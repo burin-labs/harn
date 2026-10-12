@@ -78,14 +78,16 @@ pub struct SessionChangeSubscription {
 
 impl Drop for SessionChangeSubscription {
     fn drop(&mut self) {
-        observers().retain(|(id, _)| *id != self.id);
-        let live = subscriber_count() > 0;
-        if !live {
-            let mut state = notification_state();
-            state.sessions.clear();
-            state.pending.clear();
+        {
+            let mut observers = observers();
+            observers.retain(|(id, _)| *id != self.id);
+            if observers.is_empty() {
+                let mut state = notification_state();
+                state.sessions.clear();
+                state.pending.clear();
+            }
         }
-        session_wal_watch::sync_watchers(live);
+        session_wal_watch::sync_watchers();
     }
 }
 
@@ -99,7 +101,7 @@ impl Drop for SessionChangeSubscription {
 pub fn subscribe(observer: SharedSessionChangeObserver) -> SessionChangeSubscription {
     let id = NEXT_SUBSCRIPTION.fetch_add(1, Ordering::Relaxed);
     observers().push((id, observer));
-    session_wal_watch::sync_watchers(true);
+    session_wal_watch::sync_watchers();
     SessionChangeSubscription { id }
 }
 
@@ -111,13 +113,11 @@ pub fn subscribe(observer: SharedSessionChangeObserver) -> SessionChangeSubscrip
 #[must_use = "dropping the registration stops the path being watched"]
 pub(crate) fn watch_store(path: &Path) -> session_wal_watch::StoreWatchRegistration {
     let registration = session_wal_watch::register_store_path(path);
-    if subscriber_count() > 0 {
-        session_wal_watch::sync_watchers(true);
-    }
+    session_wal_watch::sync_watchers();
     registration
 }
 
-fn subscriber_count() -> usize {
+pub(super) fn subscriber_count() -> usize {
     OBSERVERS
         .read()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -436,7 +436,7 @@ mod tests {
         .await;
         let first_writer = writer.clone();
         let runtime = tokio::runtime::Handle::current();
-        let first = std::thread::spawn(move || {
+        let first = crate::runtime_stack::spawn(move || {
             runtime.block_on(first_writer.update(
                 "ordered",
                 UpdateSession {

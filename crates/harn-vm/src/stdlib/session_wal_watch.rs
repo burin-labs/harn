@@ -1,6 +1,7 @@
 //! Cross-process session-metadata watch via WAL + `PRAGMA data_version`.
 //!
-//! One thread per database path. The thread keeps its own reader so it never
+//! One active thread per database path. Retiring threads remain owned until
+//! their readers close. Each thread keeps its own reader so it never
 //! takes the store mutex, and it only publishes when a metadata snapshot
 //! moved. Local writes go through [`super::session_change`], whose current-row
 //! view suppresses unchanged invalidations from either source.
@@ -8,7 +9,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError};
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
@@ -50,7 +51,24 @@ struct WatchState {
     /// Without it, joining costs up to one whole [`POLL`] interval, and a
     /// store handle closing on a hot path would pay that every time.
     wake: mpsc::Sender<WatchSignal>,
-    thread: JoinHandle<()>,
+    thread_id: std::thread::ThreadId,
+    thread: Mutex<Option<JoinHandle<()>>>,
+    #[cfg(test)]
+    joining: Mutex<Option<mpsc::Sender<()>>>,
+}
+
+/// Declared outside watch_loop so its reader is already closed on normal
+/// return or unwinding before the registry releases this thread's ownership.
+struct WatchExit {
+    path: PathBuf,
+    stop: Arc<AtomicBool>,
+}
+
+impl Drop for WatchExit {
+    fn drop(&mut self) {
+        watchers()
+            .retain(|(seen, state)| seen != &self.path || !Arc::ptr_eq(&state.stop, &self.stop));
+    }
 }
 
 /// Canonical store paths with at least one open handle in this process, each
@@ -65,7 +83,7 @@ struct WatchState {
 /// case starts a watcher over a sibling's store and leaves `-wal` and `-shm`
 /// sidecars in a directory the sibling is asserting on (harn#7960).
 static REGISTERED: RwLock<Vec<(PathBuf, usize)>> = RwLock::new(Vec::new());
-static WATCHERS: RwLock<Vec<(PathBuf, WatchState)>> = RwLock::new(Vec::new());
+static WATCHERS: RwLock<Vec<(PathBuf, Arc<WatchState>)>> = RwLock::new(Vec::new());
 
 fn registered() -> std::sync::RwLockWriteGuard<'static, Vec<(PathBuf, usize)>> {
     REGISTERED
@@ -73,7 +91,7 @@ fn registered() -> std::sync::RwLockWriteGuard<'static, Vec<(PathBuf, usize)>> {
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
-fn watchers() -> std::sync::RwLockWriteGuard<'static, Vec<(PathBuf, WatchState)>> {
+fn watchers() -> std::sync::RwLockWriteGuard<'static, Vec<(PathBuf, Arc<WatchState>)>> {
     WATCHERS
         .write()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -134,18 +152,28 @@ pub(super) fn register_store_path(path: &Path) -> StoreWatchRegistration {
 }
 
 /// Start or stop watchers to match whether anyone is subscribed.
-pub(super) fn sync_watchers(subscribers_live: bool) {
-    if subscribers_live {
+pub(super) fn sync_watchers() {
+    // Sample and act under the same registry guard. Subscription changes
+    // release OBSERVERS before reconciling, so there is no inverse lock order.
+    let mut running = watchers();
+    if super::session_change::subscriber_count() > 0 {
         let paths: Vec<PathBuf> = registered().iter().map(|(path, _)| path.clone()).collect();
         for path in paths {
             if !path.is_file() {
                 continue;
             }
-            start_watcher(path);
+            start_watcher(path, &mut running);
         }
     } else {
-        let running = std::mem::take(&mut *watchers());
-        for (_path, state) in running {
+        let stopping = running
+            .iter()
+            .map(|(_, state)| {
+                state.stop.store(true, Ordering::Relaxed);
+                Arc::clone(state)
+            })
+            .collect::<Vec<_>>();
+        drop(running);
+        for state in stopping {
             stop_and_join(state);
         }
     }
@@ -157,14 +185,18 @@ pub(super) fn sync_watchers(subscribers_live: bool) {
 /// thread owns is what creates the SQLite sidecars, so a caller that drops its
 /// last handle and then reads the directory must not race the close.
 fn stop_watcher(path: &Path) {
-    let state = {
-        let mut running = watchers();
+    let states = {
+        let running = watchers();
         running
             .iter()
-            .position(|(seen, _)| seen == path)
-            .map(|index| running.remove(index).1)
+            .filter(|(seen, _)| seen == path)
+            .map(|(_, state)| {
+                state.stop.store(true, Ordering::Relaxed);
+                Arc::clone(state)
+            })
+            .collect::<Vec<_>>()
     };
-    if let Some(state) = state {
+    for state in states {
         stop_and_join(state);
     }
 }
@@ -174,20 +206,30 @@ fn stop_watcher(path: &Path) {
 /// The wake is a send rather than a channel drop: the loop's own filesystem
 /// callback holds the other sender, so closing this one would not disconnect
 /// the receiver and the join would still wait out a poll interval.
-fn stop_and_join(state: WatchState) {
-    state.stop.store(true, Ordering::Relaxed);
+fn stop_and_join(state: Arc<WatchState>) {
     let _ = state.wake.send(WatchSignal::Wake);
-    // A subscriber may remove itself during a foreign notification. That
-    // callback is on this watcher; its reader closes when the callback and
-    // loop return. Every other caller still waits for the reader to close.
-    if state.thread.thread().id() != std::thread::current().id() {
-        let _ = state.thread.join();
+    // A callback cannot wait for itself. Keep its entry and handle owned until
+    // the loop returns, so an external store close can still wait for it.
+    if state.thread_id == std::thread::current().id() {
+        return;
+    }
+    let mut thread = state
+        .thread
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if let Some(handle) = thread.take() {
+        #[cfg(test)]
+        if let Some(joining) = state.joining.lock().unwrap().take() {
+            let _ = joining.send(());
+        }
+        // Concurrent stop callers wait on this mutex until the join completes.
+        // The exiting thread only needs WATCHERS, which is not held here.
+        let _ = handle.join();
     }
 }
 
-/// How many watchers are running for `path`. Test-only: the invariant this
-/// module now holds is about the watcher set, so a case should assert on that
-/// set rather than on the SQLite sidecars it happens to leave behind.
+/// How many active or retiring readers are owned for `path`. Test-only: assert
+/// their lifetime directly rather than inferring it from SQLite sidecars.
 #[cfg(test)]
 pub(super) fn watcher_count_for(path: &Path) -> usize {
     watchers().iter().filter(|(seen, _)| seen == path).count()
@@ -201,7 +243,7 @@ pub(super) fn watcher_count_for(path: &Path) -> usize {
 pub(super) fn flush_watcher(path: &Path) {
     let wake = watchers()
         .iter()
-        .find(|(seen, _)| seen == path)
+        .find(|(seen, state)| seen == path && !state.stop.load(Ordering::Relaxed))
         .map(|(_, state)| state.wake.clone())
         .expect("a watcher is running for this path");
     let (ack, acked) = mpsc::channel();
@@ -220,9 +262,12 @@ fn seed_session_memory(path: &Path, reader: &rusqlite::Connection) {
     }
 }
 
-fn start_watcher(path: PathBuf) {
-    let mut running = watchers();
-    if running.iter().any(|(seen, _)| seen == &path) {
+fn start_watcher(path: PathBuf, running: &mut Vec<(PathBuf, Arc<WatchState>)>) {
+    if running
+        .iter()
+        .any(|(seen, state)| seen == &path && !state.stop.load(Ordering::Relaxed))
+        || !registered().iter().any(|(seen, _)| seen == &path)
+    {
         return;
     }
     let Ok(reader) = open_watch_reader(&path) else {
@@ -235,12 +280,17 @@ fn start_watcher(path: PathBuf) {
 
     let stop = Arc::new(AtomicBool::new(false));
     let thread_stop = Arc::clone(&stop);
+    let cleanup_stop = Arc::clone(&stop);
     let thread_path = path.clone();
     let (wake, events) = mpsc::channel();
     let thread_wake = wake.clone();
     let thread = crate::runtime_stack::builder()
         .name("harn-session-wal-watch".to_string())
         .spawn(move || {
+            let _exit = WatchExit {
+                path: thread_path.clone(),
+                stop: cleanup_stop,
+            };
             watch_loop(
                 thread_path,
                 reader,
@@ -251,7 +301,18 @@ fn start_watcher(path: PathBuf) {
             );
         })
         .expect("start session WAL watcher");
-    running.push((path, WatchState { stop, wake, thread }));
+    let thread_id = thread.thread().id();
+    running.push((
+        path,
+        Arc::new(WatchState {
+            stop,
+            wake,
+            thread_id,
+            thread: Mutex::new(Some(thread)),
+            #[cfg(test)]
+            joining: Mutex::new(None),
+        }),
+    ));
 }
 
 fn watch_loop(
@@ -339,6 +400,47 @@ mod tests {
         fn session_updated(&self, meta: &SessionMeta) {
             let _ = self.0.send(meta.title.clone().unwrap_or_default());
         }
+    }
+
+    #[tokio::test]
+    async fn subscription_reconciliation_uses_the_current_census() {
+        let _bus = crate::stdlib::session_change::test_support::exclusive_bus().await;
+        let root = TempDir::new().unwrap();
+        let store = open_canonical_store(root.path()).unwrap();
+        store
+            .create(CreateSession {
+                id: Some("replacement-census".into()),
+                title: Some("before".into()),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let stale_census =
+            super::super::session_change::current_observer(Some(store.path())).is_some();
+        assert!(!stale_census, "measure the actual empty observer registry");
+        assert_eq!(super::watcher_count_for(store.path()), 0);
+        let (delivered, delivery) = mpsc::channel();
+        let _subscription = subscribe_session_changes(Arc::new(Recording(delivered)));
+        assert!(super::super::session_change::current_observer(Some(store.path())).is_some());
+        assert_eq!(super::watcher_count_for(store.path()), 1);
+        super::sync_watchers();
+        assert_eq!(
+            super::watcher_count_for(store.path()),
+            1,
+            "an earlier empty census must not stop the replacement watcher"
+        );
+        let foreign = rusqlite::Connection::open(store.path()).unwrap();
+        foreign
+            .execute(
+                "UPDATE sessions SET title = 'after' WHERE id = 'replacement-census'",
+                [],
+            )
+            .unwrap();
+        super::flush_watcher(store.path());
+        assert_eq!(
+            recv_within("replacement observed the foreign title", &delivery),
+            "after"
+        );
     }
 
     /// Detection without a thread or a clock: a foreign commit is published
@@ -575,6 +677,7 @@ mod tests {
         struct SelfRemoving {
             subscription: std::sync::Mutex<Option<crate::SessionChangeSubscription>>,
             removed: mpsc::Sender<bool>,
+            resume: std::sync::Mutex<mpsc::Receiver<()>>,
         }
         impl SessionChangeObserver for SelfRemoving {
             fn session_updated(&self, meta: &SessionMeta) {
@@ -587,12 +690,18 @@ mod tests {
                     drop(self.subscription.lock().unwrap().take());
                 }));
                 self.removed.send(result.is_ok()).unwrap();
+                recv_within(
+                    "release the retiring watcher callback",
+                    &self.resume.lock().unwrap(),
+                );
             }
         }
         let (removed, rx) = mpsc::channel();
+        let (resume, resumed) = mpsc::channel();
         let observer = Arc::new(SelfRemoving {
             subscription: std::sync::Mutex::new(None),
             removed,
+            resume: std::sync::Mutex::new(resumed),
         });
         *observer.subscription.lock().unwrap() = Some(subscribe_session_changes(observer.clone()));
         let foreign = rusqlite::Connection::open(store.path()).unwrap();
@@ -606,7 +715,127 @@ mod tests {
             "last subscription removed on the watcher thread",
             &rx
         ));
-        assert_eq!(super::watcher_count_for(store.path()), 0);
+        drop(foreign);
+        assert_eq!(
+            super::watcher_count_for(store.path()),
+            1,
+            "the retiring reader must remain owned while its callback is blocked"
+        );
+        let database = store.path().to_owned();
+        let (joining, join_started) = mpsc::channel();
+        let state = super::watchers()
+            .iter()
+            .find(|(seen, _)| seen == &database)
+            .map(|(_, state)| state.clone())
+            .unwrap();
+        *state.joining.lock().unwrap() = Some(joining);
+        let (closed, store_closed) = mpsc::channel();
+        let close = crate::runtime_stack::spawn(move || {
+            drop(store);
+            closed.send(()).unwrap();
+        });
+        recv_within(
+            "external store close reached the retiring thread join",
+            &join_started,
+        );
+        assert!(super::wal_sidecar_path(&database).exists());
+        resume.send(()).unwrap();
+        recv_within(
+            "external store close waited for the callback and reader",
+            &store_closed,
+        );
+        close.join().unwrap();
+        assert_eq!(super::watcher_count_for(&database), 0);
+        assert!(!super::wal_sidecar_path(&database).exists());
+    }
+
+    #[tokio::test]
+    async fn resubscribing_while_a_foreign_callback_retires_keeps_watching() {
+        let _bus = crate::stdlib::session_change::test_support::exclusive_bus().await;
+        let root = TempDir::new().unwrap();
+        let store = open_canonical_store(root.path()).unwrap();
+        store
+            .create(CreateSession {
+                id: Some("resubscribe".into()),
+                title: Some("before".into()),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        struct Replacing {
+            subscription: std::sync::Mutex<Option<crate::SessionChangeSubscription>>,
+            replacement: Arc<dyn SessionChangeObserver>,
+            replaced: mpsc::Sender<()>,
+            resume: std::sync::Mutex<mpsc::Receiver<()>>,
+        }
+        impl SessionChangeObserver for Replacing {
+            fn session_updated(&self, meta: &SessionMeta) {
+                assert_eq!(
+                    std::thread::current().name(),
+                    Some("harn-session-wal-watch")
+                );
+                assert_eq!(meta.title.as_deref(), Some("after"));
+                let mut subscription = self.subscription.lock().unwrap();
+                drop(subscription.take());
+                *subscription = Some(subscribe_session_changes(self.replacement.clone()));
+                self.replaced.send(()).unwrap();
+                recv_within(
+                    "release the replaced watcher callback",
+                    &self.resume.lock().unwrap(),
+                );
+            }
+        }
+        let (delivered, delivery) = mpsc::channel();
+        let (replaced, replacement_ready) = mpsc::channel();
+        let (resume, resumed) = mpsc::channel();
+        let observer = Arc::new(Replacing {
+            subscription: std::sync::Mutex::new(None),
+            replacement: Arc::new(Recording(delivered)),
+            replaced,
+            resume: std::sync::Mutex::new(resumed),
+        });
+        *observer.subscription.lock().unwrap() = Some(subscribe_session_changes(observer.clone()));
+        let foreign = rusqlite::Connection::open(store.path()).unwrap();
+        foreign
+            .execute(
+                "UPDATE sessions SET title = 'after' WHERE id = 'resubscribe'",
+                [],
+            )
+            .unwrap();
+        recv_within(
+            "replacement subscribed while the old callback is blocked",
+            &replacement_ready,
+        );
+        assert_eq!(
+            super::watcher_count_for(store.path()),
+            2,
+            "one active and one retiring reader"
+        );
+        foreign
+            .execute(
+                "UPDATE sessions SET title = 'replacement' WHERE id = 'resubscribe'",
+                [],
+            )
+            .unwrap();
+        resume.send(()).unwrap();
+        super::flush_watcher(store.path());
+        assert_eq!(
+            recv_within(
+                "replacement received the subsequent foreign commit",
+                &delivery
+            ),
+            "replacement"
+        );
+        assert!(matches!(
+            delivery.try_recv(),
+            Err(mpsc::TryRecvError::Empty)
+        ));
+        drop(observer.subscription.lock().unwrap().take());
+        drop(foreign);
+        let database = store.path().to_owned();
+        drop(store);
+        assert_eq!(super::watcher_count_for(&database), 0);
+        assert!(!super::wal_sidecar_path(&database).exists());
     }
 
     #[tokio::test]
