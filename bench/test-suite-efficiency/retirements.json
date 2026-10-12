@@ -3,6 +3,45 @@
   "baselineRevision": "7deefa6d8215dc5ce0bac2705624516d17c89392",
   "removedCases": [
     {
+      "path": "crates/harn-parser/src/typechecker/tests/strict_types.rs",
+      "name": "test_strict_types_flags_the_harness_boundary_spelling",
+      "reason": "Identical source, strict_errors helper, and unvalidated predicate.",
+      "retainedPath": "crates/harn-parser/src/typechecker/tests/strict_types.rs",
+      "retainedName": "test_strict_types_harness_llm_call_without_schema_still_errors"
+    },
+    {
+      "path": "crates/harn-parser/src/lib.rs",
+      "name": "parse_source_valid",
+      "reason": "Same source and nonempty AST assertion; check_source directly calls parse_source and returns its AST.",
+      "retainedPath": "crates/harn-parser/src/lib.rs",
+      "retainedName": "check_source_returns_diagnostics"
+    },
+    {
+      "path": "crates/harn-vm/src/vm/tests_runtime/optimizer.rs",
+      "name": "monomorphic_counter_loop_result_is_correct",
+      "reason": "Identical program and output; retained owner also compares optimized and unoptimized execution.",
+      "retainedPath": "crates/harn-vm/src/vm/tests_typed_op_fallback.rs",
+      "retainedName": "monomorphic_fast_path_still_correct"
+    },
+    {
+      "path": "crates/harn-vm/src/vm/tests_runtime/smoke.rs",
+      "name": "test_arithmetic_new",
+      "reason": "Same literal 2 + 3 and exact output through the canonical compiler and runtime.",
+      "retainedPath": "conformance/tests/language/arithmetic.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/vm/tests_runtime/smoke.rs",
+      "name": "test_for_loop_new",
+      "reason": "Same list iteration and exact output through the canonical compiler and runtime, with a local binding rename.",
+      "retainedPath": "conformance/tests/control_flow/for_in.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/vm/tests_runtime/smoke.rs",
+      "name": "test_closure_new",
+      "reason": "Same closure, argument, and exact output through the canonical compiler and runtime, with a local binding rename.",
+      "retainedPath": "conformance/tests/functions/closure.harn"
+    },
+    {
       "path": "crates/harn-cli/src/commands/eval_tool_calls.rs",
       "name": "selector_accepts_key_value_and_colon_forms",
       "reason": "Exact copy of the same shared selector's owning test.",

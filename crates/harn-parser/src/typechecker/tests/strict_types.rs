@@ -289,19 +289,6 @@ fn test_strict_types_flags_the_ambient_boundary_spelling() {
     );
 }
 
-#[test]
-fn test_strict_types_flags_the_harness_boundary_spelling() {
-    let errs = strict_errors(
-        r#"pipeline t(harness: Harness) {
-  harness.stdio.log(harness.llm.call("rate this", "system").data)
-}"#,
-    );
-    assert!(
-        errs.iter().any(|w| w.contains("unvalidated")),
-        "migrating the call site must not silence HARN-OWN-004, got: {errs:?}"
-    );
-}
-
 /// A buffered HTTP response is a closed record, so reading its envelope is
 /// typed access. The body text stays untrusted until it is decoded.
 #[test]

@@ -220,24 +220,6 @@ fn for_item_reassigned_via_any_matches_unoptimized() {
     );
 }
 
-/// The monomorphic loop counter / accumulator idiom keeps producing the right
-/// result with the typed fast path engaged (guards against the gate
-/// over-demoting and silently changing arithmetic results).
-#[test]
-fn monomorphic_counter_loop_result_is_correct() {
-    let source = r#"pipeline default(harness: Harness, task: unknown) {
-  let i = 0
-  let total = 0
-  while i < 10 {
-    total = total + (i + 3) * 2 - 1
-    i = i + 1
-  }
-  harness.stdio.log("${total}")
-}"#;
-    let (out, _) = run_harn(source);
-    assert_eq!(out.trim_end(), "[harn] 140");
-}
-
 #[test]
 fn inplace_concat_untyped_accumulator_builds_correctly() {
     // An accumulator whose static type is unknown (`any`-returning seed) goes

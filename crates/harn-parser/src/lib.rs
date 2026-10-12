@@ -273,12 +273,6 @@ mod pipeline_tests {
     use super::*;
 
     #[test]
-    fn parse_source_valid() {
-        let program = parse_source("const x = 1").unwrap();
-        assert!(!program.is_empty());
-    }
-
-    #[test]
     fn parse_source_lex_error() {
         let err = parse_source("let x = `").unwrap_err();
         assert!(matches!(err, PipelineError::Lex(_)));
