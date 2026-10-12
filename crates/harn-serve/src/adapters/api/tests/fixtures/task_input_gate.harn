@@ -1,0 +1,6 @@
+fn main(harness: Harness) {
+  harness.runtime.waitpoint_create("hitl_question_task_input_gate")
+  const result = harness.runtime.waitpoint_wait("hitl_question_task_input_gate")
+  assert_eq(result.status, "completed")
+  harness.stdio.println("task-input-gate-completed")
+}

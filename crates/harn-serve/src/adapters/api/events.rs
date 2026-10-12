@@ -199,45 +199,6 @@ fn live_api_event_stream(
     )
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use futures::FutureExt;
-
-    fn event(id: u64) -> ApiEvent {
-        ApiEvent {
-            id: format!("event_{id:016x}"),
-            object: "event",
-            created_at: "2026-10-11T00:00:00Z".into(),
-            event: "message.created".into(),
-            session_id: Some("session-one".into()),
-            task_id: Some("task-one".into()),
-            payload: json!({}),
-        }
-    }
-
-    #[tokio::test]
-    async fn replay_dedup_keeps_lower_live_ids_and_original_cursor() {
-        let (tx, rx) = broadcast::channel(16);
-        // The task snapshot ended at 6; the later RAM snapshot saw 8. Both
-        // notifications reached this subscriber while replay was assembled.
-        let replayed = BTreeSet::from([event(8).id]);
-        let filter = EventFilter {
-            after: Some(event(6).id),
-            ..EventFilter::default()
-        };
-        assert!(tx.send(event(6)).is_ok());
-        assert!(tx.send(event(7)).is_ok());
-        assert!(tx.send(event(8)).is_ok());
-        assert!(tx.send(event(9)).is_ok());
-        let live = live_api_event_stream(rx, filter, replayed);
-        futures::pin_mut!(live);
-        assert_eq!(live.next().await.unwrap().id, event(7).id);
-        assert_eq!(live.next().await.unwrap().id, event(9).id);
-        assert!(live.next().now_or_never().is_none());
-    }
-}
-
 async fn read_api_event_log_topic(
     log: &Arc<AnyEventLog>,
     topic_name: &str,
@@ -365,4 +326,43 @@ fn sse_event(event: &ApiEvent) -> Event {
         .event(event.event.clone())
         .json_data(event)
         .unwrap_or_else(|_| Event::default().event("error").data("{}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use futures::FutureExt;
+
+    fn event(id: u64) -> ApiEvent {
+        ApiEvent {
+            id: format!("event_{id:016x}"),
+            object: "event",
+            created_at: "2026-10-11T00:00:00Z".into(),
+            event: "message.created".into(),
+            session_id: Some("session-one".into()),
+            task_id: Some("task-one".into()),
+            payload: json!({}),
+        }
+    }
+
+    #[tokio::test]
+    async fn replay_dedup_keeps_lower_live_ids_and_original_cursor() {
+        let (tx, rx) = broadcast::channel(16);
+        // The task snapshot ended at 6; the later RAM snapshot saw 8. Both
+        // notifications reached this subscriber while replay was assembled.
+        let replayed = BTreeSet::from([event(8).id]);
+        let filter = EventFilter {
+            after: Some(event(6).id),
+            ..EventFilter::default()
+        };
+        assert!(tx.send(event(6)).is_ok());
+        assert!(tx.send(event(7)).is_ok());
+        assert!(tx.send(event(8)).is_ok());
+        assert!(tx.send(event(9)).is_ok());
+        let live = live_api_event_stream(rx, filter, replayed);
+        futures::pin_mut!(live);
+        assert_eq!(live.next().await.unwrap().id, event(7).id);
+        assert_eq!(live.next().await.unwrap().id, event(9).id);
+        assert!(live.next().now_or_never().is_none());
+    }
 }

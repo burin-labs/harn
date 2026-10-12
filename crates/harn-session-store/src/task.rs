@@ -20,8 +20,10 @@ pub enum TaskAdmission<T> {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum TaskStatus {
+    Submitted,
     Working,
     InputRequired,
+    AuthRequired,
     Completed,
     Failed,
     Canceled,
@@ -29,13 +31,18 @@ pub enum TaskStatus {
 
 impl TaskStatus {
     pub fn is_active(self) -> bool {
-        matches!(self, Self::Working | Self::InputRequired)
+        matches!(
+            self,
+            Self::Submitted | Self::Working | Self::InputRequired | Self::AuthRequired
+        )
     }
 
     pub fn as_str(self) -> &'static str {
         match self {
+            Self::Submitted => "SUBMITTED",
             Self::Working => "WORKING",
             Self::InputRequired => "INPUT_REQUIRED",
+            Self::AuthRequired => "AUTH_REQUIRED",
             Self::Completed => "COMPLETED",
             Self::Failed => "FAILED",
             Self::Canceled => "CANCELED",
@@ -44,8 +51,10 @@ impl TaskStatus {
 
     fn event(self) -> &'static str {
         match self {
+            Self::Submitted => "task.submitted",
             Self::Working => "task.resumed",
             Self::InputRequired => "task.input_required",
+            Self::AuthRequired => "task.auth_required",
             Self::Completed => "task.completed",
             Self::Failed => "task.failed",
             Self::Canceled => "task.canceled",
@@ -137,7 +146,26 @@ impl TaskRecord {
     }
 
     pub(crate) fn transition(&mut self, update: TaskUpdate) -> bool {
-        if !self.status.is_active() || self.status == update.status {
+        let allowed = match self.status {
+            TaskStatus::Submitted => matches!(
+                update.status,
+                TaskStatus::Working | TaskStatus::Failed | TaskStatus::Canceled
+            ),
+            TaskStatus::Working => matches!(
+                update.status,
+                TaskStatus::InputRequired
+                    | TaskStatus::AuthRequired
+                    | TaskStatus::Completed
+                    | TaskStatus::Failed
+                    | TaskStatus::Canceled
+            ),
+            TaskStatus::InputRequired | TaskStatus::AuthRequired => matches!(
+                update.status,
+                TaskStatus::Working | TaskStatus::Failed | TaskStatus::Canceled
+            ),
+            TaskStatus::Completed | TaskStatus::Failed | TaskStatus::Canceled => false,
+        };
+        if !allowed {
             return false;
         }
         self.status = update.status;
@@ -149,7 +177,10 @@ impl TaskRecord {
             }
             TaskStatus::Canceled => self.canceled_at = Some(update.at),
             TaskStatus::Failed => self.failure = update.failure,
-            TaskStatus::Working | TaskStatus::InputRequired => {}
+            TaskStatus::Working => {
+                self.started_at.get_or_insert(update.at);
+            }
+            TaskStatus::Submitted | TaskStatus::InputRequired | TaskStatus::AuthRequired => {}
         }
         true
     }
@@ -165,6 +196,7 @@ pub struct TaskUpdate {
 #[derive(Clone, Debug)]
 pub struct TaskChange {
     pub task: TaskRecord,
+    pub previous_status: TaskStatus,
     /// Present only when this call committed a lifecycle transition.
     pub event: Option<TaskControlEvent>,
 }
@@ -299,12 +331,16 @@ pub struct AdmitTask {
 
 impl AdmitTask {
     pub fn validate(&self) -> StoreResult<()> {
-        if self.task.id.trim().is_empty()
-            || self.task.session_id.trim().is_empty()
-            || self.task.workspace_id.trim().is_empty()
+        if [
+            &self.task.id,
+            &self.task.session_id,
+            &self.task.workspace_id,
+            &self.session.workspace_root,
+        ]
+        .iter()
+        .any(|identity| identity.trim().is_empty())
             || self.session.id != self.task.session_id
             || self.session.workspace_id != self.task.workspace_id
-            || self.session.workspace_root.trim().is_empty()
             || !self.task.status.is_active()
         {
             return Err(StoreError::InvalidInput(
@@ -355,9 +391,19 @@ pub(crate) fn retry_decision(
     }
 }
 
-pub(crate) fn status_event(task: &TaskRecord) -> NewTaskControlEvent {
+pub(crate) fn status_event(
+    task: &TaskRecord,
+    previous_status: Option<TaskStatus>,
+) -> NewTaskControlEvent {
     NewTaskControlEvent {
-        event: task.status.event().into(),
+        event: if task.status == TaskStatus::Working
+            && previous_status.is_none_or(|status| status == TaskStatus::Submitted)
+        {
+            "task.started"
+        } else {
+            task.status.event()
+        }
+        .into(),
         payload: task.resource(),
     }
 }
@@ -382,6 +428,13 @@ pub trait TaskStore: Send + Sync {
         &self,
         task_id: &str,
         event: NewTaskControlEvent,
+    ) -> StoreResult<TaskControlEvent>;
+    /// Accept input under the same lock that verifies its live task/session binding.
+    fn append_task_input(
+        &self,
+        task_id: &str,
+        session_id: &str,
+        message: Value,
     ) -> StoreResult<TaskControlEvent>;
     fn task_events(
         &self,

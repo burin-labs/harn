@@ -133,6 +133,103 @@ fn task_admission_retention_and_terminal_contract_matches_backends() {
     admission_contract(&SqliteSessionStore::open_in_memory().unwrap());
 }
 
+fn lifecycle_and_input_contract(store: &dyn TaskStore) {
+    let mut input = request("lifecycle", "b", 0);
+    input.task.status = TaskStatus::Submitted;
+    input.task.started_at = None;
+    store.admit_task(input).unwrap();
+    assert_eq!(
+        store.task_events(None, None).unwrap()[0].event,
+        "task.submitted"
+    );
+    assert_eq!(store.get_task("lifecycle").unwrap().started_at, None);
+    let update = |status, at: &str| TaskUpdate {
+        status,
+        at: at.into(),
+        failure: None,
+    };
+    let started = store
+        .update_task("lifecycle", update(TaskStatus::Working, "started"))
+        .unwrap();
+    assert_eq!(started.previous_status, TaskStatus::Submitted);
+    assert_eq!(started.event.unwrap().event, "task.started");
+    assert_eq!(started.task.started_at.as_deref(), Some("started"));
+    let waiting = store
+        .update_task("lifecycle", update(TaskStatus::AuthRequired, "approval"))
+        .unwrap();
+    assert_eq!(waiting.event.unwrap().event, "task.auth_required");
+    let resumed = store
+        .update_task("lifecycle", update(TaskStatus::Working, "resumed"))
+        .unwrap();
+    assert_eq!(resumed.event.unwrap().event, "task.resumed");
+    assert_eq!(resumed.task.started_at.as_deref(), Some("started"));
+    assert!(store
+        .append_task_input("lifecycle", "wrong-session", json!({"id":"wrong"}))
+        .is_err());
+    let input = store
+        .append_task_input("lifecycle", "session-one", json!({"id":"accepted"}))
+        .unwrap();
+    assert_eq!(input.event, "message.created");
+    assert_eq!(input.payload["id"], "accepted");
+    store
+        .update_task("lifecycle", update(TaskStatus::Canceled, "canceled"))
+        .unwrap();
+    let before = store.task_events(None, None).unwrap();
+    assert!(store
+        .append_task_input("lifecycle", "session-one", json!({"id":"late"}))
+        .is_err());
+    assert!(store
+        .update_task("lifecycle", update(TaskStatus::Working, "late"))
+        .unwrap()
+        .event
+        .is_none());
+    assert_eq!(store.task_events(None, None).unwrap(), before);
+}
+
+#[test]
+fn task_lifecycle_and_input_admission_match_backends() {
+    lifecycle_and_input_contract(&MemorySessionStore::new());
+    lifecycle_and_input_contract(&SqliteSessionStore::open_in_memory().unwrap());
+}
+
+#[test]
+fn sqlite_submitted_and_auth_required_states_survive_restart() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("sessions.sqlite");
+    let store = SqliteSessionStore::open(&path).unwrap();
+    let mut input = request("submitted", "b", 0);
+    input.task.status = TaskStatus::Submitted;
+    input.task.started_at = None;
+    store.admit_task(input).unwrap();
+    drop(store);
+    let store = SqliteSessionStore::open(&path).unwrap();
+    assert_eq!(
+        store.get_task("submitted").unwrap().status,
+        TaskStatus::Submitted
+    );
+    for status in [TaskStatus::Working, TaskStatus::AuthRequired] {
+        store
+            .update_task(
+                "submitted",
+                TaskUpdate {
+                    status,
+                    at: "approval".into(),
+                    failure: None,
+                },
+            )
+            .unwrap();
+    }
+    drop(store);
+    let store = SqliteSessionStore::open(&path).unwrap();
+    assert_eq!(
+        store.get_task("submitted").unwrap().status,
+        TaskStatus::AuthRequired
+    );
+    assert!(
+        matches!(store.admit_task(request("retry", "b", TASK_RETRY_RETENTION_MS + 1)).unwrap(), TaskAdmission::Reused(task) if task.id == "submitted")
+    );
+}
+
 #[tokio::test]
 async fn sqlite_task_retry_and_numeric_control_cursor_survive_restart() {
     let dir = tempfile::tempdir().unwrap();
@@ -312,7 +409,7 @@ impl EventRedactor for CanaryRedactor {
     fn redact_json_in_place(&self, value: &mut serde_json::Value) {
         match value {
             serde_json::Value::String(text) if text.contains("task-secret-canary") => {
-                *text = "[redacted]".into()
+                *text = "[redacted]".into();
             }
             serde_json::Value::Object(object) => {
                 for value in object.values_mut() {
@@ -392,7 +489,7 @@ fn task_admission_redacts_payloads_before_storage_and_restart_readback() {
     redaction_contract(&MemorySessionStore::with_hooks(hooks.clone()));
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("sessions.sqlite");
-    let store = SqliteSessionStore::open_with_hooks(&path, hooks.clone()).unwrap();
+    let store = SqliteSessionStore::open_with_hooks(&path, hooks).unwrap();
     redaction_contract(&store);
     drop(store);
     // Read without a redactor to prove the persisted values were already safe.

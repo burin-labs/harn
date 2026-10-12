@@ -47,6 +47,8 @@ async fn local_api_creates_session_and_accepts_task() {
     let server = ApiServer::new(ApiServerConfig::for_pipeline(
         script.to_string_lossy().to_string(),
     ));
+    let state = server.state.clone();
+    let mut events = state.events_tx.subscribe();
     let app = api_router(server.state);
 
     let response = app
@@ -87,8 +89,36 @@ async fn local_api_creates_session_and_accepts_task() {
         .expect("body");
     let task: Value = serde_json::from_slice(&body).expect("task");
     assert_eq!(task["object"], "task");
-    assert_eq!(task["status"], "WORKING");
+    assert_eq!(task["status"], "SUBMITTED");
+    assert!(task["started_at"].is_null());
     assert_eq!(task["session_id"], session_id);
+    let task_id = task["id"].as_str().unwrap();
+    loop {
+        let event = events.recv().await.unwrap();
+        if event.task_id.as_deref() == Some(task_id) && event.event == "task.completed" {
+            break;
+        }
+        assert_ne!(event.event, "task.failed", "{}", event.payload);
+    }
+    let lifecycle: Vec<_> = state
+        .task_store()
+        .unwrap()
+        .task_events(Some(task_id), None)
+        .unwrap()
+        .into_iter()
+        .filter(|event| event.event.starts_with("task."))
+        .collect();
+    assert_eq!(
+        lifecycle
+            .iter()
+            .map(|event| event.event.as_str())
+            .collect::<Vec<_>>(),
+        ["task.submitted", "task.started", "task.completed"]
+    );
+    assert_eq!(lifecycle[0].payload["status"], "SUBMITTED");
+    assert!(lifecycle[0].payload["started_at"].is_null());
+    assert_eq!(lifecycle[1].payload["status"], "WORKING");
+    assert!(lifecycle[1].payload["started_at"].is_string());
 }
 
 #[tokio::test]

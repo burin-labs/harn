@@ -86,6 +86,7 @@ default-features = false
 features = ["use_pem", "aws_lc_rs"]
 
 [dev-dependencies]
+rusqlite = { version = "0.40", features = ["bundled"] }
 async-compression = { version = "0.4", features = ["tokio", "gzip"] }
 filetime = "0.2"
 harn-clock = { path = "../harn-clock", version = "=0.10.166-dev", features = ["test-support"] }

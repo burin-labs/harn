@@ -4,6 +4,7 @@ use crate::task::{
     TaskAdmission, TaskBinding, TaskChange, TaskControlEvent, TaskMessageView, TaskRecord,
     TaskSessionDescriptor, TaskStore, TaskUpdate, TASK_RETRY_RETENTION_MS,
 };
+use serde_json::Value;
 
 impl TaskStore for MemorySessionStore {
     fn next_control_event_id(&self) -> StoreResult<String> {
@@ -36,10 +37,7 @@ impl TaskStore for MemorySessionStore {
         let mut events = vec![TaskControlEvent::new(
             next_id(&mut guard)?,
             &task,
-            NewTaskControlEvent {
-                event: "task.started".into(),
-                payload: task.resource(),
-            },
+            status_event(&task, None),
             &self.hooks,
         )];
         for event in request.initial_events {
@@ -121,9 +119,11 @@ impl TaskStore for MemorySessionStore {
             .get(task_id)
             .cloned()
             .ok_or_else(|| StoreError::NotFound(task_id.into()))?;
+        let previous_status = task.status;
         if !task.transition(update) {
             return Ok(TaskChange {
                 task: task.redacted(&self.hooks)?,
+                previous_status,
                 event: None,
             });
         }
@@ -131,13 +131,14 @@ impl TaskStore for MemorySessionStore {
         let event = TaskControlEvent::new(
             next_id(&mut guard)?,
             &task,
-            status_event(&task),
+            status_event(&task, Some(previous_status)),
             &self.hooks,
         );
         guard.task_events.push(event.clone());
         guard.tasks.insert(task.id.clone(), task.clone());
         Ok(TaskChange {
             task,
+            previous_status,
             event: Some(event),
         })
     }
@@ -173,6 +174,36 @@ impl TaskStore for MemorySessionStore {
             .cloned()
             .map(|event| event.redacted(&self.hooks))
             .collect())
+    }
+
+    fn append_task_input(
+        &self,
+        task_id: &str,
+        session_id: &str,
+        message: Value,
+    ) -> StoreResult<TaskControlEvent> {
+        let mut guard = lock(&self.inner);
+        let task = guard
+            .tasks
+            .get(task_id)
+            .cloned()
+            .ok_or_else(|| StoreError::NotFound(task_id.into()))?;
+        if task.session_id != session_id || !task.status.is_active() {
+            return Err(StoreError::InvalidInput(
+                "task cannot accept this session input".into(),
+            ));
+        }
+        let event = TaskControlEvent::new(
+            next_id(&mut guard)?,
+            &task,
+            NewTaskControlEvent {
+                event: "message.created".into(),
+                payload: message,
+            },
+            &self.hooks,
+        );
+        guard.task_events.push(event.clone());
+        Ok(event)
     }
 
     fn task_message_view(&self, session_id: &str) -> StoreResult<TaskMessageView> {

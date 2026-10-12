@@ -10,6 +10,15 @@ fn pending_permission_for(
     hitl: bool,
     request_id: &str,
 ) -> (ApiState, mpsc::UnboundedReceiver<Value>) {
+    pending_permission_kind(root, hitl, request_id, "question")
+}
+
+fn pending_permission_kind(
+    root: &Path,
+    hitl: bool,
+    request_id: &str,
+    kind: &str,
+) -> (ApiState, mpsc::UnboundedReceiver<Value>) {
     let script = root.join("agent.harn");
     write_test_pipeline(&script);
     let mut config = ApiServerConfig::for_pipeline(script.to_string_lossy().into_owned());
@@ -23,9 +32,13 @@ fn pending_permission_for(
     let (tx, rx) = mpsc::unbounded_channel();
     state.acp.request_tx = tx;
     if hitl {
-        state.register_hitl_request(Some("session-persisted".into()), Some("waiting".into()), &json!({
-            "update":{"_meta":{"harn":{"requestId":request_id, "kind":"approve", "payload":{}}}},
-        }));
+        state.register_hitl_request(
+            Some("session-persisted".into()),
+            Some("waiting".into()),
+            &json!({
+                "update":{"_meta":{"harn":{"requestId":request_id, "kind":kind, "payload":{}}}},
+            }),
+        );
     } else {
         state.register_permission_request(json!({
             "id":41,"method":"session/request_permission",
@@ -39,9 +52,44 @@ fn pending_permission_for(
             .get_task("waiting")
             .unwrap()
             .status,
-        TaskStatus::InputRequired
+        if hitl && kind == "question" {
+            TaskStatus::InputRequired
+        } else {
+            TaskStatus::AuthRequired
+        }
     );
     (state, rx)
+}
+
+#[tokio::test]
+async fn failed_hitl_approval_restores_auth_required() {
+    let root = tempfile::tempdir().unwrap();
+    let (state, mut requests) =
+        pending_permission_kind(root.path(), true, "approval-one", "approval");
+    let app = api_router(state.clone());
+    let answer = respond_to(&app, "approval-one", true);
+    let response = async {
+        let request = requests.recv().await.unwrap();
+        assert_eq!(request["method"], "harn.hitl.respond");
+        state
+            .acp
+            .resolve_response(
+                json!({"id":request["id"],"error":{"code":-32000,"message":"not accepted"}}),
+            )
+            .await;
+    };
+    let (answer, ()) = tokio::join!(answer, response);
+    assert_eq!(answer.status(), StatusCode::BAD_GATEWAY);
+    assert_eq!(
+        state
+            .task_store()
+            .unwrap()
+            .get_task("waiting")
+            .unwrap()
+            .status,
+        TaskStatus::AuthRequired
+    );
+    assert_eq!(permission(&app).await["status"], "pending");
 }
 
 async fn respond(app: &Router, approved: bool) -> Response {
@@ -381,6 +429,6 @@ async fn permission_response_keeps_pending_when_acp_channel_is_closed() {
             .get_task("waiting")
             .unwrap()
             .status,
-        TaskStatus::InputRequired
+        TaskStatus::AuthRequired
     );
 }

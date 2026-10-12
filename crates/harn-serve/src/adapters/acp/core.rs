@@ -25,7 +25,8 @@ impl AcpServer {
             serde_json::json!({
                 "authMethods": config.auth_policy.acp_auth_methods(),
             }),
-        );
+        )
+        .with_task_admission(config.task_admission);
 
         Self {
             launcher_environment: config.launcher_environment,

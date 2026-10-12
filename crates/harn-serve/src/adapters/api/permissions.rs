@@ -108,9 +108,13 @@ pub(super) async fn respond_permission_request(
         )
     };
     if let Some(task_id) = pending.public["task_id"].as_str() {
-        match state.change_task(task_id, harn_session_store::task::TaskStatus::Working, None) {
-            Ok(task) if task.status == harn_session_store::task::TaskStatus::Working => {
-                claim.restore_task = Some(task_id.to_owned());
+        match state.change_task_with_previous(
+            task_id,
+            harn_session_store::task::TaskStatus::Working,
+            None,
+        ) {
+            Ok(change) if change.task.status == harn_session_store::task::TaskStatus::Working => {
+                claim.restore_task = Some((task_id.to_owned(), change.previous_status));
             }
             Ok(_) => {
                 return api_error(
@@ -198,7 +202,7 @@ async fn deliver_permission_response(
 struct PermissionResponseClaim {
     state: ApiState,
     request_id: String,
-    restore_task: Option<String>,
+    restore_task: Option<(String, harn_session_store::task::TaskStatus)>,
     active: bool,
 }
 
@@ -225,13 +229,7 @@ impl PermissionResponseClaim {
         let restored = self
             .restore_task
             .take()
-            .map(|task_id| {
-                self.state.change_task(
-                    &task_id,
-                    harn_session_store::task::TaskStatus::InputRequired,
-                    None,
-                )
-            })
+            .map(|(task_id, status)| self.state.change_task(&task_id, status, None))
             .transpose();
         self.active = false;
         if let Some(permission) = self

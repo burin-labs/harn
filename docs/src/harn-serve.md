@@ -126,6 +126,15 @@ Admission persists the task, retry binding, and initial control events in one
 transaction. Bindings last 24 hours from creation and remain bound while the
 task is active. A retry does not renew that expiry.
 
+An accepted task starts as `SUBMITTED`. Dispatch changes it to `WORKING` and
+sets `started_at`. Cancellation during session restore or before prompt
+admission prevents execution. Ordinary session messages with `run: true`
+continue to run without a Task. Approval requests use `AUTH_REQUIRED`; questions use
+`INPUT_REQUIRED`. Failed answer delivery restores the previous waiting state.
+Task input is recorded with its generated message ID before it enters the
+session input queue. Storage failure returns `503` without queueing the input;
+an accepted input remains recorded and published if its HTTP caller disconnects.
+
 Tasks and their control history survive a server restart. An unfinished task
 whose execution lease is no longer held becomes `FAILED` with
 `task_interrupted`; retrying its key reads that result without dispatching the

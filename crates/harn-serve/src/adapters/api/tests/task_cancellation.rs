@@ -92,3 +92,78 @@ async fn task_cancel_is_idempotent_and_preserves_other_terminal_outcomes() {
         "only the state transition emits a cancellation event"
     );
 }
+
+#[tokio::test]
+async fn task_cancellation_during_cold_restore_does_not_dispatch_a_prompt() {
+    let root = tempfile::tempdir().unwrap();
+    let script = root.path().join("agent.harn");
+    write_test_pipeline(&script);
+    let mut config = ApiServerConfig::for_pipeline(script.to_string_lossy().into_owned());
+    config.workspace_root = root.path().into();
+    let mut state = ApiServer::new(config).state;
+    let sessions = state.canonical_sessions.clone().unwrap();
+    let store = sessions.task_store().unwrap();
+    // Keep only the durable descriptor, with no live ACP session.
+    store
+        .admit_task(super::task_retry::admission("previous", root.path(), None))
+        .unwrap();
+    store
+        .update_task(
+            "previous",
+            TaskUpdate {
+                status: TaskStatus::Completed,
+                at: "completed".into(),
+                failure: None,
+            },
+        )
+        .unwrap();
+    let acp = state.acp.clone();
+    let (tx, mut requests) = mpsc::unbounded_channel();
+    state.acp.request_tx = tx;
+    let app = api_router(state.clone());
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/tasks")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({"session_id":"session-persisted", "input":"must never start"})
+                        .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::ACCEPTED);
+    let task_id = read_json(response).await["id"].as_str().unwrap().to_owned();
+    let load = requests.recv().await.unwrap();
+    assert_eq!(
+        load["method"], "session/load",
+        "cold restore must be reached"
+    );
+    let response = cancel(&app, &task_id).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(read_json(response).await["status"], "CANCELED");
+    let cancel = requests.recv().await.unwrap();
+    assert_eq!(cancel["method"], "session/cancel");
+    // Only the dispatch continuation retains this request sender now. Its
+    // exit closes the stream, so absence of a prompt is a reached outcome.
+    drop(app);
+    drop(state);
+    acp.resolve_response(json!({"id":load["id"],"result":{}}))
+        .await;
+    while let Some(request) = requests.recv().await {
+        assert_ne!(
+            request["method"], "session/prompt",
+            "cancellation must survive cold restore acknowledgement"
+        );
+        acp.resolve_response(json!({"id":request["id"],"result":{}}))
+            .await;
+    }
+    assert_eq!(
+        store.get_task(&task_id).unwrap().status,
+        TaskStatus::Canceled
+    );
+}

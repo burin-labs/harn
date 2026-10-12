@@ -121,8 +121,8 @@ pub(super) async fn submit_task_inner(
         session_id: session_id.clone(),
         workspace_id: descriptor.workspace_id.clone(),
         created_at: now.clone(),
-        updated_at: now.clone(),
-        status: TaskStatus::Working,
+        updated_at: now,
+        status: TaskStatus::Submitted,
         input: message_input.clone(),
         metadata: input.get("metadata").cloned().unwrap_or_else(|| json!({})),
         created_by: "api".into(),
@@ -133,7 +133,7 @@ pub(super) async fn submit_task_inner(
         receipt_id: None,
         outcome_id: None,
         quota_id: None,
-        started_at: Some(now),
+        started_at: None,
         completed_at: None,
         canceled_at: None,
         failure: None,
@@ -221,12 +221,24 @@ pub(super) async fn submit_task_inner(
             }
             let prompt =
                 prompt.ok_or_else(|| "task input did not contain prompt text".to_owned())?;
+            // Restore can wait on RPC acknowledgements. A cancellation during
+            // that work must not enqueue a new prompt; ACP admission checks
+            // the same durable task again where execution actually begins.
+            let task = task_state
+                .task_store()
+                .map_err(|_| "durable task storage is unavailable".to_owned())?
+                .get_task(&task_id)
+                .map_err(|_| "durable task storage is unavailable".to_owned())?;
+            if task.status != TaskStatus::Submitted {
+                return Err("task is no longer submitted".to_owned());
+            }
             task_state
                 .acp
                 .call(
                     "session/prompt",
                     json!({
                         "sessionId": session_id, "prompt": [{"type": "text", "text": prompt}],
+                        "_meta": {"harn": {"task": {"taskId": task_id}}},
                     }),
                 )
                 .await
@@ -331,33 +343,19 @@ pub(super) async fn append_task_message(
             "cannot steer a terminal task",
         );
     }
-    let result = match state.acp.call("session/inject", json!({
+    let result = match state.acp.call_structured("session/inject", json!({
         "sessionId": task.session_id, "mode": "steer", "content": content,
-        "_meta": {"harn": {"actor": {"kind": "agents_api", "taskId": task_id,
+        "_meta": {"harn": {"taskMessage": {"taskId": task_id, "message": message_input}, "actor": {"kind": "agents_api", "taskId": task_id,
             "metadata": message_input.get("metadata").cloned().unwrap_or_else(|| json!({}))}}},
     })).await {
         Ok(result) => result,
-        Err(error) => return api_error(StatusCode::CONFLICT, "task_not_steerable", &error),
+        Err(error) if error.code == Some(crate::adapters::acp::TASK_ADMISSION_STORAGE_UNAVAILABLE_RPC_CODE) => return task_store::unavailable_response(),
+        Err(error) => return api_error(StatusCode::CONFLICT, "task_not_steerable", &error.message),
     };
-    let mut message = message_resource(&task.session_id, Some(&task_id), message_input);
-    if let Some(message_id) = result.get("messageId").and_then(Value::as_str) {
-        message["id"] = json!(message_id);
+    match result.pointer("/_meta/harn/taskMessage") {
+        Some(message) => (StatusCode::CREATED, Json(message.clone())).into_response(),
+        None => task_store::unavailable_response(),
     }
-    let event = match state.task_store().and_then(|store| {
-        store.append_task_event(
-            &task_id,
-            NewTaskControlEvent {
-                event: "message.created".into(),
-                payload: message,
-            },
-        )
-    }) {
-        Ok(event) => event,
-        Err(_) => return task_store::unavailable_response(),
-    };
-    let message = event.payload.clone();
-    state.publish_task_event(event);
-    (StatusCode::CREATED, Json(message)).into_response()
 }
 
 pub(super) async fn cancel_task(

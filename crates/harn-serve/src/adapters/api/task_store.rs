@@ -1,7 +1,7 @@
 use super::*;
 use harn_session_store::task::{
-    TaskControlEvent, TaskFailure, TaskRecord, TaskSessionDescriptor, TaskStatus, TaskStore,
-    TaskUpdate,
+    TaskChange, TaskControlEvent, TaskFailure, TaskRecord, TaskSessionDescriptor, TaskStatus,
+    TaskStore, TaskUpdate,
 };
 use harn_session_store::{StoreContention, StoreError, StoreResult};
 
@@ -163,6 +163,16 @@ impl ApiState {
         status: TaskStatus,
         failure: Option<TaskFailure>,
     ) -> StoreResult<TaskRecord> {
+        self.change_task_with_previous(task_id, status, failure)
+            .map(|change| change.task)
+    }
+
+    pub(super) fn change_task_with_previous(
+        &self,
+        task_id: &str,
+        status: TaskStatus,
+        failure: Option<TaskFailure>,
+    ) -> StoreResult<TaskChange> {
         let change = self.task_store()?.update_task(
             task_id,
             TaskUpdate {
@@ -171,10 +181,10 @@ impl ApiState {
                 at: now_rfc3339(),
             },
         )?;
-        if let Some(event) = change.event {
+        if let Some(event) = change.event.clone() {
             self.publish_task_event(event);
         }
-        Ok(change.task)
+        Ok(change)
     }
 
     pub(super) fn session_descriptor(
@@ -208,20 +218,28 @@ impl ApiState {
     }
 
     pub(super) fn publish_task_event(&self, event: TaskControlEvent) -> ApiEvent {
-        let event = ApiEvent::from(event);
-        let mut inner = self.inner.lock().expect("api state poisoned");
-        if let Some(session) = event
-            .session_id
-            .as_ref()
-            .and_then(|id| inner.sessions.get_mut(id))
-        {
-            session["last_event_id"] = json!(event.id);
-            session["updated_at"] = json!(event.created_at);
-        }
-        drop(inner);
-        let _ = self.events_tx.send(event.clone());
-        event
+        publish_task_event(&self.inner, &self.events_tx, event)
     }
+}
+
+pub(super) fn publish_task_event(
+    inner: &Mutex<ApiStateInner>,
+    events_tx: &broadcast::Sender<ApiEvent>,
+    event: TaskControlEvent,
+) -> ApiEvent {
+    let event = ApiEvent::from(event);
+    let mut inner = inner.lock().expect("api state poisoned");
+    if let Some(session) = event
+        .session_id
+        .as_ref()
+        .and_then(|id| inner.sessions.get_mut(id))
+    {
+        session["last_event_id"] = json!(event.id);
+        session["updated_at"] = json!(event.created_at);
+    }
+    drop(inner);
+    let _ = events_tx.send(event.clone());
+    event
 }
 
 impl From<TaskControlEvent> for ApiEvent {

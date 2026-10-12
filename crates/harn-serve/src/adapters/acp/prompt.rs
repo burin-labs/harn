@@ -129,6 +129,27 @@ impl AcpServer {
         };
         let prompt_text = prompt.text.clone();
 
+        if let Some(admission) = &self.concurrent_controls.task_admission {
+            if let Some(target) = params.pointer("/_meta/harn/task") {
+                let target = match serde_json::from_value::<TaskPromptTarget>(target.clone()) {
+                    Ok(target) => target,
+                    Err(_) => {
+                        let error = TaskAdmissionError::InvalidTaskContext;
+                        self.send_error(id, error.rpc_code(), error.message());
+                        return;
+                    }
+                };
+                if !self.sessions.contains_key(&session_id) {
+                    self.send_prompt_protocol_error(id, &format!("Unknown session: {session_id}"));
+                    return;
+                }
+                if let Err(error) = admission.admit_prompt(&session_id, &target) {
+                    self.send_error(id, error.rpc_code(), error.message());
+                    return;
+                }
+            }
+        }
+
         let (
             cancellation,
             current_mode_id,

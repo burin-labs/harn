@@ -266,46 +266,26 @@ impl AcpServer {
             .and_then(|value| value.as_str())
             .unwrap_or(mode)
             .to_string();
-        let recorded_text = content.clone();
-        let message_id = inject_state
-            .push_pending_user_message(content, transcript_content, mode)
-            .await;
-        self.concurrent_controls.record_inject_owner(
-            &session_id,
-            message_id.clone(),
-            actor.clone(),
-        );
-        // Record the caller's own mode word beside the canonical
-        // delivery mode. `steer` and `finish_step` collapse onto one
-        // checkpoint, and `queue` never reaches the model at all, so
-        // without both words a steer, an interrupt and a queued note
-        // read back out of the store as the same row.
-        self.record_and_emit_control(
-            &session_id,
-            harn_session_store::ControlEvent::injection(
-                "session/inject",
-                control_id(),
-                "accepted",
-                requested_mode,
-                mode,
-                message_id.clone(),
-                recorded_text,
+        match self
+            .concurrent_controls
+            .enqueue_injection(
+                &session_id,
+                &inject_state,
+                params,
+                InjectionCommand {
+                    content,
+                    transcript_content,
+                    mode: mode.to_owned(),
+                    requested_mode,
+                    goal,
+                    actor,
+                },
             )
-            .with_goal(goal)
-            .with_actor(actor.clone()),
-        );
-        self.send_response(
-            id,
-            serde_json::json!({
-                "messageId": message_id,
-                "status": "accepted",
-                "_meta": {
-                    "harn": {
-                        "actor": actor,
-                    }
-                }
-            }),
-        );
+            .await
+        {
+            Ok(result) => self.send_response(id, result),
+            Err(error) => self.send_error(id, error.rpc_code(), error.message()),
+        }
     }
 
     pub(super) async fn clear_active_prompt_transport(

@@ -37,6 +37,7 @@ mod events;
 mod meta;
 mod permissions;
 mod sessions;
+mod task_admission;
 mod task_store;
 mod tasks;
 mod workspaces;
@@ -103,17 +104,25 @@ impl ApiServer {
             llm_config_overrides: config.acp.llm_config_overrides.clone(),
             llm_capability_overrides: config.acp.llm_capability_overrides.clone(),
         };
-        let (client, response_rx) = AcpClient::start(config.acp);
         let (events_tx, _) = broadcast::channel(1024);
+        let inner = Arc::new(Mutex::new(ApiStateInner::new(
+            config.workspace_root.clone(),
+        )));
         let (event_log, event_log_error) =
             match harn_vm::event_log::install_default_for_base_dir(&config.workspace_root) {
                 Ok(log) => (Some(log), None),
                 Err(error) => (None, Some(error.to_string())),
             };
         let canonical_sessions = canonical_sessions::open(&config.workspace_root);
+        config.acp.task_admission = Some(Arc::new(task_admission::NativeTaskAdmission {
+            store: canonical_sessions.clone(),
+            inner: inner.clone(),
+            events_tx: events_tx.clone(),
+        }));
+        let (client, response_rx) = AcpClient::start(config.acp);
         let state = ApiState {
             acp: client.clone(),
-            inner: Arc::new(Mutex::new(ApiStateInner::new(config.workspace_root))),
+            inner,
             events_tx,
             auth_policy: config.auth_policy,
             permissions: Arc::new(InMemoryPermissionStore::default()),
@@ -242,6 +251,11 @@ struct AcpClient {
     next_id: Arc<AtomicU64>,
 }
 
+struct AcpCallError {
+    code: Option<i64>,
+    message: String,
+}
+
 impl AcpClient {
     fn start(config: AcpServerConfig) -> (Self, mpsc::UnboundedReceiver<String>) {
         let (request_tx, request_rx) = mpsc::unbounded_channel();
@@ -287,6 +301,12 @@ impl AcpClient {
     }
 
     async fn call(&self, method: &str, params: Value) -> Result<Value, String> {
+        self.call_structured(method, params)
+            .await
+            .map_err(|error| error.message)
+    }
+
+    async fn call_structured(&self, method: &str, params: Value) -> Result<Value, AcpCallError> {
         let id = self.next_id.fetch_add(1, Ordering::SeqCst);
         let (tx, rx) = oneshot::channel();
         self.pending.lock().await.insert(id, tx);
@@ -298,17 +318,24 @@ impl AcpClient {
         });
         if self.request_tx.send(request).is_err() {
             self.pending.lock().await.remove(&id);
-            return Err("ACP runtime is not running".to_string());
+            return Err(AcpCallError {
+                code: None,
+                message: "ACP runtime is not running".into(),
+            });
         }
-        let response = rx
-            .await
-            .map_err(|_| "ACP runtime stopped before responding".to_string())?;
+        let response = rx.await.map_err(|_| AcpCallError {
+            code: None,
+            message: "ACP runtime stopped before responding".into(),
+        })?;
         if let Some(error) = response.get("error") {
-            return Err(error
-                .get("message")
-                .and_then(Value::as_str)
-                .map(str::to_string)
-                .unwrap_or_else(|| error.to_string()));
+            return Err(AcpCallError {
+                code: error.get("code").and_then(Value::as_i64),
+                message: error
+                    .get("message")
+                    .and_then(Value::as_str)
+                    .map(str::to_string)
+                    .unwrap_or_else(|| error.to_string()),
+            });
         }
         Ok(response.get("result").cloned().unwrap_or(Value::Null))
     }
@@ -455,7 +482,7 @@ impl ApiState {
             if self
                 .change_task(
                     task_id,
-                    harn_session_store::task::TaskStatus::InputRequired,
+                    harn_session_store::task::TaskStatus::AuthRequired,
                     None,
                 )
                 .is_err()
@@ -553,14 +580,12 @@ impl ApiState {
             inner.permissions.insert(request_id, pending);
         }
         if let Some(task_id) = public.get("task_id").and_then(Value::as_str) {
-            if self
-                .change_task(
-                    task_id,
-                    harn_session_store::task::TaskStatus::InputRequired,
-                    None,
-                )
-                .is_err()
-            {
+            let waiting = if harn.get("kind").and_then(Value::as_str) == Some("question") {
+                harn_session_store::task::TaskStatus::InputRequired
+            } else {
+                harn_session_store::task::TaskStatus::AuthRequired
+            };
+            if self.change_task(task_id, waiting, None).is_err() {
                 eprintln!("[harn] could not commit task permission state");
                 return;
             }
@@ -590,7 +615,7 @@ impl ApiState {
         event: &str,
         payload: Value,
     ) {
-        self.append_event_from_resource(session_id, task_id, event, payload)
+        self.append_event_from_resource(session_id, task_id, event, payload);
     }
 
     fn append_event_from_resource(
@@ -1143,10 +1168,24 @@ fn workspace_root_locked(inner: &ApiStateInner, workspace_id: &str) -> Option<Pa
 }
 
 fn message_resource(session_id: &str, task_id: Option<&str>, input: Value) -> Value {
+    message_resource_with_id(
+        session_id,
+        task_id,
+        input,
+        format!("message_{}", Uuid::now_v7()),
+    )
+}
+
+fn message_resource_with_id(
+    session_id: &str,
+    task_id: Option<&str>,
+    input: Value,
+    message_id: String,
+) -> Value {
     let now = now_rfc3339();
     let message = normalize_message_input(input);
     json!({
-        "id": format!("message_{}", Uuid::now_v7()),
+        "id": message_id,
         "object": "message",
         "created_at": now,
         "updated_at": now,

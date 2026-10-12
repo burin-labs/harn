@@ -433,10 +433,26 @@ impl HostBridgeInjectionState {
         transcript_content: serde_json::Value,
         mode: &str,
     ) -> String {
+        self.push_pending_user_message_admitted(content, transcript_content, mode, |_| {
+            Ok::<_, std::convert::Infallible>(())
+        })
+        .await
+        .unwrap()
+    }
+
+    /// Allocate one identity and admit its control before exposing it to a reader.
+    /// The callback runs under the queue lock; rejection leaves the queue untouched.
+    pub async fn push_pending_user_message_admitted<E>(
+        &self,
+        content: String,
+        transcript_content: serde_json::Value,
+        mode: &str,
+        admit: impl FnOnce(&str) -> Result<(), E>,
+    ) -> Result<String, E> {
         let message_id = new_inject_message_id();
-        self.inner
-            .lock()
-            .await
+        let mut state = self.inner.lock().await;
+        admit(&message_id)?;
+        state
             .queue
             .push_back(QueuedTranscriptInjection::User(QueuedUserMessage {
                 message_id: message_id.clone(),
@@ -444,7 +460,7 @@ impl HostBridgeInjectionState {
                 transcript_content,
                 mode: QueuedUserMessageMode::from_str(mode),
             }));
-        message_id
+        Ok(message_id)
     }
 
     pub async fn revoke_pending_user_message(

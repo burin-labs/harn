@@ -4,6 +4,7 @@ use crate::task::{
     TaskBinding, TaskChange, TaskControlEvent, TaskMessageProjection, TaskMessageView, TaskRecord,
     TaskSessionDescriptor, TaskStore, TaskUpdate, TASK_RETRY_RETENTION_MS,
 };
+use serde_json::Value;
 
 fn decode<T: serde::de::DeserializeOwned>(encoded: &str) -> StoreResult<T> {
     serde_json::from_str(encoded)
@@ -142,10 +143,7 @@ impl TaskStore for SqliteSessionStore {
             &TaskControlEvent::new(
                 next_id(&tx)?,
                 &task,
-                NewTaskControlEvent {
-                    event: "task.started".into(),
-                    payload: task.resource(),
-                },
+                status_event(&task, None),
                 self.hooks(),
             ),
         )?;
@@ -226,19 +224,27 @@ impl TaskStore for SqliteSessionStore {
         let mut conn = self.lock_for_mutation()?;
         let tx = write_transaction(&mut conn)?;
         let mut task = read_task(&tx, task_id)?;
+        let previous_status = task.status;
         if !task.transition(update) {
             return Ok(TaskChange {
                 task: task.redacted(self.hooks())?,
+                previous_status,
                 event: None,
             });
         }
         let task = task.redacted(self.hooks())?;
         write_task(&tx, &task)?;
-        let event = TaskControlEvent::new(next_id(&tx)?, &task, status_event(&task), self.hooks());
+        let event = TaskControlEvent::new(
+            next_id(&tx)?,
+            &task,
+            status_event(&task, Some(previous_status)),
+            self.hooks(),
+        );
         write_event(&tx, &event)?;
         tx.commit().map_err(map_sql)?;
         Ok(TaskChange {
             task,
+            previous_status,
             event: Some(event),
         })
     }
@@ -277,6 +283,34 @@ impl TaskStore for SqliteSessionStore {
                 Ok(decode::<TaskControlEvent>(&row.map_err(map_sql)?)?.redacted(self.hooks()))
             })
             .collect()
+    }
+
+    fn append_task_input(
+        &self,
+        task_id: &str,
+        session_id: &str,
+        message: Value,
+    ) -> StoreResult<TaskControlEvent> {
+        let mut conn = self.lock_for_mutation()?;
+        let tx = write_transaction(&mut conn)?;
+        let task = read_task(&tx, task_id)?;
+        if task.session_id != session_id || !task.status.is_active() {
+            return Err(StoreError::InvalidInput(
+                "task cannot accept this session input".into(),
+            ));
+        }
+        let event = TaskControlEvent::new(
+            next_id(&tx)?,
+            &task,
+            NewTaskControlEvent {
+                event: "message.created".into(),
+                payload: message,
+            },
+            self.hooks(),
+        );
+        write_event(&tx, &event)?;
+        tx.commit().map_err(map_sql)?;
+        Ok(event)
     }
 
     fn task_message_view(&self, session_id: &str) -> StoreResult<TaskMessageView> {

@@ -174,6 +174,7 @@ pub(super) struct ConcurrentSessionControls {
     inject_owners: Arc<std::sync::Mutex<HashMap<String, BTreeMap<String, InjectControlRecord>>>>,
     authenticated: Arc<AtomicBool>,
     auth_required_data: Arc<serde_json::Value>,
+    pub(super) task_admission: Option<Arc<dyn SessionTaskAdmission>>,
 }
 
 impl ConcurrentSessionControls {
@@ -183,7 +184,16 @@ impl ConcurrentSessionControls {
             inject_owners: Arc::default(),
             authenticated: Arc::new(AtomicBool::new(authenticated)),
             auth_required_data: Arc::new(auth_required_data),
+            task_admission: None,
         }
+    }
+
+    pub(super) fn with_task_admission(
+        mut self,
+        admission: Option<Arc<dyn SessionTaskAdmission>>,
+    ) -> Self {
+        self.task_admission = admission;
+        self
     }
 
     pub(super) fn mark_authenticated(&self) {
@@ -412,39 +422,27 @@ impl ConcurrentSessionControls {
             .and_then(|value| value.as_str())
             .unwrap_or(mode)
             .to_string();
-        let recorded_text = content.clone();
-        let message_id = control
-            .inject_state
-            .push_pending_user_message(content, transcript_content, mode)
-            .await;
-        self.record_inject_owner(&session_id, message_id.clone(), actor.clone());
-        // This is the mid-turn steer: the prompt is in flight, so the
-        // frame never reaches the dispatch handler. Recording only there
-        // would have left the store blind to exactly the case the typed
-        // control event exists for.
-        super::core::record_and_emit_control(
-            self,
-            &session_id,
-            harn_session_store::ControlEvent::injection(
-                "session/inject",
-                control_id(),
-                "accepted",
-                requested_mode,
-                mode,
-                message_id.clone(),
-                recorded_text,
+        let response = match self
+            .enqueue_injection(
+                &session_id,
+                &control.inject_state,
+                params,
+                InjectionCommand {
+                    content,
+                    transcript_content,
+                    mode: mode.to_owned(),
+                    requested_mode,
+                    goal,
+                    actor,
+                },
             )
-            .with_goal(goal)
-            .with_actor(actor.clone()),
-        );
-        let response = harn_vm::jsonrpc::response(
-            id.clone(),
-            serde_json::json!({
-                "messageId": message_id,
-                "status": "accepted",
-                "_meta": { "harn": { "actor": actor } }
-            }),
-        );
+            .await
+        {
+            Ok(result) => harn_vm::jsonrpc::response(id.clone(), result),
+            Err(error) => {
+                harn_vm::jsonrpc::error_response(id.clone(), error.rpc_code(), error.message())
+            }
+        };
         if let Ok(line) = serde_json::to_string(&response) {
             output.write_line(&line);
         }

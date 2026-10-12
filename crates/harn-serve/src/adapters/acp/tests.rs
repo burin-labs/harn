@@ -1481,6 +1481,7 @@ mod conservative_admission;
 mod emit_response;
 mod event_log_barrier;
 mod host_call_turn_cache;
+mod injection_admission;
 mod modes;
 mod oauth_redirect;
 mod prompt_errors;
