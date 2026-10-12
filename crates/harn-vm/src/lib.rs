@@ -135,6 +135,7 @@ pub use runtime_content::{
     runtime_content_fingerprint, RuntimeBuildFeatures, RuntimeCompatibilityFingerprint,
     RuntimeContentFingerprint,
 };
+pub mod package_scripts;
 mod persistent_state;
 pub mod personas;
 pub mod portable;

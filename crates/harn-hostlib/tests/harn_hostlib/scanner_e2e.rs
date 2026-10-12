@@ -21,6 +21,54 @@ use harn_hostlib::scanner::{
 };
 use tempfile::tempdir;
 
+#[cfg(unix)]
+#[test]
+fn package_script_aliases_stay_within_physical_project() {
+    let fixture = tempdir().unwrap();
+    let project = fixture.path().join("project");
+    let outside = fixture.path().join("outside");
+    write(
+        &project,
+        "package.json",
+        r#"{"name":"inside","packageManager":"pnpm@10","scripts":{"test":"echo KNOWN_INSIDE"}}"#,
+    );
+    write(
+        &project,
+        "owned/package.json",
+        r#"{"name":"owned","packageManager":"npm@10","scripts":{"test":"echo KNOWN_OWNED"}}"#,
+    );
+    write(
+        &outside,
+        "package.json",
+        r#"{"name":"outside","packageManager":"npm@10","scripts":{"test":"echo KNOWN_OUTSIDE"}}"#,
+    );
+    fs::create_dir(project.join("packages")).unwrap();
+    std::os::unix::fs::symlink(&outside, project.join("packages/escaped")).unwrap();
+    std::os::unix::fs::symlink(project.join("owned"), project.join("packages/aliased")).unwrap();
+    let initial_alias = fixture.path().join("initial-alias");
+    std::os::unix::fs::symlink(&project, &initial_alias).unwrap();
+
+    for root in [&project, &initial_alias] {
+        let result = scan_project(
+            root,
+            ScanProjectOptions {
+                include_git_history: false,
+                ..ScanProjectOptions::default()
+            },
+        );
+        let commands = result.project.test_commands;
+        assert!(commands.get("pnpm test").unwrap().contains("KNOWN_INSIDE"));
+        assert!(commands
+            .get("cd packages/aliased && npm test")
+            .unwrap()
+            .contains("KNOWN_OWNED"));
+        assert!(!commands.contains_key("cd packages/escaped && npm test"));
+        assert!(!commands
+            .values()
+            .any(|label| label.contains("KNOWN_OUTSIDE")));
+    }
+}
+
 fn write(root: &Path, rel: &str, content: &str) {
     let path = root.join(rel);
     if let Some(parent) = path.parent() {
@@ -225,7 +273,7 @@ fn scan_project_emits_full_result_shape() {
     assert!(result.project.languages.iter().any(|l| l.name == "rs"));
     assert!(result.project.languages.iter().any(|l| l.name == "ts"));
     assert!(result.project.test_commands.contains_key("cargo test"));
-    assert!(result.project.test_commands.contains_key("pnpm test"));
+    assert!(result.project.test_commands.contains_key("npm test"));
     let detected = result
         .project
         .detected_test_command

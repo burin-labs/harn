@@ -6,8 +6,6 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
 
-use serde_json::Value;
-
 use crate::scanner::extensions::should_include;
 use crate::scanner::result::FileRecord;
 
@@ -16,7 +14,7 @@ use crate::scanner::result::FileRecord;
 pub fn detect_test_commands(root: &Path) -> BTreeMap<String, String> {
     let mut commands: BTreeMap<String, String> = BTreeMap::new();
 
-    scan_package_json(root, None, &mut commands);
+    scan_package_json(root, root, None, &mut commands);
     scan_monorepo_packages(root, &mut commands);
     detect_language_test_commands(root, &mut commands);
     detect_makefile_targets(root, &mut commands);
@@ -38,7 +36,7 @@ fn scan_monorepo_packages(root: &Path, commands: &mut BTreeMap<String, String>) 
                 Err(_) => continue,
             };
             if path.is_dir() {
-                scan_package_json(&path, Some(format!("{subdir}/{name}")), commands);
+                scan_package_json(root, &path, Some(format!("{subdir}/{name}")), commands);
             }
         }
     }
@@ -215,36 +213,26 @@ fn detect_makefile_targets(root: &Path, commands: &mut BTreeMap<String, String>)
     }
 }
 
-fn scan_package_json(dir: &Path, prefix: Option<String>, commands: &mut BTreeMap<String, String>) {
-    let path = dir.join("package.json");
-    let content = match fs::read_to_string(&path) {
-        Ok(c) => c,
-        Err(_) => return,
-    };
-    let json: Value = match serde_json::from_str(&content) {
-        Ok(v) => v,
-        Err(_) => return,
-    };
-    let scripts = match json.get("scripts").and_then(|v| v.as_object()) {
-        Some(m) => m,
-        None => return,
+fn scan_package_json(
+    root: &Path,
+    dir: &Path,
+    prefix: Option<String>,
+    commands: &mut BTreeMap<String, String>,
+) {
+    let harn_vm::package_scripts::Discovery::Resolved(package) =
+        harn_vm::package_scripts::discover(root, dir)
+    else {
+        return;
     };
 
-    let pkg_name = prefix
-        .clone()
-        .or_else(|| {
-            json.get("name")
-                .and_then(|v| v.as_str())
-                .map(|s| s.to_string())
-        })
-        .unwrap_or_default();
+    let pkg_name = prefix.clone().or(package.name).unwrap_or_default();
     let label_suffix = if pkg_name.is_empty() {
         String::new()
     } else {
         format!(" ({pkg_name})")
     };
 
-    for (name, value) in scripts {
+    for (name, value) in package.scripts {
         if !(name.contains("test")
             || name.contains("lint")
             || name.contains("typecheck")
@@ -252,11 +240,12 @@ fn scan_package_json(dir: &Path, prefix: Option<String>, commands: &mut BTreeMap
         {
             continue;
         }
+        let command = value.command;
         let runner = match prefix.as_deref() {
-            Some(p) => format!("cd {p} && pnpm {name}"),
-            None => format!("pnpm {name}"),
+            Some(p) => format!("cd {p} && {command}"),
+            None => command,
         };
-        let cmd_text = value.as_str().unwrap_or_default();
+        let cmd_text = value.body;
         commands.insert(runner, format!("{cmd_text}{label_suffix}"));
     }
 }
@@ -539,7 +528,7 @@ mod tests {
     }
 
     #[test]
-    fn pnpm_scripts_are_normalized() {
+    fn undeclared_package_scripts_use_the_shared_default() {
         let tmp = tempdir().unwrap();
         let pkg = serde_json::json!({
             "name": "x",
@@ -555,9 +544,9 @@ mod tests {
         )
         .unwrap();
         let mut cmds = BTreeMap::new();
-        scan_package_json(tmp.path(), None, &mut cmds);
-        assert!(cmds.contains_key("pnpm test"));
-        assert!(cmds.contains_key("pnpm lint"));
-        assert!(!cmds.contains_key("pnpm build"));
+        scan_package_json(tmp.path(), tmp.path(), None, &mut cmds);
+        assert!(cmds.contains_key("npm test"));
+        assert!(cmds.contains_key("npm run lint"));
+        assert!(!cmds.contains_key("npm run build"));
     }
 }

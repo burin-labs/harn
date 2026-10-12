@@ -7,7 +7,7 @@ use sha2::{Digest, Sha256};
 
 use crate::runtime_limits::RuntimeLimits;
 use crate::stdlib::process::resolve_source_relative_path;
-use crate::stdlib::project_catalog::{project_catalog, ProjectCatalogEntry};
+use crate::stdlib::project_catalog::{project_catalog, ProjectCatalogEntry, ProjectCommands};
 use crate::value::{VmDictExt, VmError, VmValue};
 
 // One shared list owns "what counts as build output" for every Harn walk.
@@ -41,7 +41,8 @@ const PROJECT_FRAMEWORK_ORDER: &[&str] = &[
     "axum", "next", "react", "laravel", "django", "fastapi", "rails",
 ];
 const PROJECT_PACKAGE_MANAGER_ORDER: &[&str] = &[
-    "cargo", "spm", "composer", "pnpm", "npm", "yarn", "uv", "poetry", "pip", "go-mod", "bundler",
+    "cargo", "spm", "composer", "pnpm", "npm", "yarn", "bun", "uv", "poetry", "pip", "go-mod",
+    "bundler",
 ];
 const PROJECT_TEST_RUNNER_ORDER: &[&str] = &[
     "nextest",
@@ -59,7 +60,7 @@ const PROJECT_TEST_RUNNER_ORDER: &[&str] = &[
     "minitest",
 ];
 const PROJECT_BUILD_TOOL_ORDER: &[&str] = &[
-    "cargo", "spm", "composer", "next", "vite", "uv", "poetry", "pnpm", "npm", "yarn", "go",
+    "cargo", "spm", "composer", "next", "vite", "uv", "poetry", "pnpm", "npm", "yarn", "bun", "go",
     "bundler", "pip",
 ];
 const PROJECT_CI_ORDER: &[&str] = &[
@@ -72,9 +73,6 @@ const PROJECT_CI_ORDER: &[&str] = &[
 ];
 const PROJECT_LOCKFILES: &[(&str, Option<&str>)] = &[
     ("Cargo.lock", Some("cargo")),
-    ("package-lock.json", Some("npm")),
-    ("pnpm-lock.yaml", Some("pnpm")),
-    ("yarn.lock", Some("yarn")),
     ("uv.lock", Some("uv")),
     ("poetry.lock", Some("poetry")),
     ("Pipfile.lock", Some("pip")),
@@ -83,8 +81,6 @@ const PROJECT_LOCKFILES: &[(&str, Option<&str>)] = &[
     ("Gemfile.lock", Some("bundler")),
     ("composer.lock", Some("composer")),
     ("Package.resolved", Some("spm")),
-    ("bun.lockb", Some("npm")),
-    ("bun.lock", Some("npm")),
 ];
 const TEST_DIR_NAMES: &[&str] = &["tests", "test", "__tests__", "spec", "e2e", "cypress"];
 const NEXT_CONFIG_NAMES: &[&str] = &["next.config.js", "next.config.mjs", "next.config.ts"];
@@ -300,6 +296,7 @@ pub(super) struct ProjectEvidence {
     package_name: Option<String>,
     build_commands: Vec<String>,
     declared_scripts: BTreeMap<String, String>,
+    package_scripts: crate::package_scripts::Discovery,
     readme_code_fences: Vec<String>,
     dockerfile_commands: Vec<String>,
     makefile_targets: Vec<String>,
@@ -386,6 +383,33 @@ impl ProjectEvidence {
                     .collect::<crate::value::DictMap>(),
             ),
         );
+        let mut package = BTreeMap::new();
+        package.put_str("state", self.package_scripts.state());
+        let (manager, commands, error) = match self.package_scripts {
+            crate::package_scripts::Discovery::Resolved(resolved) => (
+                VmValue::String(arcstr::ArcStr::from(resolved.manager)),
+                resolved
+                    .scripts
+                    .into_iter()
+                    .map(|(name, script)| {
+                        (name, VmValue::String(arcstr::ArcStr::from(script.command)))
+                    })
+                    .collect::<crate::value::DictMap>(),
+                VmValue::Nil,
+            ),
+            crate::package_scripts::Discovery::Refused(error) => (
+                VmValue::Nil,
+                crate::value::DictMap::new(),
+                VmValue::String(arcstr::ArcStr::from(error.code())),
+            ),
+            crate::package_scripts::Discovery::Absent => {
+                (VmValue::Nil, crate::value::DictMap::new(), VmValue::Nil)
+            }
+        };
+        package.insert("manager".to_string(), manager);
+        package.insert("commands".to_string(), VmValue::dict(commands));
+        package.insert("error".to_string(), error);
+        result.insert("package_scripts".to_string(), VmValue::dict(package));
         result.insert(
             "readme_code_fences".to_string(),
             VmValue::List(std::sync::Arc::new(
@@ -562,7 +586,7 @@ pub(super) fn scan_project_tree(
     let builder = build_project_walk_builder(base, options);
 
     let mut results = BTreeMap::new();
-    results.insert(".".to_string(), scan_exact_directory(base, options));
+    results.insert(".".to_string(), scan_exact_directory(base, base, options));
 
     for entry in builder.build() {
         let Ok(entry) = entry else {
@@ -578,7 +602,7 @@ pub(super) fn scan_project_tree(
         let rel = relative_posix(base, dir);
         results
             .entry(rel)
-            .or_insert_with(|| scan_exact_directory(dir, options));
+            .or_insert_with(|| scan_exact_directory(base, dir, options));
     }
 
     Ok(results)
@@ -793,13 +817,22 @@ fn hex_digest(bytes: impl AsRef<[u8]>) -> String {
         .collect()
 }
 
-pub(super) fn scan_exact_directory(dir: &Path, options: &ProjectScanOptions) -> ProjectEvidence {
+pub(super) fn scan_exact_directory(
+    root: &Path,
+    dir: &Path,
+    options: &ProjectScanOptions,
+) -> ProjectEvidence {
     let mut evidence = ProjectEvidence {
         path: dir.to_path_buf(),
         vcs: detect_vcs(dir),
         ..ProjectEvidence::default()
     };
     let mut build_commands = Vec::new();
+    let package = crate::package_scripts::discover(root, dir);
+    let scripts = match &package {
+        crate::package_scripts::Discovery::Resolved(package) => Some(&package.scripts),
+        _ => None,
+    };
 
     for entry in project_catalog() {
         let found_anchors = collect_present(dir, entry.anchors);
@@ -836,43 +869,49 @@ pub(super) fn scan_exact_directory(dir: &Path, options: &ProjectScanOptions) -> 
             evidence
                 .build_systems
                 .extend(entry.build_systems.iter().map(|value| value.to_string()));
-            push_unique_option(&mut build_commands, entry.default_build_cmd);
-            push_unique_option(&mut build_commands, entry.default_test_cmd);
+            match entry.commands {
+                ProjectCommands::Shell { build, test } => {
+                    push_unique_option(&mut build_commands, build);
+                    push_unique_option(&mut build_commands, test);
+                }
+                ProjectCommands::PackageScripts => {
+                    if let Some(scripts) = &scripts {
+                        for name in ["build", "test"] {
+                            if let Some(script) = scripts.get(name) {
+                                push_unique(&mut build_commands, script.command.clone());
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 
     if options.tiers.contains(&ScanTier::Config) {
         evidence.package_name = detect_package_name(dir);
-        apply_config_tier(dir, &mut evidence, &mut build_commands);
+        apply_config_tier(dir, scripts, &mut evidence, &mut build_commands);
     }
 
     evidence.build_commands = build_commands;
+    evidence.package_scripts = package;
     evidence
 }
 
-fn apply_config_tier(dir: &Path, evidence: &mut ProjectEvidence, build_commands: &mut Vec<String>) {
-    if let Some(package_json) = read_json_object(dir.join("package.json")) {
-        if let Some(scripts) = package_json
-            .get("scripts")
-            .and_then(|value| value.as_object())
-        {
-            for (name, command) in scripts {
-                let Some(command) = command.as_str() else {
-                    continue;
-                };
-                evidence
-                    .declared_scripts
-                    .insert(name.clone(), command.to_string());
-            }
-            for key in ["build", "test", "lint", "dev", "start"] {
-                if scripts.contains_key(key) {
-                    let command = if key == "test" {
-                        "npm test".to_string()
-                    } else {
-                        format!("npm run {key}")
-                    };
-                    push_unique(build_commands, command);
-                }
+fn apply_config_tier(
+    dir: &Path,
+    scripts: Option<&BTreeMap<String, crate::package_scripts::Script>>,
+    evidence: &mut ProjectEvidence,
+    build_commands: &mut Vec<String>,
+) {
+    if let Some(scripts) = scripts {
+        for (name, script) in scripts {
+            evidence
+                .declared_scripts
+                .insert(name.clone(), script.body.clone());
+        }
+        for key in ["build", "test", "lint", "dev", "start"] {
+            if let Some(script) = scripts.get(key) {
+                push_unique(build_commands, script.command.clone());
             }
         }
     }

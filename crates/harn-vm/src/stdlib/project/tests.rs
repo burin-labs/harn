@@ -21,7 +21,7 @@ fn scan_detects_rust_workspace_root_without_nested_source_walk() {
         .parent()
         .expect("workspace root")
         .to_path_buf();
-    let evidence = scan_exact_directory(&repo_root, &ProjectScanOptions::default());
+    let evidence = scan_exact_directory(&repo_root, &repo_root, &ProjectScanOptions::default());
     assert!(sorted_confident_labels(&evidence.language_scores).contains(&"rust".to_string()));
     assert!(
         evidence

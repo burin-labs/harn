@@ -1,0 +1,8 @@
+observed npm test ["npm test"]
+observed npm test ["npm test"]
+observed pnpm test ["pnpm test"]
+observed yarn run test ["yarn run test"]
+observed bun run test ["bun run test"]
+declared and default package runners agree
+unsupported and conflicting evidence refuses runner substitution
+nested manifests keep their own or inherited runner

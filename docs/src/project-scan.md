@@ -149,6 +149,32 @@ When `tiers` includes `"config"`, the scan also fills in:
 - `dockerfile_commands`: parsed `RUN`, `CMD`, and `ENTRYPOINT` commands
 - `readme_code_fences`: fenced-language labels found in the README
 
+### Package-script commands
+
+The project scanner and hostlib scanner resolve commands from the same
+string-valued `package.json` scripts. Each manifest uses the nearest supported
+`packageManager` declaration or lockfile within the requested scan root. A
+nested manifest's own evidence takes precedence over inherited evidence. A
+manifest with no manager evidence uses npm.
+
+Supported managers are npm, pnpm, yarn and bun. npm and pnpm invoke the test
+lifecycle as `npm test` and `pnpm test`; their other scripts, and yarn and bun
+scripts, use `<manager> run <script>`. The language catalog projects the actual
+declared scripts through this same selection.
+
+Unsupported or malformed declarations, conflicting manager evidence at one
+directory, and non-string script definitions produce no package-script command
+proposals. The repository fingerprint retains the aggregate manager signals;
+individual script commands use their own manifest's resolved manager.
+
+`package_scripts` carries the normalized inventory for command-planning
+consumers. Its `state` is `resolved`, `absent` when no package manifest exists,
+or `refused` when manifest or manager evidence is invalid. `manager` names the
+resolved manager, `commands` maps script names to invocation strings, and
+`error` gives the refusal code. Absent and refused results have no manager or
+commands. Consumers use this inventory directly and keep refusal distinct from
+an empty valid script inventory.
+
 ## Tiers
 
 - `ambient`: anchor files, lockfiles, coarse build system detection, VCS, and
