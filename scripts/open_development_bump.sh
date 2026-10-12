@@ -87,6 +87,7 @@ if [[ -n "$retired_version" ]]; then
   release_require_unpublished_retirement "$main_version" "$RELEASE_PUBLISHED_VERSION"
 fi
 pr_url="$(gh pr list --state open --head "$branch" --json url --jq '.[0].url // empty')"
+created=false
 if [[ -z "$pr_url" ]]; then
   # shellcheck disable=SC2031 # retirement observation changes credentials only in its subshell
   HARN_BRANCH_COMMIT_TOKEN="$GH_TOKEN" \
@@ -124,6 +125,7 @@ if [[ -z "$pr_url" ]]; then
     --title "[Release] Start $actual development" \
     --body-file "$body_file")"
   gh pr edit "$pr_url" --add-label no-changelog-needed
+  created=true
   echo "Development bump opened: $pr_url"
 else
   echo "Development bump already open: $pr_url"
@@ -135,5 +137,6 @@ if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
     echo "harn_bin=$harn_bin"
     echo "pr_url=$pr_url"
     echo "skipped=false"
+    echo "created=$created"
   } >> "$GITHUB_OUTPUT"
 fi

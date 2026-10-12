@@ -140,13 +140,14 @@ jobs:
           harn_bin="$(HARN_BIN_NO_BUILD=1 ./scripts/harn_bin.sh --print)"
           HARN_BIN="$harn_bin" ./scripts/open_development_bump.sh
 
-      - name: Validate grammar receipt and arm development bump
+      - name: Validate grammar receipt and enroll new development bump
         if: >-
           steps.development.outputs.required == 'true' &&
           steps.development-bump.outputs.skipped != 'true'
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           DEVELOPMENT_BUMP_PR_URL: ${{ steps.development-bump.outputs.pr_url }}
+          DEVELOPMENT_BUMP_CREATED: ${{ steps.development-bump.outputs.created }}
         run: |
           set -euo pipefail
           ./scripts/validate_development_bump.sh

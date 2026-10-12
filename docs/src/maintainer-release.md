@@ -14,8 +14,9 @@ gh workflow run bump-release.yml --repo burin-labs/harn --ref main
 
 The opener takes no version or candidate-build inputs. It strips the declared
 `-dev` suffix, folds the fragments, regenerates derived files, and opens
-`Release vX.Y.Z`. It publishes one GitHub-signed commit and arms squash
-auto-merge through the merge queue. Required checks and review still apply.
+`Release vX.Y.Z`. It publishes one GitHub-signed commit and adds `ship` so
+Smart Ship owns delivery through the merge queue. Required checks and review
+still apply. Repeated openers leave an existing PR's delivery grant unchanged.
 
 The daily schedule runs the same decision. A stable workspace version or no
 unreleased fragments produces `action=none`, with a notice explaining why.
@@ -44,9 +45,15 @@ gh workflow run open-development-bump.yml --repo burin-labs/harn --ref main -f p
 Omit `published_tag` to use the latest published stable release. The workflow
 verifies publication before minting the release App token, derives the next
 development identity, opens or reuses its pull request, validates its grammar
-receipt, and arms the normal merge queue. A repeated repair after the cutover
-lands is a no-op. Draft, prerelease, unreadable, and incomplete publication
+receipt, and enrolls a newly opened PR in Smart Ship. An existing PR retains
+its owner's delivery grant, including an explicit stop. Resume a stopped PR
+only after reading its label history and resolving the reason for the stop.
+A repeated repair after the cutover lands is a no-op. Draft, prerelease, unreadable, and incomplete publication
 records refuse the repair.
+
+The development monitor reports success only when main declares the expected
+development version. An open update is pending, not successful convergence;
+an unreadable, incomplete, or ambiguous PR census fails the measurement.
 
 The five-minute repository-state controller automatically dispatches the same
 opener once for an owed development version when no open cutover PR exists.
