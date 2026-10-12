@@ -816,13 +816,8 @@ fn archived_workspace_test_consumer_errors(workflow: dict, job_name: string) -> 
   }
   const test_step = step_by_name(consumer?.steps ?? [], "Run Rust workspace tests")
   const test_command = trim(test_step?.run ?? "")
-  if !contains(test_command, "--archive-file")
-    || !contains(test_command, "harn-tests.tar.zst")
-    || !contains(test_command, "--workspace-remap")
-    || !contains(test_command, HOST_BOUND_RUST_TEST_FILTER_SETUP)
-    || !contains(test_command, NEUTRAL_RUST_TEST_FILTER_FLAG)
-    || regex_match("(^|[ ])--workspace(harness, [ ]|$)", test_command)
-      != nil {
+  if test_command
+    != "scripts/ci/run_rust_test_lane.sh bash scripts/ci/run_workspace_tests.sh all \"$RUNNER_TEMP/harn-workspace-tests/harn-tests.tar.zst\"" {
     errors = errors + ["ci.yml:${job_name} must execute only the remapped nextest archive"]
   }
   if trim(test_step?.env?.CARGO_BUILD_JOBS ?? "") != "" {

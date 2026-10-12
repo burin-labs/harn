@@ -98,6 +98,15 @@ pipeline test_executes_rust_tests_recognizes_both_runners(harness: Harness, task
     1,
   )
   assert_eq(executes_rust_tests("cargo test -p harn-modules some_case"), true)
+  const workspace = "bash scripts/ci/run_workspace_tests.sh all archive.tar.zst"
+  assert_eq(executes_rust_tests(workspace), true)
+  assert_eq(len(step_violations("w.yml", "j", {run: workspace}, {}, {})), 1)
+  assert_eq(
+    len(
+      step_violations("w.yml", "j", {run: "scripts/ci/run_rust_test_lane.sh " + workspace}, {}, {}),
+    ),
+    0,
+  )
 }
 
 @test

@@ -427,7 +427,7 @@ fn workflow() {
       {
         name: "Run Rust workspace tests",
         run:
-          "${HOST_BOUND_RUST_TEST_FILTER_SETUP} scripts/ci/run_rust_test_lane.sh cargo-nextest nextest run --profile ci --archive-file harn-tests.tar.zst --workspace-remap workspace ${NEUTRAL_RUST_TEST_FILTER_FLAG}",
+          "scripts/ci/run_rust_test_lane.sh bash scripts/ci/run_workspace_tests.sh all \"$RUNNER_TEMP/harn-workspace-tests/harn-tests.tar.zst\"",
       },
     ],
   }
@@ -1780,7 +1780,7 @@ pipeline test_host_bound_sandbox_filter_has_one_owner(harness: Harness) {
   const renderer_source = harness.fs.read_text(path_join(root, HOST_BOUND_RUST_TEST_FILTER_COMMAND))
   assert_eq(renderer_source.split(HOST_BOUND_RUST_TEST_FILTER_SOURCE).count - 1, 1)
   for projection in [
-    {path: ".github/workflows/ci.yml", references: 2},
+    {path: ".github/workflows/ci.yml", references: 1},
     {path: "scripts/release_audit_contract.json", references: 1},
     {path: "scripts/ci/run_workspace_tests.sh", references: 1},
     {path: "scripts/release_gate.sh", references: 1},

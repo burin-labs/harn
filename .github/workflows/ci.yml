@@ -1400,17 +1400,18 @@ jobs:
         id: release-audit-rust-test
         env:
           HARN_LLM_CALLS_DISABLED: "1"
-        # No --locked: nextest rejects it alongside --archive-file. This step
-        # replays prebuilt binaries and never resolves dependencies, so there is
-        # no lock for the flag to hold.
         run: >-
-          set -euo pipefail;
-          host_bound_filter="$(scripts/ci/host_bound_rust_test_filter.sh)";
           scripts/ci/run_rust_test_lane.sh
-          cargo-nextest nextest run --profile ci
-          --archive-file "$RUNNER_TEMP/harn-workspace-tests/harn-tests.tar.zst"
-          --workspace-remap "$GITHUB_WORKSPACE"
-          -E "not (${host_bound_filter})"
+          bash scripts/ci/run_workspace_tests.sh all
+          "$RUNNER_TEMP/harn-workspace-tests/harn-tests.tar.zst"
+      - name: Upload workspace test inventory
+        if: always() && steps.release-audit-rust-test.outcome != 'skipped' && steps.release-audit-rust-test.outcome != ''
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: harn-nextest-inventory-archive
+          path: ${{ runner.temp }}/harn-nextest-inventory.json
+          if-no-files-found: error
+          retention-days: 7
 
   rust-security:
     name: Run Linux sandbox tests

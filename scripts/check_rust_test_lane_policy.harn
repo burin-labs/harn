@@ -77,6 +77,7 @@ pub fn executes_rust_tests(command: string) -> bool {
   return contains(command, "cargo-nextest nextest run")
     || contains(command, "cargo nextest run")
     || contains(command, "cargo test")
+    || contains(command, "scripts/ci/run_workspace_tests.sh")
 }
 
 pub fn routes_through_lane_wrapper(command: string) -> bool {
