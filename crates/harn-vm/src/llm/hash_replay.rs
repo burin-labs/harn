@@ -28,6 +28,31 @@ pub fn set_replay_mode(mode: LlmReplayMode, fixture_dir: &str) {
     LLM_FIXTURE_DIR.with(|v| *v.borrow_mut() = fixture_dir.to_string());
 }
 
+/// Temporarily select a fixture mode on the calling thread.
+pub fn scope_replay_mode(mode: LlmReplayMode, fixture_dir: &str) -> ReplayModeScope {
+    let previous = ReplayModeScope {
+        mode: get_replay_mode(),
+        fixture_dir: get_fixture_dir(),
+        thread_bound: std::marker::PhantomData,
+    };
+    set_replay_mode(mode, fixture_dir);
+    previous
+}
+
+/// Restores the caller's fixture mode when an invocation finishes or unwinds.
+#[must_use = "dropping the scope immediately restores the previous fixture mode"]
+pub struct ReplayModeScope {
+    mode: LlmReplayMode,
+    fixture_dir: String,
+    thread_bound: std::marker::PhantomData<std::rc::Rc<()>>,
+}
+
+impl Drop for ReplayModeScope {
+    fn drop(&mut self) {
+        set_replay_mode(self.mode, &self.fixture_dir);
+    }
+}
+
 pub(crate) fn get_replay_mode() -> LlmReplayMode {
     LLM_REPLAY_MODE.with(|v| *v.borrow())
 }
@@ -147,6 +172,20 @@ pub(crate) fn load_fixture(hash: &str) -> Option<LlmResult> {
 mod tests {
     use super::*;
     use crate::llm::api::{test_text_projection, ProviderAttempts};
+
+    #[test]
+    fn fixture_mode_scope_restores_mode_and_directory_after_unwind() {
+        let _outer = scope_replay_mode(LlmReplayMode::Record, "outer-fixtures");
+        let result = std::panic::catch_unwind(|| {
+            let _inner = scope_replay_mode(LlmReplayMode::Replay, "inner-fixtures");
+            assert_eq!(get_replay_mode(), LlmReplayMode::Replay);
+            assert_eq!(get_fixture_dir(), "inner-fixtures");
+            panic!("invocation failed");
+        });
+        assert!(result.is_err());
+        assert_eq!(get_replay_mode(), LlmReplayMode::Record);
+        assert_eq!(get_fixture_dir(), "outer-fixtures");
+    }
 
     #[test]
     fn recording_round_trips_provider_receipts_without_attempt_context() {

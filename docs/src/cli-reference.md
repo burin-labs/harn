@@ -799,6 +799,16 @@ test still receives a fresh VM, module state, and persistence root.
 | `--coverage-out <path>` | Write an LCOV tracefile (implies `--coverage`); consumable by Codecov, `genhtml`, and Coverage Gutters |
 | `--allow-empty` | Accept a conformance run that executed no tests. Without it, a run that executed nothing exits non-zero. |
 
+User tests default to the mock provider and disable real LLM calls.
+`--record` uses normal provider and model selection, preserves an explicitly
+configured `HARN_LLM_PROVIDER`, and records live responses from file fixtures and
+test cases in both sequential and parallel runs. The launcher's
+`HARN_LLM_CALLS_DISABLED=1` still blocks recording real calls.
+`--replay` reads matching fixtures without contacting providers, including
+under that kill switch; a missing fixture fails instead of making a live call.
+The conformance runner keeps its hermetic LLM policy. Development watch tests
+keep normal runtime provider selection.
+
 When no path is given, `harn test` auto-discovers a `tests/` directory
 in the current folder. Conformance targets must resolve to a file or directory
 inside `conformance/`; the CLI now errors instead of silently falling back to

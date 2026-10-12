@@ -203,8 +203,8 @@ const CONFORMANCE_REAL_TIME_ALLOWLIST: list<string> = [
 ]
 
 // E2E subprocess test files where `harn_e2e_command` / `spawn_orchestrator`
-// are the intended surface. Mirrors the bash `is_e2e_subprocess_path` case
-// arms; `crates/harn-cli/tests/harn_cli_fast/orchestrator_http/` is a prefix match.
+// are the intended surface. `crates/harn-cli/tests/harn_cli_fast/orchestrator_http/`
+// is a prefix match; other files require an explicit entry.
 const E2E_SUBPROCESS_PATHS: list<string> = [
   // Shared checkpoint mutations must retain keys and one initial value across real CLI processes.
   "crates/harn-cli/tests/harn_cli_e2e/checkpoint_concurrency.rs",
@@ -219,6 +219,8 @@ const E2E_SUBPROCESS_PATHS: list<string> = [
   // reach no spawned child. Only a real `harn run` with its launch-time grant
   // parsing, session install, provider auth, and process funnel proves both.
   "crates/harn-cli/tests/harn_cli_e2e/in_process_grant.rs",
+  // Recording and replay admission cross CLI flags, provider selection and worker threads.
+  "crates/harn-cli/tests/harn_cli_e2e/llm_fixture_policy.rs",
   // A missing secret's category and provider-chain message are built from
   // HARN_SECRET_PROVIDERS at process start; only a real `harn run` proves the
   // script-visible error a disabled keyring produces.

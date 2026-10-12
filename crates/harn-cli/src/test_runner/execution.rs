@@ -67,6 +67,7 @@ pub(super) async fn execute_case(
     prepared_module_cache: &harn_vm::PreparedModuleCache,
     stdio_available: bool,
     operator_approval_grant: Option<&harn_vm::orchestration::OperatorApprovalGrant>,
+    llm_policy: super::TestLlmPolicy,
 ) -> TestResult {
     let total_start = Instant::now();
     let compile_start = Instant::now();
@@ -113,6 +114,7 @@ pub(super) async fn execute_case(
         prepared_module_cache,
         stdio_available,
         operator_approval_grant,
+        llm_policy,
         compile_ms,
         total_start,
     )
@@ -129,6 +131,7 @@ pub(super) async fn execute_file_fixture(
     prepared_module_cache: &harn_vm::PreparedModuleCache,
     stdio_available: bool,
     operator_approval_grant: Option<&harn_vm::orchestration::OperatorApprovalGrant>,
+    llm_policy: super::TestLlmPolicy,
 ) -> Result<harn_vm::IsolateValue, TestResult> {
     let total_start = Instant::now();
     let compile_start = Instant::now();
@@ -184,6 +187,7 @@ pub(super) async fn execute_file_fixture(
         prepared_module_cache,
         stdio_available,
         operator_approval_grant,
+        llm_policy,
         compile_ms,
         total_start,
     )
@@ -214,6 +218,7 @@ async fn execute_compiled(
     prepared_module_cache: &harn_vm::PreparedModuleCache,
     stdio_available: bool,
     operator_approval_grant: Option<&harn_vm::orchestration::OperatorApprovalGrant>,
+    llm_policy: super::TestLlmPolicy,
     compile_ms: u64,
     total_start: Instant,
 ) -> InvocationExecution {
@@ -253,6 +258,7 @@ async fn execute_compiled(
     let work_recorder = vm.enable_work_recording();
     let result = local
         .run_until(async {
+            let _llm_mode = llm_policy.scope();
             let _environment = harn_vm::stdlib::process::declare_session_environment_if_absent(
                 harn_vm::security::SessionEnvironment::inherited(),
             );

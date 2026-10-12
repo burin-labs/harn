@@ -327,14 +327,17 @@ async fn run_standard_command(
     operator_approval_grant: Option<harn_vm::orchestration::OperatorApprovalGrant>,
 ) {
     let cli_skill_dirs: Vec<PathBuf> = args.skill_dir.iter().map(PathBuf::from).collect();
-    if args.record {
-        harn_vm::llm::set_replay_mode(harn_vm::llm::LlmReplayMode::Record, ".harn-fixtures");
+    let llm_policy = if args.record {
+        test_runner::TestLlmPolicy::Record
     } else if args.replay {
-        harn_vm::llm::set_replay_mode(harn_vm::llm::LlmReplayMode::Replay, ".harn-fixtures");
-    }
+        test_runner::TestLlmPolicy::Replay
+    } else {
+        test_runner::TestLlmPolicy::Hermetic
+    };
 
     if let Some(t) = args.target.as_deref() {
         if t == "conformance" {
+            let _llm_mode = llm_policy.scope();
             if !args.test_paths.is_empty() {
                 command_error("`harn test conformance` does not accept extra positional paths");
             }
@@ -418,7 +421,14 @@ async fn run_standard_command(
                     .map(|path| path.to_string_lossy().into_owned())
                     .collect();
             }
-            run_user_test_targets(&paths, &args, &cli_skill_dirs, operator_approval_grant).await;
+            run_user_test_targets(
+                &paths,
+                &args,
+                &cli_skill_dirs,
+                operator_approval_grant,
+                llm_policy,
+            )
+            .await;
         }
     } else {
         if args.selection.is_some() {
@@ -429,7 +439,14 @@ async fn run_standard_command(
         } else {
             args.test_paths.clone()
         };
-        run_user_test_targets(&paths, &args, &cli_skill_dirs, operator_approval_grant).await;
+        run_user_test_targets(
+            &paths,
+            &args,
+            &cli_skill_dirs,
+            operator_approval_grant,
+            llm_policy,
+        )
+        .await;
     }
 }
 
@@ -438,6 +455,7 @@ async fn run_user_test_targets(
     args: &TestArgs,
     cli_skill_dirs: &[PathBuf],
     operator_approval_grant: Option<harn_vm::orchestration::OperatorApprovalGrant>,
+    llm_policy: test_runner::TestLlmPolicy,
 ) {
     for path in paths {
         if !Path::new(path).exists() {
@@ -506,6 +524,7 @@ async fn run_user_test_targets(
         paths
     };
     let run_args = UserTestRunArgs {
+        llm_policy,
         filter: args.filter.as_deref(),
         timeout_ms: args.timeout,
         max_test_ms: args.max_test_ms,
@@ -785,6 +804,7 @@ mod report_root_tests {
 /// signatures stay readable as new flags accrete.
 #[derive(Clone)]
 pub(crate) struct UserTestRunArgs<'a> {
+    pub llm_policy: test_runner::TestLlmPolicy,
     pub filter: Option<&'a str>,
     pub timeout_ms: u64,
     pub max_test_ms: Option<u64>,
@@ -947,6 +967,7 @@ async fn run_user_test_paths_once_with_session(
     session: &test_runner::TestRunSession,
 ) -> test_runner::TestSummary {
     let options = test_runner::RunOptions {
+        llm_policy: args.llm_policy,
         filter: args.filter.map(str::to_owned),
         timeout_ms: args.timeout_ms,
         max_test_ms: args.max_test_ms,

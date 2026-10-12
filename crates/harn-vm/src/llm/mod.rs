@@ -82,6 +82,7 @@ pub mod eval;
 pub(crate) mod fake;
 pub(crate) mod first_token;
 mod hash_replay;
+pub use hash_replay::{scope_replay_mode, ReplayModeScope};
 pub(crate) mod helpers;
 pub use helpers::admit_reasoning_literals;
 pub mod introspection;
