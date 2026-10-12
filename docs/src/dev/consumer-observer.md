@@ -89,6 +89,14 @@ declaration. Callers must name its outer workflow step exactly
 checked against the shared owner. Dispatch consumes the action's closed context
 only after publication succeeds.
 
+`consumer-observer-dispatch.mjs` binds that context to its actual invoking run,
+attempt and workflow revision. The shared dispatch owner authenticates the
+immutable declaration and reads the latest live parent immediately before the
+request. Parent reads use the job's public read token; the dispatch uses the
+existing consumer-scoped App credential. A successful dispatch response exports
+no private child identity. If the parent ends after the final read, downstream
+admission still refuses expensive work.
+
 `reconcileOwnedChildren` discovers candidate children by the shared title, then
 authenticates each private receipt and freshly reads that child's latest attempt.
 The receipt must bind the same parent, declaration, source, workflow, App actor,

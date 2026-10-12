@@ -452,6 +452,30 @@ export function observerTerminalName(context) {
   return `consumer-observer-product-${observerContext(context).dispatch_nonce}`;
 }
 
+/** Dispatch only after immutable custody and a final live-parent read. The
+ * response carries no child identity into the public caller. */
+export async function dispatchObserverConsumer(parentToken, consumerToken, context, target, fetchRecord = fetch, extract = artifactJsonFromZip) {
+  const observer = observerContext(context);
+  if (!target || Object.keys(target).sort().join(',') !== 'ref,repository,target,workflow'
+    || typeof target.repository !== 'string' || !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(target.repository)
+    || typeof target.workflow !== 'string' || !/^[A-Za-z0-9_.-]+\.ya?ml$/.test(target.workflow)
+    || typeof target.ref !== 'string' || !target.ref || /[\r\n\x00]/.test(target.ref)
+    || typeof target.target !== 'string' || !/^v\d+\.\d+\.\d+$/.test(target.target)) {
+    refuse('dispatch_target_invalid');
+  }
+  if (!consumerToken) refuse('dispatch_authority_missing');
+  await githubDeclaration(parentToken, observer, fetchRecord, extract);
+  const parent = await githubRecord(parentToken, observer.parent_repository, observer.parent_run_id, fetchRecord);
+  admitObserver(observer, parent);
+  const response = await fetchRecord(`https://api.github.com/repos/${target.repository}/actions/workflows/${encodeURIComponent(target.workflow)}/dispatches`, {
+    method:'POST', headers:{Authorization:`Bearer ${consumerToken}`, Accept:'application/vnd.github+json', 'Content-Type':'application/json'},
+    body:JSON.stringify({ref:target.ref, inputs:{target:target.target, source_revision:observer.source_revision, legs:'clean', observer:JSON.stringify(observer)}}),
+    signal:AbortSignal.timeout(30_000),
+  });
+  if (response.status !== 204) refuse('dispatch_refused');
+  return {dispatched:true};
+}
+
 /** Authenticated private custody is shared by observation and cleanup. */
 async function readOwnedChild(token, observer, parent, expected, candidate, declaration, fetchRecord, extract) {
   const runId = String(candidate.id);
