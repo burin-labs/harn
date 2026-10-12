@@ -27,6 +27,10 @@ use serde::Serialize;
 use crate::tools::ToolsCapability;
 use crate::{BuiltinRegistry, HostlibCapability};
 
+#[cfg(test)]
+#[path = "conformance/progress_tests.rs"]
+mod progress_tests;
+
 /// Written into the outside file so a read is judged by content, not by an
 /// exit code a missing tool would also produce.
 const OUTSIDE_CONTENT: &str = "harn-conformance-outside-content";
@@ -139,12 +143,56 @@ impl CaseReport {
 /// guardian, which re-executes the current binary; an embedder whose binary
 /// does not own `main` must point the re-exec at its fixture first.
 pub fn run_conformance() -> ConformanceReport {
+    run_conformance_with_progress(|_| {})
+}
+
+/// A synchronous notification around one case's execution. A start is emitted
+/// before setup or spawning, and a finish before the next case starts, so an
+/// interrupted run still identifies its unfinished case.
+#[derive(Debug)]
+pub enum ConformanceProgress<'a> {
+    /// The case is about to execute, including its fixture setup.
+    Started {
+        /// The contract case that has not returned yet.
+        case: ConformanceCase,
+        /// Cases that have already returned a verdict.
+        completed: usize,
+        /// Cases without a verdict, including this one.
+        pending: usize,
+    },
+    /// The case returned its verdict, before another case starts.
+    Finished(&'a CaseReport),
+}
+
+impl ConformanceProgress<'_> {
+    /// One line describing the start or the completed case's verdict.
+    pub fn receipt_line(&self) -> String {
+        match self {
+            Self::Started {
+                case,
+                completed,
+                pending,
+            } => format!(
+                "harn.sandbox_conformance_start case={} completed={completed} pending={pending}",
+                case.id(),
+            ),
+            Self::Finished(report) => report.receipt_line(),
+        }
+    }
+}
+
+/// Run the same contract as [`run_conformance`], reporting progress as it
+/// happens. Callers writing buffered output must flush it in the observer.
+pub fn run_conformance_with_progress(
+    mut observer: impl FnMut(ConformanceProgress<'_>),
+) -> ConformanceReport {
     let backend = harn_vm::process_sandbox::active_backend_name().to_string();
     let enforcing = harn_vm::process_sandbox::active_backend_filesystem_available();
-    let cases = ConformanceCase::ALL
-        .iter()
-        .map(|&case| run_case(case, enforcing))
-        .collect();
+    let cases = run_cases(
+        ConformanceCase::ALL,
+        |case| run_case(case, enforcing),
+        &mut observer,
+    );
     ConformanceReport {
         backend,
         filesystem_mechanism: harn_vm::process_sandbox::active_backend_filesystem_mechanism()
@@ -152,6 +200,25 @@ pub fn run_conformance() -> ConformanceReport {
         enforcing,
         cases,
     }
+}
+
+fn run_cases(
+    cases: &[ConformanceCase],
+    mut execute: impl FnMut(ConformanceCase) -> CaseReport,
+    observer: &mut impl FnMut(ConformanceProgress<'_>),
+) -> Vec<CaseReport> {
+    let mut reports = Vec::with_capacity(cases.len());
+    for &case in cases {
+        observer(ConformanceProgress::Started {
+            case,
+            completed: reports.len(),
+            pending: cases.len() - reports.len(),
+        });
+        let report = execute(case);
+        observer(ConformanceProgress::Finished(&report));
+        reports.push(report);
+    }
+    reports
 }
 
 fn run_case(case: ConformanceCase, enforcing: bool) -> CaseReport {

@@ -17,6 +17,52 @@ fn binary_path() -> std::path::PathBuf {
 }
 
 #[test]
+fn sandbox_doctor_streams_all_cases_without_polluting_json() {
+    use harn_vm::process_sandbox::conformance::ConformanceCase;
+
+    let output = Command::new(binary_path())
+        .args(["doctor", "sandbox", "--json"])
+        .env("HARN_CONFORMANCE_UNDECLARED_NAME", "must-not-reach-child")
+        .output()
+        .expect("spawn sandbox doctor");
+    let parsed: serde_json::Value = serde_json::from_slice(&output.stdout)
+        .expect("progress must leave stdout as one JSON envelope");
+    let data = assert_envelope(&parsed, 1);
+    let cases = data["cases"].as_array().expect("case reports");
+    assert_eq!(cases.len(), ConformanceCase::ALL.len());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let receipts: Vec<_> = stderr
+        .lines()
+        .filter(|line| line.starts_with("harn.sandbox_conformance"))
+        .collect();
+    assert_eq!(receipts.len(), 2 * cases.len(), "{stderr}");
+    for (index, (case, contract)) in cases.iter().zip(ConformanceCase::ALL).enumerate() {
+        assert_eq!(case["case"], contract.id());
+        assert_eq!(
+            receipts[2 * index],
+            format!(
+                "harn.sandbox_conformance_start case={} completed={index} pending={}",
+                contract.id(),
+                cases.len() - index,
+            ),
+        );
+        assert!(receipts[2 * index + 1]
+            .starts_with(&format!("harn.sandbox_conformance case={} ", contract.id(),)));
+        assert!(receipts[2 * index + 1].contains(&format!(
+            "\"verdict\":\"{}\"",
+            case["verdict"].as_str().expect("verdict"),
+        )));
+    }
+    let holds = cases.iter().all(|case| {
+        matches!(
+            case["verdict"].as_str(),
+            Some("conforms" | "not_applicable")
+        )
+    });
+    assert_eq!(output.status.code(), Some(i32::from(!holds)), "{stderr}");
+}
+
+#[test]
 fn doctor_json_smoke() {
     let output = Command::new(binary_path())
         .args(["doctor", "--json"])

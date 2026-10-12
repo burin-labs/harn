@@ -281,6 +281,13 @@ or less than the backend does fails a named case. `unmeasured` means no
 measurement backs a claim either way. Network confinement is only required below
 the `network` ceiling. No policy term requires process confinement yet.
 
+`harn doctor sandbox` measures the contract through real child processes and exits
+nonzero if an applicable case fails, goes unmeasured, or isn't enforced. It writes
+each case's start and verdict to stderr as execution proceeds. A start names the
+case and counts completed and pending cases, including the current case. If the
+run stops, the last unmatched start identifies the unfinished case. With `--json`,
+stdout contains only the completed JSON report.
+
 <!-- sandbox-enforcement-table:begin -->
 | Backend | writes | reads | credential reads | network | process |
 |---|---|---|---|---|---|

@@ -6,7 +6,9 @@
 //! before it is relied on. The detector that `harn doctor` reports says what
 //! the backend believes it can do; this says what a child was observed to do.
 
-use harn_hostlib::sandbox::conformance::{run_conformance, ConformanceReport};
+use std::io::Write;
+
+use harn_hostlib::sandbox::conformance::{run_conformance_with_progress, ConformanceReport};
 use harn_vm::process_sandbox::conformance::Verdict;
 
 use crate::json_envelope::{to_string_pretty, JsonEnvelope};
@@ -18,7 +20,10 @@ pub(crate) const DOCTOR_SANDBOX_SCHEMA_VERSION: u32 = 1;
 /// zero only when every case that applies on this platform was measured and
 /// holds.
 pub(crate) fn run(json: bool) -> i32 {
-    let report = run_conformance();
+    let report = run_conformance_with_progress(|progress| {
+        eprintln!("{}", progress.receipt_line());
+        let _ = std::io::stderr().flush();
+    });
     let holds = report.failing().is_empty()
         && report.not_measured().is_empty()
         && report.not_enforced().is_empty();

@@ -16,7 +16,9 @@
 //! cases, never a pass, and a runner class that declares it must enforce
 //! (`HARN_REQUIRE_LANDLOCK_TESTS`) turns any `not_measured` into a failure.
 
-use harn_hostlib::sandbox::conformance::run_conformance;
+use std::io::Write;
+
+use harn_hostlib::sandbox::conformance::run_conformance_with_progress;
 use harn_vm::process_sandbox::conformance::ConformanceCase;
 
 /// Present in the launcher's environment and never declared by the session,
@@ -103,10 +105,13 @@ fn every_sandbox_conformance_case_holds_on_the_active_backend() {
         "--nocapture",
     ]);
 
-    let report = run_conformance();
-    for case in &report.cases {
-        println!("{}", case.receipt_line());
-    }
+    let report = run_conformance_with_progress(|progress| {
+        // Write directly so libtest's in-memory print capture cannot swallow
+        // progress when a test process is killed before it returns.
+        let mut stdout = std::io::stdout().lock();
+        writeln!(stdout, "{}", progress.receipt_line()).expect("write case progress");
+        stdout.flush().expect("flush case progress");
+    });
     println!("{}", report.summary_line());
 
     assert_eq!(report.cases.len(), ConformanceCase::ALL.len());
