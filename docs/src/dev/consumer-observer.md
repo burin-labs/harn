@@ -127,10 +127,21 @@ failed check. Missing, skipped, empty or partial decisions refuse recording.
 Harn validates this shape; the consumer owns which product checks are owed and
 must emit the file only after its actual canonical judgment succeeds.
 
-The action returns `recorded=true`, a private receipt path and the public nonce.
-Store the file in the consumer repository as an artifact named
+The action returns `recorded=true`, a private receipt path and the canonical
+`artifact` name. Store the file in the consumer repository under that name,
 `consumer-observer-product-<nonce>`. Its archive contains the single standard
 filename `consumer-observer-<nonce>.json`. No child identity is published upstream.
 Recording while the producer runs does not authorize release: a reader must
 apply `qualifyTerminalReceipt` to this receipt and fresh completed child SUCCESS,
 with the same authenticated ownership and parent declaration.
+
+`consumer-observer-observe.mjs` reads that decision through the same custody
+owner used by cleanup. Its outputs are `verdict` (`pass`, `pending` or `refused`)
+and a closed `reading` with `discovered`, `owned`, `pending`, `refused` and
+`product`. Missing or ambiguous children and missing product receipts have
+`product=null`; this is an unreported decision, not measured zero checks.
+A pass requires exactly one discovered and authenticated child, a complete
+private receipt and fresh completed SUCCESS. The returned product counts come
+from the reached decision, never a private workflow job table. Final complete
+discovery and fresh child reads narrow the race; GitHub provides no atomic
+snapshot against a dispatch or rerun arriving after the final read.

@@ -165,7 +165,11 @@ export function qualifyOwnedChild(input, context, parent, child, expected, decla
     repository: receipt.repository, runId: receipt.run_id, attempt: receipt.run_attempt,
     headSha: receipt.head_sha, workflow: receipt.workflow,
   }, child);
-  return { schema: input.schema, observer, child: { ...receipt } };
+  return { schema: input.schema, observer, child: {
+    repository:receipt.repository, workflow:receipt.workflow,
+    run_id:receipt.run_id, run_attempt:receipt.run_attempt,
+    head_sha:receipt.head_sha, dispatch_actor:receipt.dispatch_actor,
+  } };
 }
 
 /** The consumer's canonical decision owns its proof counts. This transport
@@ -444,6 +448,71 @@ export async function githubRecord(token, repository, runId, fetchRecord = fetch
   return record;
 }
 
+export function observerTerminalName(context) {
+  return `consumer-observer-product-${observerContext(context).dispatch_nonce}`;
+}
+
+/** Authenticated private custody is shared by observation and cleanup. */
+async function readOwnedChild(token, observer, parent, expected, candidate, declaration, fetchRecord, extract) {
+  const runId = String(candidate.id);
+  const name = `consumer-observer-${observer.dispatch_nonce}`;
+  const artifacts = await githubArtifactCensus(token, expected.repository, runId, fetchRecord, name);
+  if (artifacts.length !== 1 || artifacts[0].name !== name) return null;
+  const receipt = await githubArtifactJson(token, expected.repository, artifacts[0], {
+    runId, headSha: candidate.head_sha, name, filename: `${name}.json`,
+  }, fetchRecord, extract);
+  const child = await githubRecord(token, expected.repository, runId, fetchRecord);
+  const qualified = qualifyOwnedChild(receipt, observer, parent, child, expected, declaration);
+  return {receipt:qualified, child};
+}
+
+/** Read a reached private decision without exporting its child identity.
+ * Missing, partial or ambiguous discovery stays pending; it never manufactures
+ * zero product counts. The final reads narrow, but cannot atomically eliminate,
+ * a dispatch or rerun racing the observation. */
+export async function observeConsumerProduct(token, context, expected, fetchRecord = fetch, extract = artifactJsonFromZip) {
+  const observer = observerContext(context);
+  const parent = await githubRecord(token, observer.parent_repository, observer.parent_run_id,
+    fetchRecord, observer.parent_run_attempt);
+  qualifyObserverParent(observer, parent);
+  const declaration = await githubDeclaration(token, observer, fetchRecord, extract);
+  const runs = await githubChildCensus(token, expected.repository, expected.workflow,
+    parent.created_at, fetchRecord);
+  const matching = runs.filter(run => run.display_title === observerRunName(observer));
+  /** @type {{discovered:number, owned:number, pending:number, refused:number, product:ProductDecision|null}} */
+  const result = {discovered:matching.length, owned:0, pending:1, refused:0, product:null};
+  if (matching.length !== 1) return result;
+  try {
+    const candidate = matching[0];
+    const owned = await readOwnedChild(token, observer, parent, expected, candidate, declaration, fetchRecord, extract);
+    if (!owned) return result;
+    result.owned = 1;
+    if (owned.child.status !== 'completed') return result;
+    if (owned.child.conclusion !== 'success') refuse('product_run_not_successful');
+    const name = observerTerminalName(observer);
+    const artifacts = await githubArtifactCensus(token, expected.repository, String(candidate.id), fetchRecord, name);
+    if (artifacts.length !== 1 || artifacts[0].name !== name) return result;
+    const terminal = await githubArtifactJson(token, expected.repository, artifacts[0], {
+      runId:String(candidate.id), headSha:candidate.head_sha, name,
+      filename:`consumer-observer-${observer.dispatch_nonce}.json`,
+    }, fetchRecord, extract);
+    const finalRuns = await githubChildCensus(token, expected.repository, expected.workflow,
+      parent.created_at, fetchRecord);
+    const finalMatching = finalRuns.filter(run => run.display_title === observerRunName(observer));
+    result.discovered = finalMatching.length;
+    if (finalMatching.length !== 1 || finalMatching[0].id !== candidate.id) return result;
+    const finalChild = await githubRecord(token, expected.repository, String(candidate.id), fetchRecord);
+    const qualified = qualifyTerminalReceipt(terminal, observer, parent, finalChild, expected, declaration);
+    // Both artifacts must describe the exact same independently proven custody.
+    if (JSON.stringify(qualified.child) !== JSON.stringify(owned.receipt.child)) refuse('terminal_custody_unproven');
+    result.product = qualified.product;
+    result.pending = 0;
+  } catch {
+    result.refused = 1;
+  }
+  return result;
+}
+
 /** One reconciliation pass. Discovery alone cannot grant cancellation authority.
  * Only the authenticated private receipt binds a child, including its attempt.
  * Counts are safe to publish; private run identities never leave this owner.
@@ -465,20 +534,14 @@ export async function reconcileOwnedChildren(token, context, expected, fetchReco
   for (const candidate of matching) {
     try {
       const runId = String(candidate.id);
-      const artifactName = `consumer-observer-${observer.dispatch_nonce}`;
-      const artifacts = await githubArtifactCensus(token, expected.repository, runId, fetchRecord, artifactName);
-      if (artifacts.length !== 1 || artifacts[0].name !== artifactName) {
+      const owned = await readOwnedChild(token, observer, parent, expected, candidate, declaration, fetchRecord, extract);
+      if (!owned) {
         result.pending += 1;
         continue;
       }
-      const receipt = await githubArtifactJson(token, expected.repository, artifacts[0], {
-        runId, headSha: candidate.head_sha, name: artifactName,
-        filename: `${artifactName}.json`,
-      }, fetchRecord, extract);
       // This is the latest child, not /attempts/N: a rerun must refuse the old
       // receipt rather than cancelling the newer attempt under historical data.
-      const child = await githubRecord(token, expected.repository, runId, fetchRecord);
-      qualifyOwnedChild(receipt, observer, parent, child, expected, declaration);
+      const {receipt, child} = owned;
       result.owned += 1;
       if (child.status === 'completed') {
         result.terminal += 1;

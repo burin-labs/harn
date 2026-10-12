@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {
   createTerminalReceipt, githubArtifactCensus, githubArtifactJson,
-  githubDeclaration, githubRecord, observerContext,
+  githubDeclaration, githubRecord, observerContext, observerTerminalName,
 } from '../lib/consumer-observer.mjs';
 
 async function main() {
@@ -43,11 +43,12 @@ async function main() {
   }
   const receipt = createTerminalReceipt(ownership, context, parent, child, expected,
     declaration, JSON.parse(fs.readFileSync(env.PRODUCT_DECISION_FILE, 'utf8')));
-  const directory = path.join(env.RUNNER_TEMP, `consumer-observer-product-${context.dispatch_nonce}`);
+  const artifact = observerTerminalName(context);
+  const directory = path.join(env.RUNNER_TEMP, artifact);
   fs.mkdirSync(directory, {mode:0o700});
   const file = path.join(directory, `${name}.json`);
   fs.writeFileSync(file, `${JSON.stringify(receipt)}\n`, {flag:'wx',mode:0o600});
-  fs.appendFileSync(env.GITHUB_OUTPUT, `recorded=true\nreceipt=${file}\nkey=${context.dispatch_nonce}\n`);
+  fs.appendFileSync(env.GITHUB_OUTPUT, `recorded=true\nreceipt=${file}\nartifact=${artifact}\n`);
   console.log(`CONSUMER_OBSERVER product=recorded owed=${receipt.product.owed} proven=${receipt.product.proven} pending=0 failed=0`);
 }
 

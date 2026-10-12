@@ -6,7 +6,7 @@ import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
 import {fileURLToPath} from 'node:url';
-import {observerDeclarationName, observerDispatchActor, observerRunName} from '../lib/consumer-observer.mjs';
+import {observerDeclarationName, observerDispatchActor, observerRunName, observerTerminalName} from '../lib/consumer-observer.mjs';
 
 test('the terminal entrypoint records only an authenticated reached product decision', () => {
   const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'harn-observer-terminal-'));
@@ -23,6 +23,7 @@ test('the terminal entrypoint records only an authenticated reached product deci
     const ownership = {schema:'harn.consumer_observer_receipt.v1',observer:context,child:{
       repository:'acme/widget-host',workflow:child.path,run_id:'73',run_attempt:1,
       head_sha:child.head_sha,dispatch_actor:observerDispatchActor}};
+    ownership.child=Object.fromEntries(Object.entries(ownership.child).reverse());
     const name = `consumer-observer-${context.dispatch_nonce}`;
     const archives = [];
     for (const [index,filename,value] of [[0,'consumer-observer.json',context],[1,`${name}.json`,ownership]]) {
@@ -78,10 +79,13 @@ test('the terminal entrypoint records only an authenticated reached product deci
       const split=line.indexOf('=');return [line.slice(0,split),line.slice(split+1)];
     }));
     assert.equal(recorded.recorded,'true');
+    assert.equal(recorded.artifact,observerTerminalName(context));
     const receipt=JSON.parse(fs.readFileSync(recorded.receipt,'utf8'));
     assert.equal(receipt.schema,'harn.consumer_observer_terminal.v1');
     assert.deepEqual(receipt.product,product);
     assert.deepEqual(receipt.child,ownership.child);
+    assert.notDeepEqual(Object.keys(receipt.child),Object.keys(ownership.child),
+      'the actual producer normalizes equivalent reordered custody once');
     assert.equal(fs.statSync(recorded.receipt).mode&0o777,0o600);
     for(const decision of [null,{}, {...product,owed:0,proven:0}, {...product,proven:1},
       {...product,pending:1}, {...product,failed:1}, {...product,source_revision:'d'.repeat(40)},
@@ -103,6 +107,95 @@ test('the terminal entrypoint records only an authenticated reached product deci
     const ordinary=execute({},null,{OBSERVER_CONTEXT:''});
     assert.equal(ordinary.run.status,0,ordinary.run.stderr);
     assert.equal(ordinary.output,'recorded=false\n');
+
+    // Observe the receipt actually produced above, rather than a fabricated
+    // green counter. The consumer must subsequently complete successfully.
+    const archive=path.join(scratch,'archive-2.zip');
+    const zipped=spawnSync('zip',['-j',archive,recorded.receipt],{env:{PATH:process.env.PATH,LC_ALL:'C'},encoding:'utf8'});
+    assert.equal(zipped.status,0,zipped.stderr);
+    const bytes=fs.readFileSync(archive);
+    archives.push({archive,metadata:{id:503,name:observerTerminalName(context),expired:false,
+      size_in_bytes:bytes.length,digest:`sha256:${createHash('sha256').update(bytes).digest('hex')}`,
+      workflow_run:{id:73,head_sha:child.head_sha}}});
+    const observerPreload=path.join(scratch,'observe-fetch.mjs');
+    fs.writeFileSync(observerPreload,`import fs from 'node:fs';
+      const fixture=JSON.parse(fs.readFileSync(${JSON.stringify(fixture)},'utf8'));
+      let censusReads=0,childReads=0;
+      globalThis.fetch=async(url,options={})=>{
+        if(options.method==='POST')throw new Error('unexpected-private-post');
+        const endpoint=new URL(url),p=endpoint.pathname;
+        if(p.endsWith('/zip')){
+          const index=Number(/artifacts\\/(50[123])\\//.exec(p)?.[1])-501;
+          return {ok:true,arrayBuffer:async()=>fs.readFileSync(fixture.archives[index].archive)};
+        }
+        let record;
+        if(p.endsWith('/artifacts')){
+          const wanted=endpoint.searchParams.get('name');
+          if(!wanted)throw new Error('unfiltered-private-read');
+          const selected=fixture.archives.filter((a,index)=>a.metadata.name===wanted&&fixture.missing!==index);
+          record={total_count:selected.length,artifacts:selected.map(a=>a.metadata)};
+        }else if(p.endsWith('/42/attempts/2'))record=fixture.parent;
+        else if(p.endsWith('/73'))record=++childReads>1&&fixture.finalChild?fixture.finalChild:fixture.child;
+        else if(p.endsWith('/rehearsal.yml/runs')){
+          const rows=++censusReads>1&&fixture.finalRuns?fixture.finalRuns:fixture.runs;
+          record={total_count:fixture.partial?rows.length+1:rows.length,workflow_runs:rows};
+        }else throw new Error('unknown-private-url');
+        return {ok:true,json:async()=>record,headers:new Headers()};
+      };`);
+    const completed={...child,status:'completed',conclusion:'success'};
+    const observeEntry=fileURLToPath(new URL('../ci/consumer-observer-observe.mjs',import.meta.url));
+    const observe=(changes={})=>{
+      const output=path.join(scratch,`observation-${sequence++}`);
+      fs.writeFileSync(fixture,JSON.stringify({parent:{...parent,created_at:'2026-10-11T20:00:00Z'},
+        child:completed,runs:[completed],archives,...changes}));
+      const run=spawnSync(process.execPath,[observeEntry],{encoding:'utf8',env:{PATH:process.env.PATH,
+        NODE_OPTIONS:`--import=${observerPreload}`,GH_TOKEN:'fixture-read',OBSERVER_CONTEXT:JSON.stringify(context),
+        CANARY_OWNER:'acme',CANARY_NAME:'widget-host',CANARY_WORKFLOW:'rehearsal.yml',GITHUB_OUTPUT:output}});
+      const text=fs.existsSync(output)?fs.readFileSync(output,'utf8'):'';
+      assert.doesNotMatch(run.stdout+run.stderr+text,/widget-host|run_id|head_sha|dispatch_actor|\/73/);
+      const fields=Object.fromEntries(text.trim().split('\n').filter(Boolean).map(line=>{
+        const split=line.indexOf('=');return [line.slice(0,split),line.slice(split+1)];
+      }));
+      return {run,fields,reading:fields.reading?JSON.parse(fields.reading):null};
+    };
+    const measured=observe();
+    assert.equal(measured.run.status,0,measured.run.stderr);
+    assert.equal(measured.fields.verdict,'pass');
+    assert.deepEqual(measured.reading,{discovered:1,owned:1,pending:0,refused:0,product});
+    for(const changes of [{runs:[]},{runs:[completed,{...completed,id:74}]},{missing:1},{missing:2},
+      {child},{finalRuns:[completed,{...completed,id:74}]}]){
+      const pending=observe(changes);
+      assert.equal(pending.run.status,0,pending.run.stderr);
+      assert.equal(pending.fields.verdict,'pending');
+      assert.equal(pending.reading.product,null,'an unreported product is never measured zero');
+      assert(pending.reading.pending>0);
+    }
+    for(const changes of [{child:{...completed,conclusion:'failure'}},
+      {finalChild:{...completed,run_attempt:2}},{finalChild:{...completed,status:'in_progress',conclusion:null}}]){
+      const refused=observe(changes);
+      assert.equal(refused.run.status,0,refused.run.stderr);
+      assert.equal(refused.fields.verdict,'refused');
+      assert.equal(refused.reading.product,null);
+      assert.equal(refused.reading.refused,1);
+    }
+    for(const changes of [{missing:0},{partial:true}]){
+      const unmeasured=observe(changes);
+      assert.equal(unmeasured.run.status,1);
+      assert.deepEqual(unmeasured.fields,{});
+    }
+    const foreignDecision=path.join(scratch,`${name}.json`);
+    const foreignArchive=path.join(scratch,'foreign-product.zip');
+    fs.writeFileSync(foreignDecision,JSON.stringify({...receipt,product:{...product,source_revision:'d'.repeat(40)}}));
+    const foreignZip=spawnSync('zip',['-j',foreignArchive,foreignDecision],
+      {env:{PATH:process.env.PATH,LC_ALL:'C'},encoding:'utf8'});
+    assert.equal(foreignZip.status,0,foreignZip.stderr);
+    const foreignBytes=fs.readFileSync(foreignArchive);
+    const foreignReading=observe({archives:[...archives.slice(0,2),{archive:foreignArchive,metadata:{
+      ...archives[2].metadata,size_in_bytes:foreignBytes.length,
+      digest:`sha256:${createHash('sha256').update(foreignBytes).digest('hex')}`}}]});
+    assert.equal(foreignReading.run.status,0,foreignReading.run.stderr);
+    assert.equal(foreignReading.fields.verdict,'refused');
+    assert.equal(foreignReading.reading.product,null);
   } finally {
     fs.rmSync(scratch,{recursive:true});
   }

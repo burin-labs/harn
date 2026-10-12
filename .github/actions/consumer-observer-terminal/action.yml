@@ -18,9 +18,9 @@ outputs:
   receipt:
     description: Private terminal receipt path; store only in the consumer repository
     value: ${{ steps.record.outputs.receipt }}
-  key:
-    description: Public dispatch nonce naming the private terminal artifact
-    value: ${{ steps.record.outputs.key }}
+  artifact:
+    description: Canonical artifact name; upload only in the private consumer repository
+    value: ${{ steps.record.outputs.artifact }}
 runs:
   using: composite
   steps:
