@@ -218,14 +218,25 @@ for legal in LICENSE-MIT LICENSE-APACHE THIRD-PARTY-NOTICES.txt; do
   [ -f "$WORKDIR/$legal" ] && [ -s "$WORKDIR/$legal" ] && [ ! -L "$WORKDIR/$legal" ] \
     || die "$ASSET has missing or invalid $legal; required license material must be a nonempty regular file"
 done
+[ -f "$WORKDIR/harn" ] && [ -s "$WORKDIR/harn" ] && [ ! -L "$WORKDIR/harn" ] \
+  || die "$ASSET has missing or invalid harn; executable must be a nonempty regular file"
+check_regular_destination() {
+  [ ! -L "$1" ] || die "$1 must not be a symbolic link"
+  if [ -e "$1" ]; then
+    [ -f "$1" ] || die "$1 must be a regular file"
+  fi
+}
+check_regular_destination "$INSTALL_DIR/harn"
+for alias in harn-dap harn-lsp; do
+  [ -e "$WORKDIR/$alias" ] || continue
+  destination="$INSTALL_DIR/$alias"
+  # Existing multi-call links and legacy executable copies can both upgrade.
+  [ -L "$destination" ] || check_regular_destination "$destination"
+done
 LICENSE_DIR="$INSTALL_DIR/harn-licenses"
 [ ! -L "$LICENSE_DIR" ] || die "$LICENSE_DIR must not be a symbolic link"
 for legal in LICENSE-MIT LICENSE-APACHE THIRD-PARTY-NOTICES.txt; do
-  destination="$LICENSE_DIR/$legal"
-  [ ! -L "$destination" ] || die "$destination must not be a symbolic link"
-  if [ -e "$destination" ]; then
-    [ -f "$destination" ] || die "$destination must be a regular file"
-  fi
+  check_regular_destination "$LICENSE_DIR/$legal"
 done
 mkdir -p "$LICENSE_DIR" || die "cannot create $LICENSE_DIR"
 [ -w "$INSTALL_DIR" ] && [ -w "$LICENSE_DIR" ] || die "$INSTALL_DIR is not writable"

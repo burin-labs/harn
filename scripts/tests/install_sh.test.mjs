@@ -33,7 +33,7 @@ function fixture(target, invalid, existing = false, badChecksum = false, invalid
       rmSync(path);
       if (invalid.kind === 'empty') writeFileSync(path, '');
       if (invalid.kind === 'directory') mkdirSync(path);
-      if (invalid.kind === 'symlink') symlinkSync('harn', path);
+      if (invalid.kind === 'symlink') symlinkSync(invalid.name === 'harn' ? 'LICENSE-MIT' : 'harn', path);
     }
     const archive = join(root, `harn-${triple}.tar.gz`);
     const tar = spawnSync('tar', ['-czf', archive, '-C', paths.archive, '.'], { encoding: 'utf8' });
@@ -61,13 +61,18 @@ esac
     if (existing) {
       mkdirSync(join(destination, 'harn-licenses'), { recursive: true });
       writeFileSync(join(destination, 'harn'), oldBinary);
-      for (const alias of ['harn-dap', 'harn-lsp']) symlinkSync('harn', join(destination, alias));
+      for (const alias of ['harn-dap', 'harn-lsp']) {
+        if (existing === 'legacy') writeFileSync(join(destination, alias), oldBinary);
+        else symlinkSync('harn', join(destination, alias));
+      }
       for (const name of legalFiles) writeFileSync(join(destination, 'harn-licenses', name), `previous ${name}\n`);
     }
     const externalSentinel = join(root, 'external-sentinel');
     if (invalidDestination) {
       writeFileSync(externalSentinel, 'external bytes must survive\n');
-      const path = join(destination, 'harn-licenses', invalidDestination.name);
+      const path = invalidDestination.payload
+        ? join(destination, invalidDestination.name)
+        : join(destination, 'harn-licenses', invalidDestination.name);
       rmSync(path);
       if (invalidDestination.kind === 'symlink') symlinkSync(externalSentinel, path);
       else {
@@ -76,6 +81,10 @@ esac
       }
     }
     const requests = join(root, 'requests');
+    const assertInvalidDestination = path => {
+      if (invalidDestination.kind === 'symlink') assert.equal(readlinkSync(path), externalSentinel);
+      else assert.equal(readFileSync(join(path, 'retained-child'), 'utf8'), 'previous directory child\n');
+    };
     const result = spawnSync('/bin/sh', [installer], {
       encoding: 'utf8', timeout: 15_000,
       env: {
@@ -90,18 +99,20 @@ esac
     assert.equal(readFileSync(requests, 'utf8').trim().split('\n').length, 2);
     assert.deepEqual(readdirSync(paths.tmp), [], 'download/extraction directory must be removed');
     if (invalid || badChecksum || invalidDestination) {
-      assert.notEqual(result.status, 0, 'invalid archive must refuse');
+      assert.notEqual(result.status, 0, 'invalid payload or destination must refuse');
       if (invalidDestination) assert.match(result.stderr, /must (not be a symbolic link|be a regular file)/);
       else assert.match(result.stderr, invalid ? new RegExp(`missing or invalid ${invalid.name.replaceAll('.', '\\.')}`) : /checksum mismatch/);
       if (existing) {
-        assert.deepEqual(readFileSync(join(destination, 'harn')), oldBinary);
-        for (const alias of ['harn-dap', 'harn-lsp']) assert.equal(readlinkSync(join(destination, alias)), 'harn');
+        if (invalidDestination?.payload && invalidDestination.name === 'harn') assertInvalidDestination(join(destination, 'harn'));
+        else assert.deepEqual(readFileSync(join(destination, 'harn')), oldBinary);
+        for (const alias of ['harn-dap', 'harn-lsp']) {
+          if (invalidDestination?.payload && invalidDestination.name === alias) assertInvalidDestination(join(destination, alias));
+          else assert.equal(readlinkSync(join(destination, alias)), 'harn');
+        }
         for (const name of legalFiles) {
           const path = join(destination, 'harn-licenses', name);
-          if (name === invalidDestination?.name) {
-            if (invalidDestination.kind === 'symlink') assert.equal(readlinkSync(path), externalSentinel);
-            else assert.equal(readFileSync(join(path, 'retained-child'), 'utf8'), 'previous directory child\n');
-          } else assert.equal(readFileSync(path, 'utf8'), `previous ${name}\n`);
+          if (name === invalidDestination?.name && !invalidDestination.payload) assertInvalidDestination(path);
+          else assert.equal(readFileSync(path, 'utf8'), `previous ${name}\n`);
         }
         if (invalidDestination) assert.equal(readFileSync(externalSentinel, 'utf8'), 'external bytes must survive\n');
       } else assert.equal(existsSync(destination), false, 'refusal must not create an installation');
@@ -128,7 +139,15 @@ for (const name of legalFiles) {
     }
   }
 }
+for (const name of ['harn', 'harn-dap', 'harn-lsp']) {
+  test(`real installer preflights existing payload directory ${name}`, () => fixture(targets[0], undefined, true, false, { name, kind: 'directory', payload: true }));
+}
+test('real installer preflights existing payload symlink harn', () => fixture(targets[0], undefined, true, false, { name: 'harn', kind: 'symlink', payload: true }));
+for (const kind of ['missing', 'empty', 'directory', 'symlink']) {
+  test(`real installer refuses ${kind} executable before changing legal files`, () => fixture(targets[0], { name: 'harn', kind }, true));
+}
 test('real installer checks the downloaded archive digest before installation', () => fixture(targets[0], undefined, false, true));
+test('real installer updates legacy executable alias copies', () => fixture(targets[0], undefined, 'legacy'));
 for (const name of legalFiles) {
   for (const kind of ['symlink', 'directory']) {
     test(`real installer preflights existing ${kind} destination ${name}`, () => fixture(targets[0], undefined, true, false, { name, kind }));
