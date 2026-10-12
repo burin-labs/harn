@@ -91,13 +91,18 @@ impl Drop for SessionChangeSubscription {
     }
 }
 
-/// Register an observer notified after any session metadata update commits
-/// through a store this VM opens, or after a WAL watcher sees another
-/// process rename a session in the same file.
+/// Register an observer of current session metadata from stores this VM opens
+/// and from other processes writing the same file.
 ///
 /// Every canonical store opened here carries the registered observers, so a
 /// surface does not have to be handed the specific handle a writer happened to
 /// use.
+///
+/// File-backed notifications project the current committed row. Intermediate
+/// rows may coalesce when hooks arrive late or the WAL watcher sees several
+/// commits together. An unchanged row is not published again. Accepted rows
+/// are delivered in order. Direct in-memory hooks publish their supplied rows
+/// without this file-backed coalescing.
 pub fn subscribe(observer: SharedSessionChangeObserver) -> SessionChangeSubscription {
     let id = NEXT_SUBSCRIPTION.fetch_add(1, Ordering::Relaxed);
     observers().push((id, observer));
@@ -401,6 +406,74 @@ mod tests {
             rx.try_recv(),
             Err(mpsc::TryRecvError::Empty),
             "the delayed snapshot must not revert the client to a titleless row"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_delayed_local_hook_coalesces_after_a_newer_title_is_delivered() {
+        let _bus = test_support::exclusive_bus().await;
+        let (tx, rx) = mpsc::channel();
+        let (_root, writer, _subscription, _) = observed_store(Arc::new(Recording(tx))).await;
+        let (entered, paused) = mpsc::channel();
+        let (resume, barrier) = mpsc::channel();
+        struct DelayedHook {
+            entered: mpsc::Sender<()>,
+            resume: std::sync::Mutex<mpsc::Receiver<()>>,
+            fanout: SharedSessionChangeObserver,
+        }
+        impl harn_session_store::SessionChangeObserver for DelayedHook {
+            fn session_updated(&self, meta: &SessionMeta) {
+                self.entered
+                    .send(())
+                    .expect("first commit reached its hook");
+                recv_within("release delayed local hook", &self.resume.lock().unwrap());
+                self.fanout.session_updated(meta);
+            }
+        }
+        let delayed = SqliteSessionStore::open_with_hooks(
+            writer.path(),
+            StoreHooks {
+                change_observer: Some(Arc::new(DelayedHook {
+                    entered,
+                    resume: std::sync::Mutex::new(barrier),
+                    fanout: writer.hooks().change_observer.as_ref().unwrap().clone(),
+                })),
+                ..Default::default()
+            },
+        )
+        .expect("writer with a delayed post-commit hook");
+        let runtime = tokio::runtime::Handle::current();
+        let first = crate::runtime_stack::spawn(move || {
+            runtime.block_on(delayed.update(
+                "ordered",
+                UpdateSession {
+                    title: Some("first".into()),
+                    ..Default::default()
+                },
+            ))
+        });
+        recv_within("first committed before the newer update", &paused);
+        writer
+            .update(
+                "ordered",
+                UpdateSession {
+                    title: Some("second".into()),
+                    ..Default::default()
+                },
+            )
+            .await
+            .expect("newer commit");
+        assert_eq!(
+            recv_within("newer title reached the subscriber", &rx).as_deref(),
+            Some("second")
+        );
+        resume.send(()).expect("release the earlier hook");
+        let first_row = first.join().expect("first writer").expect("first commit");
+        assert_eq!(first_row.title.as_deref(), Some("first"));
+        assert_eq!(
+            rx.try_recv(),
+            Err(mpsc::TryRecvError::Empty),
+            "the late hook must publish neither the stale row nor a duplicate newer row"
         );
     }
 
