@@ -398,27 +398,28 @@ mod tests {
     #[test]
     fn contradictory_and_unsupported_evidence_cannot_default() {
         let root = tempfile::tempdir().unwrap();
+        let physical_root = root.path().canonicalize().unwrap();
         std::fs::write(root.path().join("pnpm-lock.yaml"), "lockfileVersion: 9").unwrap();
         assert_eq!(
             select_manager(
-                root.path(),
-                root.path(),
+                &physical_root,
+                &physical_root,
                 json!({"packageManager":"npm@10.0.0"}).as_object().unwrap()
             ),
             Err(SelectionError::ConflictingManagers)
         );
         assert_eq!(
             select_manager(
-                root.path(),
-                root.path(),
+                &physical_root,
+                &physical_root,
                 json!({"packageManager":"other@1"}).as_object().unwrap()
             ),
             Err(SelectionError::UnsupportedDeclaration("other".into()))
         );
         assert_eq!(
             select_manager(
-                root.path(),
-                root.path(),
+                &physical_root,
+                &physical_root,
                 json!({"packageManager":42}).as_object().unwrap()
             ),
             Err(SelectionError::InvalidDeclaration)
@@ -428,16 +429,17 @@ mod tests {
     #[test]
     fn nested_packages_inherit_only_within_the_scan_root() {
         let root = tempfile::tempdir().unwrap();
+        let physical_root = root.path().canonicalize().unwrap();
         std::fs::write(root.path().join("pnpm-lock.yaml"), "lockfileVersion: 9").unwrap();
-        let child = root.path().join("packages").join("child");
+        let child = physical_root.join("packages").join("child");
         std::fs::create_dir_all(&child).unwrap();
         assert_eq!(
-            select_manager(root.path(), &child, json!({}).as_object().unwrap()).unwrap(),
+            select_manager(&physical_root, &child, json!({}).as_object().unwrap()).unwrap(),
             PackageManager::Pnpm
         );
         assert_eq!(
             select_manager(
-                root.path(),
+                &physical_root,
                 &child,
                 json!({"packageManager":"npm@10.0.0"}).as_object().unwrap()
             )
