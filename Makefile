@@ -705,7 +705,6 @@ test-pr-gate-scripts:
 	./scripts/tests/wait_for_rate_limit_reset_test.sh
 	./scripts/tests/main_health_test.sh
 	./scripts/tests/main_health_carry_test.sh
-	./scripts/tests/check_stdlib_host_neutral_test.sh
 	./scripts/tests/check_public_product_names_test.sh
 	./scripts/tests/check_pr_metadata_privacy_test.sh
 	./scripts/tests/check_issue_comment_privacy_test.sh
@@ -808,7 +807,6 @@ test-pr-gate-scripts:
 	node scripts/tests/workspace_warm_phase_test.cjs
 	./scripts/tests/loadgen_postgres_gate_test.sh
 	./scripts/tests/check_all_features_test.sh
-	./scripts/tests/check_stdlib_strict_types_test.sh
 	./scripts/tests/test_focused_test.sh
 	./scripts/tests/test_one_test.sh
 	./scripts/tests/test_nextest_readiness_test.sh

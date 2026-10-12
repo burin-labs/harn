@@ -1,0 +1,36 @@
+/** Preserve exact reviewed lines, including duplicate occurrences. */
+pub fn baseline_lines(text: string) -> list<string> {
+  let lines: list<string> = []
+  for line in text.split("\n") {
+    if line.trim() != "" && !line.trim().starts_with("#") {
+      lines = lines + [line]
+    }
+  }
+  return lines.sorted()
+}
+
+/** Multiset difference keeps an added duplicate visible in the failure report. */
+pub fn baseline_delta(
+  expected: list<string>,
+  actual: list<string>,
+) -> {added: list<string>, removed: list<string>} {
+  const left = expected.sorted()
+  const right = actual.sorted()
+  let added: list<string> = []
+  let removed: list<string> = []
+  let i = 0
+  let j = 0
+  while i < left.count && j < right.count {
+    if left[i] == right[j] {
+      i = i + 1
+      j = j + 1
+    } else if left[i] < right[j] {
+      removed = removed + [left[i]]
+      i = i + 1
+    } else {
+      added = added + [right[j]]
+      j = j + 1
+    }
+  }
+  return {added: added + right.slice(j), removed: removed + left.slice(i)}
+}
