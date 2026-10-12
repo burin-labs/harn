@@ -78,12 +78,14 @@ as well. Bulk and new-path changes use the same projection over all files.
 Module-wide visibility remains at the dependency owner; it is never expanded
 into a cross-product of graph edges.
 
-Known-file edits still rebuild module membership by walking indexed paths and
-probing Go manifests. The next owner boundary is a module-input revision over
-paths, manifests, and parsing configuration. A path-only dirty flag would miss
-manifest changes. Measure body edits across workspace sizes and test created,
-changed, and deleted `go.mod` files before removing this work. This ranks below
-the seconds remaining in restart decoding and graph restoration.
+Module membership is a pure function of the path table and the declared Go
+modules, and the index stores both. The workspace walk reports every `go.mod`
+it passes, so reconciliation sees created, changed, and deleted manifests,
+including nested ones, without probing source directories. The snapshot
+persists the declarations its call graph was linked under. When a complete
+walk or a host reindex of a manifest changes them, only files whose import
+resolution changed are re-resolved and have their calls relinked. Equal
+declarations do no work, and known-file edits no longer rebuild membership.
 
 After that measured bottleneck, retain syntax trees under a memory budget and
 reuse them when the grammar and source revision match. Incremental syntax and

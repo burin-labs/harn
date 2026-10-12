@@ -18,6 +18,7 @@ use serde::{Deserialize, Serialize};
 use super::agents::{AgentRegistry, RegistryConfig, SerializedRegistry};
 use super::file_table::{FileId, IndexedFile, IndexedSymbol};
 use super::graph::DepGraph;
+use super::imports_go::GoModules;
 use super::symbol_graph::{GraphSnapshot, SymbolGraph};
 use super::trigram::TrigramIndex;
 use super::versions::VersionLog;
@@ -147,6 +148,11 @@ pub struct CodeIndexSnapshot {
     /// Completed content checks at a newer HEAD, before the full walk finished.
     #[serde(default)]
     pub(super) reconcile_progress: Option<super::reconcile::ReconcileProgress>,
+    /// The module manifests the saved graph was resolved under. A snapshot
+    /// written before this field restores with none, and its first
+    /// reconcile re-resolves the files the workspace's manifests affect.
+    #[serde(default)]
+    pub(super) go_modules: GoModules,
 }
 
 impl CodeIndexSnapshot {
@@ -283,6 +289,7 @@ impl IndexState {
             agents: self.agents.snapshot(),
             symbols: Some(self.symbols.snapshot()),
             reconcile_progress: self.reconcile_progress.clone(),
+            go_modules: self.modules.go_modules().clone(),
         }
     }
 
@@ -357,6 +364,7 @@ impl IndexState {
         state.git_head = snap.meta.git_head;
         state.reconcile_progress = snap.reconcile_progress;
         state.set_next_file_id(snap.next_file_id);
+        state.modules = super::imports::ModuleIndex::default().with_go_modules(snap.go_modules);
         // Membership and imported-module visibility derive from saved file
         // facts through the owning resolver. Explicit dependency rows alone
         // lose whole-module imports when a later edit resolves callers again.

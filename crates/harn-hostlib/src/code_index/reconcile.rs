@@ -6,8 +6,9 @@ use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 
 use super::file_table::FileId;
+use super::imports_go::GoModules;
 use super::state::{mtime_ms_of, now_unix_ms, relative_path_under_root, RefreshOutcome};
-use super::walker::walk_indexable;
+use super::walker::walk_workspace;
 use super::IndexState;
 use crate::HarnReferenceResolver;
 
@@ -85,66 +86,73 @@ impl IndexState {
         let mut harn_touched = false;
         let mut completed = 0;
         let mut last_checkpoint = Instant::now();
-        walk_indexable(&root, |abs, meta| {
-            outcome.files_scanned += 1;
-            let Some(rel) = relative_path_under_root(&root, abs) else {
-                return;
-            };
-            let known = self.path_to_id.get(&rel).copied();
-            if let Some(id) = known {
-                let verified = self
-                    .reconcile_progress
-                    .as_ref()
-                    .is_none_or(|p| p.verified_files.contains(&id));
-                if verified
-                    && self.files.get(&id).is_some_and(|file| {
-                        file.size_bytes == meta.len() && file.mtime_ms == mtime_ms_of(meta)
-                    })
-                {
-                    outcome.files_unchanged += 1;
-                    seen.insert(rel);
+        let mut manifests: Vec<String> = Vec::new();
+        walk_workspace(
+            &root,
+            |abs, meta| {
+                outcome.files_scanned += 1;
+                let Some(rel) = relative_path_under_root(&root, abs) else {
                     return;
-                }
-            }
-            match self.ingest(abs, Some(meta)) {
-                Some(ingested) => {
-                    let id = ingested.id;
-                    let changed = ingested.changed;
-                    seen.insert(rel.clone());
-                    if known.is_none() {
-                        outcome.files_added += 1;
-                        deps_dirty = true;
-                    } else if changed {
-                        self.rebuild_deps(id, &rel);
-                    }
-                    if changed {
-                        outcome.files_reindexed += 1;
-                        completed += 1;
-                        harn_touched |= self.files.get(&id).is_some_and(|f| f.language == "harn");
-                        // Parse before evaluating elapsed time. Reading a batch
-                        // is often cheap while graph repair takes minutes.
-                        // Unvisited files keep their old metadata throughout.
-                        self.rebuild_symbol_graph_for(id, &ingested.source);
-                        graph_dirty = true;
-                    } else {
-                        outcome.files_touched_only += 1;
-                    }
-                    if let Some(progress) = &mut self.reconcile_progress {
-                        progress.verified_files.insert(id);
-                    }
-                    if completed >= policy.files || last_checkpoint.elapsed() >= policy.interval {
-                        self.finish_reconcile_batch(&mut graph_dirty, &mut deps_dirty);
-                        checkpoint(self);
-                        completed = 0;
-                        last_checkpoint = Instant::now();
+                };
+                let known = self.path_to_id.get(&rel).copied();
+                if let Some(id) = known {
+                    let verified = self
+                        .reconcile_progress
+                        .as_ref()
+                        .is_none_or(|p| p.verified_files.contains(&id));
+                    if verified
+                        && self.files.get(&id).is_some_and(|file| {
+                            file.size_bytes == meta.len() && file.mtime_ms == mtime_ms_of(meta)
+                        })
+                    {
+                        outcome.files_unchanged += 1;
+                        seen.insert(rel);
+                        return;
                     }
                 }
-                None => {
-                    super::timing::skipped(abs);
-                    outcome.files_skipped += 1;
+                match self.ingest(abs, Some(meta)) {
+                    Some(ingested) => {
+                        let id = ingested.id;
+                        let changed = ingested.changed;
+                        seen.insert(rel.clone());
+                        if known.is_none() {
+                            outcome.files_added += 1;
+                            deps_dirty = true;
+                        } else if changed {
+                            self.rebuild_deps(id, &rel);
+                        }
+                        if changed {
+                            outcome.files_reindexed += 1;
+                            completed += 1;
+                            harn_touched |=
+                                self.files.get(&id).is_some_and(|f| f.language == "harn");
+                            // Parse before evaluating elapsed time. Reading a batch
+                            // is often cheap while graph repair takes minutes.
+                            // Unvisited files keep their old metadata throughout.
+                            self.rebuild_symbol_graph_for(id, &ingested.source);
+                            graph_dirty = true;
+                        } else {
+                            outcome.files_touched_only += 1;
+                        }
+                        if let Some(progress) = &mut self.reconcile_progress {
+                            progress.verified_files.insert(id);
+                        }
+                        if completed >= policy.files || last_checkpoint.elapsed() >= policy.interval
+                        {
+                            self.finish_reconcile_batch(&mut graph_dirty, &mut deps_dirty);
+                            checkpoint(self);
+                            completed = 0;
+                            last_checkpoint = Instant::now();
+                        }
+                    }
+                    None => {
+                        super::timing::skipped(abs);
+                        outcome.files_skipped += 1;
+                    }
                 }
-            }
-        });
+            },
+            |manifest| manifests.push(manifest),
+        );
 
         // Delete only after a complete walk. A partial checkpoint retains the
         // old rows of files not yet visited, including their old metadata.
@@ -167,6 +175,11 @@ impl IndexState {
             deps_dirty = true;
         }
         self.finish_reconcile_batch(&mut graph_dirty, &mut deps_dirty);
+        // Like deletion, manifests apply only after a complete walk: a
+        // checkpoint keeps the manifests its saved call graph was linked
+        // under, so a partial snapshot never mixes two resolutions.
+        outcome.files_reresolved =
+            self.apply_module_manifests(GoModules::read(&root, manifests)) as u64;
         self.git_head = live_head;
         self.reconcile_progress = None;
         if harn_touched {

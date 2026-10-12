@@ -819,6 +819,12 @@ impl SymbolGraph {
         self.dirty_call_files.extend(self.by_file.keys().copied());
     }
 
+    /// Re-evaluate the call sites of `files` at the next batch boundary,
+    /// for a visibility change confined to them.
+    pub(super) fn invalidate_calls_in(&mut self, files: impl IntoIterator<Item = FileId>) {
+        self.dirty_call_files.extend(files);
+    }
+
     /// Replace the CALLS edges of each call site in `sites`. `visible`
     /// maps a call site's file to its resolved import set; a file with no
     /// entry imports nothing.

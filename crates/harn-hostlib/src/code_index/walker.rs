@@ -10,6 +10,9 @@ use std::collections::HashSet;
 use std::fs::Metadata;
 use std::path::{Path, PathBuf};
 
+use super::imports_go::GO_MANIFEST;
+use super::state::relative_path_under_root;
+
 /// Maximum file size accepted by the indexer. Larger files are skipped to
 /// avoid blowing up the index on minified bundles, generated protobufs, etc.
 pub(crate) const MAX_FILE_BYTES: u64 = 2 * 1024 * 1024;
@@ -227,7 +230,17 @@ const SENSITIVE_DIRS: &[&str] = &[".ssh", ".aws", ".gnupg"];
 /// `stat` per file. Walks are depth-first; the order within a directory
 /// is sorted lexicographically so two runs over identical inputs return
 /// identical lists (helpful for snapshot tests).
-pub(crate) fn walk_indexable<F: FnMut(&Path, &Metadata)>(root: &Path, mut on_file: F) {
+///
+/// Module manifests (`go.mod`) are not indexed, but module resolution
+/// reads them, so the walk that already lists every directory reports
+/// them to `on_manifest` as workspace-relative paths. That makes a
+/// created, edited, or removed manifest as visible to a refresh as a
+/// source file, without probing every source directory's ancestors.
+pub(crate) fn walk_workspace<F, M>(root: &Path, mut on_file: F, mut on_manifest: M)
+where
+    F: FnMut(&Path, &Metadata),
+    M: FnMut(String),
+{
     let mut stack: Vec<PathBuf> = vec![root.to_path_buf()];
     let skip_dirs: HashSet<&str> = SKIP_DIRS.iter().copied().collect();
     while let Some(dir) = stack.pop() {
@@ -259,6 +272,15 @@ pub(crate) fn walk_indexable<F: FnMut(&Path, &Metadata)>(root: &Path, mut on_fil
                 }
                 stack.push(entry);
             } else if metadata.is_file() {
+                if basename == GO_MANIFEST {
+                    if metadata.len() > MAX_FILE_BYTES || is_sensitive(&entry) {
+                        continue;
+                    }
+                    if let Some(rel) = relative_path_under_root(root, &entry) {
+                        on_manifest(rel);
+                    }
+                    continue;
+                }
                 if !is_indexable_file(&entry) {
                     continue;
                 }
@@ -340,6 +362,9 @@ mod tests {
         fs::create_dir_all(root.join(".harn/state")).unwrap();
         fs::create_dir_all(root.join(".harn-runs/session")).unwrap();
         fs::write(root.join("src/main.rs"), b"fn main() {}").unwrap();
+        fs::write(root.join("go.mod"), b"module example.com/root\n").unwrap();
+        fs::write(root.join("src/go.mod"), b"module example.com/nested\n").unwrap();
+        fs::write(root.join("node_modules/foo/go.mod"), b"module skipped\n").unwrap();
         fs::write(root.join("src/.env"), b"SECRET=x").unwrap();
         fs::write(root.join("node_modules/foo/lib.js"), b"x").unwrap();
         fs::write(root.join(".git/objects/pack"), b"git").unwrap();
@@ -354,17 +379,26 @@ mod tests {
         .unwrap();
 
         let mut found: Vec<String> = Vec::new();
-        walk_indexable(root, |p, _meta| {
-            found.push(
-                p.strip_prefix(root)
-                    .unwrap()
-                    .to_string_lossy()
-                    .into_owned()
-                    .replace('\\', "/"),
-            );
-        });
+        let mut manifests: Vec<String> = Vec::new();
+        walk_workspace(
+            root,
+            |p, _meta| {
+                found.push(
+                    p.strip_prefix(root)
+                        .unwrap()
+                        .to_string_lossy()
+                        .into_owned()
+                        .replace('\\', "/"),
+                );
+            },
+            |rel| manifests.push(rel),
+        );
         found.sort();
+        manifests.sort();
         assert_eq!(found, vec!["src/main.rs"]);
+        // Manifests are reported, never indexed, and pruned directories
+        // hide theirs exactly as they hide source files.
+        assert_eq!(manifests, vec!["go.mod", "src/go.mod"]);
     }
 
     #[test]

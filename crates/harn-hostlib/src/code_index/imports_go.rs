@@ -7,9 +7,19 @@
 //! this that has to be read from a file rather than derived from the
 //! workspace layout.
 
+use std::path::Path;
+
+use serde::{Deserialize, Serialize};
+
 /// The `module` lines of every `go.mod` in the workspace, longest module
 /// path first so a nested module wins over the one containing it.
-#[derive(Debug, Default, Clone)]
+///
+/// This is the revision of the manifest half of module resolution: two
+/// equal values resolve every Go import identically, so a manifest edit
+/// that leaves the declarations alone (a `require` bump, a comment)
+/// invalidates nothing. The snapshot stores it so a restore resolves
+/// against the same manifests its saved call graph was linked under.
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct GoModules {
     /// `(declared module path, workspace-relative directory of its go.mod)`.
     modules: Vec<(String, String)>,
@@ -36,6 +46,41 @@ impl GoModules {
         // import matching both belongs to the nested one.
         modules.sort_by(|a, b| b.0.len().cmp(&a.0.len()).then_with(|| a.0.cmp(&b.0)));
         GoModules { modules }
+    }
+
+    /// Read the workspace-relative manifests at `paths` under `root`. A
+    /// path that no longer exists or no longer declares a module simply
+    /// contributes nothing, which is how a removed manifest is forgotten.
+    pub(crate) fn read<I>(root: &Path, paths: I) -> Self
+    where
+        I: IntoIterator<Item = String>,
+    {
+        let mut manifests: Vec<(String, String)> = paths
+            .into_iter()
+            .filter_map(|rel| {
+                std::fs::read_to_string(root.join(&rel))
+                    .ok()
+                    .map(|contents| (rel, contents))
+            })
+            .collect();
+        manifests.sort();
+        manifests.dedup_by(|a, b| a.0 == b.0);
+        Self::from_manifests(
+            manifests
+                .iter()
+                .map(|(path, contents)| (path.as_str(), contents.as_str())),
+        )
+    }
+
+    /// Workspace-relative paths of the manifests that declared a module.
+    pub(crate) fn manifest_paths(&self) -> impl Iterator<Item = String> + '_ {
+        self.modules.iter().map(|(_, dir)| {
+            if dir.is_empty() {
+                GO_MANIFEST.to_string()
+            } else {
+                format!("{dir}/{GO_MANIFEST}")
+            }
+        })
     }
 
     /// The workspace-relative directory an import path names, or `None`
@@ -67,6 +112,10 @@ impl GoModules {
         self.modules.is_empty()
     }
 }
+
+/// The manifest file name. The workspace walk reports every file with this
+/// name, wherever it sits, so a nested module is found the same way.
+pub(crate) const GO_MANIFEST: &str = "go.mod";
 
 /// The path on `go.mod`'s `module` line.
 fn declared_module_path(contents: &str) -> Option<String> {

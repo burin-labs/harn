@@ -26,12 +26,12 @@ use super::agents::AgentRegistry;
 use super::file_table::{fnv1a64, FileId, IndexedFile, IndexedSymbol};
 use super::graph::DepGraph;
 use super::imports;
-use super::imports_go::GoModules;
+use super::imports_go::{GoModules, GO_MANIFEST};
 use super::overlay::OverlayState;
 use super::symbol_graph::SymbolGraph;
 use super::trigram::TrigramIndex;
 use super::versions::VersionLog;
-use super::walker::{is_indexable_file, language_for_extension, walk_indexable, MAX_FILE_BYTES};
+use super::walker::{is_indexable_file, language_for_extension, walk_workspace, MAX_FILE_BYTES};
 use super::words::WordIndex;
 use crate::{HarnReferenceInput, HarnReferenceResolver};
 
@@ -121,6 +121,10 @@ pub struct RefreshOutcome {
     /// Snapshot HEAD differed from the live checkout. Every retained file was
     /// content-checked even if its size and mtime matched.
     pub git_head_changed: bool,
+    /// Files whose import resolution changed because a module manifest
+    /// (`go.mod`) was created, edited, or removed, even though the files
+    /// themselves did not change. Their call sites were relinked.
+    pub files_reresolved: u64,
 }
 
 impl RefreshOutcome {
@@ -129,6 +133,7 @@ impl RefreshOutcome {
         self.files_reindexed == 0
             && self.files_added == 0
             && self.files_removed == 0
+            && self.files_reresolved == 0
             && !self.git_head_changed
     }
 }
@@ -181,8 +186,10 @@ impl IndexState {
         };
         let mut outcome = BuildOutcome::default();
         let mut to_resolve: Vec<(FileId, String)> = Vec::new();
-        walk_indexable(&canonical_root, |abs, meta| {
-            match state.ingest(abs, Some(meta)) {
+        let mut manifests: Vec<String> = Vec::new();
+        walk_workspace(
+            &canonical_root,
+            |abs, meta| match state.ingest(abs, Some(meta)) {
                 Some(ingested) => {
                     let file_id = ingested.id;
                     outcome.files_indexed += 1;
@@ -198,8 +205,11 @@ impl IndexState {
                     super::timing::skipped(abs);
                     outcome.files_skipped += 1;
                 }
-            }
-        });
+            },
+            |manifest| manifests.push(manifest),
+        );
+        state.modules = imports::ModuleIndex::default()
+            .with_go_modules(GoModules::read(&canonical_root, manifests));
         state.refresh_module_index();
         for (id, rel) in to_resolve {
             state.rebuild_deps(id, &rel);
@@ -249,6 +259,9 @@ impl IndexState {
     /// entry under that path is removed and `None` is returned.
     pub fn reindex_file(&mut self, abs: &Path) -> Option<FileId> {
         let _phase = super::timing::Phase::start("reindex.total");
+        if self.reindex_module_manifest(abs) {
+            return None;
+        }
         if !abs.exists() {
             self.remove_file_path(abs);
             return None;
@@ -268,7 +281,8 @@ impl IndexState {
             .unwrap_or_default();
         if !rel.is_empty() {
             if known {
-                self.refresh_module_index();
+                // Membership derives from the path set and the manifests,
+                // and an edit to a tracked source file changes neither.
                 self.rebuild_deps(id, &rel);
             } else {
                 // A new path can resolve another file's dangling import.
@@ -293,6 +307,9 @@ impl IndexState {
     /// Remove an existing file from every sub-index. No-op when the file
     /// isn't tracked.
     pub fn remove_file_path(&mut self, abs: &Path) {
+        if self.reindex_module_manifest(abs) {
+            return;
+        }
         let Some(rel) = relative_path(&self.root, abs) else {
             return;
         };
@@ -423,53 +440,81 @@ impl IndexState {
     }
 
     /// Recompute module membership from the current path table. O(paths),
-    /// so it runs once per path-set change rather than once per file.
+    /// so it runs once per path-set change rather than once per file. The
+    /// manifests are kept: only a walk or a manifest reindex reads them.
     fn refresh_module_index(&mut self) {
-        // `go.mod` is the one input that is not derivable from the path
-        // table: an import path only maps onto a directory through the
-        // module path a manifest declares. It is also not in the path
-        // table, because the index does not track manifests, so the
-        // ancestors of every Go file are probed on disk instead. That is
-        // a handful of reads, once per path-set change.
-        let mut manifest_dirs: HashSet<String> = HashSet::new();
-        for rel in self.path_to_id.keys() {
-            if !rel.ends_with(".go") {
-                continue;
-            }
-            let mut cursor = rel.as_str();
-            while let Some((head, _)) = cursor.rsplit_once('/') {
-                manifest_dirs.insert(head.to_string());
-                cursor = head;
-            }
-            manifest_dirs.insert(String::new());
-        }
-        let mut manifests: Vec<(String, String)> = manifest_dirs
-            .into_iter()
-            .filter_map(|dir| {
-                let rel = if dir.is_empty() {
-                    "go.mod".to_string()
-                } else {
-                    format!("{dir}/go.mod")
-                };
-                std::fs::read_to_string(self.root.join(&rel))
-                    .ok()
-                    .map(|contents| (rel, contents))
-            })
-            .collect();
-        manifests.sort();
-        let go_modules = GoModules::from_manifests(
-            manifests
-                .iter()
-                .map(|(path, contents)| (path.as_str(), contents.as_str())),
-        );
+        let go_modules = std::mem::take(&mut self.modules).into_go_modules();
         self.modules = imports::ModuleIndex::build(&self.path_to_id).with_go_modules(go_modules);
+    }
+
+    /// Install the manifests a complete walk (or a manifest reindex) read,
+    /// then re-resolve and relink exactly the files whose answer changed.
+    ///
+    /// Membership is untouched, since it derives from paths alone, so a
+    /// file's visibility can change only through its own import
+    /// resolution. Equal declarations are the unchanged-input fast path:
+    /// a restore whose manifests match its snapshot does no work here.
+    /// Returns how many files' resolution changed.
+    pub(super) fn apply_module_manifests(&mut self, go_modules: GoModules) -> usize {
+        if *self.modules.go_modules() == go_modules {
+            return 0;
+        }
+        let _phase = super::timing::Phase::start("graph.module_inputs");
+        self.modules = imports::ModuleIndex::build(&self.path_to_id).with_go_modules(go_modules);
+        let mut affected: Vec<FileId> = Vec::new();
+        for file in self.files.values() {
+            let resolved = self.resolve_file_imports(file, &file.relative_path);
+            let unchanged = resolved.modules == self.deps.module_imports_of(file.id)
+                && resolved.unresolved == self.deps.unresolved_imports(file.id)
+                && resolved.resolved
+                    == self
+                        .deps
+                        .imports_of(file.id)
+                        .into_iter()
+                        .collect::<HashSet<_>>();
+            if !unchanged {
+                affected.push(file.id);
+            }
+        }
+        affected.sort_unstable();
+        for id in &affected {
+            if let Some(rel) = self.files.get(id).map(|f| f.relative_path.clone()) {
+                self.rebuild_deps(*id, &rel);
+            }
+        }
+        self.link_symbol_imports_for(affected.iter().copied());
+        self.symbols.invalidate_calls_in(affected.iter().copied());
+        self.relink_dirty_calls();
+        affected.len()
+    }
+
+    /// Route a host's edit or removal of a module manifest. Manifests are
+    /// not indexed files, so without this a resident index would keep
+    /// resolving through the declarations it last walked. Returns whether
+    /// `abs` was a manifest.
+    fn reindex_module_manifest(&mut self, abs: &Path) -> bool {
+        if abs.file_name().and_then(|name| name.to_str()) != Some(GO_MANIFEST) {
+            return false;
+        }
+        let Some(rel) = relative_path(&self.root, abs) else {
+            return true;
+        };
+        let mut paths: BTreeSet<String> = self.modules.go_modules().manifest_paths().collect();
+        paths.insert(rel);
+        let go_modules = GoModules::read(&self.root, paths);
+        self.apply_module_manifests(go_modules);
+        true
     }
 
     /// Restore derived module membership and imported-module visibility.
     /// Dependency snapshot rows retain explicit file edges, but not module
     /// roots or their reverse projection. Derive those from saved imports
-    /// through the same resolver as a live edit, without expanding modules
-    /// into a file-edge cross-product or invalidating the restored call graph.
+    /// and the saved manifests through the same resolver as a live edit,
+    /// without expanding modules into a file-edge cross-product. The saved
+    /// manifests are the ones the restored call graph was linked under, so
+    /// the restore stays self-consistent; reconciliation then applies any
+    /// manifest the workspace changed since through
+    /// [`Self::apply_module_manifests`].
     pub(crate) fn rebuild_module_index(&mut self) {
         self.refresh_module_index();
         for file in self.files.values() {
@@ -1236,3 +1281,7 @@ mod refs_order_tests;
 #[cfg(test)]
 #[path = "calls_order_tests.rs"]
 mod calls_order_tests;
+
+#[cfg(test)]
+#[path = "module_manifest_tests.rs"]
+mod module_manifest_tests;
