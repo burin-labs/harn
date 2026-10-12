@@ -275,7 +275,16 @@ impl IndexState {
                 self.rebuild_all_deps();
             }
             self.rebuild_symbol_graph_for(id, &ingested.source);
-            self.link_symbol_imports();
+            if known {
+                // Rebuilding replaces this file's Module node, including its
+                // incoming edges. Restore both directions from the explicit
+                // dependency owner without revisiting unrelated modules.
+                let mut affected = self.deps.importers_of(id);
+                affected.push(id);
+                self.link_symbol_imports_for(affected);
+            } else {
+                self.link_symbol_imports();
+            }
             self.relink_dirty_calls();
         }
         Some(id)
@@ -599,20 +608,22 @@ impl IndexState {
         self.symbols.resolve_call_sites(&sites, &visible);
     }
 
-    /// Walk every file's import-resolution table and add the
-    /// corresponding Module→Module IMPORTS edges in the typed graph.
-    /// Idempotent; called once at end-of-rebuild and after every
-    /// per-file reindex.
+    /// Project every file's explicit imports after a bulk/path-set change.
     pub(super) fn link_symbol_imports(&mut self) {
+        self.link_symbol_imports_for(self.files.keys().copied().collect::<Vec<_>>());
+    }
+
+    /// Project the dependency rows whose graph endpoints changed.
+    fn link_symbol_imports_for(&mut self, files: impl IntoIterator<Item = FileId>) {
         let _phase = super::timing::Phase::start("graph.imports");
         let mut resolved: HashMap<FileId, Vec<FileId>> = HashMap::new();
-        for id in self.files.keys() {
+        for id in files {
             // Explicit import statements only. Module-wide visibility
             // would put one Module→Module edge in the symbol graph per
             // pair of files in a target, which is the cross-product
             // issue #8081 removed. The call resolver consults module
             // membership directly instead.
-            resolved.insert(*id, self.deps.imports_of(*id));
+            resolved.insert(id, self.deps.imports_of(id));
         }
         self.symbols.link_imports(&resolved);
     }
@@ -942,6 +953,91 @@ mod tests {
         assert_eq!(new_id, id, "file id should be stable across reindex");
         let after_hash = state.files[&id].content_hash;
         assert_ne!(before_hash, after_hash);
+    }
+
+    #[test]
+    fn resident_reindex_restores_incoming_and_outgoing_module_imports() {
+        use super::super::symbol_graph::{EdgeKind, NodeKind};
+
+        let dir = tempdir().unwrap();
+        for (name, source) in [
+            (
+                "a.ts",
+                "import { b } from './b'; export function a() { b(); }",
+            ),
+            (
+                "b.ts",
+                "import { c } from './c'; export function b() { c(); }",
+            ),
+            ("c.ts", "export function c() {}"),
+            ("d.ts", "export function d() {}"),
+        ] {
+            fs::write(dir.path().join(name), source).unwrap();
+        }
+        let (mut state, _) = IndexState::build_from_root(dir.path());
+        let module_imports = |state: &IndexState| {
+            let mut edges: Vec<_> = state
+                .symbols
+                .iter_nodes()
+                .filter(|node| node.kind == NodeKind::Module)
+                .flat_map(|node| {
+                    state.symbols.outgoing(node.id).iter().filter_map(|edge| {
+                        let target = state.symbols.node(edge.to).unwrap();
+                        (edge.kind == EdgeKind::Imports && target.kind == NodeKind::Module)
+                            .then(|| (node.path.clone(), target.path.clone()))
+                    })
+                })
+                .collect();
+            edges.sort();
+            edges
+        };
+        assert_eq!(
+            module_imports(&state),
+            [
+                ("a.ts".into(), "b.ts".into()),
+                ("b.ts".into(), "c.ts".into())
+            ]
+        );
+        let original_module = state
+            .symbols
+            .module_node_for_file(state.path_to_id["b.ts"])
+            .unwrap();
+        for number in 1..=3 {
+            fs::write(
+                dir.path().join("b.ts"),
+                format!(
+                    "import {{ d }} from './d'; export function b() {{ d(); let n = {number}; }}"
+                ),
+            )
+            .unwrap();
+            state.reindex_file(&dir.path().join("b.ts")).unwrap();
+            assert_ne!(
+                state
+                    .symbols
+                    .module_node_for_file(state.path_to_id["b.ts"])
+                    .unwrap(),
+                original_module
+            );
+            assert_eq!(module_imports(&state), [("a.ts".into(), "b.ts".into()), ("b.ts".into(), "d.ts".into())], "incoming edges must target the replacement node, outgoing edges must be fresh, and repeated edits must not duplicate edges");
+        }
+        // New paths retain full resolution: an unchanged source can acquire a
+        // previously dangling import when its target first appears.
+        fs::write(
+            dir.path().join("a.ts"),
+            "import { e } from './e'; export function a() { e(); }",
+        )
+        .unwrap();
+        state.reindex_file(&dir.path().join("a.ts")).unwrap();
+        assert_eq!(module_imports(&state), [("b.ts".into(), "d.ts".into())]);
+        fs::write(dir.path().join("e.ts"), "export function e() {}").unwrap();
+        state.reindex_file(&dir.path().join("e.ts")).unwrap();
+        assert_eq!(
+            module_imports(&state),
+            [
+                ("a.ts".into(), "e.ts".into()),
+                ("b.ts".into(), "d.ts".into())
+            ]
+        );
     }
 
     #[test]

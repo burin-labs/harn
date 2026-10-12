@@ -107,6 +107,29 @@ fn graph_digest(state: &IndexState) -> String {
     hex::encode(digest.finalize())
 }
 
+fn postings_digest(state: &IndexState) -> String {
+    let mut digest = Sha256::new();
+    for posting in state.trigrams.snapshot_postings() {
+        let mut paths: Vec<_> = posting
+            .files
+            .iter()
+            .map(|id| &state.files[id].relative_path)
+            .collect();
+        paths.sort_unstable();
+        digest.update(serde_json::to_vec(&("trigram", posting.trigram, paths)).unwrap());
+    }
+    for posting in state.words.snapshot_postings() {
+        let mut hits: Vec<_> = posting
+            .hits
+            .iter()
+            .map(|(id, line)| (&state.files[id].relative_path, line))
+            .collect();
+        hits.sort_unstable();
+        digest.update(serde_json::to_vec(&("word", posting.word, hits)).unwrap());
+    }
+    hex::encode(digest.finalize())
+}
+
 fn report(
     name: &str,
     trial: usize,
@@ -177,7 +200,7 @@ fn report(
         "operation_peak_rss_kib": operation_peak_rss_kib,
         "source_bytes": source_bytes, "corpus_digest": corpus_digest,
         "files_attempted": attempted, "files_skipped": skipped, "skipped_files": skipped_files,
-        "graph_digest": graph_digest(state)})
+        "graph_digest": graph_digest(state), "postings_digest": postings_digest(state)})
     );
 }
 
@@ -206,17 +229,7 @@ fn main() {
     let fixture = root.join("harn_index_latency_fixture.rs");
     let original = "pub fn harn_latency_probe() -> u32 { 1 }\npub fn harn_latency_caller() -> u32 { harn_latency_probe() }\n";
     let base = CodeIndexSnapshot::path_for(root).with_file_name("release-base.json");
-    if scenario == "cold" {
-        std::fs::write(&fixture, original).unwrap();
-        let start = Instant::now();
-        let (state, outcome) = IndexState::build_from_root(root);
-        assert!(outcome.files_indexed > 8000);
-        state.snapshot().save(root).unwrap();
-        report(scenario, trial, start, &timings, &state, root);
-        std::fs::copy(CodeIndexSnapshot::path_for(root), base).unwrap();
-        return;
-    }
-    if args.get(4).is_some_and(|arg| arg == "prepare") {
+    if scenario != "cold" && args.get(4).is_some_and(|arg| arg == "prepare") {
         std::fs::write(&fixture, original).unwrap();
         let mut snapshot: CodeIndexSnapshot =
             serde_json::from_slice(&std::fs::read(&base).unwrap()).unwrap();
@@ -300,7 +313,16 @@ fn main() {
     }
     let capability = CodeIndexCapability::new();
     let mut start = Instant::now();
-    assert!(capability.restore_from_disk(root).unwrap());
+    if scenario == "cold" {
+        std::fs::write(&fixture, original).unwrap();
+        start = Instant::now();
+        let (state, outcome) = IndexState::build_from_root(root);
+        assert!(outcome.files_indexed > 8000);
+        state.snapshot().save(root).unwrap();
+        *capability.shared().lock().unwrap() = Some(state);
+    } else {
+        assert!(capability.restore_from_disk(root).unwrap());
+    }
     let mut registry = BuiltinRegistry::new();
     capability.register_builtins(&mut registry);
     if scenario.starts_with("resident_") {
@@ -352,8 +374,89 @@ fn main() {
         panic!("query did not return rows");
     };
     assert_eq!(rows.len(), 1, "the fresh declaration must be queryable");
+    let mut request = harn_vm::value::DictMap::new();
+    request.insert(
+        harn_vm::value::intern_key("word"),
+        VmValue::String(arcstr::ArcStr::from(expected_name)),
+    );
+    let word_start = Instant::now();
+    let word_result = (registry
+        .find("hostlib_code_index_word_get")
+        .unwrap()
+        .handler)(&[VmValue::dict(request)])
+    .unwrap();
+    let word_query_us = word_start.elapsed().as_micros();
+    let VmValue::List(hits) = word_result else {
+        panic!("word query must return hits");
+    };
+    assert_eq!(hits.len(), 2, "both fixture occurrences must be present");
+    let mut request = harn_vm::value::DictMap::new();
+    request.insert(
+        harn_vm::value::intern_key("query"),
+        VmValue::String(arcstr::ArcStr::from(expected_name)),
+    );
+    let trigrams = (registry
+        .find("hostlib_code_index_extract_trigrams")
+        .unwrap()
+        .handler)(&[VmValue::dict(request)])
+    .unwrap();
+    let mut request = harn_vm::value::DictMap::new();
+    request.insert(harn_vm::value::intern_key("trigrams"), trigrams);
+    let trigram_start = Instant::now();
+    let trigram_result = (registry
+        .find("hostlib_code_index_trigram_query")
+        .unwrap()
+        .handler)(&[VmValue::dict(request)])
+    .unwrap();
+    let trigram_query_us = trigram_start.elapsed().as_micros();
+    let VmValue::List(files) = trigram_result else {
+        panic!("trigram query must return files");
+    };
+    let fixture_id = {
+        let shared = capability.shared();
+        let guard = shared.lock().unwrap();
+        guard
+            .as_ref()
+            .unwrap()
+            .lookup_path("harn_index_latency_fixture.rs")
+            .unwrap()
+    };
+    assert!(
+        files
+            .iter()
+            .any(|file| matches!(file, VmValue::Int(id) if *id == i64::from(fixture_id))),
+        "trigram candidates must include the fresh fixture"
+    );
+    let mut request = harn_vm::value::DictMap::new();
+    request.insert(
+        harn_vm::value::intern_key("needle"),
+        VmValue::String(arcstr::ArcStr::from(expected_name)),
+    );
+    let literal_start = Instant::now();
+    let literal_result =
+        (registry.find("hostlib_code_index_query").unwrap().handler)(&[VmValue::dict(request)])
+            .unwrap();
+    let literal_query_us = literal_start.elapsed().as_micros();
+    let VmValue::Dict(result) = literal_result else {
+        panic!("literal query must return a record");
+    };
+    let Some(VmValue::List(results)) = result.get("results") else {
+        panic!("literal query must return results");
+    };
+    assert_eq!(
+        results.len(),
+        1,
+        "literal search must filter candidate false positives"
+    );
+    let VmValue::Dict(result) = &results[0] else {
+        panic!("literal result must be a record");
+    };
+    assert!(
+        matches!(result.get("match_count"), Some(VmValue::Int(2))),
+        "both fixture occurrences must match"
+    );
     eprintln!(
-        "ready scenario={scenario} trial={trial} ready_us={ready_us} query_us={query_us} rows={}",
+        "ready scenario={scenario} trial={trial} ready_us={ready_us} query_us={query_us} word_query_us={word_query_us} trigram_query_us={trigram_query_us} literal_query_us={literal_query_us} rows={}",
         rows.len()
     );
     let shared = capability.shared();
@@ -361,4 +464,8 @@ fn main() {
     let state = guard.as_ref().unwrap();
     // The actual host interface publishes a fresh index only after restoration.
     report(scenario, trial, start, &timings, state, root);
+    if scenario == "cold" {
+        // Preserve the next scenario's seed outside the measured operation.
+        std::fs::copy(CodeIndexSnapshot::path_for(root), base).unwrap();
+    }
 }

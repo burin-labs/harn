@@ -91,6 +91,7 @@ mod module_index;
 mod move_symbol;
 mod name_index;
 mod overlay;
+mod postings;
 mod readonly;
 mod reconcile;
 mod refactor_core;

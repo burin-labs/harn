@@ -7,7 +7,7 @@
 //! byte (`A-Z` -> `a-z`), leaves non-ASCII bytes unchanged, and packs each
 //! 3-byte sliding window as `(a << 16) | (b << 8) | c` into a `u32`.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 use super::file_table::FileId;
 
@@ -19,8 +19,7 @@ pub type Trigram = u32;
 /// plus a per-file reverse map for cheap re-indexing.
 #[derive(Debug, Default, Clone)]
 pub struct TrigramIndex {
-    index: HashMap<Trigram, HashSet<FileId>>,
-    file_trigrams: HashMap<FileId, HashSet<Trigram>>,
+    postings: super::postings::FilePostings<Trigram, FileId>,
 }
 
 impl TrigramIndex {
@@ -31,30 +30,14 @@ impl TrigramIndex {
 
     /// Replace the postings for `id` with the trigrams of `content`.
     pub fn index_file(&mut self, id: FileId, content: &str) {
-        self.remove_file(id);
         let trigrams = extract_trigrams(content);
-        if trigrams.is_empty() {
-            return;
-        }
-        for tg in &trigrams {
-            self.index.entry(*tg).or_default().insert(id);
-        }
-        self.file_trigrams.insert(id, trigrams);
+        self.postings
+            .replace_file(id, trigrams.into_iter().map(|tg| (tg, std::iter::once(id))));
     }
 
     /// Drop every posting contributed by `id`.
     pub fn remove_file(&mut self, id: FileId) {
-        let Some(trigrams) = self.file_trigrams.remove(&id) else {
-            return;
-        };
-        for tg in trigrams {
-            if let Some(set) = self.index.get_mut(&tg) {
-                set.remove(&id);
-                if set.is_empty() {
-                    self.index.remove(&tg);
-                }
-            }
-        }
+        self.postings.remove_file(id);
     }
 
     /// Return file ids that contain ALL of `trigrams`. Empty input or any
@@ -63,18 +46,19 @@ impl TrigramIndex {
         if trigrams.is_empty() {
             return HashSet::new();
         }
-        let mut postings: Vec<&HashSet<FileId>> = Vec::with_capacity(trigrams.len());
+        let mut postings: Vec<&[FileId]> = Vec::with_capacity(trigrams.len());
         for tg in trigrams {
-            match self.index.get(tg) {
-                Some(set) => postings.push(set),
-                None => return HashSet::new(),
+            let files = self.postings.get(tg);
+            if files.is_empty() {
+                return HashSet::new();
             }
+            postings.push(files);
         }
         postings.sort_by_key(|s| s.len());
         let (head, tail) = postings.split_first().expect("non-empty by construction");
-        let mut acc: HashSet<FileId> = (*head).clone();
+        let mut acc: HashSet<FileId> = head.iter().copied().collect();
         for set in tail {
-            acc.retain(|id| set.contains(id));
+            acc.retain(|id| set.binary_search(id).is_ok());
             if acc.is_empty() {
                 return acc;
             }
@@ -84,7 +68,7 @@ impl TrigramIndex {
 
     /// Number of distinct trigrams in the posting table.
     pub fn distinct_trigrams(&self) -> usize {
-        self.index.len()
+        self.postings.len()
     }
 
     /// Capture the posting table as a snapshot-friendly vector. Used by
@@ -92,15 +76,11 @@ impl TrigramIndex {
     /// serialisation.
     pub fn snapshot_postings(&self) -> Vec<super::snapshot::TrigramPosting> {
         let mut out: Vec<super::snapshot::TrigramPosting> = self
-            .index
-            .iter()
-            .map(|(tg, files)| {
-                let mut files: Vec<FileId> = files.iter().copied().collect();
-                files.sort_unstable();
-                super::snapshot::TrigramPosting {
-                    trigram: *tg,
-                    files,
-                }
+            .postings
+            .terms()
+            .map(|(tg, files)| super::snapshot::TrigramPosting {
+                trigram: *tg,
+                files: files.clone(),
             })
             .collect();
         out.sort_unstable_by_key(|p| p.trigram);
@@ -109,25 +89,17 @@ impl TrigramIndex {
 
     /// Rebuild a [`TrigramIndex`] from a snapshot's postings vector.
     pub fn from_postings(postings: Vec<super::snapshot::TrigramPosting>) -> Self {
-        let mut idx = Self::new();
-        for p in postings {
-            let entry = idx.index.entry(p.trigram).or_default();
-            for f in &p.files {
-                entry.insert(*f);
-                idx.file_trigrams.entry(*f).or_default().insert(p.trigram);
-            }
+        Self {
+            postings: super::postings::FilePostings::from_rows(
+                postings.into_iter().map(|p| (p.trigram, p.files)),
+            ),
         }
-        idx
     }
 
     /// Order-of-magnitude resident-bytes estimate. Reported by
     /// `code_index.stats.memory_bytes`.
     pub fn estimated_bytes(&self) -> usize {
-        // Cheap order-of-magnitude estimate: 4 bytes per posting key plus
-        // ~4 bytes per FileID per posting on both sides.
-        let postings: usize = self.index.values().map(|s| s.len()).sum();
-        let reverse: usize = self.file_trigrams.values().map(|s| s.len()).sum();
-        self.index.len() * 4 + postings * 4 + reverse * 4 + self.file_trigrams.len() * 4
+        self.postings.estimated_bytes()
     }
 }
 
@@ -175,6 +147,34 @@ fn normalize(byte: u8) -> u8 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn restored_memberships_normalize_and_survive_replacement() {
+        let tg = pack(b'a', b'b', b'c');
+        let mut idx = TrigramIndex::from_postings(vec![
+            super::super::snapshot::TrigramPosting {
+                trigram: tg,
+                files: vec![9, 2, 9],
+            },
+            super::super::snapshot::TrigramPosting {
+                trigram: tg,
+                files: vec![2, 4],
+            },
+        ]);
+        assert_eq!(idx.query(&[tg]), HashSet::from([2, 4, 9]));
+        idx.remove_file(2);
+        assert_eq!(idx.query(&[tg]), HashSet::from([4, 9]));
+        idx.index_file(2, "abc xyz");
+        assert_eq!(idx.query(&[tg]), HashSet::from([2, 4, 9]));
+        idx.index_file(4, "xyz");
+        assert_eq!(idx.query(&[tg]), HashSet::from([2, 9]));
+        let restored = TrigramIndex::from_postings(idx.snapshot_postings());
+        assert_eq!(
+            restored.query(&query_trigrams("xyz")),
+            HashSet::from([2, 4])
+        );
+        assert!(restored.query(&query_trigrams("absent")).is_empty());
+    }
 
     #[test]
     fn extract_handles_short_strings() {

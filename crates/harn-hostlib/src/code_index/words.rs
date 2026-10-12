@@ -6,7 +6,8 @@
 //! Tokens are runs of `[A-Za-z_][A-Za-z0-9_]*` (single-character tokens
 //! are skipped), one entry per occurrence.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
+use std::sync::Arc;
 
 use super::file_table::FileId;
 
@@ -20,11 +21,16 @@ pub struct WordHit {
     pub line: u32,
 }
 
+impl super::postings::FilePosting for WordHit {
+    fn file(&self) -> FileId {
+        self.file
+    }
+}
+
 /// Inverted word index keyed on identifier-shaped tokens.
 #[derive(Debug, Default, Clone)]
 pub struct WordIndex {
-    index: HashMap<String, Vec<WordHit>>,
-    file_words: HashMap<FileId, HashSet<String>>,
+    postings: super::postings::FilePostings<Arc<str>, WordHit>,
 }
 
 impl WordIndex {
@@ -36,62 +42,56 @@ impl WordIndex {
     /// Tokenize `content` and record every hit under `id`. If `id` already
     /// has entries, they are dropped first.
     pub fn index_file(&mut self, id: FileId, content: &str) {
-        self.remove_file(id);
-        let mut contributed: HashSet<String> = HashSet::new();
+        let mut contributed: HashMap<&str, Vec<WordHit>> = HashMap::new();
         for (line_idx, line) in content.split('\n').enumerate() {
             let line_no = (line_idx as u32) + 1;
             tokenize(line, |word| {
                 if word.len() < MIN_WORD_LEN {
                     return;
                 }
-                self.index
-                    .entry(word.to_string())
-                    .or_default()
-                    .push(WordHit {
-                        file: id,
-                        line: line_no,
-                    });
-                contributed.insert(word.to_string());
+                contributed.entry(word).or_default().push(WordHit {
+                    file: id,
+                    line: line_no,
+                });
             });
         }
-        if !contributed.is_empty() {
-            self.file_words.insert(id, contributed);
-        }
+        let rows: Vec<_> = contributed
+            .into_iter()
+            .map(|(word, hits)| {
+                let key = self
+                    .postings
+                    .key(word)
+                    .cloned()
+                    .unwrap_or_else(|| Arc::from(word));
+                (key, hits)
+            })
+            .collect();
+        self.postings.replace_file(id, rows);
     }
 
     /// Drop every hit contributed by `id`.
     pub fn remove_file(&mut self, id: FileId) {
-        let Some(words) = self.file_words.remove(&id) else {
-            return;
-        };
-        for word in words {
-            if let Some(hits) = self.index.get_mut(&word) {
-                hits.retain(|h| h.file != id);
-                if hits.is_empty() {
-                    self.index.remove(&word);
-                }
-            }
-        }
+        self.postings.remove_file(id);
     }
 
     /// O(1) lookup for every hit recorded under `word`.
     pub fn get(&self, word: &str) -> &[WordHit] {
-        self.index.get(word).map(Vec::as_slice).unwrap_or(&[])
+        self.postings.get(word)
     }
 
     /// Number of distinct tokens in the posting table.
     pub fn distinct_words(&self) -> usize {
-        self.index.len()
+        self.postings.len()
     }
 
     /// Capture the inverted index as snapshot-friendly postings. Sorted
     /// by word so the on-disk JSON is reproducible.
     pub fn snapshot_postings(&self) -> Vec<super::snapshot::WordPosting> {
         let mut out: Vec<super::snapshot::WordPosting> = self
-            .index
-            .iter()
+            .postings
+            .terms()
             .map(|(word, hits)| super::snapshot::WordPosting {
-                word: word.clone(),
+                word: word.to_string(),
                 hits: hits.iter().map(|h| (h.file, h.line)).collect(),
             })
             .collect();
@@ -101,36 +101,28 @@ impl WordIndex {
 
     /// Rebuild a [`WordIndex`] from a snapshot's postings vector.
     pub fn from_postings(postings: Vec<super::snapshot::WordPosting>) -> Self {
-        let mut idx = Self::new();
-        for p in postings {
-            let mut contributing_files: HashSet<FileId> = HashSet::new();
-            let entry = idx.index.entry(p.word.clone()).or_default();
-            for (file, line) in &p.hits {
-                entry.push(WordHit {
-                    file: *file,
-                    line: *line,
-                });
-                contributing_files.insert(*file);
-            }
-            for file in contributing_files {
-                idx.file_words
-                    .entry(file)
-                    .or_default()
-                    .insert(p.word.clone());
-            }
+        Self {
+            postings: super::postings::FilePostings::from_rows(postings.into_iter().map(|p| {
+                (
+                    Arc::from(p.word),
+                    p.hits
+                        .into_iter()
+                        .map(|(file, line)| WordHit { file, line })
+                        .collect(),
+                )
+            })),
         }
-        idx
     }
 
     /// Order-of-magnitude resident-bytes estimate. Reported by
     /// `code_index.stats.memory_bytes`.
     pub fn estimated_bytes(&self) -> usize {
-        let words = self.index.len();
-        let key_bytes: usize = self.index.keys().map(|k| k.len()).sum();
-        let hits: usize = self.index.values().map(Vec::len).sum();
-        // Each WordHit packs into 8 bytes (FileId + u32). Add overhead for
-        // the per-word vec plus the reverse map.
-        words * 16 + key_bytes + hits * 8 + self.file_words.len() * 16
+        self.postings.estimated_bytes()
+            + self
+                .postings
+                .terms()
+                .map(|(key, _)| key.len() + 16)
+                .sum::<usize>()
     }
 }
 
@@ -186,6 +178,44 @@ fn is_ident_cont(b: u8) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn restored_occurrences_preserve_multiplicity_and_survive_replacement() {
+        let mut idx = WordIndex::from_postings(vec![
+            super::super::snapshot::WordPosting {
+                word: "alpha".into(),
+                hits: vec![(2, 3), (9, 1), (2, 3)],
+            },
+            super::super::snapshot::WordPosting {
+                word: "alpha".into(),
+                hits: vec![(4, 2)],
+            },
+        ]);
+        assert_eq!(
+            idx.get("alpha"),
+            &[
+                WordHit { file: 2, line: 3 },
+                WordHit { file: 9, line: 1 },
+                WordHit { file: 2, line: 3 },
+                WordHit { file: 4, line: 2 },
+            ]
+        );
+        idx.remove_file(2);
+        idx.index_file(4, "beta beta\nalpha alpha");
+        assert_eq!(
+            idx.get("alpha"),
+            &[
+                WordHit { file: 9, line: 1 },
+                WordHit { file: 4, line: 2 },
+                WordHit { file: 4, line: 2 },
+            ]
+        );
+        let mut restored = WordIndex::from_postings(idx.snapshot_postings());
+        assert_eq!(restored.get("alpha"), idx.get("alpha"));
+        restored.remove_file(4);
+        assert!(restored.get("beta").is_empty());
+        assert_eq!(restored.get("alpha"), &[WordHit { file: 9, line: 1 }]);
+    }
 
     #[test]
     fn tokenize_skips_punctuation_and_numbers() {

@@ -10,7 +10,7 @@
 //! records and locks before serving any traffic.
 
 use std::collections::HashMap;
-use std::io::{self, BufReader, BufWriter, Write};
+use std::io::{self, BufWriter, Write};
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -189,8 +189,13 @@ impl CodeIndexSnapshot {
         if !path.exists() {
             return Ok(None);
         }
-        let reader = BufReader::new(std::fs::File::open(&path)?);
-        let snap: CodeIndexSnapshot = serde_json::from_reader(reader).map_err(io::Error::other)?;
+        let read_phase = super::timing::Phase::start("snapshot.read");
+        let bytes = std::fs::read(&path)?;
+        drop(read_phase);
+        let decode_phase = super::timing::Phase::start("snapshot.decode");
+        let snap: CodeIndexSnapshot = serde_json::from_slice(&bytes).map_err(io::Error::other)?;
+        drop(decode_phase);
+        drop(bytes);
         if snap.meta.format_version != SNAPSHOT_FORMAT_VERSION {
             tracing::debug!(
                 target: "harn_hostlib::code_index",

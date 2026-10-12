@@ -293,6 +293,7 @@ impl SymbolGraph {
         }
         let mut graph = Self {
             next_id: snapshot.next_id,
+            nodes: HashMap::with_capacity(snapshot.nodes.len()),
             ..Self::default()
         };
         for node in snapshot.nodes {
@@ -602,12 +603,10 @@ impl SymbolGraph {
                 let Some(tgt_module) = self.module_node_for_file(*tgt_file) else {
                     continue;
                 };
-                // Idempotent add: `link_imports` re-runs over the WHOLE
-                // workspace after every per-file reindex, but `rebuild_file`
-                // only clears the reindexed file's edges. Without this guard,
-                // every reindex appends another copy of every still-valid
-                // Module→Module edge, growing the graph without bound and
-                // returning duplicate rows from IMPORTS/IMPORTED_BY traversals.
+                // An affected importer can retain edges to other targets.
+                // Both full and per-file projections may revisit those
+                // edges, so add each Module→Module relationship only once.
+                // Otherwise IMPORTS/IMPORTED_BY traversals return duplicates.
                 let already_linked = self.out_edges.get(&src_module).is_some_and(|edges| {
                     edges
                         .iter()
