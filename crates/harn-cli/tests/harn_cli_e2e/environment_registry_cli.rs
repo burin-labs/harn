@@ -12,6 +12,7 @@ fn main(harness: Harness) {
   harness.stdio.println(harness.env.get("SETTINGS_OVERLAY") == nil)
   harness.stdio.println(harness.env.get_or("SETTINGS_OVERLAY", "default"))
   harness.stdio.println(harness.env.get("LC_MESSAGES") == nil)
+  harness.stdio.println(harness.env.get("lc_messages") == nil)
 }
 "#,
     )
@@ -51,6 +52,7 @@ fn main(harness: Harness) {
             .env("HARN_LOG_LEVEL", "warn")
             .env("OVERLAY_SOURCE", "visible")
             .env_remove("LC_MESSAGES")
+            .env_remove("lc_messages")
             .env_remove("SETTINGS_OVERLAY");
         if set {
             command.env("SETTINGS_OVERLAY", sentinel);
@@ -62,7 +64,11 @@ fn main(harness: Harness) {
         let stdout = String::from_utf8(output.stdout).unwrap();
         let stderr = String::from_utf8(output.stderr).unwrap();
         assert!(output.status.success(), "{policy}: {stderr}");
-        assert_eq!(stdout.trim(), expected, "{policy}: {stderr}");
+        assert_eq!(
+            stdout.trim(),
+            format!("{expected}\ntrue"),
+            "{policy}: {stderr}"
+        );
         assert_eq!(
             stderr
                 .matches("environment read \"SETTINGS_OVERLAY\" refused")
@@ -71,6 +77,13 @@ fn main(harness: Harness) {
             "{policy}: {stderr}",
         );
         assert!(!stderr.contains("LC_MESSAGES"), "{stderr}");
+        assert_eq!(
+            stderr
+                .matches("environment read \"lc_messages\" refused")
+                .count(),
+            usize::from(policy != "inherited" && !cfg!(windows)),
+            "{policy}: {stderr}",
+        );
         assert!(!stderr.contains(sentinel), "{stderr}");
         assert!(!stderr.contains("visible"), "{stderr}");
     }

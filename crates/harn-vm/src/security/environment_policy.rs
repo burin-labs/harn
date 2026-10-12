@@ -513,9 +513,7 @@ pub fn lookup_env_read(
     if let Some(value) = environment.env_exposure_for(name, resolve_secret)? {
         return Ok(EnvironmentRead::Permitted(Some(value)));
     }
-    if matches!(environment.kind(), EnvironmentPolicyKind::Inherited)
-        || ENV_ALLOWLIST.contains(&name)
-    {
+    if matches!(environment.kind(), EnvironmentPolicyKind::Inherited) || allowlist_admits(name) {
         return Ok(EnvironmentRead::Permitted(
             environment.launcher_value(name).map(str::to_string),
         ));
