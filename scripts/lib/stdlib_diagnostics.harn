@@ -1,4 +1,5 @@
 import { LintDiagnostic, LintFileReport, decode_lint_json } from "std/cli/envelope"
+import { baseline_delta } from "./text_baseline.harn"
 
 pub const STDLIB_ROOT = "crates/harn-stdlib/src/stdlib"
 
@@ -133,8 +134,9 @@ pub fn require_complete(
     actual = actual + [canonical]
     normalized = normalized + [file + {path: canonical}]
   }
-  if expected.count == 0 || expected.sorted() != actual.sorted() {
-    throw "stdlib diagnostic collection incomplete: ${actual.count} reported, ${expected.count} expected"
+  const delta = baseline_delta(expected, actual)
+  if expected.count == 0 || delta.added.count + delta.removed.count > 0 {
+    throw "stdlib diagnostic collection incomplete: ${actual.count} reported, ${expected.count} expected; pending ${delta.removed.count}: ${delta.removed.join(", ")}; unexpected ${delta.added.count}: ${delta.added.join(", ")}"
   }
   return normalized
 }

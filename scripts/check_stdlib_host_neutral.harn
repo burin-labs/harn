@@ -1,3 +1,4 @@
+import { STDLIB_ROOT } from "./lib/stdlib_diagnostics.harn"
 import { baseline_delta, baseline_lines } from "./lib/text_baseline.harn"
 
 pub fn host_specific_lines(path: string, source: string) -> list<string> {
@@ -11,14 +12,26 @@ pub fn host_specific_lines(path: string, source: string) -> list<string> {
 }
 
 fn main(harness: Harness) {
-  const root = harness.fs.workspace_canonicalize_existing(
-    harness.env.get("HARN_EXT_STDLIB_HOST_NEUTRAL_ROOT") ?? "crates/harn-stdlib/src/stdlib",
+  const configured_root = harness.env.get("HARN_EXT_STDLIB_HOST_NEUTRAL_ROOT") ?? ""
+  const configured_baseline = harness.env.get("HARN_EXT_STDLIB_HOST_NEUTRAL_BASELINE") ?? ""
+  const root = path_normalize(
+    path_join(
+      harness.fs.cwd(),
+      if configured_root == "" {
+        STDLIB_ROOT
+      } else {
+        configured_root
+      },
+    ),
   )
-  if root == nil {
+  if harness.fs.workspace_canonicalize_existing(root, root) == nil {
     throw "embedded stdlib root is missing or inaccessible"
   }
-  const baseline = harness.env.get("HARN_EXT_STDLIB_HOST_NEUTRAL_BASELINE")
-    ?? "scripts/stdlib-host-specific-compatibility.txt"
+  const baseline = if configured_baseline == "" {
+    "scripts/stdlib-host-specific-compatibility.txt"
+  } else {
+    configured_baseline
+  }
   const expected = baseline_lines(harness.fs.read_text(baseline))
   let actual: list<string> = []
   let scanned = 0
@@ -31,11 +44,10 @@ fn main(harness: Harness) {
       continue
     }
     scanned = scanned + 1
-    const canonical = harness.fs.workspace_canonicalize_existing(path)
-    if canonical == nil {
+    const relative = harness.fs.workspace_canonicalize_existing(path, root)
+    if relative == nil {
       throw "scanned source disappeared: ${path}"
     }
-    const relative = canonical.substring(root.len() + 1)
     actual = actual + host_specific_lines(relative, harness.fs.read_text(path))
   }
   if scanned == 0 {

@@ -58,6 +58,8 @@ decoder, baseline rendering, exemptions, and real launcher pass/fail behavior.
 Empty scans and incomplete diagnostic reports refuse to pass.
 Host-neutral fixtures can override the source root and baseline with
 `HARN_EXT_STDLIB_HOST_NEUTRAL_ROOT` and `HARN_EXT_STDLIB_HOST_NEUTRAL_BASELINE`.
+The launchers grant the supplied external root and baseline read-only access.
+Direct `harn run` callers supply the corresponding `--read-only-root` flags.
 
 ## Kept in Python — toolchain reason
 

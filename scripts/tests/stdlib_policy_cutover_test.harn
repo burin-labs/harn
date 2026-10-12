@@ -105,6 +105,9 @@ pipeline test_public_return_baseline_is_stable_and_rejects_checker_errors() {
   )
   assert_eq(keys, ["x.harn::answer"])
   assert_eq(baseline_lines(render_return_baseline(keys)), keys)
+  assert(
+    render_return_baseline(["x.harn::answer", "x.harn::other"]).contains("# count    2  x.harn"),
+  )
   assert_throws({ -> public_return_keys([{path: "x.harn", status: "error", diagnostics: []}]) })
   assert_throws(
     { ->
@@ -212,13 +215,96 @@ pipeline test_lint_report_cannot_excuse_an_abnormal_child_exit() {
   assert_throws({ -> lint_files(report, 124) })
 }
 
+pipeline test_external_fixture_launchers_grant_reads_without_granting_writes(harness: Harness) {
+  const repo = path_normalize(path_join(harness.fs.cwd(), "../.."))
+  const binary = harness.env.get("HARN_BIN") ?? "harn"
+  const dir = harness.fs.mkdtemp("harn-policy-external-")
+  try {
+    const source = path_join(dir, "source")
+    harness.fs.mkdir(source)
+    const rust = path_join(source, "fixture.rs")
+    const module = path_join(source, "example.harn")
+    const baseline = path_join(dir, "baseline.txt")
+    harness.fs.write_text(rust, "str_value(to_agent_path(p))\n")
+    harness.fs.write_text(module, "// neutral\n")
+    harness.fs.write_text(baseline, "")
+    const path_run = {
+      program: "bash",
+      args: [path_join(repo, "scripts/check_agent_path_normalization.sh"), source],
+      env: {HARN_BIN: binary},
+    }
+    const accepted_path = harness.process.run(path_run)
+    assert_eq(accepted_path.exit_code, 0, accepted_path.stdout + accepted_path.stderr)
+    assert(accepted_path.stdout.contains("1 files scanned"))
+    const relative_path_run = harness.process.run(
+      path_run
+        + {args: [path_join(repo, "scripts/check_agent_path_normalization.sh"), "source"], cwd: dir},
+    )
+    assert_eq(relative_path_run.exit_code, 0, relative_path_run.stdout + relative_path_run.stderr)
+    const denied_write = harness.process.run(
+      {
+        program: binary,
+        args: [
+          "run",
+          "--read-only-root",
+          source,
+          "-e",
+          "harness.fs.write_text(argv[0] ?? \"\", \"changed\")",
+          "--",
+          rust,
+        ],
+        cwd: repo,
+      },
+    )
+    assert(denied_write.exit_code != 0)
+    assert(denied_write.stderr.contains("sandbox violation"), denied_write.stderr)
+    assert_eq(harness.fs.read_text(rust), "str_value(to_agent_path(p))\n")
+    harness.fs.write_text(rust, "str_value(p.display())\n")
+    const rejected_path = harness.process.run(path_run)
+    assert(rejected_path.exit_code != 0)
+    assert(rejected_path.stderr.contains("fixture.rs:1"))
+    const host_run = {
+      program: "bash",
+      args: [path_join(repo, "scripts/check_stdlib_host_neutral.sh")],
+      env: {
+        HARN_BIN: binary,
+        HARN_EXT_STDLIB_HOST_NEUTRAL_ROOT: source,
+        HARN_EXT_STDLIB_HOST_NEUTRAL_BASELINE: baseline,
+      },
+    }
+    const accepted_host = harness.process.run(host_run)
+    assert_eq(accepted_host.exit_code, 0, accepted_host.stdout + accepted_host.stderr)
+    assert(accepted_host.stdout.contains("2 files scanned"))
+    const relative_host_run = harness.process.run(
+      host_run
+        + {
+          cwd: dir,
+          env: {
+            HARN_BIN: binary,
+            HARN_EXT_STDLIB_HOST_NEUTRAL_ROOT: "source",
+            HARN_EXT_STDLIB_HOST_NEUTRAL_BASELINE: "baseline.txt",
+          },
+        },
+    )
+    assert_eq(relative_host_run.exit_code, 0, relative_host_run.stdout + relative_host_run.stderr)
+    harness.fs.write_text(module, "// .burin\n")
+    const rejected_host = harness.process.run(host_run)
+    assert(rejected_host.exit_code != 0)
+    assert(rejected_host.stderr.contains("unreviewed:"))
+    harness.fs.delete(dir)
+  } catch (e) {
+    harness.fs.delete(dir)
+    throw e
+  }
+}
+
 pipeline test_return_baseline_renderer_preserves_reviewed_entries(harness: Harness) {
   const baseline = harness.fs.read_text("../stdlib-public-return-type-baseline.txt")
   const keys = baseline_lines(baseline)
   const rendered = render_return_baseline(keys)
   assert_eq(baseline_lines(rendered), keys)
   assert_eq(render_return_baseline(baseline_lines(rendered)), rendered)
-  assert(rendered.contains("# count    5  crates/harn-stdlib/src/stdlib/stdlib_edit.harn"))
+  assert(keys.count > 0)
 }
 
 pipeline test_schema_driver_runs_all_four_checks_and_collects_failures(harness: Harness) {
