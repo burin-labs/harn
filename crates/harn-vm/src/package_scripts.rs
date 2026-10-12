@@ -250,14 +250,26 @@ fn select_manager(
         }
         let mut selected = declared_manager(&value)?;
         for (file, manager) in LOCKFILES {
-            match current.join(file).try_exists() {
-                Ok(true) => match selected {
-                    Some(existing) if existing != *manager => {
-                        return Err(SelectionError::ConflictingManagers);
+            let path = current.join(file);
+            match std::fs::symlink_metadata(&path) {
+                Ok(_) => {
+                    let physical = path
+                        .canonicalize()
+                        .map_err(|_| SelectionError::UnreadableAncestor)?;
+                    if !physical.starts_with(project_root) {
+                        return Err(SelectionError::OutsideProject);
                     }
-                    _ => selected = Some(*manager),
-                },
-                Ok(false) => {}
+                    if !physical.is_file() {
+                        return Err(SelectionError::InvalidAncestor);
+                    }
+                    match selected {
+                        Some(existing) if existing != *manager => {
+                            return Err(SelectionError::ConflictingManagers);
+                        }
+                        _ => selected = Some(*manager),
+                    }
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
                 Err(_) => return Err(SelectionError::UnreadableAncestor),
             }
         }
@@ -290,6 +302,37 @@ fn select_manager(
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[cfg(unix)]
+    #[test]
+    fn lock_aliases_retain_the_project_boundary() {
+        let root = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let manifest = br#"{"scripts":{"test":"echo KNOWN_LOCK_BOUNDARY"}}"#;
+        std::fs::write(root.path().join("package.json"), manifest).unwrap();
+        let inside = root.path().join("actual-lock");
+        let external = outside.path().join("external-lock");
+        std::fs::write(&inside, "KNOWN_INSIDE_LOCK").unwrap();
+        std::fs::write(&external, "KNOWN_OUTSIDE_LOCK").unwrap();
+        let alias = root.path().join("pnpm-lock.yaml");
+        std::os::unix::fs::symlink(&inside, &alias).unwrap();
+        let Discovery::Resolved(resolved) = discover(root.path(), root.path()) else {
+            panic!("a measured internal lock alias must resolve");
+        };
+        assert_eq!(resolved.manager, "pnpm");
+        std::fs::remove_file(&alias).unwrap();
+        std::os::unix::fs::symlink(&external, &alias).unwrap();
+        assert_eq!(std::fs::read(&alias).unwrap(), b"KNOWN_OUTSIDE_LOCK");
+        assert_eq!(
+            discover(root.path(), root.path()),
+            Discovery::Refused(SelectionError::OutsideProject)
+        );
+        std::fs::remove_file(&external).unwrap();
+        assert_eq!(
+            discover(root.path(), root.path()),
+            Discovery::Refused(SelectionError::UnreadableAncestor)
+        );
+    }
 
     #[cfg(unix)]
     #[test]
