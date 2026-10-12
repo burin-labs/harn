@@ -172,11 +172,19 @@ delivery. HITL answers remain in flight until the runtime acknowledges them.
 Conflicting answers return `409` while delivery is pending or after the request
 is answered. Failed delivery leaves the request pending.
 
-Native workspace roots name existing directories on the server. Discovery
+Native workspace roots name existing directories inside the configured server
+workspace. Relative roots resolve against that workspace, and registration stores
+the canonical path. Missing directories, file roots, parent components and symlinks
+outside the server workspace return `400 invalid_workspace_root`.
+Discovery
 advertises `/v1/runtime`, whose `workspace_root` reports the served directory.
 The Agents conformance runner uses that root when creating its probe workspace
 and session, including when only the idempotency category is selected. A
 logical URI such as `harn://conformance/...` does not create a native directory.
+
+Events include the resource pointer and required envelope fields in history and
+SSE streams. Their sequence is the existing durable event allocation number;
+gaps are permitted, and replay retains the same number after restart.
 
 Permission responses stay pending until the runtime accepts the answer. If
 task storage or response delivery fails, the request remains available to

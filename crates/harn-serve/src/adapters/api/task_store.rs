@@ -244,14 +244,18 @@ pub(super) fn publish_task_event(
 
 impl From<TaskControlEvent> for ApiEvent {
     fn from(event: TaskControlEvent) -> Self {
-        Self {
-            id: event.id,
-            object: "event",
-            created_at: event.created_at,
-            event: event.event,
-            session_id: Some(event.session_id),
-            task_id: Some(event.task_id),
-            payload: event.payload,
-        }
+        let fallback = ResourcePointer {
+            object: "task".into(),
+            id: event.task_id.clone(),
+        };
+        Self::new(
+            event.id,
+            event.created_at,
+            event.event,
+            Some(event.session_id),
+            Some(event.task_id),
+            event.payload,
+            fallback,
+        )
     }
 }

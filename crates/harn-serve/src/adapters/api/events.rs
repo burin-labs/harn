@@ -286,15 +286,18 @@ mod tests {
     use futures::FutureExt;
 
     fn event(id: u64) -> ApiEvent {
-        ApiEvent {
-            id: format!("event_{id:016x}"),
-            object: "event",
-            created_at: "2026-10-11T00:00:00Z".into(),
-            event: "message.created".into(),
-            session_id: Some("session-one".into()),
-            task_id: Some("task-one".into()),
-            payload: json!({}),
-        }
+        ApiEvent::new(
+            format!("event_{id:016x}"),
+            "2026-10-11T00:00:00Z".into(),
+            "message.created".into(),
+            Some("session-one".into()),
+            Some("task-one".into()),
+            json!({}),
+            ResourcePointer {
+                object: "task".into(),
+                id: "task-one".into(),
+            },
+        )
     }
 
     #[tokio::test]

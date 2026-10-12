@@ -369,10 +369,73 @@ struct ApiEvent {
     id: String,
     object: &'static str,
     created_at: String,
+    updated_at: String,
+    metadata: Value,
+    resource: ResourcePointer,
+    sequence: u64,
     event: String,
     session_id: Option<String>,
     task_id: Option<String>,
     payload: Value,
+}
+
+#[derive(Clone, Serialize)]
+struct ResourcePointer {
+    object: String,
+    id: String,
+}
+
+impl ApiEvent {
+    fn new(
+        id: String,
+        created_at: String,
+        event: String,
+        session_id: Option<String>,
+        task_id: Option<String>,
+        payload: Value,
+        fallback_resource: ResourcePointer,
+    ) -> Self {
+        let resource = payload
+            .get("object")
+            .and_then(Value::as_str)
+            .filter(|object| !object.is_empty())
+            .zip(
+                payload
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .filter(|id| !id.is_empty()),
+            )
+            .map(|(object, id)| ResourcePointer {
+                object: object.into(),
+                id: id.into(),
+            })
+            .or_else(|| {
+                task_id.as_ref().map(|id| ResourcePointer {
+                    object: "task".into(),
+                    id: id.clone(),
+                })
+            })
+            .or_else(|| {
+                session_id.as_ref().map(|id| ResourcePointer {
+                    object: "session".into(),
+                    id: id.clone(),
+                })
+            })
+            .unwrap_or(fallback_resource);
+        Self {
+            sequence: event_seq(&id),
+            id,
+            object: "event",
+            updated_at: created_at.clone(),
+            created_at,
+            metadata: json!({}),
+            resource,
+            event,
+            session_id,
+            task_id,
+            payload,
+        }
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -712,15 +775,18 @@ impl ApiState {
             }
         };
         let mut inner = self.inner.lock().expect("api state poisoned");
-        let api_event = ApiEvent {
-            id: id.clone(),
-            object: "event",
-            created_at: now_rfc3339(),
-            event: event.to_string(),
+        let api_event = ApiEvent::new(
+            id.clone(),
+            now_rfc3339(),
+            event.to_string(),
             session_id,
             task_id,
             payload,
-        };
+            ResourcePointer {
+                object: "workspace".into(),
+                id: inner.root_workspace_id.clone(),
+            },
+        );
         if let Some(session_id) = api_event.session_id.as_deref() {
             if persistence == EventPersistence::SessionMessage {
                 inner
