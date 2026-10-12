@@ -100,9 +100,9 @@ fn watchers() -> std::sync::RwLockWriteGuard<'static, Vec<(PathBuf, Arc<WatchSta
 /// One open handle's claim on watching a canonical store path.
 ///
 /// Held by the store handle itself, so the path stays watchable for exactly as
-/// long as something in this process has the store open. The last claim to
-/// drop also stops the running watcher, which closes its reader before the
-/// caller can observe the directory again.
+/// long as something in this process has the store open. A last external drop
+/// waits for orphaned readers to close. A drop on the watcher callback itself
+/// requests shutdown; its reader closes when that callback returns.
 #[must_use = "dropping the registration stops the path being watched"]
 pub(crate) struct StoreWatchRegistration {
     /// `None` for a path that is not watchable at all, such as `:memory:`.
@@ -114,24 +114,16 @@ impl Drop for StoreWatchRegistration {
         let Some(path) = self.path.take() else {
             return;
         };
-        let released = {
+        {
             let mut paths = registered();
-            match paths.iter().position(|(seen, _)| seen == &path) {
-                Some(index) => {
-                    paths[index].1 = paths[index].1.saturating_sub(1);
-                    if paths[index].1 == 0 {
-                        paths.remove(index);
-                        true
-                    } else {
-                        false
-                    }
+            if let Some(index) = paths.iter().position(|(seen, _)| seen == &path) {
+                paths[index].1 = paths[index].1.saturating_sub(1);
+                if paths[index].1 == 0 {
+                    paths.remove(index);
                 }
-                None => false,
             }
-        };
-        if released {
-            stop_watcher(&path);
         }
+        sync_watchers();
     }
 }
 
@@ -151,52 +143,31 @@ pub(super) fn register_store_path(path: &Path) -> StoreWatchRegistration {
     StoreWatchRegistration { path: Some(path) }
 }
 
-/// Start or stop watchers to match whether anyone is subscribed.
+/// Reconcile readers against the current store claims and subscriptions.
 pub(super) fn sync_watchers() {
     // Sample and act under the same registry guard. Subscription changes
     // release OBSERVERS before reconciling, so there is no inverse lock order.
     let mut running = watchers();
-    if super::session_change::subscriber_count() > 0 {
-        let paths: Vec<PathBuf> = registered().iter().map(|(path, _)| path.clone()).collect();
+    let subscribers_live = super::session_change::subscriber_count() > 0;
+    let paths: Vec<PathBuf> = registered().iter().map(|(path, _)| path.clone()).collect();
+    let stopping = running
+        .iter()
+        .filter(|(path, _)| !subscribers_live || !paths.contains(path))
+        .map(|(_, state)| {
+            state.stop.store(true, Ordering::Relaxed);
+            Arc::clone(state)
+        })
+        .collect::<Vec<_>>();
+    if subscribers_live {
         for path in paths {
             if !path.is_file() {
                 continue;
             }
             start_watcher(path, &mut running);
         }
-    } else {
-        let stopping = running
-            .iter()
-            .map(|(_, state)| {
-                state.stop.store(true, Ordering::Relaxed);
-                Arc::clone(state)
-            })
-            .collect::<Vec<_>>();
-        drop(running);
-        for state in stopping {
-            stop_and_join(state);
-        }
     }
-}
-
-/// Stop and join the watcher for one path, if it is running.
-///
-/// Joining rather than signalling and returning is the point: the reader the
-/// thread owns is what creates the SQLite sidecars, so a caller that drops its
-/// last handle and then reads the directory must not race the close.
-fn stop_watcher(path: &Path) {
-    let states = {
-        let running = watchers();
-        running
-            .iter()
-            .filter(|(seen, _)| seen == path)
-            .map(|(_, state)| {
-                state.stop.store(true, Ordering::Relaxed);
-                Arc::clone(state)
-            })
-            .collect::<Vec<_>>()
-    };
-    for state in states {
+    drop(running);
+    for state in stopping {
         stop_and_join(state);
     }
 }
@@ -266,7 +237,6 @@ fn start_watcher(path: PathBuf, running: &mut Vec<(PathBuf, Arc<WatchState>)>) {
     if running
         .iter()
         .any(|(seen, state)| seen == &path && !state.stop.load(Ordering::Relaxed))
-        || !registered().iter().any(|(seen, _)| seen == &path)
     {
         return;
     }
@@ -441,6 +411,56 @@ mod tests {
             recv_within("replacement observed the foreign title", &delivery),
             "after"
         );
+    }
+
+    #[tokio::test]
+    async fn a_reopened_store_survives_an_earlier_close_decision() {
+        let _bus = crate::stdlib::session_change::test_support::exclusive_bus().await;
+        let root = TempDir::new().unwrap();
+        let old = open_canonical_store(root.path()).unwrap();
+        let database = old.path().to_owned();
+        old.create(CreateSession {
+            id: Some("reopened".into()),
+            title: Some("before".into()),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+        drop(old);
+        assert!(!super::registered()
+            .iter()
+            .any(|(path, _)| path == &database));
+        let replacement = open_canonical_store(root.path()).unwrap();
+        let (delivered, delivery) = mpsc::channel();
+        let _subscription = subscribe_session_changes(Arc::new(Recording(delivered)));
+        assert!(super::registered()
+            .iter()
+            .any(|(path, count)| path == &database && *count == 1));
+        assert_eq!(super::watcher_count_for(&database), 1);
+        // Drive the path-stop decision an older last-handle drop can carry
+        // after releasing REGISTERED and before obtaining WATCHERS.
+        super::sync_watchers();
+        assert_eq!(
+            super::watcher_count_for(&database),
+            1,
+            "the replacement still owns this store path"
+        );
+        let foreign = rusqlite::Connection::open(&database).unwrap();
+        foreign
+            .execute(
+                "UPDATE sessions SET title = 'after' WHERE id = 'reopened'",
+                [],
+            )
+            .unwrap();
+        super::flush_watcher(&database);
+        assert_eq!(
+            recv_within("reopened store retained foreign delivery", &delivery),
+            "after"
+        );
+        drop(foreign);
+        drop(replacement);
+        assert_eq!(super::watcher_count_for(&database), 0);
+        assert!(!super::wal_sidecar_path(&database).exists());
     }
 
     /// Detection without a thread or a clock: a foreign commit is published
