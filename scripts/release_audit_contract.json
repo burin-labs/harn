@@ -78,12 +78,12 @@
           "id": "release-audit-rust-test",
           "condition": "vars.HARN_CI_DISABLE_COLOCATED_TESTS != 'true'",
           "required_env": {"HARN_LLM_CALLS_DISABLED": "1"},
-          "run": "scripts/ci/run_rust_test_lane.sh bash scripts/ci/run_workspace_tests.sh count:1/3"
+          "run": "scripts/ci/run_rust_test_lane.sh bash scripts/ci/run_workspace_tests.sh count:1/6"
         }
       ]
     },
     {
-      "name": "Rust workspace tests (2/3)",
+      "name": "Rust workspace tests (2/6)",
       "job_id": "rust-test-partitions",
       "matrix_kind": "partition-2",
       "proofs": ["rust-audit"],
@@ -97,9 +97,51 @@
       ]
     },
     {
-      "name": "Rust workspace tests (3/3)",
+      "name": "Rust workspace tests (3/6)",
       "job_id": "rust-test-partitions",
       "matrix_kind": "partition-3",
+      "proofs": ["rust-audit"],
+      "steps": [
+        {
+          "id": "release-audit-rust-test",
+          "condition": "",
+          "required_env": {"HARN_LLM_CALLS_DISABLED": "1"},
+          "run": "scripts/ci/run_rust_test_lane.sh bash scripts/ci/run_workspace_tests.sh \"$HARN_EXT_TEST_PARTITION\""
+        }
+      ]
+    },
+    {
+      "name": "Rust workspace tests (4/6)",
+      "job_id": "rust-test-partitions",
+      "matrix_kind": "partition-4",
+      "proofs": ["rust-audit"],
+      "steps": [
+        {
+          "id": "release-audit-rust-test",
+          "condition": "",
+          "required_env": {"HARN_LLM_CALLS_DISABLED": "1"},
+          "run": "scripts/ci/run_rust_test_lane.sh bash scripts/ci/run_workspace_tests.sh \"$HARN_EXT_TEST_PARTITION\""
+        }
+      ]
+    },
+    {
+      "name": "Rust workspace tests (5/6)",
+      "job_id": "rust-test-partitions",
+      "matrix_kind": "partition-5",
+      "proofs": ["rust-audit"],
+      "steps": [
+        {
+          "id": "release-audit-rust-test",
+          "condition": "",
+          "required_env": {"HARN_LLM_CALLS_DISABLED": "1"},
+          "run": "scripts/ci/run_rust_test_lane.sh bash scripts/ci/run_workspace_tests.sh \"$HARN_EXT_TEST_PARTITION\""
+        }
+      ]
+    },
+    {
+      "name": "Rust workspace tests (6/6)",
+      "job_id": "rust-test-partitions",
+      "matrix_kind": "partition-6",
       "proofs": ["rust-audit"],
       "steps": [
         {

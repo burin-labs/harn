@@ -2,7 +2,7 @@
 # Census the eligible suite before allowing an empty individual partition.
 set -euo pipefail
 partition=${1:?partition or all required}
-[[ "$partition" == all || "$partition" =~ ^count:[1-3]/3$ ]] || { echo 'Invalid workspace test partition' >&2; exit 1; }
+[[ "$partition" == all || "$partition" =~ ^count:[1-6]/6$ ]] || { echo 'Invalid workspace test partition' >&2; exit 1; }
 script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 host_bound_filter=$(bash "$script_dir/host_bound_rust_test_filter.sh")
 args=(--profile ci -E "not (${host_bound_filter})")

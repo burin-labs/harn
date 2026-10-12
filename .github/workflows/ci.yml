@@ -1146,8 +1146,8 @@ jobs:
           ./scripts/ci/rust_artifact.sh build-tests
           "$RUNNER_TEMP/harn-workspace-tests.tar.zst"
           "$GITHUB_SHA"
-      # The first of three partitions; `rust-test-partitions` runs the other
-      # two on their own runners at the same time (#9435).
+      # The first of six partitions; `rust-test-partitions` runs the other
+      # five on their own runners at the same time (#9435, #9649).
       - name: Run Rust workspace tests
         timeout-minutes: 26
         id: release-audit-rust-test
@@ -1158,7 +1158,7 @@ jobs:
           POST_MERGE_TIER_ACTIVE: ${{ needs.changes.outputs.post_merge_tier }}
         run: >-
           scripts/ci/run_rust_test_lane.sh
-          bash scripts/ci/run_workspace_tests.sh count:1/3
+          bash scripts/ci/run_workspace_tests.sh count:1/6
       - name: Preserve workspace test inventory
         if: always() && steps.release-audit-rust-test.outcome != 'skipped' && steps.release-audit-rust-test.outcome != ''
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -1199,15 +1199,17 @@ jobs:
   # The rest of the workspace suite, beside the producer instead of after it.
   # The suite is about 2,400 test-seconds, which on one 4 vCPU runner was
   # 11 minutes run after a 10-minute compile (job 112105424497). Each leg here
-  # compiles the same graph from the same restored cache and runs its share,
-  # so the three partitions finish together and the lane loses two thirds of
-  # its test phase. The legs are GitHub's free standard runner (public
-  # repository, harn#9370) and save nothing, so they cannot evict the
-  # producer's cache. Under the co-location kill switch the archive-mode
-  # fallback runs the whole suite and these skip.
+  # compiles the same graph from the same restored cache and runs its share.
+  # The producer also builds the security archive (about 10 minutes), so its
+  # share sets the lane: at three partitions it ran about 250 seconds of tests
+  # after that build and finished last (run 38238361365). Six partitions cut
+  # each share to about 110 seconds; the extra legs cost compile time only on
+  # GitHub's free standard runner (public repository, harn#9370), which saves
+  # nothing and so cannot evict the producer's cache. Under the co-location
+  # kill switch the archive-mode fallback runs the whole suite and these skip.
   #
   # Ceiling: 6 setup + 24 compile (the security archive's budget, the same
-  # graph) + 10 for a third of the suite.
+  # graph) + 10 for a share of the suite.
   rust-test-partitions:
     name: ${{ matrix.name }}
     needs: [changes]
@@ -1223,11 +1225,20 @@ jobs:
       matrix:
         include:
           - kind: partition-2
-            name: Rust workspace tests (2/3)
-            partition: count:2/3
+            name: Rust workspace tests (2/6)
+            partition: count:2/6
           - kind: partition-3
-            name: Rust workspace tests (3/3)
-            partition: count:3/3
+            name: Rust workspace tests (3/6)
+            partition: count:3/6
+          - kind: partition-4
+            name: Rust workspace tests (4/6)
+            partition: count:4/6
+          - kind: partition-5
+            name: Rust workspace tests (5/6)
+            partition: count:5/6
+          - kind: partition-6
+            name: Rust workspace tests (6/6)
+            partition: count:6/6
     env:
       # Match rust-check-inputs, so the workspace-tests cache key restores.
       CARGO_PROFILE_DEV_DEBUG: line-tables-only
