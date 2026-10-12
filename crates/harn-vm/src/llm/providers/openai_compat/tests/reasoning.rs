@@ -26,6 +26,28 @@ fn cerebras_qwen_efforts_reach_the_wire_without_native_qwen_toggles() {
             assert!(body.get(unsupported).is_none(), "{unsupported}");
         }
     }
+    let options = crate::value::DictMap::from_iter([(
+        crate::value::intern_key("reasoning_policy"),
+        crate::value::VmValue::string("off"),
+    )]);
+    for (model, expected) in [("qwen-3.8-27b", "none"), ("gpt-oss-120b", "low")] {
+        let caps = crate::llm::capabilities::lookup("cerebras", model);
+        let applied = crate::llm::reasoning_policy::resolve_for_llm_call(
+            Some(&options),
+            "cerebras",
+            model,
+            &caps,
+        )
+        .expect("valid off policy")
+        .expect("reasoning policy applied");
+        let mut payload = base_request_payload();
+        payload.provider = "cerebras".to_string();
+        payload.model = model.to_string();
+        payload.thinking = applied.thinking;
+        let mut body = OpenAiCompatibleProvider::build_request_body(&payload);
+        provider.transform_request(&mut body);
+        assert_eq!(body["reasoning_effort"], expected, "{model}");
+    }
     let mut payload = base_request_payload();
     payload.provider = "cerebras".to_string();
     payload.model = "gpt-oss-120b".to_string();

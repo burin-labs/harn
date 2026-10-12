@@ -246,6 +246,7 @@ fn cerebras_qwen_38_preserves_vision_and_its_measured_effort_ladder() {
     assert_eq!(caps.thinking_modes, vec!["enabled", "effort"]);
     assert!(caps.reasoning_effort_supported);
     assert!(caps.reasoning_none_supported);
+    assert!(!caps.reasoning_disable_supported);
     assert_eq!(
         caps.reasoning_effort_levels,
         vec!["none", "low", "medium", "high"]
