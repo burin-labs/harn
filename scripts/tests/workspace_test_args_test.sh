@@ -59,12 +59,25 @@ SH
 chmod +x "$scratch/bin/cargo-nextest"
 export PATH="$scratch/bin:$PATH" RAN_TESTS="$scratch/ran" LISTED_TESTS="$scratch/listed"
 export RUNNER_TEMP="$scratch"
-GITHUB_EVENT_NAME=push bash "$root/scripts/ci/run_workspace_tests.sh" count:6/6 > "$scratch/log"
+GITHUB_EVENT_NAME=push bash "$root/scripts/ci/run_workspace_tests.sh" vm:3/3 > "$scratch/log"
 jq -e '.["rust-suites"].fixture.testcases.case["filter-match"].status == "matches"' "$RUNNER_TEMP/harn-nextest-inventory.json" > /dev/null
 grep -q 'eligible=1' "$scratch/log"
-grep -q -- '--partition count:6/6 --no-tests pass' "$scratch/ran"
+grep -q -- '--locked -p harn-vm --partition count:3/3 --no-tests pass' "$scratch/ran"
+GITHUB_EVENT_NAME=push bash "$root/scripts/ci/run_workspace_tests.sh" rest:1/3 > "$scratch/log"
+grep -q -- '--locked --workspace --exclude harn-vm --partition count:1/3 --no-tests pass' "$scratch/ran"
+# An affected selection without harn-vm leaves the vm group nothing to build.
+jq -n --arg base "$base" '{pull_request: {base: {sha: $base}}}' > "$scratch/event"
 rm "$scratch/ran"
-if MATCH_STATUS=mismatch GITHUB_EVENT_NAME=push bash "$root/scripts/ci/run_workspace_tests.sh" count:6/6 > "$scratch/log" 2>&1; then
+GITHUB_EVENT_NAME=pull_request POST_MERGE_TIER_ACTIVE=true bash "$root/scripts/ci/run_workspace_tests.sh" vm:1/3 > "$scratch/log"
+grep -q 'group=vm selects nothing' "$scratch/log"
+[[ ! -e "$scratch/ran" ]]
+GITHUB_EVENT_NAME=pull_request POST_MERGE_TIER_ACTIVE=true bash "$root/scripts/ci/run_workspace_tests.sh" rest:2/3 > "$scratch/log"
+grep -q -- '--locked -p consumer -p leaf --partition count:2/3' "$scratch/ran"
+if bash "$root/scripts/ci/run_workspace_tests.sh" count:1/3 > "$scratch/log" 2>&1; then
+  echo 'An ungrouped partition was accepted' >&2; exit 1
+fi
+rm "$scratch/ran"
+if MATCH_STATUS=mismatch GITHUB_EVENT_NAME=push bash "$root/scripts/ci/run_workspace_tests.sh" vm:3/3 > "$scratch/log" 2>&1; then
   echo 'An empty eligible suite was accepted' >&2; exit 1
 fi
 [[ ! -e "$scratch/ran" ]]
