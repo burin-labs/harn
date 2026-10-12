@@ -1,7 +1,7 @@
 //! Package-script command selection shared by project scanner projections.
 
-use std::collections::BTreeMap;
-use std::path::Path;
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::{Path, PathBuf};
 
 use serde_json::{Map, Value};
 
@@ -107,25 +107,30 @@ pub fn discover(project_root: &Path, manifest_dir: &Path) -> Discovery {
     if !manifest_dir.starts_with(&project_root) {
         return Discovery::Refused(SelectionError::OutsideProject);
     }
-    let bytes = match read_manifest_bytes(&project_root, &manifest_dir) {
-        Ok(Some(bytes)) => bytes,
+    let physical = match read_manifest(&project_root, &manifest_dir) {
+        Ok(Some(physical)) => physical,
         Ok(None) => return Discovery::Absent,
         Err(error) => return Discovery::Refused(error),
     };
-    let manifest: Map<String, Value> = match serde_json::from_slice(&bytes) {
+    let manifest: Map<String, Value> = match serde_json::from_slice(&physical.bytes) {
         Ok(manifest) => manifest,
         Err(_) => return Discovery::Refused(SelectionError::InvalidManifest),
     };
-    match resolve_scripts(&project_root, &manifest_dir, &manifest) {
+    match resolve_scripts(&project_root, &physical.directory, &manifest) {
         Ok(scripts) => Discovery::Resolved(scripts),
         Err(error) => Discovery::Refused(error),
     }
 }
 
-fn read_manifest_bytes(
+struct PhysicalManifest {
+    directory: PathBuf,
+    bytes: Vec<u8>,
+}
+
+fn read_manifest(
     project_root: &Path,
     directory: &Path,
-) -> Result<Option<Vec<u8>>, SelectionError> {
+) -> Result<Option<PhysicalManifest>, SelectionError> {
     let path = match directory.join("package.json").canonicalize() {
         Ok(path) => path,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
@@ -134,9 +139,12 @@ fn read_manifest_bytes(
     if !path.starts_with(project_root) {
         return Err(SelectionError::OutsideProject);
     }
-    std::fs::read(path)
-        .map(Some)
-        .map_err(|_| SelectionError::UnreadableManifest)
+    let directory = path
+        .parent()
+        .ok_or(SelectionError::UnreadableManifest)?
+        .to_path_buf();
+    let bytes = std::fs::read(path).map_err(|_| SelectionError::UnreadableManifest)?;
+    Ok(Some(PhysicalManifest { directory, bytes }))
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -233,9 +241,13 @@ fn select_manager(
     if !manifest_dir.starts_with(project_root) {
         return Err(SelectionError::OutsideProject);
     }
-    let mut current = manifest_dir;
+    let mut current = manifest_dir.to_path_buf();
     let mut value = manifest.clone();
+    let mut visited = BTreeSet::new();
     loop {
+        if !visited.insert(current.clone()) {
+            return Err(SelectionError::InvalidAncestor);
+        }
         let mut selected = declared_manager(&value)?;
         for (file, manager) in LOCKFILES {
             match current.join(file).try_exists() {
@@ -255,10 +267,15 @@ fn select_manager(
         if current == project_root {
             return Ok(DEFAULT_MANAGER);
         }
-        current = current.parent().ok_or(SelectionError::OutsideProject)?;
-        value = match read_manifest_bytes(project_root, current) {
-            Ok(Some(bytes)) => {
-                serde_json::from_slice(&bytes).map_err(|_| SelectionError::InvalidAncestor)?
+        current = current
+            .parent()
+            .ok_or(SelectionError::OutsideProject)?
+            .to_path_buf();
+        value = match read_manifest(project_root, &current) {
+            Ok(Some(physical)) => {
+                current = physical.directory;
+                serde_json::from_slice(&physical.bytes)
+                    .map_err(|_| SelectionError::InvalidAncestor)?
             }
             Ok(None) => Map::new(),
             Err(SelectionError::UnreadableManifest) => {
@@ -273,6 +290,29 @@ fn select_manager(
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[cfg(unix)]
+    #[test]
+    fn inherited_manifest_alias_cycle_is_refused() {
+        let root = tempfile::tempdir().unwrap();
+        let package = root.path().join("package");
+        std::fs::create_dir(&package).unwrap();
+        let bytes = br#"{"scripts":{"test":"echo KNOWN_ALIAS_CYCLE"}}"#;
+        std::fs::write(package.join("package.json"), bytes).unwrap();
+        std::os::unix::fs::symlink(
+            package.join("package.json"),
+            root.path().join("package.json"),
+        )
+        .unwrap();
+        assert_eq!(
+            std::fs::read(root.path().join("package.json")).unwrap(),
+            bytes
+        );
+        assert_eq!(
+            discover(root.path(), &package),
+            Discovery::Refused(SelectionError::InvalidAncestor)
+        );
+    }
 
     #[test]
     fn declarations_select_their_script_runner() {

@@ -160,7 +160,10 @@ manifest with no manager evidence uses npm.
 Explicit declarations require an exact semantic version, including valid
 prerelease or build metadata. Ranges, tags and malformed versions are refused.
 Manifest files and inherited manifest evidence must physically remain within
-the scan root; legitimate file aliases within that root are accepted.
+the scan root; legitimate file aliases within that root are accepted. Manager
+lockfiles and inherited evidence are resolved from the physical manifest's
+parent, so an alias cannot detach scripts from their package manager. Cyclic
+inherited aliases are refused as invalid ancestor evidence.
 
 Supported managers are npm, pnpm, yarn and bun. npm and pnpm invoke the test
 lifecycle as `npm test` and `pnpm test`; their other scripts, and yarn and bun

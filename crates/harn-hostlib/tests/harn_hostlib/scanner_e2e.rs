@@ -65,6 +65,28 @@ fn package_script_aliases_stay_within_physical_project() {
         project.join("packages/linked-manifest/package.json"),
     )
     .unwrap();
+    write(
+        &project,
+        "physical-package/package.json",
+        r#"{"scripts":{"test":"echo KNOWN_PHYSICAL_LOCK"}}"#,
+    );
+    write(&project, "physical-package/yarn.lock", "");
+    write(&project, "packages/linked-lock/index.js", "// known source");
+    std::os::unix::fs::symlink(
+        project.join("physical-package/package.json"),
+        project.join("packages/linked-lock/package.json"),
+    )
+    .unwrap();
+    write(
+        &project,
+        "packages/inherited-lock/package.json",
+        r#"{"scripts":{"test":"echo KNOWN_INHERITED_LOCK"}}"#,
+    );
+    std::os::unix::fs::symlink(
+        project.join("physical-package/package.json"),
+        project.join("packages/package.json"),
+    )
+    .unwrap();
     let initial_alias = fixture.path().join("initial-alias");
     std::os::unix::fs::symlink(&project, &initial_alias).unwrap();
 
@@ -87,6 +109,14 @@ fn package_script_aliases_stay_within_physical_project() {
             .get("cd packages/linked-manifest && npm test")
             .unwrap()
             .contains("KNOWN_OWNED"));
+        assert!(commands
+            .get("cd packages/linked-lock && yarn run test")
+            .unwrap()
+            .contains("KNOWN_PHYSICAL_LOCK"));
+        assert!(commands
+            .get("cd packages/inherited-lock && yarn run test")
+            .unwrap()
+            .contains("KNOWN_INHERITED_LOCK"));
         assert!(!commands
             .values()
             .any(|label| label.contains("KNOWN_OUTSIDE")));
@@ -96,6 +126,7 @@ fn package_script_aliases_stay_within_physical_project() {
         "packages/inherited/package.json",
         r#"{"scripts":{"test":"echo KNOWN_INHERITED"}}"#,
     );
+    fs::remove_file(project.join("packages/package.json")).unwrap();
     fs::remove_file(project.join("package.json")).unwrap();
     std::os::unix::fs::symlink(outside.join("package.json"), project.join("package.json")).unwrap();
     let result = scan_project(
