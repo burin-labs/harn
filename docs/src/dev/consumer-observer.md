@@ -151,8 +151,9 @@ failure requires fresh completed child FAILURE. Execution failure alone leaves
 the product decision unreported.
 
 `consumer-observer-observe.mjs` reads that decision through the same custody
-owner used by cleanup. Its outputs are `verdict` (`pass`, `fail`, `pending` or `refused`)
-and a closed `reading` with `discovered`, `owned`, `pending`, `refused` and
+owner used by cleanup. Its release `verdict` output exists only for `pass` or
+`fail`. The separate `observation_outcome` also reports `pending`, `refused` or
+`execution_failed`. A closed `reading` contains `discovered`, `owned`, `pending`, `refused`, `execution` and
 `product`. Missing or ambiguous children and missing product receipts have
 `product=null`; this is an unreported decision, not measured zero checks.
 A pass requires exactly one discovered and authenticated child, a complete
@@ -160,3 +161,24 @@ private receipt and fresh completed SUCCESS. The returned product counts come
 from the reached decision, never a private workflow job table. Final complete
 discovery and fresh child reads narrow the race; GitHub provides no atomic
 snapshot against a dispatch or rerun arriving after the final read.
+
+`consumer-observer-read-decision.mjs` selects the original issued public context
+without granting new ownership. It accepts a reached pass or failure only after
+refreshing the parent identity, state and attempt, selected source eligibility,
+complete child census and child attempt. A completed parent must retain its
+conclusion; a live parent must remain live. The caller specifies whether the
+consumer must still be on its current default source. An absent product receipt
+does not authorize publication or retirement, even when execution failed.
+
+`consumer-observer-read-parent.mjs` discovers an issued context by its public
+parent and role. Its default operation requires a reached pass for historical
+reuse; `--decision` returns a reached pass or failure through the same reader.
+Both return `owned=false`. Reuse requires the current default consumer source
+and retains the original context, rather than issuing another declaration.
+
+The bounded waiter keeps the original dispatch start across credential renewal
+windows. Window expiry can continue observation; aggregate expiry cannot become
+a product pass or failure. Execution failure with no reached product decision
+stops waiting through `execution_failed` and leaves the release verdict absent.
+The dispatch, decision and waiter commands remain inert until their owning
+workflow callers are integrated and the operational lifecycle is qualified.

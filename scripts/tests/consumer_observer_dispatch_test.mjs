@@ -27,7 +27,7 @@ test('the actual dispatch entrypoint requires issued custody and a fresh live pa
     fs.writeFileSync(preload,`import fs from 'node:fs';
       const f=JSON.parse(fs.readFileSync(${JSON.stringify(fixture)},'utf8'));
       globalThis.fetch=async(url,options={})=>{
-        if(options.headers?.Authorization!==(options.method==='POST'?'Bearer fixture-consumer':'Bearer fixture-parent'))throw new Error('authority-scope-mismatch');
+        if(options.headers?.Authorization!==((options.method==='POST'||url.includes('/repos/acme/'))?'Bearer fixture-consumer':'Bearer fixture-parent'))throw new Error('authority-scope-mismatch');
         fs.appendFileSync(${JSON.stringify(calls)},JSON.stringify({url,method:options.method??'GET',body:options.body})+'\\n');
         const endpoint=new URL(url),p=endpoint.pathname;
         if(options.method==='POST'){
@@ -40,6 +40,9 @@ test('the actual dispatch entrypoint requires issued custody and a fresh live pa
         }
         if(p.endsWith('/501/zip'))return {ok:true,arrayBuffer:async()=>fs.readFileSync(${JSON.stringify(archive)})};
         if(p.endsWith('/42'))return {ok:true,json:async()=>f.parent};
+        if(p==='/repos/acme/widget-host')return {ok:true,json:async()=>({full_name:'acme/widget-host',default_branch:f.branch??'main'})};
+        if(p.endsWith('/commits/main'))return {ok:true,json:async()=>({sha:'c'.repeat(40)})};
+        if(p.endsWith('/pulls/7'))return {ok:true,json:async()=>f.pull};
         throw new Error('unexpected-private-child-read');
       };`);
     const entry=fileURLToPath(new URL('../ci/consumer-observer-dispatch.mjs',import.meta.url));
@@ -49,8 +52,8 @@ test('the actual dispatch entrypoint requires issued custody and a fresh live pa
         NODE_OPTIONS:`--import=${preload}`,GH_TOKEN:'fixture-consumer',PARENT_READ_TOKEN:'fixture-parent',OBSERVER_CONTEXT:JSON.stringify(context),
         GITHUB_REPOSITORY:context.parent_repository,GITHUB_RUN_ID:context.parent_run_id,
         GITHUB_RUN_ATTEMPT:String(context.parent_run_attempt),GITHUB_SHA:context.parent_head_sha,
-        CANARY_REPOSITORY:'acme/widget-host',CANARY_WORKFLOW:'rehearsal.yml',CANARY_REF:'main',CANARY_TARGET:'v0.10.165',...envChange}});
-      assert.doesNotMatch(run.stdout+run.stderr,/widget-host|run_id|actions\/runs|fixture/);
+        CANARY_REPOSITORY:'acme/widget-host',CANARY_WORKFLOW:'rehearsal.yml',CANARY_TARGET:'v0.10.165',...envChange}});
+      assert.doesNotMatch(run.stdout+run.stderr,/widget-host|paired-work|run_id|actions\/runs|fixture/);
       return {run,calls:fs.readFileSync(calls,'utf8').trim().split('\n').filter(Boolean).map(JSON.parse)};
     };
     const good=execute();
@@ -61,13 +64,26 @@ test('the actual dispatch entrypoint requires issued custody and a fresh live pa
     assert.deepEqual(JSON.parse(dispatched.inputs.observer),context);
     assert.deepEqual({...dispatched,inputs:{...dispatched.inputs,observer:context}},
       {ref:'main',inputs:{target:'v0.10.165',source_revision:context.source_revision,legs:'clean',observer:context}});
+    const forgedRef=execute({},{CANARY_REF:'unreviewed-ref'});
+    assert.equal(forgedRef.run.status,0);
+    assert.equal(JSON.parse(forgedRef.calls.find(c=>c.method==='POST').body).ref,'main');
+    const paired={state:'open',head:{repo:{full_name:'acme/widget-host'},ref:'paired-work',sha:'c'.repeat(40)}};
+    const pairedDispatch=execute({pull:paired},{CANARY_PAIRED_PULL:'7'});
+    assert.equal(pairedDispatch.run.status,0,pairedDispatch.run.stderr);
+    assert.equal(JSON.parse(pairedDispatch.calls.find(c=>c.method==='POST').body).ref,'paired-work');
+    for(const pull of [{...paired,state:'closed'},
+      {...paired,head:{...paired.head,repo:{full_name:'foreign/fork'}}},
+      {...paired,head:{...paired.head,sha:'unknown'}}]){
+      const badPair=execute({pull},{CANARY_PAIRED_PULL:'7'});
+      assert.equal(badPair.run.status,1);assert.equal(badPair.calls.filter(c=>c.method==='POST').length,0);
+    }
     for(const change of [{missing:true},{parent:{...parent,status:'completed',conclusion:'success'}},
       {parent:{...parent,run_attempt:3}},{parent:{...parent,head_sha:'c'.repeat(40)}},
       {parent:{...parent,path:'.github/workflows/untrusted.yml'}}]){
       const bad=execute(change);assert.equal(bad.run.status,1);assert.equal(bad.calls.filter(c=>c.method==='POST').length,0);
     }
     for(const envChange of [{CANARY_TARGET:'dev'}, {CANARY_WORKFLOW:'../rehearsal.yml'},
-      {CANARY_REF:'main\nother'},{CANARY_REPOSITORY:'acme/'},{CANARY_REPOSITORY:'acme/widget-host?foreign=1'},
+      {CANARY_PAIRED_PULL:'bad'},{CANARY_REPOSITORY:'acme/'},{CANARY_REPOSITORY:'acme/widget-host?foreign=1'},
       {GITHUB_RUN_ID:'43'},{GITHUB_RUN_ATTEMPT:'3'},{GITHUB_SHA:'d'.repeat(40)},
       {GITHUB_REPOSITORY:'acme/widget-host'},{GH_TOKEN:''},{PARENT_READ_TOKEN:''},
       {OBSERVER_CONTEXT:JSON.stringify({...context,dispatch_nonce:'01234567-89ab-4cde-8fab-0123456789ac'})}]){

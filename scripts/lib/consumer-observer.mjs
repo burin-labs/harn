@@ -491,7 +491,21 @@ export async function dispatchObserverConsumer(parentToken, consumerToken, conte
   return {dispatched:true};
 }
 
-async function githubDefaultSource(token, repository, fetchRecord) {
+/** Pairing is declared in public source; private branch identity stays inside
+ * the authenticated source selector and dispatcher. */
+export function consumerPairing(text) {
+  const lines=String(text??'').split(/\r?\n/).filter(line=>/^\s*Pairs-with:/.test(line));
+  const pairs=new Set();
+  for(const line of lines){
+    const match=/^\s*Pairs-with:\s*consumer#([1-9][0-9]*)\s*$/.exec(line);
+    if(!match) refuse('consumer_pairing_invalid');
+    pairs.add(match[1]);
+  }
+  if(pairs.size>1) refuse('consumer_pairing_ambiguous');
+  return pairs.size===1?[...pairs][0]:null;
+}
+
+export async function githubConsumerSource(token, repository, pairedPull = null, fetchRecord = fetch) {
   const read=async suffix=>{
     if (!token || !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository)) refuse('read_authority_or_identity_missing');
     const response=await fetchRecord(`https://api.github.com/repos/${repository}${suffix}`, {
@@ -500,6 +514,15 @@ async function githubDefaultSource(token, repository, fetchRecord) {
     if (!response.ok) refuse('consumer_source_read_refused');
     return response.json();
   };
+  if(pairedPull!==null){
+    if(typeof pairedPull!=='string'||!id.test(pairedPull)) refuse('consumer_pairing_invalid');
+    const pull=await read(`/pulls/${pairedPull}`);
+    if(pull?.state!=='open'||pull.head?.repo?.full_name!==repository
+      ||typeof pull.head?.ref!=='string'||!pull.head.ref||!sha.test(pull.head?.sha??'')){
+      refuse('consumer_pairing_unqualified');
+    }
+    return {headSha:pull.head.sha,branch:pull.head.ref};
+  }
   const repositoryRecord=await read('');
   if(repositoryRecord?.full_name!==repository || typeof repositoryRecord.default_branch!=='string'
     || !repositoryRecord.default_branch) refuse('consumer_source_unmeasured');
@@ -511,7 +534,7 @@ async function githubDefaultSource(token, repository, fetchRecord) {
 /** A public parent selector discovers custody; it does not grant it. Reuse
  * returns only the original authenticated public context and reached decision,
  * with no new declaration or cancellation ownership. */
-export async function readConsumerParentProduct(token, selection, expected, fetchRecord = fetch, extract = artifactJsonFromZip) {
+export async function readConsumerParentDecision(token, selection, expected, fetchRecord = fetch, extract = artifactJsonFromZip) {
   if(!selection || Object.keys(selection).sort().join(',')!=='parentRunId,requireCurrentDefault,role,sourceRevision'
     || typeof selection.parentRunId!=='string' || !id.test(selection.parentRunId)
     || !Object.hasOwn(observerParentWorkflows,selection.role) || !sha.test(selection.sourceRevision)
@@ -524,21 +547,59 @@ export async function readConsumerParentProduct(token, selection, expected, fetc
   const context=declarations[0];
   qualifyObserverParent(context,parent);
   if(context.source_revision!==selection.sourceRevision) refuse('parent_selection_source_unproven');
-  const source=selection.requireCurrentDefault?await githubDefaultSource(token,expected.repository,fetchRecord):{};
+  const source=selection.requireCurrentDefault?await githubConsumerSource(token,expected.repository,null,fetchRecord):{};
   const reading=await readConsumerProduct(token,context,{...expected,...source},fetchRecord,extract,async()=>{
     const finalParent=await githubRecord(token,parentRepository,selection.parentRunId,fetchRecord);
     qualifyObserverParent(context,finalParent);
     if(finalParent.status!=='completed' || finalParent.conclusion!==parent.conclusion) refuse('parent_selection_unproven');
     if(selection.requireCurrentDefault){
-      const finalSource=await githubDefaultSource(token,expected.repository,fetchRecord);
+      const finalSource=await githubConsumerSource(token,expected.repository,null,fetchRecord);
       if(finalSource.headSha!==source.headSha || finalSource.branch!==source.branch) refuse('child_source_no_longer_eligible');
     }
   });
   if(reading.discovered!==1 || reading.owned!==1 || reading.pending!==0 || reading.refused!==0
-    || reading.product?.verdict!=='pass'){
+    || reading.product===null){
     refuse('product_decision_unmeasured');
   }
   return {context,reading,owned:false};
+}
+
+/** Historical reuse accepts only a reached pass. Retirement and publication
+ * read the same authenticated decision owner rather than inspecting child logs. */
+export async function readConsumerParentProduct(token, selection, expected, fetchRecord = fetch, extract = artifactJsonFromZip) {
+  const result=await readConsumerParentDecision(token,selection,expected,fetchRecord,extract);
+  if(result.reading.product.verdict!=='pass') refuse('product_decision_unmeasured');
+  return result;
+}
+
+/** A supplied public context selects its already-issued custody. It grants no
+ * new dispatch or cleanup ownership. Both live and completed parents require
+ * final identity and source eligibility before accepting a reached decision. */
+export async function readConsumerContextDecision(token, context, expected, fetchRecord = fetch, extract = artifactJsonFromZip) {
+  const observer=observerContext(context);
+  if(typeof expected.requireCurrentDefault!=='boolean') refuse('parent_selection_unproven');
+  const parent=await githubRecord(token,observer.parent_repository,observer.parent_run_id,fetchRecord);
+  qualifyObserverParent(observer,parent);
+  const completed=parent.status==='completed';
+  if(completed?!completedConclusions.has(parent.conclusion):!liveStates.has(parent.status)){
+    refuse('parent_state_unmeasured');
+  }
+  const source=expected.requireCurrentDefault?await githubConsumerSource(token,expected.repository,null,fetchRecord):{};
+  const reading=await readConsumerProduct(token,observer,{...expected,...source},fetchRecord,extract,async()=>{
+    const finalParent=await githubRecord(token,observer.parent_repository,observer.parent_run_id,fetchRecord);
+    qualifyObserverParent(observer,finalParent);
+    if(completed?(finalParent.status!=='completed'||finalParent.conclusion!==parent.conclusion):!liveStates.has(finalParent.status)){
+      refuse('parent_state_changed');
+    }
+    if(expected.requireCurrentDefault){
+      const finalSource=await githubConsumerSource(token,expected.repository,null,fetchRecord);
+      if(finalSource.headSha!==source.headSha||finalSource.branch!==source.branch) refuse('child_source_no_longer_eligible');
+    }
+  });
+  if(reading.discovered!==1||reading.owned!==1||reading.pending!==0||reading.refused!==0||reading.product===null){
+    refuse('product_decision_unmeasured');
+  }
+  return {context:observer,reading,owned:false};
 }
 
 /** Authenticated private custody is shared by observation and cleanup. */
@@ -560,7 +621,24 @@ async function readOwnedChild(token, observer, parent, expected, candidate, decl
  * zero product counts. The final reads narrow, but cannot atomically eliminate,
  * a dispatch or rerun racing the observation. */
 export async function observeConsumerProduct(token, context, expected, fetchRecord = fetch, extract = artifactJsonFromZip) {
-  return readConsumerProduct(token,context,expected,fetchRecord,extract);
+  const observer=observerContext(context);
+  const source=await githubConsumerSource(token,expected.repository,expected.pairedPull??null,fetchRecord);
+  return readConsumerProduct(token,observer,{...expected,...source},fetchRecord,extract,async()=>{
+    const parent=await githubRecord(token,observer.parent_repository,observer.parent_run_id,fetchRecord);
+    qualifyObserverParent(observer,parent);
+    if(!liveStates.has(parent.status)) refuse('parent_no_longer_live');
+    const finalSource=await githubConsumerSource(token,expected.repository,expected.pairedPull??null,fetchRecord);
+    if(finalSource.branch!==source.branch||finalSource.headSha!==source.headSha) refuse('child_source_no_longer_eligible');
+  });
+}
+
+/** Project only this owner's authenticated reading. Execution failure stops
+ * waiting, but remains separate from a reached product failure. */
+export function consumerProductVerdict(reading) {
+  if (reading.refused > 0) return 'refused';
+  if (reading.discovered !== 1 || reading.owned !== 1 || reading.pending !== 0) return 'pending';
+  if (reading.product !== null) return reading.product.verdict;
+  return reading.execution !== null && reading.execution !== 'success' ? 'execution_failed' : 'pending';
 }
 
 // Reuse's eligibility reads run before the final child census and status read,
@@ -575,8 +653,8 @@ async function readConsumerProduct(token, context, expected, fetchRecord, extrac
   const runs = await githubChildCensus(token, expected.repository, expected.workflow,
     parent.created_at, fetchRecord);
   const matching = runs.filter(run => run.display_title === observerRunName(observer));
-  /** @type {{discovered:number, owned:number, pending:number, refused:number, product:ProductDecision|null}} */
-  const result = {discovered:matching.length, owned:0, pending:1, refused:0, product:null};
+  /** @type {{discovered:number, owned:number, pending:number, refused:number, execution:string|null, product:ProductDecision|null}} */
+  const result = {discovered:matching.length, owned:0, pending:1, refused:0, execution:null, product:null};
   if (matching.length !== 1) return result;
   try {
     const candidate = matching[0];
@@ -584,11 +662,12 @@ async function readConsumerProduct(token, context, expected, fetchRecord, extrac
     if (!owned) return result;
     result.owned = 1;
     if (owned.child.status !== 'completed') return result;
-    if (!['success','failure'].includes(owned.child.conclusion)) refuse('product_run_conclusion_unproven');
     const name = observerTerminalName(observer);
     const artifacts = await githubArtifactCensus(token, expected.repository, String(candidate.id), fetchRecord, name);
-    if (artifacts.length !== 1 || artifacts[0].name !== name) return result;
-    const terminal = await githubArtifactJson(token, expected.repository, artifacts[0], {
+    if (artifacts.length > 1 || (artifacts.length === 1 && artifacts[0].name !== name)) {
+      refuse('terminal_receipt_ambiguous');
+    }
+    const terminal = artifacts.length === 0 ? null : await githubArtifactJson(token, expected.repository, artifacts[0], {
       runId:String(candidate.id), headSha:candidate.head_sha, name,
       filename:`consumer-observer-${observer.dispatch_nonce}.json`,
     }, fetchRecord, extract);
@@ -599,6 +678,14 @@ async function readConsumerProduct(token, context, expected, fetchRecord, extrac
     result.discovered = finalMatching.length;
     if (finalMatching.length !== 1 || finalMatching[0].id !== candidate.id) return result;
     const finalChild = await githubRecord(token, expected.repository, String(candidate.id), fetchRecord);
+    // Missing product evidence still requires fresh custody and a complete
+    // final discovery read before an execution failure can end observation.
+    qualifyOwnedChild(owned.receipt, observer, parent, finalChild, expected, declaration);
+    result.execution = finalChild.status === 'completed' ? finalChild.conclusion : null;
+    if (terminal === null) {
+      if (result.execution !== null && result.execution !== 'success') result.pending = 0;
+      return result;
+    }
     const qualified = qualifyTerminalReceipt(terminal, observer, parent, finalChild, expected, declaration);
     // Both artifacts must describe the exact same independently proven custody.
     if (JSON.stringify(qualified.child) !== JSON.stringify(owned.receipt.child)) refuse('terminal_custody_unproven');

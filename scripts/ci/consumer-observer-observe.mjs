@@ -1,5 +1,5 @@
 import fs from 'node:fs';
-import {observeConsumerProduct, observerContext} from '../lib/consumer-observer.mjs';
+import {consumerProductVerdict, observeConsumerProduct, observerContext} from '../lib/consumer-observer.mjs';
 
 async function main() {
   const env = process.env;
@@ -7,14 +7,14 @@ async function main() {
   const expected = {
     repository:`${env.CANARY_OWNER}/${env.CANARY_NAME}`,
     workflow:`.github/workflows/${env.CANARY_WORKFLOW}`,
+    pairedPull:env.CANARY_PAIRED_PULL||null,
   };
   const reading = await observeConsumerProduct(env.GH_TOKEN, context, expected);
   // The closed reading contains counts and a public source decision only.
   // Neither private discovery IDs nor custody receipts cross this boundary.
-  const verdict = reading.product !== null && reading.discovered === 1
-    && reading.owned === 1 && reading.pending === 0 && reading.refused === 0 ? reading.product.verdict
-    : reading.refused > 0 ? 'refused' : 'pending';
-  fs.appendFileSync(env.GITHUB_OUTPUT, `verdict=${verdict}\nreading=${JSON.stringify(reading)}\n`);
+  const verdict = consumerProductVerdict(reading);
+  const productVerdict=verdict==='pass'||verdict==='fail'?`verdict=${verdict}\n`:'';
+  fs.appendFileSync(env.GITHUB_OUTPUT, `${productVerdict}observation_outcome=${verdict}\nreading=${JSON.stringify(reading)}\n`);
   console.log(`CONSUMER_OBSERVER observe=measured verdict=${verdict} discovered=${reading.discovered} owned=${reading.owned} pending=${reading.pending} refused=${reading.refused}`);
 }
 

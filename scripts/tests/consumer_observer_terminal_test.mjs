@@ -18,7 +18,7 @@ test('the terminal entrypoint records only an authenticated reached product deci
       head_repository:{full_name:context.parent_repository},path:'.github/workflows/consumer-canary.yml',
       status:'in_progress'};
     const child = {id:73,run_attempt:1,head_sha:'c'.repeat(40),head_repository:{full_name:'acme/widget-host'},
-      path:'.github/workflows/rehearsal.yml',event:'workflow_dispatch',status:'in_progress',
+      path:'.github/workflows/rehearsal.yml',head_branch:'main',event:'workflow_dispatch',status:'in_progress',
       actor:{login:observerDispatchActor,type:'Bot'},display_title:observerRunName(context)};
     const ownership = {schema:'harn.consumer_observer_receipt.v1',observer:context,child:{
       repository:'acme/widget-host',workflow:child.path,run_id:'73',run_attempt:1,
@@ -128,7 +128,12 @@ test('the terminal entrypoint records only an authenticated reached product deci
     const lastRead=path.join(scratch,'last-read.json');
     fs.writeFileSync(observerPreload,`import fs from 'node:fs';
       const fixture=JSON.parse(fs.readFileSync(${JSON.stringify(fixture)},'utf8'));
-      let censusReads=0,childReads=0,parentReads=0,sourceReads=0;
+      let censusReads=0,childReads=0,parentReads=0,sourceReads=0,pullReads=0;
+      if(fixture.recordedClock){
+        let seconds=1000;
+        Date.now=()=>seconds*1000;
+        globalThis.setTimeout=(callback,milliseconds)=>{seconds+=milliseconds/1000;queueMicrotask(callback);};
+      }
       globalThis.fetch=async(url,options={})=>{
         if(options.method==='POST')throw new Error('unexpected-private-post');
         const endpoint=new URL(url),p=endpoint.pathname;
@@ -146,25 +151,28 @@ test('the terminal entrypoint records only an authenticated reached product deci
         }else if(p.endsWith('/42/attempts/2'))record=fixture.parent;
         else if(p.endsWith('/42/attempts/2/jobs'))record={total_count:1,jobs:[{id:701,conclusion:'success',steps:[{
           name:${JSON.stringify(observerDeclarationStep)},status:'completed',conclusion:fixture.publication??'success'}]}]};
-        else if(p.endsWith('/42'))record=++parentReads>1&&fixture.finalParent?fixture.finalParent:fixture.parent;
+        else if(p.endsWith('/42'))record=++parentReads>(fixture.ordinaryObservation?0:1)&&fixture.finalParent?fixture.finalParent:fixture.parent;
         else if(p==='/repos/acme/widget-host')record={full_name:'acme/widget-host',default_branch:'main'};
         else if(p.endsWith('/commits/main'))record={sha:++sourceReads>1&&fixture.finalSource?fixture.finalSource:fixture.source??'c'.repeat(40)};
+        else if(p.endsWith('/pulls/7'))record=++pullReads>1&&fixture.finalPull?fixture.finalPull:fixture.pull;
         else if(p.endsWith('/73'))record=++childReads>1&&fixture.finalChild?fixture.finalChild:fixture.child;
         else if(p.endsWith('/rehearsal.yml/runs')){
           const rows=++censusReads>1&&fixture.finalRuns?fixture.finalRuns:fixture.runs;
-          record={total_count:fixture.partial?rows.length+1:rows.length,workflow_runs:rows};
+          record={total_count:fixture.partial||(censusReads>1&&fixture.finalPartial)?rows.length+1:rows.length,workflow_runs:rows};
         }else throw new Error('unknown-private-url');
         return {ok:true,json:async()=>record,headers:new Headers()};
       };`);
     const completed={...child,status:'completed',conclusion:'success'};
     const observeEntry=fileURLToPath(new URL('../ci/consumer-observer-observe.mjs',import.meta.url));
-    const observe=(changes={})=>{
+    const waitEntry=fileURLToPath(new URL('../ci/consumer-observer-wait.mjs',import.meta.url));
+    const observe=(changes={},wait=false,extraEnv={})=>{
       const output=path.join(scratch,`observation-${sequence++}`);
       fs.writeFileSync(fixture,JSON.stringify({parent:{...parent,created_at:'2026-10-11T20:00:00Z'},
-        child:completed,runs:[completed],archives,...changes}));
-      const run=spawnSync(process.execPath,[observeEntry],{encoding:'utf8',env:{PATH:process.env.PATH,
+        child:completed,runs:[completed],archives,ordinaryObservation:true,...changes}));
+      const run=spawnSync(process.execPath,[wait?waitEntry:observeEntry],{encoding:'utf8',env:{PATH:process.env.PATH,
         NODE_OPTIONS:`--import=${observerPreload}`,GH_TOKEN:'fixture-read',OBSERVER_CONTEXT:JSON.stringify(context),
-        CANARY_OWNER:'acme',CANARY_NAME:'widget-host',CANARY_WORKFLOW:'rehearsal.yml',GITHUB_OUTPUT:output}});
+        CANARY_OWNER:'acme',CANARY_NAME:'widget-host',CANARY_WORKFLOW:'rehearsal.yml',GITHUB_OUTPUT:output,
+        CANARY_REPOSITORY:'acme/widget-host',CANARY_STARTED_AT:'1000',...extraEnv}});
       const text=fs.existsSync(output)?fs.readFileSync(output,'utf8'):'';
       assert.doesNotMatch(run.stdout+run.stderr+text,/widget-host|run_id|head_sha|dispatch_actor|\/73/);
       const fields=Object.fromEntries(text.trim().split('\n').filter(Boolean).map(line=>{
@@ -175,12 +183,13 @@ test('the terminal entrypoint records only an authenticated reached product deci
     const measured=observe();
     assert.equal(measured.run.status,0,measured.run.stderr);
     assert.equal(measured.fields.verdict,'pass');
-    assert.deepEqual(measured.reading,{discovered:1,owned:1,pending:0,refused:0,product});
+    assert.deepEqual(measured.reading,{discovered:1,owned:1,pending:0,refused:0,execution:'success',product});
     for(const changes of [{runs:[]},{runs:[completed,{...completed,id:74}]},{missing:1},{missing:2},
       {child},{finalRuns:[completed,{...completed,id:74}]}]){
       const pending=observe(changes);
       assert.equal(pending.run.status,0,pending.run.stderr);
-      assert.equal(pending.fields.verdict,'pending');
+      assert.equal(pending.fields.observation_outcome,'pending');
+      assert.equal(pending.fields.verdict,undefined);
       assert.equal(pending.reading.product,null,'an unreported product is never measured zero');
       assert(pending.reading.pending>0);
     }
@@ -188,7 +197,8 @@ test('the terminal entrypoint records only an authenticated reached product deci
       {finalChild:{...completed,run_attempt:2}},{finalChild:{...completed,status:'in_progress',conclusion:null}}]){
       const refused=observe(changes);
       assert.equal(refused.run.status,0,refused.run.stderr);
-      assert.equal(refused.fields.verdict,'refused');
+      assert.equal(refused.fields.observation_outcome,'refused');
+      assert.equal(refused.fields.verdict,undefined);
       assert.equal(refused.reading.product,null);
       assert.equal(refused.reading.refused,1);
     }
@@ -208,7 +218,8 @@ test('the terminal entrypoint records only an authenticated reached product deci
       ...archives[2].metadata,size_in_bytes:foreignBytes.length,
       digest:`sha256:${createHash('sha256').update(foreignBytes).digest('hex')}`}}]});
     assert.equal(foreignReading.run.status,0,foreignReading.run.stderr);
-    assert.equal(foreignReading.fields.verdict,'refused');
+    assert.equal(foreignReading.fields.observation_outcome,'refused');
+    assert.equal(foreignReading.fields.verdict,undefined);
     assert.equal(foreignReading.reading.product,null);
 
     const failedFields=Object.fromEntries(failedProducer.output.trim().split('\n').map(line=>{
@@ -226,22 +237,76 @@ test('the terminal entrypoint records only an authenticated reached product deci
     assert.equal(reachedFailure.run.status,0,reachedFailure.run.stderr);
     assert.equal(reachedFailure.fields.verdict,'fail');
     assert.deepEqual(reachedFailure.reading.product,failedProduct);
+    assert.equal(reachedFailure.reading.execution,'failure');
     for(const changes of [{archives:failedArchives},{archives:failedArchives,child:{...completed,conclusion:'cancelled'}},
       {archives:failedArchives,child:{...completed,conclusion:'failure'},finalChild:{...completed,run_attempt:2,conclusion:'failure'}}]){
-      const refused=observe(changes);assert.equal(refused.fields.verdict,'refused');
+      const refused=observe(changes);assert.equal(refused.fields.observation_outcome,'refused');
+      assert.equal(refused.fields.verdict,undefined);
       assert.equal(refused.reading.product,null);
+    }
+    const noProduct=observe({missing:2,child:{...completed,conclusion:'failure'}});
+    assert.equal(noProduct.run.status,0,noProduct.run.stderr);
+    assert.equal(noProduct.fields.observation_outcome,'execution_failed');
+    assert.equal(noProduct.fields.verdict,undefined);
+    assert.deepEqual(noProduct.reading,{discovered:1,owned:1,pending:0,refused:0,execution:'failure',product:null});
+    assert.equal(JSON.parse(fs.readFileSync(lastRead,'utf8')),'/repos/acme/widget-host/actions/runs/73');
+    for(const changes of [{missing:2,child:{...completed,conclusion:'failure'},finalChild:{...completed,run_attempt:2,conclusion:'failure'}},
+      {missing:2,child:{...completed,conclusion:'failure'},finalRuns:[completed,{...completed,id:74}]},
+      {missing:2,child:{...completed,conclusion:'failure'},finalPartial:true}]){
+      const unknown=observe(changes);assert.notEqual(unknown.fields.observation_outcome,'execution_failed');
+      assert.equal(unknown.fields.verdict,undefined);
+      assert.equal(unknown.reading.execution,null);assert.equal(unknown.reading.product,null);
+    }
+    const successWithoutProduct=observe({missing:2});
+    assert.equal(successWithoutProduct.fields.observation_outcome,'pending');
+    assert.equal(successWithoutProduct.fields.verdict,undefined);
+    assert.equal(successWithoutProduct.reading.execution,'success');
+    assert.equal(successWithoutProduct.reading.product,null);
+    const waitPositive=observe({recordedClock:true},true);
+    assert.equal(waitPositive.run.status,0,waitPositive.run.stderr);
+    assert.equal(waitPositive.fields.verdict,'pass');
+    const waitMissing=observe({recordedClock:true,missing:2},true);
+    assert.equal(waitMissing.run.status,0,waitMissing.run.stderr);
+    assert.equal(waitMissing.fields.observation_outcome,'pending');
+    assert.equal(waitMissing.fields.wall_seconds,'2700');
+    assert.equal(waitMissing.fields.verdict,undefined,'green execution without reached judgment cannot settle a release');
+    const waitExecutionFailure=observe({recordedClock:true,missing:2,child:{...completed,conclusion:'failure'}},true);
+    assert.equal(waitExecutionFailure.run.status,1);
+    assert.equal(waitExecutionFailure.fields.observation_outcome,'execution_failed');
+    assert.equal(waitExecutionFailure.fields.verdict,undefined,'infrastructure failure cannot authorize product retirement');
+    for(const changes of [{finalParent:{...parent,status:'completed',conclusion:'cancelled'}},
+      {finalSource:'d'.repeat(40)}]){
+      const staleWait=observe({recordedClock:true,missing:2,child:{...completed,conclusion:'failure'},...changes},true);
+      assert.equal(staleWait.run.status,1);
+      assert.equal(staleWait.fields.observation_outcome,'refused');
+      assert.equal(staleWait.fields.verdict,undefined);
+    }
+    const pairedPull={state:'open',head:{repo:{full_name:'acme/widget-host'},ref:'paired-work',sha:'c'.repeat(40)}};
+    const pairedChild={...completed,head_branch:'paired-work'};
+    const pairedWait=observe({recordedClock:true,pull:pairedPull,child:pairedChild,runs:[pairedChild]},true,{CANARY_PAIRED_PULL:'7'});
+    assert.equal(pairedWait.run.status,0,pairedWait.run.stderr);assert.equal(pairedWait.fields.verdict,'pass');
+    for(const finalPull of [{...pairedPull,state:'closed'},
+      {...pairedPull,head:{...pairedPull.head,sha:'d'.repeat(40)}},
+      {...pairedPull,head:{...pairedPull.head,repo:{full_name:'other/fork'}}}]){
+      const changedPair=observe({recordedClock:true,pull:pairedPull,finalPull,missing:2,
+        child:{...pairedChild,conclusion:'failure'},runs:[pairedChild]},true,{CANARY_PAIRED_PULL:'7'});
+      assert.equal(changedPair.run.status,1);assert.equal(changedPair.fields.observation_outcome,'refused');
+      assert.equal(changedPair.fields.verdict,undefined);
     }
 
     const readParentEntry=fileURLToPath(new URL('../ci/consumer-observer-read-parent.mjs',import.meta.url));
+    const readDecisionEntry=fileURLToPath(new URL('../ci/consumer-observer-read-decision.mjs',import.meta.url));
+    const selectEntry=fileURLToPath(new URL('../ci/consumer-observer-select.mjs',import.meta.url));
     const terminalParent={...parent,status:'completed',conclusion:'success',created_at:'2026-10-11T20:00:00Z'};
     const reusableChild={...completed,head_branch:'main'};
-    const readParent=(changes={},extraEnv={})=>{
+    const readParent=(changes={},extraEnv={},select=false,decision=false,contextDecision=false)=>{
       const output=path.join(scratch,`reuse-${sequence++}`);
       fs.writeFileSync(fixture,JSON.stringify({parent:terminalParent,child:reusableChild,runs:[reusableChild],archives,...changes}));
-      const run=spawnSync(process.execPath,[readParentEntry],{encoding:'utf8',env:{PATH:process.env.PATH,
+      const run=spawnSync(process.execPath,[contextDecision?readDecisionEntry:select?selectEntry:readParentEntry,...(decision?['--decision']:[])],{encoding:'utf8',env:{PATH:process.env.PATH,
         NODE_OPTIONS:`--import=${observerPreload}`,GH_TOKEN:'fixture-read',PARENT_RUN_ID:'42',PARENT_ROLE:'canary',
         SOURCE_REVISION:context.source_revision,REQUIRE_CURRENT_DEFAULT:'true',CANARY_REPOSITORY:'acme/widget-host',
-        CANARY_WORKFLOW:'rehearsal.yml',GITHUB_OUTPUT:output,...extraEnv}});
+        CANARY_WORKFLOW:'rehearsal.yml',GITHUB_OUTPUT:output,REHEARSAL_PROMOTION_RUN_ID:'42',
+        OBSERVER_CONTEXT:JSON.stringify(context),...extraEnv}});
       const text=fs.existsSync(output)?fs.readFileSync(output,'utf8'):'';
       assert.doesNotMatch(run.stdout+run.stderr+text,/widget-host|dispatch_actor|\/73|"run_id"/);
       return {run,text};
@@ -253,6 +318,44 @@ test('the terminal entrypoint records only an authenticated reached product deci
     assert.match(reused.text,/owned=false/);
     assert.equal(JSON.parse(fs.readFileSync(lastRead,'utf8')),'/repos/acme/widget-host/actions/runs/73',
       'the fresh child status follows public-parent and current-default eligibility reads');
+    const reachedHistoricalFailure=readParent({parent:{...terminalParent,conclusion:'failure'},
+      archives:failedArchives,child:{...reusableChild,conclusion:'failure'}},{},false,true);
+    assert.equal(reachedHistoricalFailure.run.status,0,reachedHistoricalFailure.run.stderr);
+    const historicalFailure=JSON.parse(reachedHistoricalFailure.run.stdout);
+    assert.deepEqual(historicalFailure.reading.product,failedProduct);
+    assert.equal(historicalFailure.owned,false);
+    assert.equal(historicalFailure.reading.execution,'failure');
+    for(const changes of [{missing:2,child:{...reusableChild,conclusion:'failure'}},
+      {archives:failedArchives,child:{...reusableChild,conclusion:'failure'},finalChild:{...reusableChild,run_attempt:2,conclusion:'failure'}},
+      {archives:failedArchives,child:{...reusableChild,conclusion:'failure'},finalParent:{...terminalParent,run_attempt:3}},
+      {archives:failedArchives,child:{...reusableChild,conclusion:'failure'},finalSource:'d'.repeat(40)}]){
+      const unknownDecision=readParent(changes,{},false,true);
+      assert.equal(unknownDecision.run.status,1);assert.equal(unknownDecision.text,'');
+    }
+    for(const selectedParent of [terminalParent,{...terminalParent,status:'in_progress',conclusion:null}]){
+      const contextPass=readParent({parent:selectedParent},{},false,false,true);
+      assert.equal(contextPass.run.status,0,contextPass.run.stderr);
+      assert.equal(JSON.parse(contextPass.run.stdout).reading.product.verdict,'pass');
+      assert.equal(JSON.parse(contextPass.run.stdout).owned,false);
+      const contextFail=readParent({parent:selectedParent,archives:failedArchives,
+        child:{...reusableChild,conclusion:'failure'}},{},false,false,true);
+      assert.equal(contextFail.run.status,0,contextFail.run.stderr);
+      assert.deepEqual(JSON.parse(contextFail.run.stdout).reading.product,failedProduct);
+    }
+    for(const changes of [{missing:2},{missing:2,child:{...reusableChild,conclusion:'failure'}},
+      {finalParent:{...terminalParent,run_attempt:3}},
+      {parent:{...terminalParent,status:'in_progress',conclusion:null},finalParent:terminalParent},
+      {finalSource:'d'.repeat(40)},
+      {finalChild:{...reusableChild,run_attempt:2}},
+      {finalRuns:[reusableChild,{...reusableChild,id:74}]},{finalPartial:true}]){
+      const contextUnknown=readParent(changes,{},false,false,true);
+      assert.equal(contextUnknown.run.status,1);assert.equal(contextUnknown.text,'');
+    }
+    for(const extraEnv of [{SOURCE_REVISION:'d'.repeat(40)},{REQUIRE_CURRENT_DEFAULT:'unknown'},
+      {OBSERVER_CONTEXT:JSON.stringify({...context,dispatch_nonce:'11234567-89ab-4cde-8fab-0123456789ab'})}]){
+      const contextUnknown=readParent({},extraEnv,false,false,true);
+      assert.equal(contextUnknown.run.status,1);assert.equal(contextUnknown.text,'');
+    }
     for(const changes of [{runs:[]},{runs:[reusableChild,{...reusableChild,id:74}]},{missing:0},{missing:1},{missing:2},
       {partial:true},{publication:'skipped'},{publication:'failure'},
       {parent:{...terminalParent,status:'in_progress',conclusion:null}},
@@ -266,6 +369,32 @@ test('the terminal entrypoint records only an authenticated reached product deci
       {SOURCE_REVISION:'d'.repeat(40)},{REQUIRE_CURRENT_DEFAULT:'unknown'}]){
       const negative=readParent({},extraEnv);assert.equal(negative.run.status,1);assert.equal(negative.text,'');
     }
+    for(const changes of [{finalParent:{...terminalParent,run_attempt:3}},
+      {finalSource:'d'.repeat(40)}]){
+      const missing=readParent({missing:2,child:{...reusableChild,conclusion:'failure'},...changes});
+      assert.equal(missing.run.status,1);assert.equal(missing.text,'');
+      // Reuse still refreshes parent/default eligibility when no product
+      // artifact exists, rather than returning from an older child snapshot.
+      assert.notEqual(JSON.parse(fs.readFileSync(lastRead,'utf8')),'/repos/acme/widget-host/actions/runs/73');
+    }
+    const promotion={...terminalParent,path:'.github/workflows/promote-release.yml'};
+    const selected=readParent({parent:promotion},{},true);
+    assert.equal(selected.run.status,0,selected.run.stderr);
+    assert.match(selected.text,/reused=true\nverdict=pass\n/);
+    assert.match(selected.run.stdout,/owned=false/);
+    for(const changes of [{parent:terminalParent},{parent:promotion,missing:2},
+      {parent:promotion,source:'d'.repeat(40)}]){
+      const unknown=readParent(changes,{},true);
+      assert.equal(unknown.run.status,1);assert.equal(unknown.text,'');
+    }
+    const fresh=readParent({}, {REHEARSAL_PROMOTION_RUN_ID:'',PAIRING_TEXT:'Pairs-with: consumer#7'},true);
+    assert.equal(fresh.run.status,0,fresh.run.stderr);assert.equal(fresh.text,'reused=false\npaired_pull=7\n');
+    for(const pairing of ['Pairs-with: consumer#7\nPairs-with: consumer#8','Pairs-with: other#7']){
+      const invalid=readParent({}, {REHEARSAL_PROMOTION_RUN_ID:'',PAIRING_TEXT:pairing},true);
+      assert.equal(invalid.run.status,1);assert.equal(invalid.text,'');
+    }
+    const pairedReuse=readParent({parent:promotion},{PAIRING_TEXT:'Pairs-with: consumer#7'},true);
+    assert.equal(pairedReuse.run.status,1);assert.equal(pairedReuse.text,'');
   } finally {
     fs.rmSync(scratch,{recursive:true});
   }
