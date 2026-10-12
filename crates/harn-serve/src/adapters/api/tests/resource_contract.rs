@@ -148,6 +148,24 @@ async fn event_envelope_matches_live_replay_and_restarted_task_history() {
 
     let restarted = api_router(ApiServer::new(config).state);
     let after = read_json(get(&restarted, &path).await).await;
+    let session_history =
+        read_json(get(&restarted, &format!("/v1/sessions/{session_id}/events")).await).await;
+    assert!(
+        !session_history["data"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|event| event["id"] == session_event["id"]),
+        "the known non-task event is process-local"
+    );
+    assert!(
+        session_history["data"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|event| event["id"] == submitted["id"]),
+        "the known task control event is durable"
+    );
     for stored in durable {
         let old = before["data"]
             .as_array()
@@ -281,4 +299,99 @@ async fn workspace_registration_resolves_and_confines_known_files() {
         std::fs::read_to_string(outside.path().join("canary.txt")).unwrap(),
         "outside"
     );
+}
+
+#[tokio::test]
+async fn session_workspace_is_resolved_before_any_creation_effect() {
+    fn identities(list: &Value, event: Option<&str>) -> BTreeSet<String> {
+        list["data"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|item| event.is_none_or(|event| item["event"] == event))
+            .map(|item| item["id"].as_str().unwrap().to_owned())
+            .collect()
+    }
+    let root = tempfile::tempdir().unwrap();
+    let script = root.path().join("agent.harn");
+    std::fs::write(&script, include_str!("fixtures/task_preparation.harn")).unwrap();
+    std::fs::create_dir(root.path().join("nested")).unwrap();
+    let mut config = ApiServerConfig::for_pipeline(script.to_string_lossy().into_owned());
+    config.workspace_root = root.path().into();
+    let state = ApiServer::new(config).state;
+    let app = api_router(state.clone());
+    let root_id = state.inner.lock().unwrap().root_workspace_id.clone();
+    let default = post(&app, "/v1/sessions", json!({})).await;
+    assert_eq!(default.status(), StatusCode::CREATED);
+    assert_eq!(read_json(default).await["workspace_id"], root_id);
+    let workspace = post(&app, "/v1/workspaces", json!({"root":"nested"})).await;
+    assert_eq!(workspace.status(), StatusCode::CREATED);
+    let workspace_id = read_json(workspace).await["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let session = post(
+        &app,
+        "/v1/sessions",
+        json!({"workspace_id":workspace_id,"mode_id":"code"}),
+    )
+    .await;
+    assert_eq!(session.status(), StatusCode::CREATED);
+    let session = read_json(session).await;
+    assert_eq!(session["workspace_id"], workspace_id);
+    let session_id = session["id"].as_str().unwrap().to_owned();
+    let before_sessions = read_json(get(&app, "/v1/sessions").await).await;
+    let before_events = read_json(get(&app, "/v1/events").await).await;
+    let session_ids = identities(&before_sessions, None);
+    let creation_ids = identities(&before_events, Some("session.created"));
+    assert_eq!(session_ids.len(), 2);
+    assert_eq!(creation_ids.len(), 2);
+    for (id, status, code) in [
+        (
+            json!("workspace_missing_known_canary"),
+            StatusCode::NOT_FOUND,
+            "not_found",
+        ),
+        (json!(42), StatusCode::BAD_REQUEST, "invalid_workspace"),
+        (json!(null), StatusCode::BAD_REQUEST, "invalid_workspace"),
+        (json!(" "), StatusCode::BAD_REQUEST, "invalid_workspace"),
+    ] {
+        let response = post(&app, "/v1/sessions", json!({"workspace_id":id})).await;
+        assert_eq!(response.status(), status);
+        assert_eq!(read_json(response).await["error"]["code"], code);
+        assert_eq!(
+            identities(&read_json(get(&app, "/v1/sessions").await).await, None),
+            session_ids
+        );
+        assert_eq!(
+            identities(
+                &read_json(get(&app, "/v1/events").await).await,
+                Some("session.created")
+            ),
+            creation_ids
+        );
+    }
+    let mut events = state.events_tx.subscribe();
+    let response = post(
+        &app,
+        &format!("/v1/sessions/{session_id}/tasks"),
+        json!({"input":"registered workspace execution"}),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::ACCEPTED);
+    let task_id = read_json(response).await["id"].as_str().unwrap().to_owned();
+    loop {
+        let event = events.recv().await.unwrap();
+        if event.task_id.as_deref() == Some(task_id.as_str()) {
+            assert_ne!(event.event, "task.failed", "{}", event.payload);
+            if event.event == "task.completed" {
+                break;
+            }
+        }
+    }
+    assert_eq!(
+        std::fs::read_to_string(root.path().join("nested/task-preparation.txt")).unwrap(),
+        "vm-executed"
+    );
+    assert!(!root.path().join("task-preparation.txt").exists());
 }

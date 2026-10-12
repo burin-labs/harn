@@ -63,13 +63,21 @@ pub(super) async fn create_session(State(state): State<ApiState>, body: Bytes) -
     };
     let (workspace_id, workspace_root) = {
         let inner = state.inner.lock().expect("api state poisoned");
-        let workspace_id = input
-            .get("workspace_id")
-            .and_then(Value::as_str)
-            .unwrap_or(&inner.root_workspace_id)
-            .to_string();
-        let root = workspace_root_locked(&inner, &workspace_id)
-            .unwrap_or_else(|| inner.root_workspace_path.clone());
+        let workspace_id = match input.get("workspace_id") {
+            None => inner.root_workspace_id.as_str(),
+            Some(Value::String(id)) if !id.trim().is_empty() => id.as_str(),
+            _ => {
+                return api_error(
+                    StatusCode::BAD_REQUEST,
+                    "invalid_workspace",
+                    "workspace_id must be a nonempty string",
+                )
+            }
+        }
+        .to_owned();
+        let Some(root) = workspace_root_locked(&inner, &workspace_id) else {
+            return api_error(StatusCode::NOT_FOUND, "not_found", "workspace not found");
+        };
         (workspace_id, root)
     };
     let result = match state

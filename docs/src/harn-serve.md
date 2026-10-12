@@ -184,7 +184,13 @@ logical URI such as `harn://conformance/...` does not create a native directory.
 
 Events include the resource pointer and required envelope fields in history and
 SSE streams. Their sequence is the existing durable event allocation number;
-gaps are permitted, and replay retains the same number after restart.
+gaps are permitted. Task control events retain their sequence on replay after
+restart. Live notifications and standalone non-task history stay in the serving
+process; the native discovery response advertises no replay capability.
+
+Sessions default to the configured workspace when `workspace_id` is omitted.
+An explicit ID must name a registered workspace. An unknown ID returns `404`
+before a session is opened; invalid identity types or blank IDs return `400`.
 
 Permission responses stay pending until the runtime accepts the answer. If
 task storage or response delivery fails, the request remains available to
