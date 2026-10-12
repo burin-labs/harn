@@ -31,6 +31,10 @@ use crate::{BuiltinRegistry, HostlibCapability};
 #[path = "conformance/progress_tests.rs"]
 mod progress_tests;
 
+#[cfg(test)]
+#[path = "conformance/report_tests.rs"]
+mod report_tests;
+
 /// Written into the outside file so a read is judged by content, not by an
 /// exit code a missing tool would also produce.
 const OUTSIDE_CONTENT: &str = "harn-conformance-outside-content";
@@ -70,6 +74,24 @@ pub struct CaseReport {
 }
 
 impl ConformanceReport {
+    /// Whether the complete contract was measured and holds. Missing or
+    /// duplicated cases and a run with no conforming cases cannot pass.
+    pub fn holds(&self) -> bool {
+        self.cases.len() == ConformanceCase::ALL.len()
+            && self
+                .cases
+                .iter()
+                .zip(ConformanceCase::ALL)
+                .all(|(report, case)| report.case == case.id())
+            && self.conforming() > 0
+            && self.cases.iter().all(|case| {
+                matches!(
+                    case.verdict,
+                    Verdict::Conforms | Verdict::NotApplicable { .. }
+                )
+            })
+    }
+
     /// Cases whose verdict fails the contract.
     pub fn failing(&self) -> Vec<&CaseReport> {
         self.cases

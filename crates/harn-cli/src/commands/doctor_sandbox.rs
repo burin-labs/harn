@@ -24,18 +24,26 @@ pub(crate) fn run(json: bool) -> i32 {
         eprintln!("{}", progress.receipt_line());
         let _ = std::io::stderr().flush();
     });
-    let holds = report.failing().is_empty()
-        && report.not_measured().is_empty()
-        && report.not_enforced().is_empty();
+    let holds = report.holds();
     if json {
-        println!(
-            "{}",
-            to_string_pretty(&JsonEnvelope::ok(DOCTOR_SANDBOX_SCHEMA_VERSION, &report))
-        );
+        println!("{}", to_string_pretty(&envelope(&report)));
     } else {
         print!("{}", render(&report));
     }
     i32::from(!holds)
+}
+
+fn envelope(report: &ConformanceReport) -> JsonEnvelope<&ConformanceReport> {
+    if report.holds() {
+        return JsonEnvelope::ok(DOCTOR_SANDBOX_SCHEMA_VERSION, report);
+    }
+    let mut envelope = JsonEnvelope::err(
+        DOCTOR_SANDBOX_SCHEMA_VERSION,
+        "sandbox_conformance_failed",
+        "Sandbox confinement did not hold for every applicable case.",
+    );
+    envelope.data = Some(report);
+    envelope
 }
 
 fn render(report: &ConformanceReport) -> String {
