@@ -11,6 +11,9 @@ args=(--locked "${packages[@]}" --profile ci -E "not (${host_bound_filter})")
 census=$(mktemp)
 trap 'rm -f "$census"' EXIT
 cargo-nextest nextest list "${args[@]}" --message-format json > "$census"
+if [[ -n "${RUNNER_TEMP:-}" ]]; then
+  cp "$census" "$RUNNER_TEMP/harn-nextest-inventory.json"
+fi
 eligible=$(jq -er '
   .["rust-suites"] | to_entries
   | map(.value.testcases | to_entries | map(select(.value["filter-match"].status == "matches" and .value.ignored == false)) | length)

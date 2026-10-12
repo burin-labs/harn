@@ -36,6 +36,218 @@
       "reason": "Identical emoji input, width, and expected output through the public builtin in conformance.",
       "retainedPath": "conformance/tests/strings/string_formatting_helpers.harn",
       "retainedAssertion": "word_wrap counts an emoji as two columns"
+    },
+    {
+      "path": "crates/harn-vm/src/composition/tests.rs",
+      "name": "harn_composition_dispatcher_closure_preserves_custom_host_has",
+      "reason": "Same custom host callback, dispatcher program, and report assertions as the retained case.",
+      "retainedPath": "crates/harn-vm/src/composition/tests.rs",
+      "retainedName": "harn_composition_dispatcher_closure_can_call_host_has"
+    },
+    {
+      "path": "crates/harn-vm/src/vm/tests_runtime/language.rs",
+      "name": "test_arithmetic",
+      "reason": "Identical program and expected output already executed by public conformance.",
+      "retainedPath": "conformance/tests/language/arithmetic.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/vm/tests_runtime/language.rs",
+      "name": "test_let_var",
+      "reason": "Identical program and expected output already executed by public conformance.",
+      "retainedPath": "conformance/tests/language/let_var.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/vm/tests_runtime/language.rs",
+      "name": "test_if_else",
+      "reason": "Identical program and expected output already executed by public conformance.",
+      "retainedPath": "conformance/tests/control_flow/if_else.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/vm/tests_runtime/language.rs",
+      "name": "test_while_loop",
+      "reason": "Identical program and expected output already executed by public conformance.",
+      "retainedPath": "conformance/tests/control_flow/while_loop.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/vm/tests_runtime/language.rs",
+      "name": "test_for_in",
+      "reason": "Identical program and expected output already executed by public conformance.",
+      "retainedPath": "conformance/tests/control_flow/for_in.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/vm/tests_runtime/language.rs",
+      "name": "test_inner_for_return_does_not_leak_iterator_into_caller",
+      "reason": "Identical program and expected output already executed by public conformance.",
+      "retainedPath": "conformance/tests/collections/iterator_return_is_frame_scoped.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/vm/tests_runtime/language.rs",
+      "name": "test_closure",
+      "reason": "Identical program and expected output already executed by public conformance.",
+      "retainedPath": "conformance/tests/functions/closure.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/vm/tests_runtime/language.rs",
+      "name": "test_string_concat",
+      "reason": "Identical program and expected output already executed by public conformance.",
+      "retainedPath": "conformance/tests/strings/string_concat.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/vm/tests_runtime/language.rs",
+      "name": "test_dict_access",
+      "reason": "Identical program and expected output already executed by public conformance.",
+      "retainedPath": "conformance/tests/collections/dict_access.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/vm/tests_runtime/language.rs",
+      "name": "test_dict_methods",
+      "reason": "Identical program and expected output already executed by public conformance.",
+      "retainedPath": "conformance/tests/collections/dict_methods.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/vm/tests_runtime/language.rs",
+      "name": "test_nil_coalescing",
+      "reason": "Identical program and expected output already executed by public conformance.",
+      "retainedPath": "conformance/tests/language/nil_coalescing.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/vm/tests_runtime/language.rs",
+      "name": "test_match",
+      "reason": "Identical program and expected output already executed by public conformance.",
+      "retainedPath": "conformance/tests/control_flow/match.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/vm/tests_runtime/language.rs",
+      "name": "test_list_properties",
+      "reason": "Identical program and expected output already executed by public conformance.",
+      "retainedPath": "conformance/tests/collections/list_properties.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/vm/tests_runtime/language.rs",
+      "name": "test_list_any_all",
+      "reason": "Identical program and expected output already executed by public conformance.",
+      "retainedPath": "conformance/tests/collections/list_any_all.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/vm/tests_runtime/concurrency.rs",
+      "name": "test_parallel_each_basic",
+      "reason": "Identical program and expected output already executed by public conformance.",
+      "retainedPath": "conformance/tests/concurrency/parallel_map_basic.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/vm/tests_runtime/concurrency.rs",
+      "name": "test_spawn_cancel",
+      "reason": "Identical program and expected output already executed by public conformance.",
+      "retainedPath": "conformance/tests/concurrency/spawn_cancel.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/vm/tests_runtime/concurrency.rs",
+      "name": "test_deadline_success",
+      "reason": "Identical program and expected output already executed by public conformance.",
+      "retainedPath": "conformance/tests/concurrency/deadline.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/stdlib/template/tests.rs",
+      "name": "bare_interp",
+      "reason": "Identical input and output also asserted by the retained provenance test.",
+      "retainedPath": "crates/harn-vm/src/stdlib/template/tests.rs",
+      "retainedName": "provenance_legacy_bare_interp_span_tracked"
+    },
+    {
+      "path": "crates/harn-vm/src/stdlib/template/tests.rs",
+      "name": "legacy_if_truthy",
+      "reason": "Public inline template asserts a true Boolean condition emits its branch.",
+      "retainedPath": "conformance/tests/templates/render_inline_template.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/stdlib/template/tests.rs",
+      "name": "if_else",
+      "reason": "Public inline template asserts a false Boolean condition emits the else branch.",
+      "retainedPath": "conformance/tests/templates/render_inline_template.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/stdlib/template/tests.rs",
+      "name": "if_elif_else",
+      "reason": "Same template, integer input 2, and output two; public fixture additionally exercises every other branch.",
+      "retainedPath": "conformance/tests/templates/template_if_elif_else.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/stdlib/template/tests.rs",
+      "name": "for_loop_basic",
+      "reason": "Public fixture asserts ordered binding and rendering of three string list elements.",
+      "retainedPath": "conformance/tests/templates/template_for_loop.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/stdlib/template/tests.rs",
+      "name": "for_loop_vars",
+      "reason": "Public fixture pins one-based loop indices and last-element Boolean behavior.",
+      "retainedPath": "conformance/tests/templates/template_for_loop.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/stdlib/template/tests.rs",
+      "name": "for_empty_else",
+      "reason": "Public fixture asserts the else branch of an empty list loop.",
+      "retainedPath": "conformance/tests/templates/template_for_dict.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/stdlib/template/tests.rs",
+      "name": "for_dict_kv",
+      "reason": "Public fixture asserts ordered string keys and integer values from a two-binding dictionary loop.",
+      "retainedPath": "conformance/tests/templates/template_for_dict.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/stdlib/template/tests.rs",
+      "name": "nested_path",
+      "reason": "Same dotted user.name lookup and Alice value in the public fixture.",
+      "retainedPath": "conformance/tests/templates/template_nested_access.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/stdlib/template/tests.rs",
+      "name": "filter_upper",
+      "reason": "Same alice input and ALICE output through the public upper filter.",
+      "retainedPath": "conformance/tests/templates/template_filters.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/stdlib/template/tests.rs",
+      "name": "filter_join",
+      "reason": "Public fixture asserts string-list joining with comma-space and no trailing delimiter.",
+      "retainedPath": "conformance/tests/templates/template_filters.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/stdlib/xml.rs",
+      "name": "renders_flat_dict",
+      "reason": "Identical Ada and 1815 fields and exact rendered XML in public conformance.",
+      "retainedPath": "conformance/tests/stdlib/to_xml_basic.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/stdlib/xml.rs",
+      "name": "renders_list_as_repeated_items",
+      "reason": "Identical previous_chats list and exact rendered XML in public conformance.",
+      "retainedPath": "conformance/tests/stdlib/to_xml_basic.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/stdlib/xml.rs",
+      "name": "escapes_special_chars_in_text",
+      "reason": "Identical metacharacter input and exact escaped XML in public conformance.",
+      "retainedPath": "conformance/tests/stdlib/to_xml_basic.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/stdlib/xml.rs",
+      "name": "pretty_mode_indents_children",
+      "reason": "Identical dictionary, pretty option, and exact whitespace output in public conformance.",
+      "retainedPath": "conformance/tests/stdlib/to_xml_basic.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/stdlib/xml.rs",
+      "name": "parse_flat_dict_round_trip",
+      "reason": "Identical XML input and Ada string and 1815 integer assertions in public conformance.",
+      "retainedPath": "conformance/tests/stdlib/to_xml_basic.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/stdlib/xml.rs",
+      "name": "default_parse_collapses_repeated_tag_to_list",
+      "reason": "Identical repeated-tag input, list length, and both integer elements in public conformance.",
+      "retainedPath": "conformance/tests/xml_lossless_parse.harn"
     }
   ],
   "retainedScenarios": [

@@ -711,56 +711,11 @@ mod tests {
     }
 
     #[test]
-    fn renders_flat_dict() {
-        let value = dict(&[
-            ("name", VmValue::String(arcstr::ArcStr::from("Ada"))),
-            ("year", VmValue::Int(1815)),
-        ]);
-        let xml = render_xml(&value, &opts()).unwrap();
-        assert_eq!(xml, "<root><name>Ada</name><year>1815</year></root>");
-    }
-
-    #[test]
-    fn renders_list_as_repeated_items() {
-        let value = dict(&[(
-            "previous_chats",
-            VmValue::List(std::sync::Arc::new(vec![
-                VmValue::String(arcstr::ArcStr::from("x.jsonl")),
-                VmValue::String(arcstr::ArcStr::from("y.jsonl")),
-            ])),
-        )]);
-        let xml = render_xml(&value, &opts()).unwrap();
-        assert_eq!(
-            xml,
-            "<root><previous_chats><item>x.jsonl</item><item>y.jsonl</item></previous_chats></root>"
-        );
-    }
-
-    #[test]
-    fn escapes_special_chars_in_text() {
-        let value = dict(&[("msg", VmValue::String(arcstr::ArcStr::from("<a> & </b>")))]);
-        let xml = render_xml(&value, &opts()).unwrap();
-        assert_eq!(xml, "<root><msg>&lt;a&gt; &amp; &lt;/b&gt;</msg></root>");
-    }
-
-    #[test]
     fn sanitizes_tag_names() {
         assert_eq!(sanitize_tag("hello world"), "hello_world");
         assert_eq!(sanitize_tag("9foo"), "_9foo");
         assert_eq!(sanitize_tag("a.b-c_d"), "a.b-c_d");
         assert_eq!(sanitize_tag(""), "item");
-    }
-
-    #[test]
-    fn pretty_mode_indents_children() {
-        let mut o = opts();
-        o.pretty = true;
-        let value = dict(&[
-            ("a", VmValue::String(arcstr::ArcStr::from("x"))),
-            ("b", VmValue::String(arcstr::ArcStr::from("y"))),
-        ]);
-        let xml = render_xml(&value, &o).unwrap();
-        assert_eq!(xml, "<root>\n  <a>x</a>\n  <b>y</b>\n</root>");
     }
 
     #[test]
@@ -770,19 +725,6 @@ mod tests {
         let value = dict(&[("x", VmValue::Int(1))]);
         let xml = render_xml(&value, &o).unwrap();
         assert!(xml.starts_with("<?xml version=\"1.0\" encoding=\"UTF-8\"?>"));
-    }
-
-    #[test]
-    fn parse_flat_dict_round_trip() {
-        let xml = "<root><name>Ada</name><year>1815</year></root>";
-        let parsed = parse(xml).unwrap();
-        let outer = parsed.as_dict().unwrap();
-        let inner = outer.get("root").and_then(VmValue::as_dict).unwrap();
-        assert_eq!(
-            inner.get("name").map(VmValue::display).unwrap(),
-            "Ada".to_string()
-        );
-        assert_eq!(inner.get("year").and_then(VmValue::as_int), Some(1815));
     }
 
     #[test]
@@ -907,19 +849,5 @@ mod tests {
             other => panic!("expected list under `a`, got {other:?}"),
         };
         assert_eq!(items, vec![1, 2]);
-    }
-
-    #[test]
-    fn default_parse_collapses_repeated_tag_to_list() {
-        let xml = "<addresses><a>1</a><a>2</a></addresses>";
-        let parsed = parse(xml).unwrap();
-        let outer = parsed.as_dict().unwrap();
-        match outer.get("addresses") {
-            Some(VmValue::List(items)) => {
-                let ints: Vec<i64> = items.iter().filter_map(VmValue::as_int).collect();
-                assert_eq!(ints, vec![1, 2]);
-            }
-            other => panic!("expected list, got {other:?}"),
-        }
     }
 }

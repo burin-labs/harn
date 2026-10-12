@@ -57,7 +57,9 @@ esac
 SH
 chmod +x "$scratch/bin/cargo-nextest"
 export PATH="$scratch/bin:$PATH" RAN_TESTS="$scratch/ran"
+export RUNNER_TEMP="$scratch"
 GITHUB_EVENT_NAME=push bash "$root/scripts/ci/run_workspace_tests.sh" count:3/3 > "$scratch/log"
+jq -e '.["rust-suites"].fixture.testcases.case["filter-match"].status == "matches"' "$RUNNER_TEMP/harn-nextest-inventory.json" > /dev/null
 grep -q 'eligible=1' "$scratch/log"
 grep -q -- '--partition count:3/3 --no-tests pass' "$scratch/ran"
 rm "$scratch/ran"
@@ -65,4 +67,5 @@ if MATCH_STATUS=mismatch GITHUB_EVENT_NAME=push bash "$root/scripts/ci/run_works
   echo 'An empty eligible suite was accepted' >&2; exit 1
 fi
 [[ ! -e "$scratch/ran" ]]
+jq -e '.["rust-suites"].fixture.testcases.case["filter-match"].status == "mismatch"' "$RUNNER_TEMP/harn-nextest-inventory.json" > /dev/null
 echo 'Workspace test selection: PR and merge-group reverse dependencies agree; main and full scope use the whole workspace; invalid scope fails.'

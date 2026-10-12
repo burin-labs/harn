@@ -33,14 +33,6 @@ fn test_parallel_no_variable() {
     assert_eq!(out, "[harn] [42, 42, 42]");
 }
 
-#[test]
-fn test_parallel_each_basic() {
-    let out = run_output(
-        "pipeline t(harness: Harness, task: unknown) { const results = parallel each [1, 2, 3] { x -> x * x }\nharness.stdio.log(results) }",
-    );
-    assert_eq!(out, "[harn] [1, 4, 9]");
-}
-
 #[tokio::test(flavor = "current_thread", start_paused = true)]
 async fn test_parallel_fail_fast_cancels_slow_sibling() {
     // A branch error aborts in-flight siblings: the slow branch is cancelled
@@ -239,18 +231,6 @@ harness.stdio.log("done")
 }"#,
     );
     assert_eq!(out, "[harn] spawned\n[harn] done");
-}
-
-#[test]
-fn test_spawn_cancel() {
-    let out = run_output(
-        r#"pipeline t(harness: Harness, task: unknown) {
-const handle = spawn { harness.stdio.log("should be cancelled") }
-cancel(handle)
-harness.stdio.log("cancelled")
-}"#,
-    );
-    assert_eq!(out, "[harn] cancelled");
 }
 
 #[test]
@@ -778,18 +758,6 @@ fn test_spawn_returns_value() {
 }
 
 // --- Deadline tests ---
-
-#[test]
-fn test_deadline_success() {
-    let out = run_output(
-        r#"pipeline t(harness: Harness, task: unknown) {
-const result = deadline 5s { harness.stdio.log("within deadline")
-42 }
-harness.stdio.log(result)
-}"#,
-    );
-    assert_eq!(out, "[harn] within deadline\n[harn] 42");
-}
 
 #[test]
 fn test_deadline_exceeded() {

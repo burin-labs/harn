@@ -37,12 +37,6 @@ fn multibyte_template_bodies_do_not_panic() {
 }
 
 #[test]
-fn bare_interp() {
-    let b = dict(&[("name", s("Alice"))]);
-    assert_eq!(render("hi {{name}}!", &b), "hi Alice!");
-}
-
-#[test]
 fn provenance_expr_span_matches_output_range() {
     let mut user = crate::value::DictMap::new();
     user.insert(crate::value::intern_key("name"), s("alice"));
@@ -134,69 +128,9 @@ fn bare_interp_missing_passthrough() {
 }
 
 #[test]
-fn legacy_if_truthy() {
-    let b = dict(&[("x", VmValue::Bool(true))]);
-    assert_eq!(render("{{if x}}yes{{end}}", &b), "yes");
-}
-
-#[test]
 fn legacy_if_falsey() {
     let b = dict(&[("x", VmValue::Bool(false))]);
     assert_eq!(render("{{if x}}yes{{end}}", &b), "");
-}
-
-#[test]
-fn if_else() {
-    let b = dict(&[("x", VmValue::Bool(false))]);
-    assert_eq!(render("{{if x}}A{{else}}B{{end}}", &b), "B");
-}
-
-#[test]
-fn if_elif_else() {
-    let b = dict(&[("n", VmValue::Int(2))]);
-    let tpl = "{{if n == 1}}one{{elif n == 2}}two{{elif n == 3}}three{{else}}many{{end}}";
-    assert_eq!(render(tpl, &b), "two");
-}
-
-#[test]
-fn for_loop_basic() {
-    let items = VmValue::List(std::sync::Arc::new(vec![s("a"), s("b"), s("c")]));
-    let b = dict(&[("xs", items)]);
-    assert_eq!(render("{{for x in xs}}{{x}},{{end}}", &b), "a,b,c,");
-}
-
-#[test]
-fn for_loop_vars() {
-    let items = VmValue::List(std::sync::Arc::new(vec![s("a"), s("b")]));
-    let b = dict(&[("xs", items)]);
-    let tpl = "{{for x in xs}}{{loop.index}}:{{x}}{{if !loop.last}},{{end}}{{end}}";
-    assert_eq!(render(tpl, &b), "1:a,2:b");
-}
-
-#[test]
-fn for_empty_else() {
-    let b = dict(&[("xs", VmValue::List(std::sync::Arc::new(vec![])))]);
-    assert_eq!(render("{{for x in xs}}A{{else}}empty{{end}}", &b), "empty");
-}
-
-#[test]
-fn for_dict_kv() {
-    let mut d: crate::value::DictMap = crate::value::DictMap::new();
-    d.insert("a".into(), VmValue::Int(1));
-    d.insert("b".into(), VmValue::Int(2));
-    let b = dict(&[("m", VmValue::dict(d))]);
-    assert_eq!(
-        render("{{for k, v in m}}{{k}}={{v}};{{end}}", &b),
-        "a=1;b=2;"
-    );
-}
-
-#[test]
-fn nested_path() {
-    let mut inner: crate::value::DictMap = crate::value::DictMap::new();
-    inner.insert("name".into(), s("Alice"));
-    let b = dict(&[("user", VmValue::dict(inner))]);
-    assert_eq!(render("{{user.name}}", &b), "Alice");
 }
 
 #[test]
@@ -209,24 +143,9 @@ fn list_index() {
 }
 
 #[test]
-fn filter_upper() {
-    let b = dict(&[("n", s("alice"))]);
-    assert_eq!(render("{{n | upper}}", &b), "ALICE");
-}
-
-#[test]
 fn filter_default() {
     let b = dict(&[("n", s(""))]);
     assert_eq!(render("{{n | default: \"anon\"}}", &b), "anon");
-}
-
-#[test]
-fn filter_join() {
-    let b = dict(&[(
-        "xs",
-        VmValue::List(std::sync::Arc::new(vec![s("a"), s("b")])),
-    )]);
-    assert_eq!(render("{{xs | join: \", \"}}", &b), "a, b");
 }
 
 #[test]
