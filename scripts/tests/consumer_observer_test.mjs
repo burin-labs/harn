@@ -14,13 +14,14 @@ import {
 } from '../lib/consumer-observer.mjs';
 
 const context = {
-  schema: 'harn.consumer_observer.v1',
+  schema: 'harn.consumer_observer.v2',
   parent_repository: 'burin-labs/harn',
   parent_run_id: '42',
   parent_run_attempt: 2,
   parent_head_sha: 'a'.repeat(40),
   source_revision: 'b'.repeat(40),
   dispatch_nonce: '01234567-89ab-4cde-8fab-0123456789ab',
+  started_at: 1000,
 };
 const parent = {
   id: 42, run_attempt: 2, head_sha: context.parent_head_sha,
@@ -44,6 +45,8 @@ const event = { inputs: { observer: JSON.stringify(context), source_revision: co
 test('admission binds an authenticated child to a live current parent and separately frozen source', () => {
   const receipt = admitChild(context, parent, expected, child, event, context);
   assert.equal(receipt.child.run_id, '73');
+  assert.match(receipt.child.receipt_nonce,/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+  assert.notEqual(receipt.child.receipt_nonce,admitChild(context,parent,expected,child,event,context).child.receipt_nonce);
   assert.deepEqual(receipt.observer, observerContext(context));
   assert.notEqual(receipt.observer.parent_head_sha, receipt.observer.source_revision);
 });
@@ -75,6 +78,9 @@ test('owned receipts remain bound to the historical parent and fresh child attem
     { ...child, status: 'completed', conclusion: null }, { ...child, status: 'unknown' },
   ]) assert.throws(() => qualify(reading), /CONSUMER_OBSERVER reason=/);
   assert.throws(() => qualify(child, { ...receipt, reused: true }), /child_receipt_shape_or_context_unproven/);
+  for(const receiptNonce of [undefined,null,'',context.parent_run_id]){
+    assert.throws(()=>qualify(child,{...receipt,child:{...receipt.child,receipt_nonce:receiptNonce}}),/child_receipt_identity_unproven/);
+  }
   assert.throws(() => qualify(child, { ...receipt, child: { ...receipt.child, run_attempt: 2 } }), /child_dispatch_identity_unproven/);
   assert.throws(() => qualify(child, receipt, { ...context, dispatch_nonce: '11234567-89ab-4cde-8fab-0123456789ab' }), /dispatch_declaration_mismatch/);
   assert.throws(() => qualify(child, receipt, context, { ...historicalParent, run_attempt: 3 }), /parent_attempt_superseded/);

@@ -7,7 +7,6 @@ async function main() {
     || context.parent_run_attempt!==Number(env.GITHUB_RUN_ATTEMPT) || context.parent_head_sha!==env.GITHUB_SHA){
     throw new Error('CONSUMER_OBSERVER reason=dispatch_invocation_unproven');
   }
-  const startedAt=Math.floor(Date.now()/1000);
   const source=await githubConsumerSource(env.GH_TOKEN,env.CANARY_REPOSITORY,env.CANARY_PAIRED_PULL||null);
   const result=await dispatchObserverConsumer(env.PARENT_READ_TOKEN, env.GH_TOKEN, context, {
     repository:env.CANARY_REPOSITORY, workflow:env.CANARY_WORKFLOW,
@@ -15,7 +14,7 @@ async function main() {
   });
   if(env.GITHUB_OUTPUT){
     const fs=await import('node:fs');
-    fs.appendFileSync(env.GITHUB_OUTPUT,`context=${JSON.stringify(context)}\nstarted_at=${startedAt}\n`);
+    fs.appendFileSync(env.GITHUB_OUTPUT,`context=${JSON.stringify(context)}\n`);
   }
   console.log(`CONSUMER_OBSERVER dispatched=${result.dispatched} child_identity=private`);
 }

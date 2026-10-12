@@ -25,7 +25,9 @@ test('declaration preparation reaches a closed public file only for a measured l
     const parent = { id: 42, run_attempt: 2, head_sha: 'a'.repeat(40),
       head_repository: { full_name: 'burin-labs/harn' }, path: '.github/workflows/consumer-canary.yml', status: 'in_progress' };
     fs.writeFileSync(preload, `import fs from 'node:fs';
-      globalThis.fetch = async () => ({ok:true,json:async()=>JSON.parse(fs.readFileSync(${JSON.stringify(record)}, 'utf8'))});`);
+      let clock=1000;
+      Date.now=()=>clock*1000;
+      globalThis.fetch = async () => {clock=1100;return {ok:true,json:async()=>JSON.parse(fs.readFileSync(${JSON.stringify(record)}, 'utf8'))};};`);
     const env = { PATH: process.env.PATH, NODE_OPTIONS: `--import=${preload}`, GH_TOKEN: 'fixture-read',
       GITHUB_REPOSITORY: 'burin-labs/harn', GITHUB_RUN_ID: '42', GITHUB_RUN_ATTEMPT: '2',
       GITHUB_SHA: parent.head_sha, SOURCE_REVISION: 'b'.repeat(40), RUNNER_TEMP: scratch, GITHUB_OUTPUT: output };
@@ -41,7 +43,8 @@ test('declaration preparation reaches a closed public file only for a measured l
     assert.deepEqual(JSON.parse(fs.readFileSync(fields.file, 'utf8')), declared);
     assert.equal(fields.name, observerDeclarationName(declared));
     assert.equal(declared.parent_run_id, '42');
-    assert.equal(Object.keys(declared).length, 7, 'public custody carries no private consumer identity');
+    assert.equal(declared.started_at,1000,'the original issuer starts before declaration qualification and upload');
+    assert.equal(Object.keys(declared).length, 8, 'public custody carries no private consumer identity');
     for (const reading of [{ ...parent, status: 'completed' }, { ...parent, run_attempt: 3 }, {}]) {
       fs.writeFileSync(record, JSON.stringify(reading));
       fs.writeFileSync(output, '');
@@ -58,9 +61,9 @@ test('the completion entrypoint reaches owned cancellation without publishing pr
   const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'harn-observer-cleanup-'));
   try {
     const context = {
-      schema: 'harn.consumer_observer.v1', parent_repository: 'burin-labs/harn',
+      schema: 'harn.consumer_observer.v2', parent_repository: 'burin-labs/harn',
       parent_run_id: '42', parent_run_attempt: 2, parent_head_sha: 'a'.repeat(40),
-      source_revision: 'b'.repeat(40), dispatch_nonce: '01234567-89ab-4cde-8fab-0123456789ab',
+      source_revision: 'b'.repeat(40), dispatch_nonce: '01234567-89ab-4cde-8fab-0123456789ab', started_at: 1000,
     };
     const parent = { id: 42, run_attempt: 2, head_sha: context.parent_head_sha,
       head_repository: { full_name: context.parent_repository }, path: '.github/workflows/consumer-canary.yml',
@@ -69,9 +72,10 @@ test('the completion entrypoint reaches owned cancellation without publishing pr
       head_repository: { full_name: 'acme/widget-host' }, path: '.github/workflows/rehearsal.yml',
       status: 'in_progress', event: 'workflow_dispatch', actor: { login: observerDispatchActor, type: 'Bot' },
       display_title: observerRunName(context) };
-    const receipt = { schema: 'harn.consumer_observer_receipt.v1', observer: context, child: {
+    const receipt = { schema: 'harn.consumer_observer_receipt.v2', observer: context, child: {
       repository: 'acme/widget-host', workflow: child.path, run_id: '73', run_attempt: 1,
       head_sha: child.head_sha, dispatch_actor: observerDispatchActor,
+      receipt_nonce: '11234567-89ab-4cde-8fab-0123456789ab',
     } };
     const archives = [];
     for (const [index, filename, value] of [[0, 'consumer-observer.json', context],

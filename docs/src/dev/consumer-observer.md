@@ -14,13 +14,14 @@ The closed context contains:
 
 | Field | Meaning |
 | --- | --- |
-| `schema` | `harn.consumer_observer.v1` |
+| `schema` | `harn.consumer_observer.v2` |
 | `parent_repository` | Public parent repository |
 | `parent_run_id` | Decimal workflow run identity |
 | `parent_run_attempt` | Current workflow attempt |
 | `parent_head_sha` | Immutable parent workflow revision |
 | `source_revision` | Separately frozen source being rehearsed |
 | `dispatch_nonce` | UUID identifying this dispatch |
+| `started_at` | Original declaration Unix time; unchanged across observation windows |
 
 Admission reads authenticated parent and child workflow metadata. It requires
 the expected parent workflow, revision, current attempt, and live state. The
@@ -64,6 +65,12 @@ The action emits `owned=false` for an ordinary rehearsal. An admitted observer
 emits `owned=true`, a receipt path, and the dispatch nonce. The consumer stores
 that receipt in its own repository. Private child identities and artifacts
 stay private.
+
+The private v2 ownership receipt includes an admission-minted random
+`receipt_nonce`. Terminal v2 receipts retain that same nonce. Only authenticated,
+normalized custody is hashed into the public `custody_commitment`; the nonce
+never leaves the private receipt. This binds recovery to one exact admitted
+child without exposing guessable private run identities.
 
 The discovery name can locate a candidate; it cannot authorize cancellation.
 An unreadable run or a missing identity refuses admission. A stale attempt,
@@ -153,7 +160,8 @@ the product decision unreported.
 `consumer-observer-observe.mjs` reads that decision through the same custody
 owner used by cleanup. Its release `verdict` output exists only for `pass` or
 `fail`. The separate `observation_outcome` also reports `pending`, `refused` or
-`execution_failed`. A closed `reading` contains `discovered`, `owned`, `pending`, `refused`, `execution` and
+`execution_failed`. A closed `reading` contains `discovered`, `owned`, `pending`, `refused`,
+`custody_commitment`, `execution` and
 `product`. Missing or ambiguous children and missing product receipts have
 `product=null`; this is an unreported decision, not measured zero checks.
 A pass requires exactly one discovered and authenticated child, a complete
@@ -176,9 +184,44 @@ reuse; `--decision` returns a reached pass or failure through the same reader.
 Both return `owned=false`. Reuse requires the current default consumer source
 and retains the original context, rather than issuing another declaration.
 
-The bounded waiter keeps the original dispatch start across credential renewal
+The declaration owner records `started_at` immediately before qualifying the
+live parent and uploading its immutable declaration. The budget therefore
+includes declaration qualification and upload, but excludes earlier candidate
+builds. Callers cannot supply a separate start. Schema v2 replaces v1 directly;
+no automatic caller had issued a production context before this cutover.
+
+The bounded waiter keeps the original declaration start across credential renewal
 windows. Window expiry can continue observation; aggregate expiry cannot become
 a product pass or failure. Execution failure with no reached product decision
 stops waiting through `execution_failed` and leaves the release verdict absent.
+An expired renewal still performs one fresh authenticated observation. Only a
+singular owned child with no reached product decision and no refused or failed
+execution can produce a closed deadline receipt after 7,200 seconds. A late
+product result, missing custody or infrastructure failure cannot produce it.
+The deadline qualifier binds the issued start and observation time to the
+canonical declaration and failed observation step intervals, followed by
+successful publication in that same measured job. The descriptor contains the
+public context, observation time, counts and opaque custody commitment, never
+a private child identity or receipt nonce.
+Deadline authentication and publication wiring remain unactivated.
+The decision command's inert `--deadline` operation authenticates this original
+receipt, its exact failed parent attempt, complete job census and canonical
+producer steps. It refreshes the parent after reading the digest-bound artifact.
+This historical evidence grants no product verdict or cleanup ownership.
+
+The inert `--recover` operation combines that reached deadline with the shared
+current-default product reader. The normalized private receipt must reproduce
+the original deadline commitment, including its admission nonce, child run,
+attempt and source. A different independently admitted child cannot replace
+the original, even when that original disappears. Recovery requires a completed
+successful child,
+a reached pass and a complete exact-attempt job census with at least one actual
+non-skipped job completed strictly after the original deadline. Every job must
+belong to the same run, attempt and revision and have an accounted terminal
+state. Missing timestamps cannot supply the completion witness. The reader
+refreshes parent/source eligibility, discovery and child state after the timing
+census. Child job identities and chronology remain private; the result retains
+`owned=false`. The publication owner must separately qualify the producer's
+source, consumer-only failure profile, archives and attestations.
 The dispatch, decision and waiter commands remain inert until their owning
 workflow callers are integrated and the operational lifecycle is qualified.

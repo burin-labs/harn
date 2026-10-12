@@ -11,9 +11,9 @@ import {observerDeclarationName} from '../lib/consumer-observer.mjs';
 test('the actual dispatch entrypoint requires issued custody and a fresh live parent, and exports no child identity',()=>{
   const scratch=fs.mkdtempSync(path.join(os.tmpdir(),'harn-observer-dispatch-'));
   try {
-    const context={schema:'harn.consumer_observer.v1',parent_repository:'burin-labs/harn',
+    const context={schema:'harn.consumer_observer.v2',parent_repository:'burin-labs/harn',
       parent_run_id:'42',parent_run_attempt:2,parent_head_sha:'a'.repeat(40),
-      source_revision:'b'.repeat(40),dispatch_nonce:'01234567-89ab-4cde-8fab-0123456789ab'};
+      source_revision:'b'.repeat(40),dispatch_nonce:'01234567-89ab-4cde-8fab-0123456789ab',started_at:1000};
     const parent={id:42,run_attempt:2,head_sha:context.parent_head_sha,
       head_repository:{full_name:context.parent_repository},path:'.github/workflows/consumer-canary.yml',status:'in_progress'};
     const declaration=path.join(scratch,'consumer-observer.json'),archive=path.join(scratch,'declaration.zip');

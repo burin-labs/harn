@@ -1,14 +1,22 @@
 import fs from 'node:fs';
+import path from 'node:path';
 import {observeConsumerProduct,observerContext} from '../lib/consumer-observer.mjs';
-import {waitConsumerWindow} from '../lib/consumer-observer-window.mjs';
+import {consumerDeadlineReceipt,observerDeadlineFilename,observerDeadlineName,waitConsumerWindow} from '../lib/consumer-observer-window.mjs';
 
 async function main(){
   const env=process.env;
   const context=observerContext(JSON.parse(env.OBSERVER_CONTEXT));
-  if(!/^[0-9]+$/.test(env.CANARY_STARTED_AT??'')) throw new Error('CONSUMER_OBSERVER reason=observation_start_invalid');
   const expected={repository:env.CANARY_REPOSITORY,workflow:`.github/workflows/${env.CANARY_WORKFLOW}`,
     pairedPull:env.CANARY_PAIRED_PULL||null};
-  const result=await waitConsumerWindow(Number(env.CANARY_STARTED_AT),()=>observeConsumerProduct(env.GH_TOKEN,context,expected));
+  const result=await waitConsumerWindow(context.started_at,()=>observeConsumerProduct(env.GH_TOKEN,context,expected));
+  if(result.verdict==='deadline'){
+    const receipt=consumerDeadlineReceipt(context,result.observedAt,result.reading);
+    const directory=fs.mkdtempSync(path.join(env.RUNNER_TEMP,'consumer-observer-deadline-'));
+    const file=path.join(directory,observerDeadlineFilename);
+    fs.writeFileSync(file,`${JSON.stringify(receipt)}\n`,{mode:0o600,flag:'wx'});
+    if(env.GITHUB_OUTPUT) fs.appendFileSync(env.GITHUB_OUTPUT,
+      `deadline_file=${file}\ndeadline_name=${observerDeadlineName(context)}\n`);
+  }
   if(env.GITHUB_OUTPUT){
     // Only an actually reached product judgment is a release verdict.
     const verdict=result.verdict==='pass'||result.verdict==='fail'?`verdict=${result.verdict}\n`:'';

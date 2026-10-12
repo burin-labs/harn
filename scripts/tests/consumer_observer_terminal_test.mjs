@@ -6,23 +6,27 @@ import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
 import {fileURLToPath} from 'node:url';
-import {observerDeclarationName, observerDeclarationStep, observerDispatchActor, observerRunName, observerTerminalName} from '../lib/consumer-observer.mjs';
+import {observerDeadlineName,observerDeadlineStep,observerWindowSteps} from '../lib/consumer-observer-window.mjs';
+import {admitChild, createTerminalReceipt, qualifyOwnedChild, observerDeclarationName, observerDeclarationStep, observerDispatchActor, observerRunName, observerTerminalName} from '../lib/consumer-observer.mjs';
 
 test('the terminal entrypoint records only an authenticated reached product decision', () => {
   const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'harn-observer-terminal-'));
   try {
-    const context = {schema:'harn.consumer_observer.v1',parent_repository:'burin-labs/harn',
+    const context = {schema:'harn.consumer_observer.v2',parent_repository:'burin-labs/harn',
       parent_run_id:'42',parent_run_attempt:2,parent_head_sha:'a'.repeat(40),
-      source_revision:'b'.repeat(40),dispatch_nonce:'01234567-89ab-4cde-8fab-0123456789ab'};
+      source_revision:'b'.repeat(40),dispatch_nonce:'01234567-89ab-4cde-8fab-0123456789ab',started_at:1000};
     const parent = {id:42,run_attempt:2,head_sha:context.parent_head_sha,
       head_repository:{full_name:context.parent_repository},path:'.github/workflows/consumer-canary.yml',
       status:'in_progress'};
     const child = {id:73,run_attempt:1,head_sha:'c'.repeat(40),head_repository:{full_name:'acme/widget-host'},
       path:'.github/workflows/rehearsal.yml',head_branch:'main',event:'workflow_dispatch',status:'in_progress',
       actor:{login:observerDispatchActor,type:'Bot'},display_title:observerRunName(context)};
-    const ownership = {schema:'harn.consumer_observer_receipt.v1',observer:context,child:{
-      repository:'acme/widget-host',workflow:child.path,run_id:'73',run_attempt:1,
-      head_sha:child.head_sha,dispatch_actor:observerDispatchActor}};
+    const expected={repository:'acme/widget-host',workflow:child.path,runId:'73',attempt:1,
+      headSha:child.head_sha,sourceRevision:context.source_revision};
+    const ownership=admitChild(context,parent,expected,child,{inputs:{source_revision:context.source_revision,
+      observer:JSON.stringify(context)}},context);
+    const commitment=createHash('sha256').update(JSON.stringify(qualifyOwnedChild(ownership,context,parent,child,
+      expected,context))).digest('hex');
     ownership.child=Object.fromEntries(Object.entries(ownership.child).reverse());
     const name = `consumer-observer-${context.dispatch_nonce}`;
     const archives = [];
@@ -81,7 +85,7 @@ test('the terminal entrypoint records only an authenticated reached product deci
     assert.equal(recorded.recorded,'true');
     assert.equal(recorded.artifact,observerTerminalName(context));
     const receipt=JSON.parse(fs.readFileSync(recorded.receipt,'utf8'));
-    assert.equal(receipt.schema,'harn.consumer_observer_terminal.v1');
+    assert.equal(receipt.schema,'harn.consumer_observer_terminal.v2');
     assert.deepEqual(receipt.product,product);
     assert.deepEqual(receipt.child,ownership.child);
     assert.notDeepEqual(Object.keys(receipt.child),Object.keys(ownership.child),
@@ -130,7 +134,7 @@ test('the terminal entrypoint records only an authenticated reached product deci
       const fixture=JSON.parse(fs.readFileSync(${JSON.stringify(fixture)},'utf8'));
       let censusReads=0,childReads=0,parentReads=0,sourceReads=0,pullReads=0;
       if(fixture.recordedClock){
-        let seconds=1000;
+        let seconds=fixture.clockStart??1000;
         Date.now=()=>seconds*1000;
         globalThis.setTimeout=(callback,milliseconds)=>{seconds+=milliseconds/1000;queueMicrotask(callback);};
       }
@@ -139,23 +143,25 @@ test('the terminal entrypoint records only an authenticated reached product deci
         const endpoint=new URL(url),p=endpoint.pathname;
         fs.writeFileSync(${JSON.stringify(lastRead)},JSON.stringify(p));
         if(p.endsWith('/zip')){
-          const index=Number(/artifacts\\/(50[123])\\//.exec(p)?.[1])-501;
+          const index=Number(/artifacts\\/(50[1234])\\//.exec(p)?.[1])-501;
           return {ok:true,arrayBuffer:async()=>fs.readFileSync(fixture.archives[index].archive)};
         }
         let record;
         if(p.endsWith('/artifacts')){
           const wanted=endpoint.searchParams.get('name');
           if(!wanted&&!p.includes('/42/'))throw new Error('unfiltered-private-read');
-          const selected=fixture.archives.filter((a,index)=>(wanted?a.metadata.name===wanted:index===0)&&fixture.missing!==index);
+          const selected=fixture.archives.filter((a,index)=>(wanted?a.metadata.name===wanted:[0,3].includes(index))&&fixture.missing!==index);
           record={total_count:selected.length,artifacts:selected.map(a=>a.metadata)};
         }else if(p.endsWith('/42/attempts/2'))record=fixture.parent;
-        else if(p.endsWith('/42/attempts/2/jobs'))record={total_count:1,jobs:[{id:701,conclusion:'success',steps:[{
+        else if(p.endsWith('/42/attempts/2/jobs'))record={total_count:1,jobs:fixture.parentJobs??[{id:701,conclusion:'success',steps:[{
           name:${JSON.stringify(observerDeclarationStep)},status:'completed',conclusion:fixture.publication??'success'}]}]};
+        else if(p.endsWith('/'+fixture.child.id+'/attempts/'+fixture.child.run_attempt+'/jobs'))record={total_count:fixture.chronologyPartial?fixture.childJobs.length+1:fixture.childJobs.length,
+          jobs:fixture.childJobs};
         else if(p.endsWith('/42'))record=++parentReads>(fixture.ordinaryObservation?0:1)&&fixture.finalParent?fixture.finalParent:fixture.parent;
         else if(p==='/repos/acme/widget-host')record={full_name:'acme/widget-host',default_branch:'main'};
         else if(p.endsWith('/commits/main'))record={sha:++sourceReads>1&&fixture.finalSource?fixture.finalSource:fixture.source??'c'.repeat(40)};
         else if(p.endsWith('/pulls/7'))record=++pullReads>1&&fixture.finalPull?fixture.finalPull:fixture.pull;
-        else if(p.endsWith('/73'))record=++childReads>1&&fixture.finalChild?fixture.finalChild:fixture.child;
+        else if(p.endsWith('/'+fixture.child.id))record=++childReads>1&&fixture.finalChild?fixture.finalChild:fixture.child;
         else if(p.endsWith('/rehearsal.yml/runs')){
           const rows=++censusReads>1&&fixture.finalRuns?fixture.finalRuns:fixture.runs;
           record={total_count:fixture.partial||(censusReads>1&&fixture.finalPartial)?rows.length+1:rows.length,workflow_runs:rows};
@@ -172,9 +178,10 @@ test('the terminal entrypoint records only an authenticated reached product deci
       const run=spawnSync(process.execPath,[wait?waitEntry:observeEntry],{encoding:'utf8',env:{PATH:process.env.PATH,
         NODE_OPTIONS:`--import=${observerPreload}`,GH_TOKEN:'fixture-read',OBSERVER_CONTEXT:JSON.stringify(context),
         CANARY_OWNER:'acme',CANARY_NAME:'widget-host',CANARY_WORKFLOW:'rehearsal.yml',GITHUB_OUTPUT:output,
-        CANARY_REPOSITORY:'acme/widget-host',CANARY_STARTED_AT:'1000',...extraEnv}});
+        CANARY_REPOSITORY:'acme/widget-host',RUNNER_TEMP:scratch,...extraEnv}});
       const text=fs.existsSync(output)?fs.readFileSync(output,'utf8'):'';
       assert.doesNotMatch(run.stdout+run.stderr+text,/widget-host|run_id|head_sha|dispatch_actor|\/73/);
+      assert(!(run.stdout+run.stderr+text).includes(ownership.child.receipt_nonce));
       const fields=Object.fromEntries(text.trim().split('\n').filter(Boolean).map(line=>{
         const split=line.indexOf('=');return [line.slice(0,split),line.slice(split+1)];
       }));
@@ -183,7 +190,7 @@ test('the terminal entrypoint records only an authenticated reached product deci
     const measured=observe();
     assert.equal(measured.run.status,0,measured.run.stderr);
     assert.equal(measured.fields.verdict,'pass');
-    assert.deepEqual(measured.reading,{discovered:1,owned:1,pending:0,refused:0,execution:'success',product});
+    assert.deepEqual(measured.reading,{discovered:1,owned:1,pending:0,refused:0,custody_commitment:commitment,execution:'success',product});
     for(const changes of [{runs:[]},{runs:[completed,{...completed,id:74}]},{missing:1},{missing:2},
       {child},{finalRuns:[completed,{...completed,id:74}]}]){
       const pending=observe(changes);
@@ -248,7 +255,7 @@ test('the terminal entrypoint records only an authenticated reached product deci
     assert.equal(noProduct.run.status,0,noProduct.run.stderr);
     assert.equal(noProduct.fields.observation_outcome,'execution_failed');
     assert.equal(noProduct.fields.verdict,undefined);
-    assert.deepEqual(noProduct.reading,{discovered:1,owned:1,pending:0,refused:0,execution:'failure',product:null});
+    assert.deepEqual(noProduct.reading,{discovered:1,owned:1,pending:0,refused:0,custody_commitment:commitment,execution:'failure',product:null});
     assert.equal(JSON.parse(fs.readFileSync(lastRead,'utf8')),'/repos/acme/widget-host/actions/runs/73');
     for(const changes of [{missing:2,child:{...completed,conclusion:'failure'},finalChild:{...completed,run_attempt:2,conclusion:'failure'}},
       {missing:2,child:{...completed,conclusion:'failure'},finalRuns:[completed,{...completed,id:74}]},
@@ -270,6 +277,39 @@ test('the terminal entrypoint records only an authenticated reached product deci
     assert.equal(waitMissing.fields.observation_outcome,'pending');
     assert.equal(waitMissing.fields.wall_seconds,'2700');
     assert.equal(waitMissing.fields.verdict,undefined,'green execution without reached judgment cannot settle a release');
+    const deadline=observe({recordedClock:true,clockStart:8200,missing:2},true);
+    assert.equal(deadline.run.status,1,deadline.run.stderr);
+    assert.equal(deadline.fields.observation_outcome,'deadline');
+    assert.equal(deadline.fields.verdict,undefined);
+    assert(deadline.fields.deadline_file,'reached non-null deadline must produce its closed receipt');
+    const deadlineReceipt=JSON.parse(fs.readFileSync(deadline.fields.deadline_file,'utf8'));
+    assert.deepEqual(deadlineReceipt,{schema:'harn.consumer_observer.deadline.v1',observer:context,observed_at:8200,
+      reading:{discovered:1,owned:1,pending:1,refused:0,custody_commitment:commitment,execution:'success',product:null}});
+    assert.equal(fs.statSync(deadline.fields.deadline_file).mode&0o777,0o600);
+    const liveDeadline=observe({recordedClock:true,clockStart:8200,child},true);
+    assert.equal(liveDeadline.fields.observation_outcome,'deadline');
+    assert.equal(JSON.parse(fs.readFileSync(liveDeadline.fields.deadline_file,'utf8')).reading.custody_commitment,commitment);
+    for(const change of [{finalParent:{...parent,status:'completed',conclusion:'failure'}},
+      {finalSource:'d'.repeat(40)},{finalRuns:[child,{...child,id:74}]},
+      {finalChild:{...child,run_attempt:2}},{finalChild:{...child,status:'completed',conclusion:'failure'}}]){
+      const endedLive=observe({recordedClock:true,clockStart:8200,child,...change},true);
+      assert.equal(endedLive.run.status,1);
+      assert.equal(endedLive.fields.deadline_file,undefined,'live custody must be refreshed before minting a deadline');
+    }
+    for(const changes of [{runs:[]},{runs:[completed,{...completed,id:74}]},{missing:1},
+      {child:{...completed,conclusion:'failure'}},{finalChild:{...completed,run_attempt:2}},
+      {finalParent:{...parent,status:'completed',conclusion:'failure'}},{finalSource:'d'.repeat(40)}]){
+      const unmeasuredDeadline=observe({recordedClock:true,clockStart:8200,missing:2,...changes},true);
+      assert.equal(unmeasuredDeadline.run.status,1);
+      assert.equal(unmeasuredDeadline.fields.deadline_file,undefined,'unmeasured/infrastructure evidence cannot mint deadline authority');
+    }
+    const forgedStart=observe({recordedClock:true,clockStart:8200,missing:2},true,
+      {OBSERVER_CONTEXT:JSON.stringify({...context,started_at:900})});
+    assert.equal(forgedStart.run.status,1);
+    assert.equal(forgedStart.fields.deadline_file,undefined,'a backdated context cannot match the issued declaration');
+    const lateProduct=observe({recordedClock:true,clockStart:8200},true);
+    assert.equal(lateProduct.run.status,1);
+    assert.equal(lateProduct.fields.deadline_file,undefined,'already reached product cannot become unmeasured deadline evidence');
     const waitExecutionFailure=observe({recordedClock:true,missing:2,child:{...completed,conclusion:'failure'}},true);
     assert.equal(waitExecutionFailure.run.status,1);
     assert.equal(waitExecutionFailure.fields.observation_outcome,'execution_failed');
@@ -299,10 +339,11 @@ test('the terminal entrypoint records only an authenticated reached product deci
     const selectEntry=fileURLToPath(new URL('../ci/consumer-observer-select.mjs',import.meta.url));
     const terminalParent={...parent,status:'completed',conclusion:'success',created_at:'2026-10-11T20:00:00Z'};
     const reusableChild={...completed,head_branch:'main'};
-    const readParent=(changes={},extraEnv={},select=false,decision=false,contextDecision=false)=>{
+    const readParent=(changes={},extraEnv={},select=false,decision=false,contextDecision=false,recovery=false)=>{
       const output=path.join(scratch,`reuse-${sequence++}`);
       fs.writeFileSync(fixture,JSON.stringify({parent:terminalParent,child:reusableChild,runs:[reusableChild],archives,...changes}));
-      const run=spawnSync(process.execPath,[contextDecision?readDecisionEntry:select?selectEntry:readParentEntry,...(decision?['--decision']:[])],{encoding:'utf8',env:{PATH:process.env.PATH,
+      const run=spawnSync(process.execPath,[contextDecision?readDecisionEntry:select?selectEntry:readParentEntry,
+        ...(recovery?['--recover']:decision?['--decision']:[])],{encoding:'utf8',env:{PATH:process.env.PATH,
         NODE_OPTIONS:`--import=${observerPreload}`,GH_TOKEN:'fixture-read',PARENT_RUN_ID:'42',PARENT_ROLE:'canary',
         SOURCE_REVISION:context.source_revision,REQUIRE_CURRENT_DEFAULT:'true',CANARY_REPOSITORY:'acme/widget-host',
         CANARY_WORKFLOW:'rehearsal.yml',GITHUB_OUTPUT:output,REHEARSAL_PROMOTION_RUN_ID:'42',
@@ -318,6 +359,100 @@ test('the terminal entrypoint records only an authenticated reached product deci
     assert.match(reused.text,/owned=false/);
     assert.equal(JSON.parse(fs.readFileSync(lastRead,'utf8')),'/repos/acme/widget-host/actions/runs/73',
       'the fresh child status follows public-parent and current-default eligibility reads');
+    // Recover only through the deadline receipt emitted by the actual waiter
+    // above and the actual terminal product receipt emitted by this producer.
+    const deadlineArchive=path.join(scratch,'archive-3.zip');
+    const deadlineZip=spawnSync('zip',['-j',deadlineArchive,deadline.fields.deadline_file],
+      {env:{PATH:process.env.PATH,LC_ALL:'C'},encoding:'utf8'});
+    assert.equal(deadlineZip.status,0,deadlineZip.stderr);
+    const deadlineBytes=fs.readFileSync(deadlineArchive);
+    const recoveryArchives=[...archives,{archive:deadlineArchive,metadata:{id:504,
+      name:observerDeadlineName(context),expired:false,size_in_bytes:deadlineBytes.length,
+      digest:`sha256:${createHash('sha256').update(deadlineBytes).digest('hex')}`,
+      workflow_run:{id:42,head_sha:parent.head_sha}}}];
+    const timestamp=seconds=>new Date(seconds*1000).toISOString();
+    const step=(name,number,start,end,conclusion)=>({name,number,status:'completed',conclusion,
+      started_at:timestamp(start),completed_at:timestamp(end)});
+    const parentJobs=[{id:701,run_id:42,run_attempt:2,head_sha:parent.head_sha,status:'completed',conclusion:'failure',steps:[
+      step(observerDeclarationStep,2,999,1001,'success'),
+      step(observerWindowSteps[2],8,8100,8201,'failure'),
+      step(observerDeadlineStep,9,8201,8202,'success')]}];
+    const laterJob={id:801,run_id:73,run_attempt:1,head_sha:child.head_sha,status:'completed',conclusion:'success',
+      completed_at:timestamp(8203)};
+    const recoveryInputs={parent:{...terminalParent,conclusion:'failure'},archives:recoveryArchives,parentJobs,childJobs:[laterJob]};
+    const recover=(change={},env={})=>readParent({...recoveryInputs,...change},env,false,false,true,true);
+    const recovered=recover();assert.equal(recovered.run.status,0,recovered.run.stderr);
+    const recoveryValue=JSON.parse(recovered.run.stdout);
+    assert.equal(recoveryValue.reading.product.verdict,'pass');
+    assert.deepEqual(recoveryValue.deadline,deadlineReceipt);
+    assert.equal(recoveryValue.owned,false,'later pass cannot acquire new cleanup ownership');
+    assert.doesNotMatch(recovered.run.stdout,/completed_at|head_branch|"id"/,'private chronology stays private');
+    assert.equal(JSON.parse(fs.readFileSync(lastRead,'utf8')),'/repos/acme/widget-host/actions/runs/73');
+    for(const changes of [{childJobs:[]},{chronologyPartial:true},
+      {childJobs:[{...laterJob,completed_at:timestamp(8199)}]},
+      {childJobs:[{...laterJob,completed_at:timestamp(8200)}]},
+      {childJobs:[{...laterJob,completed_at:null}]},
+      {childJobs:[{...laterJob,conclusion:'skipped'}]},
+      {childJobs:[{...laterJob,status:'in_progress',conclusion:null}]},
+      {childJobs:[{...laterJob,run_attempt:2}]},{childJobs:[{...laterJob,run_id:74}]},
+      {childJobs:[{...laterJob,head_sha:'d'.repeat(40)}]},
+      {finalChild:{...reusableChild,run_attempt:2}},{finalSource:'d'.repeat(40)},
+      {finalParent:{...terminalParent,run_attempt:3}},{missing:3},{missing:2}]){
+      const refusedRecovery=recover(changes);
+      assert.equal(refusedRecovery.run.status,1,refusedRecovery.run.stdout);
+      assert.equal(refusedRecovery.text,'');
+    }
+    const falsePolicy=recover({},{REQUIRE_CURRENT_DEFAULT:'false'});
+    assert.equal(falsePolicy.run.status,1);assert.equal(falsePolicy.text,'');
+    // A separately admitted child remains valid ordinary custody even after
+    // the original disappears. It must never replace the deadline's child.
+    for(const [index,replacement,reuseNonce] of [
+      [0,{...reusableChild,id:74},false],[1,{...reusableChild,id:74},true],
+      [2,{...reusableChild,run_attempt:2},true],[3,{...reusableChild,head_sha:'d'.repeat(40)},true],
+      [4,reusableChild,false],
+    ]){
+      const live={...replacement,status:'in_progress',conclusion:null};
+      const replacementExpected={...expected,runId:String(live.id),attempt:live.run_attempt,headSha:live.head_sha};
+      const replacementOwned=admitChild(context,parent,replacementExpected,live,
+        {inputs:{source_revision:context.source_revision,observer:JSON.stringify(context)}},context);
+      if(reuseNonce)replacementOwned.child.receipt_nonce=ownership.child.receipt_nonce;
+      const replacementTerminal=createTerminalReceipt(replacementOwned,context,parent,live,
+        replacementExpected,context,product);
+      const changedArchives=[...recoveryArchives];
+      for(const [slot,value] of [[1,replacementOwned],[2,replacementTerminal]]){
+        const json=path.join(scratch,`replacement-${index}-${slot}`,`${name}.json`);
+        fs.mkdirSync(path.dirname(json));fs.writeFileSync(json,JSON.stringify(value));
+        const zip=path.join(scratch,`replacement-${index}-${slot}.zip`);
+        const zipped=spawnSync('zip',['-j',zip,json],{env:{PATH:process.env.PATH,LC_ALL:'C'},encoding:'utf8'});
+        assert.equal(zipped.status,0,zipped.stderr);
+        const bytes=fs.readFileSync(zip);
+        changedArchives[slot]={archive:zip,metadata:{...recoveryArchives[slot].metadata,
+          size_in_bytes:bytes.length,digest:`sha256:${createHash('sha256').update(bytes).digest('hex')}`,
+          workflow_run:{id:replacement.id,head_sha:replacement.head_sha}}};
+      }
+      const change={archives:changedArchives,child:replacement,runs:[replacement],source:replacement.head_sha,
+        childJobs:[{...laterJob,run_id:replacement.id,run_attempt:replacement.run_attempt,head_sha:replacement.head_sha}]};
+      const ordinary=readParent({...recoveryInputs,...change},{},false,false,true);
+      assert.equal(ordinary.run.status,0,ordinary.run.stderr);
+      assert.equal(JSON.parse(ordinary.run.stdout).reading.product.verdict,'pass');
+      if(index===0){
+        // The original was authenticated first, but disappears from the final
+        // complete census. Exactly one valid replacement is not original custody.
+        const replacedAtDeadline=observe({recordedClock:true,clockStart:8200,child,finalRuns:[live]},true);
+        assert.equal(replacedAtDeadline.run.status,1);
+        assert.equal(replacedAtDeadline.fields.deadline_file,undefined);
+        const replacedReading=observe({child,finalRuns:[live]}).reading;
+        assert.equal(replacedReading.discovered,1);
+        assert.equal(replacedReading.owned,0);
+        assert.equal(replacedReading.custody_commitment,null);
+        assert.equal(replacedReading.pending,1);
+        assert.equal(replacedReading.product,null);
+      }
+      const swapped=recover(change);assert.equal(swapped.run.status,1,swapped.run.stdout);
+      assert.equal(swapped.text,'');
+      assert(!(ordinary.run.stdout+ordinary.run.stderr+ordinary.text).includes(replacementOwned.child.receipt_nonce));
+      assert(!(swapped.run.stdout+swapped.run.stderr).includes(replacementOwned.child.receipt_nonce));
+    }
     const reachedHistoricalFailure=readParent({parent:{...terminalParent,conclusion:'failure'},
       archives:failedArchives,child:{...reusableChild,conclusion:'failure'}},{},false,true);
     assert.equal(reachedHistoricalFailure.run.status,0,reachedHistoricalFailure.run.stderr);
