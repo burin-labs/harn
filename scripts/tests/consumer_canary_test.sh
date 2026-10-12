@@ -154,11 +154,11 @@ EOF
 env -i PATH="$PATH" PAIRING_OWNER="$root/scripts/ci/consumer_canary.sh" \
   PAIRING_TEXT='Pairs-with: consumer#7' /bin/bash "$scratch/read-pairing.sh" > "$scratch/pairing-only"
 [[ $(cat "$scratch/pairing-only") == 7 ]]
-if env -i PATH="$scratch/no-node" PAIRING_OWNER="$root/scripts/ci/consumer_canary.sh" \
-  PAIRING_TEXT='Pairs-with: consumer#7' /bin/bash "$scratch/read-pairing.sh" > "$scratch/out" 2>&1; then
-  echo 'missing Node runtime selected a pairing' >&2; exit 1
-fi
-grep -q 'node:' "$scratch/out"
+pairing_status=0
+env -i PATH="$scratch/no-node" PAIRING_OWNER="$root/scripts/ci/consumer_canary.sh" \
+  PAIRING_TEXT='Pairs-with: consumer#7' /bin/bash "$scratch/read-pairing.sh" \
+  > "$scratch/pairing-only" 2> "$scratch/out" || pairing_status=$?
+[[ $pairing_status == 1 && ! -s "$scratch/pairing-only" && -s "$scratch/out" ]]
 
 # Negative control for the identity guard: a line naming the consumer is
 # refused instead of printed.
