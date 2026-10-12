@@ -1158,7 +1158,7 @@ jobs:
           POST_MERGE_TIER_ACTIVE: ${{ needs.changes.outputs.post_merge_tier }}
         run: >-
           scripts/ci/run_rust_test_lane.sh
-          bash scripts/ci/run_workspace_tests.sh rest-unified:1/5
+          bash scripts/ci/run_workspace_tests.sh tooling
       - name: Preserve workspace test inventory
         if: always() && steps.release-audit-rust-test.outcome != 'skipped' && steps.release-audit-rust-test.outcome != ''
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -1199,14 +1199,15 @@ jobs:
   # The rest of the workspace suite, beside the producer instead of after it.
   # The suite is about 2,400 test-seconds, which on one 4 vCPU runner was
   # 11 minutes run after a 10-minute compile (job 112105424497). Each leg here
-  # compiles the same graph from the same restored cache and runs its share.
+  # restores the same cache and compiles and runs only its share.
   # The producer also builds the security archive (about 10 minutes), so its
   # share sets the lane: at three partitions it ran about 250 seconds of tests
   # after that build and finished last (run 38238361365). The legs split by
-  # package: three run harn-vm's own suite (44% of test time) and five,
-  # including the producer, run everything else. A leg then compiles only its
-  # group, so harn-vm's test-mode crate no longer competes with its library on
-  # every leg (scripts/ci/run_workspace_tests.sh). The extra legs cost compile
+  # package: three run harn-vm's own suite (44% of test time), four run
+  # everything else, and the producer keeps only a few small crates by filter
+  # on the build it already has. A leg then compiles only its group, so
+  # harn-vm's test-mode crate no longer competes with its library on every
+  # leg (scripts/ci/run_workspace_tests.sh). The extra legs cost compile
   # time only on GitHub's free standard runner (public repository, harn#9370),
   # which saves nothing and so cannot evict the producer's cache. Under the
   # co-location kill switch the archive-mode fallback runs the whole suite and
@@ -1229,17 +1230,17 @@ jobs:
       matrix:
         include:
           - kind: partition-2
-            name: Rust workspace tests (rest 2/5)
-            partition: rest:2/5
+            name: Rust workspace tests (rest 1/4)
+            partition: rest:1/4
           - kind: partition-3
-            name: Rust workspace tests (rest 3/5)
-            partition: rest:3/5
+            name: Rust workspace tests (rest 2/4)
+            partition: rest:2/4
           - kind: partition-4
-            name: Rust workspace tests (rest 4/5)
-            partition: rest:4/5
+            name: Rust workspace tests (rest 3/4)
+            partition: rest:3/4
           - kind: partition-5
-            name: Rust workspace tests (rest 5/5)
-            partition: rest:5/5
+            name: Rust workspace tests (rest 4/4)
+            partition: rest:4/4
           - kind: partition-6
             name: Rust workspace tests (vm 1/3)
             partition: vm:1/3

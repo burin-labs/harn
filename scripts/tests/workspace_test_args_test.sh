@@ -74,13 +74,13 @@ FAKE_VM_METADATA=1 GITHUB_EVENT_NAME=push bash "$root/scripts/ci/run_workspace_t
 jq -e '.["rust-suites"].fixture.testcases.case["filter-match"].status == "matches"' "$RUNNER_TEMP/harn-nextest-inventory.json" > /dev/null
 grep -q 'eligible=1' "$scratch/log"
 grep -q -- '--locked -p harn-vm --features harn-vm/default,harn-vm/otel --partition count:3/3 --no-tests pass' "$scratch/ran"
-GITHUB_EVENT_NAME=push bash "$root/scripts/ci/run_workspace_tests.sh" rest:1/5 > "$scratch/log"
-grep -q -- '--locked --workspace --exclude harn-vm --partition count:1/5 --no-tests pass' "$scratch/ran"
-# The producer keeps the unified workspace build and filters harn-vm out instead.
-GITHUB_EVENT_NAME=push bash "$root/scripts/ci/run_workspace_tests.sh" rest-unified:1/5 > "$scratch/log"
-grep -q -- 'and not package(harn-vm) --locked --workspace --partition count:1/5 --no-tests pass' "$scratch/ran"
-if grep -q -- '--exclude' "$scratch/ran"; then
-  echo 'The unified producer share changed the package selection' >&2; exit 1
+GITHUB_EVENT_NAME=push bash "$root/scripts/ci/run_workspace_tests.sh" rest:1/4 > "$scratch/log"
+grep -q -- '--locked --workspace --exclude harn-vm --exclude harn-fmt --exclude harn-lsp --exclude harn-package --partition count:1/4 --no-tests pass' "$scratch/ran"
+# The producer keeps the unified workspace build and selects its crates by filter.
+GITHUB_EVENT_NAME=push bash "$root/scripts/ci/run_workspace_tests.sh" tooling > "$scratch/log"
+grep -q -- 'and (package(harn-fmt) or package(harn-lsp) or package(harn-package)) --locked --workspace --no-tests fail' "$scratch/ran"
+if grep -Eq -- '--exclude|--partition' "$scratch/ran"; then
+  echo 'The unified producer share changed the package selection or partitioned it' >&2; exit 1
 fi
 # An affected selection without harn-vm leaves the vm group nothing to build.
 jq -n --arg base "$base" '{pull_request: {base: {sha: $base}}}' > "$scratch/event"
@@ -88,8 +88,12 @@ rm "$scratch/ran"
 GITHUB_EVENT_NAME=pull_request POST_MERGE_TIER_ACTIVE=true bash "$root/scripts/ci/run_workspace_tests.sh" vm:1/3 > "$scratch/log"
 grep -q 'group=vm selects nothing' "$scratch/log"
 [[ ! -e "$scratch/ran" ]]
-GITHUB_EVENT_NAME=pull_request POST_MERGE_TIER_ACTIVE=true bash "$root/scripts/ci/run_workspace_tests.sh" rest:2/5 > "$scratch/log"
-grep -q -- '--locked -p consumer -p leaf --partition count:2/5' "$scratch/ran"
+rm -f "$scratch/ran"
+GITHUB_EVENT_NAME=pull_request POST_MERGE_TIER_ACTIVE=true bash "$root/scripts/ci/run_workspace_tests.sh" tooling > "$scratch/log"
+grep -q 'group=tooling selects nothing' "$scratch/log"
+[[ ! -e "$scratch/ran" ]]
+GITHUB_EVENT_NAME=pull_request POST_MERGE_TIER_ACTIVE=true bash "$root/scripts/ci/run_workspace_tests.sh" rest:2/4 > "$scratch/log"
+grep -q -- '--locked -p consumer -p leaf --partition count:2/4' "$scratch/ran"
 if bash "$root/scripts/ci/run_workspace_tests.sh" count:1/3 > "$scratch/log" 2>&1; then
   echo 'An ungrouped partition was accepted' >&2; exit 1
 fi

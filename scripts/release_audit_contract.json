@@ -78,12 +78,12 @@
           "id": "release-audit-rust-test",
           "condition": "vars.HARN_CI_DISABLE_COLOCATED_TESTS != 'true'",
           "required_env": {"HARN_LLM_CALLS_DISABLED": "1"},
-          "run": "scripts/ci/run_rust_test_lane.sh bash scripts/ci/run_workspace_tests.sh rest-unified:1/5"
+          "run": "scripts/ci/run_rust_test_lane.sh bash scripts/ci/run_workspace_tests.sh tooling"
         }
       ]
     },
     {
-      "name": "Rust workspace tests (rest 2/5)",
+      "name": "Rust workspace tests (rest 1/4)",
       "job_id": "rust-test-partitions",
       "matrix_kind": "partition-2",
       "proofs": ["rust-audit"],
@@ -97,7 +97,7 @@
       ]
     },
     {
-      "name": "Rust workspace tests (rest 3/5)",
+      "name": "Rust workspace tests (rest 2/4)",
       "job_id": "rust-test-partitions",
       "matrix_kind": "partition-3",
       "proofs": ["rust-audit"],
@@ -111,7 +111,7 @@
       ]
     },
     {
-      "name": "Rust workspace tests (rest 4/5)",
+      "name": "Rust workspace tests (rest 3/4)",
       "job_id": "rust-test-partitions",
       "matrix_kind": "partition-4",
       "proofs": ["rust-audit"],
@@ -125,7 +125,7 @@
       ]
     },
     {
-      "name": "Rust workspace tests (rest 5/5)",
+      "name": "Rust workspace tests (rest 4/4)",
       "job_id": "rust-test-partitions",
       "matrix_kind": "partition-5",
       "proofs": ["rust-audit"],

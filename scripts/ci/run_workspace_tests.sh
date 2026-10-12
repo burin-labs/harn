@@ -1,29 +1,37 @@
 #!/usr/bin/env bash
 # Census the eligible suite before allowing an empty individual partition.
 #
-# A partition is `all`, `vm:<k>/3`, or `rest:<k>/5`. The `vm` group is harn-vm's own
-# suite and `rest` is every other package; together they are the workspace.
-# Each group is compiled alone, so a leg never builds the other group's test
-# targets: harn-vm's test-mode crate is the largest unit in the graph and
-# otherwise competes with its library build on every leg. harn-vm keeps all of
-# its targets in one group so its feature set is resolved once.
+# A partition is `all`, `vm:<k>/3`, `rest:<k>/4`, or `tooling`; the three
+# groups together are the workspace. `vm` is harn-vm's own suite (about 44%
+# of test time), `tooling` is a few small crates, and `rest` is everything
+# else. Each `vm` and `rest` leg compiles only its group, so harn-vm's
+# test-mode crate, the largest unit in the graph, no longer competes with its
+# library build on every leg. harn-vm keeps all of its targets in one group so
+# its feature set is resolved once.
 #
-# `rest-unified` selects the same tests as `rest` by filter instead of by
-# package, for a job that has already compiled the whole workspace: excluding
-# harn-vm changes feature resolution and would rebuild that graph. Partitions
-# count only matching binaries, so `rest-unified:k/3` and `rest:k/3` select
-# the same tests.
+# `tooling` belongs to the producer, which has already compiled the whole
+# workspace for its security archive. It selects its crates by filter rather
+# than by package, because a narrower package selection resolves features
+# differently and would rebuild that graph; it is small because the archive
+# build already sets the producer's finish time.
 set -euo pipefail
+tooling_packages=(harn-fmt harn-lsp harn-package)
 partition=${1:?partition or all required}
-[[ "$partition" == all || "$partition" =~ ^(vm:[1-3]/3|(rest|rest-unified):[1-5]/5)$ ]] || { echo 'Invalid workspace test partition' >&2; exit 1; }
+[[ "$partition" =~ ^(all|tooling|vm:[1-3]/3|rest:[1-4]/4)$ ]] || { echo 'Invalid workspace test partition' >&2; exit 1; }
 group=${partition%%:*}
 script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 host_bound_filter=$(bash "$script_dir/host_bound_rust_test_filter.sh")
-if [[ "$group" == rest-unified ]]; then
-  args=(--profile ci -E "not (${host_bound_filter}) and not package(harn-vm)")
-else
-  args=(--profile ci -E "not (${host_bound_filter})")
+filter="not (${host_bound_filter})"
+if [[ "$group" == tooling ]]; then
+  tooling_filter=$(printf ' or package(%s)' "${tooling_packages[@]}")
+  filter+=" and (${tooling_filter# or })"
 fi
+args=(--profile ci -E "$filter")
+is_tooling() {
+  local name
+  for name in "${tooling_packages[@]}"; do [[ "$1" == "$name" ]] && return 0; done
+  return 1
+}
 extracted=
 if [[ -n "${2:-}" ]]; then
   [[ "$partition" == all ]] || { echo 'Archive mode runs the whole suite' >&2; exit 1; }
@@ -34,19 +42,28 @@ else
   read -ra packages <<< "$selected"
   if [[ "$group" != all ]]; then
     grouped=()
-    if [[ "$group" == rest-unified ]]; then
-      grouped=("${packages[@]}")
-      if [[ "$selected" == "-p harn-vm" ]]; then grouped=(); fi
-    elif [[ "$selected" == --workspace ]]; then
-      if [[ "$group" == vm ]]; then grouped=(-p harn-vm); else grouped=(--workspace --exclude harn-vm); fi
+    if [[ "$selected" == --workspace ]]; then
+      case "$group" in
+        vm) grouped=(-p harn-vm) ;;
+        tooling) grouped=(--workspace) ;;
+        rest)
+          grouped=(--workspace --exclude harn-vm)
+          for name in "${tooling_packages[@]}"; do grouped+=(--exclude "$name"); done
+          ;;
+      esac
     else
+      in_group=false
       for ((i = 0; i < ${#packages[@]}; i += 2)); do
         [[ "${packages[$i]}" == -p ]] || { echo "Unexpected package selection: $selected" >&2; exit 1; }
         name=${packages[$((i + 1))]}
-        if [[ "$group" == vm && "$name" == harn-vm ]] || [[ "$group" == rest && "$name" != harn-vm ]]; then
-          grouped+=(-p "$name")
-        fi
+        case "$group" in
+          vm) [[ "$name" == harn-vm ]] && grouped+=(-p "$name") ;;
+          rest) [[ "$name" != harn-vm ]] && ! is_tooling "$name" && grouped+=(-p "$name") ;;
+          tooling) is_tooling "$name" && in_group=true ;;
+        esac
       done
+      # The producer keeps the unified selection; it only needs a member present.
+      if [[ "$group" == tooling && "$in_group" == true ]]; then grouped=("${packages[@]}"); fi
     fi
     # Alone, harn-vm resolves only its own default features, which would
     # compile out code that other members enable (harn-cli's `otel`). Build it
@@ -69,7 +86,7 @@ else
     fi
     packages=("${grouped[@]}")
     selected="${packages[*]}"
-    partition="count:${partition#*:}"
+    if [[ "$group" == tooling ]]; then partition=all; else partition="count:${partition#*:}"; fi
   fi
   args+=(--locked "${packages[@]}")
 fi

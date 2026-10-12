@@ -522,7 +522,7 @@ fn workflow() {
               if: "vars.HARN_CI_DISABLE_COLOCATED_TESTS != 'true'",
               env: {HARN_LLM_CALLS_DISABLED: "1"},
               run:
-                "scripts/ci/run_rust_test_lane.sh bash scripts/ci/run_workspace_tests.sh rest-unified:1/5",
+                "scripts/ci/run_rust_test_lane.sh bash scripts/ci/run_workspace_tests.sh tooling",
             },
           ],
       },
@@ -1855,8 +1855,8 @@ pipeline test_rejects_masked_workspace_test_failure(harness: Harness, task: unkn
             return {
               ...step,
               run: to_string(step?.run ?? "").replace(
-                "run_workspace_tests.sh rest-unified:1/5",
-                "run_workspace_tests.sh rest-unified:1/5 || true",
+                "run_workspace_tests.sh tooling",
+                "run_workspace_tests.sh tooling || true",
               ),
             }
           },

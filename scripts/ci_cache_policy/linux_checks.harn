@@ -1102,7 +1102,7 @@ fn colocated_rust_proof_errors(workflow: dict) -> list<string> {
     || trim(colocated_step?.env?.HARN_LLM_CALLS_DISABLED ?? "")
       != "1"
     || colocated_command
-      != "scripts/ci/run_rust_test_lane.sh bash scripts/ci/run_workspace_tests.sh rest-unified:1/5" {
+      != "scripts/ci/run_rust_test_lane.sh bash scripts/ci/run_workspace_tests.sh tooling" {
     errors = errors
       + ["ci.yml:rust-check-inputs must own the exact co-located environment-neutral Rust proof"]
   }
