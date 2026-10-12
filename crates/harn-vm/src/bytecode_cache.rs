@@ -1443,3 +1443,7 @@ fn walk_import_graph_fingerprinted(
 #[cfg(test)]
 #[path = "bytecode_cache_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "bytecode_cache_walk_tests.rs"]
+mod walk_tests;
