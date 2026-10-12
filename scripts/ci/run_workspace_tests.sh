@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Census the eligible suite before allowing an empty individual partition.
 #
-# A partition is `all` or `<group>:<k>/3`. The `vm` group is harn-vm's own
+# A partition is `all`, `vm:<k>/3`, or `rest:<k>/5`. The `vm` group is harn-vm's own
 # suite and `rest` is every other package; together they are the workspace.
 # Each group is compiled alone, so a leg never builds the other group's test
 # targets: harn-vm's test-mode crate is the largest unit in the graph and
@@ -15,7 +15,7 @@
 # the same tests.
 set -euo pipefail
 partition=${1:?partition or all required}
-[[ "$partition" == all || "$partition" =~ ^(vm|rest|rest-unified):[1-3]/3$ ]] || { echo 'Invalid workspace test partition' >&2; exit 1; }
+[[ "$partition" == all || "$partition" =~ ^(vm:[1-3]/3|(rest|rest-unified):[1-5]/5)$ ]] || { echo 'Invalid workspace test partition' >&2; exit 1; }
 group=${partition%%:*}
 script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 host_bound_filter=$(bash "$script_dir/host_bound_rust_test_filter.sh")

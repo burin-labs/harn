@@ -1158,7 +1158,7 @@ jobs:
           POST_MERGE_TIER_ACTIVE: ${{ needs.changes.outputs.post_merge_tier }}
         run: >-
           scripts/ci/run_rust_test_lane.sh
-          bash scripts/ci/run_workspace_tests.sh rest-unified:1/3
+          bash scripts/ci/run_workspace_tests.sh rest-unified:1/5
       - name: Preserve workspace test inventory
         if: always() && steps.release-audit-rust-test.outcome != 'skipped' && steps.release-audit-rust-test.outcome != ''
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -1203,7 +1203,7 @@ jobs:
   # The producer also builds the security archive (about 10 minutes), so its
   # share sets the lane: at three partitions it ran about 250 seconds of tests
   # after that build and finished last (run 38238361365). The legs split by
-  # package: three run harn-vm's own suite (44% of test time) and three,
+  # package: three run harn-vm's own suite (44% of test time) and five,
   # including the producer, run everything else. A leg then compiles only its
   # group, so harn-vm's test-mode crate no longer competes with its library on
   # every leg (scripts/ci/run_workspace_tests.sh). The extra legs cost compile
@@ -1229,18 +1229,24 @@ jobs:
       matrix:
         include:
           - kind: partition-2
-            name: Rust workspace tests (rest 2/3)
-            partition: rest:2/3
+            name: Rust workspace tests (rest 2/5)
+            partition: rest:2/5
           - kind: partition-3
-            name: Rust workspace tests (rest 3/3)
-            partition: rest:3/3
+            name: Rust workspace tests (rest 3/5)
+            partition: rest:3/5
           - kind: partition-4
+            name: Rust workspace tests (rest 4/5)
+            partition: rest:4/5
+          - kind: partition-5
+            name: Rust workspace tests (rest 5/5)
+            partition: rest:5/5
+          - kind: partition-6
             name: Rust workspace tests (vm 1/3)
             partition: vm:1/3
-          - kind: partition-5
+          - kind: partition-7
             name: Rust workspace tests (vm 2/3)
             partition: vm:2/3
-          - kind: partition-6
+          - kind: partition-8
             name: Rust workspace tests (vm 3/3)
             partition: vm:3/3
     env:

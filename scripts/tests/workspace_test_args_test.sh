@@ -63,11 +63,11 @@ GITHUB_EVENT_NAME=push bash "$root/scripts/ci/run_workspace_tests.sh" vm:3/3 > "
 jq -e '.["rust-suites"].fixture.testcases.case["filter-match"].status == "matches"' "$RUNNER_TEMP/harn-nextest-inventory.json" > /dev/null
 grep -q 'eligible=1' "$scratch/log"
 grep -q -- '--locked -p harn-vm --partition count:3/3 --no-tests pass' "$scratch/ran"
-GITHUB_EVENT_NAME=push bash "$root/scripts/ci/run_workspace_tests.sh" rest:1/3 > "$scratch/log"
-grep -q -- '--locked --workspace --exclude harn-vm --partition count:1/3 --no-tests pass' "$scratch/ran"
+GITHUB_EVENT_NAME=push bash "$root/scripts/ci/run_workspace_tests.sh" rest:1/5 > "$scratch/log"
+grep -q -- '--locked --workspace --exclude harn-vm --partition count:1/5 --no-tests pass' "$scratch/ran"
 # The producer keeps the unified workspace build and filters harn-vm out instead.
-GITHUB_EVENT_NAME=push bash "$root/scripts/ci/run_workspace_tests.sh" rest-unified:1/3 > "$scratch/log"
-grep -q -- 'and not package(harn-vm) --locked --workspace --partition count:1/3 --no-tests pass' "$scratch/ran"
+GITHUB_EVENT_NAME=push bash "$root/scripts/ci/run_workspace_tests.sh" rest-unified:1/5 > "$scratch/log"
+grep -q -- 'and not package(harn-vm) --locked --workspace --partition count:1/5 --no-tests pass' "$scratch/ran"
 if grep -q -- '--exclude' "$scratch/ran"; then
   echo 'The unified producer share changed the package selection' >&2; exit 1
 fi
@@ -77,8 +77,8 @@ rm "$scratch/ran"
 GITHUB_EVENT_NAME=pull_request POST_MERGE_TIER_ACTIVE=true bash "$root/scripts/ci/run_workspace_tests.sh" vm:1/3 > "$scratch/log"
 grep -q 'group=vm selects nothing' "$scratch/log"
 [[ ! -e "$scratch/ran" ]]
-GITHUB_EVENT_NAME=pull_request POST_MERGE_TIER_ACTIVE=true bash "$root/scripts/ci/run_workspace_tests.sh" rest:2/3 > "$scratch/log"
-grep -q -- '--locked -p consumer -p leaf --partition count:2/3' "$scratch/ran"
+GITHUB_EVENT_NAME=pull_request POST_MERGE_TIER_ACTIVE=true bash "$root/scripts/ci/run_workspace_tests.sh" rest:2/5 > "$scratch/log"
+grep -q -- '--locked -p consumer -p leaf --partition count:2/5' "$scratch/ran"
 if bash "$root/scripts/ci/run_workspace_tests.sh" count:1/3 > "$scratch/log" 2>&1; then
   echo 'An ungrouped partition was accepted' >&2; exit 1
 fi
