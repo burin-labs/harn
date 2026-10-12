@@ -7,13 +7,23 @@
 # targets: harn-vm's test-mode crate is the largest unit in the graph and
 # otherwise competes with its library build on every leg. harn-vm keeps all of
 # its targets in one group so its feature set is resolved once.
+#
+# `rest-unified` selects the same tests as `rest` by filter instead of by
+# package, for a job that has already compiled the whole workspace: excluding
+# harn-vm changes feature resolution and would rebuild that graph. Partitions
+# count only matching binaries, so `rest-unified:k/3` and `rest:k/3` select
+# the same tests.
 set -euo pipefail
 partition=${1:?partition or all required}
-[[ "$partition" == all || "$partition" =~ ^(vm|rest):[1-3]/3$ ]] || { echo 'Invalid workspace test partition' >&2; exit 1; }
+[[ "$partition" == all || "$partition" =~ ^(vm|rest|rest-unified):[1-3]/3$ ]] || { echo 'Invalid workspace test partition' >&2; exit 1; }
 group=${partition%%:*}
 script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 host_bound_filter=$(bash "$script_dir/host_bound_rust_test_filter.sh")
-args=(--profile ci -E "not (${host_bound_filter})")
+if [[ "$group" == rest-unified ]]; then
+  args=(--profile ci -E "not (${host_bound_filter}) and not package(harn-vm)")
+else
+  args=(--profile ci -E "not (${host_bound_filter})")
+fi
 extracted=
 if [[ -n "${2:-}" ]]; then
   [[ "$partition" == all ]] || { echo 'Archive mode runs the whole suite' >&2; exit 1; }
@@ -24,7 +34,10 @@ else
   read -ra packages <<< "$selected"
   if [[ "$group" != all ]]; then
     grouped=()
-    if [[ "$selected" == --workspace ]]; then
+    if [[ "$group" == rest-unified ]]; then
+      grouped=("${packages[@]}")
+      if [[ "$selected" == "-p harn-vm" ]]; then grouped=(); fi
+    elif [[ "$selected" == --workspace ]]; then
       if [[ "$group" == vm ]]; then grouped=(-p harn-vm); else grouped=(--workspace --exclude harn-vm); fi
     else
       for ((i = 0; i < ${#packages[@]}; i += 2)); do

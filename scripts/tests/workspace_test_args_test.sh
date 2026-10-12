@@ -65,6 +65,12 @@ grep -q 'eligible=1' "$scratch/log"
 grep -q -- '--locked -p harn-vm --partition count:3/3 --no-tests pass' "$scratch/ran"
 GITHUB_EVENT_NAME=push bash "$root/scripts/ci/run_workspace_tests.sh" rest:1/3 > "$scratch/log"
 grep -q -- '--locked --workspace --exclude harn-vm --partition count:1/3 --no-tests pass' "$scratch/ran"
+# The producer keeps the unified workspace build and filters harn-vm out instead.
+GITHUB_EVENT_NAME=push bash "$root/scripts/ci/run_workspace_tests.sh" rest-unified:1/3 > "$scratch/log"
+grep -q -- 'and not package(harn-vm) --locked --workspace --partition count:1/3 --no-tests pass' "$scratch/ran"
+if grep -q -- '--exclude' "$scratch/ran"; then
+  echo 'The unified producer share changed the package selection' >&2; exit 1
+fi
 # An affected selection without harn-vm leaves the vm group nothing to build.
 jq -n --arg base "$base" '{pull_request: {base: {sha: $base}}}' > "$scratch/event"
 rm "$scratch/ran"

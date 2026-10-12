@@ -78,7 +78,7 @@
           "id": "release-audit-rust-test",
           "condition": "vars.HARN_CI_DISABLE_COLOCATED_TESTS != 'true'",
           "required_env": {"HARN_LLM_CALLS_DISABLED": "1"},
-          "run": "scripts/ci/run_rust_test_lane.sh bash scripts/ci/run_workspace_tests.sh rest:1/3"
+          "run": "scripts/ci/run_rust_test_lane.sh bash scripts/ci/run_workspace_tests.sh rest-unified:1/3"
         }
       ]
     },
