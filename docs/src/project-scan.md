@@ -159,8 +159,9 @@ manifest with no manager evidence uses npm.
 
 Supported managers are npm, pnpm, yarn and bun. npm and pnpm invoke the test
 lifecycle as `npm test` and `pnpm test`; their other scripts, and yarn and bun
-scripts, use `<manager> run <script>`. The language catalog projects the actual
-declared scripts through this same selection.
+scripts, use `<manager> run <script>`. Config-tier scans project the actual
+declared scripts through this same selection. Ambient scans do not parse the
+manifest or propose package-script commands.
 
 Unsupported or malformed declarations, conflicting manager evidence at one
 directory, and non-string script definitions produce no package-script command
@@ -168,12 +169,14 @@ proposals. The repository fingerprint retains the aggregate manager signals;
 individual script commands use their own manifest's resolved manager.
 
 `package_scripts` carries the normalized inventory for command-planning
-consumers. Its `state` is `resolved`, `absent` when no package manifest exists,
-or `refused` when manifest or manager evidence is invalid. `manager` names the
+consumers. Its `state` is `resolved`, `absent` when a requested config scan finds
+no package manifest, `refused` when manifest or manager evidence is invalid, or
+`not_requested` when the config tier was not requested. `manager` names the
 resolved manager, `commands` maps script names to invocation strings, and
 `error` gives the refusal code. Absent and refused results have no manager or
-commands. Consumers use this inventory directly and keep refusal distinct from
-an empty valid script inventory.
+commands. A `not_requested` result also has no manager or commands; it does not
+claim the manifest is absent. Consumers use this inventory directly and keep
+refusal distinct from an empty valid script inventory.
 
 ## Tiers
 
@@ -380,6 +383,9 @@ ambient detection. Each entry includes:
 - `source_globs`
 - `default_build_cmd`
 - `default_test_cmd`
+
+Package-script entries have no default commands: a context-free catalog cannot
+know whether a manifest declares those scripts. Use config-tier scan commands.
 
 The catalog lives in
 `crates/harn-vm/src/stdlib/project_catalog.rs`. Adding a new language should be

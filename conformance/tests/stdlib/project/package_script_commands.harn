@@ -10,6 +10,12 @@ pipeline test(harness: Harness) {
   assert(absent.package_scripts.state == "absent")
   assert(absent.package_scripts.manager == nil)
   assert(absent.package_scripts.commands == {})
+  const catalog = harness.project.catalog()
+  const javascript = catalog.filter({ entry -> entry.id == "javascript" })[0]
+  assert(
+    javascript.default_build_cmd == nil && javascript.default_test_cmd == nil,
+    "context-free catalog must not invent package scripts",
+  )
   const cases: list<ScriptCase> = [
     {declaration: nil, command: "npm test", manager: "npm"},
     {declaration: "npm@10.9.2", command: "npm test", manager: "npm"},
@@ -30,6 +36,17 @@ pipeline test(harness: Harness) {
     harness.fs.write_text(path_join(dir, "index.js"), "console.log('source')\n")
     const host = harness.scanner.scan_project({root: dir, include_git_history: false})
     const vm = harness.project.scan(dir, {tiers: ["config"]})
+    const ambient = harness.project.scan(dir, {tiers: ["ambient"]})
+    assert(
+      contains(ambient.anchors, "package.json"),
+      "ambient must reach the known manifest anchor",
+    )
+    assert(
+      ambient.package_scripts.state == "not_requested",
+      "ambient does not parse package configuration",
+    )
+    assert(ambient.package_scripts.commands == {} && ambient.declared_scripts == {})
+    assert(ambient.build_commands == [], "ambient does not advertise manifest scripts")
     assert(
       contains(
         host.project.test_commands[host.project.detected_test_command] ?? "",

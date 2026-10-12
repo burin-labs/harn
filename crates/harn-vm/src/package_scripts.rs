@@ -53,6 +53,7 @@ pub enum SelectionError {
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub enum Discovery {
     #[default]
+    NotRequested,
     Absent,
     Resolved(ResolvedScripts),
     Refused(SelectionError),
@@ -61,6 +62,7 @@ pub enum Discovery {
 impl Discovery {
     pub(crate) fn state(&self) -> &'static str {
         match self {
+            Self::NotRequested => "not_requested",
             Self::Absent => "absent",
             Self::Resolved(_) => "resolved",
             Self::Refused(_) => "refused",

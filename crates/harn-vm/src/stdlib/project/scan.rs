@@ -402,7 +402,8 @@ impl ProjectEvidence {
                 crate::value::DictMap::new(),
                 VmValue::String(arcstr::ArcStr::from(error.code())),
             ),
-            crate::package_scripts::Discovery::Absent => {
+            crate::package_scripts::Discovery::NotRequested
+            | crate::package_scripts::Discovery::Absent => {
                 (VmValue::Nil, crate::value::DictMap::new(), VmValue::Nil)
             }
         };
@@ -828,7 +829,11 @@ pub(super) fn scan_exact_directory(
         ..ProjectEvidence::default()
     };
     let mut build_commands = Vec::new();
-    let package = crate::package_scripts::discover(root, dir);
+    let package = if options.tiers.contains(&ScanTier::Config) {
+        crate::package_scripts::discover(root, dir)
+    } else {
+        crate::package_scripts::Discovery::NotRequested
+    };
     let scripts = match &package {
         crate::package_scripts::Discovery::Resolved(package) => Some(&package.scripts),
         _ => None,

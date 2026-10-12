@@ -24,18 +24,14 @@ impl ProjectCatalogEntry {
     pub(crate) fn default_build_cmd(&self) -> Option<String> {
         match self.commands {
             ProjectCommands::Shell { build, .. } => build.map(str::to_string),
-            ProjectCommands::PackageScripts => {
-                Some(crate::package_scripts::DEFAULT_MANAGER.script_command("build"))
-            }
+            ProjectCommands::PackageScripts => None,
         }
     }
 
     pub(crate) fn default_test_cmd(&self) -> Option<String> {
         match self.commands {
             ProjectCommands::Shell { test, .. } => test.map(str::to_string),
-            ProjectCommands::PackageScripts => {
-                Some(crate::package_scripts::DEFAULT_MANAGER.script_command("test"))
-            }
+            ProjectCommands::PackageScripts => None,
         }
     }
 }
