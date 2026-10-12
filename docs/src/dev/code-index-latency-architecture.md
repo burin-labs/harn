@@ -37,28 +37,40 @@ factor of two even if eliminated. Nested phase totals are not additive.
 Use exclusive phase costs and include persistence and reconciliation in the
 readiness boundary.
 
-For restart, the next structural seam is a validated immutable snapshot whose
-posting lists, string table, nodes, and adjacency lists already have their
-reader layout. A small per-file mutable delta should serve edits through the
-same query owner. Atomic generations and compaction subsume the whole-file
-reconstruction path rather than becoming a second index implementation. This
-needs format/version and bounds validation, representative failed publication
-and recovery cases, and full graph/posting equivalence. Mapping arbitrary
-mutable files is unsafe: [memmap2 explicitly requires protection against
-out-of-process modification](https://docs.rs/memmap2/latest/memmap2/struct.MmapOptions.html).
+The snapshot is a sectioned binary file: file facts, the symbol graph, trigram
+postings, and word postings, each length-prefixed so the four decode on
+separate threads. Graph, trigram, and word restoration also run side by side,
+and the restore-path maps use a seeded fast hasher. On the #9712 corpus this
+made unchanged restart about 3.2 times faster and every restart workload at
+least twice as fast; the [snapshot measurements](code-index-snapshot-measurements.md)
+record the paired results and their shared-host limits.
+
+Graph reconstruction is now the long pole, about 0.97 of 1.55 seconds, and the
+next factor needs a validated immutable snapshot whose posting lists, string
+table, nodes, and adjacency lists already have their reader layout. A small
+per-file mutable delta should serve edits through the same query owner.
+Atomic generations and compaction subsume the whole-file reconstruction path
+rather than becoming a second index implementation. This needs bounds
+validation, representative failed publication and recovery cases, and full
+graph/posting equivalence. Mapping arbitrary mutable files is unsafe:
+[memmap2 explicitly requires protection against out-of-process
+modification](https://docs.rs/memmap2/latest/memmap2/struct.MmapOptions.html).
 [Tantivy's immutable reader/segment architecture](https://github.com/quickwit-oss/tantivy/blob/main/ARCHITECTURE.md)
 is a useful reference, not a reason to replace the existing graph with a search
 engine.
 
-An implementation experiment is a [validated zero-copy archive](https://rkyv.org/validation.html).
-Safe archive access checks pointer bounds, alignment, and ownership ranges before
-exposing archived values. Those checks do not establish graph identities,
-edge integrity, or workspace freshness. Measure validated access and the first
-query together; unchecked access throughput is not readiness. The graph's
-current borrowed-node and adjacency APIs require an owning reader-view seam,
-not just a serializer replacement. A pre-sized bulk graph restore is a smaller
-intermediate experiment, but eliminating graph restoration alone cannot halve
-the measured warm restart.
+A [validated zero-copy archive](https://rkyv.org/validation.html) is the
+implementation candidate. Safe archive access checks pointer bounds,
+alignment, and ownership ranges before exposing archived values. Those checks
+do not establish graph identities, edge integrity, or workspace freshness.
+Measure validated access and the first query together; unchecked access
+throughput is not readiness. The graph's borrowed-node and adjacency APIs
+require an owning reader-view seam, not just a serializer replacement.
+
+An edited restart still captures the whole index into an owned snapshot and
+rewrites it before readiness, about 1.6 seconds together. Serializing sections
+directly from the live index, and persisting after the index is published,
+removes most of that without touching the reader.
 
 For cold build, collect independent parsed-file facts on a bounded worker pool,
 then apply them through one graph owner and resolve calls after the complete
