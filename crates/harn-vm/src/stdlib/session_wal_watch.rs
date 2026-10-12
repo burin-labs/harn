@@ -2,9 +2,8 @@
 //!
 //! One thread per database path. The thread keeps its own reader so it never
 //! takes the store mutex, and it only publishes when a metadata snapshot
-//! moved. Local writes still go through [`super::session_change`]; the
-//! fingerprint cache there drops the duplicate when this thread later sees
-//! the same commit.
+//! moved. Local writes go through [`super::session_change`], whose current-row
+//! view suppresses unchanged invalidations from either source.
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -14,7 +13,7 @@ use std::thread::JoinHandle;
 use std::time::Duration;
 
 use harn_session_store::wal_watch::{
-    data_version, describe_session, list_title_snapshots, open_watch_reader, wal_sidecar_path,
+    data_version, list_title_snapshots, open_watch_reader, wal_sidecar_path,
 };
 use notify::{RecursiveMode, Watcher};
 
@@ -39,7 +38,7 @@ impl WatchSignal {
             Self::Wake => {}
             #[cfg(test)]
             Self::Flush(ack) => {
-                let _ = ack.send(());
+                super::session_change::acknowledge_delivery(ack);
             }
         }
     }
@@ -178,7 +177,12 @@ fn stop_watcher(path: &Path) {
 fn stop_and_join(state: WatchState) {
     state.stop.store(true, Ordering::Relaxed);
     let _ = state.wake.send(WatchSignal::Wake);
-    let _ = state.thread.join();
+    // A subscriber may remove itself during a foreign notification. That
+    // callback is on this watcher; its reader closes when the callback and
+    // loop return. Every other caller still waits for the reader to close.
+    if state.thread.thread().id() != std::thread::current().id() {
+        let _ = state.thread.join();
+    }
 }
 
 /// How many watchers are running for `path`. Test-only: the invariant this
@@ -211,9 +215,7 @@ pub(super) fn flush_watcher(path: &Path) {
 fn seed_session_memory(path: &Path, reader: &rusqlite::Connection) {
     if let Ok(snapshots) = list_title_snapshots(reader) {
         for snapshot in snapshots {
-            if let Ok(meta) = describe_session(reader, &snapshot.id) {
-                super::session_change::remember_snapshot(path, &meta);
-            }
+            super::session_change::seed_session(path, &snapshot.id);
         }
     }
 }
@@ -298,10 +300,12 @@ fn poll_once(path: &Path, reader: &rusqlite::Connection, last_version: &mut i64)
         return false;
     };
     if version == *last_version {
+        super::session_change::retry_pending(path);
         return false;
     }
     *last_version = version;
     publish_session_changes(path, reader);
+    super::session_change::retry_pending(path);
     true
 }
 
@@ -310,11 +314,9 @@ fn publish_session_changes(path: &Path, reader: &rusqlite::Connection) {
         return;
     };
     for snapshot in snapshots {
-        if let Ok(meta) = describe_session(reader, &snapshot.id) {
-            // Keep the store owner's identity. SQLite can return a different
-            // spelling for this same file, such as /private/var on macOS.
-            super::session_change::dispatch_foreign(path, &meta);
-        }
+        // Keep the store owner's identity. The fanout resolves the current
+        // committed row rather than trusting an earlier watcher snapshot.
+        super::session_change::dispatch_foreign(path, &snapshot.id);
     }
 }
 
@@ -542,6 +544,8 @@ mod tests {
             1,
             "a store held open under a live subscription is watched",
         );
+        let wal = super::wal_sidecar_path(&database);
+        assert!(wal.exists(), "the open store and reader hold a WAL file");
 
         drop(store);
         assert_eq!(
@@ -549,6 +553,130 @@ mod tests {
             0,
             "the last handle to close takes the watcher with it",
         );
+        assert!(
+            !wal.exists(),
+            "the last handle waits until its reader closes"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_foreign_delivery_can_remove_the_last_subscription() {
+        let _bus = crate::stdlib::session_change::test_support::exclusive_bus().await;
+        let root = TempDir::new().unwrap();
+        let store = open_canonical_store(root.path()).unwrap();
+        store
+            .create(CreateSession {
+                id: Some("self-unsubscribe".into()),
+                title: Some("before".into()),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        struct SelfRemoving {
+            subscription: std::sync::Mutex<Option<crate::SessionChangeSubscription>>,
+            removed: mpsc::Sender<bool>,
+        }
+        impl SessionChangeObserver for SelfRemoving {
+            fn session_updated(&self, meta: &SessionMeta) {
+                assert_eq!(
+                    std::thread::current().name(),
+                    Some("harn-session-wal-watch")
+                );
+                assert_eq!(meta.title.as_deref(), Some("after"));
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    drop(self.subscription.lock().unwrap().take());
+                }));
+                self.removed.send(result.is_ok()).unwrap();
+            }
+        }
+        let (removed, rx) = mpsc::channel();
+        let observer = Arc::new(SelfRemoving {
+            subscription: std::sync::Mutex::new(None),
+            removed,
+        });
+        *observer.subscription.lock().unwrap() = Some(subscribe_session_changes(observer.clone()));
+        let foreign = rusqlite::Connection::open(store.path()).unwrap();
+        foreign
+            .execute(
+                "UPDATE sessions SET title = 'after' WHERE id = 'self-unsubscribe'",
+                [],
+            )
+            .unwrap();
+        assert!(recv_within(
+            "last subscription removed on the watcher thread",
+            &rx
+        ));
+        assert_eq!(super::watcher_count_for(store.path()), 0);
+    }
+
+    #[tokio::test]
+    async fn a_failed_local_read_is_retried_without_another_data_version_change() {
+        let _bus = crate::stdlib::session_change::test_support::exclusive_bus().await;
+        let root = TempDir::new().unwrap();
+        let database = {
+            let store = open_canonical_store(root.path()).unwrap();
+            store
+                .create(CreateSession {
+                    id: Some("unreadable".into()),
+                    ..Default::default()
+                })
+                .await
+                .unwrap();
+            store.path().to_owned()
+        };
+        let (delivered, rx) = mpsc::channel();
+        let _subscription = subscribe_session_changes(Arc::new(Recording(delivered)));
+        struct UnreadableDuringHook(std::path::PathBuf);
+        impl SessionChangeObserver for UnreadableDuringHook {
+            fn session_updated(&self, meta: &SessionMeta) {
+                let migration = rusqlite::Connection::open(&self.0).unwrap();
+                migration
+                    .execute("ALTER TABLE sessions RENAME TO unavailable_sessions", [])
+                    .unwrap();
+                assert!(
+                    harn_session_store::wal_watch::describe_session(&migration, &meta.id).is_err()
+                );
+                crate::stdlib::session_change::dispatch(&self.0, meta);
+                migration
+                    .execute("ALTER TABLE unavailable_sessions RENAME TO sessions", [])
+                    .unwrap();
+                assert_eq!(
+                    harn_session_store::wal_watch::describe_session(&migration, &meta.id)
+                        .unwrap()
+                        .title,
+                    meta.title,
+                    "the same committed row is available again"
+                );
+            }
+        }
+        let writer = harn_session_store::SqliteSessionStore::open_with_hooks(
+            &database,
+            harn_session_store::StoreHooks {
+                change_observer: Some(Arc::new(UnreadableDuringHook(database.clone()))),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        writer
+            .update(
+                "unreadable",
+                UpdateSession {
+                    title: Some("committed while unreadable".into()),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(rx.try_recv(), Err(mpsc::TryRecvError::Empty));
+        let reader = super::open_watch_reader(&database).unwrap();
+        let mut version = super::data_version(&reader).unwrap();
+        assert!(
+            !super::poll_once(&database, &reader, &mut version),
+            "data_version is unchanged"
+        );
+        assert_eq!(rx.try_recv().as_deref(), Ok("committed while unreadable"));
+        assert!(!super::poll_once(&database, &reader, &mut version));
+        assert_eq!(rx.try_recv(), Err(mpsc::TryRecvError::Empty));
     }
 
     #[tokio::test]
