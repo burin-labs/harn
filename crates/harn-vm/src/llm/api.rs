@@ -400,6 +400,26 @@ enum ProviderExecution {
     Offthread,
 }
 
+/// Project a completed local result without dispatching a provider stream.
+fn complete_bypass_result(
+    request: &LlmRequestPayload,
+    result: LlmResult,
+    delta_tx: Option<DeltaSender>,
+    chunks: Option<Vec<String>>,
+) -> LlmResult {
+    record_cli_llm_result(request, &result);
+    if let Some(tx) = delta_tx {
+        if let Some(chunks) = chunks {
+            for chunk in chunks {
+                let _ = tx.send(chunk);
+            }
+        } else if !result.text.is_empty() {
+            let _ = tx.send(result.text.clone());
+        }
+    }
+    result
+}
+
 async fn vm_call_llm_full_inner_request(
     observed: &super::agent_observe::ObservedAttemptToken,
     request: &LlmRequestPayload,
@@ -408,13 +428,7 @@ async fn vm_call_llm_full_inner_request(
 ) -> Result<LlmResult, VmError> {
     if let Some(result) = super::trigger_predicate::lookup_cached_result(request) {
         request.emit_reminder_lifecycle();
-        record_cli_llm_result(request, &result);
-        if let Some(tx) = delta_tx {
-            if !result.text.is_empty() {
-                let _ = tx.send(result.text.clone());
-            }
-        }
-        return Ok(result);
+        return Ok(complete_bypass_result(request, result, delta_tx, None));
     }
 
     if crate::llm::providers::MockProvider::should_intercept_request(request) {
@@ -422,24 +436,10 @@ async fn vm_call_llm_full_inner_request(
         request.emit_reminder_lifecycle();
         let result = mock_llm_response(request)?;
         super::trigger_predicate::note_result(request, &result);
-        record_cli_llm_result(request, &result);
-        if let Some(tx) = delta_tx {
-            // A mock may script an ordered chunk sequence to emulate a real
-            // token stream; otherwise fall back to a single full-text delta so
-            // streaming callers still see the visible text (the graceful
-            // non-streaming path). `stream_chunks.concat() == result.text`.
-            if let Some(chunks) = super::mock::take_mock_stream_chunks() {
-                for chunk in chunks {
-                    let _ = tx.send(chunk);
-                }
-                return Ok(result);
-            }
-            if !result.text.is_empty() {
-                let _ = tx.send(result.text.clone());
-            }
-            return Ok(result);
-        }
-        return Ok(result);
+        let chunks = delta_tx
+            .as_ref()
+            .and_then(|_| super::mock::take_mock_stream_chunks());
+        return Ok(complete_bypass_result(request, result, delta_tx, chunks));
     }
 
     if crate::llm::fake::FakeLlmProvider::should_intercept(&request.provider) {
@@ -463,7 +463,7 @@ async fn vm_call_llm_full_inner_request(
         if let Some(result) = load_fixture(&hash) {
             request.emit_reminder_lifecycle();
             super::trigger_predicate::note_result(request, &result);
-            return Ok(result);
+            return Ok(complete_bypass_result(request, result, delta_tx, None));
         }
         return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
             format!("No fixture found for LLM call (hash: {hash}). Run with --record first."),
