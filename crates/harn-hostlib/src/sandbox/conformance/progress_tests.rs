@@ -24,9 +24,7 @@ fn interrupted_case_preserves_prior_verdict_and_unfinished_start() {
                         cases.len() - completed,
                     ),
                 );
-                if case == cases[1] {
-                    panic!("interrupted probe");
-                }
+                assert!(case != cases[1], "interrupted probe");
                 broken(case, "fixture setup failed".to_string())
             },
             &mut |progress: ConformanceProgress<'_>| {
