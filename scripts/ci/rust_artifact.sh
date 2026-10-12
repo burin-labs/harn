@@ -467,10 +467,12 @@ build_security_bundle() {
 
   # Match the following workspace test build's unified feature graph:
   # `--workspace` keeps every member's features, so the later full build reuses
-  # these artifacts. The `--test` targets limit compilation to the two security
-  # binaries, so the sandbox lane receives its archive without waiting for the
-  # rest of the workspace test graph (#9649); the filter limits what is archived.
-  cargo-nextest nextest archive --locked --workspace --test harn_vm --test harn_hostlib \
+  # these artifacts. The filter selects harn-vm's and harn-hostlib's unit tests
+  # plus their harn_vm and harn_hostlib suites, so compiling only library and
+  # those `--test` targets skips the other integration suites and binaries and
+  # the sandbox lane receives its archive sooner (#9649). The filter limits what
+  # is archived.
+  cargo-nextest nextest archive --locked --workspace --lib --test harn_vm --test harn_hostlib \
     --profile ci -E "$SECURITY_FILTER" \
     --archive-file "$staging/harn-security-tests.tar.zst"
   write_security_manifest "$staging" "$commit" "$(rustc_identity_sha256)"
