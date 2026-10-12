@@ -25,7 +25,6 @@ import {
   HOST_BOUND_RUST_TEST_FILTER_FLAG,
   HOST_BOUND_RUST_TEST_FILTER_SETUP,
   HOST_BOUND_RUST_TEST_FILTER_SOURCE,
-  NEUTRAL_RUST_TEST_FILTER_FLAG,
 } from "../ci_cache_policy/host_bound_rust_test_filter"
 
 fn gha_expression(body: string) -> string {
