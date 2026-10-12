@@ -122,13 +122,6 @@ fn slot_only_chunk_does_not_reference_outer_names() {
 }
 
 #[test]
-fn get_var_flags_outer_name_reference() {
-    let mut chunk = Chunk::new();
-    chunk.emit_u16(Op::GetVar, 0, 1);
-    assert!(chunk.references_outer_names);
-}
-
-#[test]
 fn set_var_flags_outer_name_reference() {
     let mut chunk = Chunk::new();
     chunk.emit_u16(Op::SetVar, 0, 1);

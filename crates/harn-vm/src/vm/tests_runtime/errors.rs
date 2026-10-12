@@ -41,26 +41,6 @@ fn runtime_error_renderer_normalizes_frame_paths() {
 }
 
 #[test]
-fn test_try_catch_basic() {
-    let out = run_output(
-        r#"pipeline t(harness: Harness, task: unknown) { try { throw "oops" } catch(e) { harness.stdio.log("caught: " + e) } }"#,
-    );
-    assert_eq!(out, "[harn] caught: oops");
-}
-
-#[test]
-fn test_try_no_error() {
-    let out = run_output(
-        r"pipeline t(harness: Harness, task: unknown) {
-let result = 0
-try { result = 42 } catch(e) { result = 0 }
-harness.stdio.log(result)
-}",
-    );
-    assert_eq!(out, "[harn] 42");
-}
-
-#[test]
 fn test_throw_uncaught() {
     let result = run_harn_result(r#"pipeline t(harness: Harness, task: unknown) { throw "boom" }"#);
     assert!(result.is_err());

@@ -794,33 +794,6 @@ mod tests {
     }
 
     #[test]
-    fn deep_merge_recurses_into_nested_dicts() {
-        let a = dict(&[(
-            "config",
-            dict(&[("retries", VmValue::Int(3)), ("backoff", VmValue::Int(100))]),
-        )]);
-        let b = dict(&[(
-            "config",
-            dict(&[
-                ("retries", VmValue::Int(5)),
-                ("jitter", VmValue::Bool(true)),
-            ]),
-        )]);
-        let merged = deep_merge_value(&a, &b).unwrap();
-        let config = merged
-            .as_dict()
-            .and_then(|d| d.get("config"))
-            .and_then(|v| v.as_dict())
-            .expect("nested dict");
-        assert_eq!(config.get("retries").and_then(VmValue::as_int), Some(5));
-        assert_eq!(config.get("backoff").and_then(VmValue::as_int), Some(100));
-        match config.get("jitter") {
-            Some(VmValue::Bool(true)) => {}
-            other => panic!("expected jitter=true, got {other:?}"),
-        }
-    }
-
-    #[test]
     fn deep_merge_right_wins_when_types_differ() {
         let a = dict(&[("x", dict(&[("a", VmValue::Int(1))]))]);
         let b = dict(&[("x", VmValue::Int(99))]);
@@ -832,41 +805,5 @@ mod tests {
                 .and_then(VmValue::as_int),
             Some(99)
         );
-    }
-
-    #[test]
-    fn list_unique_preserves_first_seen_order() {
-        let input = VmValue::List(std::sync::Arc::new(vec![
-            VmValue::Int(1),
-            VmValue::Int(2),
-            VmValue::Int(1),
-            VmValue::Int(3),
-            VmValue::Int(2),
-        ]));
-        let result = list_unique(&input).unwrap();
-        let items = match &result {
-            VmValue::List(items) => items.clone(),
-            _ => panic!("expected list"),
-        };
-        let ints: Vec<i64> = items.iter().filter_map(VmValue::as_int).collect();
-        assert_eq!(ints, vec![1, 2, 3]);
-    }
-
-    #[test]
-    fn dict_from_pairs_accepts_two_element_lists() {
-        let pairs = VmValue::List(std::sync::Arc::new(vec![
-            VmValue::List(std::sync::Arc::new(vec![
-                VmValue::String(arcstr::ArcStr::from("a")),
-                VmValue::Int(1),
-            ])),
-            VmValue::List(std::sync::Arc::new(vec![
-                VmValue::String(arcstr::ArcStr::from("b")),
-                VmValue::Int(2),
-            ])),
-        ]));
-        let result = dict_from_pairs(&pairs).unwrap();
-        let d = result.as_dict().unwrap();
-        assert_eq!(d.get("a").and_then(VmValue::as_int), Some(1));
-        assert_eq!(d.get("b").and_then(VmValue::as_int), Some(2));
     }
 }

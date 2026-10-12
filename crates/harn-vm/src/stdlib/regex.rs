@@ -186,28 +186,6 @@ mod tests {
     }
 
     #[test]
-    fn match_basic() {
-        let mut vm = vm();
-        let result = call(
-            &mut vm,
-            "regex_match",
-            vec![s(r"\d+"), s("abc 123 def 456")],
-        )
-        .unwrap();
-        let list = unwrap_list(&result);
-        assert_eq!(list.len(), 2);
-        assert_eq!(list[0].display(), "123");
-        assert_eq!(list[1].display(), "456");
-    }
-
-    #[test]
-    fn match_no_match_returns_nil() {
-        let mut vm = vm();
-        let result = call(&mut vm, "regex_match", vec![s(r"\d+"), s("no digits here")]).unwrap();
-        assert!(matches!(result, VmValue::Nil));
-    }
-
-    #[test]
     fn match_empty_pattern() {
         let mut vm = vm();
         let result = call(&mut vm, "regex_match", vec![s(""), s("abc")]).unwrap();
@@ -240,18 +218,6 @@ mod tests {
     }
 
     #[test]
-    fn replace_basic() {
-        let mut vm = vm();
-        let result = call(
-            &mut vm,
-            "regex_replace",
-            vec![s(r"\d+"), s("NUM"), s("abc 123 def 456")],
-        )
-        .unwrap();
-        assert_eq!(result.display(), "abc NUM def NUM");
-    }
-
-    #[test]
     fn replace_no_match_returns_original() {
         let mut vm = vm();
         let result = call(
@@ -264,93 +230,10 @@ mod tests {
     }
 
     #[test]
-    fn replace_with_backreference() {
-        let mut vm = vm();
-        let result = call(
-            &mut vm,
-            "regex_replace",
-            vec![s(r"(\w+)\s(\w+)"), s("$2 $1"), s("hello world")],
-        )
-        .unwrap();
-        assert_eq!(result.display(), "world hello");
-    }
-
-    #[test]
-    fn replace_honors_optional_flags() {
-        let mut vm = vm();
-        let result = call(
-            &mut vm,
-            "regex_replace",
-            vec![s("hello"), s("hi"), s("HeLLo HELLO"), s("i")],
-        )
-        .unwrap();
-        assert_eq!(result.display(), "hi hi");
-    }
-
-    #[test]
     fn replace_missing_args_returns_nil() {
         let mut vm = vm();
         let result = call(&mut vm, "regex_replace", vec![s(r"\d+"), s("X")]).unwrap();
         assert!(matches!(result, VmValue::Nil));
-    }
-
-    #[test]
-    fn captures_with_groups() {
-        let mut vm = vm();
-        let result = call(
-            &mut vm,
-            "regex_captures",
-            vec![s(r"(\d+)-(\w+)"), s("123-abc 456-def")],
-        )
-        .unwrap();
-        let list = unwrap_list(&result);
-        assert_eq!(list.len(), 2);
-
-        let first = list[0].as_dict().unwrap();
-        assert_eq!(first.get("match").unwrap().display(), "123-abc");
-        let groups = unwrap_list(first.get("groups").unwrap());
-        assert_eq!(groups[0].display(), "123");
-        assert_eq!(groups[1].display(), "abc");
-    }
-
-    #[test]
-    fn captures_named_groups() {
-        let mut vm = vm();
-        let result = call(
-            &mut vm,
-            "regex_captures",
-            vec![s(r"(?P<year>\d{4})-(?P<month>\d{2})"), s("2024-01")],
-        )
-        .unwrap();
-        let list = unwrap_list(&result);
-        assert_eq!(list.len(), 1);
-        let cap = list[0].as_dict().unwrap();
-        assert_eq!(cap.get("year").unwrap().display(), "2024");
-        assert_eq!(cap.get("month").unwrap().display(), "01");
-    }
-
-    #[test]
-    fn captures_no_match_returns_empty_list() {
-        let mut vm = vm();
-        let result = call(&mut vm, "regex_captures", vec![s(r"\d+"), s("no digits")]).unwrap();
-        let list = unwrap_list(&result);
-        assert!(list.is_empty());
-    }
-
-    #[test]
-    fn captures_optional_group_nil() {
-        let mut vm = vm();
-        let result = call(
-            &mut vm,
-            "regex_captures",
-            vec![s(r"(\d+)(?:-(\w+))?"), s("123")],
-        )
-        .unwrap();
-        let list = unwrap_list(&result);
-        assert_eq!(list.len(), 1);
-        let groups = unwrap_list(list[0].as_dict().unwrap().get("groups").unwrap());
-        assert_eq!(groups[0].display(), "123");
-        assert!(matches!(groups[1], VmValue::Nil));
     }
 
     #[test]
@@ -404,59 +287,6 @@ mod tests {
         .unwrap();
         let list = unwrap_list(&result);
         assert_eq!(list.len(), 2);
-    }
-
-    #[test]
-    fn captures_inline_and_trailing_flags_span_newlines() {
-        let mut vm = vm();
-        let text = "before\n<Tool_Result id=\"42\">\nAlpha\nbeta\n</Tool_Result>\nafter";
-
-        let inline = call(
-            &mut vm,
-            "regex_captures",
-            vec![
-                s(r"(?is)<tool_result\b([^>]*)>(.*?)</tool_result>"),
-                s(text),
-            ],
-        )
-        .unwrap();
-        let inline_list = unwrap_list(&inline);
-        assert_eq!(inline_list.len(), 1);
-        let inline_cap = inline_list[0].as_dict().unwrap();
-        assert_eq!(
-            inline_cap.get("match").unwrap().display(),
-            "<Tool_Result id=\"42\">\nAlpha\nbeta\n</Tool_Result>"
-        );
-        let inline_groups = unwrap_list(inline_cap.get("groups").unwrap());
-        assert_eq!(inline_groups.len(), 2);
-        assert_eq!(inline_groups[0].display(), " id=\"42\"");
-        assert_eq!(inline_groups[1].display(), "\nAlpha\nbeta\n");
-        assert_eq!(inline_cap.get("start").unwrap().as_int(), Some(7));
-        assert_eq!(inline_cap.get("end").unwrap().as_int(), Some(54));
-        assert_eq!(inline_cap.get("line").unwrap().as_int(), Some(2));
-
-        let trailing = call(
-            &mut vm,
-            "regex_captures",
-            vec![
-                s(r"<tool_result\b([^>]*)>(.*?)</tool_result>"),
-                s(text),
-                s("is"),
-            ],
-        )
-        .unwrap();
-        assert_eq!(trailing.display(), inline.display());
-
-        let class_any = call(
-            &mut vm,
-            "regex_captures",
-            vec![
-                s(r"(?i)<tool_result\b([^>]*)>([\s\S]*?)</tool_result>"),
-                s(text),
-            ],
-        )
-        .unwrap();
-        assert_eq!(class_any.display(), inline.display());
     }
 
     #[test]

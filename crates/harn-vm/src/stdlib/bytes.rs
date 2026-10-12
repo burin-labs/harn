@@ -248,14 +248,6 @@ mod tests {
     }
 
     #[test]
-    fn bytes_hex_round_trip() {
-        let mut vm = vm();
-        let bytes = call(&mut vm, "bytes_from_hex", vec![s("0001ff")]).unwrap();
-        let hex = call(&mut vm, "bytes_to_hex", vec![bytes]).unwrap();
-        assert_eq!(hex.display(), "0001ff");
-    }
-
-    #[test]
     fn bytes_base64_round_trip() {
         let mut vm = vm();
         let encoded = call(&mut vm, "bytes_to_base64", vec![b(&[0, 1, 2, 255])]).unwrap();

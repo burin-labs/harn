@@ -428,27 +428,6 @@ fn pricing_aware_call_cost_distinguishes_unpriced_from_zero() {
 }
 
 #[test]
-fn format_usd_amount_auto_precision_and_grouping() {
-    assert_eq!(format_usd_amount(0.000_045, None, false), "$0.000045");
-    assert_eq!(format_usd_amount(1.234_5, None, false), "$1.2345");
-    assert_eq!(format_usd_amount(1234.5, None, false), "$1,234.50");
-    assert_eq!(format_usd_amount(-1234.5, None, false), "-$1,234.50");
-    assert_eq!(format_usd_amount(1234.5, None, true), "+$1,234.50");
-    assert_eq!(format_usd_amount(0.123_456_789, Some(2), false), "$0.12");
-    assert_eq!(format_usd_amount(1.0, Some(0), false), "$1");
-}
-
-#[test]
-fn format_usd_handles_fractional_carry_into_whole() {
-    // 0.00027 * 300_000 produces 80.999… in IEEE-754; the formatter
-    // must round-then-render rather than splitting the rounded fraction
-    // back into a separate component (regression: "$80.1.0000").
-    let amount = 0.000_27_f64 * 300_000.0;
-    assert!((amount - 81.0).abs() < 1e-6);
-    assert_eq!(format_usd_amount(amount, None, false), "$81.0000");
-}
-
-#[test]
 fn fast_tier_bills_premium_pricing_when_served_fast() {
     let _guard = crate::llm::env_guard();
     crate::llm_config::clear_user_overrides();

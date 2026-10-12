@@ -1206,12 +1206,6 @@ mod tests {
     }
 
     #[test]
-    fn extract_from_code_fence() {
-        let text = "Here is the result:\n```json\n{\"key\": \"value\"}\n```\nDone.";
-        assert_eq!(extract_json_from_text(text), "{\"key\": \"value\"}");
-    }
-
-    #[test]
     fn whole_number_float_keeps_decimal_point() {
         // A `float` with no fractional part must serialize as `2.0`, not `2`,
         // so it round-trips as a float and matches the pretty printer.
@@ -1408,21 +1402,6 @@ mod tests {
         let shallow = deep_list(8);
         assert!(ensure_serializable_depth(&shallow, "json_stringify_pretty").is_ok());
         crate::value::recursion::dismantle(deep);
-    }
-
-    #[test]
-    fn extract_from_code_fence_no_language() {
-        let text = "```\n[1, 2, 3]\n```";
-        assert_eq!(extract_json_from_text(text), "[1, 2, 3]");
-    }
-
-    #[test]
-    fn extract_balanced_object() {
-        let text = "prefix {\"a\": 1, \"b\": {\"c\": 2}} suffix";
-        assert_eq!(
-            extract_json_from_text(text),
-            "{\"a\": 1, \"b\": {\"c\": 2}}"
-        );
     }
 
     #[test]

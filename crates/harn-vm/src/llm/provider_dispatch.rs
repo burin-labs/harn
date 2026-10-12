@@ -138,13 +138,6 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn an_open_scope_with_no_dispatch_measures_zero() {
-        let ledger = ProviderDispatchLedger::default();
-        with_provider_dispatch_ledger(ledger.clone(), async {}).await;
-        assert_eq!(ledger.observed(), 0);
-    }
-
-    #[tokio::test]
     async fn dispatches_reach_the_open_scope() {
         let ledger = ProviderDispatchLedger::default();
         with_provider_dispatch_ledger(ledger.clone(), async {

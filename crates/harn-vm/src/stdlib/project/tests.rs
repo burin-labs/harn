@@ -336,38 +336,6 @@ fn context_profile_redacts_remote_userinfo_and_query() {
 }
 
 #[test]
-fn scan_tree_respects_gitignore_and_vendor_dirs_by_default() {
-    let dir = temp_dir("tree-ignore");
-    std::fs::create_dir_all(dir.path().join("frontend/src")).unwrap();
-    std::fs::create_dir_all(dir.path().join("ignored/src")).unwrap();
-    std::fs::create_dir_all(dir.path().join("node_modules/pkg")).unwrap();
-    std::fs::write(dir.path().join(".gitignore"), "ignored/\n").unwrap();
-    std::fs::write(
-        dir.path().join("frontend/package.json"),
-        "{\"name\":\"frontend\"}",
-    )
-    .unwrap();
-    std::fs::write(dir.path().join("frontend/package-lock.json"), "{}").unwrap();
-    std::fs::write(
-        dir.path().join("frontend/src/app.ts"),
-        "export const x = 1;\n",
-    )
-    .unwrap();
-    std::fs::write(dir.path().join("ignored/go.mod"), "module ignored\n").unwrap();
-    std::fs::write(
-        dir.path().join("node_modules/pkg/package.json"),
-        "{\"name\":\"pkg\"}",
-    )
-    .unwrap();
-
-    let tree = scan_project_tree(dir.path(), &ProjectScanOptions::default()).unwrap();
-    assert!(tree.contains_key("."));
-    assert!(tree.contains_key("frontend"));
-    assert!(!tree.contains_key("ignored"));
-    assert!(!tree.contains_key("node_modules"));
-}
-
-#[test]
 fn walk_tree_includes_all_directories_and_hashes_local_content_only() {
     let dir = temp_dir("walk");
     std::fs::create_dir_all(dir.path().join("src/auth")).unwrap();
@@ -501,30 +469,6 @@ fn project_fingerprint_detects_python_package_managers() {
     assert!(fingerprint.has_tests);
     assert!(!fingerprint.has_ci);
     assert_eq!(fingerprint.lockfile_paths, vec!["uv.lock".to_string()]);
-}
-
-#[test]
-fn project_fingerprint_detects_rust_nextest_profile() {
-    let dir = temp_dir("fingerprint-rust-nextest");
-    std::fs::create_dir_all(dir.path().join(".config")).unwrap();
-    std::fs::create_dir_all(dir.path().join(".git")).unwrap();
-    std::fs::write(
-        dir.path().join("Cargo.toml"),
-        "[package]\nname = \"runner\"\nversion = \"0.1.0\"\n",
-    )
-    .unwrap();
-    std::fs::write(
-        dir.path().join(".config/nextest.toml"),
-        "[profile.default]\n",
-    )
-    .unwrap();
-
-    let fingerprint = detect_project_fingerprint(dir.path());
-    assert_eq!(fingerprint.primary_language, "rust");
-    assert_eq!(fingerprint.package_manager.as_deref(), Some("cargo"));
-    assert_eq!(fingerprint.test_runner.as_deref(), Some("nextest"));
-    assert_eq!(fingerprint.build_tool.as_deref(), Some("cargo"));
-    assert_eq!(fingerprint.vcs.as_deref(), Some("git"));
 }
 
 #[test]
@@ -772,97 +716,6 @@ fn project_fingerprint_ranks_source_languages_before_tooling_hints() {
     assert_eq!(ruby.primary_language, "ruby");
     assert_eq!(ruby.languages.first().map(String::as_str), Some("ruby"));
     assert!(ruby.languages.contains(&"typescript".to_string()));
-}
-
-#[test]
-fn project_fingerprint_detects_swift_spm_profile() {
-    let dir = temp_dir("fingerprint-swift");
-    std::fs::create_dir_all(dir.path().join("Sources/App")).unwrap();
-    std::fs::create_dir_all(dir.path().join("Tests/AppTests")).unwrap();
-    std::fs::write(
-        dir.path().join("Package.swift"),
-        "import PackageDescription\nlet package = Package(name: \"App\")\n",
-    )
-    .unwrap();
-    std::fs::write(
-        dir.path().join("Sources/App/main.swift"),
-        "__io_print(\"hi\")\n",
-    )
-    .unwrap();
-    std::fs::write(
-        dir.path().join("Tests/AppTests/AppTests.swift"),
-        "import XCTest\n",
-    )
-    .unwrap();
-
-    let fingerprint = detect_project_fingerprint(dir.path());
-    assert_eq!(fingerprint.primary_language, "swift");
-    assert_eq!(fingerprint.package_manager.as_deref(), Some("spm"));
-    assert_eq!(fingerprint.test_runner.as_deref(), Some("xctest"));
-    assert_eq!(fingerprint.build_tool.as_deref(), Some("spm"));
-    assert!(fingerprint.has_tests);
-}
-
-#[test]
-fn project_fingerprint_detects_npm_workspace_profile() {
-    let dir = temp_dir("fingerprint-npm");
-    std::fs::create_dir_all(dir.path().join("packages/web/src")).unwrap();
-    std::fs::create_dir_all(dir.path().join("packages/web/tests")).unwrap();
-    std::fs::write(
-        dir.path().join("package.json"),
-        "{\n  \"name\": \"workspace\",\n  \"private\": true,\n  \"workspaces\": [\"packages/*\"],\n  \"packageManager\": \"npm@10.8.0\",\n  \"devDependencies\": {\n    \"vite\": \"5.0.0\",\n    \"vitest\": \"2.0.0\"\n  },\n  \"scripts\": {\n    \"build\": \"vite build\",\n    \"test\": \"vitest run\"\n  }\n}\n",
-    )
-    .unwrap();
-    std::fs::write(dir.path().join("package-lock.json"), "{}\n").unwrap();
-    std::fs::write(
-        dir.path().join("packages/web/src/app.ts"),
-        "export const app = 1;\n",
-    )
-    .unwrap();
-
-    let fingerprint = detect_project_fingerprint(dir.path());
-    assert_eq!(fingerprint.primary_language, "typescript");
-    assert_eq!(fingerprint.package_manager.as_deref(), Some("npm"));
-    assert_eq!(fingerprint.test_runner.as_deref(), Some("vitest"));
-    assert_eq!(fingerprint.build_tool.as_deref(), Some("vite"));
-    assert!(fingerprint.has_tests);
-}
-
-#[test]
-fn project_fingerprint_detects_poetry_profile() {
-    let dir = temp_dir("fingerprint-poetry");
-    std::fs::create_dir_all(dir.path().join("tests")).unwrap();
-    std::fs::write(
-        dir.path().join("pyproject.toml"),
-        "[tool.poetry]\nname = \"svc\"\nversion = \"0.1.0\"\n[tool.poetry.dependencies]\npython = \"^3.12\"\nfastapi = \"^0.110\"\n[tool.poetry.group.dev.dependencies]\npytest = \"^8.0\"\n",
-    )
-    .unwrap();
-    std::fs::write(dir.path().join("poetry.lock"), "# lock\n").unwrap();
-
-    let fingerprint = detect_project_fingerprint(dir.path());
-    assert_eq!(fingerprint.package_manager.as_deref(), Some("poetry"));
-    assert_eq!(fingerprint.test_runner.as_deref(), Some("pytest"));
-    assert_eq!(fingerprint.build_tool.as_deref(), Some("poetry"));
-    assert!(fingerprint.frameworks.contains(&"fastapi".to_string()));
-}
-
-#[test]
-fn project_fingerprint_detects_go_module_profile() {
-    let dir = temp_dir("fingerprint-go");
-    std::fs::create_dir_all(dir.path().join("pkg")).unwrap();
-    std::fs::write(
-        dir.path().join("go.mod"),
-        "module github.com/acme/service\n\ngo 1.23\n",
-    )
-    .unwrap();
-    std::fs::write(dir.path().join("go.sum"), "example v0.0.0 h1:abc\n").unwrap();
-    std::fs::write(dir.path().join("pkg/service.go"), "package pkg\n").unwrap();
-
-    let fingerprint = detect_project_fingerprint(dir.path());
-    assert_eq!(fingerprint.primary_language, "go");
-    assert_eq!(fingerprint.package_manager.as_deref(), Some("go-mod"));
-    assert_eq!(fingerprint.test_runner.as_deref(), Some("go-test"));
-    assert_eq!(fingerprint.build_tool.as_deref(), Some("go"));
 }
 
 #[test]

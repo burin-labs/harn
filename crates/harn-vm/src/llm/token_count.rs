@@ -291,20 +291,6 @@ mod tests {
     }
 
     #[test]
-    fn exact_tokens_round_trip_with_stable_tokenizer_identity() {
-        let tokens = tokenize_exact("hello, 世界", "gpt-4o").expect("exact tokenization");
-        assert!(!tokens.is_empty());
-        assert!(tokens
-            .iter()
-            .all(|token| token.tokenizer == "tiktoken:o200k_base"));
-        let ids = tokens.iter().map(|token| token.id).collect::<Vec<_>>();
-        assert_eq!(
-            detokenize_exact("tiktoken:o200k_base", &ids).expect("exact decoding"),
-            "hello, 世界"
-        );
-    }
-
-    #[test]
     fn approximations_cannot_mint_token_references() {
         let error = tokenize_exact("hello", "claude-sonnet-4-20250514")
             .expect_err("Claude token counting is approximate");

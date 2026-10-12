@@ -134,15 +134,6 @@ fn legacy_if_falsey() {
 }
 
 #[test]
-fn list_index() {
-    let b = dict(&[(
-        "xs",
-        VmValue::List(std::sync::Arc::new(vec![s("a"), s("b"), s("c")])),
-    )]);
-    assert_eq!(render("{{xs[1]}}", &b), "b");
-}
-
-#[test]
 fn filter_default() {
     let b = dict(&[("n", s(""))]);
     assert_eq!(render("{{n | default: \"anon\"}}", &b), "anon");
@@ -153,35 +144,6 @@ fn comparison_ops() {
     let b = dict(&[("n", VmValue::Int(5))]);
     assert_eq!(render("{{if n > 3}}big{{end}}", &b), "big");
     assert_eq!(render("{{if n >= 5 and n < 10}}ok{{end}}", &b), "ok");
-}
-
-#[test]
-fn bool_not() {
-    let b = dict(&[("x", VmValue::Bool(false))]);
-    assert_eq!(render("{{if not x}}yes{{end}}", &b), "yes");
-    assert_eq!(render("{{if !x}}yes{{end}}", &b), "yes");
-}
-
-#[test]
-fn raw_block() {
-    let b = dict(&[]);
-    assert_eq!(
-        render("A {{ raw }}{{not-a-directive}}{{ endraw }} B", &b),
-        "A {{not-a-directive}} B"
-    );
-}
-
-#[test]
-fn comment_stripped() {
-    let b = dict(&[("x", s("hi"))]);
-    assert_eq!(render("A{{# hidden #}}B{{x}}", &b), "ABhi");
-}
-
-#[test]
-fn whitespace_trim() {
-    let b = dict(&[("x", s("v"))]);
-    let tpl = "line1\n  {{- x -}}  \nline2";
-    assert_eq!(render(tpl, &b), "line1vline2");
 }
 
 #[test]
@@ -354,19 +316,6 @@ fn logical_section_provenance_adjusts_child_spans() {
 }
 
 #[test]
-fn filter_json() {
-    let b = dict(&[(
-        "x",
-        VmValue::dict({
-            let mut m = crate::value::DictMap::new();
-            m.insert("a".into(), VmValue::Int(1));
-            m
-        }),
-    )]);
-    assert_eq!(render("{{x | json}}", &b), r#"{"a":1}"#);
-}
-
-#[test]
 fn error_unterminated_if() {
     let b = dict(&[("x", VmValue::Bool(true))]);
     let r = render_template_result("{{if x}}open", Some(&b), None, None);
@@ -378,24 +327,6 @@ fn error_unknown_filter() {
     let b = dict(&[("x", s("a"))]);
     let r = render_template_result("{{x | bogus}}", Some(&b), None, None);
     assert!(r.is_err());
-}
-
-#[test]
-fn include_with() {
-    use std::fs;
-    let dir = tempdir();
-    let partial = dir.path().join("p.prompt");
-    fs::write(&partial, "[{{name}}]").unwrap();
-    let parent = dir.path().join("main.prompt");
-    fs::write(
-        &parent,
-        r#"hello {{ include "p.prompt" with { name: who } }}!"#,
-    )
-    .unwrap();
-    let b = dict(&[("who", s("world"))]);
-    let src = fs::read_to_string(&parent).unwrap();
-    let out = render_template_result(&src, Some(&b), Some(dir.path()), Some(&parent)).unwrap();
-    assert_eq!(out, "hello [world]!");
 }
 
 #[test]

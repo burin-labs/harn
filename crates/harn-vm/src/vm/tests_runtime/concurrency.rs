@@ -17,13 +17,6 @@ use std::time::Duration;
 
 use super::harness::*;
 use crate::vm::*;
-#[test]
-fn test_parallel_basic() {
-    let out = run_output(
-        "pipeline t(harness: Harness, task: unknown) { const results = parallel(3) { i -> i * 10 }\nharness.stdio.log(results) }",
-    );
-    assert_eq!(out, "[harn] [0, 10, 20]");
-}
 
 #[test]
 fn test_parallel_no_variable() {
@@ -219,18 +212,6 @@ harness.stdio.log(harness.runtime.atomic_get(completed))
             assert_eq!(output.trim_end(), "[harn] 1");
         })
         .await;
-}
-
-#[test]
-fn test_spawn_await() {
-    let out = run_output(
-        r#"pipeline t(harness: Harness, task: unknown) {
-const handle = spawn { harness.stdio.log("spawned") }
-const result = await(handle)
-harness.stdio.log("done")
-}"#,
-    );
-    assert_eq!(out, "[harn] spawned\n[harn] done");
 }
 
 #[test]

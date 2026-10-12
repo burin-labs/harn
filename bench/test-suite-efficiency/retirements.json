@@ -248,6 +248,749 @@
       "name": "default_parse_collapses_repeated_tag_to_list",
       "reason": "Identical repeated-tag input, list length, and both integer elements in public conformance.",
       "retainedPath": "conformance/tests/xml_lossless_parse.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/stdlib/crypto/tests.rs",
+      "name": "base64_round_trip_ascii",
+      "reason": "Identical hello world encode and decode, with the same encoded and decoded output, in public conformance.",
+      "retainedPath": "conformance/tests/stdlib/base64_sha256.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/stdlib/crypto/tests.rs",
+      "name": "base64url_known_vector",
+      "reason": "Identical >>>???/// encode and Pj4-Pz8_Ly8v decode vector in public conformance.",
+      "retainedPath": "conformance/tests/stdlib/encoding_builtins.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/stdlib/crypto/tests.rs",
+      "name": "base32_known_vector",
+      "reason": "Identical foobar encode and decode vector in public conformance.",
+      "retainedPath": "conformance/tests/stdlib/encoding_builtins.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/stdlib/crypto/tests.rs",
+      "name": "hex_round_trip_ascii",
+      "reason": "Identical hello encode and 68656c6c6f decode vector in public conformance.",
+      "retainedPath": "conformance/tests/stdlib/encoding_builtins.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/stdlib/crypto/tests.rs",
+      "name": "url_encode_preserves_unreserved",
+      "reason": "Conformance passes the same unreserved set (- _ . ~ and alphanumerics) through url_encode unchanged.",
+      "retainedPath": "conformance/tests/stdlib/url_encoding.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/stdlib/crypto/tests.rs",
+      "name": "url_encode_encodes_special_chars",
+      "reason": "Conformance asserts the exact encoding of space, ampersand, and equals through url_encode.",
+      "retainedPath": "conformance/tests/stdlib/url_encoding.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/stdlib/crypto/tests.rs",
+      "name": "url_decode_plus_as_space",
+      "reason": "Identical hello+world input and hello world output in public conformance.",
+      "retainedPath": "conformance/tests/stdlib/url_encoding.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/stdlib/crypto/tests.rs",
+      "name": "url_decode_percent_encoding",
+      "reason": "Conformance decodes %20, %26, and %3D escapes with exact output.",
+      "retainedPath": "conformance/tests/stdlib/url_encoding.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/stdlib/crypto/tests.rs",
+      "name": "sha256_known_vector",
+      "reason": "Identical empty-string SHA-256 digest asserted in public conformance.",
+      "retainedPath": "conformance/tests/runtime/harness_crypto_sha256.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/stdlib/crypto/tests.rs",
+      "name": "hmac_sha256_rfc4231_vector_2",
+      "reason": "Identical RFC 4231 key, message, and digest in public conformance.",
+      "retainedPath": "conformance/tests/stdlib/hmac_sha256.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/stdlib/crypto/tests.rs",
+      "name": "hmac_sha256_github_documented_vector",
+      "reason": "Identical GitHub webhook key, message, and digest in public conformance.",
+      "retainedPath": "conformance/tests/stdlib/hmac_sha256.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/stdlib/crypto/tests.rs",
+      "name": "hmac_sha256_base64_known_vector",
+      "reason": "Identical key, message, and base64 digest in public conformance.",
+      "retainedPath": "conformance/tests/stdlib/hmac_sha256.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/stdlib/crypto/tests.rs",
+      "name": "constant_time_eq_matches_for_equal",
+      "reason": "Conformance asserts constant_time_eq is true for equal strings.",
+      "retainedPath": "conformance/tests/stdlib/hmac_sha256.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/stdlib/crypto/tests.rs",
+      "name": "constant_time_eq_rejects_different_lengths",
+      "reason": "Conformance asserts constant_time_eq is false for strings of different length.",
+      "retainedPath": "conformance/tests/stdlib/hmac_sha256.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/stdlib/crypto/tests.rs",
+      "name": "constant_time_eq_rejects_different_content",
+      "reason": "Conformance asserts constant_time_eq is false for equal-length strings with different content.",
+      "retainedPath": "conformance/tests/stdlib/hmac_sha256.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/stdlib/regex.rs",
+      "name": "match_basic",
+      "reason": "Conformance matches the same digit run in the same abc 123 def 456 text and asserts both matches.",
+      "retainedPath": "conformance/tests/stdlib/regex.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/stdlib/regex.rs",
+      "name": "match_no_match_returns_nil",
+      "reason": "Conformance asserts regex_match returns nil when the digit pattern has no match.",
+      "retainedPath": "conformance/tests/stdlib/regex.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/stdlib/regex.rs",
+      "name": "replace_basic",
+      "reason": "Conformance replaces the same digit runs in the same text with NUM and asserts the exact result.",
+      "retainedPath": "conformance/tests/stdlib/regex.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/stdlib/regex.rs",
+      "name": "replace_with_backreference",
+      "reason": "Identical pattern, $2 $1 replacement, input, and output in public conformance.",
+      "retainedPath": "conformance/tests/stdlib/regex_replace_all_alias.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/stdlib/regex.rs",
+      "name": "replace_honors_optional_flags",
+      "reason": "Identical case-insensitive replacement input, flag, and output in public conformance.",
+      "retainedPath": "conformance/tests/stdlib/regex_flags_split.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/stdlib/regex.rs",
+      "name": "captures_with_groups",
+      "reason": "Conformance asserts match text and positional groups for two capture matches.",
+      "retainedPath": "conformance/tests/stdlib/regex_captures.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/stdlib/regex.rs",
+      "name": "captures_named_groups",
+      "reason": "Conformance asserts named capture-group values exposed on each capture dict.",
+      "retainedPath": "conformance/tests/stdlib/regex_captures.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/stdlib/regex.rs",
+      "name": "captures_no_match_returns_empty_list",
+      "reason": "Conformance asserts regex_captures returns an empty list when nothing matches.",
+      "retainedPath": "conformance/tests/stdlib/regex_captures.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/stdlib/regex.rs",
+      "name": "captures_optional_group_nil",
+      "reason": "Conformance asserts an unmatched optional group is nil in the groups list.",
+      "retainedPath": "conformance/tests/stdlib/regex_captures.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/stdlib/regex.rs",
+      "name": "captures_inline_and_trailing_flags_span_newlines",
+      "reason": "Identical text, inline and trailing flag patterns, match, groups, offsets, line, and equivalence assertions in public conformance.",
+      "retainedPath": "conformance/tests/stdlib/regex_flags_captures.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/stdlib/compression.rs",
+      "name": "gzip_round_trips_strings_to_bytes",
+      "reason": "Conformance gzip-encodes a string and asserts the decoded bytes equal the original text.",
+      "retainedPath": "conformance/tests/compression/roundtrip.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/stdlib/compression.rs",
+      "name": "tar_round_trip_preserves_mode",
+      "reason": "Conformance round-trips the same bin/run entry with mode 0o755 and asserts path, content, and mode.",
+      "retainedPath": "conformance/tests/compression/roundtrip.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/stdlib/bytes.rs",
+      "name": "bytes_hex_round_trip",
+      "reason": "Identical 0001ff hex round trip through bytes_from_hex and bytes_to_hex in public conformance.",
+      "retainedPath": "conformance/tests/stdlib/base64_sha256.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/vm/tests_runtime/language.rs",
+      "name": "test_mixed_arithmetic",
+      "reason": "Conformance logs the same 3 + 1.5 and 10 - 2.5 expressions with the same output, plus more mixed cases.",
+      "retainedPath": "conformance/tests/language/mixed_arithmetic.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/vm/tests_runtime/language.rs",
+      "name": "test_exponentiation",
+      "reason": "Conformance asserts the same four exponent expressions and results, plus float exponentiation.",
+      "retainedPath": "conformance/tests/language/exponentiation.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/vm/tests_runtime/language.rs",
+      "name": "test_list_map",
+      "reason": "Identical list, closure, and output in public conformance.",
+      "retainedPath": "conformance/tests/collections/list_map.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/vm/tests_runtime/language.rs",
+      "name": "test_list_filter",
+      "reason": "Identical list, closure, and output in public conformance.",
+      "retainedPath": "conformance/tests/collections/list_filter.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/vm/tests_runtime/language.rs",
+      "name": "test_list_reduce",
+      "reason": "Identical list, seed, closure, and output in public conformance.",
+      "retainedPath": "conformance/tests/collections/list_reduce.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/vm/tests_runtime/language.rs",
+      "name": "test_pipe_with_closure",
+      "reason": "Identical program and expected output already executed by public conformance.",
+      "retainedPath": "conformance/tests/language/pipe_with_closure.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/vm/tests_runtime/language.rs",
+      "name": "test_string_repeat_operator_small_count_ok",
+      "reason": "Conformance prints the same \"ab\" * 3 expression with the same output.",
+      "retainedPath": "conformance/tests/strings/string_repeat.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/vm/tests_runtime/language.rs",
+      "name": "test_string_methods",
+      "reason": "Conformance runs the same six string method calls with the same output, plus negative cases.",
+      "retainedPath": "conformance/tests/strings/string_methods.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/vm/tests_runtime/language.rs",
+      "name": "test_for_in_dict",
+      "reason": "Conformance iterates the same dict with for entry in d and logs the same keys.",
+      "retainedPath": "conformance/tests/collections/dict_iteration.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/vm/tests_runtime/concurrency.rs",
+      "name": "test_parallel_basic",
+      "reason": "Conformance runs the same three-branch parallel block with i * 10 and the same output.",
+      "retainedPath": "conformance/tests/concurrency/parallel_basic.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/vm/tests_runtime/concurrency.rs",
+      "name": "test_spawn_await",
+      "reason": "Identical spawn, await, and log ordering in public conformance.",
+      "retainedPath": "conformance/tests/concurrency/spawn_await.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/tool_annotations.rs",
+      "name": "arg_schema_defaults_empty",
+      "reason": "Vacuous: only checks that the compiler-derived Default of ToolArgSchema leaves its collection fields empty.",
+      "retainedPath": "crates/harn-vm/src/tool_annotations.rs",
+      "retainedAssertion": "#[derive(Default)] on ToolArgSchema"
+    },
+    {
+      "path": "crates/harn-vm/src/tool_annotations.rs",
+      "name": "annotations_default_result_routes_empty",
+      "reason": "Vacuous: only checks that the compiler-derived Default of ToolAnnotations yields false, empty, and None fields.",
+      "retainedPath": "crates/harn-vm/src/tool_annotations.rs",
+      "retainedAssertion": "#[derive(Default)] on ToolAnnotations"
+    },
+    {
+      "path": "crates/harn-vm/src/orchestration/tests/workflow.rs",
+      "name": "workflow_node_defaults_exit_when_verified_to_false",
+      "reason": "The retained case deserializes a node without the field through the serde(default) path that uses this Default and asserts exit_when_verified is false.",
+      "retainedPath": "crates/harn-vm/src/orchestration/tests/workflow.rs",
+      "retainedName": "workflow_node_exit_when_verified_accepts_missing_field_for_backcompat"
+    },
+    {
+      "path": "crates/harn-vm/src/harness_net.rs",
+      "name": "exact_host_match_allows",
+      "reason": "Conformance allows an exact domain rule through the same NetPolicy::evaluate seam on a real harness.net call.",
+      "retainedPath": "conformance/tests/net_policy/request_uses_url_argument.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/harness_net.rs",
+      "name": "wildcard_does_not_match_bare_apex",
+      "reason": "Conformance asserts *.github.com allows a subdomain and denies the bare apex through the same NetPolicy::evaluate seam.",
+      "retainedPath": "conformance/tests/net_policy/wildcard_allows_subdomain.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/harness_net.rs",
+      "name": "cidr_matches_ip_literal",
+      "reason": "Identical 10.0.0.0/8 rule and 10.5.5.5 and 192.168.1.1 URLs through the same NetPolicy::evaluate seam.",
+      "retainedPath": "conformance/tests/net_policy/cidr_matches_ip.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/harness_net.rs",
+      "name": "host_port_rule_requires_matching_port",
+      "reason": "Identical api.anthropic.com host rule restricted to 443, with the same allowed https and denied http URLs.",
+      "retainedPath": "conformance/tests/net_policy/host_port_restriction.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/harness_net.rs",
+      "name": "default_allow_lets_unmatched_through",
+      "reason": "Conformance lets an unmatched example.test URL through a default-allow policy via the same evaluate seam.",
+      "retainedPath": "conformance/tests/net_policy/default_allow.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/harness_net.rs",
+      "name": "quarantine_denies_with_signal",
+      "reason": "Conformance asserts a quarantine violation denies with outcome quarantine and sets the quarantined flag.",
+      "retainedPath": "conformance/tests/net_policy/quarantine.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/llm/cost_tests.rs",
+      "name": "format_usd_amount_auto_precision_and_grouping",
+      "reason": "Identical seven amounts, precision and sign options, and outputs through std/llm/economics format_usd, which calls the same formatter.",
+      "retainedPath": "conformance/tests/scenarios/llm_economics_format_usd.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/llm/cost_tests.rs",
+      "name": "format_usd_handles_fractional_carry_into_whole",
+      "reason": "Identical 0.00027 * 300000 carry case and $81.0000 output in public conformance.",
+      "retainedPath": "conformance/tests/scenarios/llm_economics_format_usd.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/llm/token_count.rs",
+      "name": "exact_tokens_round_trip_with_stable_tokenizer_identity",
+      "reason": "Identical text, gpt-4o model, tokenizer identity, and detokenized round trip through tokenize and detokenize, which call the same exact tokenizer.",
+      "retainedPath": "conformance/tests/stdlib/llm_tokenizer_refs.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/http/tests.rs",
+      "name": "mock_call_headers_redact_sensitive_values",
+      "reason": "Conformance records authorization, x-api-key, and accept headers and asserts both the redacted and raw http_mock_calls projections built by the same helper.",
+      "retainedPath": "conformance/tests/stdlib/http_mock_calls_headers.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/channels/tests.rs",
+      "name": "org_scope_is_disabled",
+      "reason": "Conformance appends to the same org:burin-labs:pr.merged name through the resolver and asserts HARN-CHN-002.",
+      "retainedPath": "conformance/tests/stdlib/emit_channel_scope_resolution.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/channels/tests.rs",
+      "name": "missing_pipeline_context_reports_channel_error",
+      "reason": "Conformance appends a pipeline-prefixed name without pipeline context through the resolver and asserts HARN-CHN-001.",
+      "retainedPath": "conformance/tests/stdlib/emit_channel_scope_resolution.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/flow/predicates/result.rs",
+      "name": "block_marks_blocking",
+      "reason": "Conformance builds the same missing_test block through flow_invariant_block, which calls InvariantResult::block, and asserts blocking and the code.",
+      "retainedPath": "conformance/tests/stdlib/flow_invariant_results.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/flow/predicates/result.rs",
+      "name": "require_approval_routes_to_principal_or_role",
+      "reason": "Conformance builds the same user:alice principal and security-reviewer role approvals through InvariantResult::require_approval and asserts kind and identity.",
+      "retainedPath": "conformance/tests/stdlib/flow_invariant_results.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/stdlib/flow_tests.rs",
+      "name": "flow_invariant_warn_carries_reason",
+      "reason": "Identical builtin and untested helper reason asserted in public conformance.",
+      "retainedPath": "conformance/tests/stdlib/flow_invariant_results.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/stdlib/flow_tests.rs",
+      "name": "flow_invariant_block_carries_code_and_message",
+      "reason": "Identical builtin, code, and message, plus is_blocking, asserted in public conformance.",
+      "retainedPath": "conformance/tests/stdlib/flow_invariant_results.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/stdlib/flow_tests.rs",
+      "name": "flow_invariant_require_approval_routes_to_principal_or_role",
+      "reason": "Identical principal and role approver inputs and resulting kind, id, and name in public conformance.",
+      "retainedPath": "conformance/tests/stdlib/flow_invariant_results.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/stdlib/flow_tests.rs",
+      "name": "flow_with_evidence_attaches_all_four_evidence_kinds",
+      "reason": "Identical four evidence builders and arguments, with the count and each kind asserted in public conformance.",
+      "retainedPath": "conformance/tests/stdlib/flow_invariant_results.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/stdlib/flow_tests.rs",
+      "name": "flow_with_remediation_attaches_description",
+      "reason": "Identical remediation description attached to a block result and asserted in public conformance.",
+      "retainedPath": "conformance/tests/stdlib/flow_invariant_results.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/stdlib/flow_tests.rs",
+      "name": "flow_with_confidence_clamps_to_unit_interval",
+      "reason": "Conformance clamps an above-one confidence on a warn result to 1.0 through the same builtin.",
+      "retainedPath": "conformance/tests/stdlib/flow_invariant_results.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/stdlib/flow_tests.rs",
+      "name": "flow_invariant_kind_returns_string_label",
+      "reason": "Conformance asserts flow_invariant_kind returns allow for flow_invariant_allow.",
+      "retainedPath": "conformance/tests/stdlib/flow_invariant_results.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/value/diff/tests.rs",
+      "name": "equal_values_produce_no_differences",
+      "reason": "Conformance asserts value_diff returns nil for equal dicts and that assert_eq passes for equal scalars and nested values.",
+      "retainedPath": "conformance/tests/stdlib/stdlib_testing_assert_eq.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/value/diff/tests.rs",
+      "name": "nested_dict_mismatch_is_addressed_by_path",
+      "reason": "Conformance asserts the rendered assert_eq failure for the same Ada and Grace nested dict reports exactly one difference at .user.name.",
+      "retainedPath": "conformance/tests/stdlib/stdlib_testing_assert_eq.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/value/diff/tests.rs",
+      "name": "differing_lengths_report_only_the_surplus",
+      "reason": "Conformance asserts the exact rendered diff for a longer actual list, including the surplus [2] entry reported as nothing here.",
+      "retainedPath": "conformance/tests/stdlib/stdlib_testing_assert_eq.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/value/diff/tests.rs",
+      "name": "scalar_mismatch_renders_without_ceremony",
+      "reason": "Identical 3 versus 4 mismatch and verbatim rendered failure text in public conformance.",
+      "retainedPath": "conformance/tests/stdlib/stdlib_testing_assert_eq.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/value/diff/tests.rs",
+      "name": "a_type_mismatch_names_both_types",
+      "reason": "Identical 1 versus \"1\" mismatch and verbatim rendered failure text in public conformance.",
+      "retainedPath": "conformance/tests/stdlib/stdlib_testing_assert_eq.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/value/diff/tests.rs",
+      "name": "nested_mismatch_renders_path_and_only_the_differing_leaf",
+      "reason": "Conformance asserts the verbatim rendered failure for the same nested Ada and Grace mismatch alongside an equal id field.",
+      "retainedPath": "conformance/tests/stdlib/stdlib_testing_assert_eq.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/stdlib/testing.rs",
+      "name": "a_caller_message_replaces_the_diff",
+      "reason": "Identical 1, 2, and ids must line up arguments and verbatim thrown message in public conformance.",
+      "retainedPath": "conformance/tests/stdlib/stdlib_testing_assert_eq.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/stdlib/testing.rs",
+      "name": "assert_ne_fails_only_when_the_values_match",
+      "reason": "Conformance passes assert_ne(1, 2) and asserts the verbatim failure for assert_ne(\"x\", \"x\").",
+      "retainedPath": "conformance/tests/stdlib/stdlib_testing_assert_eq.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/stdlib/testing.rs",
+      "name": "assert_approx_absorbs_float_rounding_but_not_real_error",
+      "reason": "Identical 0.1 + 0.2 pass and 1.0 versus 2.0 verbatim failure text in public conformance.",
+      "retainedPath": "conformance/tests/stdlib/stdlib_testing_assert_eq.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/stdlib/testing.rs",
+      "name": "assert_matches_tests_a_pattern_against_text",
+      "reason": "Identical order-1234 pass and order-abc verbatim failure text in public conformance.",
+      "retainedPath": "conformance/tests/stdlib/stdlib_testing_assert_eq.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/stdlib/testing.rs",
+      "name": "assert_matches_refuses_a_non_string_subject",
+      "reason": "Identical 1234 subject and verbatim refusal text in public conformance.",
+      "retainedPath": "conformance/tests/stdlib/stdlib_testing_assert_eq.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/stdlib/testing.rs",
+      "name": "value_diff_is_nil_when_equal_and_headline_free_when_not",
+      "reason": "Conformance asserts value_diff is nil for equal values and the exact headline-free 1 versus 2 rendering.",
+      "retainedPath": "conformance/tests/stdlib/stdlib_testing_assert_eq.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/stdlib/template/tests.rs",
+      "name": "list_index",
+      "reason": "Conformance renders positive list indexing through render_prompt, which uses the same render_template_result engine.",
+      "retainedPath": "conformance/tests/templates/template_nested_access.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/stdlib/template/tests.rs",
+      "name": "bool_not",
+      "reason": "Conformance renders `not` negation in template_expressions and `!` negation (!loop.last) in conformance/tests/templates/template_for_loop.harn through the same template engine with exact output.",
+      "retainedPath": "conformance/tests/templates/template_expressions.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/stdlib/template/tests.rs",
+      "name": "raw_block",
+      "reason": "Conformance renders a raw block containing a non-directive {{ }} body verbatim through the same template engine.",
+      "retainedPath": "conformance/tests/templates/template_comments_and_raw.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/stdlib/template/tests.rs",
+      "name": "comment_stripped",
+      "reason": "Conformance strips a {{# #}} comment between adjacent text through the same template engine with exact output.",
+      "retainedPath": "conformance/tests/templates/template_comments_and_raw.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/stdlib/template/tests.rs",
+      "name": "whitespace_trim",
+      "reason": "Conformance trims whitespace on both sides of {{- -}} tags through the same template engine with exact output.",
+      "retainedPath": "conformance/tests/templates/template_whitespace_trim.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/stdlib/template/tests.rs",
+      "name": "filter_json",
+      "reason": "Conformance renders a dict through the json filter with exact compact output.",
+      "retainedPath": "conformance/tests/templates/template_filters.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/stdlib/template/tests.rs",
+      "name": "include_with",
+      "reason": "Conformance renders an include with a with-binding override through the same template engine with exact output.",
+      "retainedPath": "conformance/tests/templates/template_include.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/stdlib/json.rs",
+      "name": "extract_from_code_fence",
+      "reason": "Conformance extracts an object from the same prose-wrapped ```json fence through json_extract, which calls the same extractor, and asserts the parsed field.",
+      "retainedPath": "conformance/tests/stdlib/json/json_extract.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/stdlib/json.rs",
+      "name": "extract_from_code_fence_no_language",
+      "reason": "Conformance extracts JSON from a bare ``` fence with no language tag through the same extractor and asserts the parsed value.",
+      "retainedPath": "conformance/tests/stdlib/json/json_extract.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/stdlib/json.rs",
+      "name": "extract_balanced_object",
+      "reason": "Conformance extracts a nested object from surrounding prose through the same extractor and asserts the inner value.",
+      "retainedPath": "conformance/tests/stdlib/json/json_extract_balanced.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/stdlib/collections.rs",
+      "name": "deep_merge_recurses_into_nested_dicts",
+      "reason": "Conformance deep_merges the same config retries/backoff defaults with a retries/jitter override through the deep_merge builtin and asserts all three keys.",
+      "retainedPath": "conformance/tests/collections/clone_and_merge.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/stdlib/collections.rs",
+      "name": "list_unique_preserves_first_seen_order",
+      "reason": "Conformance asserts the unique builtin keeps first-seen order on an integer list with repeated 1 and 2.",
+      "retainedPath": "conformance/tests/collections/clone_and_merge.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/stdlib/collections.rs",
+      "name": "dict_from_pairs_accepts_two_element_lists",
+      "reason": "Conformance builds a dict from two-element string/int pair lists through the dict_from_pairs builtin and asserts each key, plus last-write-wins.",
+      "retainedPath": "conformance/tests/collections/clone_and_merge.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/stdlib/concurrency.rs",
+      "name": "atomic_cas_success",
+      "reason": "Conformance runs a matching atomic_cas through the same harness.runtime builtin and asserts true and the swapped value.",
+      "retainedPath": "conformance/tests/concurrency/atomic_real.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/stdlib/concurrency.rs",
+      "name": "atomic_cas_failure",
+      "reason": "Conformance runs a mismatched atomic_cas through the same builtin and asserts false and the unchanged value.",
+      "retainedPath": "conformance/tests/concurrency/atomic_real.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/stdlib/document.rs",
+      "name": "html_extraction_uses_visible_text",
+      "reason": "Identical HTML input and Receipt Amount $5.00 output through extract_text, which calls the same extractor.",
+      "retainedPath": "conformance/tests/stdlib/document_pdf.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/stdlib/document.rs",
+      "name": "pdf_extraction_marks_image_only_or_blank_input_for_ocr",
+      "reason": "Conformance extracts from a blank rendered PDF and asserts kind no_extractable_text and ocr_candidate true.",
+      "retainedPath": "conformance/tests/stdlib/document_pdf.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/vm/tests_runtime/errors.rs",
+      "name": "test_try_catch_basic",
+      "reason": "Conformance throws a string inside try and logs the caught value through the same try/catch path.",
+      "retainedPath": "conformance/tests/errors_by_feature/throw_catch.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/vm/tests_runtime/errors.rs",
+      "name": "test_try_no_error",
+      "reason": "Conformance runs a try body that does not throw and asserts the catch body never runs.",
+      "retainedPath": "conformance/tests/errors_by_feature/try_no_error.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/stdlib/xml.rs",
+      "name": "parse_rejects_pathologically_nested_xml",
+      "reason": "Identical 257-deep nesting through from_xml and the same max nesting depth rejection message in public conformance.",
+      "retainedPath": "conformance/tests/xml_lossless_parse.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/stdlib/xml.rs",
+      "name": "parse_repeated_children_into_list",
+      "reason": "Conformance asserts from_xml collapses repeated child tags into a list with both elements in order; the removed case accepted either shape.",
+      "retainedPath": "conformance/tests/xml_lossless_parse.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/chunk_tests.rs",
+      "name": "get_var_flags_outer_name_reference",
+      "reason": "The retained case emits the same GetVar into a fresh chunk and asserts the same references_outer_names flag before checking stickiness.",
+      "retainedPath": "crates/harn-vm/src/chunk_tests.rs",
+      "retainedName": "references_outer_names_is_monotonic"
+    },
+    {
+      "path": "crates/harn-vm/src/llm/provider_dispatch.rs",
+      "name": "an_open_scope_with_no_dispatch_measures_zero",
+      "reason": "The retained case opens the same empty ledger scope and asserts the same zero count, after also recording a dispatch outside every scope.",
+      "retainedPath": "crates/harn-vm/src/llm/provider_dispatch.rs",
+      "retainedName": "a_dispatch_outside_every_scope_is_not_attributed_to_a_later_one"
+    },
+    {
+      "path": "crates/harn-vm/src/stdlib/cookies.rs",
+      "name": "signed_values_use_the_cookie_crate_wire_format",
+      "reason": "Conformance signs the same plain-value with the same 32-byte secret through cookie_sign and cookie_verify, which call the same helpers, and asserts the round trip and the rejected forged suffix.",
+      "retainedPath": "conformance/tests/stdlib/cookie_session_helpers.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/stdlib/oauth_dynreg.rs",
+      "name": "valid_metadata_passes",
+      "reason": "Conformance validates the same https://app.example/callback metadata through oauth_dynreg_validate_metadata, which calls the same validator, and asserts ok with no errors.",
+      "retainedPath": "conformance/tests/stdlib/oauth/oauth_dynamic_registration_metadata.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/stdlib/oauth_dynreg.rs",
+      "name": "loopback_http_redirect_passes",
+      "reason": "Conformance registers an http://127.0.0.1 loopback redirect through the same validator on the registration path and asserts it round-trips.",
+      "retainedPath": "conformance/tests/stdlib/oauth/oauth_dynamic_registration_register.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/stdlib/oauth_dynreg.rs",
+      "name": "empty_redirect_uris_fails",
+      "reason": "Conformance validates an empty redirect_uris list and asserts the HARN-OAU-005 at least one rejection.",
+      "retainedPath": "conformance/tests/stdlib/oauth/oauth_dynamic_registration_rejects.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/stdlib/oauth_dynreg.rs",
+      "name": "missing_redirect_uris_fails",
+      "reason": "Conformance validates metadata without redirect_uris and asserts the HARN-OAU-005 redirect_uris is required rejection.",
+      "retainedPath": "conformance/tests/stdlib/oauth/oauth_dynamic_registration_rejects.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/stdlib/oauth_dynreg.rs",
+      "name": "unknown_grant_type_fails",
+      "reason": "Identical https://app.example/cb redirect with a password grant type and the same rejection naming password in public conformance.",
+      "retainedPath": "conformance/tests/stdlib/oauth/oauth_dynamic_registration_rejects.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/stdlib/oauth_dynreg.rs",
+      "name": "build_applies_defaults",
+      "reason": "Conformance builds client metadata through the same builder and asserts the default grant_types, response_types, and token_endpoint_auth_method values, not just their presence.",
+      "retainedPath": "conformance/tests/stdlib/oauth/oauth_dynamic_registration_metadata.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/stdlib/oauth_dynreg.rs",
+      "name": "register_returns_client_id_and_secret",
+      "reason": "Conformance registers through __oauth_dynreg_register and asserts client_id and client_secret lengths of at least 32 and that get_client omits the secret.",
+      "retainedPath": "conformance/tests/stdlib/oauth/oauth_dynamic_registration_register.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/stdlib/oauth_dynreg.rs",
+      "name": "register_rejects_invalid_metadata",
+      "reason": "Conformance registers a non-loopback http redirect through the same registration path and asserts HARN-OAU-005 with the store unchanged.",
+      "retainedPath": "conformance/tests/stdlib/oauth/oauth_dynamic_registration_rejects.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/stdlib/compression.rs",
+      "name": "zip_extract_rejects_duplicate_names_before_extracting",
+      "reason": "Conformance mutates a second member name to collide in both local and central records and asserts zip_extract refuses with duplicate members; the removed case's extra assertion only described the zip dependency.",
+      "retainedPath": "conformance/tests/compression/duplicate_zip_members.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/stdlib/multipart.rs",
+      "name": "parses_text_and_file_fields",
+      "reason": "Conformance builds the same text plus octet-stream file form through multipart_form_data, parses it, and asserts field_count 2 plus every field property.",
+      "retainedPath": "conformance/tests/stdlib/multipart_builtins.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/stdlib/concurrency.rs",
+      "name": "timer_start_returns_dict",
+      "reason": "Identical my_timer name and start_ms > 0 assertions through the same timer_start builtin in public conformance.",
+      "retainedPath": "conformance/tests/stdlib/timer_builtins.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/stdlib/junit.rs",
+      "name": "parses_pass_fail_skip",
+      "reason": "Conformance parses the same classname-qualified passes, fails (boom with stack trace), and skipped cases through the parse_junit_xml builtin and asserts status, name, duration, and message.",
+      "retainedPath": "conformance/tests/stdlib/parse_junit_xml.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/stdlib/junit.rs",
+      "name": "parses_error_and_streams",
+      "reason": "Conformance parses an errored case with the same segfault message and hello and warn: x system streams and asserts status and both streams.",
+      "retainedPath": "conformance/tests/stdlib/parse_junit_xml.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/stdlib/junit.rs",
+      "name": "malformed_xml_yields_empty",
+      "reason": "Identical not xml at all input and empty result through the same builtin in public conformance.",
+      "retainedPath": "conformance/tests/stdlib/parse_junit_xml.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/stdlib/crypto/tests.rs",
+      "name": "hash_value_agrees_with_mixed_numeric_and_nested_set_equality",
+      "reason": "Identical 2^53 integer and float values, nested sets, and every equality and hash_value assertion in public conformance.",
+      "retainedPath": "conformance/tests/stdlib/hash_value_equality.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/stdlib/crypto/tests.rs",
+      "name": "verify_signed_url_rejects_tampering",
+      "reason": "Conformance tampers a signed claim and asserts valid false, signature_valid false, and reason bad_signature through the same builtin.",
+      "retainedPath": "conformance/tests/stdlib/signed_url.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/stdlib/crypto/tests.rs",
+      "name": "verify_signed_url_handles_expiry_and_skew",
+      "reason": "Conformance asserts an expired link reports expired with a valid signature and that a configured skew_seconds window still verifies.",
+      "retainedPath": "conformance/tests/stdlib/signed_url.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/stdlib/crypto/tests.rs",
+      "name": "signed_url_supports_key_rotation_id",
+      "reason": "Conformance signs with kid v2, verifies against a v1/v2 key map, and asserts valid and kid v2.",
+      "retainedPath": "conformance/tests/stdlib/signed_url.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/stdlib/project/tests.rs",
+      "name": "project_fingerprint_detects_rust_nextest_profile",
+      "reason": "Conformance fingerprints a Rust tree with .git and .config/nextest.toml through harness.project.fingerprint, which calls the same detector, and asserts rust, cargo, nextest, cargo, and git among the full signature.",
+      "retainedPath": "conformance/tests/stdlib/project/project_fingerprint.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/stdlib/project/tests.rs",
+      "name": "project_fingerprint_detects_swift_spm_profile",
+      "reason": "Conformance fingerprints Swift packages with Sources and Tests and asserts swift, spm, xctest, spm, and has_tests among the full signature.",
+      "retainedPath": "conformance/tests/stdlib/project/project_fingerprint.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/stdlib/project/tests.rs",
+      "name": "project_fingerprint_detects_npm_workspace_profile",
+      "reason": "Identical npm workspace manifest, lockfile, and layout with typescript, npm, vitest, vite, and has_tests asserted in the full conformance signature.",
+      "retainedPath": "conformance/tests/stdlib/project/project_fingerprint.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/stdlib/project/tests.rs",
+      "name": "project_fingerprint_detects_poetry_profile",
+      "reason": "Identical Poetry pyproject, lockfile, and tests directory with poetry, pytest, poetry, and fastapi asserted in the full conformance signature.",
+      "retainedPath": "conformance/tests/stdlib/project/project_fingerprint.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/stdlib/project/tests.rs",
+      "name": "project_fingerprint_detects_go_module_profile",
+      "reason": "Identical go.mod, go.sum, and package layout with go, go-mod, go-test, and go asserted in the full conformance signature.",
+      "retainedPath": "conformance/tests/stdlib/project/project_fingerprint.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/stdlib/project/tests.rs",
+      "name": "scan_tree_respects_gitignore_and_vendor_dirs_by_default",
+      "reason": "Conformance scans a tree with a .gitignore'd directory and node_modules through project_scan_tree, which calls the same scanner, asserts both are excluded by default, and also checks the opt-in expanded mode.",
+      "retainedPath": "conformance/tests/stdlib/project/project_scan_gitignore.harn"
     }
   ],
   "retainedScenarios": [

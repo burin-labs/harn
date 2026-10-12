@@ -325,50 +325,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parses_pass_fail_skip() {
-        let xml = r#"<?xml version="1.0"?>
-<testsuites>
-  <testsuite name="suite">
-    <testcase classname="C" name="passes" time="0.001"/>
-    <testcase classname="C" name="fails" time="0.002">
-      <failure message="boom">stack trace here</failure>
-    </testcase>
-    <testcase classname="C" name="skipped"><skipped/></testcase>
-  </testsuite>
-</testsuites>"#;
-        let records = parse_junit_xml(xml.as_bytes());
-        assert_eq!(records.len(), 3);
-        assert_eq!(records[0].status, Status::Passed);
-        assert_eq!(records[0].name, "C::passes");
-        assert_eq!(records[0].duration_ms, 1);
-        assert_eq!(records[1].status, Status::Failed);
-        assert!(records[1].message.as_deref().unwrap().contains("boom"));
-        assert!(records[1]
-            .message
-            .as_deref()
-            .unwrap()
-            .contains("stack trace"));
-        assert_eq!(records[2].status, Status::Skipped);
-    }
-
-    #[test]
-    fn parses_error_and_streams() {
-        let xml = r#"<testsuite>
-  <testcase name="errors">
-    <error message="segfault">core dumped</error>
-    <system-out>hello</system-out>
-    <system-err>warn: x</system-err>
-  </testcase>
-</testsuite>"#;
-        let records = parse_junit_xml(xml.as_bytes());
-        assert_eq!(records.len(), 1);
-        assert_eq!(records[0].status, Status::Errored);
-        assert_eq!(records[0].name, "errors");
-        assert_eq!(records[0].stdout.as_deref(), Some("hello"));
-        assert_eq!(records[0].stderr.as_deref(), Some("warn: x"));
-    }
-
-    #[test]
     fn unescapes_entities_in_messages() {
         let xml = r#"<testsuite>
   <testcase name="t">
@@ -379,12 +335,6 @@ mod tests {
         let msg = records[0].message.as_deref().unwrap();
         assert!(msg.contains("a & b"));
         assert!(msg.contains("left < right"));
-    }
-
-    #[test]
-    fn malformed_xml_yields_empty() {
-        let records = parse_junit_xml(b"not xml at all");
-        assert!(records.is_empty());
     }
 
     #[test]

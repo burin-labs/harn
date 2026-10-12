@@ -5,13 +5,6 @@
 //! nil coalescing, subscripting, and the guards on oversized string operations.
 
 use super::harness::*;
-#[test]
-fn test_mixed_arithmetic() {
-    let out = run_output(
-        "pipeline t(harness: Harness, task: unknown) { harness.stdio.log(3 + 1.5)\nharness.stdio.log(10 - 2.5) }",
-    );
-    assert_eq!(out, "[harn] 4.5\n[harn] 7.5");
-}
 
 #[test]
 fn test_typed_opcode_drift_falls_back_to_generic() {
@@ -51,14 +44,6 @@ fn typed_annotation_is_enforced_at_the_binding_site() {
 }
 
 #[test]
-fn test_exponentiation() {
-    let out = run_output(
-        "pipeline t(harness: Harness, task: unknown) { harness.stdio.log(2 ** 8)\nharness.stdio.log(2 * 3 ** 2)\nharness.stdio.log(2 ** 3 ** 2)\nharness.stdio.log(2 ** -1) }",
-    );
-    assert_eq!(out, "[harn] 256\n[harn] 18\n[harn] 512\n[harn] 0.5");
-}
-
-#[test]
 fn test_unary_minus_binds_looser_than_exponent() {
     // `-2 ** 2` is `-(2 ** 2) = -4`, matching Python/Ruby/math notation rather
     // than the spreadsheet `(-2) ** 2 = 4` reading. The exponent operand still
@@ -91,30 +76,6 @@ fn test_closure_capture() {
 }
 
 #[test]
-fn test_list_map() {
-    let out = run_output(
-        "pipeline t(harness: Harness, task: unknown) { const doubled = [1, 2, 3].map({ x -> x * 2 })\nharness.stdio.log(doubled) }",
-    );
-    assert_eq!(out, "[harn] [2, 4, 6]");
-}
-
-#[test]
-fn test_list_filter() {
-    let out = run_output(
-        "pipeline t(harness: Harness, task: unknown) { const big = [1, 2, 3, 4, 5].filter({ x -> x > 3 })\nharness.stdio.log(big) }",
-    );
-    assert_eq!(out, "[harn] [4, 5]");
-}
-
-#[test]
-fn test_list_reduce() {
-    let out = run_output(
-        "pipeline t(harness: Harness, task: unknown) { const sum = [1, 2, 3, 4].reduce(0, { acc, x -> acc + x })\nharness.stdio.log(sum) }",
-    );
-    assert_eq!(out, "[harn] 10");
-}
-
-#[test]
 fn test_string_repeat_operator_rejects_oversized_count() {
     // `"a" * <huge>` must error cleanly, never OOM / panic `capacity overflow`.
     let result = run_harn_result(
@@ -140,14 +101,6 @@ fn test_str_pad_rejects_oversized_width() {
     );
     let err = result.unwrap_err().to_string();
     assert!(err.contains("repeat") && err.contains("limit"), "{err}");
-}
-
-#[test]
-fn test_string_repeat_operator_small_count_ok() {
-    let out = run_output(
-        r#"pipeline t(harness: Harness, task: unknown) { harness.stdio.log("ab" * 3) }"#,
-    );
-    assert_eq!(out, "[harn] ababab");
 }
 
 #[test]
@@ -218,15 +171,6 @@ fn test_pipe_operator() {
         "pipeline t(harness: Harness, task: unknown) { fn double(x) { return x * 2 }\nlet r = 5 |> double\nharness.stdio.log(r) }",
     );
     assert_eq!(out, "[harn] 10");
-}
-
-#[test]
-fn test_pipe_with_closure() {
-    let out = run_output(
-        r#"pipeline t(harness: Harness, task: unknown) { const r = "hello world" |> { s -> s.split(" ") }
-harness.stdio.log(r) }"#,
-    );
-    assert_eq!(out, "[harn] [hello, world]");
 }
 
 #[test]
@@ -311,22 +255,6 @@ harness.stdio.log("éx"[-1])
 }
 
 #[test]
-fn test_string_methods() {
-    let out = run_output(
-        r#"pipeline t(harness: Harness, task: unknown) { harness.stdio.log("hello world".replace("world", "harn"))
-harness.stdio.log("a,b,c".split(","))
-harness.stdio.log("  hello  ".trim())
-harness.stdio.log("hello".starts_with("hel"))
-harness.stdio.log("hello".ends_with("lo"))
-harness.stdio.log("hello".substring(1, 3)) }"#,
-    );
-    assert_eq!(
-        out,
-        "[harn] hello harn\n[harn] [a, b, c]\n[harn] hello\n[harn] true\n[harn] true\n[harn] el"
-    );
-}
-
-#[test]
 fn test_includes_aliases_membership_methods() {
     let out = run_output(
         r#"pipeline t(harness: Harness, task: unknown) {
@@ -369,12 +297,4 @@ const r = x > 0 ? "positive" : "non-positive"
 harness.stdio.log(r) }"#,
     );
     assert_eq!(out, "[harn] positive");
-}
-
-#[test]
-fn test_for_in_dict() {
-    let out = run_output(
-        "pipeline t(harness: Harness, task: unknown) { const d = {a: 1, b: 2}\nfor entry in d { harness.stdio.log(entry.key) } }",
-    );
-    assert_eq!(out, "[harn] a\n[harn] b");
 }

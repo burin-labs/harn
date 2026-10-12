@@ -728,26 +728,6 @@ mod tests {
     }
 
     #[test]
-    fn parse_repeated_children_into_list() {
-        let xml =
-            "<root><previous_chats><item>x.jsonl</item><item>y.jsonl</item></previous_chats></root>";
-        let parsed = parse(xml).unwrap();
-        let outer = parsed.as_dict().unwrap();
-        let inner = outer.get("root").and_then(VmValue::as_dict).unwrap();
-        let chats = inner.get("previous_chats").unwrap();
-        let items: Vec<String> = match chats {
-            VmValue::List(items) => items.iter().map(VmValue::display).collect(),
-            VmValue::Dict(d) => match d.get("item") {
-                Some(VmValue::List(items)) => items.iter().map(VmValue::display).collect(),
-                Some(VmValue::String(s)) => vec![(**s).to_string()],
-                other => panic!("unexpected dict child: {other:?}"),
-            },
-            other => panic!("unexpected: {other:?}"),
-        };
-        assert_eq!(items, vec!["x.jsonl".to_string(), "y.jsonl".to_string()]);
-    }
-
-    #[test]
     fn parse_handles_declaration_and_comments() {
         let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
 <!-- a comment -->
@@ -797,32 +777,6 @@ mod tests {
         match err {
             VmError::Thrown(VmValue::String(msg)) => {
                 assert!(msg.contains("mismatched"), "got: {msg}");
-            }
-            other => panic!("unexpected error: {other:?}"),
-        }
-    }
-
-    #[test]
-    fn parse_rejects_pathologically_nested_xml() {
-        // 257 nested elements blows the depth budget by one. We don't
-        // build a 10k-element string because the recursion limit
-        // itself is the contract — once we trip it the inner branches
-        // never run.
-        let depth = MAX_XML_DEPTH + 1;
-        let mut xml = String::with_capacity(depth * 8);
-        for _ in 0..depth {
-            xml.push_str("<a>");
-        }
-        for _ in 0..depth {
-            xml.push_str("</a>");
-        }
-        let err = parse(&xml).unwrap_err();
-        match err {
-            VmError::Thrown(VmValue::String(msg)) => {
-                assert!(
-                    msg.contains("max nesting depth"),
-                    "expected depth error, got: {msg}"
-                );
             }
             other => panic!("unexpected error: {other:?}"),
         }

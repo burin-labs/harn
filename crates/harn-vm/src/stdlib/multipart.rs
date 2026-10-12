@@ -774,49 +774,12 @@ mod tests {
         bytes_value(value.to_vec())
     }
 
-    fn field(entries: &[(&str, VmValue)]) -> VmValue {
-        dict_value(
-            entries
-                .iter()
-                .map(|(key, value)| ((*key).to_string(), value.clone()))
-                .collect(),
-        )
-    }
-
     fn call(name: &str, args: Vec<VmValue>) -> Result<VmValue, VmError> {
         let mut vm = Vm::new();
         register_multipart_builtins(&mut vm);
         let func = vm.builtins.get(name).unwrap().clone();
         let mut out = String::new();
         func(&args, &mut out)
-    }
-
-    #[test]
-    fn parses_text_and_file_fields() {
-        let built = call(
-            "multipart_form_data",
-            vec![list_value(vec![
-                field(&[("name", s("title")), ("content", s("Hello"))]),
-                field(&[
-                    ("name", s("upload")),
-                    ("filename", s("a.bin")),
-                    ("content_type", s("application/octet-stream")),
-                    ("content", b(&[0, 1, 255])),
-                ]),
-            ])],
-        )
-        .unwrap();
-        let built = expect_dict(&built, "test", "built").unwrap();
-        let parsed = call(
-            "multipart_parse",
-            vec![
-                built.get("body").unwrap().clone(),
-                built.get("content_type").unwrap().clone(),
-            ],
-        )
-        .unwrap();
-        let parsed = expect_dict(&parsed, "test", "parsed").unwrap();
-        assert!(matches!(parsed.get("field_count"), Some(VmValue::Int(2))));
     }
 
     #[test]

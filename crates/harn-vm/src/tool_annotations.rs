@@ -418,25 +418,6 @@ mod tests {
     }
 
     #[test]
-    fn arg_schema_defaults_empty() {
-        let schema = ToolArgSchema::default();
-        assert!(schema.path_params.is_empty());
-        assert!(schema.dependency_key_params.is_empty());
-        assert!(schema.dependency_range_params.is_empty());
-        assert!(schema.arg_aliases.is_empty());
-        assert!(schema.required.is_empty());
-    }
-
-    #[test]
-    fn annotations_default_result_routes_empty() {
-        let annotations = ToolAnnotations::default();
-        assert!(!annotations.emits_artifacts);
-        assert!(annotations.result_readers.is_empty());
-        assert!(!annotations.inline_result);
-        assert_eq!(annotations.completion_evidence_role, None);
-    }
-
-    #[test]
     fn completion_evidence_roles_round_trip() {
         for role in CompletionEvidenceRole::ALL {
             let encoded = serde_json::to_value(role).expect("serialize evidence role");
