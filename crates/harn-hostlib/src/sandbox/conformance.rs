@@ -955,7 +955,8 @@ fn observe_wrapper(
             "the daemon fixture did not reach its blocking read".to_string(),
         ));
     }
-    let daemon_alive = daemon.map(DaemonProbe::alive);
+    let daemon_helpers = daemon.map(DaemonProbe::helper_states);
+    let daemon_alive = daemon_helpers.as_ref().map(|helpers| !helpers.is_empty());
     let (behaved, receipt) = match case {
         ConformanceCase::RustcWrapperThatRunsIsKept => (
             built && wrapped_the_crate,
@@ -973,7 +974,8 @@ fn observe_wrapper(
     if behaved != receipt {
         return Err(Unmeasured::Broken(format!(
             "the recorded decision ({:?}: {}) disagrees with the build: completed={built} \
-             wrapper_ran_on_the_crate={wrapped_the_crate} daemon_alive={daemon_alive:?}",
+             wrapper_ran_on_the_crate={wrapped_the_crate} daemon_alive={daemon_alive:?} \
+             daemon_helpers={daemon_helpers:?}",
             decision.disposition, decision.reason
         )));
     }

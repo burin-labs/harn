@@ -44,11 +44,18 @@ impl DaemonProbe {
         )
     }
 
-    pub(super) fn alive(&self) -> bool {
+    #[cfg(test)]
+    fn alive(&self) -> bool {
+        !self.helper_states().is_empty()
+    }
+
+    pub(super) fn helper_states(&self) -> Vec<(sysinfo::Pid, sysinfo::ProcessStatus)> {
         snapshot()
             .processes()
             .values()
-            .any(|process| self.owns(process))
+            .filter(|process| self.owns(process))
+            .map(|process| (process.pid(), process.status()))
+            .collect()
     }
 
     pub(super) fn started(&self) -> bool {
