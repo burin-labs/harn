@@ -660,7 +660,7 @@ mod tests {
         // invalid data so the caller rebuilds instead of serving a prefix.
         for len in [SNAPSHOT_HEADER_LEN - 1, bytes.len() / 2] {
             fs::write(&path, &bytes[..len]).unwrap();
-            let error = CodeIndexSnapshot::load(dir.path()).err().expect("refused");
+            let error = CodeIndexSnapshot::load(dir.path()).expect_err("refused");
             assert_eq!(error.kind(), io::ErrorKind::InvalidData, "length {len}");
         }
     }
@@ -672,7 +672,7 @@ mod tests {
         let path = CodeIndexSnapshot::path_for(dir.path());
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         fs::write(&path, serde_json::to_vec(&snap).unwrap()).unwrap();
-        let error = CodeIndexSnapshot::load(dir.path()).err().expect("refused");
+        let error = CodeIndexSnapshot::load(dir.path()).expect_err("refused");
         assert_eq!(error.kind(), io::ErrorKind::InvalidData);
     }
 
