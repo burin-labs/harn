@@ -180,12 +180,11 @@ async fn execution_budget_starts_after_setup_and_stops_cpu_bound_code() {
     let result = execute_case(
         &case,
         temp.path(),
-        0,
+        &RunOptions::new(0),
         &loaded_skills_for(&file),
         &harn_vm::PreparedModuleCache::default(),
         true,
         None,
-        TestLlmPolicy::Hermetic,
     )
     .await;
 
@@ -235,12 +234,11 @@ async fn run_single_case(temp: &TempTestDir, name: &str, source_body: &str) -> T
     execute_case(
         &case,
         temp.path(),
-        30_000,
+        &RunOptions::new(30_000),
         &loaded_skills_for(&file),
         &harn_vm::PreparedModuleCache::default(),
         true,
         None,
-        TestLlmPolicy::Hermetic,
     )
     .await
 }
@@ -397,12 +395,11 @@ async fn execution_timeout_captures_lazy_module_load_attribution() {
     let result = execute_case(
         &case,
         temp.path(),
-        100,
+        &RunOptions::new(100),
         &loaded_skills_for(&temp.path().join("test_timeout_import.harn")),
         &harn_vm::PreparedModuleCache::default(),
         true,
         None,
-        TestLlmPolicy::Hermetic,
     )
     .await;
 

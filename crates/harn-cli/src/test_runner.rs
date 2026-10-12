@@ -590,12 +590,11 @@ async fn run_test_file_with_session_impl(
             execute_case(
                 &case,
                 &execution_cwd,
-                timeout_ms,
+                &fixture_options,
                 loaded_skills,
                 &prepared_module_cache,
                 session.stdio_available(),
                 None,
-                fixture_options.llm_policy,
             )
             .await,
         );
@@ -1102,12 +1101,11 @@ async fn prepare_file_fixtures(
                 &case,
                 &fixture,
                 &cwd,
-                options.timeout_ms,
+                options,
                 skill_contexts.for_case(&case),
                 &prepared_module_cache,
                 session.stdio_available(),
                 operator_approval_grant,
-                options.llm_policy,
             )
             .await;
             if let Err(failure) = &value {
@@ -1166,12 +1164,11 @@ async fn execute_cases(
             let result = execute_case(
                 &case,
                 &cwd,
-                options.timeout_ms,
+                options,
                 loaded_skills,
                 &prepared_module_cache,
                 session.stdio_available(),
                 operator_approval_grant,
-                options.llm_policy,
             )
             .await;
             let result = enforce_case_budgets(result, options.max_test_ms, options.max_execute_ms);
@@ -1203,11 +1200,7 @@ async fn execute_cases(
         .collect::<Vec<_>>();
     let stdio_available = session.stdio_available();
     let operator_approval_grant = operator_approval_grant.cloned();
-    let timeout_ms = options.timeout_ms;
-    let llm_policy = options.llm_policy;
-    let max_test_ms = options.max_test_ms;
-    let max_execute_ms = options.max_execute_ms;
-    let diagnose = options.diagnose;
+    let options = options.clone();
     // Process-backed tests share one typed host lane, including read-only
     // compilers and formatters. Waiting for that lane is admission time, not
     // user-code execution time. `@heavy` separately reserves CPU capacity for
@@ -1241,16 +1234,15 @@ async fn execute_cases(
             let result = worker.0.block_on(execute_case(
                 case,
                 &cwd,
-                timeout_ms,
+                &options,
                 loaded_skills,
                 &worker.1,
                 stdio_available,
                 operator_approval_grant.as_ref(),
-                llm_policy,
             ));
             let result = attribute_admission_wait(result, admission_scope.waited_ms());
-            let result = enforce_case_budgets(result, max_test_ms, max_execute_ms);
-            if diagnose {
+            let result = enforce_case_budgets(result, options.max_test_ms, options.max_execute_ms);
+            if options.diagnose {
                 result.emit_diagnose();
             }
             result
