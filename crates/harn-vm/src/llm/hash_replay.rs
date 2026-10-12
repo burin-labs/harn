@@ -100,10 +100,9 @@ fn save_fixture_at(dir: &str, hash: &str, result: &LlmResult) {
     let Ok(serde_json::Value::Object(mut json)) = serde_json::to_value(result) else {
         return;
     };
-    // Replay restores the provider result, without the original call's retry
-    // context or billing tier. Derived text projection already skips serde.
+    // Retry accounting belongs to the current logical call. Provider receipts
+    // survive replay; derived text projection already skips serde.
     json.remove("attempts");
-    json.remove("served_fast");
     let _ = std::fs::write(
         &path,
         serde_json::to_string_pretty(&json).unwrap_or_default(),
@@ -121,7 +120,7 @@ pub(crate) fn load_fixture(hash: &str) -> Option<LlmResult> {
     Some(LlmResult {
         attempts: Default::default(),
         text_projection: None,
-        served_fast: false,
+        served_fast: json["served_fast"].as_bool().unwrap_or(false),
         text: json["text"].as_str().unwrap_or("").to_string(),
         tool_calls: json["tool_calls"].as_array().cloned().unwrap_or_default(),
         raw_tool_calls: RawProviderToolCall::array_from_value(&json["raw_tool_calls"]).ok()?,
@@ -150,10 +149,12 @@ mod tests {
     use crate::llm::api::{test_text_projection, ProviderAttempts};
 
     #[test]
-    fn recording_round_trips_cache_support_without_replaying_attempt_context() {
+    fn recording_round_trips_provider_receipts_without_attempt_context() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().to_str().unwrap();
-        for cache_supported in [false, true] {
+        for (cache_supported, served_fast) in
+            [(false, false), (false, true), (true, false), (true, true)]
+        {
             let mut result = LlmResult {
                 text: "recorded provider result".to_string(),
                 tool_calls: Vec::new(),
@@ -177,10 +178,10 @@ mod tests {
                     rate_limited: 2,
                     ..Default::default()
                 },
-                served_fast: true,
+                served_fast,
             };
             result.text_projection = Some(Box::new(test_text_projection(&result, None)));
-            let hash = format!("cache-{cache_supported}");
+            let hash = format!("cache-{cache_supported}-fast-{served_fast}");
             set_replay_mode(LlmReplayMode::Record, path);
             let recorder =
                 FixtureRecorder::capture(&hash).expect("record mode captures destination");
@@ -188,11 +189,16 @@ mod tests {
             set_replay_mode(LlmReplayMode::Replay, path);
             let replayed = load_fixture(&hash).expect("recorded fixture loads");
             assert_eq!(replayed.cache_supported, cache_supported);
+            assert_eq!(replayed.served_fast, served_fast);
             result.attempts = Default::default();
             result.text_projection = None;
-            result.served_fast = false;
             assert_eq!(replayed, result, "provider result changed during replay");
         }
+        std::fs::write(directory.path().join("legacy.json"), r#"{"text":"legacy"}"#).unwrap();
+        let legacy = load_fixture("legacy").expect("legacy fixture loads");
+        assert_eq!(legacy.text, "legacy");
+        assert!(legacy.cache_supported);
+        assert!(!legacy.served_fast);
         set_replay_mode(LlmReplayMode::Off, "");
     }
 }
