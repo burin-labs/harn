@@ -1,12 +1,15 @@
 //! Persistent on-disk snapshot of the workspace index.
 //!
 //! One file at `.burin/index/snapshot.bin`: an eight-byte magic, the
-//! little-endian format version, then the [`CodeIndexSnapshot`] encoded with
-//! postcard. The header lets a reader reject another layout before decoding
-//! it. Restart time is dominated by decoding this file, and a compact binary
-//! body decodes several times faster than the JSON it replaced while taking
-//! about a third of the space. Earlier versions, including every JSON
-//! snapshot, are rebuilt rather than restored.
+//! little-endian format version, then four postcard-encoded sections, each
+//! preceded by its little-endian `u64` length: file facts and bookkeeping,
+//! the symbol graph, trigram postings, and word postings. The header lets a
+//! reader reject another layout before decoding it, and the sections decode on
+//! separate threads because they share nothing. Restart time is dominated by
+//! decoding and restoring this file; the compact binary body decodes several
+//! times faster than the JSON it replaced while taking about a third of the
+//! space. Earlier versions, including every JSON snapshot, are rebuilt rather
+//! than restored.
 //!
 //! The snapshot is the recovery primitive. On daemon startup, the
 //! embedder restores from the snapshot if one exists, then calls
@@ -42,6 +45,8 @@ pub const SNAPSHOT_FORMAT_VERSION: u32 = 5;
 const SNAPSHOT_MAGIC: &[u8; 8] = b"HARNIDX\0";
 /// Magic plus the little-endian `u32` format version.
 const SNAPSHOT_HEADER_LEN: usize = SNAPSHOT_MAGIC.len() + 4;
+/// Each section's length prefix.
+const SECTION_LEN_BYTES: usize = 8;
 /// The pre-v5 JSON file. Removed when a binary snapshot replaces it.
 const LEGACY_JSON_SNAPSHOT: &str = "snapshot.json";
 
@@ -190,7 +195,20 @@ impl CodeIndexSnapshot {
             let mut writer = BufWriter::new(tmp.as_file_mut());
             writer.write_all(SNAPSHOT_MAGIC)?;
             writer.write_all(&self.meta.format_version.to_le_bytes())?;
-            let mut writer = postcard::to_io(self, writer).map_err(io::Error::other)?;
+            let core: CoreSectionRef<'_> = (
+                &self.meta,
+                self.next_file_id,
+                &self.files,
+                &self.deps,
+                &self.versions,
+                &self.agents,
+                &self.reconcile_progress,
+                &self.go_modules,
+            );
+            write_section(&mut writer, &core)?;
+            write_section(&mut writer, &self.symbols)?;
+            write_section(&mut writer, &self.trigrams)?;
+            write_section(&mut writer, &self.words)?;
             writer.flush()?;
         }
         tmp.persist(&path).map_err(|error| error.error)?;
@@ -199,7 +217,7 @@ impl CodeIndexSnapshot {
         Ok(())
     }
 
-    /// Try to load the snapshot from `workspace_root/.burin/index/snapshot.json`.
+    /// Try to load the snapshot from [`Self::path_for`].
     /// Returns `Ok(None)` when no snapshot exists yet, the format is
     /// unrecognised, or the snapshot does not describe `workspace_root`
     /// (different checkout or missing graph). Returns `Err` when one
@@ -236,8 +254,39 @@ impl CodeIndexSnapshot {
             return Ok(None);
         }
         let decode_phase = super::timing::Phase::start("snapshot.decode");
-        let snap: CodeIndexSnapshot = postcard::from_bytes(body)
-            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+        let mut sections = Sections(body);
+        let (core, graph, trigrams, words) = (
+            sections.next()?,
+            sections.next()?,
+            sections.next()?,
+            sections.next()?,
+        );
+        if !sections.0.is_empty() {
+            return Err(invalid("code-index snapshot has trailing bytes"));
+        }
+        // The sections share nothing, so decoding takes the longest of them.
+        let (core, symbols, trigrams, words) = std::thread::scope(|scope| {
+            let graph = scope.spawn(|| decode_section("snapshot.decode_graph", graph));
+            let trigrams = scope.spawn(|| decode_section("snapshot.decode_trigrams", trigrams));
+            let words = scope.spawn(|| decode_section("snapshot.decode_words", words));
+            let core: io::Result<CoreSection> = decode_section("snapshot.decode_core", core);
+            (core, joined(graph), joined(trigrams), joined(words))
+        });
+        let (meta, next_file_id, files, deps, versions, agents, reconcile_progress, go_modules) =
+            core?;
+        let snap = CodeIndexSnapshot {
+            meta,
+            next_file_id,
+            files,
+            trigrams: trigrams?,
+            words: words?,
+            deps,
+            versions,
+            agents,
+            symbols: symbols?,
+            reconcile_progress,
+            go_modules,
+        };
         drop(decode_phase);
         drop(bytes);
         if snap.symbols.is_none() || !snapshot_matches_workspace(&snap, workspace_root) {
@@ -245,6 +294,90 @@ impl CodeIndexSnapshot {
         }
         Ok(Some(snap))
     }
+}
+
+/// Every field outside the graph and postings, in declaration order.
+type CoreSection = (
+    SnapshotMeta,
+    FileId,
+    Vec<SnapshotFile>,
+    Vec<DepRow>,
+    VersionLog,
+    SerializedRegistry,
+    Option<super::reconcile::ReconcileProgress>,
+    GoModules,
+);
+type CoreSectionRef<'a> = (
+    &'a SnapshotMeta,
+    FileId,
+    &'a Vec<SnapshotFile>,
+    &'a Vec<DepRow>,
+    &'a VersionLog,
+    &'a SerializedRegistry,
+    &'a Option<super::reconcile::ReconcileProgress>,
+    &'a GoModules,
+);
+
+/// Stream one section after a placeholder length, then patch the length in.
+fn write_section<T: Serialize>(
+    writer: &mut BufWriter<&mut std::fs::File>,
+    value: &T,
+) -> io::Result<()> {
+    use std::io::{Seek, SeekFrom};
+    writer.flush()?;
+    let start = writer.get_mut().stream_position()?;
+    writer.write_all(&[0; SECTION_LEN_BYTES])?;
+    postcard::to_io(value, &mut *writer).map_err(io::Error::other)?;
+    writer.flush()?;
+    let end = writer.get_mut().stream_position()?;
+    let len = end - start - SECTION_LEN_BYTES as u64;
+    writer.get_mut().seek(SeekFrom::Start(start))?;
+    writer.get_mut().write_all(&len.to_le_bytes())?;
+    writer.get_mut().seek(SeekFrom::Start(end))?;
+    Ok(())
+}
+
+/// Length-prefixed sections of a snapshot body.
+struct Sections<'a>(&'a [u8]);
+
+impl<'a> Sections<'a> {
+    fn next(&mut self) -> io::Result<&'a [u8]> {
+        let truncated = || invalid("code-index snapshot section is truncated");
+        let (len, rest) = self
+            .0
+            .split_first_chunk::<SECTION_LEN_BYTES>()
+            .ok_or_else(truncated)?;
+        let len = usize::try_from(u64::from_le_bytes(*len)).map_err(|_| truncated())?;
+        if rest.len() < len {
+            return Err(truncated());
+        }
+        let (section, rest) = rest.split_at(len);
+        self.0 = rest;
+        Ok(section)
+    }
+}
+
+fn decode_section<T: serde::de::DeserializeOwned>(
+    phase: &'static str,
+    bytes: &[u8],
+) -> io::Result<T> {
+    let _phase = super::timing::Phase::start(phase);
+    match postcard::take_from_bytes(bytes) {
+        Ok((value, [])) => Ok(value),
+        Ok(_) => Err(invalid("code-index snapshot section has trailing bytes")),
+        Err(error) => Err(io::Error::new(io::ErrorKind::InvalidData, error)),
+    }
+}
+
+fn invalid(message: &'static str) -> io::Error {
+    io::Error::new(io::ErrorKind::InvalidData, message)
+}
+
+/// Join a scoped restore thread, re-raising its panic on the caller.
+fn joined<T>(handle: std::thread::ScopedJoinHandle<'_, T>) -> T {
+    handle
+        .join()
+        .unwrap_or_else(|panic| std::panic::resume_unwind(panic))
 }
 
 fn snapshot_matches_workspace(snap: &CodeIndexSnapshot, workspace_root: &Path) -> bool {
@@ -346,11 +479,6 @@ impl IndexState {
                 let _phase = super::timing::Phase::start("snapshot.restore_graph");
                 SymbolGraph::from_snapshot(symbols)
             };
-            fn joined<T>(handle: std::thread::ScopedJoinHandle<'_, T>) -> T {
-                handle
-                    .join()
-                    .unwrap_or_else(|panic| std::panic::resume_unwind(panic))
-            }
             (graph, joined(trigrams), joined(words))
         });
         let graph = graph.map_err(|message| io::Error::new(io::ErrorKind::InvalidData, message))?;
