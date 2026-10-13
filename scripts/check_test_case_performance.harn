@@ -1,3 +1,4 @@
+import { median } from "std/math"
 import { shell_quote } from "std/runtime"
 import "std/schema"
 
@@ -300,18 +301,6 @@ fn baseline_schema() {
 // pool's typical round.
 const MIN_REFERENCE_SAMPLES = 30
 
-pub fn median(values: list<float>) -> float {
-  const sorted = values.sorted()
-  const middle = sorted.count / 2
-  if sorted.count == 0 {
-    return 0.0
-  }
-  if sorted.count % 2 == 1 {
-    return sorted[middle] ?? 0.0
-  }
-  return ((sorted[middle - 1] ?? 0.0) + (sorted[middle] ?? 0.0)) / 2.0
-}
-
 /**
  * Resolve a profile's gated references. A profile with a `samples` table gets
  * each reference as the median of its recorded rounds, and may not also state
@@ -348,7 +337,7 @@ pub fn resolve_references(baseline: dict) -> dict {
         baseline: {},
       }
     }
-    resolved = resolved + {[name]: median(values.map({ value -> number(value) }).to_list())}
+    resolved = resolved + {[name]: number(median(values))}
   }
   return {ok: true, error: "", baseline: resolved}
 }

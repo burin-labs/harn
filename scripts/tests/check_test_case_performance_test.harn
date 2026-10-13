@@ -3,7 +3,6 @@ import {
   best_metrics,
   evaluate_metrics,
   load_platform_baseline,
-  median,
   parse_diagnose_output,
   parse_time_output,
   percentile,
@@ -355,7 +354,7 @@ pipeline test_sampled_profile_derives_every_reference_as_the_median(
   assert_eq(resolved.ok, true)
   assert_eq(resolved.baseline.execute_p90_ms, 16.0)
   assert_eq(resolved.baseline.sum_sys_ms, 16.0)
-  assert_eq(median([4.0, 1.0, 3.0, 2.0]), 2.5)
+  assert_eq(resolve_references(sampled_profile(32)).baseline.setup_p90_ms, 16.5)
 }
 
 @test
