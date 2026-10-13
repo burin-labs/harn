@@ -192,7 +192,7 @@ pub(super) fn run(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, Host
         .symbols
         .node(seed_node_id)
         .expect("resolve_seed returned a node id present in the graph");
-    let seed_path = seed_node.path.clone();
+    let seed_path = seed_node.path.to_string();
 
     let in_scope_files = files_in_scope(
         state,

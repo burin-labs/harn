@@ -33,7 +33,7 @@ fn view(graph: &SymbolGraph) -> View {
                 node.kind.as_str(),
                 node.name.clone(),
                 node.file_id,
-                node.path.clone(),
+                node.path.to_string(),
                 node.line,
             )
         })

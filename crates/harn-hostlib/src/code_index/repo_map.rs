@@ -292,7 +292,7 @@ fn ranked_definition_entries(
                 reasons.push("context_file");
             }
             Some(RepoMapEntry {
-                path: node.path.clone(),
+                path: node.path.to_string(),
                 line: node.line,
                 kind: node.kind.as_str(),
                 name: node.name.clone(),

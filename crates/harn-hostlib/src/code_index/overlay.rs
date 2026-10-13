@@ -406,7 +406,7 @@ mod tests {
             .outgoing(use_module)
             .iter()
             .filter(|edge| edge.kind == super::super::symbol_graph::EdgeKind::Refs)
-            .map(|edge| overlay.graph().node(edge.to).unwrap().path.as_str())
+            .map(|edge| &*overlay.graph().node(edge.to).unwrap().path)
             .collect::<Vec<_>>();
         assert_eq!(targets, vec!["b.harn"]);
     }
