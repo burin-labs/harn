@@ -101,6 +101,7 @@ impl Parser {
 
     /// Parse a complete .harn file. Reports multiple errors via recovery.
     pub fn parse(&mut self) -> Result<Vec<SNode>, ParserError> {
+        crate::analysis::record_parse_run();
         self.check_token_nesting_limit()?;
 
         let mut nodes = Vec::new();

@@ -789,7 +789,7 @@ fn collect_file_candidates(
         BTreeSet::new()
     };
 
-    for diag in &output.diagnostics {
+    for diag in output.diagnostics.iter() {
         if harn_lint::type_diagnostic_lint_disabled(diag, &config.disable_rules) {
             continue;
         }
@@ -965,7 +965,10 @@ fn collect_file_candidates(
     }
 
     let lint_context = FixLintContext::load(file);
-    let lint_options = lint_context.options(file);
+    let lint_options = harn_lint::LintOptions {
+        binding_types: Some(&output.binding_types),
+        ..lint_context.options(file)
+    };
     let lint_diagnostics = harn_lint::lint_with_module_graph(
         &program,
         &config.disable_rules,

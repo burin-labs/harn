@@ -26,11 +26,11 @@ pub(crate) fn analyze_file(
     let mut output = analysis
         .typecheck(&id, typecheck_config(path, config, module_graph))
         .map_err(FileAnalysisError::Analysis)?;
-    output
-        .diagnostics
-        .extend(harn_vm::provider_catalog::validate_predicate_models(
-            &output.predicate_sites,
-        ));
+    let model_diagnostics =
+        harn_vm::provider_catalog::validate_predicate_models(&output.predicate_sites);
+    if !model_diagnostics.is_empty() {
+        std::sync::Arc::make_mut(&mut output.diagnostics).extend(model_diagnostics);
+    }
     Ok(output)
 }
 

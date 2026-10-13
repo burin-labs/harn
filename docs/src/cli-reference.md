@@ -1378,6 +1378,12 @@ harn lint src/ tests/
 harn lint prompts/system.harn.prompt
 ```
 
+Files are linted in parallel on the same worker pool as `harn check`
+(`HARN_CHECK_JOBS=<n>` pins its size) and their output is printed in file
+order. Each file is parsed and type-checked once: the lint rules read the
+import-aware type facts of that check. A file that fails to lex or parse is
+reported and the remaining files are still linted; the run exits non-zero.
+
 To ratchet strict linting onto newly added Harn source lines without making
 inherited warnings block unrelated work, let `harn lint` derive its source
 scope from two Git revisions:
@@ -1627,6 +1633,14 @@ even though that file is not part of the import graph. A warm re-check of an
 unchanged tree replays byte-identical output without re-running the
 typechecker or linter. Set `HARN_CHECK_RESULT_CACHE=0` to disable just this
 cache; `HARN_BYTECODE_CACHE=0` disables it together with the bytecode cache.
+
+Set `HARN_CHECK_ANALYSIS_STATS=1` to print, on stderr, how many tokenizations,
+parses, and type checks a `harn check` or `harn lint` run performed, for
+example `analysis stats: files=3 lex=6 parse=3 typecheck=3`. Each target is
+type-checked once. `harn lint` also parses each target once; `harn check`
+parses it a second time in its worker rather than holding every target's
+syntax tree in memory until a worker claims it. Imported modules outside the
+targets and preflight probes add to the count.
 
 `--invariants` includes the capability-policy lattice:
 

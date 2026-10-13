@@ -444,7 +444,7 @@ mod tests {
             "}\n",
         );
         let state = DocumentState::new(source.to_string());
-        let ranges = build_folding_ranges(source, state.cached_ast.as_deref());
+        let ranges = build_folding_ranges(source, state.cached_ast.as_deref().map(Vec::as_slice));
 
         assert!(
             ranges
@@ -551,7 +551,10 @@ mod tests {
             state.prompt_outline.is_empty(),
             "a Harn program has no template outline"
         );
-        let ranges = build_folding_ranges(&state.source, state.cached_ast.as_deref());
+        let ranges = build_folding_ranges(
+            &state.source,
+            state.cached_ast.as_deref().map(Vec::as_slice),
+        );
         assert!(
             ranges
                 .iter()

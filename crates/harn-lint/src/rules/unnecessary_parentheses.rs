@@ -15,8 +15,7 @@ pub(crate) fn check_unnecessary_parentheses(
     program: &[SNode],
     diagnostics: &mut Vec<LintDiagnostic>,
 ) {
-    let mut lexer = harn_lexer::Lexer::new(source);
-    let Ok(tokens) = lexer.tokenize_with_comments() else {
+    let Some(tokens) = crate::source_tokens::with_comments(source) else {
         return;
     };
 

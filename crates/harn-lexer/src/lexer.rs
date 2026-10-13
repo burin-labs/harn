@@ -1,6 +1,15 @@
 use crate::token::*;
 use std::fmt;
 
+/// Source tokenizations this process has run, for the analysis-count
+/// instrument (`harn_parser::analysis::process_stats`).
+static TOKENIZE_RUNS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// How many times this process has tokenized a source.
+pub fn process_tokenize_runs() -> usize {
+    TOKENIZE_RUNS.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 mod positioned;
 
 /// Lexer errors.
@@ -97,6 +106,7 @@ impl<'src> Lexer<'src> {
     }
 
     fn tokenize_inner(&mut self, keep_comments: bool) -> Result<Vec<Token>, LexerError> {
+        TOKENIZE_RUNS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         // Harn source averages roughly six bytes per token; reserving that up
         // front spares the token vector its doubling copies (tokens are large
         // — a `TokenKind` plus a five-word `Span`), at the cost of one bounded
