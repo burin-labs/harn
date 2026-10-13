@@ -1013,7 +1013,6 @@ impl crate::vm::Vm {
         match error {
             VmError::Runtime(msg) => VmError::Runtime(format!("{msg}{suffix}")),
             VmError::TypeError(msg) => VmError::TypeError(format!("{msg}{suffix}")),
-            VmError::DivisionByZero => VmError::Runtime(format!("Division by zero{suffix}")),
             VmError::UndefinedVariable(name) => {
                 VmError::Runtime(format!("Undefined variable: {name}{suffix}"))
             }
@@ -1027,6 +1026,9 @@ impl crate::vm::Vm {
                 VmError::Runtime(format!("Stack overflow: too many nested calls{suffix}"))
             }
             // Leave these untouched:
+            // - DivisionByZero, ValueByteLimit, ArgTypeMismatch: their variant
+            //   is the diagnostic code hosts and the portable differential
+            //   match on; the stack trace already carries the location
             // - Thrown: user-thrown errors should not be silently modified
             // - CategorizedError: structured errors for agent orchestration
             // - Return / ProcessExit: control flow, not a real error

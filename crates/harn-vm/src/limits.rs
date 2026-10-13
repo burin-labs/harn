@@ -7,7 +7,7 @@
 //! never be able to crash the host that way. These helpers centralise the cap
 //! so every site shares one limit and one error.
 
-use crate::value::VmError;
+use crate::value::{ValueByteLimitError, VmError};
 
 /// Upper bound on the byte length a single repeat/pad expansion may produce
 /// (16 MiB). A typo (`"-" * 1_000_000_000`) errors instead of allocating
@@ -16,14 +16,16 @@ pub(crate) const MAX_REPEAT_OUTPUT_BYTES: usize = 1 << 24;
 
 /// Repeat `s` `count` times, refusing to build a string larger than
 /// [`MAX_REPEAT_OUTPUT_BYTES`]. Returns an empty string for non-positive
-/// counts (callers pass `count.max(0)`), and a clean [`VmError::Runtime`]
+/// counts (callers pass `count.max(0)`), and a [`VmError::ValueByteLimit`]
 /// rather than panicking/OOM-ing when the result would be too large.
 pub(crate) fn checked_repeat(s: &str, count: usize) -> Result<String, VmError> {
     let total = s.len().saturating_mul(count);
     if total > MAX_REPEAT_OUTPUT_BYTES {
-        return Err(VmError::Runtime(format!(
-            "repeat: output would be {total} bytes (limit {MAX_REPEAT_OUTPUT_BYTES})"
-        )));
+        return Err(VmError::ValueByteLimit(Box::new(ValueByteLimitError {
+            operation: "repeat",
+            requested_bytes: total,
+            limit_bytes: MAX_REPEAT_OUTPUT_BYTES,
+        })));
     }
     Ok(s.repeat(count))
 }
@@ -42,7 +44,7 @@ mod tests {
     fn oversized_repeat_errors_without_panic() {
         // Would be ~9.2e18 bytes — must error, never allocate or panic.
         let err = checked_repeat("ab", usize::MAX / 2).unwrap_err();
-        assert!(matches!(err, VmError::Runtime(_)));
+        assert!(matches!(err, VmError::ValueByteLimit(_)));
         // Just under vs over the cap.
         assert!(checked_repeat("a", MAX_REPEAT_OUTPUT_BYTES).is_ok());
         assert!(checked_repeat("a", MAX_REPEAT_OUTPUT_BYTES + 1).is_err());

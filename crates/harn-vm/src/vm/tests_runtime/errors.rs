@@ -230,7 +230,7 @@ fn cleanup_rethrow_preserves_original_runtime_error() {
         );
         let err = run_harn_result(&source).unwrap_err();
         assert!(
-            matches!(&err, VmError::Runtime(message) if message == "Division by zero (line 2)"),
+            matches!(&err, VmError::DivisionByZero),
             "{cleanup}: {err:?}"
         );
     }

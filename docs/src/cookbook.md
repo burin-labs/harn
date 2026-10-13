@@ -1109,7 +1109,7 @@ pipeline default(harness: Harness) {
 
 ### How to enforce types at call boundaries
 
-Annotate function parameters. The VM throws a `TypeError` before the
+Annotate function parameters. The VM throws a type error before the
 body runs if a caller passes the wrong type; `harn check` rejects most
 of these statically.
 
@@ -1131,8 +1131,9 @@ pipeline default(harness: Harness) {
   try {
     summarize(42, "not a number")
   } catch (e) {
+    // -> Caught: Type error: function 'summarize' parameter
+    //    'text' expected string, got int (42)
     harness.stdio.log("Caught: ${e}")
-    // -> TypeError: parameter 'text' expected string, got int (42)
   }
 
   fn process_batch(items: list, verbose: bool) {

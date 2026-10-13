@@ -37,7 +37,7 @@ fn main(harness: Harness) {
     );
     assert!(
         outcome.stderr.contains(
-            "TypeError: function 'named_helper' parameter 'file_id' expected string, got nil"
+            "Type error: function 'named_helper' parameter 'file_id' expected string, got nil"
         ),
         "stderr did not identify the imported function: {}",
         outcome.stderr
