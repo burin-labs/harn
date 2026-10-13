@@ -10,18 +10,11 @@ use crate::agent_events::{AgentEvent, ToolCallErrorCategory, ToolCallStatus};
 use crate::llm::capabilities::should_use_responses_transport;
 use crate::value::{VmError, VmValue};
 
-use super::openai_normalize::{
-    append_paragraph, debug_log_message_shapes, extract_openai_delta_field_str,
-    parse_openai_tool_argument_json_values, parse_tool_arguments,
-};
+use super::openai_normalize::{debug_log_message_shapes, parse_tool_arguments};
 use super::options::{DeltaSender, LlmApiMode, LlmRequestPayload};
 use super::partial_tool_args::{project_partial, DeltaCoalescer, PartialToolArgs};
-use super::response::{
-    billed_noncommittal_completion_error, empty_generation_error, extract_cache_read_tokens,
-    extract_cache_write_tokens, is_billed_noncommittal_completion, CompletionContractSignals,
-    ProviderResponseEnvelope,
-};
-use super::result::{LlmResult, RawProviderToolCall};
+use super::response::{empty_generation_error, ProviderResponseEnvelope};
+use super::result::LlmResult;
 use super::telemetry::{elapsed_ms, source as telemetry_source, ProviderTelemetry};
 use super::thinking::ThinkingStreamSplitter;
 use super::{DialectContract, StreamProtocol};
@@ -30,8 +23,8 @@ mod blocks;
 mod capture;
 mod liveness;
 mod ndjson;
-mod response_envelope;
 mod sse;
+mod stream_fold;
 
 pub(crate) use liveness::premature_eof;
 
@@ -781,6 +774,8 @@ mod sse_read_error_tests;
 mod sse_telemetry_tests;
 #[cfg(test)]
 mod stream_block_coalesce_tests;
+#[cfg(test)]
+mod stream_parity_tests;
 #[cfg(test)]
 mod streaming_tool_call_tests;
 #[cfg(test)]

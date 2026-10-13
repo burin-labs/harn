@@ -164,49 +164,28 @@ pub(crate) fn openai_same_key_reasoning(
     ))
 }
 
-#[derive(Debug, Default)]
-pub(crate) struct AnthropicThinkingBlock {
-    thinking: String,
-    signature: String,
-}
-
-impl AnthropicThinkingBlock {
-    pub(crate) fn from_start(block: &serde_json::Value) -> Self {
-        Self {
-            thinking: block
-                .get("thinking")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or_default()
-                .to_owned(),
-            signature: block
-                .get("signature")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or_default()
-                .to_owned(),
-        }
-    }
-
-    pub(crate) fn push_thinking(&mut self, value: &str) {
-        self.thinking.push_str(value);
-    }
-
-    pub(crate) fn push_signature(&mut self, value: &str) {
-        self.signature.push_str(value);
-    }
-
-    pub(crate) fn finish(self) -> serde_json::Value {
-        if self.signature.is_empty() {
-            serde_json::json!({
-                "type": "reasoning",
-                "text": self.thinking,
-                "visibility": "private",
-            })
-        } else {
-            serde_json::json!({
-                "type": "thinking",
-                "thinking": self.thinking,
-                "signature": self.signature,
-            })
-        }
+/// Harn's block for an Anthropic `thinking` content block. A block with a
+/// signature keeps it so the block can be replayed; an unsigned one cannot be
+/// replayed to Anthropic and becomes private reasoning text.
+pub(crate) fn anthropic_thinking_block(block: &serde_json::Value) -> serde_json::Value {
+    let thinking = block
+        .get("thinking")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+    match block
+        .get("signature")
+        .and_then(serde_json::Value::as_str)
+        .filter(|signature| !signature.is_empty())
+    {
+        Some(signature) => serde_json::json!({
+            "type": "thinking",
+            "thinking": thinking,
+            "signature": signature,
+        }),
+        None => serde_json::json!({
+            "type": "reasoning",
+            "text": thinking,
+            "visibility": "private",
+        }),
     }
 }
