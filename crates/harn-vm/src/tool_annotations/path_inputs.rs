@@ -32,8 +32,13 @@ pub(crate) fn validate(arguments: &Value, parameters: &[String]) -> Result<(), S
             );
         }
         match arguments.get(parameter) {
-            None => {}
-            Some(Value::String(value)) if !value.trim().is_empty() => {}
+            // Strict tool schemas make a model fill every field, so an
+            // optional path it means to leave out arrives as `""` or `null`.
+            // That is an absent argument, not a malformed one; refusing it cost
+            // a model turn per call (harn#9816).
+            None | Some(Value::Null) => {}
+            Some(Value::String(value)) if value.trim().is_empty() => {}
+            Some(Value::String(_)) => {}
             Some(Value::Array(values))
                 if values
                     .iter()
