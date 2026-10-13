@@ -60,8 +60,8 @@ pub fn splice_reference(document: &str) -> Option<String> {
     if end < begin {
         return None;
     }
-    let head = &document[..begin + REFERENCE_BEGIN_MARKER.len()];
-    let tail = &document[end..];
+    let head = document.get(..begin + REFERENCE_BEGIN_MARKER.len())?;
+    let tail = document.get(end..)?;
     Some(format!(
         "{head}\n\n{}\n{tail}",
         render_reference().trim_end()

@@ -25,10 +25,11 @@ impl TypeChecker {
                 // Numbers and bools have no methods; reject only names that
                 // exist on no builtin at all, which catches typos without a
                 // closed candidate list.
-                TypeExpr::Named(name) if matches!(name.as_str(), "int" | "float" | "bool") => {
-                    if !methods::is_method_name(method) {
-                        self.emit_unknown_method(method, &format!("`{name}`"), &[], false, span);
-                    }
+                TypeExpr::Named(name)
+                    if matches!(name.as_str(), "int" | "float" | "bool")
+                        && !methods::is_method_name(method) =>
+                {
+                    self.emit_unknown_method(method, &format!("`{name}`"), &[], false, span);
                 }
                 TypeExpr::Named(name) if is_gradual_type_name(name) => {
                     self.check_removed_method_on_unknown_receiver(object, method, args, span);

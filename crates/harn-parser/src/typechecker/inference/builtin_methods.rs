@@ -251,7 +251,7 @@ impl TypeChecker {
             .filter(|name| {
                 bindings
                     .get(**name)
-                    .is_none_or(|bound| Self::is_wildcard_type(bound))
+                    .is_none_or(Self::is_wildcard_type)
             })
             .map(|name| (*name).to_string())
             .collect()
