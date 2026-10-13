@@ -2,7 +2,8 @@
 #
 # Guards the supply chain of every crate in this workspace: security
 # advisories, license posture, and dependency sourcing. Run it with
-# `cargo deny check` from the repo root; CI enforces it on `deny-scan`.
+# `cargo deny check` from the repo root; CI enforces it in the Supply chain
+# workflow (.github/workflows/supply-chain.yml).
 #
 # cargo-deny reads `Cargo.lock`, so it audits the *entire* resolved graph
 # regardless of which crates any one CI lane compiles. That is intentional:
@@ -17,8 +18,17 @@ all-features = true
 # Vulnerabilities and yanked crates fail the gate. Every ignore below is a
 # standing exception with a concrete reason and an upstream tracking link.
 # A real, fixable vulnerability is never ignored — it fails unconditionally.
+#
+# An ignore that no longer matches any crate also fails the gate: the CI job
+# runs `--deny advisory-not-detected`. Delete an entry once its crate leaves
+# the tree; do not keep it "just in case" the crate returns.
 ignore = [
     # --- Unmaintained/unsound transitive deps, no vuln, no safe upgrade ---
+    # unsafe-libyaml is archived upstream; reached only through serde_yaml_ng.
+    # The exit is moving Harn's YAML handling to a safe-Rust parser, which
+    # deletes this entry. Expires 2027-01-12: past that date, migrate rather
+    # than renew.
+    { id = "RUSTSEC-2024-0449", reason = "unsafe-libyaml unmaintained (archived), no vuln. Transitive via serde_yaml_ng pending the move to a safe-Rust YAML parser. Expires 2027-01-12. https://rustsec.org/advisories/RUSTSEC-2024-0449" },
     { id = "RUSTSEC-2024-0436", reason = "paste 1.x unmaintained proc-macro; transitive, no vuln, no drop-in replacement. https://rustsec.org/advisories/RUSTSEC-2024-0436" },
     # --- quick-xml DoS advisories: transitive under xcap (screen capture for
     # computer-use), which is at its latest 0.9.6. The fix (>=0.41.0) is

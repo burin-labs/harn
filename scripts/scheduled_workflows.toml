@@ -190,6 +190,18 @@ health_failures = 2
 health_events = ["schedule", "workflow_dispatch"]
 
 [[workflow]]
+path = ".github/workflows/supply-chain.yml"
+name = "Supply chain"
+claim = "The locked dependency graph carries no unexcepted RustSec advisory"
+crons = ["23 8 * * *"]
+cadence_reason = "Daily catches advisory database updates against an unchanged Cargo.lock; pull requests and main pushes that touch dependency files cover source changes."
+job_ids = ["cargo-deny"]
+health_failures = 3
+# A manual dispatch runs the identical cargo-deny job on main, so a fix can
+# clear the alarm without waiting for the next scheduled run.
+health_events = ["schedule", "workflow_dispatch"]
+
+[[workflow]]
 path = ".github/workflows/thread-parity.yml"
 name = "Test scheduler thread-count parity"
 claim = "The full test suite has the same outcome across supported scheduler thread counts"

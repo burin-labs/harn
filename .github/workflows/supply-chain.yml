@@ -4,18 +4,23 @@
 # cargo-deny only reads `Cargo.lock` + crate metadata, so there is no workspace
 # compile here — the job is cheap (~1 min) and needs no Rust toolchain or auth.
 #
-# Two invocations with deliberately different blocking behavior:
+# Two invocations, both blocking within the job:
 #   * `check bans licenses sources` is deterministic (only changes when
 #     Cargo.lock / Cargo.toml / deny.toml change), so a failure is meaningful
 #     and actionable — it catches a new disallowed license, a duplicate-crate
 #     ban, or an unreviewed (non-crates.io) source.
-#   * `check advisories` reads the RustSec database, which updates continuously;
-#     a brand-new advisory must not red an unrelated PR, so it is advisory-only
-#     (continue-on-error). A vulnerable/yanked dependency introduced BY a PR
-#     still surfaces here for a human to act on.
+#   * `check advisories` reads the RustSec database, which updates continuously,
+#     so a brand-new advisory can red this job on an unrelated PR. That is the
+#     intended signal: this workflow is NOT a required status check, so a red
+#     run reports the finding without blocking any merge. Clear it by upgrading
+#     the crate, or by adding a reasoned entry to `deny.toml`.
 #
-# This workflow is intentionally NOT yet a required status check, so it reports
-# without blocking merges while the ignore policy settles.
+# The advisories step used to carry `continue-on-error`. It never made the job
+# non-blocking (the workflow was already non-required); it only made the job
+# report success while cargo-deny exited 1. Under it, RUSTSEC-2026-0258 (an h2
+# denial of service with a patched release available) and RUSTSEC-2024-0449
+# (unsafe-libyaml unmaintained) both sat unread on green main runs. A check
+# that cannot fail is a check nobody reads.
 
 name: Supply chain
 
@@ -33,13 +38,21 @@ on:
       - "Cargo.lock"
       - "deny.toml"
       - ".github/workflows/supply-chain.yml"
+  schedule:
+    # Daily. The path filters above fire only when a dependency file changes,
+    # so without this a new RustSec advisory against an unchanged `Cargo.lock`
+    # is never looked for.
+    - cron: "23 8 * * *"
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: supply-chain-${{ github.ref }}
+  # PR runs supersede each other. Main pushes key by SHA so each merge commit
+  # keeps its own verdict instead of one cancelling the next (secret-scan.yml
+  # uses the same key for the same reason).
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || (github.ref == 'refs/heads/main' && github.sha) || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -81,6 +94,7 @@ jobs:
           "${HOME}/.local/bin/cargo-deny" --version
       - name: License / bans / sources gate (deterministic)
         run: cargo-deny --all-features check bans licenses sources
-      - name: Security advisories (advisory-only — RustSec DB updates continuously)
-        continue-on-error: true
-        run: cargo-deny --all-features check advisories
+      # `--deny advisory-not-detected` fails on an ignore entry whose crate has
+      # left the tree, so a stale exception cannot outlive its dependency.
+      - name: Security advisories
+        run: cargo-deny --all-features check advisories --deny advisory-not-detected
