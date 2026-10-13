@@ -738,7 +738,7 @@ impl Compiler {
                             reassigns
                                 .entry(name.clone())
                                 .or_default()
-                                .push((op.clone(), (**value).clone()));
+                                .push((*op, (**value).clone()));
                         }
                     }
                 }
@@ -914,7 +914,7 @@ impl Compiler {
                 if let Node::Assignment { target, value, op } = &node.node {
                     if let Node::Identifier(target_name) = &target.node {
                         if target_name == name {
-                            reassigns.push((op.clone(), (**value).clone()));
+                            reassigns.push((*op, (**value).clone()));
                         }
                     }
                 }
