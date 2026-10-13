@@ -157,7 +157,8 @@ pub(super) fn synthesize_missing_capability_argument_repair(
     // structural and preserves the caller's chosen binding name.
     if matches!(actual, TypeExpr::Named(name) if name == "Harness") {
         let (argument_span, binding) = matched_argument?;
-        if let Some(replacement) = capability_bundle_literal(expected, &binding) {
+        let pick_available = !super::signature_threading::program_binds_name(program, "pick", true);
+        if let Some(replacement) = capability_bundle_literal(expected, &binding, pick_available) {
             return Some((
                 Repair {
                     id: harn_parser::RepairId::from_owned(
@@ -413,7 +414,11 @@ pub(super) fn synthesize_missing_zero_arg_capability_repair(
     ))
 }
 
-pub(super) fn capability_bundle_literal(expected: &TypeExpr, binding: &str) -> Option<String> {
+pub(super) fn capability_bundle_literal(
+    expected: &TypeExpr,
+    binding: &str,
+    pick_available: bool,
+) -> Option<String> {
     let TypeExpr::Shape(fields) = expected else {
         return None;
     };
@@ -428,10 +433,44 @@ pub(super) fn capability_bundle_literal(expected: &TypeExpr, binding: &str) -> O
             };
             let capability = harn_builtin_meta::CapabilityId::from_type_name(type_name)?;
             (capability.field_name() == field.name)
-                .then(|| format!("{}: {binding}.{}", field.name, field.name))
+                .then(|| (field.name.clone(), format!("{binding}.{}", field.name)))
         })
         .collect::<Option<Vec<_>>>()?;
-    (!fields.is_empty()).then(|| format!("{{{}}}", fields.join(", ")))
+    (!fields.is_empty()).then(|| capability_bundle_expression(&fields, pick_available))
+}
+
+/// Render a capability bundle argument in the form `harn check` accepts.
+///
+/// When two or more fields copy same-named fields from one binding, the
+/// `prefer-pick` lint (HARN-LNT-077) rejects a record literal, so a migration
+/// that emitted one would fail strict consumers on code it wrote itself. Those
+/// bundles render as `pick(binding, [...])`; anything else stays a literal, as
+/// does every bundle in a file where `pick` names something other than the
+/// builtin (the lint is silent there too).
+pub(super) fn capability_bundle_expression(
+    fields: &[(String, String)],
+    pick_available: bool,
+) -> String {
+    let common_binding = fields
+        .iter()
+        .map(|(name, value)| value.strip_suffix(name.as_str())?.strip_suffix('.'))
+        .collect::<Option<Vec<_>>>()
+        .filter(|bindings| bindings.len() >= 2 && bindings.iter().all(|b| *b == bindings[0]))
+        .map(|bindings| bindings[0]);
+    if let Some(binding) = common_binding.filter(|_| pick_available) {
+        let names = fields
+            .iter()
+            .map(|(name, _)| format!("\"{name}\""))
+            .collect::<Vec<_>>()
+            .join(", ");
+        return format!("pick({binding}, [{names}])");
+    }
+    let entries = fields
+        .iter()
+        .map(|(name, value)| format!("{name}: {value}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("{{{entries}}}")
 }
 
 /// Emit the new capability parameter and, when the callable's arity is fixed by

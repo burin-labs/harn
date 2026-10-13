@@ -1,15 +1,17 @@
 use super::*;
 
-pub(super) fn assert_only_pick_diagnostic(result: &ApplyResult, source: &str) {
+pub(super) fn assert_clean_after_apply(result: &ApplyResult, source: &str) {
     let temp = tempfile::NamedTempFile::with_suffix(".harn").unwrap();
     fs::write(temp.path(), source).unwrap();
-    assert_only_pick_diagnostic_at(result, temp.path());
+    assert_clean_after_apply_at(result, temp.path());
 }
 
-pub(super) fn assert_only_pick_diagnostic_at(result: &ApplyResult, path: &Path) {
+pub(super) fn assert_clean_after_apply_at(result: &ApplyResult, path: &Path) {
     let plan = build_plan(path, None).unwrap();
+    // A migrated program must already be in the form `harn check --strict`
+    // accepts; no follow-up `prefer-pick` pass runs during a runtime bump.
     let codes: Vec<_> = plan.diagnostics.iter().map(|d| d.code.as_str()).collect();
-    assert_eq!(codes, ["HARN-LNT-077"], "{plan:#?}");
+    assert!(codes.is_empty(), "{plan:#?}");
     assert_eq!(
         result.post_apply_diagnostics_count,
         codes.len(),

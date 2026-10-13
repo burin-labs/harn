@@ -228,6 +228,23 @@ fn attenuated_capability_bundle_repair_projects_existing_root_grant() {
     );
     assert_eq!(edits.len(), 1);
     assert_eq!(edits[0].span, span);
+    assert_eq!(edits[0].replacement, "pick(harness, [\"fs\", \"tools\"])");
+}
+
+#[test]
+fn attenuated_capability_bundle_repair_keeps_a_literal_when_pick_is_shadowed() {
+    let source = "fn pick(value, keys) {\n  return value\n}\n\nfn main(harness: Harness) {\n  helper(harness, \"old\")\n}\n";
+    let program = harn_parser::parse_source(source).unwrap();
+    let start = source.find("harness, \"").unwrap();
+    let span = harn_lexer::Span::with_offsets(start, start + "harness".len(), 6, 10);
+    let (_, edits, _) = synthesize_missing_capability_argument_repair(
+        span,
+        &capability_shape(&[("fs", "HarnessFs"), ("tools", "HarnessTools")]),
+        &named_type("Harness"),
+        source,
+        &program,
+    )
+    .expect("capability bundle repair");
     assert_eq!(
         edits[0].replacement,
         "{fs: harness.fs, tools: harness.tools}"

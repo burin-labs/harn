@@ -1209,8 +1209,20 @@ fn apply_rewrites_legacy_host_projections_to_typed_snapshots() {
     );
     assert!(updated.contains("harness.fs.home_dir()"), "{updated}");
     assert!(
-        updated.contains("describe({fs: harness.fs, system: harness.system})"),
+        updated.contains("describe(pick(harness, [\"fs\", \"system\"]))"),
         "{updated}"
+    );
+    // A migration must not write code its own lint rejects: strict consumers
+    // run `harn check --strict` on the bump that applies it.
+    let program = harn_parser::parse_source(&updated).unwrap();
+    let diagnostics = harn_parser::TypeChecker::new()
+        .check_with_facts(&program, &updated)
+        .diagnostics;
+    assert!(
+        !diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == harn_parser::DiagnosticCode::LintPreferPick),
+        "{diagnostics:?}"
     );
 }
 
