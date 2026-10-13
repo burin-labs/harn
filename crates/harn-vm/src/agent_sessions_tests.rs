@@ -44,6 +44,8 @@ mod linked_observation_tests;
 mod scratchpad_tests;
 #[path = "agent_sessions_tests/truncation_boundary_tests.rs"]
 mod truncation_boundary_tests;
+#[path = "agent_sessions_tests/visible_message_sharing_tests.rs"]
+mod visible_message_sharing_tests;
 
 fn make_msg(role: &str, content: &str) -> VmValue {
     let mut m: crate::value::DictMap = crate::value::DictMap::new();
