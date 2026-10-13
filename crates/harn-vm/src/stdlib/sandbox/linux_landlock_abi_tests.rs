@@ -41,6 +41,47 @@ fn limits_name_each_gap_an_older_abi_leaves() {
     assert_eq!(limits(ABI::V6), Vec::new());
 }
 
+/// Negotiation picks the newest ABI the kernel accepts, never one it refuses.
+#[test]
+fn negotiation_selects_the_newest_abi_the_kernel_accepts() {
+    let kernel = |newest: Option<ABI>| move |abi: ABI| newest.is_some_and(|newest| abi <= newest);
+    let selected = |newest, ceiling| {
+        LandlockSupport::negotiate_with(ceiling, kernel(newest)).map(LandlockSupport::abi)
+    };
+    assert_eq!(selected(Some(ABI::V1), ABI::V6), Some(ABI::V1));
+    assert_eq!(selected(Some(ABI::V5), ABI::V6), Some(ABI::V5));
+    assert_eq!(selected(Some(ABI::V6), ABI::V6), Some(ABI::V6));
+    assert_eq!(selected(Some(ABI::V9), ABI::V6), Some(ABI::V6));
+    assert_eq!(selected(None, ABI::V6), None, "no Landlock selects nothing");
+    // The ceiling caps a newer kernel without inventing support.
+    assert_eq!(selected(Some(ABI::V6), ABI::V2), Some(ABI::V2));
+    // Negative control: a kernel that refuses ABI 6 is never handed it, even
+    // when it would accept a weaker feature asked for out of order.
+    let gappy = |abi: ABI| abi != ABI::V6 && abi <= ABI::V5;
+    assert_eq!(
+        LandlockSupport::negotiate_with(ABI::V6, gappy).map(LandlockSupport::abi),
+        Some(ABI::V5)
+    );
+}
+
+/// The live kernel's answer: every ABI at or below the negotiated one creates
+/// a ruleset, and the next one up, if Harn distinguishes it, does not.
+#[test]
+fn the_negotiated_abi_is_the_one_the_live_kernel_creates() {
+    if !live_landlock_available("landlock-abi-negotiation") {
+        return;
+    }
+    let support = LandlockSupport::negotiate(ABI::V6).expect("Landlock is available");
+    for abi in EVERY_ABI {
+        assert_eq!(
+            capped(abi).is_some(),
+            abi <= support.abi(),
+            "ABI {abi} against negotiated ABI {}",
+            support.abi()
+        );
+    }
+}
+
 #[test]
 fn handled_rights_follow_the_abi_and_stop_at_harns_vocabulary() {
     let handled = |abi| LandlockSupport::assume(abi).handled_access();

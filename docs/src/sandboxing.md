@@ -828,11 +828,14 @@ behavior rather than its sizing and stay refused, as does every control under
 the namespace helper, which has no way to re-apply them.
 
 Bubblewrap supports complete read-only and writable directory grants. It
-refuses selective filesystem rights and managed proxy-only egress. Both `/proc`
-grants, the default files-only one and process self-introspection, mount a
-fresh read-only procfs. It belongs to the sandbox's private PID namespace, so
-listing it shows only the sandbox's own processes, which is what the files-only
-grant withholds directory listing to protect.
+refuses selective filesystem rights and managed proxy-only egress. A mount
+can't grant procfs file reads without directory listing, so the default
+files-only `/proc` grant mounts no procfs at all; a child that reads
+`/proc/self` fails there. Granting process self-introspection with
+`--sandbox-allow-process-self-introspection` mounts a fresh read-only procfs
+from the sandbox's private PID namespace, which lists only the sandbox's own
+processes. This applies only to hosts without usable Landlock, since every
+image in the table above selects Landlock.
 An unavailable namespace facility or a failed mount stops the launch before
 the payload runs.
 

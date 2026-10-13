@@ -230,11 +230,14 @@ fn mounts(filesystem: FilesystemProfile) -> Result<MountPlan, VmError> {
             ))
         })?;
         if rule.path == Path::new("/proc") {
-            // Both `/proc` grants render as a fresh, read-only procfs. The
-            // files-only grant withholds directory listing on the host so a
-            // child cannot enumerate its neighbours; this procfs belongs to
-            // the sandbox's own PID namespace and lists only the sandbox's
-            // processes, so listing it reaches nothing the grant withholds.
+            // A mount cannot grant file reads without directory listing, so
+            // the files-only grant mounts no procfs at all: narrower than the
+            // grant, never wider, and the same answer Landlock gives on a host
+            // that cannot contain procfs reads. Only the explicit
+            // self-introspection grant mounts the sandbox's private procfs.
+            if !rule.allowed_access.contains(AccessFs::ReadDir) {
+                continue;
+            }
             argv.extend([
                 "--proc".into(),
                 "/proc".into(),
@@ -361,37 +364,56 @@ mod tests {
         available
     }
 
-    /// The default policy carries the files-only `/proc` grant. Bubblewrap
-    /// renders it as the sandbox's own procfs instead of refusing the launch,
-    /// so the default profile needs no self-introspection flag here.
-    #[test]
-    fn the_default_files_only_proc_grant_renders_a_private_procfs() {
-        let root = tempfile::tempdir().unwrap();
-        let mut policy = policy(root.path());
-        policy.process_sandbox.allow_process_self_introspection = false;
+    fn proc_argv(policy: &CapabilityPolicy) -> Vec<String> {
         let filesystem = filesystem_profile(
             "/usr/bin/sh",
-            &policy,
+            policy,
             FsAccess::all(),
             ProcessFilesystemScope::PrivatePidNamespace,
         )
         .unwrap();
-        let proc_rule = filesystem
-            .rules
-            .iter()
-            .find(|rule| rule.path == Path::new("/proc"))
-            .expect("a private PID namespace always carries the files-only grant");
-        assert!(!proc_rule.allowed_access.contains(AccessFs::ReadDir));
-        let argv = mounts(filesystem).unwrap().argv;
+        mounts(filesystem).unwrap().argv
+    }
+
+    /// The default files-only `/proc` grant mounts no procfs, because a mount
+    /// cannot withhold directory listing; the explicit self-introspection
+    /// grant mounts the sandbox's private procfs.
+    #[test]
+    fn only_the_self_introspection_grant_mounts_a_private_procfs() {
+        let root = tempfile::tempdir().unwrap();
+        let mut policy = policy(root.path());
+        let mounts_proc = |argv: &[String]| argv.windows(2).any(|pair| pair == ["--proc", "/proc"]);
         assert!(
-            argv.windows(2).any(|pair| pair == ["--proc", "/proc"]),
-            "{argv:?}"
+            mounts_proc(&proc_argv(&policy)),
+            "the explicit grant mounts it"
         );
-        assert!(
-            argv.windows(2)
-                .any(|pair| pair == ["--remount-ro", "/proc"]),
-            "{argv:?}"
+        policy.process_sandbox.allow_process_self_introspection = false;
+        let default = proc_argv(&policy);
+        assert!(!mounts_proc(&default), "{default:?}");
+        assert!(!default.iter().any(|arg| arg == "/proc"), "{default:?}");
+    }
+
+    /// The same live enumeration through bubblewrap: refused without the
+    /// grant, admitted with it.
+    #[test]
+    fn procfs_enumeration_follows_the_self_introspection_grant() {
+        if !live() {
+            return;
+        }
+        let root = tempfile::tempdir().unwrap();
+        let mut policy = policy(root.path());
+        let list = vec!["-c".into(), "ls /proc/self/task".into()];
+        let granted = launch(
+            prepare("/usr/bin/sh", &list, &policy, policy.sandbox_profile).unwrap(),
+            root.path(),
         );
+        assert!(granted.status.success(), "{granted:?}");
+        policy.process_sandbox.allow_process_self_introspection = false;
+        let withheld = launch(
+            prepare("/usr/bin/sh", &list, &policy, policy.sandbox_profile).unwrap(),
+            root.path(),
+        );
+        assert!(!withheld.status.success(), "{withheld:?}");
     }
 
     #[test]

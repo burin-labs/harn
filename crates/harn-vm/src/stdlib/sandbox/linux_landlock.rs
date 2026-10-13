@@ -67,10 +67,17 @@ impl LandlockSupport {
     /// kernel would get: an unhandled right behaves the same on every kernel,
     /// which is what lets a test exercise ABI 1 on a current host.
     pub(crate) fn negotiate(ceiling: ABI) -> Option<Self> {
+        Self::negotiate_with(ceiling, kernel_creates_ruleset_for)
+    }
+
+    /// The newest candidate at or below `ceiling` that `accepts` admits. The
+    /// kernel check is a parameter so the selection itself can be tested
+    /// against kernels this host is not.
+    pub(crate) fn negotiate_with(ceiling: ABI, accepts: impl Fn(ABI) -> bool) -> Option<Self> {
         [ABI::V6, ABI::V5, ABI::V4, ABI::V3, ABI::V2, ABI::V1]
             .into_iter()
             .filter(|abi| *abi <= ceiling)
-            .find(|abi| kernel_supports(*abi))
+            .find(|abi| accepts(*abi))
             .map(|abi| Self { abi })
     }
 
@@ -152,20 +159,25 @@ impl LandlockSupport {
     }
 }
 
-/// Whether the kernel offers the feature that ABI introduced. Each probe is a
-/// hard requirement on the builder, which consults the kernel's reported ABI
-/// and creates nothing.
-fn kernel_supports(abi: ABI) -> bool {
+/// Whether the kernel creates a ruleset that needs the feature `abi`
+/// introduced. Every request is a hard requirement and the ruleset is really
+/// created, so the answer is the kernel's, not the builder's reading of it.
+fn kernel_creates_ruleset_for(abi: ABI) -> bool {
     let ruleset = Ruleset::default().set_compatibility(CompatLevel::HardRequirement);
-    match abi {
-        ABI::V1 => ruleset.handle_access(AccessFs::from_all(ABI::V1)).is_ok(),
-        ABI::V2 => ruleset.handle_access(AccessFs::Refer).is_ok(),
-        ABI::V3 => ruleset.handle_access(AccessFs::Truncate).is_ok(),
-        ABI::V4 => ruleset.handle_access(AccessNet::BindTcp).is_ok(),
-        ABI::V5 => ruleset.handle_access(AccessFs::IoctlDev).is_ok(),
-        ABI::V6 => ruleset.scope(Scope::AbstractUnixSocket).is_ok(),
-        _ => false,
-    }
+    let ruleset = match abi {
+        ABI::V1 => ruleset.handle_access(AccessFs::from_all(ABI::V1)),
+        ABI::V2 => ruleset.handle_access(AccessFs::Refer),
+        ABI::V3 => ruleset.handle_access(AccessFs::Truncate),
+        ABI::V4 => ruleset.handle_access(AccessNet::BindTcp),
+        ABI::V5 => ruleset.handle_access(AccessFs::IoctlDev),
+        ABI::V6 => ruleset
+            .handle_access(AccessFs::Execute)
+            .and_then(|ruleset| ruleset.scope(Scope::AbstractUnixSocket)),
+        _ => return false,
+    };
+    ruleset
+        .and_then(Ruleset::create)
+        .is_ok_and(|created| Option::<OwnedFd>::from(created).is_some())
 }
 
 /// The seccomp half of confinement under a Landlock that cannot scope
