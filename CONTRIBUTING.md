@@ -621,7 +621,7 @@ it closes.
 
 Use a closing keyword only when the pull request resolves the whole issue:
 `Closes #N items: 1, 2, ...` naming every enumerated sub-ask, or
-`Single-ask: #N` when the issue is not enumerated. For partial work write
+`Closes #N` when the issue is not enumerated. For partial work write
 `Partial: #N items: 1, 3` or `Refs #N`, and never a closing keyword.
 
 The reason the partial form avoids the keyword is mechanical, not stylistic.

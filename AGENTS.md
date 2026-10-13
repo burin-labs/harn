@@ -245,8 +245,8 @@ live in [Engineering principles](docs/src/dev/engineering-principles.md):
   terms, why, the one risk or blind spot, and how you verified the claim at the
   level of the claim. Do not restate the Files or Checks tabs.
 - Use a closing keyword only when the pull request resolves the whole issue:
-  `Closes #N items: 1, 2, ...` for every enumerated sub-ask, or `Single-ask:
-  #N` when the issue is not enumerated. For partial work, use `Partial: #N
+  `Closes #N items: 1, 2, ...` for every enumerated sub-ask, or `Closes #N`
+  when the issue is not enumerated. For partial work, use `Partial: #N
   items: 1, 3` or `Refs #N`; never use a closing keyword. GitHub builds the
   closing link from the keyword and ignores the text after it, so a keyword on
   partial work closes the whole issue on merge however the line is worded.
