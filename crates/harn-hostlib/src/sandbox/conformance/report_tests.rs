@@ -5,6 +5,7 @@ fn complete() -> ConformanceReport {
         backend: "fixture".to_string(),
         filesystem_mechanism: "fixture".to_string(),
         enforcing: true,
+        mechanism_limits: Vec::new(),
         cases: ConformanceCase::ALL
             .iter()
             .map(|case| CaseReport {

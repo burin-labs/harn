@@ -5,10 +5,8 @@ use std::path::{Path, PathBuf};
 use super::{
     developer_toolchain_system_read_roots, network_name_service_read_roots,
     proc_runtime_reads_are_contained, push_rule, read_only_access, standard_device_rules,
-    system_read_roots, workspace_access, FilesystemProfile, ProcessFilesystemScope,
-    LANDLOCK_ACCESS_FS_EXECUTE, LANDLOCK_ACCESS_FS_MAKE_DIR, LANDLOCK_ACCESS_FS_MAKE_SOCK,
-    LANDLOCK_ACCESS_FS_READ_DIR, LANDLOCK_ACCESS_FS_READ_FILE, LANDLOCK_ACCESS_FS_REMOVE_FILE,
-    LANDLOCK_ACCESS_FS_WRITE_FILE,
+    system_read_roots, workspace_access, AccessFs, FilesystemProfile, FsAccess,
+    ProcessFilesystemScope,
 };
 use crate::orchestration::{CapabilityPolicy, SandboxProfile};
 use crate::stdlib::sandbox::{
@@ -23,7 +21,7 @@ use crate::VmError;
 pub(super) fn filesystem_profile(
     program: &str,
     policy: &CapabilityPolicy,
-    handled_access_fs: u64,
+    handled_access_fs: FsAccess,
     process_scope: ProcessFilesystemScope,
 ) -> Result<FilesystemProfile, VmError> {
     let mut profile = FilesystemProfile {
@@ -37,19 +35,14 @@ pub(super) fn filesystem_profile(
         push_rule(&mut profile, path, access, true)?;
     }
     for path in system_read_roots() {
-        push_rule(
-            &mut profile,
-            path,
-            LANDLOCK_ACCESS_FS_READ_FILE | LANDLOCK_ACCESS_FS_READ_DIR | LANDLOCK_ACCESS_FS_EXECUTE,
-            true,
-        )?;
+        push_rule(&mut profile, path, read_only_access(), true)?;
     }
     for path in network_name_service_read_roots(policy) {
         // `/etc/resolv.conf` is commonly a symlink into `/run` on hosted
         // Linux. Landlock checks the resolved inode, so the broad `/etc` rule
         // above does not cover that target. Open each exact host file before
         // confinement and grant its canonical inode without exposing `/run`.
-        push_rule(&mut profile, path, LANDLOCK_ACCESS_FS_READ_FILE, true)?;
+        push_rule(&mut profile, path, AccessFs::ReadFile.into(), true)?;
     }
     if policy.process_sandbox.allow_process_self_introspection {
         // A host procfs grant needs kernel containment; a private PID
@@ -68,7 +61,7 @@ pub(super) fn filesystem_profile(
         push_rule(
             &mut profile,
             PathBuf::from("/proc"),
-            LANDLOCK_ACCESS_FS_READ_FILE | LANDLOCK_ACCESS_FS_READ_DIR,
+            AccessFs::ReadFile | AccessFs::ReadDir,
             true,
         )?;
     } else if proc_runtime_reads_are_contained()
@@ -79,7 +72,7 @@ pub(super) fn filesystem_profile(
         push_rule(
             &mut profile,
             PathBuf::from("/proc"),
-            LANDLOCK_ACCESS_FS_READ_FILE,
+            AccessFs::ReadFile.into(),
             true,
         )?;
     }
@@ -89,7 +82,7 @@ pub(super) fn filesystem_profile(
         push_rule(
             &mut profile,
             program_path.to_path_buf(),
-            LANDLOCK_ACCESS_FS_READ_FILE | LANDLOCK_ACCESS_FS_EXECUTE,
+            AccessFs::ReadFile | AccessFs::Execute,
             true,
         )?;
     }
@@ -138,12 +131,12 @@ pub(super) fn filesystem_profile(
             push_rule(
                 &mut profile,
                 root,
-                LANDLOCK_ACCESS_FS_MAKE_SOCK
-                    | LANDLOCK_ACCESS_FS_READ_FILE
-                    | LANDLOCK_ACCESS_FS_READ_DIR
-                    | LANDLOCK_ACCESS_FS_WRITE_FILE
-                    | LANDLOCK_ACCESS_FS_MAKE_DIR
-                    | LANDLOCK_ACCESS_FS_REMOVE_FILE,
+                AccessFs::MakeSock
+                    | AccessFs::ReadFile
+                    | AccessFs::ReadDir
+                    | AccessFs::WriteFile
+                    | AccessFs::MakeDir
+                    | AccessFs::RemoveFile,
                 true,
             )?;
         }
@@ -233,45 +226,50 @@ fn report_unheld_read_denials(
 pub(crate) fn installed_write_grants(
     policy: &CapabilityPolicy,
 ) -> Option<super::super::child_write::LandlockWriteGrants> {
-    if !super::landlock_available() {
-        return None;
-    }
-    let handled_access = super::landlock_handled_access(super::landlock_abi_version());
+    let support = super::landlock_support::host_support()?;
     let profile = filesystem_profile(
         "/bin/sh",
         policy,
-        handled_access,
+        support.handled_access(),
         ProcessFilesystemScope::Host,
     )
     .ok()?;
+    // Two write rights an older ABI leaves unhandled are still refused
+    // outside the grants: below ABI 2 the kernel refuses every reparenting
+    // rename or link, and below ABI 3 the seccomp filter refuses truncation
+    // by path.
+    let refused_outside_grants = support.handled_access() | AccessFs::Refer | AccessFs::Truncate;
     Some(super::super::child_write::LandlockWriteGrants {
         rules: profile
             .filesystem_rules()
-            .map(|(path, access)| (path.to_path_buf(), access))
+            .map(|(path, access)| (path.to_path_buf(), access.bits()))
             .collect(),
-        handled_access,
-        write_access: LANDLOCK_WRITE_ACCESS,
+        handled_access: refused_outside_grants.bits(),
+        write_access: LANDLOCK_WRITE_ACCESS.bits(),
     })
 }
 
-/// Every Landlock right that changes the filesystem.
-pub(super) const LANDLOCK_WRITE_ACCESS: u64 = super::LANDLOCK_ACCESS_FS_WRITE_FILE
-    | super::LANDLOCK_ACCESS_FS_REMOVE_DIR
-    | super::LANDLOCK_ACCESS_FS_REMOVE_FILE
-    | super::LANDLOCK_ACCESS_FS_MAKE_CHAR
-    | super::LANDLOCK_ACCESS_FS_MAKE_DIR
-    | super::LANDLOCK_ACCESS_FS_MAKE_REG
-    | super::LANDLOCK_ACCESS_FS_MAKE_SOCK
-    | super::LANDLOCK_ACCESS_FS_MAKE_FIFO
-    | super::LANDLOCK_ACCESS_FS_MAKE_BLOCK
-    | super::LANDLOCK_ACCESS_FS_MAKE_SYM
-    | super::LANDLOCK_ACCESS_FS_REFER
-    | super::LANDLOCK_ACCESS_FS_TRUNCATE;
-
 impl FilesystemProfile {
-    fn filesystem_rules(&self) -> impl Iterator<Item = (&std::path::Path, u64)> + '_ {
+    fn filesystem_rules(&self) -> impl Iterator<Item = (&std::path::Path, FsAccess)> + '_ {
         self.rules
             .iter()
             .map(|rule| (rule.path.as_path(), rule.allowed_access))
     }
 }
+
+/// Every Landlock right that changes the filesystem, through truncation.
+/// `IOCTL_DEV` is left out: no write grant needs to drive a device.
+pub(super) const LANDLOCK_WRITE_ACCESS: FsAccess = super::landlock_support::make_bitflags!(AccessFs::{
+    WriteFile
+        | RemoveDir
+        | RemoveFile
+        | MakeChar
+        | MakeDir
+        | MakeReg
+        | MakeSock
+        | MakeFifo
+        | MakeBlock
+        | MakeSym
+        | Refer
+        | Truncate
+});

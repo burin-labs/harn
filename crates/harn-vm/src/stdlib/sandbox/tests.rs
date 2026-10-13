@@ -1482,13 +1482,13 @@ fn unix_socket_enforcement_is_stated_on_every_backend() {
         unix_socket_roots: vec!["/ws".to_string()],
         ..Default::default()
     };
-
     #[cfg(target_os = "macos")]
     let expected = UnixSocketEnforcement::PathScoped;
-    // Linux cannot scope a connection by path at any Landlock ABI, so it
-    // grants the serving half only and must report the narrower shape.
-    #[cfg(target_os = "linux")]
-    let expected = UnixSocketEnforcement::ServeOnly;
+    #[cfg(target_os = "linux")] // Serve-only; refused below Landlock ABI 6.
+    let expected = [
+        UnixSocketEnforcement::ServeOnly,
+        UnixSocketEnforcement::Refused,
+    ][usize::from(super::policy_projection::serve_only_unavailable_on_host())];
     #[cfg(not(any(target_os = "macos", target_os = "linux")))]
     let expected = UnixSocketEnforcement::Refused;
 

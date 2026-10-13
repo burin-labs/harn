@@ -48,9 +48,17 @@ fn envelope(report: &ConformanceReport) -> JsonEnvelope<&ConformanceReport> {
 
 fn render(report: &ConformanceReport) -> String {
     let mut out = format!(
-        "Process sandbox: backend={} mechanism={} enforcing={}\n\n",
+        "Process sandbox: backend={} mechanism={} enforcing={}\n",
         report.backend, report.filesystem_mechanism, report.enforcing
     );
+    for limit in &report.mechanism_limits {
+        out.push_str(&format!(
+            "  limit: {} ({})\n",
+            limit.as_str(),
+            limit.description()
+        ));
+    }
+    out.push('\n');
     for case in &report.cases {
         let (status, note) = match &case.verdict {
             Verdict::Conforms => ("ok", String::new()),

@@ -8,18 +8,10 @@ use crate::stdlib::sandbox::{effective_fallback, handler_sandbox_test_guard, San
 #[path = "linux_process_introspection_tests.rs"]
 mod process_introspection;
 
-const WRITE_BITS: u64 = LANDLOCK_ACCESS_FS_WRITE_FILE
-    | LANDLOCK_ACCESS_FS_REMOVE_DIR
-    | LANDLOCK_ACCESS_FS_REMOVE_FILE
-    | LANDLOCK_ACCESS_FS_MAKE_CHAR
-    | LANDLOCK_ACCESS_FS_MAKE_DIR
-    | LANDLOCK_ACCESS_FS_MAKE_REG
-    | LANDLOCK_ACCESS_FS_MAKE_SOCK
-    | LANDLOCK_ACCESS_FS_MAKE_FIFO
-    | LANDLOCK_ACCESS_FS_MAKE_BLOCK
-    | LANDLOCK_ACCESS_FS_MAKE_SYM
-    | LANDLOCK_ACCESS_FS_REFER
-    | LANDLOCK_ACCESS_FS_TRUNCATE;
+/// Every right a write could use, through truncation.
+fn write_bits() -> FsAccess {
+    AccessFs::from_write(ABI::V3)
+}
 
 /// Declares that this host is expected to enforce Landlock, so a live-boundary
 /// test that cannot exercise the boundary must fail rather than skip.
@@ -148,7 +140,8 @@ pub(super) fn live_landlock_available(test: &str) -> bool {
             // passes, skips, or reds.
             eprintln!(
                 "[{test}] Landlock ABI {} reported enforcing. active security modules: {lsm}",
-                landlock_abi_version()
+                landlock_support::host_support()
+                    .map_or("none".to_string(), |support| support.abi().to_string())
             );
             true
         }
@@ -357,7 +350,7 @@ fn sandboxed_tar_extracts_symlinks_without_widening_the_write_root() {
     // the write, so asserting there blames the backend for the runner. Skip
     // the boundary half the same way the other live-Landlock cases do; the
     // extraction assertions above still ran.
-    if landlock_abi_version() == 0 {
+    if LandlockSupport::negotiate(ABI::V6).is_none() {
         eprintln!("[fchmodat2-boundary] SKIPPED: no Landlock on this kernel");
         return;
     }
@@ -472,9 +465,16 @@ fn local_ipc_policy(root: &std::path::Path) -> CapabilityPolicy {
 fn local_ipc_grant_admits_serving_and_withholds_connect() {
     let root = tempfile::tempdir().expect("root");
     let granted = local_ipc_policy(root.path());
-    assert!(
-        unix_socket_local_ipc_grant(&granted),
-        "a Unix-socket root on a non-network policy must be rendered as local IPC",
+    // Below Landlock ABI 6 the grant is refused; everywhere else Linux cannot
+    // scope a connection by path, so it reports the narrower shape it applies.
+    let expected = if super::super::policy_projection::serve_only_unavailable_on_host() {
+        crate::orchestration::UnixSocketEnforcement::Refused
+    } else {
+        crate::orchestration::UnixSocketEnforcement::ServeOnly
+    };
+    assert_eq!(
+        crate::stdlib::sandbox::unix_socket_enforcement(&granted),
+        expected,
     );
 
     let syscalls = allowed_syscalls(&granted);
@@ -485,11 +485,11 @@ fn local_ipc_grant_admits_serving_and_withholds_connect() {
          user can open",
     );
 
-    let filter = compile_seccomp_program(&granted).expect("compile the granted filter");
+    let filter = compile_seccomp_program(&granted, true).expect("compile the granted filter");
     let denied = {
         let mut policy = granted;
         *policy.process_sandbox = Default::default();
-        compile_seccomp_program(&policy).expect("compile the ungranted filter")
+        compile_seccomp_program(&policy, true).expect("compile the ungranted filter")
     };
     assert_ne!(
         filter, denied,
@@ -550,11 +550,16 @@ fn unix_socket_disposition_is_reported_per_decision() {
     );
 
     let granted = local_ipc_policy(root.path());
+    // Below Landlock ABI 6 the grant is refused; everywhere else Linux cannot
+    // scope a connection by path, so it reports the narrower shape it applies.
+    let expected = if super::super::policy_projection::serve_only_unavailable_on_host() {
+        crate::orchestration::UnixSocketEnforcement::Refused
+    } else {
+        crate::orchestration::UnixSocketEnforcement::ServeOnly
+    };
     assert_eq!(
         crate::stdlib::sandbox::unix_socket_enforcement(&granted),
-        crate::orchestration::UnixSocketEnforcement::ServeOnly,
-        "Linux cannot scope a connection by path, so it must report the \
-         narrower shape it actually applied rather than claiming path scoping",
+        expected,
     );
 
     let mut networked = granted;
@@ -570,7 +575,7 @@ fn unix_socket_disposition_is_reported_per_decision() {
 fn seccomp_filter_is_default_deny_allowlist() {
     let mut policy = linux_policy_with_workspace_ops(&["read_text"]);
     policy.side_effect_level = Some("read_only".to_string());
-    let filter = compile_seccomp_program(&policy).expect("compile the probe filter");
+    let filter = compile_seccomp_program(&policy, true).expect("compile the probe filter");
     assert_eq!(
         filter.last().map(|entry| entry.k),
         Some(libc::SECCOMP_RET_ERRNO | libc::EPERM as u32),
@@ -598,7 +603,7 @@ fn seccomp_filter_validates_architecture_before_syscall_number() {
         allowed_syscalls(&policy).contains(&libc::SYS_msync),
         "this test reasons about msync being allowlisted, so its premise must hold",
     );
-    let filter = compile_seccomp_program(&policy).expect("compile the probe filter");
+    let filter = compile_seccomp_program(&policy, true).expect("compile the probe filter");
 
     let arch_load = filter.first().expect("filter must not be empty");
     assert_eq!(
@@ -648,12 +653,12 @@ fn allowlist_excludes_process_introspection_and_io_uring() {
 #[test]
 fn read_only_access_grants_read_and_execute_but_never_write() {
     let access = read_only_access();
-    assert_ne!(access & LANDLOCK_ACCESS_FS_READ_FILE, 0, "read file");
-    assert_ne!(access & LANDLOCK_ACCESS_FS_READ_DIR, 0, "read dir");
-    assert_ne!(access & LANDLOCK_ACCESS_FS_EXECUTE, 0, "execute");
+    assert!(access.contains(AccessFs::ReadFile), "read file");
+    assert!(access.contains(AccessFs::ReadDir), "read dir");
+    assert!(access.contains(AccessFs::Execute), "execute");
     assert_eq!(
-        access & WRITE_BITS,
-        0,
+        access & write_bits(),
+        FsAccess::empty(),
         "read-only access must not carry any write/create/remove right",
     );
 }
@@ -665,13 +670,13 @@ fn read_only_access_is_independent_of_workspace_write_capability() {
     // read+execute only.
     let writable = linux_policy_with_workspace_ops(&["read_text", "write_text", "delete"]);
     assert_ne!(
-        workspace_access(&writable) & LANDLOCK_ACCESS_FS_WRITE_FILE,
-        0,
+        workspace_access(&writable) & AccessFs::WriteFile,
+        FsAccess::empty(),
         "writable workspace root should carry write",
     );
     assert_eq!(
-        read_only_access() & WRITE_BITS,
-        0,
+        read_only_access() & write_bits(),
+        FsAccess::empty(),
         "read-only roots stay unwritable regardless of workspace write capability",
     );
 }
@@ -701,8 +706,8 @@ fn package_manager_config_roots_are_read_only() {
         "package-manager roots must stay under HOME"
     );
     assert_eq!(
-        read_only_access() & WRITE_BITS,
-        0,
+        read_only_access() & write_bits(),
+        FsAccess::empty(),
         "package-manager Landlock rules use read-only access bits"
     );
 }
@@ -729,8 +734,8 @@ fn developer_toolchain_roots_are_read_only() {
         "developer-toolchain roots must stay under HOME"
     );
     assert_eq!(
-        read_only_access() & WRITE_BITS,
-        0,
+        read_only_access() & write_bits(),
+        FsAccess::empty(),
         "developer-toolchain Landlock rules use read-only access bits"
     );
 }
@@ -765,9 +770,9 @@ fn standard_device_rules_allow_common_device_files_only() {
     assert_eq!(rules.len(), 4);
     assert!(rules.iter().any(
         |(path, access)| path.as_path() == std::path::Path::new("/dev/null")
-            && access & LANDLOCK_ACCESS_FS_READ_FILE != 0
-            && access & LANDLOCK_ACCESS_FS_WRITE_FILE != 0
-            && access & LANDLOCK_ACCESS_FS_IOCTL_DEV == 0
+            && access.contains(AccessFs::ReadFile)
+            && access.contains(AccessFs::WriteFile)
+            && !access.contains(AccessFs::IoctlDev)
     ));
     for device in ["/dev/zero", "/dev/random", "/dev/urandom"] {
         let Some((_, access)) = rules
@@ -776,19 +781,16 @@ fn standard_device_rules_allow_common_device_files_only() {
         else {
             panic!("missing standard device rule for {device}");
         };
-        assert_ne!(
-            *access & LANDLOCK_ACCESS_FS_READ_FILE,
-            0,
+        assert!(
+            access.contains(AccessFs::ReadFile),
             "{device} should be readable"
         );
-        assert_eq!(
-            *access & LANDLOCK_ACCESS_FS_WRITE_FILE,
-            0,
+        assert!(
+            !access.contains(AccessFs::WriteFile),
             "{device} must not be writable"
         );
-        assert_eq!(
-            *access & LANDLOCK_ACCESS_FS_IOCTL_DEV,
-            0,
+        assert!(
+            !access.contains(AccessFs::IoctlDev),
             "{device} must not receive device ioctl access"
         );
     }
@@ -800,22 +802,21 @@ fn directory_only_access_excludes_file_applicable_rights() {
     // directory-only, otherwise `push_rule` would strip a read/exec
     // grant from a regular-file rule and silently under-scope it.
     for right in [
-        LANDLOCK_ACCESS_FS_READ_FILE,
-        LANDLOCK_ACCESS_FS_WRITE_FILE,
-        LANDLOCK_ACCESS_FS_EXECUTE,
-        LANDLOCK_ACCESS_FS_TRUNCATE,
-        LANDLOCK_ACCESS_FS_IOCTL_DEV,
+        AccessFs::ReadFile,
+        AccessFs::WriteFile,
+        AccessFs::Execute,
+        AccessFs::Truncate,
+        AccessFs::IoctlDev,
     ] {
-        assert_eq!(
-            DIRECTORY_ONLY_ACCESS_FS & right,
-            0,
-            "file-applicable right {right:#x} must not be directory-only",
+        assert!(
+            !DIRECTORY_ONLY_ACCESS_FS.contains(right),
+            "file-applicable right {right:?} must not be directory-only",
         );
     }
     // READ_DIR is the right that triggers the EINVAL on regular files.
     assert_ne!(
-        DIRECTORY_ONLY_ACCESS_FS & LANDLOCK_ACCESS_FS_READ_DIR,
-        0,
+        DIRECTORY_ONLY_ACCESS_FS & AccessFs::ReadDir,
+        FsAccess::empty(),
         "READ_DIR must be classified as directory-only",
     );
 }
@@ -828,35 +829,24 @@ fn read_only_access_on_a_regular_file_drops_directory_only_bits() {
     // `landlock_add_rule` return EINVAL.
     let masked = read_only_access() & !DIRECTORY_ONLY_ACCESS_FS;
     assert_eq!(
-        masked & LANDLOCK_ACCESS_FS_READ_DIR,
-        0,
+        masked & AccessFs::ReadDir,
+        FsAccess::empty(),
         "READ_DIR must be stripped for non-directory rules",
     );
     assert_ne!(
-        masked & LANDLOCK_ACCESS_FS_READ_FILE,
-        0,
+        masked & AccessFs::ReadFile,
+        FsAccess::empty(),
         "READ_FILE must survive for non-directory rules",
     );
     assert_ne!(
-        masked & LANDLOCK_ACCESS_FS_EXECUTE,
-        0,
+        masked & AccessFs::Execute,
+        FsAccess::empty(),
         "EXECUTE must survive for non-directory rules",
     );
 }
 
-#[test]
-fn landlock_handled_access_tracks_device_ioctl_abi() {
-    assert_eq!(
-        landlock_handled_access(4) & LANDLOCK_ACCESS_FS_IOCTL_DEV,
-        0,
-        "ABI 4 kernels do not support device ioctl mediation",
-    );
-    assert_ne!(
-        landlock_handled_access(5) & LANDLOCK_ACCESS_FS_IOCTL_DEV,
-        0,
-        "ABI 5+ kernels should explicitly mediate device ioctls",
-    );
-}
+#[path = "linux_landlock_abi_tests.rs"]
+mod landlock_abi;
 
 // ---- complement enumeration: how a denial is expressed without a deny rule
 
@@ -1201,20 +1191,20 @@ fn an_unreadable_optional_root_is_skipped_and_a_required_one_still_fails() {
     let mut profile = FilesystemProfile {
         rules: Vec::new(),
         symlinks: std::collections::BTreeMap::new(),
-        handled_access_fs: 0,
+        handled_access_fs: FsAccess::empty(),
         read_deny_roots: Vec::new(),
         unheld_read_denials: Vec::new(),
     };
     let optional = push_rule_exact(
         &mut profile,
         locked.clone(),
-        LANDLOCK_ACCESS_FS_READ_FILE,
+        AccessFs::ReadFile.into(),
         true,
     );
     let required = push_rule_exact(
         &mut profile,
         locked.clone(),
-        LANDLOCK_ACCESS_FS_READ_FILE,
+        AccessFs::ReadFile.into(),
         false,
     );
 
@@ -1361,7 +1351,7 @@ fn an_enforcing_host_always_proceeds() {
 /// control an unconfined child, which is the same vacuous pass by another route.
 #[test]
 fn the_selector_can_disable_enforcement_on_a_landlock_capable_kernel() {
-    if landlock_abi_version() == 0 {
+    if LandlockSupport::negotiate(ABI::V6).is_none() {
         eprintln!(
             "[selector-probe] SKIPPED: no Landlock on this kernel, so the selector cannot be \
              the deciding factor. active security modules: {}",

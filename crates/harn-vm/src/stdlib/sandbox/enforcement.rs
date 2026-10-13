@@ -124,6 +124,63 @@ impl Enforcement {
     }
 }
 
+/// One way the mechanism on this host falls short of the backend's row.
+///
+/// The row states what the backend confines on a fully capable kernel. An
+/// older kernel can hold the same dimensions with less precision; each limit
+/// names one difference a child can observe, and how the backend answers it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MechanismLimit {
+    /// Landlock ABI 1 refuses every rename or link into another directory,
+    /// inside granted roots too. Narrower than the policy, never wider.
+    CrossDirectoryRenameRefused,
+    /// Landlock below ABI 3 cannot scope truncation, so the syscall filter
+    /// refuses `truncate(2)`, `openat2(2)`, and read-only opens with `O_TRUNC`.
+    TruncationFilteredBySyscall,
+    /// Landlock below ABI 5 does not scope `ioctl` on a device opened under a
+    /// grant. The default grants open only the standard character devices.
+    DeviceIoctlUnscoped,
+    /// Landlock below ABI 6 cannot contain abstract Unix sockets, so the
+    /// serve-only Unix socket grant is refused.
+    UnixSocketGrantUnavailable,
+}
+
+impl MechanismLimit {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::CrossDirectoryRenameRefused => "cross_directory_rename_refused",
+            Self::TruncationFilteredBySyscall => "truncation_filtered_by_syscall",
+            Self::DeviceIoctlUnscoped => "device_ioctl_unscoped",
+            Self::UnixSocketGrantUnavailable => "unix_socket_grant_unavailable",
+        }
+    }
+
+    pub fn description(self) -> &'static str {
+        match self {
+            Self::CrossDirectoryRenameRefused => {
+                "children cannot rename or link a file into another directory"
+            }
+            Self::TruncationFilteredBySyscall => {
+                "children cannot call truncate(2) or openat2(2), or open a file read-only with O_TRUNC"
+            }
+            Self::DeviceIoctlUnscoped => {
+                "ioctl on a device opened under a grant is not scoped"
+            }
+            Self::UnixSocketGrantUnavailable => "the serve-only Unix socket grant is refused",
+        }
+    }
+
+    /// Whether a child doing ordinary work can fail because of this limit.
+    /// The others change what the backend guarantees, not what a child sees.
+    pub fn changes_child_behavior(self) -> bool {
+        matches!(
+            self,
+            Self::CrossDirectoryRenameRefused | Self::TruncationFilteredBySyscall
+        )
+    }
+}
+
 /// One backend's row: the mechanism that names it and a cell per dimension.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct BackendEnforcement {

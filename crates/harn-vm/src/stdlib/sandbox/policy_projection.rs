@@ -3,8 +3,9 @@
 //! disposition the active backend will report for a Unix-socket grant it was
 //! asked to render.
 //!
-//! These sit apart from the spawn machinery because they are pure readings of
-//! the policy. Nothing here consults the host or mutates state, so a backend
+//! These sit apart from the spawn machinery because they are readings of the
+//! policy. Nothing here mutates state, and the only host fact consulted is
+//! whether Linux Landlock can render the serve-only socket grant, so a backend
 //! and a receipt writer can ask the same question and get the same answer.
 
 #[allow(unused_imports)]
@@ -62,6 +63,8 @@ pub fn unix_socket_enforcement(policy: &CapabilityPolicy) -> UnixSocketEnforceme
     {
         if policy_allows_network(policy) {
             UnixSocketEnforcement::SupersededByNetworkGrant
+        } else if serve_only_unavailable_on_host() {
+            UnixSocketEnforcement::Refused
         } else {
             UnixSocketEnforcement::ServeOnly
         }
@@ -70,4 +73,13 @@ pub fn unix_socket_enforcement(policy: &CapabilityPolicy) -> UnixSocketEnforceme
     {
         UnixSocketEnforcement::Refused
     }
+}
+
+/// The one host fact the Linux disposition reads: Landlock below ABI 6
+/// cannot contain abstract sockets, so the backend refuses the serve-only
+/// grant there instead of rendering it.
+#[cfg(target_os = "linux")]
+pub(crate) fn serve_only_unavailable_on_host() -> bool {
+    super::active_backend_mechanism_limits()
+        .contains(&super::enforcement::MechanismLimit::UnixSocketGrantUnavailable)
 }

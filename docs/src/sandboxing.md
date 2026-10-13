@@ -300,6 +300,21 @@ verdicts in `data`. An empty or incomplete report cannot pass.
 | No OS sandbox | not enforced | not enforced | not enforced | not enforced | unmeasured |
 <!-- sandbox-enforcement-table:end -->
 
+A row states what a backend confines on a fully capable kernel. An older kernel
+can hold the same dimensions with less precision, and each difference a child
+can observe is reported as a mechanism limit: `harn doctor` lists them as
+`limits=[...]`, `harn doctor sandbox` prints one `limit:` line each, and both
+`--json` reports carry them as `mechanism_limits`. When a limit can make an
+ordinary command fail, the first confined spawn also logs one
+`handler_sandbox` warning that names it.
+
+| Limit | Linux Landlock ABI | What a confined child sees |
+|---|---|---|
+| `cross_directory_rename_refused` | 1 | `rename` or `link` into another directory fails with `EXDEV`, inside the workspace too |
+| `truncation_filtered_by_syscall` | 1 and 2 | `truncate(2)`, `openat2(2)`, and a read-only `open` with `O_TRUNC` fail with `EPERM`; `ftruncate` on a file opened for writing works |
+| `device_ioctl_unscoped` | 1 to 4 | `ioctl` on a device opened under a grant isn't scoped; the default grants open only `/dev/null`, `/dev/zero`, `/dev/random`, and `/dev/urandom` |
+| `unix_socket_grant_unavailable` | 1 to 5 | a serve-only Unix socket grant is refused |
+
 ### Reading a mechanism refusal
 
 A spawn refused because the platform mechanism could not be attached carries
@@ -708,7 +723,9 @@ What children get differs by platform:
   confines on its main thread before it starts its runtime; an embedder must
   likewise confine before it starts any thread. Seccomp isn't applied to the
   server, because the child syscall allowlist isn't sized for a server
-  runtime.
+  runtime. Without that filter, nothing else closes the truncation gap below
+  Landlock ABI 3, so self-confinement requires ABI 3 or newer and refuses on
+  an older kernel.
 - **Other platforms** refuse.
 
 The profile allows every Mach service lookup, as the child profile does.
@@ -745,10 +762,42 @@ small, named kernel feature, never an open-ended escape hatch.
 
 ### Linux (`crates/harn-vm/src/stdlib/sandbox/linux.rs`)
 
-Harn selects Landlock only when ABI 6 or newer supports its permission
-vocabulary and a child restriction actually denies access to the host root.
-Otherwise it probes the installed `/usr/bin/bwrap` or `/bin/bwrap` by creating
-private namespaces and checking that a known host file is hidden.
+Harn selects Landlock when the kernel offers any Landlock ABI and a child
+restriction actually denies access to the host root. Otherwise it probes the
+installed `/usr/bin/bwrap` or `/bin/bwrap` by creating private namespaces and
+checking that a known host file is hidden.
+
+Every Landlock ABI confines reads, writes, and execution beneath the granted
+roots. Harn negotiates the newest ABI the kernel offers through the `landlock`
+crate, handles every right that ABI defines, and covers or refuses each gap an
+older ABI leaves:
+
+- ABI 1 can't permit a rename or link into another directory, so it refuses
+  all of them. That is narrower than the policy.
+- Below ABI 3, Landlock can't scope truncation by path. The seccomp filter
+  refuses `truncate(2)`, `openat2(2)`, and read-only opens with `O_TRUNC`, so
+  an ungranted file can't be emptied.
+- Below ABI 5, `ioctl` on a device opened under a grant isn't scoped.
+- Below ABI 6, Landlock can't contain abstract Unix sockets, so only the
+  serve-only Unix socket grant is refused. Without that grant the seccomp
+  filter withholds `socket` below the `network` ceiling, so no abstract socket
+  can be created or reached; at the ceiling the policy already grants
+  `connect`.
+
+The mechanism limit table above names each gap. These stock images, measured
+as a non-root user with no extra packages and default kernel settings, select
+Landlock:
+
+| Image | Kernel | Landlock ABI | Mechanism limits |
+|---|---|---|---|
+| Ubuntu 24.04 LTS | 6.8 | 4 | `device_ioctl_unscoped`, `unix_socket_grant_unavailable` |
+| Ubuntu 22.04 LTS | 5.15 | 1 | all four |
+| Debian 12 | 6.1 | 2 | `truncation_filtered_by_syscall`, `device_ioctl_unscoped`, `unix_socket_grant_unavailable` |
+| Rocky Linux 9 (RHEL 9) | 5.14 | 6 or newer | none |
+| Any distribution on Linux 6.12 or newer | 6.12+ | 6 or newer | none |
+
+Harn reports ABI 6 for any newer kernel, because later ABIs add only features
+Harn doesn't use.
 
 Both backends use the same opened filesystem grants and credential denylist.
 Bubblewrap mounts the admitted file descriptors, so replacing a grant's path
@@ -779,17 +828,18 @@ behavior rather than its sizing and stay refused, as does every control under
 the namespace helper, which has no way to re-apply them.
 
 Bubblewrap supports complete read-only and writable directory grants. It
-refuses selective filesystem rights, managed proxy-only egress, and files-only
-process introspection. A run that needs a private `/proc` must explicitly grant
-process self-introspection with `--sandbox-allow-process-self-introspection`.
-The private PID namespace prevents that procfs from exposing host processes.
+refuses selective filesystem rights and managed proxy-only egress. Both `/proc`
+grants, the default files-only one and process self-introspection, mount a
+fresh read-only procfs. It belongs to the sandbox's private PID namespace, so
+listing it shows only the sandbox's own processes, which is what the files-only
+grant withholds directory listing to protect.
 An unavailable namespace facility or a failed mount stops the launch before
 the payload runs.
 
 | Capability / policy | Kernel knob | Effect |
 |---|---|---|
 | `workspace.read_text` / `workspace.list` / `workspace.exists` | Landlock LSM `LANDLOCK_ACCESS_FS_READ_FILE` + `_READ_DIR` + `_EXECUTE` | reads under `workspace_roots` and the `system_read_roots()` allowlist (`/bin`, `/lib`, `/lib64`, `/usr`, `/etc`, `/nix/store`, `/System`); at the network ceiling, exact name-service files such as `/etc/resolv.conf` are also opened before confinement so symlink targets under `/run` remain readable without granting the mutable `/run` tree |
-| `workspace.write_text` | Landlock `_WRITE_FILE` + `_REMOVE_*` + `_MAKE_*` + (ABI ≥ 2) `_REFER` + (ABI ≥ 3) `_TRUNCATE` | writes scoped to `workspace_roots` |
+| `workspace.write_text` | Landlock `_WRITE_FILE` + `_REMOVE_*` + `_MAKE_*` + (ABI ≥ 2) `_REFER` + (ABI ≥ 3) `_TRUNCATE` | writes scoped to `workspace_roots`; below ABI 3 the seccomp filter refuses truncation by path instead |
 | `workspace.delete` | Landlock `_REMOVE_DIR` + `_REMOVE_FILE` | removes scoped to `workspace_roots` |
 | `read_only_roots: [...]` | Landlock `_READ_FILE` + `_READ_DIR` + `_EXECUTE` only | each read-only root is readable but never writable, regardless of the `workspace.*` capabilities |
 | `process_sandbox.presets` includes `package_manager_config` | Landlock read-only rules for existing npm, pip, cargo, git, and CA config/cache roots under `$HOME` | package managers can resolve real per-user config without granting Harn file builtin access or write rights |
@@ -800,10 +850,10 @@ the payload runs.
 | always | seccomp-bpf default-deny allowlist omits tier-1 dangerous syscalls including `bpf`, mount/module/kexec/sysctl families, `ptrace`, `process_vm_readv`/`process_vm_writev`, `io_uring_*`, `perf_event_open`, `userfaultfd`, `fanotify_init`, and `open_by_handle_at` | unknown and dangerous syscalls fail with `EPERM` |
 | always | `prctl(PR_SET_NO_NEW_PRIVS, 1)` | no setuid escalation across `exec` |
 
-The Landlock ruleset is built lazily from `landlock_abi_version()`.
-Access bits are limited to the kernel's supported vocabulary. A kernel below
-the required ABI or one that cannot enforce the boundary selects bubblewrap;
-if bubblewrap cannot preserve the requested grants, the launch is refused.
+The ruleset handles every right the negotiated ABI defines, so a right outside
+a grant is denied. A host where Landlock can't confine a child selects
+bubblewrap; if bubblewrap can't preserve the requested grants, the launch is
+refused.
 
 Bubblewrap availability uses a functional confinement probe with its own
 one-second setup budget and the runtime's normal cancellation and process

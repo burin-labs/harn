@@ -32,13 +32,16 @@ pub use descriptors::DescriptorTransfer;
 pub(super) mod bwrap;
 #[path = "linux_filesystem.rs"]
 mod filesystem;
+#[path = "linux_landlock.rs"]
+mod landlock_support;
 #[path = "linux_nesting.rs"]
 mod nesting;
 #[path = "linux_self_confinement.rs"]
 mod self_confinement;
 use filesystem::filesystem_profile;
 pub(crate) use filesystem::installed_write_grants;
-use nesting::{landlock_probe_witness, nested_seccomp_filter_rule};
+use landlock_support::{AccessFs, FsAccess, LandlockSupport, ABI};
+use nesting::nested_seccomp_filter_rule;
 
 impl SandboxBackend for Backend {
     fn name() -> &'static str {
@@ -51,6 +54,12 @@ impl SandboxBackend for Backend {
         } else {
             super::SandboxMechanism::LinuxBubblewrap
         }
+    }
+
+    fn mechanism_limits() -> Vec<super::enforcement::MechanismLimit> {
+        landlock_support::host_support()
+            .map(LandlockSupport::limits)
+            .unwrap_or_default()
     }
 
     fn confine_current_process(
@@ -123,15 +132,16 @@ struct ProcessProfile {
     seccomp: BpfProgram,
 }
 
+/// A populated ruleset, ready for the process that will `exec` the payload to
+/// enter. Rules are added in the parent, so only the descriptor travels.
 struct LandlockProfile {
-    ruleset_fd: libc::c_int,
-    filesystem: FilesystemProfile,
+    ruleset: OwnedFd,
 }
 
 struct FilesystemProfile {
     rules: Vec<FilesystemRule>,
     symlinks: std::collections::BTreeMap<PathBuf, PathBuf>,
-    handled_access_fs: u64,
+    handled_access_fs: FsAccess,
     /// Subtrees no grant may cover. Landlock has no deny rule, so this is
     /// enforced by never granting a path that contains one; see
     /// [`expand_around_denied`].
@@ -144,7 +154,7 @@ struct FilesystemProfile {
 struct FilesystemRule {
     file: std::fs::File,
     path: PathBuf,
-    allowed_access: u64,
+    allowed_access: FsAccess,
 }
 
 enum ProcessFilesystemScope {
@@ -152,28 +162,10 @@ enum ProcessFilesystemScope {
     PrivatePidNamespace,
 }
 
-impl Drop for LandlockProfile {
-    fn drop(&mut self) {
-        // A negative descriptor means ownership was handed to a
-        // `TransferableConfinement`; closing it here would shut the ruleset
-        // before the process that has to enter it ever sees it.
-        if self.ruleset_fd >= 0 {
-            unsafe {
-                libc::close(self.ruleset_fd);
-            }
-        }
-    }
-}
-
 impl LandlockProfile {
-    /// Hand the populated ruleset over, leaving the rule descriptors to close.
-    fn take_ruleset(mut self) -> OwnedFd {
-        let fd = self.ruleset_fd;
-        self.ruleset_fd = -1;
-        drop(self);
-        // SAFETY: `fd` came from `landlock_create_ruleset` and this is the only
-        // remaining owner, because `drop` above was told to skip it.
-        unsafe { OwnedFd::from_raw_fd(fd) }
+    /// Hand the populated ruleset over.
+    fn take_ruleset(self) -> OwnedFd {
+        self.ruleset
     }
 }
 
@@ -254,7 +246,7 @@ impl TransferableConfinement {
     /// allocation, locking, or I/O.
     pub fn enter(&self) -> io::Result<()> {
         if let Some(ruleset) = self.ruleset.as_ref() {
-            enter_landlock_ruleset(ruleset.as_raw_fd())?;
+            landlock_support::enter_ruleset(ruleset.as_raw_fd())?;
             confirm_filesystem_boundary_holds()?;
         }
         seccompiler::apply_filter(&self.seccomp)
@@ -328,6 +320,45 @@ fn profile_setup(
     policy: &CapabilityPolicy,
     profile: SandboxProfile,
 ) -> Result<ProcessProfile, VmError> {
+    let support = host_landlock(profile)?;
+    // An older ABI that a child can trip over is named once, so a refused
+    // rename or truncation reads as this host's kernel, not as a broken tool.
+    let observable: Vec<&str> = support
+        .limits()
+        .into_iter()
+        .filter(|limit| limit.changes_child_behavior())
+        .map(|limit| limit.description())
+        .collect();
+    if !observable.is_empty() {
+        super::warn_once(
+            "landlock_abi_limits",
+            &format!(
+                "Linux Landlock ABI {} on this host confines child processes, but {}",
+                support.abi(),
+                observable.join(", and ")
+            ),
+        );
+    }
+    profile_setup_for(program, policy, support)
+}
+
+/// The Landlock this host offers, or the typed refusal for its absence.
+fn host_landlock(profile: SandboxProfile) -> Result<LandlockSupport, VmError> {
+    landlock_support::host_support().ok_or_else(|| {
+        super::SandboxMechanismUnavailable::new(
+            super::SandboxMechanism::LinuxLandlock,
+            super::SandboxMechanismAvailability::AbsentOnHost,
+            profile,
+        )
+        .into_error()
+    })
+}
+
+fn profile_setup_for(
+    program: &str,
+    policy: &CapabilityPolicy,
+    support: LandlockSupport,
+) -> Result<ProcessProfile, VmError> {
     if policy.process_network_proxy.is_some() {
         return Err(sandbox_rejection(
             "managed child-process egress requires a proxy-only Linux network namespace; this build cannot enforce that boundary"
@@ -341,25 +372,21 @@ fn profile_setup(
     resolve_netns_launcher(policy)?;
     // A Unix-socket grant is rendered here as serve-only local IPC rather than
     // refused. seccomp filters the syscall and not the socket path, and no
-    // Landlock ABI has an access right governing connection to a socket file,
-    // so `connect` is the one operation that cannot be scoped: a child allowed
-    // to make it reaches every socket its uid can open, a container daemon's
-    // among them, which is an escape and not a grant. Withholding `connect`
-    // removes that reach entirely while leaving the serving half — create,
-    // bind, listen, accept — which is all a build server needs to talk to
-    // itself. `unix_socket_local_ipc_grant` owns that decision; the seccomp
-    // and Landlock terms below both read it so they cannot disagree.
+    // Landlock ABI Harn uses has an access right governing connection to a
+    // socket file, so `connect` is the one operation that cannot be scoped: a
+    // child allowed to make it reaches every socket its uid can open, a
+    // container daemon's among them, which is an escape and not a grant.
+    // Withholding `connect` removes that reach entirely while leaving the
+    // serving half — create, bind, listen, accept — which is all a build server
+    // needs to talk to itself. `unix_socket_local_ipc_grant` owns that
+    // decision; the seccomp and Landlock terms below both read it so they
+    // cannot disagree.
     // The selected Landlock renderer must attach a filesystem boundary; it
     // cannot return a seccomp-only profile when that mechanism is unavailable.
-    let landlock = landlock_profile(program, policy, profile)?;
-    add_landlock_rules(&landlock).map_err(|error| {
-        sandbox_rejection(format!(
-            "failed to populate the Linux Landlock ruleset: {error}"
-        ))
-    })?;
+    let landlock = landlock_profile_for(program, policy, support)?;
     Ok(ProcessProfile {
         landlock: Some(landlock),
-        seccomp: compile_seccomp_program(policy)?,
+        seccomp: compile_seccomp_program(policy, support.bounds_truncation())?,
     })
 }
 
@@ -376,7 +403,7 @@ fn unix_socket_local_ipc_grant(policy: &CapabilityPolicy) -> bool {
 
 fn apply_profile(profile: &ProcessProfile) -> io::Result<()> {
     if let Some(landlock) = &profile.landlock {
-        enter_landlock_ruleset(landlock.ruleset_fd)?;
+        landlock_support::enter_ruleset(landlock.ruleset.as_raw_fd())?;
     }
     // Once seccomp is default-deny, the child keeps only the setup calls that
     // narrow it further (stacking Landlock and seccomp, for its own confined
@@ -391,22 +418,19 @@ fn apply_profile(profile: &ProcessProfile) -> io::Result<()> {
     Ok(())
 }
 
-fn landlock_profile(
+/// Build and populate the ruleset `program` runs under, with every right the
+/// host's Landlock offers handled.
+///
+/// Runs in the PARENT, before fork. Adding rules needs the open directory
+/// descriptors the profile holds and a `Vec` walk, neither of which belongs on
+/// the `pre_exec` side; and a populated ruleset is a self-contained object that
+/// a descriptor alone can carry, which is what lets a confinement survive being
+/// handed to another process (see [`transferable_confinement`]).
+fn landlock_profile_for(
     program: &str,
     policy: &CapabilityPolicy,
-    profile: SandboxProfile,
+    support: LandlockSupport,
 ) -> Result<LandlockProfile, VmError> {
-    let abi = landlock_abi_version();
-    if !landlock_available() {
-        return Err(super::SandboxMechanismUnavailable::new(
-            super::SandboxMechanism::LinuxLandlock,
-            super::SandboxMechanismAvailability::AbsentOnHost,
-            profile,
-        )
-        .into_error());
-    }
-
-    let handled_access_fs = landlock_handled_access(abi);
     // Abstract Unix sockets have no filesystem path, so the path scoping that
     // covers a socket file cannot reach them: without this, a serve-only grant
     // would still let a child speak to any abstract socket on the host. ABI 6
@@ -415,60 +439,33 @@ fn landlock_profile(
     // cannot express it, so the grant is refused there rather than issued
     // half-enforced.
     let scope_abstract_unix = unix_socket_local_ipc_grant(policy);
-    if scope_abstract_unix && abi < LANDLOCK_ABI_SCOPED {
+    if scope_abstract_unix && !support.scopes_abstract_unix_sockets() {
         return Err(sandbox_rejection(format!(
-            "serve-only Unix-domain sockets need Landlock ABI {LANDLOCK_ABI_SCOPED} to contain abstract sockets; this host reports ABI {abi}"
+            "serve-only Unix-domain sockets need Landlock ABI {} to contain abstract sockets; this host reports ABI {}",
+            ABI::V6,
+            support.abi()
         )));
     }
-    let ruleset_attr = LandlockRulesetAttr {
-        handled_access_fs,
-        handled_access_net: 0,
-        scoped: if scope_abstract_unix {
-            LANDLOCK_SCOPE_ABSTRACT_UNIX_SOCKET
-        } else {
-            0
-        },
-    };
-    // The kernel reads exactly as many bytes as the caller declares and
-    // rejects a size its ABI does not know, so the declared size tracks the
-    // fields actually in use rather than the Rust struct.
-    let ruleset_attr_size = if scope_abstract_unix {
-        std::mem::size_of::<LandlockRulesetAttr>()
-    } else {
-        std::mem::size_of::<u64>()
-    };
-    let ruleset_fd = unsafe {
-        libc::syscall(
-            libc::SYS_landlock_create_ruleset,
-            &raw const ruleset_attr,
-            ruleset_attr_size,
-            0,
-        ) as libc::c_int
-    };
-    if ruleset_fd < 0 {
-        return Err(sandbox_rejection(format!(
-            "failed to create Linux Landlock ruleset: {}",
-            io::Error::last_os_error()
-        )));
-    }
-
-    let mut profile = LandlockProfile {
-        ruleset_fd,
-        filesystem: FilesystemProfile {
-            rules: Vec::new(),
-            symlinks: std::collections::BTreeMap::new(),
-            handled_access_fs,
-            read_deny_roots: Vec::new(),
-            unheld_read_denials: Vec::new(),
-        },
-    };
-    profile.filesystem = filesystem_profile(
+    let filesystem = filesystem_profile(
         program,
         policy,
-        handled_access_fs,
+        support.handled_access(),
         ProcessFilesystemScope::Host,
     )?;
-    Ok(profile)
+    let ruleset = support
+        .populated_ruleset(
+            scope_abstract_unix,
+            filesystem
+                .rules
+                .iter()
+                .map(|rule| (&rule.file, rule.allowed_access)),
+        )
+        .map_err(|error| {
+            sandbox_rejection(format!(
+                "failed to build the Linux Landlock ruleset: {error}"
+            ))
+        })?;
+    Ok(LandlockProfile { ruleset })
 }
 
 fn system_read_roots() -> Vec<PathBuf> {
@@ -514,15 +511,12 @@ fn developer_toolchain_system_read_roots(policy: &CapabilityPolicy) -> Vec<PathB
     }
 }
 
-fn standard_device_rules() -> Vec<(PathBuf, u64)> {
+fn standard_device_rules() -> Vec<(PathBuf, FsAccess)> {
     [
-        (
-            "/dev/null",
-            LANDLOCK_ACCESS_FS_READ_FILE | LANDLOCK_ACCESS_FS_WRITE_FILE,
-        ),
-        ("/dev/zero", LANDLOCK_ACCESS_FS_READ_FILE),
-        ("/dev/random", LANDLOCK_ACCESS_FS_READ_FILE),
-        ("/dev/urandom", LANDLOCK_ACCESS_FS_READ_FILE),
+        ("/dev/null", AccessFs::ReadFile | AccessFs::WriteFile),
+        ("/dev/zero", AccessFs::ReadFile.into()),
+        ("/dev/random", AccessFs::ReadFile.into()),
+        ("/dev/urandom", AccessFs::ReadFile.into()),
     ]
     .into_iter()
     .map(|(path, access)| (PathBuf::from(path), access))
@@ -665,7 +659,7 @@ const MAX_DENY_EXPANSION_RULES: usize = 4096;
 fn push_rule(
     profile: &mut FilesystemProfile,
     path: PathBuf,
-    allowed_access: u64,
+    allowed_access: FsAccess,
     optional: bool,
 ) -> Result<(), VmError> {
     let mut pending = vec![(path, optional)];
@@ -687,7 +681,7 @@ fn push_rule(
                 "credential subtraction exceeded its grant expansion ceiling".into(),
             ));
         }
-        if allowed_access & filesystem::LANDLOCK_WRITE_ACCESS != 0 {
+        if allowed_access.intersects(filesystem::LANDLOCK_WRITE_ACCESS) {
             if filesystem::keep_writable_grant(profile, &path) {
                 push_rule_exact(profile, path, allowed_access, optional)?;
             }
@@ -709,7 +703,7 @@ fn push_rule(
 fn push_rule_exact(
     profile: &mut FilesystemProfile,
     path: PathBuf,
-    allowed_access: u64,
+    allowed_access: FsAccess,
     optional: bool,
 ) -> Result<(), VmError> {
     let file = match std::fs::File::open(&path) {
@@ -799,55 +793,6 @@ fn push_rule_exact(
     Ok(())
 }
 
-/// Populate the ruleset with this profile's grants.
-///
-/// Runs in the PARENT, before fork. Adding rules needs the open directory
-/// descriptors the profile holds and a `Vec` walk, neither of which belongs on
-/// the `pre_exec` side; and a populated ruleset is a self-contained object that
-/// a descriptor alone can carry, which is what lets a confinement survive being
-/// handed to another process (see [`transferable_confinement`]).
-fn add_landlock_rules(profile: &LandlockProfile) -> io::Result<()> {
-    for rule in &profile.filesystem.rules {
-        let path_beneath = LandlockPathBeneathAttr {
-            allowed_access: rule.allowed_access,
-            parent_fd: rule.file.as_raw_fd(),
-        };
-        let result = unsafe {
-            libc::syscall(
-                libc::SYS_landlock_add_rule,
-                profile.ruleset_fd,
-                LANDLOCK_RULE_PATH_BENEATH,
-                &raw const path_beneath,
-                0,
-            )
-        };
-        if result < 0 {
-            return Err(io::Error::last_os_error());
-        }
-    }
-    Ok(())
-}
-
-/// Enter an already-populated ruleset. Async-signal-safe: two raw syscalls,
-/// no allocation, no locking, so it is legal on the `pre_exec` side of a fork.
-///
-/// This is the step that actually confines, and it must run in the process that
-/// will `exec` the payload. Nothing before it restricts anything: a ruleset that
-/// is created, populated, and never entered leaves the child completely
-/// unconfined while every earlier step reports success.
-fn enter_landlock_ruleset(ruleset_fd: libc::c_int) -> io::Result<()> {
-    unsafe {
-        if libc::prctl(libc::PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0 {
-            return Err(io::Error::last_os_error());
-        }
-        let result = libc::syscall(libc::SYS_landlock_restrict_self, ruleset_fd, 0);
-        if result < 0 {
-            return Err(io::Error::last_os_error());
-        }
-    }
-    Ok(())
-}
-
 fn proc_runtime_reads_are_contained() -> bool {
     std::fs::read_to_string("/proc/sys/kernel/yama/ptrace_scope")
         .ok()
@@ -882,7 +827,14 @@ fn yama_scope_contains_process_reads(value: &str) -> bool {
 /// number 26 is `ptrace`, which we deliberately withhold (see
 /// `allowlist_excludes_process_introspection_and_io_uring`). The exclusion
 /// held only for callers that agreed to use the ABI we expected.
-fn compile_seccomp_program(policy: &CapabilityPolicy) -> Result<BpfProgram, VmError> {
+///
+/// `filesystem_bounds_truncation` is false only under a Landlock ABI that
+/// cannot scope truncation; the filter then refuses the calls that truncate by
+/// path (see [`landlock_support::filter_path_truncation`]).
+fn compile_seccomp_program(
+    policy: &CapabilityPolicy,
+    filesystem_bounds_truncation: bool,
+) -> Result<BpfProgram, VmError> {
     // `c_long` is already `i64` on every target `target_arch()` accepts —
     // they are all LP64 — so the syscall numbers need no conversion.
     let mut rules: std::collections::BTreeMap<libc::c_long, Vec<SeccompRule>> =
@@ -890,6 +842,9 @@ fn compile_seccomp_program(policy: &CapabilityPolicy) -> Result<BpfProgram, VmEr
             .iter()
             .map(|syscall| (*syscall, Vec::new()))
             .collect();
+    if !filesystem_bounds_truncation {
+        landlock_support::filter_path_truncation(&mut rules)?;
+    }
 
     if unix_socket_local_ipc_grant(policy) {
         // `socket` is admitted only for the Unix domain. An argument condition
@@ -1254,32 +1209,22 @@ fn allowed_syscalls(policy: &CapabilityPolicy) -> Vec<libc::c_long> {
 /// are additive (there is no deny), so a read-only root nested under a
 /// writable workspace root still inherits the parent's write grant; the
 /// two lists are intended to be disjoint (see `docs/src/sandboxing.md`).
-fn read_only_access() -> u64 {
-    LANDLOCK_ACCESS_FS_READ_FILE | LANDLOCK_ACCESS_FS_READ_DIR | LANDLOCK_ACCESS_FS_EXECUTE
+fn read_only_access() -> FsAccess {
+    AccessFs::from_read(ABI::V1)
 }
 
-fn workspace_access(policy: &CapabilityPolicy) -> u64 {
-    let read_access =
-        LANDLOCK_ACCESS_FS_READ_FILE | LANDLOCK_ACCESS_FS_READ_DIR | LANDLOCK_ACCESS_FS_EXECUTE;
-    let write_access = LANDLOCK_ACCESS_FS_WRITE_FILE
-        | LANDLOCK_ACCESS_FS_REMOVE_DIR
-        | LANDLOCK_ACCESS_FS_REMOVE_FILE
-        | LANDLOCK_ACCESS_FS_MAKE_CHAR
-        | LANDLOCK_ACCESS_FS_MAKE_DIR
-        | LANDLOCK_ACCESS_FS_MAKE_REG
-        | LANDLOCK_ACCESS_FS_MAKE_SOCK
-        | LANDLOCK_ACCESS_FS_MAKE_FIFO
-        | LANDLOCK_ACCESS_FS_MAKE_BLOCK
-        | LANDLOCK_ACCESS_FS_MAKE_SYM
-        | LANDLOCK_ACCESS_FS_REFER
-        | LANDLOCK_ACCESS_FS_TRUNCATE;
+fn workspace_access(policy: &CapabilityPolicy) -> FsAccess {
+    let read_access = read_only_access();
+    // Every right that changes a file, through truncation. `IOCTL_DEV` is
+    // left out: no workspace grant needs to drive a device.
+    let write_access = AccessFs::from_write(ABI::V3);
     // The child write grant is the whole write set, whatever subset of it the
     // policy's own `workspace` capability names: the grant exists for roles
     // whose capability names none of it.
     if !policy.capabilities_are_restricted() || policy.process_sandbox.allow_child_workspace_write {
         return read_access | write_access;
     }
-    let mut access = 0;
+    let mut access = FsAccess::empty();
     if policy_allows_capability(policy, "workspace", &["read_text", "list", "exists"]) {
         access |= read_access;
     }
@@ -1287,153 +1232,20 @@ fn workspace_access(policy: &CapabilityPolicy) -> u64 {
         access |= write_access;
     }
     if policy_allows_capability(policy, "workspace", &["delete"]) {
-        access |= LANDLOCK_ACCESS_FS_REMOVE_DIR | LANDLOCK_ACCESS_FS_REMOVE_FILE;
+        access |= AccessFs::RemoveDir | AccessFs::RemoveFile;
     }
-    if access == 0 {
+    if access.is_empty() {
         read_access
     } else {
         access
     }
 }
 
-fn landlock_abi_version() -> u32 {
-    let result = unsafe {
-        libc::syscall(
-            libc::SYS_landlock_create_ruleset,
-            std::ptr::null::<libc::c_void>(),
-            0,
-            LANDLOCK_CREATE_RULESET_VERSION,
-        )
-    };
-    if result <= 0 {
-        0
-    } else {
-        result as u32
-    }
-}
-
-/// Advertise Landlock only after its current permission vocabulary and an
-/// actual child restriction hold. ABI presence alone is not enforcement.
+/// Whether this host's Landlock holds a child restriction. Any ABI qualifies;
+/// a grant that needs a newer one refuses on its own.
 pub(super) fn landlock_available() -> bool {
-    static AVAILABLE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *AVAILABLE.get_or_init(|| {
-        let abi = landlock_abi_version();
-        if abi < LANDLOCK_ABI_SCOPED {
-            return false;
-        }
-        let Some(witness) = landlock_probe_witness() else {
-            return false;
-        };
-        let attr = LandlockRulesetAttr {
-            handled_access_fs: landlock_handled_access(abi),
-            handled_access_net: 0,
-            scoped: 0,
-        };
-        let ruleset = unsafe {
-            libc::syscall(
-                libc::SYS_landlock_create_ruleset,
-                &raw const attr,
-                std::mem::size_of::<u64>(),
-                0,
-            ) as libc::c_int
-        };
-        if ruleset < 0 {
-            return false;
-        }
-        let ruleset = unsafe { OwnedFd::from_raw_fd(ruleset) };
-        // The child runs only raw async-signal-safe syscalls and _exit. No
-        // Rust allocator, destructor, callback, or ambient policy is touched.
-        let child = unsafe { libc::fork() };
-        if child == 0 {
-            let confined = unsafe {
-                libc::prctl(libc::PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) == 0
-                    && libc::syscall(libc::SYS_landlock_restrict_self, ruleset.as_raw_fd(), 0) == 0
-            };
-            let opened = if confined {
-                unsafe { libc::open(witness.as_ptr(), libc::O_RDONLY | libc::O_DIRECTORY) }
-            } else {
-                0
-            };
-            unsafe { libc::_exit(i32::from(!(confined && opened < 0))) };
-        }
-        if child < 0 {
-            return false;
-        }
-        let mut status = 0;
-        loop {
-            let waited = unsafe { libc::waitpid(child, &raw mut status, 0) };
-            if waited == child {
-                return libc::WIFEXITED(status) && libc::WEXITSTATUS(status) == 0;
-            }
-            if waited < 0 && std::io::Error::last_os_error().kind() == io::ErrorKind::Interrupted {
-                continue;
-            }
-            return false;
-        }
-    })
+    landlock_support::host_support().is_some()
 }
-
-fn landlock_handled_access(abi: u32) -> u64 {
-    let mut access = LANDLOCK_ACCESS_FS_EXECUTE
-        | LANDLOCK_ACCESS_FS_WRITE_FILE
-        | LANDLOCK_ACCESS_FS_READ_FILE
-        | LANDLOCK_ACCESS_FS_READ_DIR
-        | LANDLOCK_ACCESS_FS_REMOVE_DIR
-        | LANDLOCK_ACCESS_FS_REMOVE_FILE
-        | LANDLOCK_ACCESS_FS_MAKE_CHAR
-        | LANDLOCK_ACCESS_FS_MAKE_DIR
-        | LANDLOCK_ACCESS_FS_MAKE_REG
-        | LANDLOCK_ACCESS_FS_MAKE_SOCK
-        | LANDLOCK_ACCESS_FS_MAKE_FIFO
-        | LANDLOCK_ACCESS_FS_MAKE_BLOCK
-        | LANDLOCK_ACCESS_FS_MAKE_SYM;
-    if abi >= 2 {
-        access |= LANDLOCK_ACCESS_FS_REFER;
-    }
-    if abi >= 3 {
-        access |= LANDLOCK_ACCESS_FS_TRUNCATE;
-    }
-    if abi >= 5 {
-        access |= LANDLOCK_ACCESS_FS_IOCTL_DEV;
-    }
-    access
-}
-
-#[repr(C)]
-struct LandlockRulesetAttr {
-    handled_access_fs: u64,
-    handled_access_net: u64,
-    scoped: u64,
-}
-
-#[repr(C)]
-struct LandlockPathBeneathAttr {
-    allowed_access: u64,
-    parent_fd: libc::c_int,
-}
-
-const LANDLOCK_CREATE_RULESET_VERSION: u32 = 1 << 0;
-/// First ABI carrying `scoped`, and so the first that can contain an abstract
-/// Unix socket inside the sandbox domain.
-const LANDLOCK_ABI_SCOPED: u32 = 6;
-const LANDLOCK_SCOPE_ABSTRACT_UNIX_SOCKET: u64 = 1 << 0;
-const LANDLOCK_RULE_PATH_BENEATH: libc::c_int = 1;
-const LANDLOCK_ACCESS_FS_EXECUTE: u64 = 1 << 0;
-const LANDLOCK_ACCESS_FS_WRITE_FILE: u64 = 1 << 1;
-const LANDLOCK_ACCESS_FS_READ_FILE: u64 = 1 << 2;
-const LANDLOCK_ACCESS_FS_READ_DIR: u64 = 1 << 3;
-const LANDLOCK_ACCESS_FS_REMOVE_DIR: u64 = 1 << 4;
-const LANDLOCK_ACCESS_FS_REMOVE_FILE: u64 = 1 << 5;
-const LANDLOCK_ACCESS_FS_MAKE_CHAR: u64 = 1 << 6;
-const LANDLOCK_ACCESS_FS_MAKE_DIR: u64 = 1 << 7;
-const LANDLOCK_ACCESS_FS_MAKE_REG: u64 = 1 << 8;
-const LANDLOCK_ACCESS_FS_MAKE_SOCK: u64 = 1 << 9;
-const LANDLOCK_ACCESS_FS_MAKE_FIFO: u64 = 1 << 10;
-const LANDLOCK_ACCESS_FS_MAKE_BLOCK: u64 = 1 << 11;
-const LANDLOCK_ACCESS_FS_MAKE_SYM: u64 = 1 << 12;
-const LANDLOCK_ACCESS_FS_REFER: u64 = 1 << 13;
-const LANDLOCK_ACCESS_FS_TRUNCATE: u64 = 1 << 14;
-const LANDLOCK_ACCESS_FS_IOCTL_DEV: u64 = 1 << 15;
 
 /// Access rights that Landlock only permits on a *directory* handle. A
 /// PATH_BENEATH rule that pairs any of these with a non-directory
@@ -1441,17 +1253,19 @@ const LANDLOCK_ACCESS_FS_IOCTL_DEV: u64 = 1 << 15;
 /// the resolved path is a regular file. (`READ_FILE`, `WRITE_FILE`,
 /// `EXECUTE`, `TRUNCATE`, and `IOCTL_DEV` are valid on file handles and
 /// are intentionally absent here.)
-const DIRECTORY_ONLY_ACCESS_FS: u64 = LANDLOCK_ACCESS_FS_READ_DIR
-    | LANDLOCK_ACCESS_FS_REMOVE_DIR
-    | LANDLOCK_ACCESS_FS_REMOVE_FILE
-    | LANDLOCK_ACCESS_FS_MAKE_CHAR
-    | LANDLOCK_ACCESS_FS_MAKE_DIR
-    | LANDLOCK_ACCESS_FS_MAKE_REG
-    | LANDLOCK_ACCESS_FS_MAKE_SOCK
-    | LANDLOCK_ACCESS_FS_MAKE_FIFO
-    | LANDLOCK_ACCESS_FS_MAKE_BLOCK
-    | LANDLOCK_ACCESS_FS_MAKE_SYM
-    | LANDLOCK_ACCESS_FS_REFER;
+const DIRECTORY_ONLY_ACCESS_FS: FsAccess = landlock_support::make_bitflags!(AccessFs::{
+    ReadDir
+        | RemoveDir
+        | RemoveFile
+        | MakeChar
+        | MakeDir
+        | MakeReg
+        | MakeSock
+        | MakeFifo
+        | MakeBlock
+        | MakeSym
+        | Refer
+});
 
 #[path = "netns.rs"]
 mod netns;

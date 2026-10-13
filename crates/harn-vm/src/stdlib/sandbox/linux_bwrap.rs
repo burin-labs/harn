@@ -12,9 +12,8 @@ use std::process::Command;
 
 use super::{
     compile_seccomp_program, filesystem_profile, policy_allows_network, read_only_access,
-    sandbox_rejection, workspace_access, DescriptorTransfer, FilesystemProfile,
-    ProcessFilesystemScope, TransferableConfinement, LANDLOCK_ACCESS_FS_EXECUTE,
-    LANDLOCK_ACCESS_FS_READ_DIR, LANDLOCK_ACCESS_FS_READ_FILE, LANDLOCK_ACCESS_FS_WRITE_FILE,
+    sandbox_rejection, workspace_access, AccessFs, DescriptorTransfer, FilesystemProfile, FsAccess,
+    ProcessFilesystemScope, TransferableConfinement,
 };
 use crate::orchestration::{CapabilityPolicy, SandboxProfile};
 use crate::stdlib::sandbox::{PrepareOutcome, SandboxMechanism, SandboxMechanismAvailability};
@@ -94,7 +93,7 @@ pub(in crate::stdlib::sandbox) fn prepare(
     let filesystem = filesystem_profile(
         program,
         policy,
-        u64::MAX,
+        FsAccess::all(),
         ProcessFilesystemScope::PrivatePidNamespace,
     )?;
     let mut helper_grant = FilesystemProfile {
@@ -106,7 +105,9 @@ pub(in crate::stdlib::sandbox) fn prepare(
     };
     let seccomp = TransferableConfinement {
         ruleset: None,
-        seccomp: compile_seccomp_program(policy)?,
+        // Mounts bound truncation: an ungranted path does not exist in the
+        // namespace, and a read-only bind refuses it.
+        seccomp: compile_seccomp_program(policy, true)?,
     };
     let filter = sealed_filter(&seccomp.seccomp_bytes()).map_err(|error| {
         sandbox_rejection(format!(
@@ -229,13 +230,11 @@ fn mounts(filesystem: FilesystemProfile) -> Result<MountPlan, VmError> {
             ))
         })?;
         if rule.path == Path::new("/proc") {
-            // A fresh procfs in the PID namespace cannot expose host siblings.
-            // A files-only grant cannot be widened to directory enumeration.
-            if rule.allowed_access & LANDLOCK_ACCESS_FS_READ_DIR == 0 {
-                return Err(sandbox_rejection(
-                    "bubblewrap cannot express the files-only process introspection grant".into(),
-                ));
-            }
+            // Both `/proc` grants render as a fresh, read-only procfs. The
+            // files-only grant withholds directory listing on the host so a
+            // child cannot enumerate its neighbours; this procfs belongs to
+            // the sandbox's own PID namespace and lists only the sandbox's
+            // processes, so listing it reaches nothing the grant withholds.
             argv.extend([
                 "--proc".into(),
                 "/proc".into(),
@@ -244,8 +243,8 @@ fn mounts(filesystem: FilesystemProfile) -> Result<MountPlan, VmError> {
             ]);
             continue;
         }
-        let reads = LANDLOCK_ACCESS_FS_READ_FILE | LANDLOCK_ACCESS_FS_READ_DIR;
-        let writable = rule.allowed_access & LANDLOCK_ACCESS_FS_WRITE_FILE != 0;
+        let reads = AccessFs::ReadFile | AccessFs::ReadDir;
+        let writable = rule.allowed_access.contains(AccessFs::WriteFile);
         if metadata.is_dir()
             && rule.allowed_access != read_only_access()
             && rule.allowed_access != workspace_access(&CapabilityPolicy::default())
@@ -255,8 +254,8 @@ fn mounts(filesystem: FilesystemProfile) -> Result<MountPlan, VmError> {
                 rule.path.display(),
             )));
         }
-        if rule.allowed_access & reads == 0
-            || (rule.allowed_access & LANDLOCK_ACCESS_FS_EXECUTE == 0
+        if !rule.allowed_access.intersects(reads)
+            || (!rule.allowed_access.contains(AccessFs::Execute)
                 && metadata.permissions().mode() & 0o111 != 0
                 && !metadata.file_type().is_char_device())
         {
@@ -360,6 +359,39 @@ mod tests {
             assert_ne!(std::env::var("BWRAP_REQUIRE_TESTS").as_deref(), Ok("1"));
         }
         available
+    }
+
+    /// The default policy carries the files-only `/proc` grant. Bubblewrap
+    /// renders it as the sandbox's own procfs instead of refusing the launch,
+    /// so the default profile needs no self-introspection flag here.
+    #[test]
+    fn the_default_files_only_proc_grant_renders_a_private_procfs() {
+        let root = tempfile::tempdir().unwrap();
+        let mut policy = policy(root.path());
+        policy.process_sandbox.allow_process_self_introspection = false;
+        let filesystem = filesystem_profile(
+            "/usr/bin/sh",
+            &policy,
+            FsAccess::all(),
+            ProcessFilesystemScope::PrivatePidNamespace,
+        )
+        .unwrap();
+        let proc_rule = filesystem
+            .rules
+            .iter()
+            .find(|rule| rule.path == Path::new("/proc"))
+            .expect("a private PID namespace always carries the files-only grant");
+        assert!(!proc_rule.allowed_access.contains(AccessFs::ReadDir));
+        let argv = mounts(filesystem).unwrap().argv;
+        assert!(
+            argv.windows(2).any(|pair| pair == ["--proc", "/proc"]),
+            "{argv:?}"
+        );
+        assert!(
+            argv.windows(2)
+                .any(|pair| pair == ["--remount-ro", "/proc"]),
+            "{argv:?}"
+        );
     }
 
     #[test]
@@ -674,7 +706,7 @@ mod tests {
         let filesystem = filesystem_profile(
             "/usr/bin/sh",
             &policy,
-            u64::MAX,
+            FsAccess::all(),
             ProcessFilesystemScope::PrivatePidNamespace,
         )
         .unwrap();
