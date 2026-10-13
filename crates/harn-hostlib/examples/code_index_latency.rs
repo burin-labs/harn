@@ -323,7 +323,7 @@ fn main() {
         start = Instant::now();
         let (state, outcome) = IndexState::build_from_root(root);
         assert!(outcome.files_indexed > 8000);
-        state.snapshot().save(root).unwrap();
+        state.save_snapshot().unwrap();
         *capability.shared().lock().unwrap() = Some(state);
     } else {
         assert!(capability.restore_from_disk(root).unwrap());

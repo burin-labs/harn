@@ -45,32 +45,36 @@ made unchanged restart about 3.2 times faster and every restart workload at
 least twice as fast; the [snapshot measurements](code-index-snapshot-measurements.md)
 record the paired results and their shared-host limits.
 
-Graph reconstruction is now the long pole, about 0.97 of 1.55 seconds, and the
-next factor needs a validated immutable snapshot whose posting lists, string
-table, nodes, and adjacency lists already have their reader layout. A small
-per-file mutable delta should serve edits through the same query owner.
-Atomic generations and compaction subsume the whole-file reconstruction path
-rather than becoming a second index implementation. This needs bounds
-validation, representative failed publication and recovery cases, and full
-graph/posting equivalence. Mapping arbitrary mutable files is unsafe:
-[memmap2 explicitly requires protection against out-of-process
-modification](https://docs.rs/memmap2/latest/memmap2/struct.MmapOptions.html).
-[Tantivy's immutable reader/segment architecture](https://github.com/quickwit-oss/tantivy/blob/main/ARCHITECTURE.md)
-is a useful reference, not a reason to replace the existing graph with a search
-engine.
+The symbol graph and both posting stores now restore as shared immutable
+generations, the structure of [Tantivy's segment architecture](https://github.com/quickwit-oss/tantivy/blob/main/ARCHITECTURE.md)
+applied to the existing owners rather than a second index. The graph's base
+holds nodes sorted by id, an id-to-slot table, and forward and reverse
+adjacency as contiguous arrays with offsets. The name index and the posting
+maps are shared bases too. Edits go to a copy-on-write delta: replaced edge
+lists and name buckets, added nodes, and tombstones for removed nodes and for
+files whose postings changed. Reads consult the delta first. Only the delta
+keeps a per-file removal index, so restoring postings no longer derives one for
+15 million pairs. Clones, including branch overlays, share the base. Every
+mutation path ends at one batch boundary that folds the delta into a fresh base
+once it is a quarter of the base. Snapshots encode straight from the live index
+in parallel sections, and graph nodes decode in parallel runs. The
+[generation measurements](code-index-generation-measurements.md) put unchanged
+restart at about 0.65 seconds on a loaded host, from 2.09 for the same host's
+baseline, with peak memory down by about 29%.
 
-A [validated zero-copy archive](https://rkyv.org/validation.html) is the
-implementation candidate. Safe archive access checks pointer bounds,
-alignment, and ownership ranges before exposing archived values. Those checks
-do not establish graph identities, edge integrity, or workspace freshness.
-Measure validated access and the first query together; unchecked access
-throughput is not readiness. The graph's borrowed-node and adjacency APIs
-require an owning reader-view seam, not just a serializer replacement.
-
-An edited restart still captures the whole index into an owned snapshot and
-rewrites it before readiness, about 1.6 seconds together. Serializing sections
-directly from the live index, and persisting after the index is published,
-removes most of that without touching the reader.
+Read, decode, and restore are now of similar size. Decoding is dominated by
+node strings, so the next cut is either storing each file's path and language
+once rather than on every node, or reading archived nodes in place. A
+[validated zero-copy archive](https://rkyv.org/validation.html) remains the
+candidate for the latter. Safe archive access checks pointer bounds,
+alignment, and ownership ranges, but not graph identities, edge integrity, or
+workspace freshness, and the graph's borrowed-node API would need a reader view
+over archived nodes. Mapping the file is unsafe without protection against
+out-of-process modification, as
+[memmap2 documents](https://docs.rs/memmap2/latest/memmap2/struct.MmapOptions.html).
+An edited restart still writes the whole snapshot before readiness, about 0.6
+seconds; writing sections as they finish encoding, or persisting after the
+index is published, would remove most of it.
 
 For cold build, collect independent parsed-file facts on a bounded worker pool,
 then apply them through one graph owner and resolve calls after the complete

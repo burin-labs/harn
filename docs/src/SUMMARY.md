@@ -409,5 +409,6 @@
 - [Code-index release measurements](./dev/code-index-release-measurements.md)
 - [Code-index restoration measurements](./dev/code-index-restoration-measurements.md)
 - [Code-index snapshot measurements](./dev/code-index-snapshot-measurements.md)
+- [Code-index generation measurements](./dev/code-index-generation-measurements.md)
 - [Code-index latency architecture](./dev/code-index-latency-architecture.md)
 - [Bytecode cache](./perf/bytecode-cache.md)
