@@ -736,7 +736,7 @@ fn __usage_token(arg: ArgSpec) -> string {
     }
     return "<${arg.name}>"
   }
-  const flag_marker = arg.long ?? arg.short ?? ("--" + arg.name)
+  const flag_marker = arg.long ?? arg.short ?? "--" + arg.name
   if arg.kind == "switch" {
     return "[${flag_marker}]"
   }

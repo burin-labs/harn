@@ -86,7 +86,7 @@ pub fn abort_token(
   runtime: HarnessRuntime,
   options: AbortTokenOptions? = nil,
 ) -> AbortToken {
-  const key = options?.key ?? ("abort:" + random.uuid())
+  const key = options?.key ?? "abort:" + random.uuid()
   const scope = options?.scope ?? "task_group"
   return {cell: runtime.shared_cell({scope: scope, key: key})}
 }

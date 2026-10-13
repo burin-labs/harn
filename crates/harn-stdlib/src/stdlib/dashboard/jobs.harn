@@ -670,7 +670,7 @@ pub fn dashboard_job_event(kind: any, input: any = nil, options: dict? = nil) ->
   const event = {
     schema: DASHBOARD_JOB_EVENT_SCHEMA,
     id: opts.id ?? input?.dashboard_event_id
-      ?? ("dash_job_evt_" + substring(sha256(dedupe_key), 0, 24)),
+      ?? "dash_job_evt_" + substring(sha256(dedupe_key), 0, 24),
     dedupe_key: dedupe_key,
     kind: resolved_kind,
     source: source,
@@ -690,9 +690,9 @@ pub fn dashboard_job_event(kind: any, input: any = nil, options: dict? = nil) ->
     )
       ?? job_id,
     summary: __job_first([opts.summary, input?.summary, payload?.summary])
-      ?? (__job_status_for_kind(resolved_kind)
+      ?? __job_status_for_kind(resolved_kind)
         + ": "
-        + job_id),
+        + job_id,
     priority: __job_first([opts.priority, input?.priority, payload?.priority]),
     queue_depth: opts.queue_depth ?? input?.queue_depth ?? payload?.queue_depth,
     attempt: opts.attempt ?? input?.attempt ?? payload?.attempt,

@@ -48,8 +48,8 @@ fn __edit_lifecycle_rejection(kind: string, verdict: unknown) {
   }
   if verdict?.reject ?? false {
     return {
-      code: verdict?.code ?? (kind + "_rejected"),
-      reason: verdict?.reason ?? verdict?.message ?? (kind + " rejected the edit"),
+      code: verdict?.code ?? kind + "_rejected",
+      reason: verdict?.reason ?? verdict?.message ?? kind + " rejected the edit",
       cause: verdict?.cause,
       verdict: verdict,
     }
@@ -58,8 +58,8 @@ fn __edit_lifecycle_rejection(kind: string, verdict: unknown) {
 }
 
 fn __edit_lifecycle_reject_fields(kind: string, rejection: dict, fields: dict? = nil) {
-  const reason = rejection?.reason ?? (kind + " rejected the edit")
-  const code = rejection?.code ?? (kind + "_rejected")
+  const reason = rejection?.reason ?? kind + " rejected the edit"
+  const code = rejection?.code ?? kind + "_rejected"
   return (fields ?? {}).merging(
     {
       result: "rejected",

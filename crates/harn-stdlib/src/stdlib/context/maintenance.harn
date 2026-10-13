@@ -194,11 +194,11 @@ pub fn context_maintenance_receipt(
   const source_id = __cm_source_id(opts)
   const dedupe_key = opts?.dedupe_key
     ?? context_maintenance_dedupe_key(resolved_job_id, lifecycle_event, affected_paths, source_id)
-  const run_id = opts?.run_id ?? ("ctx_run_" + substring(sha256(dedupe_key), 0, 16))
+  const run_id = opts?.run_id ?? "ctx_run_" + substring(sha256(dedupe_key), 0, 16)
   return filter_nil(
     {
       schema: CONTEXT_MAINTENANCE_RECEIPT_SCHEMA,
-      id: opts?.id ?? ("ctx_job_" + substring(sha256(dedupe_key + "\n" + resolved_status), 0, 24)),
+      id: opts?.id ?? "ctx_job_" + substring(sha256(dedupe_key + "\n" + resolved_status), 0, 24),
       dedupe_key: dedupe_key,
       job_id: resolved_job_id,
       run_id: run_id,

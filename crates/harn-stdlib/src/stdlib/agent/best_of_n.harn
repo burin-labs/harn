@@ -150,7 +150,7 @@ pub fn best_of_n_candidates(opts: any) {
   }
   if winner == nil {
     const fallback_idx = __bon_clamp_int(
-      o?.fallthrough_index ?? (len(candidates) - 1),
+      o?.fallthrough_index ?? len(candidates) - 1,
       0,
       len(candidates) - 1,
     )

@@ -170,7 +170,7 @@ fn __persona_prompt_usage(checkpoint: dict) -> PersonaPromptCompileUsage {
   const raw = checkpoint.usage ?? {}
   const input_tokens = to_int(raw?.input_tokens ?? raw?.prompt_tokens) ?? 0
   const output_tokens = to_int(raw?.output_tokens ?? raw?.completion_tokens) ?? 0
-  const total_tokens = to_int(raw?.total_tokens) ?? (input_tokens + output_tokens)
+  const total_tokens = to_int(raw?.total_tokens) ?? input_tokens + output_tokens
   return {
     input_tokens: input_tokens,
     output_tokens: output_tokens,

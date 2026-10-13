@@ -178,7 +178,7 @@ fn __refactor_exec_op(fs: HarnessFs, ast: HarnessAst, op: dict, session_id: any,
       result: res.result,
       conflict: {
         code: res.result,
-        message: res.details ?? ("apply_node " + res.result),
+        message: res.details ?? "apply_node " + res.result,
         path: op?.path,
       },
     }
@@ -190,7 +190,7 @@ fn __refactor_exec_op(fs: HarnessFs, ast: HarnessAst, op: dict, session_id: any,
       result: res.result,
       conflict: {
         code: res.result,
-        message: res.details ?? ("insert_at_anchor " + res.result),
+        message: res.details ?? "insert_at_anchor " + res.result,
         path: op?.path,
       },
     }

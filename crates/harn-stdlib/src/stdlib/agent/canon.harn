@@ -653,7 +653,7 @@ pub fn canon_inject_feedback(
         body: feedback,
         tags: opts?.reminder?.tags ?? ["harn-canon"],
         dedupe_key: opts?.reminder?.dedupe_key
-          ?? ("harn-canon/" + join(result.selected_pack_ids, ",")),
+          ?? "harn-canon/" + join(result.selected_pack_ids, ","),
         ttl_turns: opts?.reminder?.ttl_turns ?? 1,
         preserve_on_compact: opts?.reminder?.preserve_on_compact ?? true,
       }

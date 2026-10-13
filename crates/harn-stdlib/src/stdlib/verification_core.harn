@@ -145,7 +145,7 @@ pub fn __verification_result_text(result: CommandResult, source: string) -> stri
     return result?.stdout ?? ""
   }
   if source == "combined" {
-    return result?.combined ?? ((result?.stdout ?? "") + (result?.stderr ?? ""))
+    return result?.combined ?? (result?.stdout ?? "") + (result?.stderr ?? "")
   }
   return ""
 }

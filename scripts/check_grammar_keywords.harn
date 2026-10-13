@@ -30,7 +30,11 @@ const TOKEN_RS = "crates/harn-lexer/src/token.rs"
  * position). The lexer's `CONTEXTUAL_KEYWORDS` const owns the list.
  */
 pub fn contextual_keywords(text: string) -> list<string>? {
-  const table = regex_captures(r"pub const CONTEXTUAL_KEYWORDS:\s*&\[&str\]\s*=\s*&\[(.*?)\];", text, "s")
+  const table = regex_captures(
+    r"pub const CONTEXTUAL_KEYWORDS:\s*&\[&str\]\s*=\s*&\[(.*?)\];",
+    text,
+    "s",
+  )
   if table.count == 0 {
     return nil
   }

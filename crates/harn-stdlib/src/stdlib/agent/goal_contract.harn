@@ -15,7 +15,7 @@ fn __goal_pin_criteria(criteria: list<GoalCriterion>) -> list<GoalCriterion> {
   let index = 0
   for criterion in criteria {
     out = out.appending(
-      {id: criterion.id ?? ("sc_" + to_string(index)), description: criterion.description},
+      {id: criterion.id ?? "sc_" + to_string(index), description: criterion.description},
     )
     index = index + 1
   }

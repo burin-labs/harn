@@ -36,7 +36,7 @@ Repairs are tagged with a six-level safety class so `harn fix --apply --safety <
 | Category | Title | Codes |
 |---|---|---:|
 | [`TYP`](#typ--type-checker) | Type checker | 36 |
-| [`PAR`](#par--parser--lexer) | Parser / lexer | 6 |
+| [`PAR`](#par--parser--lexer) | Parser / lexer | 7 |
 | [`NAM`](#nam--naming-and-resolution) | Naming and resolution | 12 |
 | [`CAP`](#cap--capabilities) | Capabilities | 9 |
 | [`LLM`](#llm--llm-calls) | LLM calls | 4 |
@@ -112,6 +112,7 @@ The lexer or parser raises these before type checking begins. Harn cannot build 
 | [`HARN-PAR-004`](#harn-par-004) | string literal is unterminated | — | — |
 | [`HARN-PAR-005`](#harn-par-005) | block comment is unterminated | — | — |
 | [`HARN-PAR-006`](#harn-par-006) | integer literal is out of range for int (i64) | — | — |
+| [`HARN-PAR-007`](#harn-par-007) | the `start to end` range spelling was removed | — | — |
 
 ## NAM — Naming and resolution
 
@@ -1038,6 +1039,26 @@ the exact value (distinct literals collapse onto the same `float`) and the
   `-9223372036854775807 - 1`.
 - Otherwise the value genuinely does not fit in `int`; rework the computation to
   stay within range.
+
+### `HARN-PAR-007`
+
+**Category:** `PAR` (Parser / lexer) &nbsp;·&nbsp; **API stability:** `stable`
+
+the `start to end` range spelling was removed
+
+Ranges are written with Rust-style operators. `start..end` excludes `end` and
+`start..=end` includes it. The old `start to end` spelling (inclusive) and its
+`exclusive` suffix no longer parse, and `to` and `exclusive` are ordinary
+identifiers again.
+
+#### How to fix
+
+- Replace `a to b` with `a..=b`.
+- Replace `a to b exclusive` with `a..b`.
+- To rewrite a whole tree, run
+  `harn fix --apply --migrate-operator-syntax <path>`. The migration also
+  inserts parentheses wherever the new `??` precedence would regroup an
+  expression, so every rewritten file keeps its meaning.
 
 ### `HARN-NAM-001`
 

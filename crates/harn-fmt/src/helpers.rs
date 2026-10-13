@@ -107,9 +107,16 @@ pub(crate) fn needs_parens_as_postfix_object(node: &Node) -> bool {
 }
 
 /// Whether `node` needs parentheses as the operand of a unary prefix (`!`, `-`).
+/// Any infix operand is grouped, including `**`, which binds tighter than a
+/// prefix: `-(2 ** 2)` reads unambiguously where `-2 ** 2` does not.
 pub(crate) fn needs_parens_as_unary_operand(node: &Node) -> bool {
-    matches!(node, Node::Assignment { .. })
-        || operand_needs_grouping(Precedence::Prefix, node, OperandSide::Prefix)
+    matches!(
+        node,
+        Node::BinaryOp { .. }
+            | Node::Ternary { .. }
+            | Node::RangeExpr { .. }
+            | Node::Assignment { .. }
+    ) || operand_needs_grouping(Precedence::Prefix, node, OperandSide::Prefix)
 }
 
 /// Whether `node` needs parentheses as the `side` operand of an operator in
@@ -142,7 +149,11 @@ pub(crate) fn child_needs_parens(parent_op: BinaryOperator, child: &Node, is_rig
     } else {
         OperandSide::Left
     };
-    if operand_needs_grouping(parent_op.precedence(), child, side) {
+    // A ternary operand of a binary operator, even `|>`, keeps parentheses so
+    // its extent is visible.
+    if operand_needs_grouping(parent_op.precedence(), child, side)
+        || matches!(child, Node::Ternary { .. })
+    {
         return true;
     }
     let Node::BinaryOp { op: child_op, .. } = child else {

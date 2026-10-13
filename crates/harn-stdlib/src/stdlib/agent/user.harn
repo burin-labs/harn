@@ -658,7 +658,7 @@ pub fn agentic_user(
   const state = __sim_user_atomic_state(harness.runtime, config?.state)
   let answerer = {
     kind: "agentic_user",
-    id: config?.id ?? ("agentic-user-" + harness.random.uuid_v7()),
+    id: config?.id ?? "agentic-user-" + harness.random.uuid_v7(),
     task: config?.task ?? "",
     behavior: config?.behavior ?? "",
     tools: config?.tools,
@@ -692,7 +692,7 @@ pub fn scripted_user(harness: Harness, script: list<unknown>?, options: dict? = 
   const state = __sim_user_atomic_state(harness.runtime, opts?.state)
   let answerer = {
     kind: "scripted_user",
-    id: opts?.id ?? ("scripted-user-" + harness.random.uuid_v7()),
+    id: opts?.id ?? "scripted-user-" + harness.random.uuid_v7(),
     script: script ?? [],
     default_reply: opts?.default_reply,
     on_exhausted: opts?.on_exhausted ?? "stop",

@@ -128,7 +128,7 @@ pub fn gha_env_block(
   value: unknown,
   delimiter: string? = nil,
 ) -> string {
-  const delim = delimiter ?? ("harn_" + random.uuid_v7())
+  const delim = delimiter ?? "harn_" + random.uuid_v7()
   return name + "<<" + delim + "\n" + to_string(value ?? "") + "\n" + delim + "\n"
 }
 

@@ -556,9 +556,9 @@ pub fn assert_receipt_field(receipt: any, path: string, expected: any, message: 
   const diff = value_diff(actual, expected)
   require diff == nil,
     message
-    ?? ("assert_receipt_field: the receipt field " + path
+    ?? "assert_receipt_field: the receipt field " + path
       + " does not match.\n"
-      + to_string(diff))
+      + to_string(diff)
   return actual
 }
 
@@ -579,10 +579,10 @@ pub fn assert_receipt_field(receipt: any, path: string, expected: any, message: 
 pub fn assert_golden_transcript(actual: any, golden: any, message: any = nil) {
   require __testing_golden_match(golden, actual),
     message
-    ?? ("assert_golden_transcript: the value does not match the golden.\n    golden    "
+    ?? "assert_golden_transcript: the value does not match the golden.\n    golden    "
       + to_string(golden)
       + "\n    actual    "
-      + to_string(actual))
+      + to_string(actual)
   return actual
 }
 
@@ -680,7 +680,7 @@ pub fn llm_tool_calls(calls: list<LlmToolCall>) -> dict {
   let out = []
   let index = 0
   for call in calls {
-    const resolved_id = call.id ?? (call.name + "_" + to_string(index))
+    const resolved_id = call.id ?? call.name + "_" + to_string(index)
     out = out.appending({id: resolved_id, name: call.name, arguments: call.args ?? {}})
     index = index + 1
   }
@@ -764,10 +764,10 @@ pub fn assert_error_contains<T>(
   const rendered = to_string(captured)
   require contains(rendered, substring),
     message
-    ?? ("assert_error_contains: expected thrown error to contain "
+    ?? "assert_error_contains: expected thrown error to contain "
       + to_string(substring)
       + ", got: "
-      + rendered)
+      + rendered
   return rendered
 }
 
@@ -789,7 +789,7 @@ pub fn assert_no_throw<T>(body: fn() -> T, message: string? = nil) -> T {
     return outcome.value
   } catch (e) {
     throw message
-      ?? ("assert_no_throw: expected the body not to throw, but it threw: " + to_string(e))
+      ?? "assert_no_throw: expected the body not to throw, but it threw: " + to_string(e)
   }
 }
 
@@ -821,7 +821,7 @@ pub fn assert_no_throw<T>(body: fn() -> T, message: string? = nil) -> T {
  * @example: assert_nil(cache_lookup("missing-key"))
  */
 pub fn assert_nil<T>(value: T?, message: string? = nil) -> nil {
-  require value == nil, message ?? ("assert_nil: expected nil, got " + to_string(value))
+  require value == nil, message ?? "assert_nil: expected nil, got " + to_string(value)
   return nil
 }
 
@@ -851,7 +851,7 @@ pub fn assert_not_nil<T>(value: T?, message: string? = nil) -> T {
  * @example: assert_true(is_ready())
  */
 pub fn assert_true(value: bool, message: string? = nil) -> nil {
-  require value, message ?? ("assert_true: expected true, got " + to_string(value))
+  require value, message ?? "assert_true: expected true, got " + to_string(value)
   return nil
 }
 
@@ -864,7 +864,7 @@ pub fn assert_true(value: bool, message: string? = nil) -> nil {
  * @example: assert_false(is_ready())
  */
 pub fn assert_false(value: bool, message: string? = nil) -> nil {
-  require !value, message ?? ("assert_false: expected false, got " + to_string(value))
+  require !value, message ?? "assert_false: expected false, got " + to_string(value)
   return nil
 }
 
@@ -894,9 +894,9 @@ pub fn assert_contains<U>(
   }
   require matched,
     message
-    ?? ("assert_contains: expected " + to_string(haystack)
+    ?? "assert_contains: expected " + to_string(haystack)
       + " to contain "
-      + to_string(needle))
+      + to_string(needle)
   return haystack
 }
 
@@ -1073,7 +1073,7 @@ fn __testing_snapshot_may_write(env: HarnessEnv, options: dict?) -> bool {
  * tool's goldens.
  */
 fn __testing_snapshot_path(fs: HarnessFs, name: string, options: dict?) -> string {
-  const dir = options?.dir ?? (fs.source_dir() + "/__snapshots__")
+  const dir = options?.dir ?? fs.source_dir() + "/__snapshots__"
   return dir + "/" + name + ".harn.snap"
 }
 

@@ -132,10 +132,10 @@ pub fn pin(random: HarnessRandom, kind: string, content: string, opts: any = nil
   if type_of(content) != "string" || content == "" {
     throw "pin(harness, \"" + kind + "\", content): content must be a non-empty string"
   }
-  const id = options?.id ?? ("pin_" + random.uuid_v7())
+  const id = options?.id ?? "pin_" + random.uuid_v7()
   return {
     content: content,
-    dedupe_key: options?.dedupe_key ?? ("pin/" + kind + "/" + id),
+    dedupe_key: options?.dedupe_key ?? "pin/" + kind + "/" + id,
     id: id,
     kind: kind,
     meta: options?.meta ?? {},
@@ -389,7 +389,7 @@ pub fn pin_reminder(agent: HarnessAgent, pin: dict, opts: any = nil) {
   const kind = to_string(pin?.kind ?? "note")
   let reminder = {
     body: __pin_reminder_body(agent, pin.content, options),
-    dedupe_key: pin?.dedupe_key ?? ("pin/" + kind),
+    dedupe_key: pin?.dedupe_key ?? "pin/" + kind,
     preserve_on_compact: true,
     role_hint: pin?.role_hint ?? __pin_role_hint(kind),
     tags: __pin_reminder_tags(["pin", kind], options),

@@ -21,7 +21,7 @@ fn __web_store_options(opts: dict) {
 }
 
 fn __web_cache_key(method: any, url: any, opts: dict) {
-  return opts?.cache_key ?? ("std/web:web_fetch:" + uppercase(method) + ":" + url)
+  return opts?.cache_key ?? "std/web:web_fetch:" + uppercase(method) + ":" + url
 }
 
 fn __web_effective_url(url: string, http_opts: dict) {

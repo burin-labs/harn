@@ -360,6 +360,21 @@ const greeting = """
 Ordered by precedence (lowest to highest):
 
 <!-- operator-precedence:begin -->
+| Precedence | Operators | Associativity | Description |
+|---|---|---|---|
+| 1 | `\|>` | Left | Pipe |
+| 2 | `? :` | Right | Ternary conditional |
+| 3 | `\|\|` | Left | Logical OR |
+| 4 | `&&` | Left | Logical AND |
+| 5 | `==` `!=` | Left | Equality |
+| 6 | `<` `>` `<=` `>=` `in` `not in` | Left | Comparison / membership |
+| 7 | `??` | Left | Nil coalescing |
+| 8 | `..` `..=` | None | Range formation |
+| 9 | `+` `-` | Left | Additive |
+| 10 | `*` `/` `%` | Left | Multiplicative |
+| 11 | `!` `-` | Right | Unary prefix |
+| 12 | `**` | Right | Exponentiation |
+| 13 | `.` `?.` `[]` `?.[]` `[:]` `()` `?` `!` | Left | Postfix |
 <!-- operator-precedence:end -->
 
 Integer division truncates toward zero. Integer division (and any modulo) by

@@ -79,7 +79,7 @@ fn __normalize_criteria(value: list?) {
         + type_of(entry.check)
     }
     out = out.appending(
-      {check: entry?.check, description: description, id: entry?.id ?? ("sc_" + to_string(index))},
+      {check: entry?.check, description: description, id: entry?.id ?? "sc_" + to_string(index)},
     )
     index = index + 1
   }
