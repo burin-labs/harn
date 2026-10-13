@@ -80,11 +80,11 @@ Cold build collects independent parsed-file facts on a bounded worker pool and
 applies them through one publisher, which resolves calls after the complete
 declaration set exists. Source reading, parser selection, and extracted facts
 share one boundary with reconciliation and single-file reindexing. The live
-generation stays queryable until the next complete one is published. Four
-workers made cold build and persist about 3.2 times faster; the
+generation stays queryable until the next complete one is published. Six
+workers made cold build and persist about 3.7 times faster; the
 [parallel build measurements](code-index-parallel-build-measurements.md)
 record the worker-count comparison. The publisher's word postings, graph
-installation, and reference linking, about 5.4 seconds, plus persistence are
+installation, and reference linking, about 5.8 seconds, plus persistence are
 now the serial limit.
 
 For resident edits, first remove workspace-wide projections from per-file

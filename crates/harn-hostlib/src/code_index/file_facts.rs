@@ -24,16 +24,22 @@ use super::walker::MAX_FILE_BYTES;
 
 /// Fact workers selected from paired release trials on the frozen #9712
 /// corpus (`docs/src/dev/perf/code-index-9744.json`). Four workers cut cold
-/// readiness to 0.31 of the serial build. Six saved another 8% for 13% more
-/// CPU, within overlapping intervals: by then the single publisher, not
-/// extraction, bounds the build.
-pub(crate) const DEFAULT_FACT_WORKERS: usize = 4;
+/// readiness to about 0.31 of the serial build, and six were faster than four
+/// in every one of twelve paired rounds, by 9-13% for 9-12% more CPU. Past
+/// that the single publisher, not extraction, bounds the build.
+const DEFAULT_FACT_WORKERS: usize = 6;
 
-/// [`DEFAULT_FACT_WORKERS`], never more than the host can run at once.
+/// Threads a build runs besides its fact workers: the publisher and the
+/// trigram installer.
+const DEDICATED_BUILD_THREADS: usize = 2;
+
+/// [`DEFAULT_FACT_WORKERS`], leaving the publisher and trigram installer a
+/// core each on smaller hosts. At least one worker always runs.
 pub(super) fn default_workers() -> usize {
     std::thread::available_parallelism()
         .map_or(1, usize::from)
-        .min(DEFAULT_FACT_WORKERS)
+        .saturating_sub(DEDICATED_BUILD_THREADS)
+        .clamp(1, DEFAULT_FACT_WORKERS)
 }
 
 /// Extracted facts each worker may hold ahead of the publisher. Bounds the
