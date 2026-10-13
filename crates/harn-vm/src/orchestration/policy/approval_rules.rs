@@ -20,6 +20,16 @@ mod path_inputs;
 mod remembered_paths;
 mod rule_source;
 mod sensitive_paths;
+
+/// The default sensitive-path match, for the cross-consumer parity test in
+/// `crate::known_paths`.
+#[cfg(test)]
+pub(crate) fn first_sensitive_path(
+    policy: &ToolApprovalPolicy,
+    candidates: &[String],
+) -> Option<String> {
+    sensitive_paths::first_candidate(policy, candidates)
+}
 pub use host_request::{ToolApprovalRequest, ToolApprovalWorkspaceBoundary};
 use identity_match::LiteralResourceIdentity;
 pub use identity_match::PolicyIdentityMatch;

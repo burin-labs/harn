@@ -355,7 +355,7 @@ fn broad_authority_write_covers_scoped_delegation_and_flattening() {
 
 /// A non-null control on the parse.
 ///
-/// `default_read_deny_home_paths()` reads a TOML file. Every failure mode of
+/// `default_read_deny_home_paths()` reads the `known_paths.toml` registry. Every failure mode of
 /// that read — a renamed table, a retyped array, a file that stopped being
 /// included — produces an EMPTY list, and an empty denylist denies nothing
 /// while every other signature of a working feature stays intact: the field

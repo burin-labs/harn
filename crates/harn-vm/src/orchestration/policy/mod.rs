@@ -5,6 +5,8 @@ mod approval_resolver;
 mod approval_review_config;
 mod approval_rules;
 mod capability_invocation;
+#[cfg(test)]
+pub(crate) use approval_rules::first_sensitive_path;
 pub(crate) use approval_rules::PolicyAuthorityRequest;
 mod capability_lattice;
 pub use capability_invocation::enforce_current_policy_for_capability;
@@ -843,8 +845,9 @@ pub struct ToolApprovalPolicy {
     /// Explicit opt-out for the deny-by-default sensitive-path guard.
     #[serde(default)]
     pub allow_sensitive_paths: bool,
-    /// Additional or replacement sensitive path globs. Empty uses the
-    /// runtime defaults such as `.env`, private keys, and credential files.
+    /// Replacement sensitive path globs. Empty uses the credential class of
+    /// the `known_paths` registry: credential stores such as `~/.ssh` and
+    /// `~/.docker/config.json`, and file names such as `.env` and `*.pem`.
     #[serde(default)]
     pub sensitive_path_patterns: Vec<String>,
     /// Explicit opt-out for the external-path guard on declared path args.

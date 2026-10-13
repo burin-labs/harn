@@ -32,39 +32,31 @@ Two properties distinguish it from every other field:
 
 ## Default data file
 
-`crates/harn-vm/src/orchestration/policy/read_deny_defaults.toml`, embedded with
-`include_str!` and parsed once into `default_read_deny_home_paths()`. Parse
-failure or an empty list panics at first use rather than silently producing an
-empty denylist.
+The defaults are the `[credential]` class of the path registry,
+`crates/harn-vm/src/known_paths/known_paths.toml`, embedded with `include_str!`
+and parsed once. The same entries drive the taint gate's secret-read check, the
+command risk scan's `credential_file_read` label, and the default approval
+`sensitive_path_patterns`, so a path added once is recognized by all four; a
+parity test fails if any consumer misses an entry. Parse failure, an empty
+list, a credential without a reason, or a preset grant that names a credential
+panics at first use rather than silently producing an empty denylist.
 
 ```toml
-[defaults]
-home_relative = [".ssh", ".aws", "..."]
+[credential]
+home = [".ssh", ".aws", "..."]
+basename_globs = [".env", "*.pem", "..."]
 
-[reason]
+[credential.reason]
 ".ssh" = "private keys and known_hosts"
 ```
 
 | Key | Type | Required | Meaning |
 | --- | --- | --- | --- |
-| `defaults.home_relative` | array of strings | yes, non-empty | paths denied under `$HOME` |
-| `reason.<path>` | string | no | why the entry is on the list, for review |
+| `credential.home` | array of strings | yes, non-empty | paths denied under `$HOME` |
+| `credential.basename_globs` | array of strings | yes, non-empty | credential file names matched anywhere by the path matchers; not sandbox-denied |
+| `credential.reason.<path>` | string | yes, one per `home` entry | why the entry is on the list |
 
-Keys in `[reason]` that do not appear in `home_relative` are ignored, and an
-entry with no reason is not an error. The table is documentation kept next to
-the data instead of in a comment that drifts from it.
-
-### Current defaults
-
-`.ssh`, `.aws`, `.gnupg`, `.netrc`, `.docker/config.json`,
-`.config/gh/hosts.yml`, `.config/gcloud`, `.kube/config`, `.npmrc`, `.pypirc`,
-`.cargo/credentials`, `.cargo/credentials.toml`, `.composer/auth.json`,
-`.config/composer/auth.json`, `.config/git/credentials`, `.config/glab-cli`,
-`.config/hub`, `.config/github-copilot`, `.config/rclone/rclone.conf`,
-`.config/doctl`, `.config/hcloud`, `.config/containers/auth.json`,
-`.config/.wrangler`, `.config/stripe`, `.config/sops/age`,
-`.config/configstore/firebase-tools.json`, `.cache/huggingface/token`,
-`.cache/huggingface/stored_tokens`.
+The registry file lists the current entries, each with its reason.
 
 The list names the default credential locations of widely used CLIs. It is not
 exhaustive: credentials elsewhere inside an admitted tool root need another

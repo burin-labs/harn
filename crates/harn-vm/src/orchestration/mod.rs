@@ -104,6 +104,8 @@ mod replay_bench;
 pub use replay_bench::*;
 
 mod policy;
+#[cfg(test)]
+pub(crate) use policy::first_sensitive_path;
 pub(crate) use policy::PolicyAuthorityRequest;
 pub use policy::*;
 #[cfg(test)]
