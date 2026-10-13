@@ -56,13 +56,7 @@ pub(crate) fn next_journal_event(
 /// when the session has no journal.
 pub(crate) fn pending_journal_events(
     id: &str,
-) -> Result<
-    Option<(
-        crate::stdlib::canonical_store::CanonicalStore,
-        Vec<harn_session_store::AppendEvent>,
-    )>,
-    VmError,
-> {
+) -> Result<Option<crate::agent_session_journal::PendingJournalBatch>, VmError> {
     super::SESSIONS.with(|sessions| {
         sessions
             .borrow()

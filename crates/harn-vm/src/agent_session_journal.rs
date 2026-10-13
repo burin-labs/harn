@@ -20,6 +20,13 @@ const WORKFLOW_LEARNING_ELIGIBILITY_HEADER: &str = "harn.workflow_learning.eligi
 const WORKFLOW_LEARNING_ELIGIBLE: &str = "eligible";
 const WORKFLOW_LEARNING_EXCLUDED: &str = "excluded";
 
+/// The store a flush appends to and every queued mutation as its event,
+/// oldest first.
+pub(crate) type PendingJournalBatch = (
+    crate::stdlib::canonical_store::CanonicalStore,
+    Vec<AppendEvent>,
+);
+
 #[derive(Clone)]
 struct JournalConfig {
     store: crate::stdlib::canonical_store::CanonicalStore,
@@ -141,15 +148,7 @@ impl JournalState {
     }
 
     /// Every queued mutation, oldest first, as the events one flush appends.
-    pub(crate) fn pending_events(
-        &self,
-    ) -> Result<
-        (
-            crate::stdlib::canonical_store::CanonicalStore,
-            Vec<AppendEvent>,
-        ),
-        VmError,
-    > {
+    pub(crate) fn pending_events(&self) -> Result<PendingJournalBatch, VmError> {
         let events = self
             .pending
             .iter()
