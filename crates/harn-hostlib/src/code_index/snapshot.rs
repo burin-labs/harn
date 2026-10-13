@@ -1,11 +1,13 @@
 //! Persistent on-disk snapshot of the workspace index.
 //!
 //! One file at `.burin/index/snapshot.bin`: an eight-byte magic, the
-//! little-endian format version, then four postcard-encoded sections, each
-//! preceded by its little-endian `u64` length: file facts and bookkeeping,
-//! the symbol graph, trigram postings, and word postings. The header lets a
-//! reader reject another layout before decoding it, and the sections decode on
-//! separate threads because they share nothing. Restart time is dominated by
+//! little-endian format version, then postcard-encoded sections, each
+//! preceded by its little-endian `u64` length. In order: file facts and
+//! bookkeeping, the graph's next node id, graph edges, trigram postings,
+//! word postings, and then the graph's nodes split into up to
+//! [`NODE_SECTIONS`] runs. The header lets a reader reject another layout
+//! before decoding it, and every section decodes on its own thread because
+//! the sections share nothing; nodes are split because they are the largest. Restart time is dominated by
 //! decoding and restoring this file; the compact binary body decodes several
 //! times faster than the JSON it replaced while taking about a third of the
 //! space. Earlier versions, including every JSON snapshot, are rebuilt rather
@@ -26,7 +28,8 @@ use super::agents::{AgentRegistry, RegistryConfig, SerializedRegistry};
 use super::file_table::{FileId, IndexedFile, IndexedSymbol};
 use super::graph::DepGraph;
 use super::imports_go::GoModules;
-use super::symbol_graph::{GraphSnapshot, SymbolGraph};
+use super::parallel::{joined, scope};
+use super::symbol_graph::{Edge, GraphSnapshot, Node, NodeId, SymbolGraph};
 use super::trigram::TrigramIndex;
 use super::versions::VersionLog;
 use super::words::WordIndex;
@@ -38,8 +41,12 @@ use super::IndexState;
 /// file that has not changed. v4 adds partial HEAD-verification progress;
 /// older readers must not treat a checkpoint as a fully verified HEAD when
 /// the checkout reverts to the previously recorded commit. v5 replaces JSON
-/// with the binary layout described in the module documentation.
-pub const SNAPSHOT_FORMAT_VERSION: u32 = 5;
+/// with a binary layout; v6 splits the graph into the sections described in
+/// the module documentation.
+pub const SNAPSHOT_FORMAT_VERSION: u32 = 6;
+
+/// The most runs graph nodes are split into, each decoded on its own thread.
+const NODE_SECTIONS: usize = 4;
 
 /// Leading bytes of every binary snapshot.
 const SNAPSHOT_MAGIC: &[u8; 8] = b"HARNIDX\0";
@@ -205,10 +212,17 @@ impl CodeIndexSnapshot {
                 &self.reconcile_progress,
                 &self.go_modules,
             );
+            let graph = self.symbols.as_ref();
+            let nodes: &[Node] = graph.map_or(&[], |graph| &graph.nodes);
+            let edges: &[Edge] = graph.map_or(&[], |graph| &graph.edges);
             write_section(&mut writer, &core)?;
-            write_section(&mut writer, &self.symbols)?;
+            write_section(&mut writer, &graph.map(|graph| graph.next_id))?;
+            write_section(&mut writer, &edges)?;
             write_section(&mut writer, &self.trigrams)?;
             write_section(&mut writer, &self.words)?;
+            for run in nodes.chunks(nodes.len().div_ceil(NODE_SECTIONS).max(1)) {
+                write_section(&mut writer, &run)?;
+            }
             writer.flush()?;
         }
         tmp.persist(&path).map_err(|error| error.error)?;
@@ -255,25 +269,60 @@ impl CodeIndexSnapshot {
         }
         let decode_phase = super::timing::Phase::start("snapshot.decode");
         let mut sections = Sections(body);
-        let (core, graph, trigrams, words) = (
+        let (core, next_node_id, edges, trigrams, words) = (
+            sections.next()?,
             sections.next()?,
             sections.next()?,
             sections.next()?,
             sections.next()?,
         );
-        if !sections.0.is_empty() {
-            return Err(invalid("code-index snapshot has trailing bytes"));
+        let mut node_runs = Vec::new();
+        while !sections.0.is_empty() {
+            node_runs.push(sections.next()?);
+        }
+        if node_runs.len() > NODE_SECTIONS {
+            return Err(invalid("code-index snapshot has trailing sections"));
         }
         // The sections share nothing, so decoding takes the longest of them.
-        let (core, symbols, trigrams, words) = harn_parser::runtime_stack::scope(|scope| {
-            let graph = scope.spawn(|| decode_section("snapshot.decode_graph", graph));
+        let (core, next_node_id, edges, trigrams, words, node_runs) = scope(|scope| {
+            let edges = scope.spawn(|| decode_section::<Vec<Edge>>("snapshot.decode_edges", edges));
             let trigrams = scope.spawn(|| decode_section("snapshot.decode_trigrams", trigrams));
             let words = scope.spawn(|| decode_section("snapshot.decode_words", words));
+            let node_runs: Vec<_> = node_runs
+                .iter()
+                .map(|run| {
+                    scope.spawn(|| decode_section::<Vec<Node>>("snapshot.decode_nodes", run))
+                })
+                .collect();
             let core: io::Result<CoreSection> = decode_section("snapshot.decode_core", core);
-            (core, joined(graph), joined(trigrams), joined(words))
+            let next_node_id: io::Result<Option<NodeId>> =
+                decode_section("snapshot.decode_core", next_node_id);
+            (
+                core,
+                next_node_id,
+                joined(edges),
+                joined(trigrams),
+                joined(words),
+                node_runs.into_iter().map(joined).collect::<Vec<_>>(),
+            )
         });
         let (meta, next_file_id, files, deps, versions, agents, reconcile_progress, go_modules) =
             core?;
+        let symbols = match next_node_id? {
+            Some(next_id) => {
+                let mut runs = node_runs.into_iter();
+                let mut nodes = runs.next().transpose()?.unwrap_or_default();
+                for run in runs {
+                    nodes.append(&mut run?);
+                }
+                Some(GraphSnapshot {
+                    next_id,
+                    nodes,
+                    edges: edges?,
+                })
+            }
+            None => None,
+        };
         let snap = CodeIndexSnapshot {
             meta,
             next_file_id,
@@ -283,7 +332,7 @@ impl CodeIndexSnapshot {
             deps,
             versions,
             agents,
-            symbols: symbols?,
+            symbols,
             reconcile_progress,
             go_modules,
         };
@@ -373,13 +422,6 @@ fn invalid(message: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, message)
 }
 
-/// Join a scoped restore thread, re-raising its panic on the caller.
-fn joined<T>(handle: std::thread::ScopedJoinHandle<'_, T>) -> T {
-    handle
-        .join()
-        .unwrap_or_else(|panic| std::panic::resume_unwind(panic))
-}
-
 fn snapshot_matches_workspace(snap: &CodeIndexSnapshot, workspace_root: &Path) -> bool {
     let requested = super::state::canonicalize(workspace_root);
     let stored = super::state::canonicalize(Path::new(&snap.meta.workspace_root));
@@ -466,7 +508,7 @@ impl IndexState {
             .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "missing symbol graph"))?;
         // The graph and the two posting stores share no state, so restore
         // takes the longest of them rather than their sum.
-        let (graph, trigrams, words) = harn_parser::runtime_stack::scope(|scope| {
+        let (graph, trigrams, words) = scope(|scope| {
             let trigrams = scope.spawn(|| {
                 let _phase = super::timing::Phase::start("snapshot.restore_trigrams");
                 TrigramIndex::from_postings(snap.trigrams)

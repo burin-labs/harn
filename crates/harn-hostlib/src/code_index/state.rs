@@ -646,7 +646,16 @@ impl IndexState {
     /// Visibility is the full answer from [`Self::imports_of`], not just
     /// the explicit import statements: a Swift or Go file calls into its
     /// own module's other files without importing them.
+    ///
+    /// Every mutation path ends here, so this is also the batch boundary
+    /// where accumulated graph edits are folded into a fresh shared
+    /// generation once they are worth it.
     pub(super) fn relink_dirty_calls(&mut self) {
+        self.resolve_dirty_call_sites();
+        self.symbols.compact_if_heavy();
+    }
+
+    fn resolve_dirty_call_sites(&mut self) {
         let _phase = super::timing::Phase::start("graph.calls");
         let sites = self.symbols.take_dirty_call_sites();
         if sites.is_empty() {
