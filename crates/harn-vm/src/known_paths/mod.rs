@@ -140,13 +140,18 @@ pub fn credential_reason(path: &str) -> Option<&'static str> {
     registry().credential.reason.get(path).map(String::as_str)
 }
 
+// The preset accessors follow their sandbox consumers' platform gates, so a
+// target without that backend builds them only for the tests.
+
 /// Home-relative read-only roots of the PackageManagerConfig preset.
+#[cfg(any(test, target_os = "linux", target_os = "macos", target_os = "windows"))]
 pub(crate) fn package_config_home_paths() -> &'static [String] {
     &registry().package_config.home
 }
 
 /// Home-relative read-only roots of the DeveloperToolchains preset, with the
 /// Windows-only entries included when `windows` is set.
+#[cfg(any(test, target_os = "linux", target_os = "macos", target_os = "windows"))]
 pub(crate) fn toolchain_read_home_paths(windows: bool) -> impl Iterator<Item = &'static str> {
     let read = &registry().toolchain_read;
     let extra: &'static [String] = if windows { &read.windows_home } else { &[] };
@@ -154,6 +159,7 @@ pub(crate) fn toolchain_read_home_paths(windows: bool) -> impl Iterator<Item = &
 }
 
 /// Home-relative read+write cache roots of the DeveloperToolchains preset.
+#[cfg(any(test, target_os = "linux", target_os = "macos"))]
 pub(crate) fn toolchain_cache_home_paths() -> &'static [String] {
     &registry().toolchain_cache.home
 }
