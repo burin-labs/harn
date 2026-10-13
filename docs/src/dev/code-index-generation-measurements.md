@@ -75,11 +75,29 @@ After an edit, the baseline copies the whole index into an owned snapshot
 encodes sections in parallel straight from the live index (0.21 seconds) and
 writes them (0.57 seconds).
 
+## Per-file strings follow-up
+
+[Pull request #9810](https://github.com/burin-labs/harn/pull/9810) stores each
+file's path and language once rather than on every node: in memory as one
+shared path and the registry's static language name, and in the snapshot as a
+per-file table. It was measured against main on a quiet host, where every trial
+met the 0.25-core external-load bound; the
+[trial record](perf/code-index-node-strings.json) has the details.
+
+| Operation | Baseline median | Candidate median | Paired ratio [95% interval] | Pairs |
+| --- | --- | --- | --- | --- |
+| Unchanged restart | 0.525 s | 0.484 s | 0.923 [0.684, 0.941] | 5 |
+| Body edit on restart | 1.380 s | 1.175 s | 0.880 [0.825, 0.883] | 3 |
+| Resident body edit | 0.206 ms | 0.210 ms | 1.005 [0.981, 1.044] | 3 |
+
+The snapshot shrinks from 191,222,003 to 143,450,072 bytes, and peak RSS for
+an unchanged restart falls from 707 to 575 MiB. Every pair has identical
+corpus, graph, and posting digests.
+
 ## Residuals
 
 - A quiet-host repetition of this matrix.
-- Decoding is now the largest unchanged-restart phase. Node strings dominate
-  it; storing each file's path and language once instead of on every node, or
-  reading archived nodes in place, would cut it further.
+- Decoding is now the largest unchanged-restart phase. Reading archived nodes
+  in place would cut it further.
 - The file write after an edit. Writing sections as they finish encoding, or
   persisting after the index is published, would remove most of it.
