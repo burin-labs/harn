@@ -321,7 +321,14 @@ fn main() {
     if scenario == "cold" {
         std::fs::write(&fixture, original).unwrap();
         start = Instant::now();
-        let (state, outcome) = IndexState::build_from_root(root);
+        // `cold <trial> <workers>` compares fact-worker counts on one binary.
+        let (state, outcome) = match args.get(4) {
+            Some(workers) => IndexState::build_from_root_with_workers(
+                root,
+                workers.to_str().unwrap().parse().unwrap(),
+            ),
+            None => IndexState::build_from_root(root),
+        };
         assert!(outcome.files_indexed > 8000);
         state.save_snapshot().unwrap();
         *capability.shared().lock().unwrap() = Some(state);

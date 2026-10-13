@@ -1,4 +1,5 @@
 use super::*;
+use crate::code_index::file_facts::distinct_ref_words;
 
 #[test]
 fn repeated_calls_expand_only_declarations_across_restore_and_rebuild() {
@@ -21,7 +22,7 @@ fn repeated_calls_expand_only_declarations_across_restore_and_rebuild() {
     // The actual reference-expansion scan stays bounded by declarations,
     // regardless of how many same-named call expressions the parser produced.
     assert_eq!(graph.names.references("shared").len(), 2);
-    let refs = graph.collect_cross_file_refs(&source, 4);
+    let refs = graph.collect_cross_file_refs(&distinct_ref_words(&source, MIN_REF_WORD_LEN), 4);
     assert_eq!(refs.len(), 2);
     assert!(refs
         .iter()
@@ -48,7 +49,12 @@ fn repeated_calls_expand_only_declarations_across_restore_and_rebuild() {
         &[],
     );
     assert_eq!(graph.names.references("shared").len(), 1);
-    assert_eq!(graph.collect_cross_file_refs(&source, 4).len(), 1);
+    assert_eq!(
+        graph
+            .collect_cross_file_refs(&distinct_ref_words(&source, MIN_REF_WORD_LEN), 4)
+            .len(),
+        1
+    );
     assert_eq!(graph.take_dirty_call_sites().len(), 256);
     graph.remove_file(4);
     assert!(graph.names.call_sites("shared").is_empty());

@@ -31,9 +31,29 @@ impl TrigramIndex {
 
     /// Replace the postings for `id` with the trigrams of `content`.
     pub fn index_file(&mut self, id: FileId, content: &str) {
-        let trigrams = extract_trigrams(content);
+        self.install_file(id, extract_trigrams(content));
+    }
+
+    /// Replace the postings for `id` with already-extracted distinct
+    /// `trigrams`.
+    pub(super) fn install_file(&mut self, id: FileId, trigrams: impl IntoIterator<Item = Trigram>) {
         self.postings
             .replace_file(id, trigrams.into_iter().map(|tg| (tg, std::iter::once(id))));
+    }
+
+    /// Build from each file's distinct trigrams, in strictly ascending
+    /// file id order. Answers exactly as [`Self::index_file`] per file would.
+    pub(super) fn from_files<T>(files: impl IntoIterator<Item = (FileId, T)>) -> Self
+    where
+        T: IntoIterator<Item = Trigram>,
+    {
+        Self {
+            postings: super::postings::FilePostings::from_files(
+                files
+                    .into_iter()
+                    .map(|(id, trigrams)| (id, trigrams.into_iter().map(move |tg| (tg, id)))),
+            ),
+        }
     }
 
     /// Drop every posting contributed by `id`.
@@ -184,6 +204,51 @@ mod tests {
             HashSet::from([2, 4])
         );
         assert!(restored.query(&query_trigrams("absent")).is_empty());
+    }
+
+    #[test]
+    fn a_bulk_build_answers_like_per_file_indexing() {
+        let sources = [
+            (1, "fn alpha() { beta() }"),
+            (2, "struct Beta;"),
+            (4, ""),
+            (7, "alpha beta gamma ALPHA"),
+        ];
+        let mut incremental = TrigramIndex::new();
+        for (id, source) in sources {
+            incremental.index_file(id, source);
+        }
+        let mut bulk = TrigramIndex::from_files(
+            sources
+                .iter()
+                .map(|(id, source)| (*id, extract_trigrams(source))),
+        );
+        let same = |bulk: &TrigramIndex, incremental: &TrigramIndex| {
+            let rows = |index: &TrigramIndex| -> Vec<(Trigram, Vec<FileId>)> {
+                index
+                    .snapshot_postings()
+                    .into_iter()
+                    .map(|posting| (posting.trigram, posting.files))
+                    .collect()
+            };
+            assert_eq!(rows(bulk), rows(incremental));
+            assert_eq!(bulk.distinct_trigrams(), incremental.distinct_trigrams());
+            for needle in ["alp", "beta", "gamma", "absent"] {
+                assert_eq!(
+                    bulk.query(&query_trigrams(needle)),
+                    incremental.query(&query_trigrams(needle))
+                );
+            }
+        };
+        same(&bulk, &incremental);
+        // The removal index must survive the bulk path, or later edits
+        // would leave stale postings behind.
+        for index in [&mut bulk, &mut incremental] {
+            index.remove_file(1);
+            index.index_file(7, "delta");
+            index.index_file(9, "alpha");
+        }
+        same(&bulk, &incremental);
     }
 
     #[test]
