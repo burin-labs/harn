@@ -20,11 +20,15 @@ impl DaemonProbe {
         // Bootstrap a writer before opening the read end, so a helper that
         // starts after parent death cannot block waiting for a vanished writer.
         // It then drops its own writer and waits only on the parent's custody.
+        // The stdout line is a readiness handshake: on macOS `/bin/sh` is a
+        // shim that re-execs the real shell, and the helper's argv cannot be
+        // read mid-exec. Detached helpers discard it; tests block on it.
         std::fs::write(
             &helper,
             format!(
                 "exec 3<> {fifo}\nexec 4< {fifo}\nexec 3>&-\n\
                  printf '%s\\n' \"$$\" >> {started}\n\
+                 printf '%s\\n' \"$$\"\n\
                  while IFS= read -r line <&4; do :; done\n",
                 fifo = shell_path(&fifo),
                 started = shell_path(&started),
@@ -145,16 +149,25 @@ mod tests {
     struct Child(std::process::Child);
 
     impl Child {
+        /// Spawn a helper and block until it reports its pid from inside the
+        /// read loop's shell, so its argv is measurable.
         fn spawn(probe: &DaemonProbe) -> Self {
-            Self(
+            use std::io::BufRead;
+            let mut child = Self(
                 std::process::Command::new("sh")
                     .arg(&probe.helper)
                     .stdin(std::process::Stdio::null())
-                    .stdout(std::process::Stdio::null())
+                    .stdout(std::process::Stdio::piped())
                     .stderr(std::process::Stdio::null())
                     .spawn()
                     .expect("spawn FIFO reader"),
-            )
+            );
+            let mut ready = String::new();
+            std::io::BufReader::new(child.0.stdout.take().unwrap())
+                .read_line(&mut ready)
+                .expect("read helper readiness");
+            assert_eq!(ready.trim(), child.0.id().to_string());
+            child
         }
     }
 
