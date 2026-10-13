@@ -197,6 +197,16 @@ impl Linter<'_> {
         });
     }
 
+    /// `xs.push(v)` rewrites `xs` like `xs[i] = v` does, so it counts as a
+    /// reassignment for `mutable-never-reassigned`.
+    pub(super) fn record_mutating_call_assignment(&mut self, node: &SNode) {
+        if let Some(root) = harn_parser::builtin_methods::mutating_call_place(node)
+            .and_then(harn_parser::builtin_methods::place_root)
+        {
+            self.assignments.insert(root.to_string());
+        }
+    }
+
     /// The root identifier of a method receiver: `a.b.c` and `a[0]` both root
     /// at `a`. `None` when the receiver is not rooted in a plain name.
     fn method_receiver_root(object: &SNode) -> Option<&str> {

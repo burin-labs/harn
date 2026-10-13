@@ -13,8 +13,8 @@ pipeline default(harness: Harness, task: unknown) {
   // first / last
   harness.stdio.println(nums.first())
   harness.stdio.println(nums.last())
-  harness.stdio.println(nums.first(3))
-  harness.stdio.println(nums.last(2))
+  harness.stdio.println(nums.take(3))
+  harness.stdio.println(nums.slice(-2))
   // partition
   const parts = nums.partition({ x -> x % 2 == 0 })
   harness.stdio.println(parts.first())

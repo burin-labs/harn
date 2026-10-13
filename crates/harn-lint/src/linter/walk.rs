@@ -427,12 +427,6 @@ impl<'a> Linter<'a> {
                 method,
                 args,
             } => {
-                // `xs.push(v)` rewrites `xs` like `xs[i] = v` does.
-                if let Some(root) = harn_parser::builtin_methods::mutating_call_place(snode)
-                    .and_then(harn_parser::builtin_methods::place_root)
-                {
-                    self.assignments.insert(root.to_string());
-                }
                 self.check_harness_method_effect_policy(object, method, args, snode.span);
                 if self.harness_call_uses_background_flag(object, method, args) {
                     self.warn_unmanaged_long_running_call(method, snode.span);
@@ -1338,9 +1332,9 @@ impl<'a> Linter<'a> {
     ///
     /// Both the ambient global and the typed `harness.*` method that replaced
     /// it route here, so migrating a call site cannot silence a rule. Anything
-    /// added here is spelling-independent for free; anything left matching
-    /// `Node::FunctionCall` on a name is not.
+    /// added here is spelling-independent; a `Node::FunctionCall` name is not.
     fn check_builtin_call_rules(&mut self, node: &SNode) {
+        self.record_mutating_call_assignment(node);
         if let Some(registry) = self
             .call_names_builtin(node, "mcp_tools")
             .and_then(|args| args.first())

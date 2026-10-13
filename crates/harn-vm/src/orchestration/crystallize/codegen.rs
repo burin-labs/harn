@@ -237,6 +237,6 @@ mod tests {
         let generated = generate_harn_code(&candidate);
 
         assert!(generated.contains("  let review_warnings = []"));
-        assert!(generated.contains("review_warnings = review_warnings.appending"));
+        assert!(generated.contains("review_warnings.push("));
     }
 }

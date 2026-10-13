@@ -377,7 +377,7 @@ const list = [1, 2, 3]
 const args = []
 let i = 0
 while i < 3 {
-  harness.stdio.log(list.count(...args))
+  harness.stdio.log(list.len(...args))
   i = i + 1
 }
 }",

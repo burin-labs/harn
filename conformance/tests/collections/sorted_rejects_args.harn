@@ -1,3 +1,4 @@
 pipeline test(harness: Harness, task: unknown) {
-  harness.stdio.log([3, 1, 2].sorted({ item -> item }))
+  const items: any = [3, 1, 2]
+  harness.stdio.log(items.sorted({ item -> item }))
 }

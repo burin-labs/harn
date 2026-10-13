@@ -123,8 +123,14 @@ async fn every_mutating_registry_row_is_handled_by_the_mutating_dispatch() {
                 "insert" => vec![VmValue::Int(0), VmValue::Int(9)],
                 "extend" => vec![VmValue::List(Arc::new(vec![VmValue::Int(3)]))],
                 "sort" | "pop" | "clear" | "reverse" => Vec::new(),
-                "sort_by" => vec![VmValue::BuiltinRef("to_string".into())],
+                // No key call happens on the one-element receiver below.
+                "sort_by" => vec![VmValue::BuiltinRef("key".into())],
                 _ => vec![VmValue::Int(1)],
+            };
+            let value = if name == "sort_by" {
+                VmValue::List(Arc::new(vec![VmValue::Int(1)]))
+            } else {
+                value.clone()
             };
             let mutation = vm
                 .apply_mutating_method(&value, name, &args)

@@ -156,7 +156,9 @@ fn mutating_methods_need_a_mutable_place() {
     assert_eq!(errs.len(), 3, "{errs:?}");
     assert!(errs[0].contains("mutates 'frozen'"), "{errs:?}");
     assert!(errs[1].contains("mutates 'param'"), "{errs:?}");
-    assert!(errs[2].contains("temporary value"), "{errs:?}");
+    // A temporary's `sort` can only have meant the copy, so it repairs to
+    // `sorted` rather than reporting the missing place.
+    assert!(errs[2].contains("use `sorted()`"), "{errs:?}");
 }
 
 #[test]

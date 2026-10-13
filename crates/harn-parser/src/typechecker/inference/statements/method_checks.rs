@@ -63,7 +63,11 @@ impl TypeChecker {
             }
             return;
         };
-        self.check_builtin_method_arity(row, method, args, span);
+        // A dict may be a namespace or carry a callable member of the same
+        // name, so only closed receivers are held to the signature's arity.
+        if kind != MethodReceiver::Dict {
+            self.check_builtin_method_arity(row, method, args, span);
+        }
         if row.is_mutating() {
             self.check_mutating_method_receiver(object, method, kind, scope, span);
         }

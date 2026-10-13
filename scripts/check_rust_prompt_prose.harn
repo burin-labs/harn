@@ -106,13 +106,13 @@ pub fn decode_normal_literal(raw: string) -> string {
   let out = ""
   let i = 0
   while i < n {
-    const ch = body.char_at(i)
+    const ch = body.char_at(i) ?? ""
     if ch != "\\" || i + 1 >= n {
       out = out + ch
       i = i + 1
       continue
     }
-    const next = body.char_at(i + 1)
+    const next = body.char_at(i + 1) ?? ""
     if next == "n" {
       out = out + "\n"
       i = i + 2
@@ -140,8 +140,8 @@ pub fn decode_normal_literal(raw: string) -> string {
     } else if is_octal(next) {
       let digits = next
       let j = i + 2
-      while j < n && digits.len() < 3 && is_octal(body.char_at(j)) {
-        digits = digits + body.char_at(j)
+      while j < n && digits.len() < 3 && is_octal(body.char_at(j) ?? "") {
+        digits = digits + (body.char_at(j) ?? "")
         j = j + 1
       }
       // One code point per octal escape (parse_octal kept for completeness).
@@ -219,7 +219,7 @@ pub fn decode_hex_run(body: string, start: int, width: int) -> any {
   let value = 0
   let i = start
   while i < start + width {
-    const v = hex_val(body.char_at(i))
+    const v = hex_val(body.char_at(i) ?? "")
     if v < 0 {
       return {ok: false, value: 0, next: start}
     }

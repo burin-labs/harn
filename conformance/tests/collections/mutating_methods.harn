@@ -46,10 +46,10 @@ pipeline test(harness: Harness, task: unknown) {
   harness.stdio.log(options.remove("a"))
   harness.stdio.log(options.remove("missing"))
   harness.stdio.log(options)
-  // Places: property and subscript paths rooted at a `let` binding.
-  let state = {queue: [1], groups: [[1], [2]]}
+  // Places: property paths rooted at a `let` binding.
+  let state = {queue: [1], groups: {b: [2]}}
   state.queue.push(2)
-  state.groups[1].push(3)
+  state.groups.b.push(3)
   harness.stdio.log(state)
   // A user method of the same name is an ordinary call.
   let stack = Stack {items: []}
