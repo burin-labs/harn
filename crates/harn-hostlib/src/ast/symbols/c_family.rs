@@ -100,6 +100,25 @@ pub(super) fn extract_cpp(root: Node<'_>, source: &str, out: &mut Vec<Symbol>) {
                 enum_case_symbol(node, source, container, pos, out);
                 None
             }
+            // `int x() const;` in a class body is a member function
+            // declaration, which the grammar parses as a field.
+            "field_declaration" if declares_member_function(node) => {
+                let kind = if container.is_some() {
+                    SymbolKind::Method
+                } else {
+                    SymbolKind::Function
+                };
+                push_function(
+                    node,
+                    source,
+                    container,
+                    member_access(node, source),
+                    pos,
+                    kind,
+                    out,
+                );
+                None
+            }
             "field_declaration" => {
                 push_field(
                     node,
@@ -177,6 +196,29 @@ fn push_field(
         pos,
         out,
     );
+}
+
+/// Whether a C++ field declaration declares a member function rather than
+/// data. Pointer and reference return types wrap the function declarator;
+/// a function-pointer member parenthesizes its name, so it stays a field.
+fn declares_member_function(field: Node<'_>) -> bool {
+    let mut declarator = field.child_by_field_name("declarator");
+    while let Some(node) = declarator {
+        match node.kind() {
+            "function_declarator" => {
+                return node
+                    .child_by_field_name("declarator")
+                    .is_some_and(|name| name.kind() != "parenthesized_declarator");
+            }
+            "pointer_declarator" | "reference_declarator" => {
+                declarator = node
+                    .child_by_field_name("declarator")
+                    .or_else(|| node.named_child(0));
+            }
+            _ => return false,
+        }
+    }
+    false
 }
 
 fn child_by_kind<'tree>(node: Node<'tree>, kind: &str) -> Option<Node<'tree>> {
@@ -262,6 +304,16 @@ fn declarator_name(node: Node<'_>, source: &str) -> Option<String> {
     }
     node.child_by_field_name("declarator")
         .or_else(|| node.child_by_field_name("name"))
+        // Reference and parenthesized declarators wrap their inner
+        // declarator without a field name.
+        .or_else(|| {
+            matches!(
+                node.kind(),
+                "reference_declarator" | "parenthesized_declarator"
+            )
+            .then(|| node.named_child(0))
+            .flatten()
+        })
         .and_then(|inner| declarator_name(inner, source))
 }
 
@@ -278,4 +330,52 @@ fn declarator_params(node: Node<'_>, source: &str) -> String {
         }
     }
     "()".into()
+}
+
+#[cfg(all(test, feature = "grammar-systems"))]
+mod tests {
+    use crate::ast::api::symbols_from_source;
+    use crate::ast::{Language, SymbolKind};
+
+    fn kinds(source: &str, language: Language) -> Vec<(String, SymbolKind, String)> {
+        symbols_from_source(source, language)
+            .unwrap()
+            .into_iter()
+            .map(|s| (s.name, s.kind, s.signature))
+            .collect()
+    }
+
+    #[test]
+    fn cpp_member_function_declarations_are_methods_not_fields() {
+        let source = "class Point {\npublic:\n  int x() const;\n  int& at(int i);\n  \
+                      Point* clone() const;\n  virtual void draw() = 0;\n  int y;\n  \
+                      int (*callback)(int);\n};\n";
+        let symbols = kinds(source, Language::Cpp);
+        let kind_of = |name: &str| {
+            symbols
+                .iter()
+                .find(|(n, _, _)| n == name)
+                .unwrap_or_else(|| panic!("{name} missing from {symbols:?}"))
+                .clone()
+        };
+        assert_eq!(kind_of("x").1, SymbolKind::Method);
+        assert_eq!(kind_of("x").2, "x()");
+        assert_eq!(kind_of("at").1, SymbolKind::Method);
+        assert_eq!(kind_of("clone").1, SymbolKind::Method);
+        assert_eq!(kind_of("draw").1, SymbolKind::Method);
+        // Data members, including a function pointer, stay fields.
+        assert_eq!(kind_of("y").1, SymbolKind::Field);
+        assert_eq!(kind_of("callback").1, SymbolKind::Field);
+    }
+
+    #[test]
+    fn c_function_pointer_members_stay_fields() {
+        let symbols = kinds("struct ops {\n  int (*run)(int);\n};\n", Language::C);
+        assert!(
+            symbols
+                .iter()
+                .any(|(n, k, _)| n == "run" && *k == SymbolKind::Field),
+            "{symbols:?}"
+        );
+    }
 }
