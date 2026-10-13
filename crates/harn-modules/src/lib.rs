@@ -23,6 +23,7 @@ pub mod project_config;
 mod references;
 mod standalone;
 mod stdlib;
+pub use stdlib::{stdlib_catalog, try_stdlib_catalog};
 mod symbol_reachability;
 mod type_dependencies;
 mod typecheck;

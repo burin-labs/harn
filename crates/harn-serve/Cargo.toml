@@ -85,6 +85,7 @@ default-features = false
 features = ["use_pem", "aws_lc_rs"]
 
 [dev-dependencies]
+harn-modules = { path = "../harn-modules", version = "=0.10.166", features = ["bundled-stdlib"] }
 rusqlite = { version = "0.40", features = ["bundled"] }
 async-compression = { version = "0.4", features = ["tokio", "gzip"] }
 filetime = "0.2"

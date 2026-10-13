@@ -122,7 +122,8 @@ pub(crate) fn embedded_stdlib_digest_bytes() -> &'static [u8; 32] {
     static DIGEST: OnceLock<[u8; 32]> = OnceLock::new();
     DIGEST.get_or_init(|| {
         embedded_stdlib_digest_from_sources(
-            harn_stdlib::STDLIB_SOURCES
+            harn_modules::stdlib_catalog()
+                .sources
                 .iter()
                 .map(|source| (source.module, source.source)),
         )

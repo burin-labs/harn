@@ -10,6 +10,7 @@ use std::process::ExitCode;
 use harn_postgres_perf::LoadgenConfig;
 
 fn main() -> ExitCode {
+    harn_stdlib::install().expect("install the bundled Harn stdlib");
     let config = LoadgenConfig::from_env();
 
     if !config.url_available() {

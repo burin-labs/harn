@@ -29,6 +29,7 @@ members = [
     "crates/harn-modules",
     "crates/harn-package",
     "crates/harn-stdlib",
+    "crates/harn-stdlib-catalog",
     "crates/harn-stdlib-artifacts",
     "crates/harn-vm",
     "crates/harn-wasm",

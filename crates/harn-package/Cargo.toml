@@ -43,6 +43,7 @@ uuid = { version = "1", features = ["v4", "v7"] }
 which = "8"
 
 [dev-dependencies]
+harn-modules = { path = "../harn-modules", version = "=0.10.166", features = ["bundled-stdlib"] }
 futures = "0.3"
 
 [features]

@@ -1092,7 +1092,8 @@ fn emitted_event_types(source: &str) -> Vec<String> {
 fn every_event_type_the_embedded_stdlib_emits_is_registered() {
     let registered: std::collections::BTreeSet<&str> =
         crate::agent_events::from_host::registered_host_event_types().collect();
-    let mut unregistered: Vec<String> = harn_stdlib::STDLIB_SOURCES
+    let mut unregistered: Vec<String> = harn_modules::stdlib_catalog()
+        .sources
         .iter()
         .flat_map(|entry| {
             emitted_event_types(entry.source)
@@ -1115,7 +1116,8 @@ fn every_event_type_the_embedded_stdlib_emits_is_registered() {
 fn the_emitter_scan_actually_finds_emitters() {
     // A scanner that silently matches nothing would make the drift check above
     // vacuously green, so pin that it sees a known emitter in the real sources.
-    let found: std::collections::BTreeSet<String> = harn_stdlib::STDLIB_SOURCES
+    let found: std::collections::BTreeSet<String> = harn_modules::stdlib_catalog()
+        .sources
         .iter()
         .flat_map(|entry| emitted_event_types(entry.source))
         .collect();

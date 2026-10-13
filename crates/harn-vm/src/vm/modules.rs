@@ -490,7 +490,7 @@ impl Vm {
     }
 
     /// Widen a stdlib module's export surface with the builtins it re-exports
-    /// (see [`harn_stdlib::builtin_reexports`]), so a Rust-implemented member of
+    /// (see [`harn_stdlib_catalog::builtin_reexports`]), so a Rust-implemented member of
     /// the module imports exactly like a Harn-implemented one.
     ///
     /// The name binds to a [`VmValue::BuiltinRef`], which is what a bare mention
@@ -498,7 +498,7 @@ impl Vm {
     /// global `assert_eq` are the same function reached two ways, not two
     /// implementations that can drift.
     fn add_builtin_reexports(module: &str, loaded: &mut LoadedModule) {
-        for name in harn_stdlib::builtin_reexports(module) {
+        for name in harn_stdlib_catalog::builtin_reexports(module) {
             // A `pub fn` in the module's Harn source wins: it is the more
             // specific declaration, and silently shadowing it here would make
             // the source of an export unguessable from reading the module.

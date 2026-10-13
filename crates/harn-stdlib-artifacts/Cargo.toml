@@ -15,7 +15,7 @@ build = "build.rs"
 # `harn` build took 337 s -> 390 s (dev) and 625 s -> 664 s (release), with
 # about 40% more compiler CPU. Hosts enable it for the binaries they ship.
 # Without it the table is empty and every import behaves as it always has.
-embed = ["dep:harn-vm"]
+embed = ["dep:harn-vm", "dep:harn-stdlib"]
 
 [dependencies]
 harn-vm = { path = "../harn-vm", version = "=0.10.166", default-features = false }
@@ -26,6 +26,8 @@ harn-vm = { path = "../harn-vm", version = "=0.10.166", default-features = false
 # not different code), so the lean feature set keeps this second build small.
 [build-dependencies]
 harn-vm = { path = "../harn-vm", version = "=0.10.166", default-features = false, optional = true }
+# The sources the build script compiles; a stdlib edit reruns the script.
+harn-stdlib = { path = "../harn-stdlib", version = "=0.10.166", optional = true }
 
 [lints]
 workspace = true

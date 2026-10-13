@@ -1031,7 +1031,7 @@ fn main(harness: Harness) {
         assert!(matches!(result, crate::value::VmValue::Bool(true)));
     }
 
-    /// `harn_stdlib::builtin_reexports` names builtins from a crate that
+    /// `harn_stdlib_catalog::builtin_reexports` names builtins from a crate that
     /// cannot see the builtin registry, so nothing there can catch a typo or a
     /// rename. This is that check: every re-exported name must resolve to a
     /// real builtin, or `import { … } from "std/…"` binds a reference to
@@ -1044,8 +1044,8 @@ fn main(harness: Harness) {
             .collect();
 
         let mut checked = 0;
-        for entry in harn_stdlib::STDLIB_SOURCES {
-            for name in harn_stdlib::builtin_reexports(entry.module) {
+        for entry in harn_modules::stdlib_catalog().sources {
+            for name in harn_stdlib_catalog::builtin_reexports(entry.module) {
                 assert!(
                     registered.contains(name),
                     "std/{} re-exports '{name}', which is not a registered builtin",

@@ -39,6 +39,7 @@ tokenizers = { version = "0.23", optional = true, default-features = false, feat
 ] }
 
 [dev-dependencies]
+harn-modules = { path = "../harn-modules", version = "=0.10.166", features = ["bundled-stdlib"] }
 tempfile = "3"
 
 [features]
