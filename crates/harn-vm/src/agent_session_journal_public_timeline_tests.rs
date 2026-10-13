@@ -1,5 +1,6 @@
 use super::*;
 use crate::session_timeline::{query_session_store_timeline, SessionTimelineQuery};
+use harn_session_store::SessionStore;
 use serde_json::json;
 
 #[tokio::test]

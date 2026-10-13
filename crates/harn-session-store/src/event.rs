@@ -335,7 +335,10 @@ pub struct EventSignature {
 /// Canonical bytes used for hashing & signing. Keys are sorted so the
 /// signature is stable across hashmap iteration order changes.
 pub fn canonical_event_bytes(event: &StoredEvent) -> Vec<u8> {
-    let canonical = serde_json::json!({
+    // The payload is the bulk of an event, so it is encoded in place rather
+    // than cloned into the envelope. The output is the canonical encoding of
+    // the full envelope object, `payload` included, with keys sorted.
+    let envelope = serde_json::json!({
         "schema": "harn.session.event.v1",
         "session_id": event.session_id,
         "event_id": event.event_id,
@@ -343,13 +346,23 @@ pub fn canonical_event_bytes(event: &StoredEvent) -> Vec<u8> {
         "parent_event_id": event.parent_event_id,
         "actor": event.actor,
         "kind": event.kind.discriminator(),
-        "payload": event.payload,
         "tags": event.tags,
         "headers": event.headers,
         "ts_ms": event.ts_ms,
         "prev_hash": event.prev_hash,
     });
-    canonical_json_bytes(&canonical)
+    let Value::Object(fields) = &envelope else {
+        unreachable!("the event envelope is an object literal");
+    };
+    let mut entries: Vec<(&str, &Value)> = fields
+        .iter()
+        .map(|(key, value)| (key.as_str(), value))
+        .chain(std::iter::once(("payload", &event.payload)))
+        .collect();
+    entries.sort_unstable_by(|left, right| left.0.cmp(right.0));
+    let mut buf = Vec::new();
+    write_canonical_entries(&mut buf, entries.into_iter());
+    buf
 }
 
 /// Stable JSON encoding that sorts object keys recursively.
@@ -364,10 +377,7 @@ fn write_canonical(buf: &mut Vec<u8>, value: &Value) {
         Value::Null => buf.extend_from_slice(b"null"),
         Value::Bool(b) => buf.extend_from_slice(if *b { b"true" } else { b"false" }),
         Value::Number(n) => buf.extend_from_slice(n.to_string().as_bytes()),
-        Value::String(s) => {
-            let encoded = serde_json::to_string(s).expect("string round-trip");
-            buf.extend_from_slice(encoded.as_bytes());
-        }
+        Value::String(s) => write_json_string(buf, s),
         Value::Array(items) => {
             buf.push(b'[');
             for (i, item) in items.iter().enumerate() {
@@ -379,21 +389,44 @@ fn write_canonical(buf: &mut Vec<u8>, value: &Value) {
             buf.push(b']');
         }
         Value::Object(map) => {
-            let mut keys: Vec<&String> = map.keys().collect();
-            keys.sort();
-            buf.push(b'{');
-            for (i, key) in keys.iter().enumerate() {
-                if i > 0 {
-                    buf.push(b',');
-                }
-                let encoded_key = serde_json::to_string(key).expect("key round-trip");
-                buf.extend_from_slice(encoded_key.as_bytes());
-                buf.push(b':');
-                write_canonical(buf, &map[*key]);
+            // Without serde_json's `preserve_order` the map already iterates
+            // in key order; sort only when some dependency enables it.
+            let in_order = map
+                .keys()
+                .zip(map.keys().skip(1))
+                .all(|(left, right)| left < right);
+            if in_order {
+                write_canonical_entries(buf, map.iter().map(|(k, v)| (k.as_str(), v)));
+            } else {
+                let mut entries: Vec<(&str, &Value)> =
+                    map.iter().map(|(k, v)| (k.as_str(), v)).collect();
+                entries.sort_unstable_by(|left, right| left.0.cmp(right.0));
+                write_canonical_entries(buf, entries.into_iter());
             }
-            buf.push(b'}');
         }
     }
+}
+
+fn write_canonical_entries<'a>(
+    buf: &mut Vec<u8>,
+    entries: impl Iterator<Item = (&'a str, &'a Value)>,
+) {
+    buf.push(b'{');
+    for (i, (key, value)) in entries.enumerate() {
+        if i > 0 {
+            buf.push(b',');
+        }
+        write_json_string(buf, key);
+        buf.push(b':');
+        write_canonical(buf, value);
+    }
+    buf.push(b'}');
+}
+
+/// The exact bytes `serde_json::to_string` produces for a string, written
+/// straight into the buffer.
+fn write_json_string(buf: &mut Vec<u8>, value: &str) {
+    serde_json::to_writer(&mut *buf, value).expect("writing a JSON string to memory cannot fail");
 }
 
 pub(crate) fn now_ms_and_rfc3339() -> (i64, String) {
@@ -412,4 +445,120 @@ pub(crate) fn ms_to_rfc3339(ms: i64) -> String {
         .ok()
         .and_then(|dt| dt.format(&Rfc3339).ok())
         .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod canonical_tests {
+    use super::*;
+
+    /// The encoder record hashes and signatures were computed with before it
+    /// stopped cloning the payload. Every stored chain was hashed over these
+    /// bytes, so the current encoder must reproduce them exactly.
+    fn reference_canonical_event_bytes(event: &StoredEvent) -> Vec<u8> {
+        fn write(buf: &mut Vec<u8>, value: &Value) {
+            match value {
+                Value::Null => buf.extend_from_slice(b"null"),
+                Value::Bool(b) => buf.extend_from_slice(if *b { b"true" } else { b"false" }),
+                Value::Number(n) => buf.extend_from_slice(n.to_string().as_bytes()),
+                Value::String(s) => {
+                    buf.extend_from_slice(serde_json::to_string(s).unwrap().as_bytes());
+                }
+                Value::Array(items) => {
+                    buf.push(b'[');
+                    for (i, item) in items.iter().enumerate() {
+                        if i > 0 {
+                            buf.push(b',');
+                        }
+                        write(buf, item);
+                    }
+                    buf.push(b']');
+                }
+                Value::Object(map) => {
+                    let mut keys: Vec<&String> = map.keys().collect();
+                    keys.sort();
+                    buf.push(b'{');
+                    for (i, key) in keys.iter().enumerate() {
+                        if i > 0 {
+                            buf.push(b',');
+                        }
+                        buf.extend_from_slice(serde_json::to_string(key).unwrap().as_bytes());
+                        buf.push(b':');
+                        write(buf, &map[*key]);
+                    }
+                    buf.push(b'}');
+                }
+            }
+        }
+        let canonical = serde_json::json!({
+            "schema": "harn.session.event.v1",
+            "session_id": event.session_id,
+            "event_id": event.event_id,
+            "tenant_id": event.tenant_id,
+            "parent_event_id": event.parent_event_id,
+            "actor": event.actor,
+            "kind": event.kind.discriminator(),
+            "payload": event.payload,
+            "tags": event.tags,
+            "headers": event.headers,
+            "ts_ms": event.ts_ms,
+            "prev_hash": event.prev_hash,
+        });
+        let mut buf = Vec::new();
+        write(&mut buf, &canonical);
+        buf
+    }
+
+    fn event(payload: Value, kind: SessionEventKind) -> StoredEvent {
+        StoredEvent {
+            event_id: 7,
+            session_id: "session-\u{1F980}".to_string(),
+            tenant_id: Some("tenant".to_string()),
+            parent_event_id: Some(3),
+            actor: Some("assistant".to_string()),
+            kind,
+            payload,
+            tags: vec!["b".to_string(), "a\"quoted".to_string()],
+            headers: BTreeMap::from([
+                ("z-key".to_string(), "line\nbreak".to_string()),
+                (
+                    "a-key".to_string(),
+                    "tab\tand \u{7f} control \u{1}".to_string(),
+                ),
+            ]),
+            ts_ms: -12,
+            ts: "1970-01-01T00:00:00Z".to_string(),
+            record_hash: String::new(),
+            prev_hash: Some("sha256:abc".to_string()),
+            signed_by: None,
+        }
+    }
+
+    #[test]
+    fn canonical_event_bytes_match_the_reference_encoder() {
+        let payloads = [
+            Value::Null,
+            serde_json::json!("bare string \\ with \"escapes\" and \u{2028}"),
+            serde_json::json!({
+                "zeta": [1, -2.5, 1e300, true, null, {"b": 1, "a": [{}]}],
+                "alpha": {"payloadish": "nested", "PAYLOAD": "case", "émoji": "\u{1F600}"},
+                "payload": "a key that collides with the envelope's payload name",
+                "": "empty key",
+                "big": u64::MAX,
+            }),
+        ];
+        for payload in payloads {
+            for kind in [
+                SessionEventKind::Message,
+                SessionEventKind::Custom {
+                    custom_type: "loop_checkpoint".to_string(),
+                },
+            ] {
+                let event = event(payload.clone(), kind);
+                assert_eq!(
+                    String::from_utf8(canonical_event_bytes(&event)).unwrap(),
+                    String::from_utf8(reference_canonical_event_bytes(&event)).unwrap(),
+                );
+            }
+        }
+    }
 }

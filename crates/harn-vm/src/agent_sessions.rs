@@ -53,10 +53,12 @@ mod journal;
 pub mod reclaim_hooks;
 mod state;
 mod subscribers;
+#[cfg(test)]
+pub(crate) use journal::next_journal_event;
 pub(crate) use journal::{active_run_id, has_journal, journal_first_event_id, journal_store};
 pub(crate) use journal::{
     claim_journal_task, clear_journal, install_journal, journal_flush_lock, journal_owns_session,
-    journal_sessions_for_task, next_journal_event, record_persisted_journal_event,
+    journal_sessions_for_task, pending_journal_events, record_persisted_journal_events,
 };
 pub use subscribers::{append_subscriber, subscriber_count, subscribers_for, SessionSubscriber};
 const LIVE_CLIENT_EVENT_KIND: &str = "live_session_client";
