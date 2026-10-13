@@ -464,12 +464,14 @@ fn from_host_judge_decision_preserves_source() {
             trigger,
             escalation_recommended,
             escalation_target,
+            requirement_report,
             ..
         } => {
             assert_eq!(source.as_deref(), Some("deterministic"));
             assert_eq!(trigger.as_deref(), Some("verify_completion"));
             assert_eq!(escalation_recommended, Some(true));
             assert_eq!(escalation_target.as_deref(), Some("frontier"));
+            assert_eq!(requirement_report, None);
         }
         other => panic!("expected JudgeDecision, got {other:?}"),
     }

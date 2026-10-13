@@ -493,6 +493,22 @@ fn agent_event_ext_fixture_events() -> Vec<AgentEvent> {
             gap_class: None,
             judge_outcome: None,
             terminal_evidence_preserved: None,
+            requirement_report: Some(serde_json::json!({
+                "schema": "harn.completion_requirement_report.v1",
+                "complete": false,
+                "required_count": 1,
+                "reported_count": 1,
+                "pending_count": 1,
+                "pending_names": ["Reach the requested handler."],
+                "rows": [{
+                    "requirement_id": "behavior",
+                    "name": "Reach the requested handler.",
+                    "met": false,
+                    "evidence_refs": [9],
+                    "status": "unsupported",
+                    "evidence_roles": ["deterministic_verification"]
+                }]
+            })),
         },
         AgentEvent::StructuralValidatorDecision {
             session_id: "session-1".to_string(),
