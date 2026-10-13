@@ -125,8 +125,9 @@ pub(crate) use transcript_ambient::pop_llm_transcript_dir;
 use transcript_ambient::{
     capability_snapshot_needs_definition, context_manifest_changed, current_transcript_dir,
     output_schema_needs_definition, record_capability_snapshot_definition,
-    record_output_schema_definition, record_served_message_definition,
-    served_message_needs_definition, system_prompt_changed, tool_schemas_changed,
+    record_output_schema_definition, record_served_lineage_head, record_served_message_definition,
+    served_lineage_head, served_message_needs_definition, system_prompt_changed,
+    tool_schemas_changed,
 };
 pub(crate) use transcript_ambient::{
     current_transcript_path, push_llm_transcript_dir, remove_llm_transcript_dir,
@@ -1318,5 +1319,7 @@ mod empty_completion_retry_tests;
 mod event_log_definition_tests;
 #[cfg(test)]
 mod retry_tests;
+#[cfg(test)]
+mod served_lineage_chain_tests;
 #[cfg(test)]
 mod streaming_detector_tests;

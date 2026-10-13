@@ -71,14 +71,26 @@ fn event_log_defines_each_served_message_once() {
         .map(|(_, event)| &event.payload)
         .find(|payload| payload["type"] == "provider_call_request")
         .expect("last request receipt");
-    let reconstructed: Vec<serde_json::Value> = last_request["served_context"]["message_lineage"]
-        ["messages"]
-        .as_array()
-        .expect("lineage")
+    let lineage = crate::llm::served_lineage::LineageIndex::from_transcript_events(
+        events.iter().map(|(_, event)| &event.payload),
+    )
+    .expect("lineage index")
+    .reconstruct_request(last_request)
+    .expect("chained lineage resolves")
+    .expect("request lineage");
+    let reconstructed: Vec<serde_json::Value> = lineage
         .iter()
-        .map(|entry| (*by_hash[entry["definition_ref"].as_str().expect("definition ref")]).clone())
+        .map(|entry| (*by_hash[entry.definition_ref.as_str()]).clone())
         .collect();
     assert_eq!(reconstructed, messages);
+    assert_eq!(
+        last_request["served_context"]["message_lineage"]["messages"]
+            .as_array()
+            .expect("appended entries")
+            .len(),
+        2,
+        "a growing transcript lists only the messages appended since the last receipt"
+    );
 
     crate::event_log::swap_active_event_log(saved_log);
     let _ = super::transcript_ambient::swap_llm_transcript_ambient(saved_ambient);

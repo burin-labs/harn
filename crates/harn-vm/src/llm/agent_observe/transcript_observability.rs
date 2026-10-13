@@ -511,6 +511,18 @@ pub(super) fn dump_llm_request(
                 resolved_model: payload.model.clone(),
                 catalog_version: crate::llm_config::MODEL_CATALOG_VERSION.to_string(),
             });
+    let session_id = opts.session_id.as_deref();
+    let (served_context, lineage_head) = served_context_receipts::served_context_receipt(
+        &payload,
+        &message_contents,
+        &served_manifest,
+        &tool_schemas,
+        opts,
+        iteration,
+        call_id,
+        session_id,
+        served_lineage_head(session_id).as_ref(),
+    );
     let mut request_event = serde_json::json!({
         "type": "provider_call_request",
         "iteration": iteration,
@@ -557,15 +569,7 @@ pub(super) fn dump_llm_request(
         "message_count": payload.messages.len(),
         "structured_output": served_context_receipts::structured_output_receipt(opts, &payload),
         "prompt_cache_breakpoint": crate::llm::prompt_cache::PromptCacheBreakpoint::for_request(&payload),
-        "served_context": served_context_receipts::served_context_receipt(
-            &payload,
-            &served_manifest,
-            &tool_schemas,
-            opts,
-            iteration,
-            call_id,
-            opts.session_id.as_deref(),
-        ),
+        "served_context": served_context,
         "context_token_breakdown": context_token_breakdown,
         "structural_experiment": structural_experiment,
         "route_policy": opts.route_policy.as_label(),
@@ -583,7 +587,9 @@ pub(super) fn dump_llm_request(
             "native_tools": payload.native_tools,
         });
     }
-    append_llm_transcript_entry(&request_event);
+    if append_llm_transcript_entry(&request_event) {
+        record_served_lineage_head(session_id, lineage_head);
+    }
     Ok(payload)
 }
 

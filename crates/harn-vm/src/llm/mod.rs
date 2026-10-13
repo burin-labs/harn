@@ -102,6 +102,7 @@ mod predicate;
 pub mod prompt;
 pub(crate) mod prompt_cache;
 mod protocol_violation;
+pub mod served_lineage;
 pub use protocol_violation::{ProtocolViolation, ProtocolViolationKind};
 mod provider_contract_probe;
 pub use provider_contract_probe::with_portable_option_probe;

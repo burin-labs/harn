@@ -1,8 +1,10 @@
 //! Ambient transcript routing and per-scope deduplication state.
 
 use std::cell::RefCell;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
+
+use crate::llm::served_lineage::LineageHead;
 
 thread_local! {
     /// Last-emitted hashes for the current transcript. These avoid writing
@@ -20,6 +22,10 @@ thread_local! {
     /// Content-addressed output schemas already defined in the active
     /// transcript. Request receipts carry these ids as schema hashes.
     static EMITTED_OUTPUT_SCHEMA_IDS: RefCell<BTreeSet<String>> = const { RefCell::new(BTreeSet::new()) };
+    /// Last persisted message-lineage receipt per session in the active
+    /// sinks. The next receipt for that session continues it when its served
+    /// messages extend it.
+    static SERVED_LINEAGE_HEADS: RefCell<BTreeMap<Option<String>, LineageHead>> = const { RefCell::new(BTreeMap::new()) };
     static TRANSCRIPT_DIR_STACK: RefCell<Vec<TranscriptDirFrame>> = const { RefCell::new(Vec::new()) };
     /// Durable sinks the emitted definition ids above were persisted to.
     static DEFINITION_SCOPE: RefCell<Option<DefinitionScope>> = const { RefCell::new(None) };
@@ -77,6 +83,7 @@ fn clear_definition_ids() {
     EMITTED_CAPABILITY_SNAPSHOT_IDS.with(|ids| ids.borrow_mut().clear());
     EMITTED_SERVED_MESSAGE_IDS.with(|ids| ids.borrow_mut().clear());
     EMITTED_OUTPUT_SCHEMA_IDS.with(|ids| ids.borrow_mut().clear());
+    SERVED_LINEAGE_HEADS.with(|heads| heads.borrow_mut().clear());
 }
 
 static NEXT_TRANSCRIPT_DIR_FRAME_ID: std::sync::atomic::AtomicU64 =
@@ -120,6 +127,7 @@ pub(crate) struct LlmTranscriptAmbient {
     capability_snapshot_ids: BTreeSet<String>,
     served_message_ids: BTreeSet<String>,
     output_schema_ids: BTreeSet<String>,
+    served_lineage_heads: BTreeMap<Option<String>, LineageHead>,
     transcript_dirs: Vec<TranscriptDirFrame>,
     definition_scope: Option<DefinitionScope>,
 }
@@ -144,6 +152,9 @@ pub(crate) fn swap_llm_transcript_ambient(
         }),
         output_schema_ids: EMITTED_OUTPUT_SCHEMA_IDS
             .with(|slot| std::mem::replace(&mut *slot.borrow_mut(), replacement.output_schema_ids)),
+        served_lineage_heads: SERVED_LINEAGE_HEADS.with(|slot| {
+            std::mem::replace(&mut *slot.borrow_mut(), replacement.served_lineage_heads)
+        }),
         transcript_dirs: TRANSCRIPT_DIR_STACK
             .with(|slot| std::mem::replace(&mut *slot.borrow_mut(), replacement.transcript_dirs)),
         definition_scope: DEFINITION_SCOPE
@@ -218,6 +229,27 @@ pub(super) fn record_output_schema_definition(schema_id: &str) {
     if definitions_are_retained() {
         EMITTED_OUTPUT_SCHEMA_IDS.with(|ids| {
             ids.borrow_mut().insert(schema_id.to_string());
+        });
+    }
+}
+
+/// The session's last persisted lineage receipt in the current sinks. Without
+/// durable sinks nothing retains a predecessor, so every receipt is full.
+pub(super) fn served_lineage_head(session_id: Option<&str>) -> Option<LineageHead> {
+    if !definitions_are_retained() {
+        return None;
+    }
+    SERVED_LINEAGE_HEADS.with(|heads| heads.borrow().get(&session_id.map(str::to_string)).cloned())
+}
+
+/// Record a lineage receipt as its session's predecessor only after the
+/// receipt is persisted, so a continuation never names an unwritten receipt.
+pub(super) fn record_served_lineage_head(session_id: Option<&str>, head: LineageHead) {
+    if definitions_are_retained() {
+        SERVED_LINEAGE_HEADS.with(|heads| {
+            heads
+                .borrow_mut()
+                .insert(session_id.map(str::to_string), head);
         });
     }
 }
