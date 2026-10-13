@@ -18,6 +18,7 @@
 //! [`super::IndexState::reap_after_recovery`] to drop stale agent
 //! records and locks before serving any traffic.
 
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::io::{self, BufWriter, Write};
 use std::path::{Path, PathBuf};
@@ -25,14 +26,14 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use super::agents::{AgentRegistry, RegistryConfig, SerializedRegistry};
-use super::file_table::{FileId, IndexedFile, IndexedSymbol};
+use super::file_table::{FileId, IndexedFile};
 use super::graph::DepGraph;
 use super::imports_go::GoModules;
 use super::parallel::{joined, scope};
 use super::symbol_graph::{Edge, GraphSnapshot, Node, NodeId, SymbolGraph};
 use super::trigram::TrigramIndex;
 use super::versions::VersionLog;
-use super::words::WordIndex;
+use super::words::{WordHit, WordIndex};
 use super::IndexState;
 
 /// Current format version. Bumped whenever the snapshot layout changes
@@ -74,47 +75,6 @@ pub struct SnapshotMeta {
     pub file_count: usize,
 }
 
-/// Serialised form of one outline symbol. Mirrors [`IndexedSymbol`].
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SnapshotSymbol {
-    /// Symbol name.
-    pub name: String,
-    /// Language-specific kind tag.
-    pub kind: String,
-    /// Normalized declaration access level when known.
-    #[serde(default)]
-    pub access_level: Option<String>,
-    /// 1-based start line.
-    pub start_line: u32,
-    /// 1-based inclusive end line.
-    pub end_line: u32,
-    /// Single-line preview of the declaration.
-    pub signature: String,
-}
-
-/// Serialised form of one file row. Mirrors [`IndexedFile`].
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SnapshotFile {
-    /// Stable file identifier.
-    pub id: FileId,
-    /// Workspace-relative path with `/` separators.
-    pub relative_path: String,
-    /// Best-effort language tag.
-    pub language: String,
-    /// Size in bytes.
-    pub size_bytes: u64,
-    /// Newline-delimited line count.
-    pub line_count: u32,
-    /// FNV-1a 64-bit content hash.
-    pub content_hash: u64,
-    /// Last-modified time (ms since epoch).
-    pub mtime_ms: i64,
-    /// Outline symbols.
-    pub symbols: Vec<SnapshotSymbol>,
-    /// Raw import statement strings.
-    pub imports: Vec<String>,
-}
-
 /// One trigram posting entry: `trigram → list of file ids`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TrigramPosting {
@@ -153,8 +113,9 @@ pub struct CodeIndexSnapshot {
     /// Next file id to hand out — preserved so reused ids don't collide
     /// with historical version-log entries.
     pub next_file_id: FileId,
-    /// File table.
-    pub files: Vec<SnapshotFile>,
+    /// File table: the live rows themselves, so writing it from a live
+    /// index copies nothing.
+    pub files: Vec<IndexedFile>,
     /// Trigram postings.
     pub trigrams: Vec<TrigramPosting>,
     /// Word postings.
@@ -188,47 +149,44 @@ impl CodeIndexSnapshot {
             .join("snapshot.bin")
     }
 
-    /// Stream to a unique sibling temporary file and atomically replace the
-    /// snapshot. Large symbol graphs must not be buffered as another full
-    /// serialized copy in process memory, and concurrent writers must not
-    /// share one fixed `.tmp` path.
+    /// Encode and atomically replace the snapshot. See
+    /// [`IndexState::save_snapshot`], which writes the same layout straight
+    /// from a live index without building this owned copy first.
     pub fn save(&self, workspace_root: &Path) -> std::io::Result<()> {
-        let _phase = super::timing::Phase::start("snapshot.write");
-        let path = Self::path_for(workspace_root);
-        let parent = path.parent().expect("snapshot path has a parent");
-        std::fs::create_dir_all(parent)?;
-        let mut tmp = tempfile::NamedTempFile::new_in(parent)?;
-        {
-            let mut writer = BufWriter::new(tmp.as_file_mut());
-            writer.write_all(SNAPSHOT_MAGIC)?;
-            writer.write_all(&self.meta.format_version.to_le_bytes())?;
-            let core: CoreSectionRef<'_> = (
-                &self.meta,
-                self.next_file_id,
-                &self.files,
-                &self.deps,
-                &self.versions,
-                &self.agents,
-                &self.reconcile_progress,
-                &self.go_modules,
-            );
-            let graph = self.symbols.as_ref();
-            let nodes: &[Node] = graph.map_or(&[], |graph| &graph.nodes);
-            let edges: &[Edge] = graph.map_or(&[], |graph| &graph.edges);
-            write_section(&mut writer, &core)?;
-            write_section(&mut writer, &graph.map(|graph| graph.next_id))?;
-            write_section(&mut writer, &edges)?;
-            write_section(&mut writer, &self.trigrams)?;
-            write_section(&mut writer, &self.words)?;
-            for run in nodes.chunks(nodes.len().div_ceil(NODE_SECTIONS).max(1)) {
-                write_section(&mut writer, &run)?;
-            }
-            writer.flush()?;
+        let graph = self.symbols.as_ref();
+        let words: Vec<(&str, Cow<'_, [WordHit]>)> = self
+            .words
+            .iter()
+            .map(|posting| {
+                let hits = posting
+                    .hits
+                    .iter()
+                    .map(|&(file, line)| WordHit { file, line })
+                    .collect();
+                (posting.word.as_str(), Cow::Owned(hits))
+            })
+            .collect();
+        SectionsRef {
+            meta: &self.meta,
+            next_file_id: self.next_file_id,
+            files: self.files.iter().collect(),
+            deps: &self.deps,
+            versions: &self.versions,
+            agents: &self.agents,
+            reconcile_progress: &self.reconcile_progress,
+            go_modules: &self.go_modules,
+            next_node_id: graph.map(|graph| graph.next_id),
+            nodes: graph.map_or_else(Vec::new, |graph| graph.nodes.iter().collect()),
+            edges: graph.map_or(&[], |graph| &graph.edges),
+            trigrams: self
+                .trigrams
+                .iter()
+                .map(|posting| (&posting.trigram, Cow::Borrowed(posting.files.as_slice())))
+                .collect(),
+            words,
         }
-        tmp.persist(&path).map_err(|error| error.error)?;
-        // A superseded JSON snapshot is hundreds of megabytes nothing reads.
-        let _ = std::fs::remove_file(parent.join(LEGACY_JSON_SNAPSHOT));
-        Ok(())
+        .encode()?
+        .write(workspace_root)
     }
 
     /// Try to load the snapshot from [`Self::path_for`].
@@ -268,7 +226,7 @@ impl CodeIndexSnapshot {
             return Ok(None);
         }
         let decode_phase = super::timing::Phase::start("snapshot.decode");
-        let mut sections = Sections(body);
+        let mut sections = SectionReader(body);
         let (core, next_node_id, edges, trigrams, words) = (
             sections.next()?,
             sections.next()?,
@@ -349,47 +307,116 @@ impl CodeIndexSnapshot {
 type CoreSection = (
     SnapshotMeta,
     FileId,
-    Vec<SnapshotFile>,
+    Vec<IndexedFile>,
     Vec<DepRow>,
     VersionLog,
     SerializedRegistry,
     Option<super::reconcile::ReconcileProgress>,
     GoModules,
 );
-type CoreSectionRef<'a> = (
-    &'a SnapshotMeta,
-    FileId,
-    &'a Vec<SnapshotFile>,
-    &'a Vec<DepRow>,
-    &'a VersionLog,
-    &'a SerializedRegistry,
-    &'a Option<super::reconcile::ReconcileProgress>,
-    &'a GoModules,
-);
+/// A snapshot's sections, borrowed from whichever form of the index is
+/// being written. An owned [`CodeIndexSnapshot`] and a live [`IndexState`]
+/// both encode through this one layout, which the reader mirrors.
+struct SectionsRef<'a> {
+    meta: &'a SnapshotMeta,
+    next_file_id: FileId,
+    files: Vec<&'a IndexedFile>,
+    deps: &'a [DepRow],
+    versions: &'a VersionLog,
+    agents: &'a SerializedRegistry,
+    reconcile_progress: &'a Option<super::reconcile::ReconcileProgress>,
+    go_modules: &'a GoModules,
+    next_node_id: Option<NodeId>,
+    nodes: Vec<&'a Node>,
+    edges: &'a [Edge],
+    trigrams: Vec<(&'a u32, Cow<'a, [FileId]>)>,
+    words: Vec<(&'a str, Cow<'a, [WordHit]>)>,
+}
 
-/// Stream one section after a placeholder length, then patch the length in.
-fn write_section<T: Serialize>(
-    writer: &mut BufWriter<&mut std::fs::File>,
-    value: &T,
-) -> io::Result<()> {
-    use std::io::{Seek, SeekFrom};
-    writer.flush()?;
-    let start = writer.get_mut().stream_position()?;
-    writer.write_all(&[0; SECTION_LEN_BYTES])?;
-    postcard::to_io(value, &mut *writer).map_err(io::Error::other)?;
-    writer.flush()?;
-    let end = writer.get_mut().stream_position()?;
-    let len = end - start - SECTION_LEN_BYTES as u64;
-    writer.get_mut().seek(SeekFrom::Start(start))?;
-    writer.get_mut().write_all(&len.to_le_bytes())?;
-    writer.get_mut().seek(SeekFrom::Start(end))?;
-    Ok(())
+impl SectionsRef<'_> {
+    /// Encode every section, each on its own thread, in file order.
+    fn encode(&self) -> io::Result<EncodedSnapshot> {
+        let _phase = super::timing::Phase::start("snapshot.encode");
+        let core = (
+            self.meta,
+            self.next_file_id,
+            &self.files,
+            self.deps,
+            self.versions,
+            self.agents,
+            self.reconcile_progress,
+            self.go_modules,
+        );
+        let run_len = self.nodes.len().div_ceil(NODE_SECTIONS).max(1);
+        let sections = scope(|scope| {
+            let next_node_id = scope.spawn(|| encode_section(&self.next_node_id));
+            let edges = scope.spawn(|| encode_section(&self.edges));
+            let trigrams = scope.spawn(|| encode_section(&self.trigrams));
+            let words = scope.spawn(|| encode_section(&self.words));
+            let runs: Vec<_> = self
+                .nodes
+                .chunks(run_len)
+                .map(|run| scope.spawn(move || encode_section(&run)))
+                .collect();
+            let core = encode_section(&core);
+            [
+                core,
+                joined(next_node_id),
+                joined(edges),
+                joined(trigrams),
+                joined(words),
+            ]
+            .into_iter()
+            .chain(runs.into_iter().map(joined))
+            .collect::<io::Result<Vec<_>>>()
+        })?;
+        Ok(EncodedSnapshot {
+            format_version: self.meta.format_version,
+            sections,
+        })
+    }
+}
+
+fn encode_section<T: Serialize + ?Sized>(value: &T) -> io::Result<Vec<u8>> {
+    postcard::to_allocvec(value).map_err(io::Error::other)
+}
+
+/// A snapshot's encoded sections, ready to write without the index.
+pub(super) struct EncodedSnapshot {
+    format_version: u32,
+    sections: Vec<Vec<u8>>,
+}
+
+impl EncodedSnapshot {
+    /// Write to a unique sibling temporary file and atomically replace the
+    /// snapshot, so concurrent writers never share one `.tmp` path.
+    pub(super) fn write(&self, workspace_root: &Path) -> io::Result<()> {
+        let _phase = super::timing::Phase::start("snapshot.write");
+        let path = CodeIndexSnapshot::path_for(workspace_root);
+        let parent = path.parent().expect("snapshot path has a parent");
+        std::fs::create_dir_all(parent)?;
+        let mut tmp = tempfile::NamedTempFile::new_in(parent)?;
+        {
+            let mut writer = BufWriter::new(tmp.as_file_mut());
+            writer.write_all(SNAPSHOT_MAGIC)?;
+            writer.write_all(&self.format_version.to_le_bytes())?;
+            for section in &self.sections {
+                writer.write_all(&(section.len() as u64).to_le_bytes())?;
+                writer.write_all(section)?;
+            }
+            writer.flush()?;
+        }
+        tmp.persist(&path).map_err(|error| error.error)?;
+        // A superseded JSON snapshot is hundreds of megabytes nothing reads.
+        let _ = std::fs::remove_file(parent.join(LEGACY_JSON_SNAPSHOT));
+        Ok(())
+    }
 }
 
 /// Length-prefixed sections of a snapshot body.
-struct Sections<'a>(&'a [u8]);
+struct SectionReader<'a>(&'a [u8]);
 
-impl<'a> Sections<'a> {
+impl<'a> SectionReader<'a> {
     fn next(&mut self) -> io::Result<&'a [u8]> {
         let truncated = || invalid("code-index snapshot section is truncated");
         let (len, rest) = self
@@ -441,58 +468,63 @@ fn snapshot_matches_workspace(snap: &CodeIndexSnapshot, workspace_root: &Path) -
 }
 
 impl IndexState {
-    /// Capture the current state as a [`CodeIndexSnapshot`].
+    /// Capture the current state as an owned [`CodeIndexSnapshot`]. Writing
+    /// one is [`Self::save_snapshot`], which skips this copy.
     pub fn snapshot(&self) -> CodeIndexSnapshot {
         let _phase = super::timing::Phase::start("snapshot.capture");
-        let files: Vec<SnapshotFile> = self
-            .files
-            .values()
-            .map(|f| SnapshotFile {
-                id: f.id,
-                relative_path: f.relative_path.clone(),
-                language: f.language.clone(),
-                size_bytes: f.size_bytes,
-                line_count: f.line_count,
-                content_hash: f.content_hash,
-                mtime_ms: f.mtime_ms,
-                symbols: f
-                    .symbols
-                    .iter()
-                    .map(|s| SnapshotSymbol {
-                        name: s.name.clone(),
-                        kind: s.kind.clone(),
-                        access_level: s.access_level.clone(),
-                        start_line: s.start_line,
-                        end_line: s.end_line,
-                        signature: s.signature.clone(),
-                    })
-                    .collect(),
-                imports: f.imports.clone(),
-            })
-            .collect();
-
-        let trigrams = self.trigrams.snapshot_postings();
-        let words = self.words.snapshot_postings();
-        let deps = self.deps.snapshot_rows();
-
         CodeIndexSnapshot {
-            meta: SnapshotMeta {
-                format_version: SNAPSHOT_FORMAT_VERSION,
-                workspace_root: self.root.to_string_lossy().into_owned(),
-                git_head: self.git_head.clone(),
-                indexed_at_ms: self.last_built_unix_ms,
-                file_count: self.files.len(),
-            },
+            meta: self.snapshot_meta(),
             next_file_id: self.next_file_id_internal(),
-            files,
-            trigrams,
-            words,
-            deps,
+            files: self.files.values().cloned().collect(),
+            trigrams: self.trigrams.snapshot_postings(),
+            words: self.words.snapshot_postings(),
+            deps: self.deps.snapshot_rows(),
             versions: self.versions.clone(),
             agents: self.agents.snapshot(),
             symbols: Some(self.symbols.snapshot()),
             reconcile_progress: self.reconcile_progress.clone(),
             go_modules: self.modules.go_modules().clone(),
+        }
+    }
+
+    /// Encode and atomically replace the on-disk snapshot, borrowing from
+    /// the live index rather than copying it first.
+    pub fn save_snapshot(&self) -> io::Result<()> {
+        self.encode_snapshot()?.write(&self.root)
+    }
+
+    /// Encode the live index. Holding the index only while encoding lets a
+    /// shared owner release it before the file write.
+    pub(super) fn encode_snapshot(&self) -> io::Result<EncodedSnapshot> {
+        let meta = self.snapshot_meta();
+        let deps = self.deps.snapshot_rows();
+        let agents = self.agents.snapshot();
+        let (next_node_id, nodes, edges) = self.symbols.snapshot_refs();
+        SectionsRef {
+            meta: &meta,
+            next_file_id: self.next_file_id_internal(),
+            files: self.files.values().collect(),
+            deps: &deps,
+            versions: &self.versions,
+            agents: &agents,
+            reconcile_progress: &self.reconcile_progress,
+            go_modules: self.modules.go_modules(),
+            next_node_id: Some(next_node_id),
+            nodes,
+            edges: &edges,
+            trigrams: self.trigrams.posting_rows(),
+            words: self.words.posting_rows(),
+        }
+        .encode()
+    }
+
+    fn snapshot_meta(&self) -> SnapshotMeta {
+        SnapshotMeta {
+            format_version: SNAPSHOT_FORMAT_VERSION,
+            workspace_root: self.root.to_string_lossy().into_owned(),
+            git_head: self.git_head.clone(),
+            indexed_at_ms: self.last_built_unix_ms,
+            file_count: self.files.len(),
         }
     }
 
@@ -526,31 +558,9 @@ impl IndexState {
         let graph = graph.map_err(|message| io::Error::new(io::ErrorKind::InvalidData, message))?;
         let mut files: HashMap<FileId, IndexedFile> = HashMap::with_capacity(snap.files.len());
         let mut path_to_id: HashMap<String, FileId> = HashMap::with_capacity(snap.files.len());
-        for f in snap.files {
-            let indexed = IndexedFile {
-                id: f.id,
-                relative_path: f.relative_path.clone(),
-                language: f.language,
-                size_bytes: f.size_bytes,
-                line_count: f.line_count,
-                content_hash: f.content_hash,
-                mtime_ms: f.mtime_ms,
-                symbols: f
-                    .symbols
-                    .into_iter()
-                    .map(|s| IndexedSymbol {
-                        name: s.name,
-                        kind: s.kind,
-                        access_level: s.access_level,
-                        start_line: s.start_line,
-                        end_line: s.end_line,
-                        signature: s.signature,
-                    })
-                    .collect(),
-                imports: f.imports,
-            };
-            path_to_id.insert(f.relative_path, f.id);
-            files.insert(f.id, indexed);
+        for file in snap.files {
+            path_to_id.insert(file.relative_path.clone(), file.id);
+            files.insert(file.id, file);
         }
         let deps = DepGraph::from_rows(snap.deps);
         let agents = AgentRegistry::from_snapshot(RegistryConfig::default(), snap.agents);
@@ -760,6 +770,38 @@ mod tests {
         assert!(!trigram_files(&state).contains(&alpha));
         assert_eq!(state.words.get("gamma").len(), 1);
         assert_eq!(state.words.get("beta").len(), 1, "other files keep theirs");
+    }
+
+    #[test]
+    fn live_and_owned_saves_write_identical_bytes() {
+        let dir = fixture_tree();
+        let root = dir.path();
+        fs::write(
+            root.join("src/beta.rs"),
+            "pub fn beta() -> i32 { alpha() }\n",
+        )
+        .unwrap();
+        snapshot_for(root).save(root).unwrap();
+        let mut state =
+            IndexState::from_snapshot(CodeIndexSnapshot::load(root).unwrap().unwrap()).unwrap();
+        // Edit over the restored base, so the graph has a delta and the
+        // postings have tombstones as well as delta hits.
+        let path = root.join("src/alpha.rs");
+        fs::write(&path, "pub fn alpha() -> i32 { beta() }\n").unwrap();
+        filetime::set_file_mtime(&path, filetime::FileTime::from_unix_time(2_000_000_000, 0))
+            .unwrap();
+        assert_eq!(state.refresh_from_root(None).files_reindexed, 1);
+
+        let snapshot_path = CodeIndexSnapshot::path_for(root);
+        state.save_snapshot().unwrap();
+        let live = fs::read(&snapshot_path).unwrap();
+        state.snapshot().save(root).unwrap();
+        let owned = fs::read(&snapshot_path).unwrap();
+        assert_eq!(live, owned, "both writers share one layout");
+        let restored =
+            IndexState::from_snapshot(CodeIndexSnapshot::load(root).unwrap().unwrap()).unwrap();
+        assert_eq!(restored.words.get("beta").len(), 2);
+        assert_eq!(restored.symbols.node_count(), state.symbols.node_count());
     }
 
     #[test]

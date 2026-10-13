@@ -76,15 +76,20 @@ impl TrigramIndex {
     /// the on-disk snapshot path; sorted by trigram for deterministic
     /// serialisation.
     pub fn snapshot_postings(&self) -> Vec<super::snapshot::TrigramPosting> {
-        let mut out: Vec<super::snapshot::TrigramPosting> = Vec::new();
-        self.postings.for_each_term(|tg, files| {
-            out.push(super::snapshot::TrigramPosting {
-                trigram: *tg,
-                files: files.to_vec(),
-            });
-        });
-        out.sort_unstable_by_key(|p| p.trigram);
-        out
+        self.posting_rows()
+            .into_iter()
+            .map(|(trigram, files)| super::snapshot::TrigramPosting {
+                trigram: *trigram,
+                files: files.into_owned(),
+            })
+            .collect()
+    }
+
+    /// Every posting, sorted by trigram, borrowed where no edit touched it.
+    pub(super) fn posting_rows(&self) -> Vec<(&Trigram, Cow<'_, [FileId]>)> {
+        let mut rows = self.postings.rows();
+        rows.sort_unstable_by_key(|(trigram, _)| **trigram);
+        rows
     }
 
     /// Rebuild a [`TrigramIndex`] from a snapshot's postings vector.

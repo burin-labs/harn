@@ -122,19 +122,22 @@ impl<K: Eq + Hash + Clone, H: FilePosting> FilePostings<K, H> {
             .map(|(key, _)| key)
     }
 
-    /// Visit every term with live hits, in no particular order.
-    pub fn for_each_term(&self, mut visit: impl FnMut(&K, &[H])) {
-        for key in self.base.keys() {
-            let hits = self.get(key);
-            if !hits.is_empty() {
-                visit(key, &hits);
-            }
-        }
-        for (key, hits) in &self.forward {
-            if !self.base.contains_key(key) {
-                visit(key, hits);
-            }
-        }
+    /// Every term with live hits, in no particular order. Hits are borrowed
+    /// unless an edit since the last compaction touched the term.
+    pub fn rows(&self) -> Vec<(&K, Cow<'_, [H]>)> {
+        let mut rows: Vec<(&K, Cow<'_, [H]>)> = self
+            .base
+            .keys()
+            .map(|key| (key, self.get(key)))
+            .filter(|(_, hits)| !hits.is_empty())
+            .collect();
+        rows.extend(
+            self.forward
+                .iter()
+                .filter(|(key, _)| !self.base.contains_key(*key))
+                .map(|(key, hits)| (key, Cow::Borrowed(hits.as_slice()))),
+        );
+        rows
     }
 
     /// Every stored term, including any whose hits are all tombstoned.
@@ -148,9 +151,7 @@ impl<K: Eq + Hash + Clone, H: FilePosting> FilePostings<K, H> {
 
     /// Distinct terms with live hits.
     pub fn len(&self) -> usize {
-        let mut count = 0;
-        self.for_each_term(|_, _| count += 1);
-        count
+        self.rows().len()
     }
 
     pub fn remove_file(&mut self, file: FileId) {

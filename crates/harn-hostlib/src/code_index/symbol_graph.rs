@@ -269,12 +269,23 @@ impl SymbolGraph {
     }
 
     pub(super) fn snapshot(&self) -> GraphSnapshot {
+        let (next_id, nodes, edges) = self.snapshot_refs();
+        GraphSnapshot {
+            next_id,
+            nodes: nodes.into_iter().cloned().collect(),
+            edges,
+        }
+    }
+
+    /// What a snapshot stores, borrowing the nodes: the next id, every node
+    /// in id order, and each node's outgoing edges in that order.
+    pub(super) fn snapshot_refs(&self) -> (NodeId, Vec<&Node>, Vec<Edge>) {
         let ids = self.all_node_ids();
         let mut nodes = Vec::with_capacity(ids.len());
         let mut edges = Vec::with_capacity(self.edge_count());
         for id in ids {
             let node = self.store.node(id).expect("listed ids are live");
-            nodes.push(node.clone());
+            nodes.push(node);
             // Harn references come from the embedding host's resolver. A
             // different process may have no resolver or a different answer.
             edges.extend(self.outgoing(id).iter().copied().filter(|edge| {
@@ -283,11 +294,7 @@ impl SymbolGraph {
                     && edge.kind == EdgeKind::Refs)
             }));
         }
-        GraphSnapshot {
-            next_id: self.next_id,
-            nodes,
-            edges,
-        }
+        (self.next_id, nodes, edges)
     }
 
     pub(super) fn from_snapshot(snapshot: GraphSnapshot) -> Result<Self, &'static str> {

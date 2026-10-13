@@ -14,7 +14,7 @@ use super::file_table::FileId;
 
 /// Single occurrence of an identifier-shaped token: which file it landed
 /// in and on which 1-based line number.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 pub struct WordHit {
     /// File the token was tokenized from.
     pub file: FileId,
@@ -90,15 +90,25 @@ impl WordIndex {
     /// Capture the inverted index as snapshot-friendly postings. Sorted
     /// by word so the on-disk JSON is reproducible.
     pub fn snapshot_postings(&self) -> Vec<super::snapshot::WordPosting> {
-        let mut out: Vec<super::snapshot::WordPosting> = Vec::new();
-        self.postings.for_each_term(|word, hits| {
-            out.push(super::snapshot::WordPosting {
+        self.posting_rows()
+            .into_iter()
+            .map(|(word, hits)| super::snapshot::WordPosting {
                 word: word.to_string(),
                 hits: hits.iter().map(|h| (h.file, h.line)).collect(),
-            });
-        });
-        out.sort_by(|a, b| a.word.cmp(&b.word));
-        out
+            })
+            .collect()
+    }
+
+    /// Every posting, sorted by word, borrowed where no edit touched it.
+    pub(super) fn posting_rows(&self) -> Vec<(&str, Cow<'_, [WordHit]>)> {
+        let mut rows: Vec<(&str, Cow<'_, [WordHit]>)> = self
+            .postings
+            .rows()
+            .into_iter()
+            .map(|(word, hits)| (&**word, hits))
+            .collect();
+        rows.sort_unstable_by(|a, b| a.0.cmp(b.0));
+        rows
     }
 
     /// Rebuild a [`WordIndex`] from a snapshot's postings vector.

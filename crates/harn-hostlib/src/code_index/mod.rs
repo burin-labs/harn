@@ -260,7 +260,7 @@ fn restore_shared(
                 None,
                 reconcile::CheckpointPolicy::default(),
                 |state| {
-                    if let Err(error) = state.snapshot().save(&state.root) {
+                    if let Err(error) = state.save_snapshot() {
                         tracing::debug!(
                             target: "harn_hostlib::code_index",
                             %error,
@@ -288,7 +288,7 @@ fn restore_shared(
             // process. A read-only workspace can still use this valid
             // in-memory state, so persistence failure is advisory.
             if !outcome.is_noop() || outcome.files_touched_only > 0 {
-                if let Err(error) = state.snapshot().save(&state.root) {
+                if let Err(error) = state.save_snapshot() {
                     tracing::debug!(
                         target: "harn_hostlib::code_index",
                         %error,
@@ -306,19 +306,17 @@ fn restore_shared(
 }
 
 fn persist_shared(index: &SharedIndex) -> std::io::Result<bool> {
-    let snap = {
+    // Encode under the lock, then release it for the file write.
+    let encoded = {
         let guard = index.lock().expect("code_index mutex poisoned");
-        guard
-            .as_ref()
-            .map(|state| (state.snapshot(), state.root.clone()))
-    };
-    match snap {
-        Some((snap, root)) => {
-            snap.save(&root)?;
-            Ok(true)
+        match guard.as_ref() {
+            Some(state) => (state.encode_snapshot()?, state.root.clone()),
+            None => return Ok(false),
         }
-        None => Ok(false),
-    }
+    };
+    let (snapshot, root) = encoded;
+    snapshot.write(&root)?;
+    Ok(true)
 }
 
 impl HostlibCapability for CodeIndexCapability {
