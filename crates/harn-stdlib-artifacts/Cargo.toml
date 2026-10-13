@@ -18,14 +18,14 @@ build = "build.rs"
 embed = ["dep:harn-vm"]
 
 [dependencies]
-harn-vm = { path = "../harn-vm", version = "=0.10.166-dev", default-features = false }
+harn-vm = { path = "../harn-vm", version = "=0.10.166", default-features = false }
 
 # The compiler the build script runs: the same harn-vm source the host links.
 # Stdlib bytecode does not depend on harn-vm's capability features (they only
 # decide which builtins exist, and naming a missing one is a compile error,
 # not different code), so the lean feature set keeps this second build small.
 [build-dependencies]
-harn-vm = { path = "../harn-vm", version = "=0.10.166-dev", default-features = false, optional = true }
+harn-vm = { path = "../harn-vm", version = "=0.10.166", default-features = false, optional = true }
 
 [lints]
 workspace = true
