@@ -859,23 +859,32 @@ value, changing part of it changes the binding's whole value:
   all of them require `let`. Through a `const` binding each is rejected
   identically, with `HARN-OWN-001`. Read `d["k"] = 1` as sugar for
   `d = <a new dict differing at k>` and the requirement is self-evident.
-- **Methods** such as `appending`, `sorted`, and `adding` return a *new* value and leave
-  the receiver's value untouched, so they change nothing and are permitted on
-  a `const` binding. They are ordinary expressions, not assignments.
+- **Mutating methods** (`xs.push(v)`, `xs.pop()`, `xs.sort()`, `s.add(v)`,
+  `d.remove(k)`) are Swift's `mutating` methods: the call computes the
+  receiver's next value and writes it back to the receiver's place. `xs.push(v)`
+  is sugar for `xs = <xs with v appended>`, so the receiver must be a `let`
+  binding or a property or subscript path rooted at one, and a `const`
+  binding, a parameter, or a temporary is rejected with `HARN-OWN-001`. The
+  call's own result is separate from the write: `pop()` returns the removed
+  element.
+- **Copy-returning methods** such as `sorted`, `reversed`, `lower`, and `merge`
+  return a *new* value and leave the receiver's value untouched, so they
+  change nothing and are permitted on a `const` binding. They are ordinary
+  expressions, not assignments.
 
 ```harn
 const base = [1]
 // fine: base is untouched, base == [1]
-const appended = base.appending(2)
+const ordered = base.sorted()
 
 let built = []
 // this is how a collection is built up
 built.push(1)
 ```
 
-Because the methods are pure, discarding a result silently does nothing;
-`HARN-LNT-066` rejects that as an error. A bare `l.appending(1)` leaves `l`
-unchanged and is always a bug.
+Because copy-returning methods are pure, discarding a result silently does
+nothing; `HARN-LNT-066` rejects that as an error. A bare `l.sorted()` leaves
+`l` unchanged and is always a bug; `l.sort()` is the in-place form.
 
 #### Why this is Swift's rule, not TypeScript's
 
@@ -888,9 +897,10 @@ takes Swift's position for the same reason.
 
 The two halves are therefore one paradigm, not two: **values are immutable,
 and a binding's value changes only through assignment.** Subscript assignment
-is assignment; a method call is an expression. Swift reaches the same place
-from the other side, defining subscript-set on a value type as a `mutating`
-whole-value reassignment. Harn simply has no `mutating` methods.
+is assignment, and a mutating method call is assignment to its receiver; an
+alias taken before the call keeps the old value. Swift reaches the same place
+from the other side, defining subscript-set and `mutating` methods on a value
+type as whole-value reassignment.
 
 ### Variable assignment
 
@@ -899,8 +909,8 @@ declared with `const`, throws `HarnRuntimeError.immutableAssignment`. If not fou
 throws `HarnRuntimeError.undefinedVariable`.
 
 The same applies to every assignment form that changes a binding's value —
-`l[0] = x`, `d.k = x`, `d["a"]["b"] = x`, `p.x = 9` — since under value
-semantics each one reassigns the binding as a whole. See
+`l[0] = x`, `d.k = x`, `d["a"]["b"] = x`, `p.x = 9`, `l.push(x)` — since under
+value semantics each one reassigns the binding as a whole. See
 [Binding mutability](#binding-mutability).
 
 ### Scope creation
@@ -5082,7 +5092,7 @@ Tuple-to-tuple subtyping is covariant at each position and requires equal
 arity. A tuple widens to `list<T>` when every position is compatible with `T`;
 an arbitrary list cannot narrow to a tuple because it proves neither arity nor
 positional types. Operations that can change arity, including slicing,
-`appending`, and collection transforms, widen to a list of the element union.
+concatenation, and collection transforms, widen to a list of the element union.
 
 Because Harn collections are values rather than shared mutable references, a
 `let` tuple may be updated safely. A constant-index write must satisfy that
@@ -6039,59 +6049,64 @@ are not required to be present.
 
 ## Built-in methods
 
-### String methods
+Strings, lists, sets, dicts, ranges, iterators, and generators have builtin
+methods called with dot syntax. One method registry owns every method: its
+receiver type, name, signature, whether it mutates its receiver, and its
+reference text. The typechecker, the linter, the language server, both
+runtimes, and the method reference in the builtins guide all read that
+registry, so the reference lists exactly the methods that exist.
 
-| Method | Signature | Returns |
-|---|---|---|
-| `count` | `.count` (property) | int -- character count |
-| `empty` | `.empty` (property) | bool -- true if empty |
-| `contains(sub)` | string | bool |
-| `replace(old, new)` | string, string | string |
-| `split(sep)` | string | list of strings; `sep` is required |
-| `trim()` | (none) | string -- whitespace stripped |
-| `starts_with(prefix)` | string | bool |
-| `ends_with(suffix)` | string | bool |
-| `lowercase()` | (none) | string |
-| `uppercase()` | (none) | string |
-| `substring(start, end?)` | int, int? | string -- character range |
-| `index_of(substr)` | string | int -- first character offset, or -1 |
-| `last_index_of(substr)` / `rfind(substr)` | string | int -- last character offset, or -1 |
-| `chars()` | (none) | list of single-character strings |
+### One name per operation
+
+Each operation has one name, following Python and Rust: `len`, `contains`,
+`lower`, `upper`, `windows`, `chunks`, `map_keys`, `merge`, `all`. A removed
+spelling (`count`, `includes`, `to_lower`, `lowercase`, `each_cons`,
+`appending`, `rekeyed`, …) is a type error, `HARN-NAM-013`, whose repair
+names the replacement; `harn fix` rewrites the mechanical ones. A spelling no
+builtin uses any more is flagged even through an untyped receiver; a spelling
+another receiver still uses (`count` on an iterator) is flagged only when the
+receiver's type is known.
+
+### Mutating methods
+
+These methods change their receiver:
+
+| Receiver | Mutating methods |
+|---|---|
+| list | `push(item)`, `pop()`, `insert(index, item)`, `extend(items)`, `clear()`, `sort()`, `sort_by(key)`, `reverse()` |
+| set | `add(item)`, `remove(item)`, `clear()` |
+| dict | `remove(key)`, `clear()` |
+
+A mutating call `place.m(args)` evaluates `place` once, computes the
+receiver's next value and the call's result, writes the next value back to
+`place`, and evaluates to the result. `place` is a `let` binding or a property
+or subscript path rooted at one; each index in the path is evaluated once. A
+mutating method on a `const` binding, a function parameter, a temporary, or
+through `?.` is a type error (`HARN-OWN-001`). Because values are immutable, an
+alias taken before the call keeps the old value.
+
+| Method | Result |
+|---|---|
+| `pop()` | the removed last element, or `nil` when empty |
+| `remove(item)` on a set | `true` when `item` was a member |
+| `remove(key)` on a dict | the removed value, or `nil` when absent |
+| every other mutating method | `nil` |
+
+`list.insert` clamps an out-of-range index to the ends; a negative index
+counts from the end. When the receiver turns out not to be a builtin value at
+runtime (a struct whose `impl` defines `push`), the call is an ordinary method
+call and nothing is written back.
+
+`sorted()`, `sorted_by(key)`, and `reversed()` return a sorted or reversed copy
+and leave the receiver alone.
+
+### Strings
 
 `chars()` (also the `chars(text)` builtin) materializes a string into a list of
 single-character strings in one linear pass. Because a string is UTF-8, random
-character access (`s[i]`, `s[a:b]`, `.count`, `substring(...)`) is O(n) per call;
-materialize once with `chars()` and scan the list with O(1) indexing when writing
-cursor-style source scanners.
-
-### List methods
-
-| Method | Signature | Returns |
-|---|---|---|
-| `count` | (property) | int |
-| `empty` | (property) | bool |
-| `first` | (property) | value or nil |
-| `last` | (property) | value or nil |
-| `map(closure)` | closure(item) -> value | list |
-| `filter(closure)` | closure(item) -> bool | list |
-| `reduce(init, closure)` | value, closure(acc, item) -> value | value |
-| `find(closure)` | closure(item) -> bool | value or nil |
-| `any(closure)` | closure(item) -> bool | bool |
-| `all(closure)` | closure(item) -> bool | bool |
-| `flat_map(closure)` | closure(item) -> value/list | list (flattened) |
-
-### Dict methods
-
-| Method | Signature | Returns |
-|---|---|---|
-| `keys()` | (none) | list of strings (sorted) |
-| `values()` | (none) | list of values (sorted by key) |
-| `entries()` | (none) | list of `{key, value}` dicts (sorted by key) |
-| `count` | (property) | int |
-| `has(key)` | string | bool |
-| `merge(other)` | dict | dict (other wins on conflict) |
-| `map_values(closure)` | closure(value) -> value | dict |
-| `filter(closure)` | closure(value) -> bool | dict |
+character access (`s[i]`, `s[a:b]`, `.len()`, `substring(...)`) is O(n) per
+call; materialize once with `chars()` and scan the list with O(1) indexing when
+writing cursor-style source scanners.
 
 ### Dict property access
 
@@ -6099,8 +6114,8 @@ cursor-style source scanners.
 
 ### Set builtins
 
-Sets are created with the `set()` builtin and are immutable -- mutation
-operations return a new set. Sets deduplicate values using structural
+Sets are created with the `set()` builtin. The `set_*` builtins return a new
+set; the `add` and `remove` methods change a `let` binding in place. Sets deduplicate values using structural
 equality, retaining the first occurrence. Membership uses the same equality
 as `==`, including mixed numeric coercion; closures and NaN are never equal.
 Two sets are equal when their members can be paired one-to-one with equal

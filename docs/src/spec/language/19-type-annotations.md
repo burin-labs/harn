@@ -487,7 +487,7 @@ Tuple-to-tuple subtyping is covariant at each position and requires equal
 arity. A tuple widens to `list<T>` when every position is compatible with `T`;
 an arbitrary list cannot narrow to a tuple because it proves neither arity nor
 positional types. Operations that can change arity, including slicing,
-`appending`, and collection transforms, widen to a list of the element union.
+concatenation, and collection transforms, widen to a list of the element union.
 
 Because Harn collections are values rather than shared mutable references, a
 `let` tuple may be updated safely. A constant-index write must satisfy that
@@ -1404,10 +1404,10 @@ permissive in four ways:
 In addition to compile-time checking, function parameters with type annotations
 are enforced at runtime. When a function is called, the VM verifies that each
 annotated parameter matches its declared type before executing the function body.
-If the types do not match, a type error is thrown:
+If the types do not match, a `TypeError` is thrown:
 
 ```text
-Type error: function 'greet' parameter 'name' expected string, got int (42)
+TypeError: parameter 'name' expected string, got int (42)
 ```
 
 The following types are enforced at runtime: `int`, `float`, `string`, `bytes`,

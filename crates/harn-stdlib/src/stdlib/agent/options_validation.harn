@@ -806,12 +806,7 @@ pub fn __auto_tool_format_source(value: string?) {
 pub fn __clear_tool_format_resolution(opts: any) {
   return omit(
     opts,
-    [
-      "tool_format",
-      "_tool_format_source",
-      "_tool_format_capability_gap",
-      "_tool_format_override",
-    ],
+    ["tool_format", "_tool_format_source", "_tool_format_capability_gap", "_tool_format_override"],
   )
 }
 /**
