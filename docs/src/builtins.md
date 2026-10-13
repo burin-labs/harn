@@ -677,7 +677,7 @@ stack.reverse()             // stack is [3, 2, 1]
 | `.values()` | `<V> values() -> list<V>` |  | Values in key order. |
 | `.entries()` | `<K, V> entries() -> list<{key: K, value: V}>` |  | `{key, value}` records in key order. |
 | `.has()` | `has(key: string) -> bool` |  | True when `key` is present. |
-| `.get()` | `<V> get(key: string, default?: V) -> V?` |  | Value at `key`, else `default` (nil when omitted). |
+| `.get()` | `get(key: string, default?: any) -> any` |  | Value at `key`, else `default` (nil when omitted). |
 | `.merge()` | `<K, V> merge(other: dict<K, V>) -> dict<K, V>` |  | Copy with `other`'s entries added; `other` wins on conflicts. |
 | `.map_values()` | `<K, V, U> map_values(f: (V) -> U) -> dict<K, U>` |  | Apply `f` to each value. |
 | `.map_keys()` | `<K, V> map_keys(f: (K) -> string) -> dict<string, V>` |  | Rename each key to `f(key)`. |

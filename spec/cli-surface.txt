@@ -285,6 +285,9 @@ harn doctor --json
 harn doctor --no-network
 harn doctor sandbox
 harn doctor sandbox --json
+harn dump-builtin-methods
+harn dump-builtin-methods --check
+harn dump-builtin-methods --output
 harn dump-cli-surface
 harn dump-cli-surface --check
 harn dump-cli-surface --output

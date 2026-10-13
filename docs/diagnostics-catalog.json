@@ -14,7 +14,7 @@
     {
       "id": "NAM",
       "title": "Naming and resolution",
-      "count": 12
+      "count": 13
     },
     {
       "id": "CAP",
@@ -682,7 +682,8 @@
       ],
       "related": [
         "HARN-NAM-004",
-        "HARN-TYP-018"
+        "HARN-TYP-018",
+        "HARN-NAM-013"
       ],
       "explanationPresent": true,
       "apiStability": "stable"
@@ -761,6 +762,23 @@
       "related": [
         "HARN-NAM-003",
         "HARN-NAM-011"
+      ],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-NAM-013",
+      "category": "NAM",
+      "summary": "method spelling was removed from the builtin receiver",
+      "repairs": [
+        {
+          "id": "methods/migrate-removed",
+          "safety": "behavior-preserving",
+          "summary": "Rewrite the removed builtin method spelling to its canonical replacement"
+        }
+      ],
+      "related": [
+        "HARN-NAM-005"
       ],
       "explanationPresent": true,
       "apiStability": "stable"
