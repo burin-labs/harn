@@ -24,9 +24,10 @@ use super::walker::MAX_FILE_BYTES;
 use super::words::tokenize;
 
 /// Fact workers selected from paired release trials on the frozen #9712
-/// corpus (`docs/src/dev/perf/code-index-9744.json`). More workers only
-/// widened the gap between extraction and the serial publisher, so the
-/// build stopped getting faster while peak memory kept rising.
+/// corpus (`docs/src/dev/perf/code-index-9744.json`). Four workers cut cold
+/// readiness to 0.31 of the serial build. Six saved another 8% for 13% more
+/// CPU, within overlapping intervals: by then the single publisher, not
+/// extraction, bounds the build.
 pub(crate) const DEFAULT_FACT_WORKERS: usize = 4;
 
 /// [`DEFAULT_FACT_WORKERS`], never more than the host can run at once.

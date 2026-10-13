@@ -410,5 +410,6 @@
 - [Code-index restoration measurements](./dev/code-index-restoration-measurements.md)
 - [Code-index snapshot measurements](./dev/code-index-snapshot-measurements.md)
 - [Code-index generation measurements](./dev/code-index-generation-measurements.md)
+- [Code-index parallel build measurements](./dev/code-index-parallel-build-measurements.md)
 - [Code-index latency architecture](./dev/code-index-latency-architecture.md)
 - [Bytecode cache](./perf/bytecode-cache.md)
