@@ -98,6 +98,26 @@ async fn reviews_a_run_record_without_materializing_a_report_file() {
 
     assert_eq!(review["schema"], "harn.run_review.v1");
     assert_eq!(review["verdict"], "pass");
+    let descriptors = service.handle_tools_list(json!(3), &json!({}));
+    let descriptor = descriptors["result"]["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|tool| tool["name"] == "harn.run.review")
+        .unwrap();
+    let validator = jsonschema::draft202012::new(&descriptor["outputSchema"]).unwrap();
+    for verdict in ["pass", "concerns", "fail"] {
+        let mut response = review.clone();
+        response["verdict"] = json!(verdict);
+        validator
+            .validate(&response)
+            .expect("producer matches advertised schema");
+        response["schema_version"] = json!(2);
+        assert!(
+            !validator.is_valid(&response),
+            "unpublished review version accepted"
+        );
+    }
     assert!(review["provenance"]["report_hash"]
         .as_str()
         .is_some_and(|hash| hash.starts_with("sha256:")));
