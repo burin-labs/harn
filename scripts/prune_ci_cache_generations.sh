@@ -49,12 +49,37 @@ prune_to_listed_ceiling() {
         (.key | startswith("v0-rust-workspace-tests"))
         or (.key | startswith("v0-rust-package-audit"))
         or (.key | startswith("v0-rust-harn-ci-cli"));
+      # A merge-gate generation key is <restore key>-<source>. GitHub serves
+      # the newest entry for a restore-key prefix, so once a newer main
+      # generation shares the restore key, the older one is unreachable.
+      def generation_restore_key:
+        (.key
+          | capture("^(?<restore>v0-rust-(workspace-tests|package-audit|harn-ci-cli)-workspace-crates-v3-Linux-x64-[0-9a-f]{8})-[0-9a-f]{8}$")
+          | .restore) // null;
       def protected_key:
         linux_merge_gate_key
         or (
           $mode_name != "ensure_headroom"
           and (.key | startswith("v0-rust-release-"))
         );
+      # The smallest single entry that covers the deficit, else the largest
+      # entries until it is covered.
+      def cover($candidates; $need):
+        if $need <= 0 then []
+        else
+          ($candidates
+            | map(select(.size_in_bytes >= $need))
+            | sort_by(.size_in_bytes, .created_at, .id)
+            | .[0] // null) as $single
+          | if $single != null then [$single]
+            else
+              (reduce ($candidates | sort_by(-.size_in_bytes, .created_at, .id)[]) as $cache
+                ({selected: [], selected_bytes: 0};
+                  if .selected_bytes < $need then
+                    .selected += [$cache] | .selected_bytes += $cache.size_in_bytes
+                  else . end)).selected
+            end
+        end;
       [.[].actions_caches[]
         | {
             id,
@@ -65,21 +90,27 @@ prune_to_listed_ceiling() {
           }
       ] as $caches
       | ($caches | map(.size_in_bytes) | add // 0) as $listed_bytes
-      | ([ $caches[] | select(protected_key) ]) as $protected
-      | ([ $caches[] | select(protected_key | not) ]) as $eligible
+      | ([ $caches[]
+          | select(.ref == "refs/heads/main")
+          | (generation_restore_key) as $restore
+          | select($restore != null)
+          | . as $cache
+          | select(any($caches[];
+              .ref == "refs/heads/main"
+              and generation_restore_key == $restore
+              and ((.created_at > $cache.created_at)
+                or (.created_at == $cache.created_at and .id > $cache.id))))
+        ]) as $superseded
+      | ($superseded | map(.id)) as $superseded_ids
+      | ([ $caches[] | select(protected_key and (.id | IN($superseded_ids[]) | not)) ]) as $protected
+      | ([ $caches[] | select((protected_key | not) or (.id | IN($superseded_ids[]))) ]) as $eligible
       | ([($listed_bytes - $ceiling_bytes), 0] | max) as $deficit
-      | ($eligible
-          | map(select(.size_in_bytes >= $deficit))
-          | sort_by(.size_in_bytes, .created_at, .id)
-          | .[0] // null) as $single
-      | (reduce ($eligible | sort_by(-.size_in_bytes, .created_at, .id)[]) as $cache
-          ({selected: [], selected_bytes: 0};
-            if .selected_bytes < $deficit then
-              .selected += [$cache] | .selected_bytes += $cache.size_in_bytes
-            else . end)) as $fallback
-      | (if $deficit == 0 then []
-          elif $single != null then [$single]
-          else $fallback.selected
+      | ($superseded | map(.size_in_bytes) | add // 0) as $superseded_bytes
+      # Superseded generations go first: they cost nothing to lose.
+      | (if $superseded_bytes >= $deficit then cover($superseded; $deficit)
+          else $superseded
+            + cover([ $eligible[] | select(.id | IN($superseded_ids[]) | not) ];
+                $deficit - $superseded_bytes)
           end) as $selected
       | {
           schema_version: "harn.ci_cache_budget_prune.v1",
@@ -99,6 +130,7 @@ prune_to_listed_ceiling() {
             | add // 0
           ),
           eligible_bytes: ($eligible | map(.size_in_bytes) | add // 0),
+          superseded_generations: $superseded,
           selected_bytes: ($selected | map(.size_in_bytes) | add // 0),
           deleted: $selected
         }

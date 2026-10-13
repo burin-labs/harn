@@ -354,6 +354,52 @@ if grep -q '^cache delete ' "$tmp/cli-refused-gh.log"; then
   exit 1
 fi
 
+# A merge-gate generation that a newer main generation shadows under the same
+# restore key is unreachable, so it yields first, before useful caches. Two
+# protected generations of one family used to fill the pool until no save
+# could be admitted. A different restore key (a toolchain change) is not
+# shadowed and stays protected.
+ws=v0-rust-workspace-tests-workspace-crates-v3-Linux-x64
+cat >"$tmp/bin/gh" <<MOCK
+#!/usr/bin/env bash
+set -euo pipefail
+args="\$*"
+printf '%s\n' "\$args" >>"\$MOCK_GH_LOG"
+if [[ "\$args" == *'/actions/caches?per_page=100'* ]]; then
+  printf '%s\n' '[{"total_count":5,"actions_caches":[
+    {"id":401,"ref":"refs/heads/main","key":"$ws-2af81dbb-b4b51475","size_in_bytes":1610612736,"created_at":"2026-10-12T19:25:26Z"},
+    {"id":402,"ref":"refs/heads/main","key":"$ws-2af81dbb-5db8b8ef","size_in_bytes":1879048192,"created_at":"2026-10-13T05:20:28Z"},
+    {"id":403,"ref":"refs/heads/main","key":"$ws-11111111-aaaaaaaa","size_in_bytes":536870912,"created_at":"2026-10-11T01:00:00Z"},
+    {"id":404,"ref":"refs/pull/7/merge","key":"$ws-2af81dbb-cccccccc","size_in_bytes":268435456,"created_at":"2026-10-13T06:00:00Z"},
+    {"id":405,"ref":"refs/heads/main","key":"node-cache-Linux-X64-npm-current","size_in_bytes":805306368,"created_at":"2026-10-13T05:00:00Z"}]}]'
+elif [[ "\$args" == cache\ delete\ *\ --repo\ burin-labs/harn ]]; then
+  exit 0
+else
+  echo "unexpected gh arguments: \$args" >&2
+  exit 64
+fi
+MOCK
+chmod +x "$tmp/bin/gh"
+# 5 GiB policy, 1 GiB headroom: listed 1.5 + 1.75 + 0.5 + 0.25 + 0.75 = 4.75
+# GiB against a 4 GiB ceiling, a 0.75 GiB deficit. The shadowed generation
+# (401) covers it, so the node cache (405), the reachable generations (402,
+# 403) and the pull-request entry (404) all stay.
+PATH="$tmp/bin:$PATH" MOCK_GH_LOG="$tmp/superseded-gh.log" \
+  HARN_CACHE_POLICY_PATH="$tmp/protect-policy.json" \
+  GITHUB_REPOSITORY=burin-labs/harn \
+  "$repo_root/scripts/prune_ci_cache_generations.sh" --ensure-headroom 1073741824 \
+  >"$tmp/superseded.json"
+jq -e '
+  (.deleted | map(.id)) == [401] and
+  (.superseded_generations | map(.id)) == [401] and
+  (.protected_generations | map(.id) | sort) == [402, 403, 404]
+' "$tmp/superseded.json" >/dev/null
+if grep -Eq '^cache delete (402|403|404|405) ' "$tmp/superseded-gh.log"; then
+  echo "only the shadowed merge-gate generation may yield here" >&2
+  cat "$tmp/superseded-gh.log" >&2
+  exit 1
+fi
+
 # Restore the baseline mock for the remaining authorization-failure case.
 cat >"$tmp/bin/gh" <<'MOCK'
 #!/usr/bin/env bash
