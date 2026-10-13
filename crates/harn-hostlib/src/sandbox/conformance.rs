@@ -39,6 +39,10 @@ mod progress_tests;
 #[path = "conformance/report_tests.rs"]
 mod report_tests;
 
+#[cfg(all(test, unix))]
+#[path = "conformance/probe_tool_tests.rs"]
+mod probe_tool_tests;
+
 /// Written into the outside file so a read is judged by content, not by an
 /// exit code a missing tool would also produce.
 const OUTSIDE_CONTENT: &str = "harn-conformance-outside-content";
@@ -273,6 +277,12 @@ fn run_case(case: ConformanceCase, enforcing: bool) -> CaseReport {
         let verdict = judge(case, expectation, enforcing, Observation::Refused, &target);
         return report(None, verdict, String::new());
     }
+    // A probe whose own tool is missing measures nothing. Spawning it would
+    // fail before any sandbox decision and read as an over-refusal.
+    if let Some(tool) = missing_probe_tool(&argv, std::env::var_os("PATH").as_deref()) {
+        let reason = format!("{tool} is not installed, so this case could not be measured");
+        return report(None, Verdict::NotMeasured { reason }, String::new());
+    }
     let daemon = if case == ConformanceCase::RustcWrapperThatDaemonizesIsSwitchedOff {
         match DaemonProbe::create(&layout.workspace) {
             Ok(probe) => Some(probe),
@@ -290,10 +300,6 @@ fn run_case(case: ConformanceCase, enforcing: bool) -> CaseReport {
         None
     };
     if is_wrapper_case(case) {
-        if !cargo_on_path() {
-            let reason = "cargo is not installed, so no Rust build could be measured".to_string();
-            return report(None, Verdict::NotMeasured { reason }, String::new());
-        }
         if let Err(error) = write_wrapper_crate(case, &layout, daemon.as_ref()) {
             let reason = format!("could not write the wrapper crate: {error}");
             return report(None, Verdict::ProbeBroken { reason }, String::new());
@@ -874,9 +880,20 @@ fn is_wrapper_case(case: ConformanceCase) -> bool {
     )
 }
 
-fn cargo_on_path() -> bool {
-    std::env::var_os("PATH")
-        .is_some_and(|path| std::env::split_paths(&path).any(|dir| dir.join("cargo").is_file()))
+/// The probe's program when it names a tool `path` does not provide. Windows
+/// probes run shell builtins and system binaries resolved with extensions, so
+/// only Unix probes are checked.
+fn missing_probe_tool(argv: &[String], path: Option<&std::ffi::OsStr>) -> Option<String> {
+    if cfg!(windows) {
+        return None;
+    }
+    let program = argv.first()?;
+    let found = if Path::new(program).is_absolute() {
+        Path::new(program).is_file()
+    } else {
+        path.is_some_and(|path| std::env::split_paths(path).any(|dir| dir.join(program).is_file()))
+    };
+    (!found).then(|| program.clone())
 }
 
 /// Where the wrapper logs. Outside every writable root for the wrapper that
