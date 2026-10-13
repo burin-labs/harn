@@ -322,12 +322,12 @@ pub enum LiveClientMode {
 
 mod control_events;
 mod delegation;
-pub(crate) mod event_facts;
 mod host_injection;
 mod live_clients;
 mod metadata;
 mod runtime_store;
 mod scratchpad;
+pub(crate) mod session_event;
 mod text_tool_call_seq;
 mod transcript_lifecycle;
 mod types;

@@ -35,8 +35,8 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use harn_session_store::{
-    EventId, ListFilter, ReadRange, SessionMeta, SessionStatus, SessionStore, StoreError,
-    StoredEvent, MAX_READ_BATCH,
+    EventId, ListFilter, ReadRange, SessionEventKind, SessionMeta, SessionStatus, SessionStore,
+    StoreError, StoredEvent, MAX_READ_BATCH,
 };
 use rust_decimal::prelude::ToPrimitive;
 use rust_decimal::Decimal;
@@ -45,10 +45,12 @@ use serde_json::json;
 
 use super::types::{
     ExecutionEvidenceRecord, LlmUsageRecord, RunChildRecord, RunRecord, RunTraceSpanRecord,
-    ToolCallRecord,
+    ToolCallRecord, ToolCallRecordStatus,
 };
 use super::EXECUTION_EVIDENCE_SCHEMA_VERSION;
-use crate::agent_sessions::event_facts as facts;
+use crate::agent_sessions::session_event::{
+    self, float, integer, nonblank, TranscriptKind, TranscriptRecord,
+};
 use crate::value::VmError;
 
 /// Marker written into `metadata.projected_from.source`, identifying both that
@@ -852,8 +854,10 @@ impl SessionFold {
         event: &StoredEvent,
         publications: &BTreeMap<String, crate::llm::assistant_publication::PublishedMessage>,
     ) {
-        if event.kind.discriminator() == "agent_run_started" {
-            self.absorb_run_started(event);
+        let record = session_event::transcript_record(event);
+        let kind = record.as_ref().and_then(TranscriptRecord::kind);
+        if let (Some(record), Some(TranscriptKind::AgentRunStarted)) = (&record, kind) {
+            self.absorb_run_started(event, record);
             return;
         }
         let clock = EventClock {
@@ -861,34 +865,37 @@ impl SessionFold {
             ms: event.ts_ms,
         };
         self.last_observed_at = Some(clock);
-        match event.kind.discriminator() {
-            "message" => self.absorb_message(event, publications),
-            "tool_call" => self.absorb_tool_call(event),
-            "tool_call_update" => self.absorb_tool_update(event),
-            "tool_result" => self.absorb_tool_result(event),
-            "llm_call" => self.absorb_llm_call(event),
-            "reasoning_receipt" => self.absorb_reasoning_receipt(event),
-            "loop_checkpoint" => self.absorb_checkpoint(event),
-            "sub_agent_start" => self.absorb_sub_agent_start(event),
-            "agent_run_terminal" => self.absorb_terminal(event),
+        let Some(record) = &record else {
+            return;
+        };
+        match (&event.kind, kind) {
+            (SessionEventKind::Message, _) => self.absorb_message(event, record, publications),
+            (SessionEventKind::ToolCall, _) => self.absorb_tool_call(event, record),
+            (SessionEventKind::ToolResult, _) => self.absorb_tool_result(event, record),
+            (_, Some(TranscriptKind::ToolCallUpdate)) => self.absorb_tool_update(event, record),
+            (_, Some(TranscriptKind::LlmCall)) => self.absorb_llm_call(event, record),
+            (_, Some(TranscriptKind::ReasoningReceipt)) => self.absorb_reasoning_receipt(record),
+            (_, Some(TranscriptKind::LoopCheckpoint)) => self.absorb_checkpoint(record),
+            (_, Some(TranscriptKind::SubAgentStart)) => self.absorb_sub_agent_start(record),
+            (_, Some(TranscriptKind::AgentRunTerminal)) => self.absorb_terminal(event, record),
             _ => {}
         }
     }
 
-    fn absorb_sub_agent_start(&mut self, event: &StoredEvent) {
-        let Some(session_id) = facts::string_at(&event.payload, facts::CHILD_SESSION_ID) else {
+    fn absorb_sub_agent_start(&mut self, record: &TranscriptRecord) {
+        let metadata = record.metadata();
+        let Some(session_id) = nonblank(&metadata.child_session_id) else {
             return;
         };
         // Older start events persisted only the child session id. Keeping that
         // child in the correct parent invocation is still exact; only its
         // narrower child-run identity is unavailable, so use the historical
         // session-id compatibility projection for that field.
-        let run_id = facts::string_at(&event.payload, facts::CHILD_RUN_ID)
-            .unwrap_or_else(|| session_id.clone());
+        let run_id = nonblank(&metadata.child_run_id).unwrap_or_else(|| session_id.clone());
         self.child_runs.insert(session_id, run_id);
     }
 
-    fn absorb_run_started(&mut self, event: &StoredEvent) {
+    fn absorb_run_started(&mut self, event: &StoredEvent, record: &TranscriptRecord) {
         // A durable session owns transcript continuity across invocations, but
         // a RunRecord owns exactly one invocation. Starting a new run therefore
         // begins a new projection generation: every aggregate and transcript
@@ -898,8 +905,9 @@ impl SessionFold {
             text: event.ts.clone(),
             ms: event.ts_ms,
         });
-        self.execution_id = facts::string_at(&event.payload, facts::EXECUTION_ID);
-        if facts::bool_at(&event.payload, facts::REASONING_RECEIPTS_REPORTED) {
+        let metadata = record.metadata();
+        self.execution_id = nonblank(&metadata.execution_id);
+        if metadata.reasoning_receipts_reported == Some(true) {
             self.reasoning_receipts = Some(Vec::new());
         }
         self.last_observed_at = self.run_started_at.clone();
@@ -908,15 +916,18 @@ impl SessionFold {
     fn absorb_message(
         &mut self,
         event: &StoredEvent,
+        record: &TranscriptRecord,
         publications: &BTreeMap<String, crate::llm::assistant_publication::PublishedMessage>,
     ) {
-        let Some(role) = facts::semantic_string(&event.payload, &facts::ROLE)
+        let Some(role) = record
+            .role()
             .as_deref()
             .and_then(ProjectedMessageRole::parse)
         else {
             return;
         };
-        let text = if facts::string_at(&event.payload, facts::VISIBILITY)
+        let text = if record
+            .visibility()
             .is_some_and(|visibility| visibility != "public")
         {
             if !matches!(role, ProjectedMessageRole::Assistant) {
@@ -927,9 +938,9 @@ impl SessionFold {
                 .get("source_event_id")
                 .and_then(|id| publications.get(id))
                 .and_then(|publication| {
-                    event
-                        .payload
-                        .get("raw_message")
+                    record
+                        .raw_message
+                        .as_ref()
                         .and_then(|raw| publication.text_for(raw))
                 })
             else {
@@ -937,7 +948,7 @@ impl SessionFold {
             };
             text.to_string()
         } else {
-            let Some(text) = facts::semantic_string(&event.payload, &facts::TEXT) else {
+            let Some(text) = record.text() else {
                 return;
             };
             text
@@ -949,15 +960,16 @@ impl SessionFold {
             self.task = Some(text.clone());
         }
         self.messages.push(ProjectedMessage {
-            event_id: facts::string_at(&event.payload, facts::TRANSCRIPT_EVENT_ID)
+            event_id: record
+                .transcript_event_id()
                 .unwrap_or_else(|| format!("session-event-{}", event.event_id)),
             role,
             content: text,
         });
     }
 
-    fn absorb_reasoning_receipt(&mut self, event: &StoredEvent) {
-        let Some(value) = facts::semantic_value(&event.payload, &[facts::REASONING_RECEIPT]) else {
+    fn absorb_reasoning_receipt(&mut self, record: &TranscriptRecord) {
+        let Some(value) = record.metadata().receipt.clone() else {
             return;
         };
         let Ok(mut receipt) = serde_json::from_value::<crate::llm::ReasoningReceipt>(value) else {
@@ -972,75 +984,81 @@ impl SessionFold {
         }
     }
 
-    fn absorb_llm_call(&mut self, event: &StoredEvent) {
-        let payload = &event.payload;
+    fn absorb_llm_call(&mut self, event: &StoredEvent, record: &TranscriptRecord) {
+        let metadata = record.metadata();
+        let input_tokens = integer(&metadata.input_tokens).unwrap_or(0);
+        let output_tokens = integer(&metadata.output_tokens).unwrap_or(0);
+        let cache_read_tokens = integer(&metadata.cache_read_tokens).unwrap_or(0);
+        let cache_write_tokens = integer(&metadata.cache_write_tokens).unwrap_or(0);
+        let cost_usd = float(&metadata.cost_usd);
+        let model = nonblank(&metadata.model);
+        let provider = nonblank(&metadata.provider);
         self.llm_calls.push(LlmCallFacts {
             at_ms: event.ts_ms,
-            model: facts::string_at(payload, facts::MODEL),
-            provider: facts::string_at(payload, facts::PROVIDER),
-            input_tokens: facts::i64_at(payload, facts::INPUT_TOKENS).unwrap_or(0),
-            output_tokens: facts::i64_at(payload, facts::OUTPUT_TOKENS).unwrap_or(0),
-            cache_read_tokens: facts::i64_at(payload, facts::CACHE_READ_TOKENS).unwrap_or(0),
-            cache_write_tokens: facts::i64_at(payload, facts::CACHE_WRITE_TOKENS).unwrap_or(0),
-            cost_usd: facts::f64_at(payload, facts::COST_USD),
+            model: model.clone(),
+            provider: provider.clone(),
+            input_tokens,
+            output_tokens,
+            cache_read_tokens,
+            cache_write_tokens,
+            cost_usd,
         });
         self.usage.call_count += 1;
-        if facts::f64_at(payload, facts::COST_USD).is_none() {
+        if cost_usd.is_none() {
             self.usage.unpriced_calls += 1;
         }
-        if facts::string_at(payload, facts::ACCOUNTING_STATUS).as_deref() == Some("unknown") {
+        if nonblank(&metadata.accounting_status).as_deref() == Some("unknown") {
             self.usage.usage_unknown_calls += 1;
         }
-        self.usage.input_tokens += facts::i64_at(payload, facts::INPUT_TOKENS).unwrap_or(0);
-        self.usage.output_tokens += facts::i64_at(payload, facts::OUTPUT_TOKENS).unwrap_or(0);
-        if let Some(cost) = facts::f64_at(payload, facts::COST_USD) {
+        self.usage.input_tokens += input_tokens;
+        self.usage.output_tokens += output_tokens;
+        if let Some(cost) = cost_usd {
             self.total_cost += Decimal::from_f64_retain(cost).unwrap_or_default();
         }
-        self.cache_read_tokens += facts::i64_at(payload, facts::CACHE_READ_TOKENS).unwrap_or(0);
-        self.cache_write_tokens += facts::i64_at(payload, facts::CACHE_WRITE_TOKENS).unwrap_or(0);
+        self.cache_read_tokens += cache_read_tokens;
+        self.cache_write_tokens += cache_write_tokens;
+        let attempts = metadata.provider_attempts.clone().unwrap_or_default();
         // A call recorded before provider attempts existed has no entry. It
         // still made at least one request, so counting 1 keeps the total a
         // lower bound rather than under-reporting a mixed-age session.
-        self.provider_attempts += facts::i64_at(payload, facts::PROVIDER_ATTEMPTS_TOTAL)
+        self.provider_attempts += integer(&attempts.total)
             .filter(|total| *total > 0)
             .unwrap_or(1);
-        self.rate_limited_attempts +=
-            facts::i64_at(payload, facts::PROVIDER_ATTEMPTS_RATE_LIMITED).unwrap_or(0);
-        self.empty_completion_attempts +=
-            facts::i64_at(payload, facts::PROVIDER_ATTEMPTS_EMPTY).unwrap_or(0);
-        self.other_retry_attempts +=
-            facts::i64_at(payload, facts::PROVIDER_ATTEMPTS_OTHER).unwrap_or(0);
-        if let Some(model) = facts::string_at(payload, facts::MODEL) {
+        self.rate_limited_attempts += integer(&attempts.rate_limited).unwrap_or(0);
+        self.empty_completion_attempts += integer(&attempts.empty_completion).unwrap_or(0);
+        self.other_retry_attempts += integer(&attempts.other).unwrap_or(0);
+        if let Some(model) = model {
             push_distinct(&mut self.models, model);
         }
-        if let Some(provider) = facts::string_at(payload, facts::PROVIDER) {
+        if let Some(provider) = provider {
             push_distinct(&mut self.providers, provider);
         }
     }
 
-    fn absorb_checkpoint(&mut self, event: &StoredEvent) {
-        if facts::string_at(&event.payload, facts::CHECKPOINT_KIND).as_deref()
-            != Some("iteration_start")
-        {
+    fn absorb_checkpoint(&mut self, record: &TranscriptRecord) {
+        let metadata = record.metadata();
+        if nonblank(&metadata.checkpoint_kind).as_deref() != Some("iteration_start") {
             return;
         }
-        if let Some(iteration) = facts::i64_at(&event.payload, facts::ITERATION) {
+        if let Some(iteration) = integer(&metadata.iteration) {
             self.iteration = usize::try_from(iteration).unwrap_or(0);
             self.max_iteration = self.max_iteration.max(self.iteration);
         }
     }
 
-    fn absorb_tool_call(&mut self, event: &StoredEvent) {
-        let payload = &event.payload;
-        let Some(tool_call_id) = facts::tool_call_id(event) else {
+    fn absorb_tool_call(&mut self, event: &StoredEvent, record: &TranscriptRecord) {
+        let Some(tool_call_id) = record.tool_call_id(&event.headers) else {
             return;
         };
         if self.tool_index.contains_key(&tool_call_id) {
             return;
         }
-        let args = facts::semantic_value(payload, &[facts::TOOL_RAW_INPUT])
+        let args = record
+            .metadata()
+            .raw_input
+            .clone()
             .unwrap_or(serde_json::Value::Null);
-        let tool_name = facts::semantic_string(payload, &facts::TOOL_NAME_ANY).unwrap_or_default();
+        let tool_name = record.tool_name().unwrap_or_default();
         self.tool_index
             .insert(tool_call_id.clone(), self.tools.len());
         self.tools.push(ToolCallRecord {
@@ -1053,68 +1071,72 @@ impl SessionFold {
         });
     }
 
-    fn absorb_tool_update(&mut self, event: &StoredEvent) {
-        let payload = &event.payload;
-        let Some(record) = self.tool_for(event) else {
+    fn absorb_tool_update(&mut self, event: &StoredEvent, record: &TranscriptRecord) {
+        let metadata = record.metadata();
+        let status = nonblank(&metadata.status)
+            .as_deref()
+            .and_then(ToolCallRecordStatus::terminal);
+        let duration_ms = integer(&metadata.duration_ms);
+        let Some(tool) = self.tool_for(event, record) else {
             return;
         };
-        let status = facts::string_at(payload, facts::TOOL_STATUS);
         // Only a terminal update carries a duration, and only a terminal update
-        // should overwrite a rejection already recorded for this call.
-        match status.as_deref() {
-            Some("completed") | Some("failed") | Some("rejected") => {
-                record.is_rejected = status.as_deref() == Some("rejected");
-                record.duration_ms = facts::i64_at(payload, facts::TOOL_DURATION_MS)
-                    .and_then(|duration| u64::try_from(duration).ok());
-            }
-            _ => {}
+        // settles the call's status.
+        if let Some(status) = status {
+            tool.status = status;
+            tool.duration_ms = duration_ms.and_then(|duration| u64::try_from(duration).ok());
         }
     }
 
     /// Attach a tool's output to the call it answers.
     ///
-    /// `is_error` is deliberately not folded into `is_rejected`: a tool that
-    /// ran and failed is not a tool whose call was refused, and a rejected call
-    /// still emits a result event, so treating the two as one would clear the
-    /// rejection recorded moments earlier. The failure stays legible in
-    /// `result`, which carries the error text verbatim.
-    fn absorb_tool_result(&mut self, event: &StoredEvent) {
-        let payload = &event.payload;
-        let text = facts::semantic_string(payload, &facts::TEXT).unwrap_or_default();
-        let Some(record) = self.tool_for(event) else {
+    /// The result's `is_error` does not change the status: a rejected call
+    /// still emits a result event, and the terminal update already recorded
+    /// how the call ended. The failure stays legible in `result`, which
+    /// carries the error text verbatim.
+    fn absorb_tool_result(&mut self, event: &StoredEvent, record: &TranscriptRecord) {
+        let text = record.text().unwrap_or_default();
+        let Some(tool) = self.tool_for(event, record) else {
             return;
         };
-        record.result = text;
+        tool.result = text;
     }
 
     /// Resolve the recorded call this event belongs to, by provider tool-call
     /// id. Returns `None` for an event that names no call or names one this
     /// session never opened.
-    fn tool_for(&mut self, event: &StoredEvent) -> Option<&mut ToolCallRecord> {
-        let tool_call_id = facts::tool_call_id(event)?;
+    fn tool_for(
+        &mut self,
+        event: &StoredEvent,
+        record: &TranscriptRecord,
+    ) -> Option<&mut ToolCallRecord> {
+        let tool_call_id = record.tool_call_id(&event.headers)?;
         let index = *self.tool_index.get(&tool_call_id)?;
         self.tools.get_mut(index)
     }
 
-    fn absorb_terminal(&mut self, event: &StoredEvent) {
-        let stop_reason = facts::string_at(&event.payload, facts::STOP_REASON);
-        let error = facts::semantic_value(&event.payload, &[facts::TERMINAL_ERROR])
+    fn absorb_terminal(&mut self, event: &StoredEvent, record: &TranscriptRecord) {
+        let metadata = record.metadata();
+        let terminal = metadata.terminal.clone().unwrap_or_default();
+        let stop_reason = nonblank(&metadata.stop_reason);
+        let final_status = nonblank(&metadata.final_status);
+        let error = metadata
+            .error
+            .clone()
             .filter(|value| !value.is_null())
             .map(Box::new);
-        let class = facts::string_at(&event.payload, facts::TERMINAL_CLASS);
-        let outcome = facts::string_at(&event.payload, facts::TERMINAL_KIND)
+        let class = nonblank(&metadata.terminal_class);
+        let outcome = nonblank(&terminal.kind)
             .as_deref()
             .and_then(crate::agent_events::AgentTerminalKind::from_wire)
             .map(|kind| {
                 crate::agent_events::AgentTerminalOutcome::from_evidence(
                     kind,
-                    facts::string_at(&event.payload, facts::FINAL_STATUS)
-                        .as_deref()
-                        .unwrap_or_default(),
-                    facts::string_at(&event.payload, facts::TERMINAL_REASON)
+                    final_status.as_deref().unwrap_or_default(),
+                    nonblank(&terminal.reason)
                         .or_else(|| stop_reason.clone())
                         .unwrap_or_else(|| kind.as_str().to_string()),
-                    facts::string_at(&event.payload, facts::TERMINAL_OUTCOME_CLASS)
+                    nonblank(&terminal.terminal_class)
                         .as_deref()
                         .or(class.as_deref())
                         .and_then(crate::llm::AgentTerminalClass::from_wire),
@@ -1123,8 +1145,10 @@ impl SessionFold {
             })
             .map(Box::new);
         self.terminal = Some(TerminalFacts {
-            final_status: facts::string_at(&event.payload, facts::FINAL_STATUS),
-            adaptive_budget: facts::semantic_value(&event.payload, &[facts::ADAPTIVE_BUDGET])
+            final_status,
+            adaptive_budget: metadata
+                .adaptive_budget
+                .clone()
                 .filter(|value| !value.is_null()),
             stop_reason,
             error,

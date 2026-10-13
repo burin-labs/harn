@@ -83,7 +83,7 @@ pub use types::{
     RunPlannerRoundRecord, RunRecord, RunStageAttemptRecord, RunStageDiffRecord, RunStageRecord,
     RunTaskLedgerSummaryRecord, RunTraceSpanRecord, RunTranscriptArtifactDescriptor,
     RunTranscriptPointerRecord, RunTransitionRecord, RunVerificationOutcomeRecord,
-    RunWorkerLineageRecord, ToolCallDiffRecord, ToolCallRecord,
+    RunWorkerLineageRecord, ToolCallDiffRecord, ToolCallRecord, ToolCallRecordStatus,
     ACTION_GRAPH_EDGE_KIND_A2A_DISPATCH, ACTION_GRAPH_EDGE_KIND_DELEGATES,
     ACTION_GRAPH_EDGE_KIND_DLQ_MOVE, ACTION_GRAPH_EDGE_KIND_ENTRY,
     ACTION_GRAPH_EDGE_KIND_PREDICATE_GATE, ACTION_GRAPH_EDGE_KIND_REPLAY_CHAIN,

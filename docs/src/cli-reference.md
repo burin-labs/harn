@@ -3305,9 +3305,14 @@ A session left `open` by a host that exited without closing it still reports its
 loop's own terminal verdict, so a finished run is not described as running.
 
 `harn runs report` follows the root record's typed child-run pointers and emits
-the versioned `harn.run_report.v1` JSON projection. The report has one row per
+the versioned `harn.run_report.v2` JSON projection. The report has one row per
 agent, checked parent/child links, LLM timing and cache/cost data recorded on
 trace spans, source hashes, redacted visible output, and structural checks.
+Each tool-call row is the run record's own tool-call fact (`tool_use_id`,
+`tool_name`, `args_hash`, `result`, `duration_ms`, `iteration`, `timestamp`, and
+`status`: `open`, `completed`, `failed`, or `rejected`) plus the `agent_id`
+that made the call. Version 2 replaced version 1's `call_id` and `is_rejected`;
+a version-1 report is refused with a schema error.
 `--events-db` adds the redacted semantic timeline from a SQLite event log.
 Canonical `subagent_join` receipts let the report count terminal children that
 the parent has not collected and report three separate worst-case intervals:
@@ -3334,7 +3339,7 @@ snapshot. Increase the timeline query's `limit` to recover more nodes. The
 topic cursor remains a subscription watermark, not a continuation token for a
 snapshot that combines sorted run spans and event topics.
 
-`harn runs review` either reads one `harn.run_report.v1` file or builds that
+`harn runs review` either reads one `harn.run_report.v2` file or builds that
 same report in memory from `--run-record`, then makes one structured model
 call. `--events-db` is available with `--run-record`; no intermediate report
 file is required. The command emits `harn.run_review.v1` JSON with the verdict, confidence,

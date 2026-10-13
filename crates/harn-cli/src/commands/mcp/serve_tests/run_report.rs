@@ -44,7 +44,7 @@ async fn correlates_delegated_runs() {
         json!({ "path": "parent.json" }),
     )
     .await;
-    assert_eq!(report["schema"], "harn.run_report.v1");
+    assert_eq!(report["schema"], "harn.run_report.v2");
     assert_eq!(report["root_run_id"], "parent");
     assert_eq!(report["agents"].as_array().unwrap().len(), 2);
     assert_eq!(report["delegations"][0]["forward_pointer"], true);

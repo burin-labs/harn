@@ -816,8 +816,8 @@ fn run_report_tool_def(name: &str, title: &str, description: &str) -> JsonValue 
                 "checks"
             ],
             "properties": {
-                "schema": { "const": "harn.run_report.v1" },
-                "schema_version": { "const": 1 },
+                "schema": { "const": "harn.run_report.v2" },
+                "schema_version": { "const": 2 },
                 "producer": { "type": "object" },
                 "projection": { "type": "object" },
                 "root_run_id": { "type": "string" },
@@ -869,7 +869,7 @@ fn run_review_tool_def() -> JsonValue {
             "required": ["schema", "schema_version", "provenance", "lifecycle", "verdict"],
             "properties": {
                 "schema": { "const": "harn.run_review.v1" },
-                "schema_version": { "const": 1 },
+                "schema_version": { "const": 2 },
                 "provenance": { "type": "object" },
                 "lifecycle": { "type": "object" },
                 "verdict": { "enum": ["pass", "concerns", "fail"] }
