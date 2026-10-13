@@ -983,6 +983,12 @@ pub fn args_reference_secret(args: &serde_json::Value) -> bool {
     hit
 }
 
+/// Whether a path names credential material.
+#[deprecated(note = "use `harn_vm::known_paths::is_credential_path`, the shared registry")]
+pub fn is_secret_path(path: &str) -> bool {
+    crate::known_paths::is_credential_path(path)
+}
+
 // --- Builtin registration ----------------------------------------------------
 
 fn vm_bool(value: &VmValue) -> Option<bool> {
