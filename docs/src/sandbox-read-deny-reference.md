@@ -85,7 +85,7 @@ A host may add to this list through `read_deny_roots`. It cannot remove from it.
 
 | Backend | Mechanism | Applied |
 | --- | --- | --- |
-| macOS | `(deny file-read* (subpath …))` emitted after every allow | yes |
+| macOS | `(deny file-read* (subpath …))` and unlink denials on the path to it, emitted after every allow | yes |
 | Linux | Landlock grants the siblings that do not lead to the denial | yes |
 | Windows | none: Windows runs with no OS sandbox confinement | no |
 | OpenBSD | `unveil` | not yet |
@@ -120,6 +120,17 @@ that do not lead to the denial.
   you are on.
 
 ### A denial inside a writable root
+
+A read denial is path-based, so inside a root the child may write it holds only
+while nothing on the path to it can be renamed.
+
+On macOS, the profile also denies `file-write-unlink`, which covers rename, on
+the denied subtree and on each directory above it. The denied file, its
+directory, and the directories above cannot be renamed or deleted; every other
+entry in those directories stays writable. A child that tries to carry the file
+out of the denial gets `Operation not permitted`. When Harn runs inside an outer
+sandbox it would inherit, that sandbox must deny the same unlinks, or the spawn
+is refused.
 
 On Linux, a writable root that contains a denial is granted whole rather than
 subtracted. Landlock could hold the denial only by withholding every directory

@@ -466,13 +466,34 @@ fn render_profile_with_extra_read_roots(
     // global `(allow file-read-metadata)` at the top of the profile. Without
     // that, a denied path's existence and size would still leak to a child that
     // cannot open it.
+    //
+    // A read deny alone does not hold inside a writable root: the child could
+    // rename the denied path, or any directory above it, and read it under the
+    // new name (harn#9788). `file-write-unlink` covers rename, so denying it on
+    // the denied subtree and on each directory above holds the denial while
+    // every other entry in those directories stays writable.
+    let mut pinned_ancestors = std::collections::BTreeSet::new();
     for root in read_deny_roots {
         for path in sandbox_profile_path_aliases(&root.display().to_string()) {
+            let escaped = sandbox_profile_escape(&path);
             profile.push_str(&format!(
-                "(deny file-read* (subpath \"{}\"))\n",
-                sandbox_profile_escape(&path)
+                "(deny file-read* (subpath \"{escaped}\"))\n\
+                 (deny file-write-unlink (subpath \"{escaped}\"))\n"
             ));
+            pinned_ancestors.extend(
+                std::path::Path::new(&path)
+                    .ancestors()
+                    .skip(1)
+                    .filter(|ancestor| ancestor.parent().is_some())
+                    .map(|ancestor| ancestor.display().to_string()),
+            );
         }
+    }
+    for ancestor in pinned_ancestors {
+        profile.push_str(&format!(
+            "(deny file-write-unlink (literal \"{}\"))\n",
+            sandbox_profile_escape(&ancestor)
+        ));
     }
     profile
 }
@@ -626,3 +647,7 @@ mod external_root_tests;
 #[cfg(test)]
 #[path = "macos/child_write_nested_tests.rs"]
 mod child_write_nested_tests;
+
+#[cfg(test)]
+#[path = "macos/writable_denial_tests.rs"]
+mod writable_denial_tests;

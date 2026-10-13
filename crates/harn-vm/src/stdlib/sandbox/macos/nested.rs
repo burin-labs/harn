@@ -98,6 +98,20 @@ pub(super) fn nesting(policy: &CapabilityPolicy) -> Nesting {
             return Nesting::Unenforceable(Narrowing::Read(dir));
         }
     }
+    // A denial inside a writable root holds only while nothing on its path can
+    // be renamed, which the rendered profile ensures with unlink denials.
+    for denied in super::super::process_sandbox_read_deny_roots(policy) {
+        if !denied.exists() || !covered(&denied, &writable) {
+            continue;
+        }
+        let renamable = denied
+            .ancestors()
+            .take_while(|path| covered(path, &writable))
+            .any(|path| !outer_denies("file-write-unlink", Some(path)));
+        if renamable {
+            return Nesting::Unenforceable(Narrowing::Read(denied));
+        }
+    }
     Nesting::Inherit
 }
 

@@ -68,12 +68,13 @@ pub struct ProcessSandboxPolicy {
     /// `~/.config/composer`, so a denylist that merely competed
     /// with presets would leave credentials readable by default.
     ///
-    /// macOS renders it as a trailing `deny file-read*` (last-match-wins);
-    /// Linux, whose Landlock is allow-only, grants the siblings that do not
-    /// lead to it. Linux keeps a writable root that contains a denial whole,
-    /// and reports that denial as not enforced. Which backends hold it is the `credential_reads` column of
-    /// the enforcement table (`process_sandbox::enforcement`), not this
-    /// comment.
+    /// macOS renders it as a trailing `deny file-read*` (last-match-wins),
+    /// plus unlink denials on the path to it so a rename cannot carry it out
+    /// of the denial. Linux, whose Landlock is allow-only, grants the siblings
+    /// that do not lead to it; it keeps a writable root that contains a denial
+    /// whole, and reports that denial as not enforced. Which backends hold it
+    /// is the `credential_reads` column of the enforcement table
+    /// (`process_sandbox::enforcement`), not this comment.
     ///
     /// A backend that does not hold it refuses only under `os_hardened`.
     /// Refusing under every profile would be the fail-closed reflex, and it is
