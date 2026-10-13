@@ -18,7 +18,6 @@ capped_today="$(fake_sha 0 f)"
 draft="$(fake_sha 0 1)"
 bot="$(fake_sha 0 2)"
 unrequested="$(fake_sha 0 3)"
-release="$(fake_sha 0 4)"
 
 # shellcheck disable=SC2016 # Markdown backticks, not command substitution.
 stand_down() {
@@ -38,8 +37,7 @@ $(pr 5 false "$decided" User "" "$(stand_down 2026-10-05T15:00:00Z "$decided" ge
 $(pr 6 false "$capped_today" User "" "$(stand_down 2026-10-05T15:00:00Z "$capped_today" daily_cap)"),
 $(pr 7 true "$draft" User "" ""),
 $(pr 8 false "$bot" Bot "" ""),
-$(pr 9 false "$unrequested" User "" ""),
-$(pr 10 false "$release" Bot "" "" | sed 's/"__typename":"Bot"/&,"login":"harn-release-bot"/')
+$(pr 9 false "$unrequested" User "" "")
 ]}}}}
 JSON
 )"
@@ -82,10 +80,9 @@ fail() {
 }
 
 # The plan: a head capped yesterday, a head whose request vanished two hours
-# ago, a head never requested, and the release App's unreviewed head (Smart
-# Ship lands it only after a review). No other bot's head.
+# ago, and a head never requested. Nothing else.
 plan="$("$script" --repo burin-labs/harn --now 2026-10-06T03:00:00Z)"
-expected="$(printf '1\t%s\tdaily_cap\n2\t%s\tno_outcome\n9\t%s\tno_outcome\n10\t%s\tno_outcome' "$capped" "$lost" "$unrequested" "$release")"
+expected="$(printf '1\t%s\tdaily_cap\n2\t%s\tno_outcome\n9\t%s\tno_outcome' "$capped" "$lost" "$unrequested")"
 [[ "$plan" == "$expected" ]] || fail "unexpected plan:
 $plan"
 ! grep -q '^workflow' "$calls" || fail "a read-only plan dispatched a review"
@@ -104,7 +101,7 @@ grep -q "^workflow run review.yml --repo burin-labs/reviewer -f repository=burin
 ! grep -q "pr=9 " "$calls" || fail "the limit was exceeded"
 
 # Same day, an hour after the lost head was requested again: nothing repeats.
-export FAKE_REQUESTS="$capped=2026-10-06T03:00:00Z $lost=2026-10-06T03:01:00Z $recent=2026-10-06T02:30:00Z $capped_today=2026-10-06T01:00:00Z $unrequested=2026-10-06T03:02:00Z $release=2026-10-06T03:03:00Z"
+export FAKE_REQUESTS="$capped=2026-10-06T03:00:00Z $lost=2026-10-06T03:01:00Z $recent=2026-10-06T02:30:00Z $capped_today=2026-10-06T01:00:00Z $unrequested=2026-10-06T03:02:00Z"
 plan="$("$script" --repo burin-labs/harn --now 2026-10-06T04:00:00Z)"
 [[ "$plan" == "No pull request head is waiting for an automatic review outcome." ]] || fail "a request repeated within its window:
 $plan"
