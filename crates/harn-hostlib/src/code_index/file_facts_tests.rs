@@ -237,3 +237,50 @@ fn a_panicking_worker_fails_the_build_instead_of_hanging_it() {
     assert!(result.is_err());
     assert_eq!(published, 42, "nothing after the failed file is published");
 }
+
+#[test]
+fn a_later_worker_panic_does_not_hide_an_earlier_lost_job() {
+    let window = super::Window::new(8);
+    // Unwind two workers in the order that used to overwrite the earlier
+    // loss, leaving the publisher waiting forever for job 5.
+    for claimed in [5, 7] {
+        let window = &window;
+        let unwound = std::thread::scope(|scope| {
+            scope
+                .spawn(move || {
+                    let _flag = super::PanicFlag {
+                        window,
+                        claimed: Some(claimed),
+                    };
+                    panic!("simulated extraction failure");
+                })
+                .join()
+        });
+        assert!(unwound.is_err());
+    }
+    assert_eq!(window.lock().lost, Some(5));
+}
+
+#[test]
+fn reindexing_unchanged_bytes_keeps_posting_order_and_graph() {
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+    write(root, "a.py", "def shared_name():\n    return 1\n");
+    write(root, "b.py", "shared_name()\n");
+    let (mut state, _) = IndexState::build_from_root(root);
+    let before = exact_facts(&state);
+    let hits = |state: &IndexState| -> Vec<u32> {
+        state
+            .words
+            .get("shared_name")
+            .iter()
+            .map(|hit| hit.file)
+            .collect()
+    };
+    let order = hits(&state);
+    // Same bytes, newer timestamp: an editor save with no edits.
+    write(root, "a.py", "def shared_name():\n    return 1\n");
+    state.reindex_file(&root.join("a.py")).unwrap();
+    assert_eq!(hits(&state), order);
+    assert_eq!(exact_facts(&state), before);
+}

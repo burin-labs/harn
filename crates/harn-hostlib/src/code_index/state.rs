@@ -331,10 +331,10 @@ impl IndexState {
         }
         let known =
             relative_path(&self.root, abs).is_some_and(|rel| self.path_to_id.contains_key(&rel));
-        // Re-parse even when the bytes match: an explicit reindex has always
-        // rebuilt the file's graph slice.
-        let mut job = self.file_job(abs, &std::fs::metadata(abs).ok()?)?;
-        job.known_hash = None;
+        // Unchanged bytes keep their postings and graph slice, as in a
+        // refresh. Re-installing them would move the file's word hits behind
+        // every other file's in each shared posting.
+        let job = self.file_job(abs, &std::fs::metadata(abs).ok()?)?;
         let facts = file_facts::extract(&job);
         let ingested = self.install_facts(&job, facts, TrigramSink::Inline)?;
         let id = ingested.id;
@@ -352,7 +352,13 @@ impl IndexState {
                 // A new path can resolve another file's dangling import.
                 self.rebuild_all_deps();
             }
-            self.rebuild_symbol_graph_for(id, ingested.graph);
+            if ingested.changed {
+                self.rebuild_symbol_graph_for(id, ingested.graph);
+            } else {
+                // The dependency rows were just re-resolved, so re-resolve
+                // this file's calls against them even though its slice stays.
+                self.symbols.invalidate_calls_in([id]);
+            }
             if known {
                 // Rebuilding replaces this file's Module node, including its
                 // incoming edges. Restore both directions from the explicit

@@ -151,7 +151,7 @@ impl WordIndex {
 }
 
 /// Shortest token the index records.
-pub(super) const MIN_WORD_LEN: usize = 2;
+const MIN_WORD_LEN: usize = 2;
 
 /// Distinct word-index tokens of `content`, each with the 1-based line of
 /// every occurrence in order.

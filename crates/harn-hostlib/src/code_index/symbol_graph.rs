@@ -19,7 +19,7 @@ use tree_sitter::{Node as TsNode, Tree};
 use crate::ast::{Language, Symbol, SymbolKind};
 use crate::ResolvedHarnReference;
 
-use super::file_facts::{distinct_ref_words, GraphFacts};
+use super::file_facts::GraphFacts;
 use super::file_table::FileId;
 use super::graph_store::GraphStore;
 use super::name_index::NameIndex;
@@ -435,7 +435,7 @@ impl SymbolGraph {
         // a scan of the import list per candidate per call site.
         let visible: HashSet<FileId> = imported_files.iter().copied().collect();
         let facts = GraphFacts::extract(path, language, source);
-        let ref_words = distinct_ref_words(source, MIN_REF_WORD_LEN);
+        let ref_words = distinct_ref_words(source);
         self.install_file(
             file_id,
             path,
@@ -881,6 +881,18 @@ impl SymbolGraph {
     fn add_edge(&mut self, from: NodeId, to: NodeId, kind: EdgeKind) {
         self.store.add_edge(Edge { from, to, kind });
     }
+}
+
+/// `source`'s distinct word-index tokens long enough to name a REFS target.
+fn distinct_ref_words(source: &str) -> Vec<&str> {
+    let mut seen = HashSet::new();
+    let mut out = Vec::new();
+    super::words::tokenize(source, |word| {
+        if word.len() >= MIN_REF_WORD_LEN && seen.insert(word) {
+            out.push(word);
+        }
+    });
+    out
 }
 
 /// Derive a coarse module name from a workspace-relative path (basename

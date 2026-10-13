@@ -10,7 +10,7 @@
 //! order, and graph contents therefore match a serial build exactly,
 //! whatever the worker count.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::BTreeMap;
 use std::ops::ControlFlow;
 use std::path::{Path, PathBuf};
 use std::sync::{Condvar, Mutex};
@@ -21,7 +21,6 @@ use super::file_table::fnv1a64;
 use super::imports;
 use super::trigram::{extract_trigrams, Trigram};
 use super::walker::MAX_FILE_BYTES;
-use super::words::tokenize;
 
 /// Fact workers selected from paired release trials on the frozen #9712
 /// corpus (`docs/src/dev/perf/code-index-9744.json`). Four workers cut cold
@@ -334,23 +333,16 @@ impl Drop for PanicFlag<'_> {
     fn drop(&mut self) {
         if std::thread::panicking() {
             let mut state = self.window.lock();
-            state.lost = self.claimed;
+            // Keep the earliest lost job: the publisher reaches it first,
+            // and a later panic must not hide it.
+            state.lost = match (state.lost, self.claimed) {
+                (Some(lost), Some(claimed)) => Some(lost.min(claimed)),
+                (lost, claimed) => lost.or(claimed),
+            };
             state.stopped = true;
             self.window.changed.notify_all();
         }
     }
-}
-
-/// Word-index tokens long enough to name a REFS target.
-pub(super) fn distinct_ref_words(source: &str, min_len: usize) -> Vec<&str> {
-    let mut seen = HashSet::new();
-    let mut out = Vec::new();
-    tokenize(source, |word| {
-        if word.len() >= min_len && seen.insert(word) {
-            out.push(word);
-        }
-    });
-    out
 }
 
 #[cfg(test)]
