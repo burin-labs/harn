@@ -422,12 +422,18 @@ pub fn build_census(
 
 /**
  * Conflicting PRs among `/pulls/{n}` payloads. A PR whose mergeability GitHub
- * has not computed yet (`mergeable_state` "unknown") is not reported.
+ * has not computed yet (`mergeable_state` "unknown") is not reported, nor is
+ * one whose `head.sha` is no longer `head_sha`.
  */
-pub fn classify_pr_blocks(pulls: list<any>) -> list<PrBlock> {
+pub fn classify_pr_blocks(head_sha: string, pulls: list<any>) -> list<PrBlock> {
   let blocks: list<PrBlock> = []
   for pull in pulls {
     const number = to_int(pull?.number)
+    // `commits/{sha}/pulls` also lists PRs whose head has since moved on; a
+    // conflict on a newer head says nothing about why this sha has no CI.
+    if to_string(pull?.head?.sha ?? "").lower() != head_sha.lower() {
+      continue
+    }
     if number != nil && to_string(pull?.mergeable_state ?? "") == "dirty" {
       blocks = blocks.appending({pr: number, reason: "merge_conflict"})
     }
@@ -587,6 +593,13 @@ fn api_json(
   return receipt.value
 }
 
+/**
+ * Whether a list endpoint returning `batch_len` rows for `page` may have a next page within the bound.
+ */
+pub fn more_pages(batch_len: int, page: int) -> bool {
+  return batch_len >= PAGE_SIZE && page < MAX_PAGES
+}
+
 /** Best-effort: open PRs headed at `sha` that conflict with their base. */
 fn lookup_blocks(
   process: HarnessProcess,
@@ -595,9 +608,23 @@ fn lookup_blocks(
   repo: string,
   sha: string,
 ) -> {blocked_by: list<PrBlock>, blocked_lookup: BlockLookup} {
-  const listed = api_json(process, clock, stdio, "/repos/${repo}/commits/${sha}/pulls")
-  if listed == nil {
-    return {blocked_by: [], blocked_lookup: "unavailable"}
+  let listed: list<any> = []
+  let page = 1
+  while page <= MAX_PAGES {
+    const batch = api_json(
+      process,
+      clock,
+      stdio,
+      "/repos/${repo}/commits/${sha}/pulls?per_page=${to_string(PAGE_SIZE)}&page=${to_string(page)}",
+    )
+    if batch == nil {
+      return {blocked_by: [], blocked_lookup: "unavailable"}
+    }
+    listed = listed + batch
+    if !more_pages(len(batch), page) {
+      break
+    }
+    page = page + 1
   }
   let pulls: list<any> = []
   for entry in listed {
@@ -610,7 +637,7 @@ fn lookup_blocks(
     }
     pulls = pulls.appending(pull)
   }
-  return {blocked_by: classify_pr_blocks(pulls), blocked_lookup: "ok"}
+  return {blocked_by: classify_pr_blocks(sha, pulls), blocked_lookup: "ok"}
 }
 
 fn collect_observations(

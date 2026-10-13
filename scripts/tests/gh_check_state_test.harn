@@ -11,10 +11,15 @@ import {
   filter_matches_paths,
   glob_match,
   latest_per_name,
+  more_pages,
   path_required_check_names,
   render_block_lines,
   workflow_surface_filters,
 } from "../gh_check_state.harn"
+
+const HEAD = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+
+const NEWER = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 
 const CI_WORKFLOW = "../../.github/workflows/ci.yml"
 
@@ -435,9 +440,10 @@ pipeline test_an_in_flight_run_reads_pending_not_missing(harness: Harness, task:
 
 pipeline test_conflicting_pr_is_named_as_the_reason_ci_never_started(task: unknown) {
   const blocks = classify_pr_blocks(
+    HEAD,
     [
-      {number: 9807, mergeable_state: "dirty", mergeable: false},
-      {number: 9808, mergeable_state: "clean", mergeable: true},
+      {number: 9807, mergeable_state: "dirty", head: {sha: HEAD}},
+      {number: 9808, mergeable_state: "clean", head: {sha: HEAD}},
     ],
   )
   assert_eq(blocks, [{pr: 9807, reason: "merge_conflict"}])
@@ -448,11 +454,31 @@ pipeline test_conflicting_pr_is_named_as_the_reason_ci_never_started(task: unkno
 }
 
 pipeline test_clean_or_unknown_mergeability_names_no_block(task: unknown) {
-  assert_eq(classify_pr_blocks([{number: 1, mergeable_state: "clean"}]), [])
-  assert_eq(classify_pr_blocks([{number: 2, mergeable_state: "unknown"}]), [])
-  assert_eq(classify_pr_blocks([]), [])
+  assert_eq(
+    classify_pr_blocks(HEAD, [{number: 1, mergeable_state: "clean", head: {sha: HEAD}}]),
+    [],
+  )
+  assert_eq(
+    classify_pr_blocks(HEAD, [{number: 2, mergeable_state: "unknown", head: {sha: HEAD}}]),
+    [],
+  )
+  assert_eq(classify_pr_blocks(HEAD, []), [])
   assert_eq(render_block_lines([], "ok"), [])
   assert_eq(render_block_lines([], "not_run"), [])
+}
+
+pipeline test_conflict_on_a_newer_head_is_not_blamed_for_this_sha(task: unknown) {
+  const moved = [{number: 7, mergeable_state: "dirty", head: {sha: NEWER}}]
+  assert_eq(classify_pr_blocks(HEAD, moved), [])
+  // Control: the same PR is reported once its head is the queried sha.
+  assert_eq(classify_pr_blocks(NEWER, moved), [{pr: 7, reason: "merge_conflict"}])
+}
+
+pipeline test_pull_listing_pages_until_a_short_page_within_the_bound(task: unknown) {
+  assert(more_pages(100, 1))
+  assert(!more_pages(99, 1))
+  assert(!more_pages(0, 1))
+  assert(!more_pages(100, 10))
 }
 
 pipeline test_failed_mergeability_lookup_is_said_not_silent(task: unknown) {
