@@ -1170,7 +1170,11 @@ impl Formatter<'_> {
         let mut cursor = root;
         loop {
             match &cursor.node {
-                Node::BinaryOp { op, left, right } if matches!(op, BinaryOperator::Add) => {
+                Node::BinaryOp {
+                    op: BinaryOperator::Add,
+                    left,
+                    right,
+                } => {
                     terms.push(right.as_ref());
                     cursor = left.as_ref();
                 }

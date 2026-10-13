@@ -56,9 +56,11 @@ impl TypeChecker {
                         .lookup_builtin(name)
                         .is_some_and(|sig| sig.projection.is_some())
             }
-            Node::BinaryOp { op, right, .. } if matches!(op, BinaryOperator::Pipe) => {
-                self.has_projection_contract(right, scope)
-            }
+            Node::BinaryOp {
+                op: BinaryOperator::Pipe,
+                right,
+                ..
+            } => self.has_projection_contract(right, scope),
             _ => false,
         }
     }

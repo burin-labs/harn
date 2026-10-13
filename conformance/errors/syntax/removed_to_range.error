@@ -1,1 +1,1 @@
-`start to end` ranges were removed
+ranges were removed; write `start..=end`

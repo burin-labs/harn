@@ -261,7 +261,7 @@ fn test_includes_aliases_membership_methods() {
 harness.stdio.log("hello world".includes("world"))
 harness.stdio.log(["alpha", "beta"].includes("beta"))
 harness.stdio.log(set("read", "write").includes("write"))
-harness.stdio.log((1 to 4).includes(3))
+harness.stdio.log((1..=4).includes(3))
 }"#,
     );
     assert_eq!(out, "[harn] true\n[harn] true\n[harn] true\n[harn] true");

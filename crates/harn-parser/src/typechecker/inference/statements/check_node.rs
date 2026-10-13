@@ -670,7 +670,7 @@ impl TypeChecker {
                 if self.check_pipe_operands(*op, left, right, scope) {
                     return;
                 }
-                if matches!(op, BinaryOperator::And) || matches!(op, BinaryOperator::Or) {
+                if matches!(op, BinaryOperator::And | BinaryOperator::Or) {
                     let refs = self.extract_refinements(left, scope);
                     let mut right_scope = scope.child();
                     if matches!(op, BinaryOperator::And) {

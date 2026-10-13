@@ -597,21 +597,25 @@ fn eval_static(node: &SNode) -> StaticValue {
             index,
             matches!(&node.node, Node::OptionalSubscriptAccess { .. }),
         ),
-        Node::BinaryOp { op, left, right } if matches!(op, BinaryOperator::Add) => {
-            match (eval_static(left), eval_static(right)) {
-                (StaticValue::String(left), StaticValue::String(right)) => {
-                    StaticValue::String(format!("{left}{right}"))
-                }
-                _ => StaticValue::Unknown,
+        Node::BinaryOp {
+            op: BinaryOperator::Add,
+            left,
+            right,
+        } => match (eval_static(left), eval_static(right)) {
+            (StaticValue::String(left), StaticValue::String(right)) => {
+                StaticValue::String(format!("{left}{right}"))
             }
-        }
-        Node::BinaryOp { op, left, right } if matches!(op, BinaryOperator::NilCoalesce) => {
-            match eval_static(left) {
-                StaticValue::Nil => eval_static(right),
-                StaticValue::Unknown => StaticValue::Unknown,
-                value => value,
-            }
-        }
+            _ => StaticValue::Unknown,
+        },
+        Node::BinaryOp {
+            op: BinaryOperator::NilCoalesce,
+            left,
+            right,
+        } => match eval_static(left) {
+            StaticValue::Nil => eval_static(right),
+            StaticValue::Unknown => StaticValue::Unknown,
+            value => value,
+        },
         Node::Ternary {
             condition,
             true_expr,

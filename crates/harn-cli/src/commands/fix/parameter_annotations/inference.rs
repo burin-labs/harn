@@ -309,7 +309,11 @@ fn collect_body(
             }
         }
         match &node.node {
-            Node::BinaryOp { op, left, right } if matches!(op, BinaryOperator::NilCoalesce) => {
+            Node::BinaryOp {
+                op: BinaryOperator::NilCoalesce,
+                left,
+                right,
+            } => {
                 // `value ?? fallback` types `value` as the fallback's type
                 // widened with nil: the operator exists because it can be nil.
                 if let ArgKind::Known(rendered) = arg_kind(right, &env) {

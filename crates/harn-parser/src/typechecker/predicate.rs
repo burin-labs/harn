@@ -265,7 +265,7 @@ impl TypeChecker {
                 self.check_predicate_boolean(operand, scope);
             }
             Node::BinaryOp { op, left, right }
-                if matches!(op, BinaryOperator::And) || matches!(op, BinaryOperator::Or) =>
+                if matches!(op, BinaryOperator::And | BinaryOperator::Or) =>
             {
                 self.check_predicate_boolean(left, scope);
                 self.check_predicate_boolean(right, scope);

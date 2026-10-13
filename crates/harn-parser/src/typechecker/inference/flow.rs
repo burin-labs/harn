@@ -253,7 +253,7 @@ fn evaluate_constant_bool(condition: &SNode) -> Option<bool> {
         Node::FloatLiteral(v) => Some(*v != 0.0),
         Node::StringLiteral(s) | Node::RawStringLiteral(s) => Some(!s.is_empty()),
         Node::BinaryOp { op, left, right }
-            if matches!(op, BinaryOperator::And) || matches!(op, BinaryOperator::Or) =>
+            if matches!(op, BinaryOperator::And | BinaryOperator::Or) =>
         {
             let lv = evaluate_constant_bool(left);
             let rv = evaluate_constant_bool(right);
@@ -363,7 +363,7 @@ impl TypeChecker {
         }
         match &condition.node {
             Node::BinaryOp { op, left, right }
-                if matches!(op, BinaryOperator::And) || matches!(op, BinaryOperator::Or) =>
+                if matches!(op, BinaryOperator::And | BinaryOperator::Or) =>
             {
                 self.lint_vacuous_condition(left, scope);
                 let left_ref = self.extract_refinements(left, scope);
@@ -520,7 +520,7 @@ impl TypeChecker {
         }
         match &condition.node {
             Node::BinaryOp { op, left, right }
-                if matches!(op, BinaryOperator::Neq) || matches!(op, BinaryOperator::Eq) =>
+                if matches!(op, BinaryOperator::Neq | BinaryOperator::Eq) =>
             {
                 let (left, left_aliased) = self.resolve_typeof_alias_node(left, scope);
                 let (right, right_aliased) = self.resolve_typeof_alias_node(right, scope);
@@ -566,7 +566,11 @@ impl TypeChecker {
             }
 
             // Logical AND: both operands must be truthy, so truthy refinements compose.
-            Node::BinaryOp { op, left, right } if matches!(op, BinaryOperator::And) => {
+            Node::BinaryOp {
+                op: BinaryOperator::And,
+                left,
+                right,
+            } => {
                 let left_ref = self.extract_refinements(left, scope);
                 let mut right_scope = scope.child();
                 left_ref.apply_truthy(&mut right_scope);
@@ -588,7 +592,11 @@ impl TypeChecker {
             }
 
             // Logical OR: both operands must be falsy for the whole to be falsy.
-            Node::BinaryOp { op, left, right } if matches!(op, BinaryOperator::Or) => {
+            Node::BinaryOp {
+                op: BinaryOperator::Or,
+                left,
+                right,
+            } => {
                 let left_ref = self.extract_refinements(left, scope);
                 let mut right_scope = scope.child();
                 left_ref.apply_falsy(&mut right_scope);

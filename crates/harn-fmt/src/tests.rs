@@ -14,6 +14,30 @@ use harn_parser::Parser;
 use crate::helpers::format_duration;
 use crate::{format_source, format_source_opts, FmtOptions, AUTO_SEPARATOR_WIDTH};
 
+/// The program's structure without positions. The formatter sorts selective
+/// import names, which does not change meaning, so they compare sorted.
+fn meaning(program: &[harn_parser::SNode]) -> serde_json::Value {
+    fn sort_import_names(value: &mut serde_json::Value) {
+        match value {
+            serde_json::Value::Object(map) => {
+                if let Some(serde_json::Value::Array(names)) = map
+                    .get_mut("SelectiveImport")
+                    .and_then(|import| import.get_mut("names"))
+                {
+                    names.sort_by(|a, b| a.as_str().cmp(&b.as_str()));
+                }
+                map.values_mut().for_each(sort_import_names);
+            }
+            serde_json::Value::Array(items) => items.iter_mut().for_each(sort_import_names),
+            _ => {}
+        }
+    }
+    let mut projection =
+        harn_parser::ast_json::structural_projection(program, OperatorGrammar::CURRENT);
+    sort_import_names(&mut projection);
+    projection
+}
+
 pub(super) fn assert_roundtrip(source: &str) {
     let formatted = format_source(source).unwrap();
     let mut lexer = Lexer::new(&formatted);
@@ -26,8 +50,8 @@ pub(super) fn assert_roundtrip(source: &str) {
         .unwrap_or_else(|e| panic!("Formatted output failed to parse:\n{formatted}\nError: {e}"));
     let original = harn_parser::parse_source(source).expect("roundtrip source must parse");
     assert_eq!(
-        harn_parser::ast_json::structural_projection(&original, OperatorGrammar::CURRENT),
-        harn_parser::ast_json::structural_projection(&reparsed, OperatorGrammar::CURRENT),
+        meaning(&original),
+        meaning(&reparsed),
         "Formatter changed the meaning of:\n{source}\nformatted as:\n{formatted}"
     );
     let formatted2 = format_source(&formatted).unwrap();

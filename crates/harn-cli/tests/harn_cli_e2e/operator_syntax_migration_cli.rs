@@ -4,7 +4,8 @@
 //! grammar meant.
 
 use std::path::{Path, PathBuf};
-use std::process::Command;
+
+use crate::test_util::process::harn_e2e_command;
 
 fn temp_root(name: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!(
@@ -17,7 +18,7 @@ fn temp_root(name: &str) -> PathBuf {
 }
 
 fn run(dir: &Path, args: &[&str]) -> (String, String, i32) {
-    let out = Command::new(env!("CARGO_BIN_EXE_harn"))
+    let out = harn_e2e_command()
         .current_dir(dir)
         .args(args)
         .output()
