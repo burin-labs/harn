@@ -14,11 +14,11 @@ subdirectory adds rules for changes under it.
 - Harn owns orchestration, transcript lifecycle, replay/eval, worker lineage, capability policy, and
   mutation-session audit metadata; hosts own presentation, approval UX, concrete file mutations, and
   undo/redo. Judge a finding against the owner of the behavior. (AGENTS.md#Ownership)
-- Generated files are not edited by hand: spec/HARN_SPEC.md, docs/src/language-spec.md,
-  docs/theme/harn-keywords.js, protocol artifacts (except spec/protocol-artifacts/*_test.go),
-  providers.toml, capabilities.toml, spec/provider-catalog/. scripts/generated_artifacts.toml
-  registers every gen/check pair; a new artifact needs Makefile targets, a registry entry, `make
-  all`, and CI wiring. (AGENTS.md#Source ownership and generated files)
+- Every output registered in `scripts/generated_artifacts.toml` is generated: a hand edit to one
+  is a defect, and the fix edits its source and regenerates. Examples include `spec/HARN_SPEC.md`,
+  `docs/src/language-spec.md`, the provider catalog projections, and the provider docs. A new
+  artifact needs Makefile targets, a registry entry, `make all`, and CI wiring. (AGENTS.md#Source
+  ownership and generated files; `scripts/generated_artifacts.toml`)
 - Provider catalog changes edit only catalog_sources/ and capability_sources/ fragments, ship a row
   and capability rule on every route the model is served on, and give every catalog test a negative
   control. Capability claims need a live probe, not a model card. (AGENTS.md#Adding a model or
