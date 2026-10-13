@@ -74,10 +74,11 @@ over archived nodes. Mapping the file is unsafe without protection against
 out-of-process modification, as
 [memmap2 documents](https://docs.rs/memmap2/latest/memmap2/struct.MmapOptions.html).
 A restore that reconciled changes publishes the index first and rewrites the
-snapshot on a background thread that `wait_until_idle` joins, so readers never
-wait for the write. Each write encodes the index current when it starts, and
-writes are ordered within the process, so an older state never replaces a
-newer one on disk.
+snapshot on a background thread that `wait_until_idle` waits for. The write
+holds the index lock only to detach a copy, which the shared generations make
+cheap, so readers wait tens of milliseconds rather than for the encode. Each
+write encodes the index current when it starts, and writes are ordered within
+the process, so an older state never replaces a newer one on disk.
 
 For cold build, collect independent parsed-file facts on a bounded worker pool,
 then apply them through one graph owner and resolve calls after the complete

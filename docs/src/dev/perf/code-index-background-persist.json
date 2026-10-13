@@ -1,12 +1,13 @@
 {
  "baseline": {
-  "binary_sha256": "4a4aab73bf8d9ec385d53fa3df0ca5e9611ee62748c74c154bf29c9269692b9c",
   "source": "70bc0eee20, per-file graph strings without background persistence"
  },
+ "binaries": {
+  "baseline": "4a4aab73bf8d9ec385d53fa3df0ca5e9611ee62748c74c154bf29c9269692b9c",
+  "candidate": "c7876135113ba334bf4a0bf04a93cd4416ab64f7a9575f57598eefd30cb5f651"
+ },
  "candidate": {
-  "binary_sha256": "62d4c49c2cbb1fd59d16a30e2093165332ccd40d9ed8edc568ee74a8dfdefc49",
-  "profile": "release, thin LTO, 16 codegen units, no native-CPU flags",
-  "source": "579dce1ff7"
+  "source": "3c1d0cb59a, background persistence with the independent-review fixes"
  },
  "host": {
   "cpu": "AMD Ryzen 5 3600X 6-Core Processor",
@@ -16,13 +17,13 @@
  },
  "measurement_date": "2026-10-13",
  "protocol": {
-  "bootstrap": "median paired candidate/baseline ratio, 10,000 resamples, seed 9743",
+  "bootstrap": "median paired ratio, 10,000 resamples, seed 9743",
   "pair_order": "alternating",
   "parity": "corpus, graph, and posting digests plus file, node, edge, and resolved-call counts compared per pair",
-  "readiness": "restore return, before the registered queries; persisted_us is when the background snapshot write landed, after the queries",
-  "regime": "quiet host: CI idle; no idle wait before trials; the HEAD workload saw up to 1.07 external busy cores in two pairs, which are flagged rejected and retained"
+  "readiness": "restore or mutation return, before the registered Cypher, word, trigram, and literal queries; ready_and_queries adds those queries, so a reader blocked by background work is counted",
+  "regime": "quiet host: CI idle; each trial waited for 0.9 idle CPU over three seconds and must keep external load at or under 0.25 busy cores"
  },
- "seed_sha256": "392516349f932b46a96ad675a9cf58169533fd48b38f6b9a246f5fee443df311",
+ "seed_sha256": "81f2e48df72c49b4b4f80e88284c2fa702b3cc95e700dfcfa1fd2a2caf3dbaf2",
  "skipped_file_inventories": {
   "ecf3f0ac3ea88dbe1e096128817116baccc3e0f181cde9a3c80f49dbe6dc3148": [
    "docs/perf/h1-time-scroll.trace/corespace/run1/core/stores/indexed-store-0/schema.xml",
@@ -69,195 +70,103 @@
  },
  "summary": {
   "body": {
-   "baseline_median_s": 1.148677,
-   "candidate_median_s": 0.499177,
-   "candidate_persisted_median_s": 1.168536,
-   "external_busy_cores_max": 0.044981740529196415,
+   "accepted_pairs": 3,
+   "baseline_ready_and_queries_median_s": 1.13438,
+   "baseline_ready_median_s": 1.121371,
+   "candidate_persisted_median_s": 1.17263,
+   "candidate_ready_and_queries_median_s": 0.553523,
+   "candidate_ready_median_s": 0.501039,
    "full_fact_parity": true,
-   "paired_ratio_median": 0.4363306656266296,
    "pairs": 3,
    "peak_rss_mib_median": {
-    "baseline": 844.47265625,
-    "candidate": 845.3203125
+    "baseline": 850.7109375,
+    "candidate": 882.39453125
    },
-   "phase_median_s": {
-    "baseline": {
-     "reconcile.total": 0.058494,
-     "snapshot.decode": 0.159422,
-     "snapshot.decode_core": 0.067827,
-     "snapshot.decode_trigrams": 0.096153,
-     "snapshot.decode_words": 0.111786,
-     "snapshot.read": 0.070223,
-     "snapshot.restore": 0.193076,
-     "snapshot.restore_dependencies": 0.01435,
-     "snapshot.restore_graph": 0.172886,
-     "snapshot.restore_trigrams": 0.024653,
-     "snapshot.restore_words": 0.038116,
-     "snapshot.write": 0.277073
-    },
-    "candidate": {
-     "reconcile.total": 0.05816,
-     "snapshot.decode": 0.16999,
-     "snapshot.decode_core": 0.067737,
-     "snapshot.decode_trigrams": 0.075948,
-     "snapshot.decode_words": 0.122973,
-     "snapshot.read": 0.069206,
-     "snapshot.restore": 0.190259,
-     "snapshot.restore_dependencies": 0.014125,
-     "snapshot.restore_graph": 0.170474,
-     "snapshot.restore_trigrams": 0.023095,
-     "snapshot.restore_words": 0.038111,
-     "snapshot.write": 0.289007
-    }
-   },
-   "ratio_95": [
-    0.41274481343779384,
-    0.437251669551446
+   "ready_and_queries_ratio_95": [
+    0.47151676565003875,
+    0.4931962242430398
    ],
-   "ratio_range": [
-    0.41274481343779384,
-    0.437251669551446
+   "ready_and_queries_ratio_median": 0.48821823374883194,
+   "ready_ratio_95": [
+    0.44013879344807133,
+    0.449943973510172
    ],
-   "snapshot_bytes": {
-    "baseline": 143450090,
-    "candidate": 143450090
-   }
+   "ready_ratio_median": 0.4468093075351512
   },
   "declaration": {
-   "baseline_median_s": 1.132534,
-   "candidate_median_s": 0.500838,
-   "candidate_persisted_median_s": 1.179842,
-   "external_busy_cores_max": 0.01737417632791682,
+   "accepted_pairs": 3,
+   "baseline_ready_and_queries_median_s": 1.122851,
+   "baseline_ready_median_s": 1.114285,
+   "candidate_persisted_median_s": 1.186205,
+   "candidate_ready_and_queries_median_s": 0.552055,
+   "candidate_ready_median_s": 0.499756,
    "full_fact_parity": true,
-   "paired_ratio_median": 0.4422277830069561,
    "pairs": 3,
    "peak_rss_mib_median": {
-    "baseline": 837.8125,
-    "candidate": 842.9375
+    "baseline": 846.26953125,
+    "candidate": 867.31640625
    },
-   "phase_median_s": {
-    "baseline": {
-     "reconcile.total": 0.058124,
-     "snapshot.decode": 0.162341,
-     "snapshot.decode_core": 0.06914,
-     "snapshot.decode_trigrams": 0.078186,
-     "snapshot.decode_words": 0.114123,
-     "snapshot.read": 0.068712,
-     "snapshot.restore": 0.19218,
-     "snapshot.restore_dependencies": 0.014192,
-     "snapshot.restore_graph": 0.172418,
-     "snapshot.restore_trigrams": 0.025818,
-     "snapshot.restore_words": 0.039195,
-     "snapshot.write": 0.281593
-    },
-    "candidate": {
-     "reconcile.total": 0.058512,
-     "snapshot.decode": 0.17087,
-     "snapshot.decode_core": 0.053782,
-     "snapshot.decode_trigrams": 0.077125,
-     "snapshot.decode_words": 0.123191,
-     "snapshot.read": 0.069774,
-     "snapshot.restore": 0.188806,
-     "snapshot.restore_dependencies": 0.014141,
-     "snapshot.restore_graph": 0.168997,
-     "snapshot.restore_trigrams": 0.022863,
-     "snapshot.restore_words": 0.038752,
-     "snapshot.write": 0.287857
-    }
-   },
-   "ratio_95": [
-    0.4127835677274864,
-    0.4442174684174222
+   "ready_and_queries_ratio_95": [
+    0.4833784714089403,
+    0.49320701820842533
    ],
-   "ratio_range": [
-    0.4127835677274864,
-    0.4442174684174222
+   "ready_and_queries_ratio_median": 0.4910804174013093,
+   "ready_ratio_95": [
+    0.44177387293196985,
+    0.4514544382022979
    ],
-   "snapshot_bytes": {
-    "baseline": 143450133,
-    "candidate": 143450133
-   }
+   "ready_ratio_median": 0.4479318810960203
   },
   "head": {
-   "baseline_median_s": 1.326851,
-   "candidate_median_s": 0.676401,
-   "candidate_persisted_median_s": 1.275812,
-   "external_busy_cores_max": 1.0652369695706678,
+   "accepted_pairs": 3,
+   "baseline_ready_and_queries_median_s": 1.287165,
+   "baseline_ready_median_s": 1.275462,
+   "candidate_persisted_median_s": 1.310254,
+   "candidate_ready_and_queries_median_s": 0.734805,
+   "candidate_ready_median_s": 0.680172,
    "full_fact_parity": true,
-   "paired_ratio_median": 0.5132897363758252,
    "pairs": 3,
    "peak_rss_mib_median": {
-    "baseline": 831.8125,
-    "candidate": 838.3515625
+    "baseline": 851.296875,
+    "candidate": 847.6953125
    },
-   "phase_median_s": {
-    "baseline": {
-     "reconcile.total": 0.238013,
-     "snapshot.decode": 0.172246,
-     "snapshot.decode_core": 0.070641,
-     "snapshot.decode_trigrams": 0.09579,
-     "snapshot.decode_words": 0.124346,
-     "snapshot.read": 0.070612,
-     "snapshot.restore": 0.191082,
-     "snapshot.restore_dependencies": 0.014515,
-     "snapshot.restore_graph": 0.170944,
-     "snapshot.restore_trigrams": 0.029002,
-     "snapshot.restore_words": 0.037869,
-     "snapshot.write": 0.285678
-    },
-    "candidate": {
-     "reconcile.total": 0.237,
-     "snapshot.decode": 0.161303,
-     "snapshot.decode_core": 0.067833,
-     "snapshot.decode_trigrams": 0.07591,
-     "snapshot.decode_words": 0.111886,
-     "snapshot.read": 0.070229,
-     "snapshot.restore": 0.191891,
-     "snapshot.restore_dependencies": 0.014421,
-     "snapshot.restore_graph": 0.17157,
-     "snapshot.restore_trigrams": 0.027055,
-     "snapshot.restore_words": 0.037309,
-     "snapshot.write": 0.28403
-    }
-   },
-   "ratio_95": [
-    0.2504800747212158,
-    0.5134893233247094
+   "ready_and_queries_ratio_95": [
+    0.5127110347886573,
+    0.5797728079517217
    ],
-   "ratio_range": [
-    0.2504800747212158,
-    0.5134893233247094
+   "ready_and_queries_ratio_median": 0.570870867371316,
+   "ready_ratio_95": [
+    0.4791592092228166,
+    0.5423262303904958
    ],
-   "snapshot_bytes": {
-    "baseline": 143450072,
-    "candidate": 143450072
-   }
+   "ready_ratio_median": 0.536067715071088
   }
  },
+ "superseded_measurement": "An earlier run of 579dce1ff7, before the review fixes, encoded under the index lock: its first queries after publication took about 0.33 s, so readiness alone overstated the gain. These trials replace it.",
  "trials": [
   {
    "accepted": true,
    "binary_sha256": "4a4aab73bf8d9ec385d53fa3df0ca5e9611ee62748c74c154bf29c9269692b9c",
    "corpus_digest": "9d13d6b2dd9a5fab2e41845fe0e6dac8eb30d31c8c1cd874f92cd24704f5e040",
    "edges": 5036843,
-   "elapsed_us": 1154258,
+   "elapsed_us": 1159517,
    "estimated_bytes": 142265485,
-   "external_busy_cores": 0.01129900130277278,
+   "external_busy_cores": 0.0040830809134495445,
    "files": 8464,
    "files_attempted": 41,
    "files_skipped": 40,
    "graph_digest": "60c139dfe072dca280cb1df87af9af7ac70059339323df6fabf7f35eb48a894b",
    "label": "baseline",
-   "literal_query_us": 12334,
+   "literal_query_us": 10983,
    "nodes": 752584,
-   "operation_peak_rss_kib": 864740,
+   "operation_peak_rss_kib": 882196,
    "phases_us_and_count": {
     "graph.calls": [
-     15,
+     7,
      1
     ],
     "graph.imports": [
-     5716,
+     5687,
      1
     ],
     "graph.parse": [
@@ -265,11 +174,11 @@
      1
     ],
     "graph.parse_and_replace": [
-     118,
+     117,
      1
     ],
     "graph.rebuild_file": [
-     123,
+     122,
      1
     ],
     "graph.refs_incoming": [
@@ -277,445 +186,11 @@
      1
     ],
     "graph.refs_outgoing": [
-     1,
-     1
-    ],
-    "graph.remove_file": [
-     9,
-     1
-    ],
-    "ingest.skipped": [
-     0,
-     40
-    ],
-    "ingest.total": [
-     198,
-     41
-    ],
-    "ingest.trigrams": [
-     8,
-     1
-    ],
-    "ingest.words": [
-     9,
-     1
-    ],
-    "reconcile.total": [
-     58494,
-     1
-    ],
-    "snapshot.decode": [
-     159370,
-     1
-    ],
-    "snapshot.decode_core": [
-     69490,
-     3
-    ],
-    "snapshot.decode_edges": [
-     79605,
-     1
-    ],
-    "snapshot.decode_nodes": [
-     223180,
-     4
-    ],
-    "snapshot.decode_trigrams": [
-     77306,
-     1
-    ],
-    "snapshot.decode_words": [
-     111028,
-     1
-    ],
-    "snapshot.encode": [
-     159309,
-     1
-    ],
-    "snapshot.load": [
-     242139,
-     1
-    ],
-    "snapshot.read": [
-     70189,
-     1
-    ],
-    "snapshot.restore": [
-     193076,
-     1
-    ],
-    "snapshot.restore_dependencies": [
-     14480,
-     1
-    ],
-    "snapshot.restore_graph": [
-     172886,
-     1
-    ],
-    "snapshot.restore_trigrams": [
-     24653,
-     1
-    ],
-    "snapshot.restore_words": [
-     38116,
-     1
-    ],
-    "snapshot.write": [
-     272372,
-     1
-    ]
-   },
-   "postings_digest": "cea864c577db462669ebaa7adeeb942bb6c171f2ab5c60c9e5b6a261b0e0c9e5",
-   "pre_idle": 0.999722145040289,
-   "query_us": 37,
-   "ready_us": 1141624,
-   "resolved_calls": 441301,
-   "rows": 1,
-   "scenario": "body",
-   "skipped_file_inventory": "ecf3f0ac3ea88dbe1e096128817116baccc3e0f181cde9a3c80f49dbe6dc3148",
-   "snapshot_bytes": 143450090,
-   "source_bytes": 88173038,
-   "trial": 1,
-   "trigram_query_us": 199,
-   "word_query_us": 4
-  },
-  {
-   "accepted": true,
-   "binary_sha256": "62d4c49c2cbb1fd59d16a30e2093165332ccd40d9ed8edc568ee74a8dfdefc49",
-   "corpus_digest": "9d13d6b2dd9a5fab2e41845fe0e6dac8eb30d31c8c1cd874f92cd24704f5e040",
-   "edges": 5036843,
-   "elapsed_us": 1165009,
-   "estimated_bytes": 142265485,
-   "external_busy_cores": 0.044981740529196415,
-   "files": 8464,
-   "files_attempted": 41,
-   "files_skipped": 40,
-   "graph_digest": "60c139dfe072dca280cb1df87af9af7ac70059339323df6fabf7f35eb48a894b",
-   "label": "candidate",
-   "literal_query_us": 9928,
-   "nodes": 752584,
-   "operation_peak_rss_kib": 865608,
-   "persisted_us": 1164981,
-   "phases_us_and_count": {
-    "graph.calls": [
-     7,
-     1
-    ],
-    "graph.imports": [
-     6079,
-     1
-    ],
-    "graph.parse": [
-     97,
-     1
-    ],
-    "graph.parse_and_replace": [
-     118,
-     1
-    ],
-    "graph.rebuild_file": [
-     125,
-     1
-    ],
-    "graph.refs_incoming": [
-     5,
-     1
-    ],
-    "graph.refs_outgoing": [
-     1,
-     1
-    ],
-    "graph.remove_file": [
-     8,
-     1
-    ],
-    "ingest.skipped": [
-     0,
-     40
-    ],
-    "ingest.total": [
-     207,
-     41
-    ],
-    "ingest.trigrams": [
-     12,
-     1
-    ],
-    "ingest.words": [
-     10,
-     1
-    ],
-    "reconcile.total": [
-     58160,
-     1
-    ],
-    "snapshot.decode": [
-     169990,
-     1
-    ],
-    "snapshot.decode_core": [
-     68155,
-     3
-    ],
-    "snapshot.decode_edges": [
-     78759,
-     1
-    ],
-    "snapshot.decode_nodes": [
-     211546,
-     4
-    ],
-    "snapshot.decode_trigrams": [
-     75440,
-     1
-    ],
-    "snapshot.decode_words": [
-     122991,
-     1
-    ],
-    "snapshot.encode": [
-     172388,
-     1
-    ],
-    "snapshot.load": [
-     250959,
-     1
-    ],
-    "snapshot.read": [
-     68044,
-     1
-    ],
-    "snapshot.restore": [
-     189977,
-     1
-    ],
-    "snapshot.restore_dependencies": [
-     14087,
-     1
-    ],
-    "snapshot.restore_graph": [
-     170289,
-     1
-    ],
-    "snapshot.restore_trigrams": [
-     23095,
-     1
-    ],
-    "snapshot.restore_words": [
-     38111,
-     1
-    ],
-    "snapshot.write": [
-     289007,
-     1
-    ]
-   },
-   "postings_digest": "cea864c577db462669ebaa7adeeb942bb6c171f2ab5c60c9e5b6a261b0e0c9e5",
-   "pre_idle": 0.999722145040289,
-   "query_us": 348289,
-   "ready_us": 499177,
-   "resolved_calls": 441301,
-   "rows": 1,
-   "scenario": "body",
-   "skipped_file_inventory": "ecf3f0ac3ea88dbe1e096128817116baccc3e0f181cde9a3c80f49dbe6dc3148",
-   "snapshot_bytes": 143450090,
-   "source_bytes": 88173038,
-   "trial": 1,
-   "trigram_query_us": 160,
-   "word_query_us": 6
-  },
-  {
-   "accepted": true,
-   "binary_sha256": "62d4c49c2cbb1fd59d16a30e2093165332ccd40d9ed8edc568ee74a8dfdefc49",
-   "corpus_digest": "9d13d6b2dd9a5fab2e41845fe0e6dac8eb30d31c8c1cd874f92cd24704f5e040",
-   "edges": 5036843,
-   "elapsed_us": 1186472,
-   "estimated_bytes": 142265485,
-   "external_busy_cores": 0.010635775895280596,
-   "files": 8464,
-   "files_attempted": 41,
-   "files_skipped": 40,
-   "graph_digest": "60c139dfe072dca280cb1df87af9af7ac70059339323df6fabf7f35eb48a894b",
-   "label": "candidate",
-   "literal_query_us": 10001,
-   "nodes": 752584,
-   "operation_peak_rss_kib": 871964,
-   "persisted_us": 1186453,
-   "phases_us_and_count": {
-    "graph.calls": [
-     6,
-     1
-    ],
-    "graph.imports": [
-     6073,
-     1
-    ],
-    "graph.parse": [
-     93,
-     1
-    ],
-    "graph.parse_and_replace": [
-     116,
-     1
-    ],
-    "graph.rebuild_file": [
-     124,
-     1
-    ],
-    "graph.refs_incoming": [
-     6,
-     1
-    ],
-    "graph.refs_outgoing": [
-     1,
-     1
-    ],
-    "graph.remove_file": [
-     8,
-     1
-    ],
-    "ingest.skipped": [
-     0,
-     40
-    ],
-    "ingest.total": [
-     196,
-     41
-    ],
-    "ingest.trigrams": [
-     7,
-     1
-    ],
-    "ingest.words": [
-     9,
-     1
-    ],
-    "reconcile.total": [
-     58175,
-     1
-    ],
-    "snapshot.decode": [
-     156977,
-     1
-    ],
-    "snapshot.decode_core": [
-     66819,
-     3
-    ],
-    "snapshot.decode_edges": [
-     78864,
-     1
-    ],
-    "snapshot.decode_nodes": [
-     236282,
-     4
-    ],
-    "snapshot.decode_trigrams": [
-     75948,
-     1
-    ],
-    "snapshot.decode_words": [
-     110297,
-     1
-    ],
-    "snapshot.encode": [
-     148559,
-     1
-    ],
-    "snapshot.load": [
-     239177,
-     1
-    ],
-    "snapshot.read": [
-     69643,
-     1
-    ],
-    "snapshot.restore": [
-     190259,
-     1
-    ],
-    "snapshot.restore_dependencies": [
-     14162,
-     1
-    ],
-    "snapshot.restore_graph": [
-     170474,
-     1
-    ],
-    "snapshot.restore_trigrams": [
-     23118,
-     1
-    ],
-    "snapshot.restore_words": [
-     38086,
-     1
-    ],
-    "snapshot.write": [
-     322612,
-     1
-    ]
-   },
-   "postings_digest": "cea864c577db462669ebaa7adeeb942bb6c171f2ab5c60c9e5b6a261b0e0c9e5",
-   "pre_idle": 0.999722067815453,
-   "query_us": 32,
-   "ready_us": 487684,
-   "resolved_calls": 441301,
-   "rows": 1,
-   "scenario": "body",
-   "skipped_file_inventory": "ecf3f0ac3ea88dbe1e096128817116baccc3e0f181cde9a3c80f49dbe6dc3148",
-   "snapshot_bytes": 143450090,
-   "source_bytes": 88173038,
-   "trial": 2,
-   "trigram_query_us": 119,
-   "word_query_us": 3
-  },
-  {
-   "accepted": true,
-   "binary_sha256": "4a4aab73bf8d9ec385d53fa3df0ca5e9611ee62748c74c154bf29c9269692b9c",
-   "corpus_digest": "9d13d6b2dd9a5fab2e41845fe0e6dac8eb30d31c8c1cd874f92cd24704f5e040",
-   "edges": 5036843,
-   "elapsed_us": 1195853,
-   "estimated_bytes": 142265485,
-   "external_busy_cores": 0.010478442973122861,
-   "files": 8464,
-   "files_attempted": 41,
-   "files_skipped": 40,
-   "graph_digest": "60c139dfe072dca280cb1df87af9af7ac70059339323df6fabf7f35eb48a894b",
-   "label": "baseline",
-   "literal_query_us": 13962,
-   "nodes": 752584,
-   "operation_peak_rss_kib": 862312,
-   "phases_us_and_count": {
-    "graph.calls": [
-     7,
-     1
-    ],
-    "graph.imports": [
-     5766,
-     1
-    ],
-    "graph.parse": [
-     91,
-     1
-    ],
-    "graph.parse_and_replace": [
-     113,
-     1
-    ],
-    "graph.rebuild_file": [
-     120,
-     1
-    ],
-    "graph.refs_incoming": [
-     4,
-     1
-    ],
-    "graph.refs_outgoing": [
      2,
      1
     ],
     "graph.remove_file": [
-     8,
+     9,
      1
     ],
     "ingest.skipped": [
@@ -727,260 +202,116 @@
      41
     ],
     "ingest.trigrams": [
-     8,
-     1
-    ],
-    "ingest.words": [
-     9,
-     1
-    ],
-    "reconcile.total": [
-     58859,
-     1
-    ],
-    "snapshot.decode": [
-     171540,
-     1
-    ],
-    "snapshot.decode_core": [
-     67827,
-     3
-    ],
-    "snapshot.decode_edges": [
-     89080,
-     1
-    ],
-    "snapshot.decode_nodes": [
-     236904,
-     4
-    ],
-    "snapshot.decode_trigrams": [
-     97062,
-     1
-    ],
-    "snapshot.decode_words": [
-     124444,
-     1
-    ],
-    "snapshot.encode": [
-     168003,
-     1
-    ],
-    "snapshot.load": [
-     255159,
-     1
-    ],
-    "snapshot.read": [
-     70223,
-     1
-    ],
-    "snapshot.restore": [
-     190680,
-     1
-    ],
-    "snapshot.restore_dependencies": [
-     14350,
-     1
-    ],
-    "snapshot.restore_graph": [
-     170661,
-     1
-    ],
-    "snapshot.restore_trigrams": [
-     25398,
-     1
-    ],
-    "snapshot.restore_words": [
-     38245,
-     1
-    ],
-    "snapshot.write": [
-     296946,
-     1
-    ]
-   },
-   "postings_digest": "cea864c577db462669ebaa7adeeb942bb6c171f2ab5c60c9e5b6a261b0e0c9e5",
-   "pre_idle": 0.9974993053626007,
-   "query_us": 35,
-   "ready_us": 1181563,
-   "resolved_calls": 441301,
-   "rows": 1,
-   "scenario": "body",
-   "skipped_file_inventory": "ecf3f0ac3ea88dbe1e096128817116baccc3e0f181cde9a3c80f49dbe6dc3148",
-   "snapshot_bytes": 143450090,
-   "source_bytes": 88173038,
-   "trial": 2,
-   "trigram_query_us": 227,
-   "word_query_us": 8
-  },
-  {
-   "accepted": true,
-   "binary_sha256": "4a4aab73bf8d9ec385d53fa3df0ca5e9611ee62748c74c154bf29c9269692b9c",
-   "corpus_digest": "9d13d6b2dd9a5fab2e41845fe0e6dac8eb30d31c8c1cd874f92cd24704f5e040",
-   "edges": 5036843,
-   "elapsed_us": 1161365,
-   "estimated_bytes": 142265485,
-   "external_busy_cores": 0.009927914222851256,
-   "files": 8464,
-   "files_attempted": 41,
-   "files_skipped": 40,
-   "graph_digest": "60c139dfe072dca280cb1df87af9af7ac70059339323df6fabf7f35eb48a894b",
-   "label": "baseline",
-   "literal_query_us": 12362,
-   "nodes": 752584,
-   "operation_peak_rss_kib": 872184,
-   "phases_us_and_count": {
-    "graph.calls": [
      7,
      1
     ],
-    "graph.imports": [
-     5698,
-     1
-    ],
-    "graph.parse": [
-     89,
-     1
-    ],
-    "graph.parse_and_replace": [
-     114,
-     1
-    ],
-    "graph.rebuild_file": [
-     121,
-     1
-    ],
-    "graph.refs_incoming": [
-     4,
-     1
-    ],
-    "graph.refs_outgoing": [
-     1,
-     1
-    ],
-    "graph.remove_file": [
+    "ingest.words": [
      10,
      1
     ],
-    "ingest.skipped": [
-     0,
-     40
-    ],
-    "ingest.total": [
-     198,
-     41
-    ],
-    "ingest.trigrams": [
-     8,
-     1
-    ],
-    "ingest.words": [
-     9,
-     1
-    ],
     "reconcile.total": [
-     58340,
+     58710,
      1
     ],
     "snapshot.decode": [
-     159422,
+     158783,
      1
     ],
     "snapshot.decode_core": [
-     63363,
+     71771,
      3
     ],
     "snapshot.decode_edges": [
-     90356,
+     80621,
      1
     ],
     "snapshot.decode_nodes": [
-     219079,
+     224936,
      4
     ],
     "snapshot.decode_trigrams": [
-     96153,
+     78200,
      1
     ],
     "snapshot.decode_words": [
-     111786,
+     110984,
      1
     ],
     "snapshot.encode": [
-     151438,
+     182918,
      1
     ],
     "snapshot.load": [
-     244566,
+     241195,
      1
     ],
     "snapshot.read": [
-     70292,
+     68264,
      1
     ],
     "snapshot.restore": [
-     196349,
+     191955,
      1
     ],
     "snapshot.restore_dependencies": [
-     14271,
+     14333,
      1
     ],
     "snapshot.restore_graph": [
-     176411,
+     171979,
      1
     ],
     "snapshot.restore_trigrams": [
-     24588,
+     25823,
      1
     ],
     "snapshot.restore_words": [
-     37959,
+     39014,
      1
     ],
     "snapshot.write": [
-     277073,
+     254496,
      1
     ]
    },
    "postings_digest": "cea864c577db462669ebaa7adeeb942bb6c171f2ab5c60c9e5b6a261b0e0c9e5",
-   "pre_idle": 0.9994441356309061,
-   "query_us": 40,
-   "ready_us": 1148677,
+   "pre_idle": 0.994161801501251,
+   "query_us": 54,
+   "ready_us": 1148181,
    "resolved_calls": 441301,
    "rows": 1,
    "scenario": "body",
    "skipped_file_inventory": "ecf3f0ac3ea88dbe1e096128817116baccc3e0f181cde9a3c80f49dbe6dc3148",
    "snapshot_bytes": 143450090,
    "source_bytes": 88173038,
-   "trial": 3,
-   "trigram_query_us": 225,
+   "trial": 1,
+   "trigram_query_us": 232,
    "word_query_us": 4
   },
   {
    "accepted": true,
-   "binary_sha256": "62d4c49c2cbb1fd59d16a30e2093165332ccd40d9ed8edc568ee74a8dfdefc49",
+   "binary_sha256": "c7876135113ba334bf4a0bf04a93cd4416ab64f7a9575f57598eefd30cb5f651",
    "corpus_digest": "9d13d6b2dd9a5fab2e41845fe0e6dac8eb30d31c8c1cd874f92cd24704f5e040",
    "edges": 5036843,
-   "elapsed_us": 1168555,
+   "elapsed_us": 1172659,
    "estimated_bytes": 142265485,
-   "external_busy_cores": 0.009644887414365456,
+   "external_busy_cores": 0.012306524539587506,
    "files": 8464,
    "files_attempted": 41,
    "files_skipped": 40,
    "graph_digest": "60c139dfe072dca280cb1df87af9af7ac70059339323df6fabf7f35eb48a894b",
    "label": "candidate",
-   "literal_query_us": 10004,
+   "literal_query_us": 9664,
    "nodes": 752584,
-   "operation_peak_rss_kib": 861076,
-   "persisted_us": 1168536,
+   "operation_peak_rss_kib": 903572,
+   "persisted_us": 1172630,
    "phases_us_and_count": {
     "graph.calls": [
-     8,
+     7,
      1
     ],
     "graph.imports": [
-     6051,
+     5752,
      1
     ],
     "graph.parse": [
@@ -992,729 +323,7 @@
      1
     ],
     "graph.rebuild_file": [
-     124,
-     1
-    ],
-    "graph.refs_incoming": [
-     7,
-     1
-    ],
-    "graph.refs_outgoing": [
-     1,
-     1
-    ],
-    "graph.remove_file": [
-     9,
-     1
-    ],
-    "ingest.skipped": [
-     0,
-     40
-    ],
-    "ingest.total": [
-     196,
-     41
-    ],
-    "ingest.trigrams": [
-     7,
-     1
-    ],
-    "ingest.words": [
-     9,
-     1
-    ],
-    "reconcile.total": [
-     58109,
-     1
-    ],
-    "snapshot.decode": [
-     170717,
-     1
-    ],
-    "snapshot.decode_core": [
-     67737,
-     3
-    ],
-    "snapshot.decode_edges": [
-     78700,
-     1
-    ],
-    "snapshot.decode_nodes": [
-     240238,
-     4
-    ],
-    "snapshot.decode_trigrams": [
-     77584,
-     1
-    ],
-    "snapshot.decode_words": [
-     122973,
-     1
-    ],
-    "snapshot.encode": [
-     172678,
-     1
-    ],
-    "snapshot.load": [
-     252265,
-     1
-    ],
-    "snapshot.read": [
-     69206,
-     1
-    ],
-    "snapshot.restore": [
-     190746,
-     1
-    ],
-    "snapshot.restore_dependencies": [
-     14125,
-     1
-    ],
-    "snapshot.restore_graph": [
-     171017,
-     1
-    ],
-    "snapshot.restore_trigrams": [
-     22324,
-     1
-    ],
-    "snapshot.restore_words": [
-     38776,
-     1
-    ],
-    "snapshot.write": [
-     284544,
-     1
-    ]
-   },
-   "postings_digest": "cea864c577db462669ebaa7adeeb942bb6c171f2ab5c60c9e5b6a261b0e0c9e5",
-   "pre_idle": 0.9963868816008894,
-   "query_us": 34,
-   "ready_us": 501203,
-   "resolved_calls": 441301,
-   "rows": 1,
-   "scenario": "body",
-   "skipped_file_inventory": "ecf3f0ac3ea88dbe1e096128817116baccc3e0f181cde9a3c80f49dbe6dc3148",
-   "snapshot_bytes": 143450090,
-   "source_bytes": 88173038,
-   "trial": 3,
-   "trigram_query_us": 165,
-   "word_query_us": 348355
-  },
-  {
-   "accepted": true,
-   "binary_sha256": "4a4aab73bf8d9ec385d53fa3df0ca5e9611ee62748c74c154bf29c9269692b9c",
-   "corpus_digest": "b45cd2a68379f63d38c631f51954408136ac39e0ba8c07eb7411c0eba791c7c2",
-   "edges": 5036843,
-   "elapsed_us": 1185376,
-   "estimated_bytes": 142267109,
-   "external_busy_cores": 0.013851742298131922,
-   "files": 8464,
-   "files_attempted": 41,
-   "files_skipped": 40,
-   "graph_digest": "0196b45dae30b31a0d4449cd635750811c8397b67f83cfbb0497d1ee36e7fd00",
-   "label": "baseline",
-   "literal_query_us": 52536,
-   "nodes": 752584,
-   "operation_peak_rss_kib": 857920,
-   "phases_us_and_count": {
-    "graph.calls": [
-     7,
-     1
-    ],
-    "graph.imports": [
-     5682,
-     1
-    ],
-    "graph.parse": [
-     89,
-     1
-    ],
-    "graph.parse_and_replace": [
-     113,
-     1
-    ],
-    "graph.rebuild_file": [
      120,
-     1
-    ],
-    "graph.refs_incoming": [
-     5,
-     1
-    ],
-    "graph.refs_outgoing": [
-     2,
-     1
-    ],
-    "graph.remove_file": [
-     9,
-     1
-    ],
-    "ingest.skipped": [
-     0,
-     40
-    ],
-    "ingest.total": [
-     199,
-     41
-    ],
-    "ingest.trigrams": [
-     8,
-     1
-    ],
-    "ingest.words": [
-     9,
-     1
-    ],
-    "reconcile.total": [
-     57702,
-     1
-    ],
-    "snapshot.decode": [
-     158990,
-     1
-    ],
-    "snapshot.decode_core": [
-     71411,
-     3
-    ],
-    "snapshot.decode_edges": [
-     78787,
-     1
-    ],
-    "snapshot.decode_nodes": [
-     222770,
-     4
-    ],
-    "snapshot.decode_trigrams": [
-     78186,
-     1
-    ],
-    "snapshot.decode_words": [
-     111266,
-     1
-    ],
-    "snapshot.encode": [
-     177021,
-     1
-    ],
-    "snapshot.load": [
-     241151,
-     1
-    ],
-    "snapshot.read": [
-     69735,
-     1
-    ],
-    "snapshot.restore": [
-     193843,
-     1
-    ],
-    "snapshot.restore_dependencies": [
-     14192,
-     1
-    ],
-    "snapshot.restore_graph": [
-     173903,
-     1
-    ],
-    "snapshot.restore_trigrams": [
-     25818,
-     1
-    ],
-    "snapshot.restore_words": [
-     39627,
-     1
-    ],
-    "snapshot.write": [
-     265506,
-     1
-    ]
-   },
-   "postings_digest": "f4ad9c3733fdbd4f45a5fa68052d7399bc6158b4edd4b3615c808033707d7121",
-   "pre_idle": 1.0,
-   "query_us": 29,
-   "ready_us": 1132534,
-   "resolved_calls": 441301,
-   "rows": 1,
-   "scenario": "declaration",
-   "skipped_file_inventory": "ecf3f0ac3ea88dbe1e096128817116baccc3e0f181cde9a3c80f49dbe6dc3148",
-   "snapshot_bytes": 143450133,
-   "source_bytes": 88173045,
-   "trial": 1,
-   "trigram_query_us": 223,
-   "word_query_us": 6
-  },
-  {
-   "accepted": true,
-   "binary_sha256": "62d4c49c2cbb1fd59d16a30e2093165332ccd40d9ed8edc568ee74a8dfdefc49",
-   "corpus_digest": "b45cd2a68379f63d38c631f51954408136ac39e0ba8c07eb7411c0eba791c7c2",
-   "edges": 5036843,
-   "elapsed_us": 1179869,
-   "estimated_bytes": 142267109,
-   "external_busy_cores": 0.01469678685580763,
-   "files": 8464,
-   "files_attempted": 41,
-   "files_skipped": 40,
-   "graph_digest": "0196b45dae30b31a0d4449cd635750811c8397b67f83cfbb0497d1ee36e7fd00",
-   "label": "candidate",
-   "literal_query_us": 8594,
-   "nodes": 752584,
-   "operation_peak_rss_kib": 863168,
-   "persisted_us": 1179842,
-   "phases_us_and_count": {
-    "graph.calls": [
-     8,
-     1
-    ],
-    "graph.imports": [
-     6082,
-     1
-    ],
-    "graph.parse": [
-     108,
-     1
-    ],
-    "graph.parse_and_replace": [
-     132,
-     1
-    ],
-    "graph.rebuild_file": [
-     142,
-     1
-    ],
-    "graph.refs_incoming": [
-     7,
-     1
-    ],
-    "graph.refs_outgoing": [
-     2,
-     1
-    ],
-    "graph.remove_file": [
-     9,
-     1
-    ],
-    "ingest.skipped": [
-     0,
-     40
-    ],
-    "ingest.total": [
-     197,
-     41
-    ],
-    "ingest.trigrams": [
-     8,
-     1
-    ],
-    "ingest.words": [
-     9,
-     1
-    ],
-    "reconcile.total": [
-     58534,
-     1
-    ],
-    "snapshot.decode": [
-     170870,
-     1
-    ],
-    "snapshot.decode_core": [
-     52882,
-     3
-    ],
-    "snapshot.decode_edges": [
-     90635,
-     1
-    ],
-    "snapshot.decode_nodes": [
-     226171,
-     4
-    ],
-    "snapshot.decode_trigrams": [
-     77125,
-     1
-    ],
-    "snapshot.decode_words": [
-     123191,
-     1
-    ],
-    "snapshot.encode": [
-     188628,
-     1
-    ],
-    "snapshot.load": [
-     253431,
-     1
-    ],
-    "snapshot.read": [
-     70062,
-     1
-    ],
-    "snapshot.restore": [
-     188806,
-     1
-    ],
-    "snapshot.restore_dependencies": [
-     14132,
-     1
-    ],
-    "snapshot.restore_graph": [
-     168997,
-     1
-    ],
-    "snapshot.restore_trigrams": [
-     23558,
-     1
-    ],
-    "snapshot.restore_words": [
-     38752,
-     1
-    ],
-    "snapshot.write": [
-     277356,
-     1
-    ]
-   },
-   "postings_digest": "f4ad9c3733fdbd4f45a5fa68052d7399bc6158b4edd4b3615c808033707d7121",
-   "pre_idle": 0.9969427459699833,
-   "query_us": 36,
-   "ready_us": 500838,
-   "resolved_calls": 441301,
-   "rows": 1,
-   "scenario": "declaration",
-   "skipped_file_inventory": "ecf3f0ac3ea88dbe1e096128817116baccc3e0f181cde9a3c80f49dbe6dc3148",
-   "snapshot_bytes": 143450133,
-   "source_bytes": 88173045,
-   "trial": 1,
-   "trigram_query_us": 215,
-   "word_query_us": 366637
-  },
-  {
-   "accepted": true,
-   "binary_sha256": "62d4c49c2cbb1fd59d16a30e2093165332ccd40d9ed8edc568ee74a8dfdefc49",
-   "corpus_digest": "b45cd2a68379f63d38c631f51954408136ac39e0ba8c07eb7411c0eba791c7c2",
-   "edges": 5036843,
-   "elapsed_us": 1132180,
-   "estimated_bytes": 142267109,
-   "external_busy_cores": 0.00840308675121395,
-   "files": 8464,
-   "files_attempted": 41,
-   "files_skipped": 40,
-   "graph_digest": "0196b45dae30b31a0d4449cd635750811c8397b67f83cfbb0497d1ee36e7fd00",
-   "label": "candidate",
-   "literal_query_us": 8822,
-   "nodes": 752584,
-   "operation_peak_rss_kib": 827420,
-   "persisted_us": 1132161,
-   "phases_us_and_count": {
-    "graph.calls": [
-     8,
-     1
-    ],
-    "graph.imports": [
-     6096,
-     1
-    ],
-    "graph.parse": [
-     92,
-     1
-    ],
-    "graph.parse_and_replace": [
-     116,
-     1
-    ],
-    "graph.rebuild_file": [
-     125,
-     1
-    ],
-    "graph.refs_incoming": [
-     7,
-     1
-    ],
-    "graph.refs_outgoing": [
-     1,
-     1
-    ],
-    "graph.remove_file": [
-     9,
-     1
-    ],
-    "ingest.skipped": [
-     0,
-     40
-    ],
-    "ingest.total": [
-     200,
-     41
-    ],
-    "ingest.trigrams": [
-     8,
-     1
-    ],
-    "ingest.words": [
-     9,
-     1
-    ],
-    "reconcile.total": [
-     58009,
-     1
-    ],
-    "snapshot.decode": [
-     171135,
-     1
-    ],
-    "snapshot.decode_core": [
-     53782,
-     3
-    ],
-    "snapshot.decode_edges": [
-     85721,
-     1
-    ],
-    "snapshot.decode_nodes": [
-     227417,
-     4
-    ],
-    "snapshot.decode_trigrams": [
-     74678,
-     1
-    ],
-    "snapshot.decode_words": [
-     123224,
-     1
-    ],
-    "snapshot.encode": [
-     154942,
-     1
-    ],
-    "snapshot.load": [
-     253167,
-     1
-    ],
-    "snapshot.read": [
-     69525,
-     1
-    ],
-    "snapshot.restore": [
-     186574,
-     1
-    ],
-    "snapshot.restore_dependencies": [
-     14141,
-     1
-    ],
-    "snapshot.restore_graph": [
-     166857,
-     1
-    ],
-    "snapshot.restore_trigrams": [
-     20552,
-     1
-    ],
-    "snapshot.restore_words": [
-     38909,
-     1
-    ],
-    "snapshot.write": [
-     287857,
-     1
-    ]
-   },
-   "postings_digest": "f4ad9c3733fdbd4f45a5fa68052d7399bc6158b4edd4b3615c808033707d7121",
-   "pre_idle": 0.999722067815453,
-   "query_us": 37,
-   "ready_us": 497824,
-   "resolved_calls": 441301,
-   "rows": 1,
-   "scenario": "declaration",
-   "skipped_file_inventory": "ecf3f0ac3ea88dbe1e096128817116baccc3e0f181cde9a3c80f49dbe6dc3148",
-   "snapshot_bytes": 143450133,
-   "source_bytes": 88173045,
-   "trial": 2,
-   "trigram_query_us": 215,
-   "word_query_us": 321955
-  },
-  {
-   "accepted": true,
-   "binary_sha256": "4a4aab73bf8d9ec385d53fa3df0ca5e9611ee62748c74c154bf29c9269692b9c",
-   "corpus_digest": "b45cd2a68379f63d38c631f51954408136ac39e0ba8c07eb7411c0eba791c7c2",
-   "edges": 5036843,
-   "elapsed_us": 1220879,
-   "estimated_bytes": 142267109,
-   "external_busy_cores": 0.01737417632791682,
-   "files": 8464,
-   "files_attempted": 41,
-   "files_skipped": 40,
-   "graph_digest": "0196b45dae30b31a0d4449cd635750811c8397b67f83cfbb0497d1ee36e7fd00",
-   "label": "baseline",
-   "literal_query_us": 14372,
-   "nodes": 752584,
-   "operation_peak_rss_kib": 862788,
-   "phases_us_and_count": {
-    "graph.calls": [
-     7,
-     1
-    ],
-    "graph.imports": [
-     5701,
-     1
-    ],
-    "graph.parse": [
-     89,
-     1
-    ],
-    "graph.parse_and_replace": [
-     112,
-     1
-    ],
-    "graph.rebuild_file": [
-     120,
-     1
-    ],
-    "graph.refs_incoming": [
-     5,
-     1
-    ],
-    "graph.refs_outgoing": [
-     1,
-     1
-    ],
-    "graph.remove_file": [
-     9,
-     1
-    ],
-    "ingest.skipped": [
-     0,
-     40
-    ],
-    "ingest.total": [
-     199,
-     41
-    ],
-    "ingest.trigrams": [
-     8,
-     1
-    ],
-    "ingest.words": [
-     9,
-     1
-    ],
-    "reconcile.total": [
-     58124,
-     1
-    ],
-    "snapshot.decode": [
-     173250,
-     1
-    ],
-    "snapshot.decode_core": [
-     52836,
-     3
-    ],
-    "snapshot.decode_edges": [
-     89759,
-     1
-    ],
-    "snapshot.decode_nodes": [
-     250546,
-     4
-    ],
-    "snapshot.decode_trigrams": [
-     77230,
-     1
-    ],
-    "snapshot.decode_words": [
-     125961,
-     1
-    ],
-    "snapshot.encode": [
-     168838,
-     1
-    ],
-    "snapshot.load": [
-     254099,
-     1
-    ],
-    "snapshot.read": [
-     68712,
-     1
-    ],
-    "snapshot.restore": [
-     192180,
-     1
-    ],
-    "snapshot.restore_dependencies": [
-     14153,
-     1
-    ],
-    "snapshot.restore_graph": [
-     172418,
-     1
-    ],
-    "snapshot.restore_trigrams": [
-     26521,
-     1
-    ],
-    "snapshot.restore_words": [
-     39033,
-     1
-    ],
-    "snapshot.write": [
-     319831,
-     1
-    ]
-   },
-   "postings_digest": "f4ad9c3733fdbd4f45a5fa68052d7399bc6158b4edd4b3615c808033707d7121",
-   "pre_idle": 0.9944382647385984,
-   "query_us": 35,
-   "ready_us": 1206017,
-   "resolved_calls": 441301,
-   "rows": 1,
-   "scenario": "declaration",
-   "skipped_file_inventory": "ecf3f0ac3ea88dbe1e096128817116baccc3e0f181cde9a3c80f49dbe6dc3148",
-   "snapshot_bytes": 143450133,
-   "source_bytes": 88173045,
-   "trial": 2,
-   "trigram_query_us": 381,
-   "word_query_us": 7
-  },
-  {
-   "accepted": true,
-   "binary_sha256": "4a4aab73bf8d9ec385d53fa3df0ca5e9611ee62748c74c154bf29c9269692b9c",
-   "corpus_digest": "b45cd2a68379f63d38c631f51954408136ac39e0ba8c07eb7411c0eba791c7c2",
-   "edges": 5036843,
-   "elapsed_us": 1140741,
-   "estimated_bytes": 142267109,
-   "external_busy_cores": 0.01156782132357752,
-   "files": 8464,
-   "files_attempted": 41,
-   "files_skipped": 40,
-   "graph_digest": "0196b45dae30b31a0d4449cd635750811c8397b67f83cfbb0497d1ee36e7fd00",
-   "label": "baseline",
-   "literal_query_us": 10953,
-   "nodes": 752584,
-   "operation_peak_rss_kib": 854648,
-   "phases_us_and_count": {
-    "graph.calls": [
-     13,
-     1
-    ],
-    "graph.imports": [
-     5677,
-     1
-    ],
-    "graph.parse": [
-     95,
-     1
-    ],
-    "graph.parse_and_replace": [
-     118,
-     1
-    ],
-    "graph.rebuild_file": [
-     122,
      1
     ],
     "graph.refs_incoming": [
@@ -1738,124 +347,284 @@
      41
     ],
     "ingest.trigrams": [
+     12,
+     1
+    ],
+    "ingest.words": [
+     11,
+     1
+    ],
+    "reconcile.total": [
+     58791,
+     1
+    ],
+    "snapshot.decode": [
+     170838,
+     1
+    ],
+    "snapshot.decode_core": [
+     50026,
+     2
+    ],
+    "snapshot.decode_edges": [
+     62488,
+     1
+    ],
+    "snapshot.decode_graph_files": [
+     1065,
+     1
+    ],
+    "snapshot.decode_nodes": [
+     279155,
+     4
+    ],
+    "snapshot.decode_trigrams": [
+     79396,
+     1
+    ],
+    "snapshot.decode_words": [
+     122397,
+     1
+    ],
+    "snapshot.detach": [
+     31455,
+     1
+    ],
+    "snapshot.encode": [
+     169920,
+     1
+    ],
+    "snapshot.load": [
+     252845,
+     1
+    ],
+    "snapshot.read": [
+     69333,
+     1
+    ],
+    "snapshot.restore": [
+     193648,
+     1
+    ],
+    "snapshot.restore_dependencies": [
+     14419,
+     1
+    ],
+    "snapshot.restore_graph": [
+     173515,
+     1
+    ],
+    "snapshot.restore_trigrams": [
+     22712,
+     1
+    ],
+    "snapshot.restore_words": [
+     30126,
+     1
+    ],
+    "snapshot.write": [
+     248263,
+     1
+    ]
+   },
+   "postings_digest": "cea864c577db462669ebaa7adeeb942bb6c171f2ab5c60c9e5b6a261b0e0c9e5",
+   "pre_idle": 0.9980544747081712,
+   "query_us": 43,
+   "ready_us": 505359,
+   "resolved_calls": 441301,
+   "rows": 1,
+   "scenario": "body",
+   "skipped_file_inventory": "ecf3f0ac3ea88dbe1e096128817116baccc3e0f181cde9a3c80f49dbe6dc3148",
+   "snapshot_bytes": 143450090,
+   "source_bytes": 88173038,
+   "trial": 1,
+   "trigram_query_us": 161,
+   "word_query_us": 31475
+  },
+  {
+   "accepted": true,
+   "binary_sha256": "c7876135113ba334bf4a0bf04a93cd4416ab64f7a9575f57598eefd30cb5f651",
+   "corpus_digest": "9d13d6b2dd9a5fab2e41845fe0e6dac8eb30d31c8c1cd874f92cd24704f5e040",
+   "edges": 5036843,
+   "elapsed_us": 1185175,
+   "estimated_bytes": 142265485,
+   "external_busy_cores": 0.06053442254362099,
+   "files": 8464,
+   "files_attempted": 41,
+   "files_skipped": 40,
+   "graph_digest": "60c139dfe072dca280cb1df87af9af7ac70059339323df6fabf7f35eb48a894b",
+   "label": "candidate",
+   "literal_query_us": 10306,
+   "nodes": 752584,
+   "operation_peak_rss_kib": 911608,
+   "persisted_us": 1185153,
+   "phases_us_and_count": {
+    "graph.calls": [
+     8,
+     1
+    ],
+    "graph.imports": [
+     5714,
+     1
+    ],
+    "graph.parse": [
+     96,
+     1
+    ],
+    "graph.parse_and_replace": [
+     120,
+     1
+    ],
+    "graph.rebuild_file": [
+     126,
+     1
+    ],
+    "graph.refs_incoming": [
+     3,
+     1
+    ],
+    "graph.refs_outgoing": [
+     2,
+     1
+    ],
+    "graph.remove_file": [
+     9,
+     1
+    ],
+    "ingest.skipped": [
+     0,
+     40
+    ],
+    "ingest.total": [
+     208,
+     41
+    ],
+    "ingest.trigrams": [
      8,
      1
     ],
     "ingest.words": [
-     10,
+     11,
      1
     ],
     "reconcile.total": [
-     58668,
+     60720,
      1
     ],
     "snapshot.decode": [
-     162341,
+     168322,
      1
     ],
     "snapshot.decode_core": [
-     69140,
-     3
+     49242,
+     2
     ],
     "snapshot.decode_edges": [
-     79353,
+     62503,
+     1
+    ],
+    "snapshot.decode_graph_files": [
+     1081,
      1
     ],
     "snapshot.decode_nodes": [
-     228277,
+     245400,
      4
     ],
     "snapshot.decode_trigrams": [
-     80451,
+     79248,
      1
     ],
     "snapshot.decode_words": [
-     114123,
+     119934,
+     1
+    ],
+    "snapshot.detach": [
+     42176,
      1
     ],
     "snapshot.encode": [
-     140691,
+     173760,
      1
     ],
     "snapshot.load": [
-     244045,
+     248395,
      1
     ],
     "snapshot.read": [
-     68055,
+     67635,
      1
     ],
     "snapshot.restore": [
-     191415,
+     191848,
      1
     ],
     "snapshot.restore_dependencies": [
-     14392,
+     14526,
      1
     ],
     "snapshot.restore_graph": [
-     171313,
+     171621,
      1
     ],
     "snapshot.restore_trigrams": [
-     24411,
+     22650,
      1
     ],
     "snapshot.restore_words": [
-     39195,
+     38989,
      1
     ],
     "snapshot.write": [
-     281593,
+     251106,
      1
     ]
    },
-   "postings_digest": "f4ad9c3733fdbd4f45a5fa68052d7399bc6158b4edd4b3615c808033707d7121",
-   "pre_idle": 0.999722145040289,
-   "query_us": 39,
-   "ready_us": 1129341,
+   "postings_digest": "cea864c577db462669ebaa7adeeb942bb6c171f2ab5c60c9e5b6a261b0e0c9e5",
+   "pre_idle": 0.9988888888888889,
+   "query_us": 42251,
+   "ready_us": 501039,
    "resolved_calls": 441301,
    "rows": 1,
-   "scenario": "declaration",
+   "scenario": "body",
    "skipped_file_inventory": "ecf3f0ac3ea88dbe1e096128817116baccc3e0f181cde9a3c80f49dbe6dc3148",
-   "snapshot_bytes": 143450133,
-   "source_bytes": 88173045,
-   "trial": 3,
-   "trigram_query_us": 341,
-   "word_query_us": 4
+   "snapshot_bytes": 143450090,
+   "source_bytes": 88173038,
+   "trial": 2,
+   "trigram_query_us": 218,
+   "word_query_us": 11
   },
   {
    "accepted": true,
-   "binary_sha256": "62d4c49c2cbb1fd59d16a30e2093165332ccd40d9ed8edc568ee74a8dfdefc49",
-   "corpus_digest": "b45cd2a68379f63d38c631f51954408136ac39e0ba8c07eb7411c0eba791c7c2",
+   "binary_sha256": "4a4aab73bf8d9ec385d53fa3df0ca5e9611ee62748c74c154bf29c9269692b9c",
+   "corpus_digest": "9d13d6b2dd9a5fab2e41845fe0e6dac8eb30d31c8c1cd874f92cd24704f5e040",
    "edges": 5036843,
-   "elapsed_us": 1182259,
-   "estimated_bytes": 142267109,
-   "external_busy_cores": 0.013204704390739409,
+   "elapsed_us": 1134445,
+   "estimated_bytes": 142265485,
+   "external_busy_cores": 0.012581083274804047,
    "files": 8464,
    "files_attempted": 41,
    "files_skipped": 40,
-   "graph_digest": "0196b45dae30b31a0d4449cd635750811c8397b67f83cfbb0497d1ee36e7fd00",
-   "label": "candidate",
-   "literal_query_us": 8814,
+   "graph_digest": "60c139dfe072dca280cb1df87af9af7ac70059339323df6fabf7f35eb48a894b",
+   "label": "baseline",
+   "literal_query_us": 12712,
    "nodes": 752584,
-   "operation_peak_rss_kib": 866564,
-   "persisted_us": 1182238,
+   "operation_peak_rss_kib": 871128,
    "phases_us_and_count": {
     "graph.calls": [
-     15,
+     7,
      1
     ],
     "graph.imports": [
-     6096,
+     5739,
      1
     ],
     "graph.parse": [
-     94,
+     98,
      1
     ],
     "graph.parse_and_replace": [
-     117,
+     120,
      1
     ],
     "graph.rebuild_file": [
@@ -1863,7 +632,746 @@
      1
     ],
     "graph.refs_incoming": [
-     5,
+     2,
+     1
+    ],
+    "graph.refs_outgoing": [
+     1,
+     1
+    ],
+    "graph.remove_file": [
+     8,
+     1
+    ],
+    "ingest.skipped": [
+     0,
+     40
+    ],
+    "ingest.total": [
+     200,
+     41
+    ],
+    "ingest.trigrams": [
+     8,
+     1
+    ],
+    "ingest.words": [
+     11,
+     1
+    ],
+    "reconcile.total": [
+     58151,
+     1
+    ],
+    "snapshot.decode": [
+     169900,
+     1
+    ],
+    "snapshot.decode_core": [
+     70411,
+     3
+    ],
+    "snapshot.decode_edges": [
+     81291,
+     1
+    ],
+    "snapshot.decode_nodes": [
+     270546,
+     4
+    ],
+    "snapshot.decode_trigrams": [
+     79157,
+     1
+    ],
+    "snapshot.decode_words": [
+     116946,
+     1
+    ],
+    "snapshot.encode": [
+     158769,
+     1
+    ],
+    "snapshot.load": [
+     252050,
+     1
+    ],
+    "snapshot.read": [
+     69611,
+     1
+    ],
+    "snapshot.restore": [
+     188485,
+     1
+    ],
+    "snapshot.restore_dependencies": [
+     14375,
+     1
+    ],
+    "snapshot.restore_graph": [
+     168436,
+     1
+    ],
+    "snapshot.restore_trigrams": [
+     22559,
+     1
+    ],
+    "snapshot.restore_words": [
+     39054,
+     1
+    ],
+    "snapshot.write": [
+     254326,
+     1
+    ]
+   },
+   "postings_digest": "cea864c577db462669ebaa7adeeb942bb6c171f2ab5c60c9e5b6a261b0e0c9e5",
+   "pre_idle": 0.999722067815453,
+   "query_us": 39,
+   "ready_us": 1121371,
+   "resolved_calls": 441301,
+   "rows": 1,
+   "scenario": "body",
+   "skipped_file_inventory": "ecf3f0ac3ea88dbe1e096128817116baccc3e0f181cde9a3c80f49dbe6dc3148",
+   "snapshot_bytes": 143450090,
+   "source_bytes": 88173038,
+   "trial": 2,
+   "trigram_query_us": 253,
+   "word_query_us": 5
+  },
+  {
+   "accepted": true,
+   "binary_sha256": "4a4aab73bf8d9ec385d53fa3df0ca5e9611ee62748c74c154bf29c9269692b9c",
+   "corpus_digest": "9d13d6b2dd9a5fab2e41845fe0e6dac8eb30d31c8c1cd874f92cd24704f5e040",
+   "edges": 5036843,
+   "elapsed_us": 1122382,
+   "estimated_bytes": 142265485,
+   "external_busy_cores": 0.010659529629831691,
+   "files": 8464,
+   "files_attempted": 41,
+   "files_skipped": 40,
+   "graph_digest": "60c139dfe072dca280cb1df87af9af7ac70059339323df6fabf7f35eb48a894b",
+   "label": "baseline",
+   "literal_query_us": 10100,
+   "nodes": 752584,
+   "operation_peak_rss_kib": 855284,
+   "phases_us_and_count": {
+    "graph.calls": [
+     7,
+     1
+    ],
+    "graph.imports": [
+     5685,
+     1
+    ],
+    "graph.parse": [
+     95,
+     1
+    ],
+    "graph.parse_and_replace": [
+     116,
+     1
+    ],
+    "graph.rebuild_file": [
+     121,
+     1
+    ],
+    "graph.refs_incoming": [
+     2,
+     1
+    ],
+    "graph.refs_outgoing": [
+     1,
+     1
+    ],
+    "graph.remove_file": [
+     8,
+     1
+    ],
+    "ingest.skipped": [
+     0,
+     40
+    ],
+    "ingest.total": [
+     201,
+     41
+    ],
+    "ingest.trigrams": [
+     7,
+     1
+    ],
+    "ingest.words": [
+     10,
+     1
+    ],
+    "reconcile.total": [
+     58243,
+     1
+    ],
+    "snapshot.decode": [
+     161135,
+     1
+    ],
+    "snapshot.decode_core": [
+     53140,
+     3
+    ],
+    "snapshot.decode_edges": [
+     79607,
+     1
+    ],
+    "snapshot.decode_nodes": [
+     274417,
+     4
+    ],
+    "snapshot.decode_trigrams": [
+     75422,
+     1
+    ],
+    "snapshot.decode_words": [
+     112809,
+     1
+    ],
+    "snapshot.encode": [
+     157122,
+     1
+    ],
+    "snapshot.load": [
+     245070,
+     1
+    ],
+    "snapshot.read": [
+     69137,
+     1
+    ],
+    "snapshot.restore": [
+     189072,
+     1
+    ],
+    "snapshot.restore_dependencies": [
+     14224,
+     1
+    ],
+    "snapshot.restore_graph": [
+     169147,
+     1
+    ],
+    "snapshot.restore_trigrams": [
+     24402,
+     1
+    ],
+    "snapshot.restore_words": [
+     38660,
+     1
+    ],
+    "snapshot.write": [
+     252940,
+     1
+    ]
+   },
+   "postings_digest": "cea864c577db462669ebaa7adeeb942bb6c171f2ab5c60c9e5b6a261b0e0c9e5",
+   "pre_idle": 0.9986099527383931,
+   "query_us": 40,
+   "ready_us": 1111974,
+   "resolved_calls": 441301,
+   "rows": 1,
+   "scenario": "body",
+   "skipped_file_inventory": "ecf3f0ac3ea88dbe1e096128817116baccc3e0f181cde9a3c80f49dbe6dc3148",
+   "snapshot_bytes": 143450090,
+   "source_bytes": 88173038,
+   "trial": 3,
+   "trigram_query_us": 200,
+   "word_query_us": 4
+  },
+  {
+   "accepted": true,
+   "binary_sha256": "c7876135113ba334bf4a0bf04a93cd4416ab64f7a9575f57598eefd30cb5f651",
+   "corpus_digest": "9d13d6b2dd9a5fab2e41845fe0e6dac8eb30d31c8c1cd874f92cd24704f5e040",
+   "edges": 5036843,
+   "elapsed_us": 1152877,
+   "estimated_bytes": 142265485,
+   "external_busy_cores": 0.009858968221456856,
+   "files": 8464,
+   "files_attempted": 41,
+   "files_skipped": 40,
+   "graph_digest": "60c139dfe072dca280cb1df87af9af7ac70059339323df6fabf7f35eb48a894b",
+   "label": "candidate",
+   "literal_query_us": 9516,
+   "nodes": 752584,
+   "operation_peak_rss_kib": 894444,
+   "persisted_us": 1152855,
+   "phases_us_and_count": {
+    "graph.calls": [
+     8,
+     1
+    ],
+    "graph.imports": [
+     5710,
+     1
+    ],
+    "graph.parse": [
+     91,
+     1
+    ],
+    "graph.parse_and_replace": [
+     113,
+     1
+    ],
+    "graph.rebuild_file": [
+     118,
+     1
+    ],
+    "graph.refs_incoming": [
+     2,
+     1
+    ],
+    "graph.refs_outgoing": [
+     1,
+     1
+    ],
+    "graph.remove_file": [
+     9,
+     1
+    ],
+    "ingest.skipped": [
+     0,
+     40
+    ],
+    "ingest.total": [
+     205,
+     41
+    ],
+    "ingest.trigrams": [
+     11,
+     1
+    ],
+    "ingest.words": [
+     11,
+     1
+    ],
+    "reconcile.total": [
+     58493,
+     1
+    ],
+    "snapshot.decode": [
+     168978,
+     1
+    ],
+    "snapshot.decode_core": [
+     63327,
+     2
+    ],
+    "snapshot.decode_edges": [
+     47503,
+     1
+    ],
+    "snapshot.decode_graph_files": [
+     1283,
+     1
+    ],
+    "snapshot.decode_nodes": [
+     239846,
+     4
+    ],
+    "snapshot.decode_trigrams": [
+     79452,
+     1
+    ],
+    "snapshot.decode_words": [
+     120722,
+     1
+    ],
+    "snapshot.detach": [
+     43487,
+     1
+    ],
+    "snapshot.encode": [
+     156896,
+     1
+    ],
+    "snapshot.load": [
+     250957,
+     1
+    ],
+    "snapshot.read": [
+     69400,
+     1
+    ],
+    "snapshot.restore": [
+     190800,
+     1
+    ],
+    "snapshot.restore_dependencies": [
+     14269,
+     1
+    ],
+    "snapshot.restore_graph": [
+     170870,
+     1
+    ],
+    "snapshot.restore_trigrams": [
+     23731,
+     1
+    ],
+    "snapshot.restore_words": [
+     38159,
+     1
+    ],
+    "snapshot.write": [
+     251205,
+     1
+    ]
+   },
+   "postings_digest": "cea864c577db462669ebaa7adeeb942bb6c171f2ab5c60c9e5b6a261b0e0c9e5",
+   "pre_idle": 0.9983328702417338,
+   "query_us": 36,
+   "ready_us": 500326,
+   "resolved_calls": 441301,
+   "rows": 1,
+   "scenario": "body",
+   "skipped_file_inventory": "ecf3f0ac3ea88dbe1e096128817116baccc3e0f181cde9a3c80f49dbe6dc3148",
+   "snapshot_bytes": 143450090,
+   "source_bytes": 88173038,
+   "trial": 3,
+   "trigram_query_us": 43642,
+   "word_query_us": 3
+  },
+  {
+   "accepted": true,
+   "binary_sha256": "4a4aab73bf8d9ec385d53fa3df0ca5e9611ee62748c74c154bf29c9269692b9c",
+   "corpus_digest": "b45cd2a68379f63d38c631f51954408136ac39e0ba8c07eb7411c0eba791c7c2",
+   "edges": 5036843,
+   "elapsed_us": 1119383,
+   "estimated_bytes": 142267109,
+   "external_busy_cores": 0.012215378301514168,
+   "files": 8464,
+   "files_attempted": 41,
+   "files_skipped": 40,
+   "graph_digest": "0196b45dae30b31a0d4449cd635750811c8397b67f83cfbb0497d1ee36e7fd00",
+   "label": "baseline",
+   "literal_query_us": 11959,
+   "nodes": 752584,
+   "operation_peak_rss_kib": 857352,
+   "phases_us_and_count": {
+    "graph.calls": [
+     8,
+     1
+    ],
+    "graph.imports": [
+     5690,
+     1
+    ],
+    "graph.parse": [
+     106,
+     1
+    ],
+    "graph.parse_and_replace": [
+     135,
+     1
+    ],
+    "graph.rebuild_file": [
+     140,
+     1
+    ],
+    "graph.refs_incoming": [
+     2,
+     1
+    ],
+    "graph.refs_outgoing": [
+     1,
+     1
+    ],
+    "graph.remove_file": [
+     9,
+     1
+    ],
+    "ingest.skipped": [
+     0,
+     40
+    ],
+    "ingest.total": [
+     202,
+     41
+    ],
+    "ingest.trigrams": [
+     8,
+     1
+    ],
+    "ingest.words": [
+     12,
+     1
+    ],
+    "reconcile.total": [
+     58617,
+     1
+    ],
+    "snapshot.decode": [
+     159207,
+     1
+    ],
+    "snapshot.decode_core": [
+     59752,
+     3
+    ],
+    "snapshot.decode_edges": [
+     89731,
+     1
+    ],
+    "snapshot.decode_nodes": [
+     218970,
+     4
+    ],
+    "snapshot.decode_trigrams": [
+     94212,
+     1
+    ],
+    "snapshot.decode_words": [
+     111695,
+     1
+    ],
+    "snapshot.encode": [
+     146258,
+     1
+    ],
+    "snapshot.load": [
+     244633,
+     1
+    ],
+    "snapshot.read": [
+     69478,
+     1
+    ],
+    "snapshot.restore": [
+     192520,
+     1
+    ],
+    "snapshot.restore_dependencies": [
+     14516,
+     1
+    ],
+    "snapshot.restore_graph": [
+     172285,
+     1
+    ],
+    "snapshot.restore_trigrams": [
+     24902,
+     1
+    ],
+    "snapshot.restore_words": [
+     39539,
+     1
+    ],
+    "snapshot.write": [
+     253281,
+     1
+    ]
+   },
+   "postings_digest": "f4ad9c3733fdbd4f45a5fa68052d7399bc6158b4edd4b3615c808033707d7121",
+   "pre_idle": 0.999722145040289,
+   "query_us": 40,
+   "ready_us": 1106991,
+   "resolved_calls": 441301,
+   "rows": 1,
+   "scenario": "declaration",
+   "skipped_file_inventory": "ecf3f0ac3ea88dbe1e096128817116baccc3e0f181cde9a3c80f49dbe6dc3148",
+   "snapshot_bytes": 143450133,
+   "source_bytes": 88173045,
+   "trial": 1,
+   "trigram_query_us": 323,
+   "word_query_us": 4
+  },
+  {
+   "accepted": true,
+   "binary_sha256": "c7876135113ba334bf4a0bf04a93cd4416ab64f7a9575f57598eefd30cb5f651",
+   "corpus_digest": "b45cd2a68379f63d38c631f51954408136ac39e0ba8c07eb7411c0eba791c7c2",
+   "edges": 5036843,
+   "elapsed_us": 1189088,
+   "estimated_bytes": 142267109,
+   "external_busy_cores": 0.02098985146983853,
+   "files": 8464,
+   "files_attempted": 41,
+   "files_skipped": 40,
+   "graph_digest": "0196b45dae30b31a0d4449cd635750811c8397b67f83cfbb0497d1ee36e7fd00",
+   "label": "candidate",
+   "literal_query_us": 8191,
+   "nodes": 752584,
+   "operation_peak_rss_kib": 918044,
+   "persisted_us": 1189058,
+   "phases_us_and_count": {
+    "graph.calls": [
+     8,
+     1
+    ],
+    "graph.imports": [
+     5754,
+     1
+    ],
+    "graph.parse": [
+     92,
+     1
+    ],
+    "graph.parse_and_replace": [
+     115,
+     1
+    ],
+    "graph.rebuild_file": [
+     120,
+     1
+    ],
+    "graph.refs_incoming": [
+     2,
+     1
+    ],
+    "graph.refs_outgoing": [
+     1,
+     1
+    ],
+    "graph.remove_file": [
+     8,
+     1
+    ],
+    "ingest.skipped": [
+     0,
+     40
+    ],
+    "ingest.total": [
+     200,
+     41
+    ],
+    "ingest.trigrams": [
+     8,
+     1
+    ],
+    "ingest.words": [
+     11,
+     1
+    ],
+    "reconcile.total": [
+     58638,
+     1
+    ],
+    "snapshot.decode": [
+     167195,
+     1
+    ],
+    "snapshot.decode_core": [
+     50383,
+     2
+    ],
+    "snapshot.decode_edges": [
+     63082,
+     1
+    ],
+    "snapshot.decode_graph_files": [
+     1058,
+     1
+    ],
+    "snapshot.decode_nodes": [
+     233864,
+     4
+    ],
+    "snapshot.decode_trigrams": [
+     88277,
+     1
+    ],
+    "snapshot.decode_words": [
+     118690,
+     1
+    ],
+    "snapshot.detach": [
+     43853,
+     1
+    ],
+    "snapshot.encode": [
+     166377,
+     1
+    ],
+    "snapshot.load": [
+     249521,
+     1
+    ],
+    "snapshot.read": [
+     69255,
+     1
+    ],
+    "snapshot.restore": [
+     191515,
+     1
+    ],
+    "snapshot.restore_dependencies": [
+     14459,
+     1
+    ],
+    "snapshot.restore_graph": [
+     171368,
+     1
+    ],
+    "snapshot.restore_trigrams": [
+     20971,
+     1
+    ],
+    "snapshot.restore_words": [
+     39230,
+     1
+    ],
+    "snapshot.write": [
+     256712,
+     1
+    ]
+   },
+   "postings_digest": "f4ad9c3733fdbd4f45a5fa68052d7399bc6158b4edd4b3615c808033707d7121",
+   "pre_idle": 0.9997222993612885,
+   "query_us": 39,
+   "ready_us": 499756,
+   "resolved_calls": 441301,
+   "rows": 1,
+   "scenario": "declaration",
+   "skipped_file_inventory": "ecf3f0ac3ea88dbe1e096128817116baccc3e0f181cde9a3c80f49dbe6dc3148",
+   "snapshot_bytes": 143450133,
+   "source_bytes": 88173045,
+   "trial": 1,
+   "trigram_query_us": 191,
+   "word_query_us": 43878
+  },
+  {
+   "accepted": true,
+   "binary_sha256": "c7876135113ba334bf4a0bf04a93cd4416ab64f7a9575f57598eefd30cb5f651",
+   "corpus_digest": "b45cd2a68379f63d38c631f51954408136ac39e0ba8c07eb7411c0eba791c7c2",
+   "edges": 5036843,
+   "elapsed_us": 1186237,
+   "estimated_bytes": 142267109,
+   "external_busy_cores": 0.00952497982358373,
+   "files": 8464,
+   "files_attempted": 41,
+   "files_skipped": 40,
+   "graph_digest": "0196b45dae30b31a0d4449cd635750811c8397b67f83cfbb0497d1ee36e7fd00",
+   "label": "candidate",
+   "literal_query_us": 8336,
+   "nodes": 752584,
+   "operation_peak_rss_kib": 888132,
+   "persisted_us": 1186205,
+   "phases_us_and_count": {
+    "graph.calls": [
+     8,
+     1
+    ],
+    "graph.imports": [
+     5668,
+     1
+    ],
+    "graph.parse": [
+     85,
+     1
+    ],
+    "graph.parse_and_replace": [
+     109,
+     1
+    ],
+    "graph.rebuild_file": [
+     114,
+     1
+    ],
+    "graph.refs_incoming": [
+     2,
      1
     ],
     "graph.refs_outgoing": [
@@ -1887,78 +1395,374 @@
      1
     ],
     "ingest.words": [
-     9,
+     11,
      1
     ],
     "reconcile.total": [
-     58512,
+     58232,
      1
     ],
     "snapshot.decode": [
-     169274,
+     162034,
      1
     ],
     "snapshot.decode_core": [
-     68114,
-     3
+     64693,
+     2
     ],
     "snapshot.decode_edges": [
-     80132,
+     63479,
+     1
+    ],
+    "snapshot.decode_graph_files": [
+     1095,
      1
     ],
     "snapshot.decode_nodes": [
-     213955,
+     225739,
      4
     ],
     "snapshot.decode_trigrams": [
-     77311,
+     84084,
      1
     ],
     "snapshot.decode_words": [
-     121912,
+     114765,
+     1
+    ],
+    "snapshot.detach": [
+     43712,
      1
     ],
     "snapshot.encode": [
-     158953,
+     167177,
      1
     ],
     "snapshot.load": [
-     253154,
+     244127,
      1
     ],
     "snapshot.read": [
-     69774,
+     69541,
      1
     ],
     "snapshot.restore": [
-     189923,
+     198368,
      1
     ],
     "snapshot.restore_dependencies": [
-     14149,
+     14318,
      1
     ],
     "snapshot.restore_graph": [
-     170116,
+     178376,
      1
     ],
     "snapshot.restore_trigrams": [
-     22863,
+     22738,
      1
     ],
     "snapshot.restore_words": [
-     38434,
+     38640,
      1
     ],
     "snapshot.write": [
-     311948,
+     248247,
+     1
+    ]
+   },
+   "postings_digest": "f4ad9c3733fdbd4f45a5fa68052d7399bc6158b4edd4b3615c808033707d7121",
+   "pre_idle": 0.999722067815453,
+   "query_us": 43782,
+   "ready_us": 500808,
+   "resolved_calls": 441301,
+   "rows": 1,
+   "scenario": "declaration",
+   "skipped_file_inventory": "ecf3f0ac3ea88dbe1e096128817116baccc3e0f181cde9a3c80f49dbe6dc3148",
+   "snapshot_bytes": 143450133,
+   "source_bytes": 88173045,
+   "trial": 2,
+   "trigram_query_us": 223,
+   "word_query_us": 3
+  },
+  {
+   "accepted": true,
+   "binary_sha256": "4a4aab73bf8d9ec385d53fa3df0ca5e9611ee62748c74c154bf29c9269692b9c",
+   "corpus_digest": "b45cd2a68379f63d38c631f51954408136ac39e0ba8c07eb7411c0eba791c7c2",
+   "edges": 5036843,
+   "elapsed_us": 1126470,
+   "estimated_bytes": 142267109,
+   "external_busy_cores": 0.014190252498979676,
+   "files": 8464,
+   "files_attempted": 41,
+   "files_skipped": 40,
+   "graph_digest": "0196b45dae30b31a0d4449cd635750811c8397b67f83cfbb0497d1ee36e7fd00",
+   "label": "baseline",
+   "literal_query_us": 8023,
+   "nodes": 752584,
+   "operation_peak_rss_kib": 889804,
+   "phases_us_and_count": {
+    "graph.calls": [
+     7,
+     1
+    ],
+    "graph.imports": [
+     5677,
+     1
+    ],
+    "graph.parse": [
+     94,
+     1
+    ],
+    "graph.parse_and_replace": [
+     117,
+     1
+    ],
+    "graph.rebuild_file": [
+     122,
+     1
+    ],
+    "graph.refs_incoming": [
+     2,
+     1
+    ],
+    "graph.refs_outgoing": [
+     2,
+     1
+    ],
+    "graph.remove_file": [
+     9,
+     1
+    ],
+    "ingest.skipped": [
+     0,
+     40
+    ],
+    "ingest.total": [
+     206,
+     41
+    ],
+    "ingest.trigrams": [
+     9,
+     1
+    ],
+    "ingest.words": [
+     10,
+     1
+    ],
+    "reconcile.total": [
+     58362,
+     1
+    ],
+    "snapshot.decode": [
+     158902,
+     1
+    ],
+    "snapshot.decode_core": [
+     71003,
+     3
+    ],
+    "snapshot.decode_edges": [
+     78920,
+     1
+    ],
+    "snapshot.decode_nodes": [
+     238414,
+     4
+    ],
+    "snapshot.decode_trigrams": [
+     95097,
+     1
+    ],
+    "snapshot.decode_words": [
+     111222,
+     1
+    ],
+    "snapshot.encode": [
+     160653,
+     1
+    ],
+    "snapshot.load": [
+     240704,
+     1
+    ],
+    "snapshot.read": [
+     69210,
+     1
+    ],
+    "snapshot.restore": [
+     191372,
+     1
+    ],
+    "snapshot.restore_dependencies": [
+     14222,
+     1
+    ],
+    "snapshot.restore_graph": [
+     171472,
+     1
+    ],
+    "snapshot.restore_trigrams": [
+     24248,
+     1
+    ],
+    "snapshot.restore_words": [
+     38169,
+     1
+    ],
+    "snapshot.write": [
+     254777,
      1
     ]
    },
    "postings_digest": "f4ad9c3733fdbd4f45a5fa68052d7399bc6158b4edd4b3615c808033707d7121",
    "pre_idle": 0.9983328702417338,
-   "query_us": 28,
-   "ready_us": 501673,
+   "query_us": 42,
+   "ready_us": 1118045,
+   "resolved_calls": 441301,
+   "rows": 1,
+   "scenario": "declaration",
+   "skipped_file_inventory": "ecf3f0ac3ea88dbe1e096128817116baccc3e0f181cde9a3c80f49dbe6dc3148",
+   "snapshot_bytes": 143450133,
+   "source_bytes": 88173045,
+   "trial": 2,
+   "trigram_query_us": 284,
+   "word_query_us": 4
+  },
+  {
+   "accepted": true,
+   "binary_sha256": "4a4aab73bf8d9ec385d53fa3df0ca5e9611ee62748c74c154bf29c9269692b9c",
+   "corpus_digest": "b45cd2a68379f63d38c631f51954408136ac39e0ba8c07eb7411c0eba791c7c2",
+   "edges": 5036843,
+   "elapsed_us": 1122913,
+   "estimated_bytes": 142267109,
+   "external_busy_cores": 0.017831242813208754,
+   "files": 8464,
+   "files_attempted": 41,
+   "files_skipped": 40,
+   "graph_digest": "0196b45dae30b31a0d4449cd635750811c8397b67f83cfbb0497d1ee36e7fd00",
+   "label": "baseline",
+   "literal_query_us": 8169,
+   "nodes": 752584,
+   "operation_peak_rss_kib": 866580,
+   "phases_us_and_count": {
+    "graph.calls": [
+     7,
+     1
+    ],
+    "graph.imports": [
+     5768,
+     1
+    ],
+    "graph.parse": [
+     107,
+     1
+    ],
+    "graph.parse_and_replace": [
+     132,
+     1
+    ],
+    "graph.rebuild_file": [
+     141,
+     1
+    ],
+    "graph.refs_incoming": [
+     6,
+     1
+    ],
+    "graph.refs_outgoing": [
+     2,
+     1
+    ],
+    "graph.remove_file": [
+     9,
+     1
+    ],
+    "ingest.skipped": [
+     0,
+     40
+    ],
+    "ingest.total": [
+     200,
+     41
+    ],
+    "ingest.trigrams": [
+     8,
+     1
+    ],
+    "ingest.words": [
+     12,
+     1
+    ],
+    "reconcile.total": [
+     60534,
+     1
+    ],
+    "snapshot.decode": [
+     172600,
+     1
+    ],
+    "snapshot.decode_core": [
+     52460,
+     3
+    ],
+    "snapshot.decode_edges": [
+     89706,
+     1
+    ],
+    "snapshot.decode_nodes": [
+     217240,
+     4
+    ],
+    "snapshot.decode_trigrams": [
+     95585,
+     1
+    ],
+    "snapshot.decode_words": [
+     125364,
+     1
+    ],
+    "snapshot.encode": [
+     150817,
+     1
+    ],
+    "snapshot.load": [
+     255181,
+     1
+    ],
+    "snapshot.read": [
+     69417,
+     1
+    ],
+    "snapshot.restore": [
+     189742,
+     1
+    ],
+    "snapshot.restore_dependencies": [
+     14883,
+     1
+    ],
+    "snapshot.restore_graph": [
+     169239,
+     1
+    ],
+    "snapshot.restore_trigrams": [
+     24572,
+     1
+    ],
+    "snapshot.restore_words": [
+     38153,
+     1
+    ],
+    "snapshot.write": [
+     251696,
+     1
+    ]
+   },
+   "postings_digest": "f4ad9c3733fdbd4f45a5fa68052d7399bc6158b4edd4b3615c808033707d7121",
+   "pre_idle": 0.9997222222222222,
+   "query_us": 49,
+   "ready_us": 1114285,
    "resolved_calls": 441301,
    "rows": 1,
    "scenario": "declaration",
@@ -1966,521 +1770,690 @@
    "snapshot_bytes": 143450133,
    "source_bytes": 88173045,
    "trial": 3,
-   "trigram_query_us": 223,
-   "word_query_us": 331158
+   "trigram_query_us": 344,
+   "word_query_us": 4
+  },
+  {
+   "accepted": true,
+   "binary_sha256": "c7876135113ba334bf4a0bf04a93cd4416ab64f7a9575f57598eefd30cb5f651",
+   "corpus_digest": "b45cd2a68379f63d38c631f51954408136ac39e0ba8c07eb7411c0eba791c7c2",
+   "edges": 5036843,
+   "elapsed_us": 1145012,
+   "estimated_bytes": 142267109,
+   "external_busy_cores": 0.01871129806729038,
+   "files": 8464,
+   "files_attempted": 41,
+   "files_skipped": 40,
+   "graph_digest": "0196b45dae30b31a0d4449cd635750811c8397b67f83cfbb0497d1ee36e7fd00",
+   "label": "candidate",
+   "literal_query_us": 8176,
+   "nodes": 752584,
+   "operation_peak_rss_kib": 884580,
+   "persisted_us": 1144979,
+   "phases_us_and_count": {
+    "graph.calls": [
+     7,
+     1
+    ],
+    "graph.imports": [
+     5695,
+     1
+    ],
+    "graph.parse": [
+     94,
+     1
+    ],
+    "graph.parse_and_replace": [
+     116,
+     1
+    ],
+    "graph.rebuild_file": [
+     121,
+     1
+    ],
+    "graph.refs_incoming": [
+     2,
+     1
+    ],
+    "graph.refs_outgoing": [
+     1,
+     1
+    ],
+    "graph.remove_file": [
+     8,
+     1
+    ],
+    "ingest.skipped": [
+     0,
+     40
+    ],
+    "ingest.total": [
+     202,
+     41
+    ],
+    "ingest.trigrams": [
+     8,
+     1
+    ],
+    "ingest.words": [
+     11,
+     1
+    ],
+    "reconcile.total": [
+     58236,
+     1
+    ],
+    "snapshot.decode": [
+     156753,
+     1
+    ],
+    "snapshot.decode_core": [
+     63274,
+     2
+    ],
+    "snapshot.decode_edges": [
+     47980,
+     1
+    ],
+    "snapshot.decode_graph_files": [
+     1069,
+     1
+    ],
+    "snapshot.decode_nodes": [
+     216138,
+     4
+    ],
+    "snapshot.decode_trigrams": [
+     96694,
+     1
+    ],
+    "snapshot.decode_words": [
+     109808,
+     1
+    ],
+    "snapshot.detach": [
+     42004,
+     1
+    ],
+    "snapshot.encode": [
+     149119,
+     1
+    ],
+    "snapshot.load": [
+     239056,
+     1
+    ],
+    "snapshot.read": [
+     69667,
+     1
+    ],
+    "snapshot.restore": [
+     194878,
+     1
+    ],
+    "snapshot.restore_dependencies": [
+     14273,
+     1
+    ],
+    "snapshot.restore_graph": [
+     174970,
+     1
+    ],
+    "snapshot.restore_trigrams": [
+     23928,
+     1
+    ],
+    "snapshot.restore_words": [
+     38262,
+     1
+    ],
+    "snapshot.write": [
+     247520,
+     1
+    ]
+   },
+   "postings_digest": "f4ad9c3733fdbd4f45a5fa68052d7399bc6158b4edd4b3615c808033707d7121",
+   "pre_idle": 0.9991664351208669,
+   "query_us": 42056,
+   "ready_us": 492262,
+   "resolved_calls": 441301,
+   "rows": 1,
+   "scenario": "declaration",
+   "skipped_file_inventory": "ecf3f0ac3ea88dbe1e096128817116baccc3e0f181cde9a3c80f49dbe6dc3148",
+   "snapshot_bytes": 143450133,
+   "source_bytes": 88173045,
+   "trial": 3,
+   "trigram_query_us": 266,
+   "word_query_us": 2
   },
   {
    "accepted": true,
    "binary_sha256": "4a4aab73bf8d9ec385d53fa3df0ca5e9611ee62748c74c154bf29c9269692b9c",
    "corpus_digest": "1e6b56d7ec770c5d56ed40899c6164d5e7dfa8a5b24ed77fa1be2f4db6331666",
    "edges": 5036843,
-   "elapsed_us": 2653878,
+   "elapsed_us": 1404632,
    "estimated_bytes": 142261965,
-   "external_busy_cores": 0.016084871132190155,
+   "external_busy_cores": 0.01316792305503455,
    "files": 8464,
    "files_attempted": 8504,
    "files_skipped": 40,
    "graph_digest": "60c139dfe072dca280cb1df87af9af7ac70059339323df6fabf7f35eb48a894b",
    "label": "baseline",
-   "literal_query_us": 13429,
+   "literal_query_us": 10380,
    "nodes": 752584,
-   "operation_peak_rss_kib": 843008,
+   "operation_peak_rss_kib": 871728,
    "phases_us_and_count": {
     "ingest.skipped": [
      0,
      40
     ],
     "ingest.total": [
-     1505034,
+     174274,
      8504
     ],
     "reconcile.total": [
-     1569004,
+     232160,
      1
     ],
     "snapshot.decode": [
-     163216,
+     170686,
      1
     ],
     "snapshot.decode_core": [
-     69403,
+     73118,
      3
     ],
     "snapshot.decode_edges": [
-     78943,
+     80627,
      1
     ],
     "snapshot.decode_nodes": [
-     226877,
+     222088,
      4
     ],
     "snapshot.decode_trigrams": [
-     88567,
+     83479,
      1
     ],
     "snapshot.decode_words": [
-     115807,
+     124225,
      1
     ],
     "snapshot.encode": [
-     174788,
+     177706,
      1
     ],
     "snapshot.load": [
-     245105,
+     251727,
      1
     ],
     "snapshot.read": [
-     69467,
+     68775,
      1
     ],
     "snapshot.restore": [
-     190310,
+     186531,
      1
     ],
     "snapshot.restore_dependencies": [
-     14194,
+     14313,
      1
     ],
     "snapshot.restore_graph": [
-     170438,
+     166586,
      1
     ],
     "snapshot.restore_trigrams": [
-     25016,
+     24458,
      1
     ],
     "snapshot.restore_words": [
-     38819,
+     38183,
      1
     ],
     "snapshot.write": [
-     285678,
+     376309,
+     1
+    ]
+   },
+   "postings_digest": "7ad571a6fe972c06c2b632bca55b4393fd3fdef0ed7a5633d4ad8da20aaee4a8",
+   "pre_idle": 0.999722145040289,
+   "query_us": 43,
+   "ready_us": 1394021,
+   "resolved_calls": 441301,
+   "rows": 1,
+   "scenario": "head",
+   "skipped_file_inventory": "ecf3f0ac3ea88dbe1e096128817116baccc3e0f181cde9a3c80f49dbe6dc3148",
+   "snapshot_bytes": 143450072,
+   "source_bytes": 88173033,
+   "trial": 1,
+   "trigram_query_us": 119,
+   "word_query_us": 4
+  },
+  {
+   "accepted": true,
+   "binary_sha256": "c7876135113ba334bf4a0bf04a93cd4416ab64f7a9575f57598eefd30cb5f651",
+   "corpus_digest": "1e6b56d7ec770c5d56ed40899c6164d5e7dfa8a5b24ed77fa1be2f4db6331666",
+   "edges": 5036843,
+   "elapsed_us": 1306044,
+   "estimated_bytes": 142261965,
+   "external_busy_cores": 0.008900357019165002,
+   "files": 8464,
+   "files_attempted": 8504,
+   "files_skipped": 40,
+   "graph_digest": "60c139dfe072dca280cb1df87af9af7ac70059339323df6fabf7f35eb48a894b",
+   "label": "candidate",
+   "literal_query_us": 9344,
+   "nodes": 752584,
+   "operation_peak_rss_kib": 890088,
+   "persisted_us": 1306009,
+   "phases_us_and_count": {
+    "ingest.skipped": [
+     0,
+     40
+    ],
+    "ingest.total": [
+     176657,
+     8504
+    ],
+    "reconcile.total": [
+     235114,
+     1
+    ],
+    "snapshot.decode": [
+     158118,
+     1
+    ],
+    "snapshot.decode_core": [
+     62064,
+     2
+    ],
+    "snapshot.decode_edges": [
+     47507,
+     1
+    ],
+    "snapshot.decode_graph_files": [
+     1262,
+     1
+    ],
+    "snapshot.decode_nodes": [
+     244261,
+     4
+    ],
+    "snapshot.decode_trigrams": [
+     96934,
+     1
+    ],
+    "snapshot.decode_words": [
+     111067,
+     1
+    ],
+    "snapshot.detach": [
+     42667,
+     1
+    ],
+    "snapshot.encode": [
+     164743,
+     1
+    ],
+    "snapshot.load": [
+     240166,
+     1
+    ],
+    "snapshot.read": [
+     69507,
+     1
+    ],
+    "snapshot.restore": [
+     192595,
+     1
+    ],
+    "snapshot.restore_dependencies": [
+     14226,
+     1
+    ],
+    "snapshot.restore_graph": [
+     172753,
+     1
+    ],
+    "snapshot.restore_trigrams": [
+     22566,
+     1
+    ],
+    "snapshot.restore_words": [
+     38446,
+     1
+    ],
+    "snapshot.write": [
+     253676,
+     1
+    ]
+   },
+   "postings_digest": "7ad571a6fe972c06c2b632bca55b4393fd3fdef0ed7a5633d4ad8da20aaee4a8",
+   "pre_idle": 0.9974993053626007,
+   "query_us": 39,
+   "ready_us": 667958,
+   "resolved_calls": 441301,
+   "rows": 1,
+   "scenario": "head",
+   "skipped_file_inventory": "ecf3f0ac3ea88dbe1e096128817116baccc3e0f181cde9a3c80f49dbe6dc3148",
+   "snapshot_bytes": 143450072,
+   "source_bytes": 88173033,
+   "trial": 1,
+   "trigram_query_us": 42793,
+   "word_query_us": 3
+  },
+  {
+   "accepted": true,
+   "binary_sha256": "c7876135113ba334bf4a0bf04a93cd4416ab64f7a9575f57598eefd30cb5f651",
+   "corpus_digest": "1e6b56d7ec770c5d56ed40899c6164d5e7dfa8a5b24ed77fa1be2f4db6331666",
+   "edges": 5036843,
+   "elapsed_us": 1310281,
+   "estimated_bytes": 142261965,
+   "external_busy_cores": 0.009046584837942037,
+   "files": 8464,
+   "files_attempted": 8504,
+   "files_skipped": 40,
+   "graph_digest": "60c139dfe072dca280cb1df87af9af7ac70059339323df6fabf7f35eb48a894b",
+   "label": "candidate",
+   "literal_query_us": 10524,
+   "nodes": 752584,
+   "operation_peak_rss_kib": 868040,
+   "persisted_us": 1310254,
+   "phases_us_and_count": {
+    "ingest.skipped": [
+     0,
+     40
+    ],
+    "ingest.total": [
+     177301,
+     8504
+    ],
+    "reconcile.total": [
+     236020,
+     1
+    ],
+    "snapshot.decode": [
+     163271,
+     1
+    ],
+    "snapshot.decode_core": [
+     50494,
+     2
+    ],
+    "snapshot.decode_edges": [
+     48636,
+     1
+    ],
+    "snapshot.decode_graph_files": [
+     1091,
+     1
+    ],
+    "snapshot.decode_nodes": [
+     231536,
+     4
+    ],
+    "snapshot.decode_trigrams": [
+     95946,
+     1
+    ],
+    "snapshot.decode_words": [
+     115121,
+     1
+    ],
+    "snapshot.detach": [
+     44079,
+     1
+    ],
+    "snapshot.encode": [
+     161979,
+     1
+    ],
+    "snapshot.load": [
+     247218,
+     1
+    ],
+    "snapshot.read": [
+     69647,
+     1
+    ],
+    "snapshot.restore": [
+     196863,
+     1
+    ],
+    "snapshot.restore_dependencies": [
+     14518,
+     1
+    ],
+    "snapshot.restore_graph": [
+     176591,
+     1
+    ],
+    "snapshot.restore_trigrams": [
+     23549,
+     1
+    ],
+    "snapshot.restore_words": [
+     39339,
+     1
+    ],
+    "snapshot.write": [
+     250579,
+     1
+    ]
+   },
+   "postings_digest": "7ad571a6fe972c06c2b632bca55b4393fd3fdef0ed7a5633d4ad8da20aaee4a8",
+   "pre_idle": 0.9986103390772652,
+   "query_us": 38,
+   "ready_us": 680172,
+   "resolved_calls": 441301,
+   "rows": 1,
+   "scenario": "head",
+   "skipped_file_inventory": "ecf3f0ac3ea88dbe1e096128817116baccc3e0f181cde9a3c80f49dbe6dc3148",
+   "snapshot_bytes": 143450072,
+   "source_bytes": 88173033,
+   "trial": 2,
+   "trigram_query_us": 44212,
+   "word_query_us": 3
+  },
+  {
+   "accepted": true,
+   "binary_sha256": "4a4aab73bf8d9ec385d53fa3df0ca5e9611ee62748c74c154bf29c9269692b9c",
+   "corpus_digest": "1e6b56d7ec770c5d56ed40899c6164d5e7dfa8a5b24ed77fa1be2f4db6331666",
+   "edges": 5036843,
+   "elapsed_us": 1267720,
+   "estimated_bytes": 142261965,
+   "external_busy_cores": 0.0440892044723878,
+   "files": 8464,
+   "files_attempted": 8504,
+   "files_skipped": 40,
+   "graph_digest": "60c139dfe072dca280cb1df87af9af7ac70059339323df6fabf7f35eb48a894b",
+   "label": "baseline",
+   "literal_query_us": 13301,
+   "nodes": 752584,
+   "operation_peak_rss_kib": 819836,
+   "phases_us_and_count": {
+    "ingest.skipped": [
+     0,
+     40
+    ],
+    "ingest.total": [
+     175391,
+     8504
+    ],
+    "reconcile.total": [
+     233726,
+     1
+    ],
+    "snapshot.decode": [
+     170973,
+     1
+    ],
+    "snapshot.decode_core": [
+     68054,
+     3
+    ],
+    "snapshot.decode_edges": [
+     78709,
+     1
+    ],
+    "snapshot.decode_nodes": [
+     227414,
+     4
+    ],
+    "snapshot.decode_trigrams": [
+     75603,
+     1
+    ],
+    "snapshot.decode_words": [
+     123105,
+     1
+    ],
+    "snapshot.encode": [
+     161928,
+     1
+    ],
+    "snapshot.load": [
+     251608,
+     1
+    ],
+    "snapshot.read": [
+     68065,
+     1
+    ],
+    "snapshot.restore": [
+     192505,
+     1
+    ],
+    "snapshot.restore_dependencies": [
+     14279,
+     1
+    ],
+    "snapshot.restore_graph": [
+     172587,
+     1
+    ],
+    "snapshot.restore_trigrams": [
+     26217,
+     1
+    ],
+    "snapshot.restore_words": [
+     38788,
+     1
+    ],
+    "snapshot.write": [
+     254168,
      1
     ]
    },
    "postings_digest": "7ad571a6fe972c06c2b632bca55b4393fd3fdef0ed7a5633d4ad8da20aaee4a8",
    "pre_idle": 1.0,
-   "query_us": 37,
-   "ready_us": 2640214,
+   "query_us": 51,
+   "ready_us": 1254175,
    "resolved_calls": 441301,
    "rows": 1,
    "scenario": "head",
    "skipped_file_inventory": "ecf3f0ac3ea88dbe1e096128817116baccc3e0f181cde9a3c80f49dbe6dc3148",
    "snapshot_bytes": 143450072,
    "source_bytes": 88173033,
-   "trial": 1,
-   "trigram_query_us": 125,
-   "word_query_us": 8
+   "trial": 2,
+   "trigram_query_us": 119,
+   "word_query_us": 4
   },
   {
    "accepted": true,
-   "binary_sha256": "62d4c49c2cbb1fd59d16a30e2093165332ccd40d9ed8edc568ee74a8dfdefc49",
-   "corpus_digest": "1e6b56d7ec770c5d56ed40899c6164d5e7dfa8a5b24ed77fa1be2f4db6331666",
-   "edges": 5036843,
-   "elapsed_us": 1265454,
-   "estimated_bytes": 142261965,
-   "external_busy_cores": 0.23966771813294338,
-   "files": 8464,
-   "files_attempted": 8504,
-   "files_skipped": 40,
-   "graph_digest": "60c139dfe072dca280cb1df87af9af7ac70059339323df6fabf7f35eb48a894b",
-   "label": "candidate",
-   "literal_query_us": 10731,
-   "nodes": 752584,
-   "operation_peak_rss_kib": 857524,
-   "persisted_us": 1265432,
-   "phases_us_and_count": {
-    "ingest.skipped": [
-     0,
-     40
-    ],
-    "ingest.total": [
-     175461,
-     8504
-    ],
-    "reconcile.total": [
-     233641,
-     1
-    ],
-    "snapshot.decode": [
-     161303,
-     1
-    ],
-    "snapshot.decode_core": [
-     53006,
-     3
-    ],
-    "snapshot.decode_edges": [
-     91076,
-     1
-    ],
-    "snapshot.decode_nodes": [
-     256343,
-     4
-    ],
-    "snapshot.decode_trigrams": [
-     78594,
-     1
-    ],
-    "snapshot.decode_words": [
-     108364,
-     1
-    ],
-    "snapshot.encode": [
-     156918,
-     1
-    ],
-    "snapshot.load": [
-     243259,
-     1
-    ],
-    "snapshot.read": [
-     69376,
-     1
-    ],
-    "snapshot.restore": [
-     184346,
-     1
-    ],
-    "snapshot.restore_dependencies": [
-     14180,
-     1
-    ],
-    "snapshot.restore_graph": [
-     164535,
-     1
-    ],
-    "snapshot.restore_trigrams": [
-     21384,
-     1
-    ],
-    "snapshot.restore_words": [
-     44456,
-     1
-    ],
-    "snapshot.write": [
-     274510,
-     1
-    ]
-   },
-   "postings_digest": "7ad571a6fe972c06c2b632bca55b4393fd3fdef0ed7a5633d4ad8da20aaee4a8",
-   "pre_idle": 0.9936040044493882,
-   "query_us": 39,
-   "ready_us": 661321,
-   "resolved_calls": 441301,
-   "rows": 1,
-   "scenario": "head",
-   "skipped_file_inventory": "ecf3f0ac3ea88dbe1e096128817116baccc3e0f181cde9a3c80f49dbe6dc3148",
-   "snapshot_bytes": 143450072,
-   "source_bytes": 88173033,
-   "trial": 1,
-   "trigram_query_us": 152,
-   "word_query_us": 298850
-  },
-  {
-   "accepted": false,
-   "binary_sha256": "62d4c49c2cbb1fd59d16a30e2093165332ccd40d9ed8edc568ee74a8dfdefc49",
-   "corpus_digest": "1e6b56d7ec770c5d56ed40899c6164d5e7dfa8a5b24ed77fa1be2f4db6331666",
-   "edges": 5036843,
-   "elapsed_us": 1373725,
-   "estimated_bytes": 142261965,
-   "external_busy_cores": 0.870381208349833,
-   "files": 8464,
-   "files_attempted": 8504,
-   "files_skipped": 40,
-   "graph_digest": "60c139dfe072dca280cb1df87af9af7ac70059339323df6fabf7f35eb48a894b",
-   "label": "candidate",
-   "literal_query_us": 9971,
-   "nodes": 752584,
-   "operation_peak_rss_kib": 858472,
-   "persisted_us": 1373694,
-   "phases_us_and_count": {
-    "ingest.skipped": [
-     0,
-     40
-    ],
-    "ingest.total": [
-     178288,
-     8504
-    ],
-    "reconcile.total": [
-     237642,
-     1
-    ],
-    "snapshot.decode": [
-     167611,
-     1
-    ],
-    "snapshot.decode_core": [
-     67833,
-     3
-    ],
-    "snapshot.decode_edges": [
-     83736,
-     1
-    ],
-    "snapshot.decode_nodes": [
-     229443,
-     4
-    ],
-    "snapshot.decode_trigrams": [
-     75910,
-     1
-    ],
-    "snapshot.decode_words": [
-     120353,
-     1
-    ],
-    "snapshot.encode": [
-     180305,
-     1
-    ],
-    "snapshot.load": [
-     251454,
-     1
-    ],
-    "snapshot.read": [
-     71065,
-     1
-    ],
-    "snapshot.restore": [
-     191891,
-     1
-    ],
-    "snapshot.restore_dependencies": [
-     14558,
-     1
-    ],
-    "snapshot.restore_graph": [
-     171570,
-     1
-    ],
-    "snapshot.restore_trigrams": [
-     27055,
-     1
-    ],
-    "snapshot.restore_words": [
-     34219,
-     1
-    ],
-    "snapshot.write": [
-     340913,
-     1
-    ]
-   },
-   "postings_digest": "7ad571a6fe972c06c2b632bca55b4393fd3fdef0ed7a5633d4ad8da20aaee4a8",
-   "pre_idle": 0.933649289099526,
-   "query_us": 36,
-   "ready_us": 681059,
-   "resolved_calls": 441301,
-   "rows": 1,
-   "scenario": "head",
-   "skipped_file_inventory": "ecf3f0ac3ea88dbe1e096128817116baccc3e0f181cde9a3c80f49dbe6dc3148",
-   "snapshot_bytes": 143450072,
-   "source_bytes": 88173033,
-   "trial": 2,
-   "trigram_query_us": 110,
-   "word_query_us": 318222
-  },
-  {
-   "accepted": false,
    "binary_sha256": "4a4aab73bf8d9ec385d53fa3df0ca5e9611ee62748c74c154bf29c9269692b9c",
    "corpus_digest": "1e6b56d7ec770c5d56ed40899c6164d5e7dfa8a5b24ed77fa1be2f4db6331666",
    "edges": 5036843,
-   "elapsed_us": 1338990,
+   "elapsed_us": 1287228,
    "estimated_bytes": 142261965,
-   "external_busy_cores": 0.7677066041946505,
+   "external_busy_cores": 0.015791841263667974,
    "files": 8464,
    "files_attempted": 8504,
    "files_skipped": 40,
    "graph_digest": "60c139dfe072dca280cb1df87af9af7ac70059339323df6fabf7f35eb48a894b",
    "label": "baseline",
-   "literal_query_us": 11900,
+   "literal_query_us": 11531,
    "nodes": 752584,
-   "operation_peak_rss_kib": 865764,
+   "operation_peak_rss_kib": 872108,
    "phases_us_and_count": {
     "ingest.skipped": [
      0,
      40
     ],
     "ingest.total": [
-     178688,
+     175308,
      8504
     ],
     "reconcile.total": [
-     238013,
+     233579,
      1
     ],
     "snapshot.decode": [
-     172246,
+     157486,
      1
     ],
     "snapshot.decode_core": [
-     73247,
+     65829,
      3
     ],
     "snapshot.decode_edges": [
-     88608,
+     82104,
      1
     ],
     "snapshot.decode_nodes": [
-     216185,
+     212277,
      4
     ],
     "snapshot.decode_trigrams": [
-     95790,
+     94329,
      1
     ],
     "snapshot.decode_words": [
-     124346,
+     110848,
      1
     ],
     "snapshot.encode": [
-     173031,
+     151936,
      1
     ],
     "snapshot.load": [
-     256105,
+     239466,
      1
     ],
     "snapshot.read": [
-     70612,
+     69433,
      1
     ],
     "snapshot.restore": [
-     199045,
+     189395,
      1
     ],
     "snapshot.restore_dependencies": [
-     14543,
+     14432,
      1
     ],
     "snapshot.restore_graph": [
-     178709,
+     169236,
      1
     ],
     "snapshot.restore_trigrams": [
-     29841,
+     28285,
      1
     ],
     "snapshot.restore_words": [
-     37858,
+     33456,
      1
     ],
     "snapshot.write": [
-     279602,
+     288159,
      1
     ]
    },
    "postings_digest": "7ad571a6fe972c06c2b632bca55b4393fd3fdef0ed7a5633d4ad8da20aaee4a8",
-   "pre_idle": 0.9143254520166898,
-   "query_us": 35,
-   "ready_us": 1326851,
-   "resolved_calls": 441301,
-   "rows": 1,
-   "scenario": "head",
-   "skipped_file_inventory": "ecf3f0ac3ea88dbe1e096128817116baccc3e0f181cde9a3c80f49dbe6dc3148",
-   "snapshot_bytes": 143450072,
-   "source_bytes": 88173033,
-   "trial": 2,
-   "trigram_query_us": 131,
-   "word_query_us": 8
-  },
-  {
-   "accepted": false,
-   "binary_sha256": "4a4aab73bf8d9ec385d53fa3df0ca5e9611ee62748c74c154bf29c9269692b9c",
-   "corpus_digest": "1e6b56d7ec770c5d56ed40899c6164d5e7dfa8a5b24ed77fa1be2f4db6331666",
-   "edges": 5036843,
-   "elapsed_us": 1331021,
-   "estimated_bytes": 142261965,
-   "external_busy_cores": 1.0652369695706678,
-   "files": 8464,
-   "files_attempted": 8504,
-   "files_skipped": 40,
-   "graph_digest": "60c139dfe072dca280cb1df87af9af7ac70059339323df6fabf7f35eb48a894b",
-   "label": "baseline",
-   "literal_query_us": 13519,
-   "nodes": 752584,
-   "operation_peak_rss_kib": 851776,
-   "phases_us_and_count": {
-    "ingest.skipped": [
-     0,
-     40
-    ],
-    "ingest.total": [
-     178642,
-     8504
-    ],
-    "reconcile.total": [
-     237990,
-     1
-    ],
-    "snapshot.decode": [
-     172672,
-     1
-    ],
-    "snapshot.decode_core": [
-     70641,
-     3
-    ],
-    "snapshot.decode_edges": [
-     78942,
-     1
-    ],
-    "snapshot.decode_nodes": [
-     243793,
-     4
-    ],
-    "snapshot.decode_trigrams": [
-     96277,
-     1
-    ],
-    "snapshot.decode_words": [
-     124806,
-     1
-    ],
-    "snapshot.encode": [
-     163931,
-     1
-    ],
-    "snapshot.load": [
-     256940,
-     1
-    ],
-    "snapshot.read": [
-     71610,
-     1
-    ],
-    "snapshot.restore": [
-     191082,
-     1
-    ],
-    "snapshot.restore_dependencies": [
-     14515,
-     1
-    ],
-    "snapshot.restore_graph": [
-     170944,
-     1
-    ],
-    "snapshot.restore_trigrams": [
-     29002,
-     1
-    ],
-    "snapshot.restore_words": [
-     37869,
-     1
-    ],
-    "snapshot.write": [
-     292830,
-     1
-    ]
-   },
-   "postings_digest": "7ad571a6fe972c06c2b632bca55b4393fd3fdef0ed7a5633d4ad8da20aaee4a8",
-   "pre_idle": 0.9899944413563091,
-   "query_us": 36,
-   "ready_us": 1317264,
+   "pre_idle": 0.999722145040289,
+   "query_us": 48,
+   "ready_us": 1275462,
    "resolved_calls": 441301,
    "rows": 1,
    "scenario": "head",
@@ -2488,104 +2461,112 @@
    "snapshot_bytes": 143450072,
    "source_bytes": 88173033,
    "trial": 3,
-   "trigram_query_us": 134,
-   "word_query_us": 8
+   "trigram_query_us": 120,
+   "word_query_us": 4
   },
   {
-   "accepted": false,
-   "binary_sha256": "62d4c49c2cbb1fd59d16a30e2093165332ccd40d9ed8edc568ee74a8dfdefc49",
+   "accepted": true,
+   "binary_sha256": "c7876135113ba334bf4a0bf04a93cd4416ab64f7a9575f57598eefd30cb5f651",
    "corpus_digest": "1e6b56d7ec770c5d56ed40899c6164d5e7dfa8a5b24ed77fa1be2f4db6331666",
    "edges": 5036843,
-   "elapsed_us": 1275831,
+   "elapsed_us": 1342324,
    "estimated_bytes": 142261965,
-   "external_busy_cores": 0.36101314651776806,
+   "external_busy_cores": 0.012195393690683785,
    "files": 8464,
    "files_attempted": 8504,
    "files_skipped": 40,
    "graph_digest": "60c139dfe072dca280cb1df87af9af7ac70059339323df6fabf7f35eb48a894b",
    "label": "candidate",
-   "literal_query_us": 13770,
+   "literal_query_us": 9520,
    "nodes": 752584,
-   "operation_peak_rss_kib": 869352,
-   "persisted_us": 1275812,
+   "operation_peak_rss_kib": 865476,
+   "persisted_us": 1342302,
    "phases_us_and_count": {
     "ingest.skipped": [
      0,
      40
     ],
     "ingest.total": [
-     178245,
+     175429,
      8504
     ],
     "reconcile.total": [
-     237000,
+     233628,
      1
     ],
     "snapshot.decode": [
-     159027,
+     169027,
      1
     ],
     "snapshot.decode_core": [
-     68565,
-     3
+     50475,
+     2
     ],
     "snapshot.decode_edges": [
-     87008,
+     47426,
+     1
+    ],
+    "snapshot.decode_graph_files": [
+     1068,
      1
     ],
     "snapshot.decode_nodes": [
-     239657,
+     235832,
      4
     ],
     "snapshot.decode_trigrams": [
-     74726,
+     99037,
      1
     ],
     "snapshot.decode_words": [
-     111886,
+     121761,
+     1
+    ],
+    "snapshot.detach": [
+     41383,
      1
     ],
     "snapshot.encode": [
-     154498,
+     188817,
      1
     ],
     "snapshot.load": [
-     241944,
+     252038,
      1
     ],
     "snapshot.read": [
-     70229,
+     68952,
      1
     ],
     "snapshot.restore": [
-     197393,
+     197986,
      1
     ],
     "snapshot.restore_dependencies": [
-     14421,
+     14327,
      1
     ],
     "snapshot.restore_graph": [
-     177251,
+     178010,
      1
     ],
     "snapshot.restore_trigrams": [
-     28358,
+     22676,
      1
     ],
     "snapshot.restore_words": [
-     37309,
+     37988,
      1
     ],
     "snapshot.write": [
-     284030,
+     250796,
      1
     ]
    },
    "postings_digest": "7ad571a6fe972c06c2b632bca55b4393fd3fdef0ed7a5633d4ad8da20aaee4a8",
-   "pre_idle": 0.9162493043962159,
-   "query_us": 34,
-   "ready_us": 676401,
+   "pre_idle": 0.999722067815453,
+   "query_us": 40,
+   "ready_us": 683734,
    "resolved_calls": 441301,
    "rows": 1,
    "scenario": "head",
@@ -2593,8 +2574,8 @@
    "snapshot_bytes": 143450072,
    "source_bytes": 88173033,
    "trial": 3,
-   "trigram_query_us": 116,
-   "word_query_us": 294496
+   "trigram_query_us": 103,
+   "word_query_us": 41408
   }
  ]
 }
