@@ -394,23 +394,31 @@ impl McpServer {
     /// server, such as a local app shell. The request is authorized as an
     /// in-process caller; a `tools/call` runs to completion and its terminal
     /// response is returned. Notifications return `None`.
-    pub async fn handle_request(self: Arc<Self>, request: JsonValue) -> Option<JsonValue> {
-        let auth = AuthRequest {
-            method: "IN_PROCESS".to_string(),
-            ..AuthRequest::default()
-        };
-        match self
-            .process_message(request, SharedSession::new(), auth)
-            .await
-        {
-            ImmediateResult::Response(response) => Some(response),
-            ImmediateResult::Accepted => None,
-            ImmediateResult::Stream(job) => self.run_job_to_response(*job).await,
-            ImmediateResult::TaskStream { immediate, job } => {
-                tokio::spawn(async move { self.execute_streaming_job(*job, discard()).await });
-                Some(immediate)
+    ///
+    /// Boxed so an embedding host's own handler frame stays small; the
+    /// request future carries the whole dispatch path.
+    pub fn handle_request(
+        self: Arc<Self>,
+        request: JsonValue,
+    ) -> futures::future::BoxFuture<'static, Option<JsonValue>> {
+        Box::pin(async move {
+            let auth = AuthRequest {
+                method: "IN_PROCESS".to_string(),
+                ..AuthRequest::default()
+            };
+            match self
+                .process_message(request, SharedSession::new(), auth)
+                .await
+            {
+                ImmediateResult::Response(response) => Some(response),
+                ImmediateResult::Accepted => None,
+                ImmediateResult::Stream(job) => self.run_job_to_response(*job).await,
+                ImmediateResult::TaskStream { immediate, job } => {
+                    tokio::spawn(async move { self.execute_streaming_job(*job, discard()).await });
+                    Some(immediate)
+                }
             }
-        }
+        })
     }
 
     /// Run a streaming job and keep only its terminal response.
