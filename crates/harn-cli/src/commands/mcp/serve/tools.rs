@@ -8,7 +8,6 @@ use uuid::Uuid;
 use harn_vm::mcp_protocol;
 use harn_vm::{append_secret_scan_audit, secret_scan_content, SecretFinding};
 
-use super::protocol::paginated_list_response;
 use super::types::{
     ConnectionState, DlqRetryRequest, InspectPayload, McpOrchestratorService, QueueSnapshot,
     SecretScanRequest, TopicPreview, TriggerFireRequest, TriggerListEntry, TriggerReplayRequest,
@@ -216,7 +215,7 @@ impl McpOrchestratorService {
                 })),
             ),
         ];
-        paginated_list_response(id, "tools/list", "tools", params, tools)
+        harn_vm::mcp_protocol::list_response(id, "tools/list", "tools", params, tools)
     }
 
     pub(super) async fn handle_tools_call(

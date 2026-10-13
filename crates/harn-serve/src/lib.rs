@@ -84,7 +84,8 @@ pub use adapters::acp::{
 };
 pub use adapters::api::{ApiHttpServeOptions, ApiServer, ApiServerConfig};
 pub use adapters::mcp::{
-    McpHttpServeOptions, McpServer, McpServerConfig, McpStdioServer, MCP_PROTOCOL_VERSION,
+    McpHttpServeOptions, McpScriptReloader, McpScriptRuntime, McpServer, McpServerConfig,
+    McpStdioServer, MCP_PROTOCOL_VERSION,
 };
 pub use adapters::site::{
     SiteAuth, SiteAuthContext, SiteAuthOutcome, SiteHttpServeOptions, SiteServer, SiteServerConfig,

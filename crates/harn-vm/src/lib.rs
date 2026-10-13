@@ -382,7 +382,7 @@ pub use mcp_server::{
     reset_mcp_serve_publication, take_mcp_serve_metadata, take_mcp_serve_prompts,
     take_mcp_serve_registry, take_mcp_serve_rejection, take_mcp_serve_resource_templates,
     take_mcp_serve_resources, tool_registry_to_mcp_tools, McpPromptDef, McpResourceDef,
-    McpResourceTemplateDef, McpServer, McpServerMetadata, McpServerReload, McpToolSet,
+    McpResourceTemplateDef, McpScriptRegistry, McpScriptSurface, McpServerMetadata, McpToolSet,
 };
 pub use metadata::register_metadata_builtins;
 pub use observability::audit::{audit_events as audit_obs_events, AuditFinding, AuditFindingKind};

@@ -532,6 +532,22 @@ On stdio, the server accepts `initialize` from released MCP clients and
 `server/discover` from 2026-07-28 clients. Streamable HTTP uses the session-free
 2026-07-28 flow.
 
+Both surfaces are served by the same MCP server, so they share one behavior for
+everything except what is listed:
+
+- Over HTTP, `--api-key` and `--hmac-secret` guard every method except `ping`
+  and `server/discover`.
+- A task belongs to the authenticated caller that started it. `tasks/get`,
+  `tasks/update`, and `tasks/cancel` from any other caller report
+  `task not found`.
+- A tool runs as a task when it allows one (an `@job` export, or a registry
+  tool with `execution: {taskSupport: "optional" | "required"}`) and the client
+  declares the stable tasks extension. A `required` tool refuses a plain call.
+- `harn.hitl.respond` records a host's answer to a pending human-in-the-loop
+  request in the working directory's event log.
+- A client whose `Accept` header omits `text/event-stream` receives
+  `tools/call` results as a JSON body instead of an event stream.
+
 Use `--watch` while developing a script-published registry. Harn watches `.harn`
 files and `harn.toml` recursively below the entry script's directory. It
 compiles, executes, and validates a complete replacement registry and VM before
@@ -574,8 +590,9 @@ implements the stable request-scoped stream.
 | Embedded `roots/list` input | Script-driven handlers emit an `input_required` result through `harness.tools.mcp_client_roots()` / `harn.mcp.client_roots()` |
 | Embedded `sampling/createMessage` input | Not currently emitted by Harn's server catalogs |
 | Embedded `elicitation/create` input | Script-driven handlers emit a form-mode `input_required` result through `mcp_elicit(...)` |
-| `tasks/get`, `tasks/update`, `tasks/cancel` | Supported for async orchestrator tool calls when the client declares the stable tasks extension |
-| `tools/call` task results | Async orchestrator tools return `resultType = "task"`; other tools return inline results |
+| `tasks/get`, `tasks/update`, `tasks/cancel` | Supported when the client declares the stable tasks extension; each task is visible only to the caller that started it |
+| `tools/call` task results | Async orchestrator tools, `@job` exports, and registry tools that allow tasks return `resultType = "task"`; other tools return inline results |
+| `harn.hitl.respond` | Supported by `harn serve mcp` for both surfaces |
 
 #### Publishing a server card
 

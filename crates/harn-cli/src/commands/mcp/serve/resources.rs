@@ -20,7 +20,7 @@ impl McpOrchestratorService {
         params: &JsonValue,
     ) -> JsonValue {
         match self.list_resources().await {
-            Ok(resources) => super::protocol::paginated_list_response(
+            Ok(resources) => harn_vm::mcp_protocol::list_response(
                 id,
                 "resources/list",
                 "resources",
