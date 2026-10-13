@@ -908,11 +908,16 @@ fn host_request_path_free_annotations_do_not_require_workspace_authority() {
             "invalid_host_request"
         );
     }
-    for value in [
-        serde_json::json!(null),
-        serde_json::json!({}),
-        serde_json::json!([1]),
-    ] {
+    // A model filling every field of a strict schema sends `""` or `null` for
+    // a path it leaves out; that is an absent argument (harn#9816).
+    for value in [serde_json::json!(null), serde_json::json!(""), serde_json::json!("  ")] {
+        ToolApprovalRequest::from_host_json(request_json(
+            serde_json::json!({"filename": value}),
+            serde_json::json!(["filename"]),
+        ))
+        .expect("an empty optional path reads as absent");
+    }
+    for value in [serde_json::json!({}), serde_json::json!([1])] {
         let refusal = ToolApprovalRequest::from_host_json(request_json(
             serde_json::json!({"filename": value}),
             serde_json::json!(["filename"]),
