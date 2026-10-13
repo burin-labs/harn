@@ -15,6 +15,7 @@ mod payload_errors;
 mod persistence;
 mod report;
 mod time;
+mod tool_call;
 mod transcript_descriptor;
 mod types;
 mod view;
