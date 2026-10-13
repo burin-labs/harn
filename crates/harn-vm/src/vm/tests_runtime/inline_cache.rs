@@ -146,11 +146,11 @@ const values = set(1, 2)
 let i = 0
 let total = 0
 while i < 3 {
-  total = total + list.count()
-  total = total + text.count()
-  total = total + dict.count()
+  total = total + list.len()
+  total = total + text.len()
+  total = total + dict.len()
   total = total + range.first()
-  total = total + values.count()
+  total = total + values.len()
   if list.contains(i + 1) { total = total + 1 }
   if text.contains("b") { total = total + 1 }
   if dict.has("a") { total = total + 1 }
@@ -163,14 +163,14 @@ harness.stdio.log(total)
 
     assert_eq!(out.trim_end(), "[harn] 45");
     for target in [
-        MethodCacheTarget::ListCount,
+        MethodCacheTarget::ListLen,
         MethodCacheTarget::ListContains,
-        MethodCacheTarget::StringCount,
+        MethodCacheTarget::StringLen,
         MethodCacheTarget::StringContains,
-        MethodCacheTarget::DictCount,
+        MethodCacheTarget::DictLen,
         MethodCacheTarget::DictHas,
         MethodCacheTarget::RangeFirst,
-        MethodCacheTarget::SetCount,
+        MethodCacheTarget::SetLen,
         MethodCacheTarget::SetContains,
     ] {
         assert!(
@@ -388,7 +388,7 @@ while i < 3 {
         entries.iter().any(|entry| matches!(
             entry,
             InlineCacheEntry::Method {
-                target: MethodCacheTarget::ListCount,
+                target: MethodCacheTarget::ListLen,
                 ..
             }
         )),

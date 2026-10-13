@@ -413,7 +413,7 @@ fn platform_name(process: HarnessProcess) -> string {
   if !uname.success {
     return "unknown"
   }
-  const name = uname.stdout.trim().lowercase()
+  const name = uname.stdout.trim().lower()
   return if name == "darwin" {
     "macos"
   } else if name == "linux" {

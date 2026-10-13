@@ -41,7 +41,7 @@ fn __sv_string_list(value: unknown) -> list {
   for item in __sv_list(value) {
     const text = trim(__sv_string(item))
     if text != "" {
-      out = out.appending(text)
+      out.push(text)
     }
   }
   return out
@@ -69,7 +69,7 @@ fn __sv_merge_catalog_locale(base: list, override_items: list) {
   for item in __sv_string_list(base) + __sv_string_list(override_items) {
     const normalized = lowercase(item)
     if normalized != "" && !contains(merged, normalized) {
-      merged = merged.appending(normalized)
+      merged.push(normalized)
     }
   }
   return merged
@@ -137,7 +137,7 @@ fn __sv_normalize_rules(value: unknown) {
     const entry = __sv_normalize_rule_entry(item)
     const name = entry.name
     if !contains(rules.map({ rule -> rule.name }), name) {
-      rules = rules.appending(entry)
+      rules.push(entry)
     }
   }
   if len(rules) == 0 {
@@ -482,7 +482,7 @@ pub fn tool_required_argument_names(registry: dict, tool_name: any) -> list<stri
   let out: list<string> = []
   for name in __sv_dict(entries).keys() {
     if __sv_param_is_required(parameters, name, entries[name]) {
-      out = out.appending(name)
+      out.push(name)
     }
   }
   return out
@@ -513,7 +513,7 @@ pub fn tool_required_argument_exemplar(registry: dict, tool_name: any) -> list {
     } else {
       "<value>"
     }
-    out = out.appending({key: name, value: placeholder})
+    out.push({key: name, value: placeholder})
   }
   return out
 }
@@ -580,7 +580,7 @@ pub fn tool_call_output_schema(registry: dict, claimed_tool: string = "") -> any
     if name == "" || contains(seen, name) {
       continue
     }
-    seen = seen.appending(name)
+    seen.push(name)
     const parameters = __sv_tool_entry_parameters(entry)
     const entries = __sv_parameter_entries(parameters)
     let props = {}
@@ -593,7 +593,7 @@ pub fn tool_call_output_schema(registry: dict, claimed_tool: string = "") -> any
       }
       props = props + {[pname]: __sv_argument_property_schema(schema)}
       if required {
-        req = req.appending(pname)
+        req.push(pname)
       }
     }
     // A tool with nothing for the model to write gets the bare object type, and
@@ -627,7 +627,7 @@ pub fn tool_call_output_schema(registry: dict, claimed_tool: string = "") -> any
     if claimed != "" && name == claimed {
       claimed_branch = branch
     }
-    branches = branches.appending(branch)
+    branches.push(branch)
   }
   if claimed_branch != nil {
     return claimed_branch
@@ -725,13 +725,13 @@ fn __sv_schema_type_names(schema: dict) {
     for item in raw {
       const name = lowercase(trim(__sv_string(item)))
       if name != "" {
-        names = names.appending(name)
+        names.push(name)
       }
     }
   } else {
     const name = lowercase(trim(__sv_string(raw)))
     if name != "" {
-      names = names.appending(name)
+      names.push(name)
     }
   }
   return names
@@ -793,17 +793,17 @@ fn __sv_tool_schema_violations(payload: dict) {
   for call in __sv_list(payload?.tool_calls) {
     const tool_name = __sv_tool_call_name(call)
     if tool_name == "" {
-      violations = violations.appending("Tool call is missing a tool name.")
+      violations.push("Tool call is missing a tool name.")
       continue
     }
     const entry = __sv_registry_tool_entry(registry, tool_name)
     if entry == nil {
-      violations = violations.appending("Unknown tool '" + tool_name + "'.")
+      violations.push("Unknown tool '" + tool_name + "'.")
       continue
     }
     const args = __sv_tool_call_arguments(call)
     if args == nil {
-      violations = violations.appending("Tool '" + tool_name + "' arguments must be a dict.")
+      violations.push("Tool '" + tool_name + "' arguments must be a dict.")
       continue
     }
     const parameters = __sv_tool_entry_parameters(entry)
@@ -812,16 +812,16 @@ fn __sv_tool_schema_violations(payload: dict) {
     for name in entries.keys() {
       const schema = entries[name]
       if __sv_param_is_required(parameters, name, schema) && args[name] == nil {
-        missing = missing.appending(name)
+        missing.push(name)
       } else {
         const type_error = __sv_type_violation(tool_name, name, args[name], schema)
         if type_error != nil {
-          violations = violations.appending(type_error)
+          violations.push(type_error)
         }
       }
     }
     if len(missing) > 0 {
-      violations = violations.appending(
+      violations.push(
         "Tool '"
           + tool_name
           + "' is missing required parameter(s): "

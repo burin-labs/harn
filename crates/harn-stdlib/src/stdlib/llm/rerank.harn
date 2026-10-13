@@ -11,7 +11,7 @@ fn __rerank_text(value: any) {
 fn __rerank_records(candidates: any) {
   let records = []
   for (index, candidate) in iter(candidates).enumerate() {
-    records = records.appending({index: index, candidate: candidate})
+    records.push({index: index, candidate: candidate})
   }
   return records
 }
@@ -19,7 +19,7 @@ fn __rerank_records(candidates: any) {
 fn __rerank_initial_scores(candidates: any) {
   let scores = []
   for (index, candidate) in iter(candidates).enumerate() {
-    scores = scores.appending(
+    scores.push(
       {
         index: index,
         candidate: candidate,
@@ -100,7 +100,7 @@ fn __rerank_note_decision(state: dict, left: dict, right: dict, decision: dict) 
     confidence: confidence,
     reasoning: decision?.reasoning ?? "",
   }
-  return {scores: scores, comparisons: state.comparisons.appending(comparison)}
+  return {scores: scores, comparisons: state.comparisons + [comparison]}
 }
 
 fn __rerank_winner_from_string(value: any) {
@@ -217,19 +217,19 @@ fn __rerank_merge(fs: HarnessFs, llm: HarnessLlm, left: any, right: any, opts: d
     const decision = __rerank_compare(fs, llm, left[left_idx], right[right_idx], opts)
     next_state = __rerank_note_decision(next_state, left[left_idx], right[right_idx], decision)
     if decision.winner == "right" {
-      out = out.appending(right[right_idx])
+      out.push(right[right_idx])
       right_idx = right_idx + 1
     } else {
-      out = out.appending(left[left_idx])
+      out.push(left[left_idx])
       left_idx = left_idx + 1
     }
   }
   while left_idx < len(left) {
-    out = out.appending(left[left_idx])
+    out.push(left[left_idx])
     left_idx = left_idx + 1
   }
   while right_idx < len(right) {
-    out = out.appending(right[right_idx])
+    out.push(right[right_idx])
     right_idx = right_idx + 1
   }
   return {ranked: out, state: next_state}
@@ -248,7 +248,7 @@ fn __rerank_sort(harness: Harness, records: any, opts: dict, state: any) {
 fn __rerank_strip_internal_score_fields(scores: list) {
   let out = []
   for score in scores {
-    out = out.appending(
+    out.push(
       {
         index: score.index,
         candidate: score.candidate,
@@ -279,7 +279,7 @@ pub fn pairwise_rerank(harness: Harness, candidates: any, opts: dict? = nil) -> 
   const sorted = __rerank_sort(harness, __rerank_records(candidates), opts ?? {}, initial_state)
   let ranked = []
   for record in sorted.ranked {
-    ranked = ranked.appending(record.candidate)
+    ranked.push(record.candidate)
   }
   return {
     ranked: ranked,

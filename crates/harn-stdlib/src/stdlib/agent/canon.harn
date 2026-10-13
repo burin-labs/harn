@@ -79,7 +79,7 @@ fn __canon_push_unique(items: list<string>, value: string?) {
   if text == "" || contains(items, text) {
     return items
   }
-  return items.appending(text)
+  return items + [text]
 }
 
 fn __canon_manifest_has_routing(manifest: dict?) -> bool {
@@ -214,9 +214,7 @@ pub fn canon_slice_from_files(files: list?, metadata: dict? = nil) -> dict {
   for file in files ?? [] {
     const path = __canon_text(file?.path ?? file?.name)
     if path != "" {
-      normalized = normalized.appending(
-        {path: path, text: to_string(file?.text ?? file?.content ?? "")},
-      )
+      normalized.push({path: path, text: to_string(file?.text ?? file?.content ?? "")})
     }
   }
   return {files: normalized, metadata: metadata ?? {}}
@@ -244,14 +242,14 @@ pub fn canon_slice_from_paths(fs: HarnessFs, paths: list?, options: dict? = nil)
       continue
     }
     if item?.text != nil || item?.content != nil {
-      files = files.appending({path: path, text: to_string(item?.text ?? item?.content ?? "")})
+      files.push({path: path, text: to_string(item?.text ?? item?.content ?? "")})
       continue
     }
     const read_path = __canon_path(root, path)
     if fs.exists(read_path) {
-      files = files.appending({path: path, text: fs.read_text(read_path)})
+      files.push({path: path, text: fs.read_text(read_path)})
     } else if opts?.include_missing ?? false {
-      files = files.appending({path: path, text: "", missing: true})
+      files.push({path: path, text: "", missing: true})
     }
   }
   return {files: files, metadata: opts?.metadata ?? {}}
@@ -307,7 +305,7 @@ fn __canon_append_manifest_packs(packs: list, base_dir: string, manifest: dict?)
     if id == "" || invariants == "" {
       continue
     }
-    out = out.appending(
+    out.push(
       {
         id: id,
         title: __canon_text(pack?.title ?? id),
@@ -400,7 +398,7 @@ fn __canon_manifest_from_installed_packages(fs: HarnessFs, project_root_value: s
       if id == "" {
         continue
       }
-      packs = packs.appending(
+      packs.push(
         {
           id: id,
           title: __canon_text(contribution?.title ?? id),
@@ -427,14 +425,14 @@ fn __canon_merge_manifest_packs(primary: dict?, secondary: dict?) -> dict? {
   }
   let packs = []
   for pack in primary?.packs ?? [] {
-    packs = packs.appending(pack)
+    packs.push(pack)
   }
   for pack in secondary?.packs ?? [] {
     const id = __canon_text(pack?.id)
     if id == "" || __canon_manifest_pack({packs: packs}, id) != nil {
       continue
     }
-    packs = packs.appending(pack)
+    packs.push(pack)
   }
   return {schema_version: primary?.schema_version ?? secondary?.schema_version ?? 1, packs: packs}
 }
@@ -539,7 +537,7 @@ pub fn canon_resolve_packs(env: HarnessEnv, fs: HarnessFs, options: dict? = nil)
   }
   let resolved = []
   for item in requested {
-    resolved = resolved.appending(__canon_pack_from_item(item, manifest, canon_root))
+    resolved.push(__canon_pack_from_item(item, manifest, canon_root))
   }
   return resolved
 }
@@ -561,7 +559,7 @@ pub fn canon_evaluate_slice(harness: Harness, slice: dict, options: dict? = nil)
   let selected = []
   let ok = true
   for pack in packs {
-    selected = selected.appending(pack.id)
+    selected.push(pack.id)
     const report = harness.runtime.flow_evaluate_invariants(
       "",
       slice,
@@ -575,7 +573,7 @@ pub fn canon_evaluate_slice(harness: Harness, slice: dict, options: dict? = nil)
       },
     )
     ok = ok && (report?.ok ?? false)
-    reports = reports.appending(
+    reports.push(
       {
         pack_id: pack.id,
         title: pack.title,
@@ -608,7 +606,7 @@ pub fn canon_feedback_text(result: dict, options: dict? = nil) -> string {
   for pack in result?.packs ?? [] {
     const body = trim(to_string(pack?.feedback ?? ""))
     if body != "" {
-      sections = sections.appending("[" + pack.pack_id + "] " + pack.title + "\n" + body)
+      sections.push("[" + pack.pack_id + "] " + pack.title + "\n" + body)
     }
   }
   if len(sections) == 0 {
@@ -717,7 +715,7 @@ fn __canon_event_push_path(items: list<string>, value: unknown) {
   if path == "" || contains(items, path) {
     return items
   }
-  return items.appending(path)
+  return items + [path]
 }
 
 fn __canon_event_push_path_bucket(items: list, bucket: unknown) {
@@ -916,7 +914,7 @@ fn __canon_event_push_symbol(items: list, value: unknown) {
   if symbol == "" || contains(items, symbol) {
     return items
   }
-  return items.appending(symbol)
+  return items + [symbol]
 }
 
 fn __canon_event_push_symbol_bucket(items: list, bucket: unknown) {

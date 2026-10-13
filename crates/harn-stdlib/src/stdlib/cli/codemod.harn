@@ -46,7 +46,7 @@ fn run_codemod(rules: HarnessRules, plan: list, apply: bool, allow_unsafe: bool)
         if f.applied {
           applied = applied + 1
         }
-        file_results = file_results.appending(f)
+        file_results.push(f)
       }
     }
   }
@@ -65,7 +65,7 @@ fn run_builtin_recipe(rules: HarnessRules, name: string, files: list, apply: boo
         if f.applied {
           applied = applied + 1
         }
-        file_results = file_results.appending(f)
+        file_results.push(f)
       }
     }
     return {files: file_results, changed: changed, applied: applied}

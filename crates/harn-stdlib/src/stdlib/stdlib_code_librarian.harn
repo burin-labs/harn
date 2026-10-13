@@ -581,7 +581,7 @@ fn __architecture_glob_regex(glob: string) -> string {
   let out = "^"
   let i = 0
   while i < len(chars) {
-    const c = chars[i]
+    const c = chars[i] ?? ""
     if c == "*" && i + 2 < len(chars) && chars[i + 1] == "*" && chars[i + 2] == "/" {
       out = out + "(?:.*/)?"
       i = i + 3

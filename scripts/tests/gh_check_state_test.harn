@@ -343,7 +343,7 @@ pipeline test_every_path_gated_job_has_a_registry_row(harness: Harness, task: un
   const workflow = ci_workflow(harness.fs)
   let mapped: list<string> = []
   for row in PATH_GATED_CHECKS {
-    mapped = mapped.appending(to_string(row.filter))
+    mapped.push(to_string(row.filter))
   }
   // Only the outputs the `changes` job forwards straight from the paths
   // filter are pure path gates. An output routed through a resolver step can
@@ -352,7 +352,7 @@ pipeline test_every_path_gated_job_has_a_registry_row(harness: Harness, task: un
   for output_key in keys(workflow?.jobs?.changes?.outputs ?? {}) {
     const expression = to_string(workflow?.jobs?.changes?.outputs?.[output_key] ?? "")
     if expression.contains("steps.surface_filter.outputs.") {
-      direct_keys = direct_keys.appending(to_string(output_key))
+      direct_keys.push(to_string(output_key))
     }
   }
   assert(len(direct_keys) > 0)
@@ -363,7 +363,7 @@ pipeline test_every_path_gated_job_has_a_registry_row(harness: Harness, task: un
     for filter_key in direct_keys {
       if condition == "needs.changes.outputs.${filter_key} == 'true'"
         && !mapped.contains(filter_key) {
-        unmapped = unmapped.appending("${to_string(job_key)} (${filter_key})")
+        unmapped.push("${to_string(job_key)} (${filter_key})")
       }
     }
   }

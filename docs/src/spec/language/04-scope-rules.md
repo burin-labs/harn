@@ -70,7 +70,7 @@ const appended = base.appending(2)
 
 let built = []
 // this is how a collection is built up
-built = built.appending(1)
+built.push(1)
 ```
 
 Because the methods are pure, discarding a result silently does nothing;

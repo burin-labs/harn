@@ -97,7 +97,7 @@ pub fn novel(current: list, baseline: any, suppressed: any) -> list {
     if suppressed.contains(signature) {
       continue
     }
-    out = out.appending(diag)
+    out.push(diag)
   }
   return out
 }
@@ -105,7 +105,7 @@ pub fn novel(current: list, baseline: any, suppressed: any) -> list {
 pub fn signatures_of(diags: list) {
   let out = set()
   for diag in diags {
-    out = out.adding(to_string(diag.signature))
+    out.add(to_string(diag.signature))
   }
   return out
 }
@@ -126,10 +126,10 @@ pub fn render(diags: list, path: string) -> string {
   for diag in diags {
     if to_string(diag.severity) == "ERROR" {
       if len(error_lines) < 8 {
-        error_lines = error_lines.appending("  L${diag.line} ERROR: ${diag.message}")
+        error_lines.push("  L${diag.line} ERROR: ${diag.message}")
       }
     } else {
-      low_names = low_names.appending(to_string(diag.message))
+      low_names.push(to_string(diag.message))
       if low_reason == "" {
         low_reason = to_string(diag?.reason ?? "")
       }

@@ -208,13 +208,13 @@ fn __tool_search_normalize_result(value: any) {
     let ranked = []
     for item in value {
       if type_of(item) == "string" {
-        names = names.appending(item)
-        ranked = ranked.appending({tool_name: item, score: nil, snippet: ""})
+        names.push(item)
+        ranked.push({tool_name: item, score: nil, snippet: ""})
       } else if type_of(item) == "dict" {
         const name = item?.tool_name ?? item?.name
         if name != nil {
-          names = names.appending(name)
-          ranked = ranked.appending(item + {tool_name: name})
+          names.push(name)
+          ranked.push(item + {tool_name: name})
         }
       }
     }
@@ -242,7 +242,7 @@ fn __tool_search_run(args: dict, state: dict) {
   const ranked = normalized?.ranked ?? []
   let names = []
   for name in normalized?.tool_names ?? [] {
-    names = names.appending(name)
+    names.push(name)
   }
   const diagnostic = if len(names) == 0 {
     "no deferred tools matched the query; try broader terms"
@@ -274,9 +274,9 @@ fn __tool_search_initial_state(opts: dict) {
     const name = entry?.name ?? ""
     const pinned = __tool_search_contains(cfg.always_loaded, name)
     if entry?.defer_loading && !pinned {
-      deferred = deferred.appending(entry)
+      deferred.push(entry)
     } else {
-      eager = eager.appending(entry)
+      eager.push(entry)
     }
   }
   if len(source_tools) > 0 && len(eager) == 0 {
@@ -300,12 +300,12 @@ fn __tool_search_initial_state(opts: dict) {
 fn __tool_search_build_tools(opts: dict, state: dict) {
   let visible = []
   for entry in state.eager_tools {
-    visible = visible.appending(entry)
+    visible.push(entry)
   }
   for name in state.promoted {
     const entry = __tool_search_find_tool(state.deferred_tools, name)
     if entry != nil {
-      visible = visible.appending(entry)
+      visible.push(entry)
     }
   }
   const registry = __tool_search_registry_like(state.original_registry, visible)
@@ -387,7 +387,7 @@ fn __tool_search_apply_budget(state: dict, names: list) {
     if !__tool_search_contains(promoted, name)
       && __tool_search_find_tool(state.deferred_tools, name)
         != nil {
-      promoted = promoted.appending(name)
+      promoted.push(name)
     }
   }
   const budget = state?.budget_tokens
@@ -407,7 +407,7 @@ fn __tool_search_apply_budget(state: dict, names: list) {
         kept = kept.slice(1)
       }
       if estimate <= budget {
-        kept = kept.appending(name)
+        kept.push(name)
         total = total + estimate
       }
     }
@@ -419,7 +419,7 @@ fn __tool_search_promoted_names(state: dict, names: list) {
   let out = []
   for name in names {
     if __tool_search_contains(state.promoted, name) {
-      out = out.appending(name)
+      out.push(name)
     }
   }
   return out

@@ -264,7 +264,7 @@ pipeline main(harness: Harness, task: unknown) {{
   let i = 0
   for label in labels {{
     const marker = "MARK-" + to_string(i)
-    reqs = reqs.appending({{task: "do " + marker, options: base_opts(ok_caller(marker)), label: label}})
+    reqs.push({{task: "do " + marker, options: base_opts(ok_caller(marker)), label: label}})
     i = i + 1
   }}
   const results = agent_fanout(harness, reqs, {{max_parallel: 8}})
@@ -323,7 +323,7 @@ pipeline main(harness: Harness, task: unknown) {{
   for label in labels {{
     const marker = "MARK-" + to_string(i)
     const caller = if i == 2 {{ fail_caller(marker) }} else {{ ok_caller(marker) }}
-    reqs = reqs.appending({{task: "do " + marker, options: base_opts(caller), label: label}})
+    reqs.push({{task: "do " + marker, options: base_opts(caller), label: label}})
     i = i + 1
   }}
   const results = agent_fanout(harness, reqs, {{max_parallel: 8}})
@@ -393,7 +393,7 @@ pipeline main(harness: Harness, task: unknown) {{
   let i = 0
   for label in labels {{
     const marker = "WAVE-" + to_string(i)
-    reqs = reqs.appending({{task: "do " + marker, options: base_opts(ok_caller(marker)), label: label}})
+    reqs.push({{task: "do " + marker, options: base_opts(ok_caller(marker)), label: label}})
     i = i + 1
   }}
   const results = agent_fanout(harness, reqs, {{max_parallel: 2}})
@@ -565,7 +565,7 @@ pipeline main(harness: Harness, task: unknown) {{
     }} else {{
       base_opts(ok_caller(marker))
     }}
-    reqs = reqs.appending({{task: "do " + marker, options: opts, label: label}})
+    reqs.push({{task: "do " + marker, options: opts, label: label}})
     i = i + 1
   }}
   const results = agent_fanout(harness, reqs, {{max_parallel: 8}})
@@ -651,7 +651,7 @@ pipeline main(harness: Harness, task: unknown) {{
     }} else {{
       base_opts(ok_caller(marker))
     }}
-    reqs = reqs.appending({{task: "do " + marker, options: opts, label: label}})
+    reqs.push({{task: "do " + marker, options: opts, label: label}})
     i = i + 1
   }}
   const results = agent_fanout(harness, reqs, {{max_parallel: 2}})

@@ -516,6 +516,35 @@ while i < n {
 when line- or token-oriented scanning suffices, and reach for `regex_*`
 (see [Regex](#regex)) for pattern matching rather than hand-rolled cursors.
 
+## Collection methods
+
+Each builtin operation has one name: `len`, `contains`, `lower`, `upper`,
+`windows`, `chunks`, `map_keys`, `merge`, `all`. Old spellings (`count()`,
+`includes`, `to_lower`, `lowercase`, `each_cons`, `appending`, `rekeyed`) are
+type errors (`HARN-NAM-013`); `harn fix --apply --safety behavior-preserving`
+rewrites them. The full table is "Builtin methods" in `docs/src/builtins.md`.
+
+Mutating methods change a `let` binding in place, Swift-style; copy-returning
+methods leave the receiver alone:
+
+```harn
+let stack = [1, 2, 3]
+stack.push(4)                 // stack is [1, 2, 3, 4]
+const top = stack.pop()       // 4; stack is [1, 2, 3]
+stack.reverse()               // stack is [3, 2, 1]
+const ordered = stack.sorted() // new list; stack unchanged
+let seen = set()
+seen.add("a")
+let opts = {model: "x", debug: true}
+const was = opts.remove("debug") // true; opts is {model: "x"}
+```
+
+Mutating: list `push`, `pop`, `insert`, `extend`, `clear`, `sort`, `sort_by`,
+`reverse`; set `add`, `remove`, `clear`; dict `remove`, `clear`. The receiver
+must be a `let` binding or a path rooted at one (`state.items.push(x)`); on a
+`const`, a parameter, or a temporary it is a type error. Use `xs + [v]`,
+`sorted()`, `reversed()`, `s.union(...)`, or `omit(d, keys)` for a new value.
+
 ## Control flow: `if` is an expression
 
 `if` / `else` produces a value. Bind it directly into `let`, pass it

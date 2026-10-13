@@ -636,7 +636,7 @@ pipeline test_cache_generation_projection_binds_actual_inputs_and_post_order(
     },
   }
   assert_eq(len(rust_cache_generation_projection_errors(bad_inputs, companion, pin)), 1)
-  const reversed = {...action, runs: {...action.runs, steps: action.runs.steps.reverse()}}
+  const reversed = {...action, runs: {...action.runs, steps: action.runs.steps.reversed()}}
   assert_eq(len(rust_cache_generation_projection_errors(reversed, companion, pin)), 1)
   assert_eq(
     len(

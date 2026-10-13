@@ -35,7 +35,7 @@ fn serial_source() -> String {
 pipeline default() {{
   let results = []
   for i in 0 to {TASKS} exclusive {{
-    results = results.appending(crunch(i))
+    results.push(crunch(i))
   }}
   return len(results)
 }}
@@ -56,7 +56,7 @@ pipeline default(harness: Harness) {{
   let handles = []
   for i in 0 to {TASKS} exclusive {{
     let seed = i
-    handles = handles.appending(pool.submit({{ -> crunch(seed) }}))
+    handles.push(pool.submit({{ -> crunch(seed) }}))
   }}
   let results = pool_wait(harness.agent, handles)
   return len(results)

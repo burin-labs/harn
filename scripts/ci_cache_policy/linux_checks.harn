@@ -1029,7 +1029,7 @@ pub fn event_skip_propagation_errors(workflow: dict) -> list<string> {
       }
       seen[need] = true
       if event_gated[need] ?? false {
-        gated_ancestors = gated_ancestors.appending(need)
+        gated_ancestors.push(need)
       }
       pending = pending + job_needs(jobs[need])
     }

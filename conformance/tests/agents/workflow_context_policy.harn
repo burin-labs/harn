@@ -8,7 +8,7 @@ import {
 fn ids(artifacts: list) {
   let out = []
   for artifact in artifacts {
-    out = out.appending(artifact.id)
+    out.push(artifact.id)
   }
   return out
 }

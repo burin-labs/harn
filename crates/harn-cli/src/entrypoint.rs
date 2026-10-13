@@ -1046,6 +1046,7 @@ async fn dispatch(subcommand: Command) {
         Command::DumpHighlightKeywords(_)
         | Command::DumpPortableBenchmarkSchema(_)
         | Command::DumpPromptGrammar(_)
+        | Command::DumpBuiltinMethods(_)
         | Command::DumpTriggerQuickref(_)
         | Command::DumpCliSurface(_)
         | Command::DumpConnectorMatrix(_)

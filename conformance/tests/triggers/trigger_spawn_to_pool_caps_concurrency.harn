@@ -63,7 +63,7 @@ pipeline test(harness: Harness, task: unknown) {
       },
     )
     if dispatch.status == "dispatched" && dispatch.result?.pool == pool_name {
-      handles = handles.appending(dispatch.result)
+      handles.push(dispatch.result)
     }
   }
   harness.stdio.println(len(handles) == 8)

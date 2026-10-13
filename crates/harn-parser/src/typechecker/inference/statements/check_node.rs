@@ -4,6 +4,7 @@ impl TypeChecker {
     pub(in crate::typechecker) fn check_node(&mut self, snode: &SNode, scope: &mut TypeScope) {
         let span = snode.span;
         self.check_predicate_node(snode, scope);
+        self.check_consumed_mutating_calls(snode, scope);
         match &snode.node {
             Node::ConstBinding {
                 pattern,
@@ -304,6 +305,7 @@ impl TypeChecker {
                 iterable,
                 body,
             } => {
+                self.check_mutating_call_used_as_value(iterable, scope);
                 self.check_node(iterable, scope);
                 let mut loop_scope = scope.child();
                 // Narrowing established before the loop only holds for the
@@ -855,11 +857,18 @@ impl TypeChecker {
                     }
                 }
                 self.check_node(object, scope);
+                self.check_mutating_call_used_as_value(object, scope);
                 self.check_method_receiver(object, method, scope, span, false);
                 if self.check_harness_method_call(object, method, args, scope, span) {
                     return;
                 }
-                self.check_method_existence(object, method, scope, span);
+                self.check_method_existence(object, method, args, scope, span);
+                // `xs.push(v)` rewrites `xs`, so constant facts about it end.
+                if let Some(root) = crate::builtin_methods::mutating_call_place(snode)
+                    .and_then(crate::builtin_methods::place_root)
+                {
+                    scope.const_values.insert(root.to_string(), None);
+                }
                 // A namespace member is a free function reached through an
                 // alias. Check it against its exported signature instead of
                 // the method registry, which knows nothing about it (#6172).
@@ -887,11 +896,13 @@ impl TypeChecker {
                 if self.check_harness_method_call(object, method, args, scope, span) {
                     return;
                 }
-                self.check_method_existence(object, method, scope, span);
+                self.check_method_existence(object, method, args, scope, span);
+                self.check_optional_chained_mutation(object, method, scope, span);
                 self.check_method_args_with_expected(object, method, args, scope);
                 self.check_generic_method_bound(object, method, scope, span);
             }
             Node::PropertyAccess { object, property } => {
+                self.check_mutating_call_used_as_value(object, scope);
                 self.check_strict_untyped_access(object, scope, span, UntypedAccessKind::Property);
                 self.check_property_access(object, property, scope, span, false, false);
                 self.check_node(object, scope);
@@ -904,6 +915,7 @@ impl TypeChecker {
                 self.check_node(object, scope);
             }
             Node::SubscriptAccess { object, index } => {
+                self.check_mutating_call_used_as_value(object, scope);
                 self.check_strict_untyped_access(object, scope, span, UntypedAccessKind::Subscript);
                 self.check_subscript_access(object, index, scope, span, false, false);
                 self.check_node(object, scope);

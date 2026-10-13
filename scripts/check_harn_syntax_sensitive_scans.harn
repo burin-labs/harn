@@ -60,7 +60,7 @@ pub fn harn_syntax_sensitive_files(fs: HarnessFs, root: string = "") -> list<str
     for path in find_files(fs, resolved_root, pattern) {
       const rel = rel_path(path, resolved_root)
       if !is_skipped(rel) {
-        out = out.appending(rel)
+        out.push(rel)
       }
     }
   }
@@ -108,7 +108,7 @@ fn git_candidate_files(process: HarnessProcess, root: string) -> list<string>? {
   for path in result.stdout.lines() {
     const rel = path.trim()
     if rel != "" && !is_skipped(rel) {
-      files = files.appending(rel)
+      files.push(rel)
     }
   }
   // `git grep` intentionally avoids walking ignored build output, but a local
@@ -126,7 +126,7 @@ fn git_candidate_files(process: HarnessProcess, root: string) -> list<string>? {
     }
     for suffix in SCANNED_SUFFIXES {
       if rel.lower().ends_with(suffix) {
-        files = files.appending(rel)
+        files.push(rel)
         break
       }
     }
@@ -200,7 +200,7 @@ pub fn harn_syntax_sensitive_scan_text(path: string, text: string) -> list {
     const line = candidate.match
     const line_no = candidate.line
     if line_has_let_only_harn_binding_regex(line) {
-      findings = findings.appending(
+      findings.push(
         line_finding(
           path,
           line_no,
@@ -210,7 +210,7 @@ pub fn harn_syntax_sensitive_scan_text(path: string, text: string) -> list {
       )
     }
     if line_has_stale_var_tool_registry_example(line) {
-      findings = findings.appending(
+      findings.push(
         line_finding(
           path,
           line_no,
@@ -220,7 +220,7 @@ pub fn harn_syntax_sensitive_scan_text(path: string, text: string) -> list {
       )
     }
     if line_has_retired_long_running_option(path, line) {
-      findings = findings.appending(
+      findings.push(
         line_finding(
           path,
           line_no,
@@ -257,7 +257,7 @@ pub fn check_harn_syntax_sensitive_scans(
       continue
     }
     for finding in harn_syntax_sensitive_scan_text(rel, text) {
-      findings = findings.appending(finding)
+      findings.push(finding)
     }
   }
   return {root: resolved_root, findings: findings, violation_count: len(findings)}
@@ -295,7 +295,7 @@ pub fn llm_policy_identity_findings(fs: HarnessFs, rules: HarnessRules, root: st
         + to_string(result?.error ?? result)
     }
     for found in result.matches ?? [] {
-      findings = findings.appending(
+      findings.push(
         line_finding(
           rel,
           found.start_row + 1,
@@ -320,7 +320,7 @@ fn render_report(report: dict) -> string {
     "Use parser/codemod facts where possible. Keep examples and public option keys on the current canonical spelling.",
   ]
   for finding in report.findings {
-    lines = lines.appending(
+    lines.push(
       "- "
         + to_string(finding.path)
         + ":"

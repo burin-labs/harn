@@ -68,14 +68,14 @@ fn __verify_source(
   let errors = []
   const path = safe_string(source["path"], "")
   if path != expected_path {
-    errors = errors.appending(label + " path mismatch")
+    errors.push(label + " path mismatch")
   }
   if path == "" || !fs.exists(path) {
-    return errors.appending(label + " not found: " + path)
+    return errors + [label + " not found: " + path]
   }
   const actual_sha256 = sha256(fs.read_text(path))
   if safe_string(source["sha256"], "") != actual_sha256 {
-    errors = errors.appending(label + " hash mismatch")
+    errors.push(label + " hash mismatch")
   }
   return errors
 }
@@ -83,7 +83,7 @@ fn __verify_source(
 fn __job_ids(receipt: dict) -> list<string> {
   let ids = []
   for raw_job in safe_list(receipt["jobs"]) {
-    ids = ids.appending(safe_string(safe_dict(raw_job)["id"], ""))
+    ids.push(safe_string(safe_dict(raw_job)["id"], ""))
   }
   return ids
 }
@@ -109,11 +109,11 @@ fn __execution_artifact_errors(fs: HarnessFs, execution: dict) -> list<string> {
     const path = safe_string(artifact["path"], "")
     const role = safe_string(artifact["role"], "artifact")
     if path == "" || !fs.exists(path) {
-      errors = errors.appending("execution " + role + " not found: " + path)
+      errors.push("execution " + role + " not found: " + path)
       continue
     }
     if sha256(fs.read_text(path)) != safe_string(artifact["sha256"], "") {
-      errors = errors.appending("execution " + role + " hash mismatch: " + path)
+      errors.push("execution " + role + " hash mismatch: " + path)
     }
   }
   return errors
@@ -422,14 +422,14 @@ fn __validate_lineage(
     + __expect_kind(manifest, "harn.model_batch_manifest", "batch manifest")
     + __expect_kind(download, "harn.model_batch_results_receipt", "batch download receipt")
   if safe_string(safe_dict(execution["paths"])["manifest"], "") != manifest_path {
-    errors = errors.appending("wrong_execution_manifest")
+    errors.push("wrong_execution_manifest")
   }
   if safe_string(safe_dict(execution["paths"])["downloadReceipt"], "") != download_path {
-    errors = errors.appending("wrong_execution_download")
+    errors.push("wrong_execution_download")
   }
   const expected_execution_id = "batch-" + substring(manifest_loaded.sha256, 0, 24)
   if safe_string(execution["executionId"], "") != expected_execution_id {
-    errors = errors.appending("wrong_execution_identity")
+    errors.push("wrong_execution_identity")
   }
   errors = errors + __execution_artifact_errors(fs, execution)
   const status_path = safe_string(safe_dict(download["source"])["path"], "")
@@ -477,11 +477,11 @@ fn __validate_lineage(
     )
   const expected_jobs = __job_ids(prepare_loaded.value)
   if !__same_strings(expected_jobs, safe_list(execution["jobIds"])) {
-    errors = errors.appending("execution_job_identity_changed")
+    errors.push("execution_job_identity_changed")
   }
   for receipt in [submission_loaded.value, status_loaded.value, download] {
     if !__same_strings(expected_jobs, __job_ids(safe_dict(receipt))) {
-      errors = errors.appending("job_identity_changed")
+      errors.push("job_identity_changed")
     }
   }
   return {
@@ -516,7 +516,7 @@ pub fn batch_rejoin(fs: HarnessFs, input: BatchRejoinInput) -> BatchRejoinRun {
   errors = errors + safe_list(index["errors"])
   const expected_ids: list<string> = safe_list(index["ids"])
   if !__same_strings(expected_ids, safe_list(execution["requestIds"])) {
-    errors = errors.appending("execution_request_identity_changed")
+    errors.push("execution_request_identity_changed")
   }
   const metadata_by_id = safe_dict(index["by_id"])
   let by_id = {}
@@ -544,9 +544,9 @@ pub fn batch_rejoin(fs: HarnessFs, input: BatchRejoinInput) -> BatchRejoinRun {
       const path = safe_string(artifact["path"], "")
       let artifact_errors = []
       if !fs.exists(path) {
-        artifact_errors = artifact_errors.appending("result_artifact_missing: " + path)
+        artifact_errors.push("result_artifact_missing: " + path)
       } else if sha256(fs.read_text(path)) != safe_string(artifact["sha256"], "") {
-        artifact_errors = artifact_errors.appending("result_artifact_hash_mismatch: " + path)
+        artifact_errors.push("result_artifact_hash_mismatch: " + path)
       }
       errors = errors + artifact_errors
       const parsed = if len(artifact_errors) == 0 {
@@ -590,7 +590,7 @@ pub fn batch_rejoin(fs: HarnessFs, input: BatchRejoinInput) -> BatchRejoinRun {
         if len(existing) > 0 {
           duplicate_ids = __unique_append(duplicate_ids, custom_id)
         }
-        by_id = by_id + {[custom_id]: existing.appending(normalized)}
+        by_id = by_id + {[custom_id]: existing + [normalized]}
         const state = safe_string(normalized["state"], "")
         if state == "failed" {
           failed_ids = __unique_append(failed_ids, custom_id)

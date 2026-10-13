@@ -119,9 +119,10 @@ pub(crate) use dev::DevArgs;
 pub(crate) use doc::DocArgs;
 pub(crate) use doctor::{DoctorArgs, DoctorCommand};
 pub(crate) use dump::{
-    ConnectorSchemaCodegenArgs, DumpCliSurfaceArgs, DumpConnectorMatrixArgs,
-    DumpHarnessMigrationsArgs, DumpHighlightKeywordsArgs, DumpPortableBenchmarkSchemaArgs,
-    DumpPromptGrammarArgs, DumpProtocolArtifactsArgs, DumpTriggerQuickrefArgs,
+    ConnectorSchemaCodegenArgs, DumpBuiltinMethodsArgs, DumpCliSurfaceArgs,
+    DumpConnectorMatrixArgs, DumpHarnessMigrationsArgs, DumpHighlightKeywordsArgs,
+    DumpPortableBenchmarkSchemaArgs, DumpPromptGrammarArgs, DumpProtocolArtifactsArgs,
+    DumpTriggerQuickrefArgs,
 };
 pub use eval::{
     EvalArgs, EvalCalibrateArgs, EvalCodingAgentArgs, EvalCommand, EvalContextArgs, EvalPromptArgs,
@@ -622,6 +623,13 @@ SCRIPTING
     /// `make gen-prompt-grammar` target.
     #[command(hide = true, name = "dump-prompt-grammar")]
     DumpPromptGrammar(DumpPromptGrammarArgs),
+    /// Regenerate the builtin method reference in docs/src/builtins.md from
+    /// the method registry.
+    ///
+    /// Dev-only. Hidden from `--help` — invoke via the
+    /// `make gen-builtin-methods` target.
+    #[command(hide = true, name = "dump-builtin-methods")]
+    DumpBuiltinMethods(DumpBuiltinMethodsArgs),
     /// Regenerate docs/llm/harn-triggers-quickref.md from the live trigger provider catalog.
     ///
     /// Dev-only. Hidden from `--help` — invoke via

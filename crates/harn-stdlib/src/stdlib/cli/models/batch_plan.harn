@@ -179,7 +179,7 @@ fn __sorted_strings(items: list) -> list<string> {
     while idx < len(out) && out[idx] < item {
       idx = idx + 1
     }
-    out = out[0:idx].appending(item) + out[idx:len(out)]
+    out = out[0:idx] + [item] + out[idx:len(out)]
   }
   return out
 }
@@ -198,7 +198,7 @@ fn __sort_models_by_provider_id(models: list) -> list {
       }
       idx = idx + 1
     }
-    out = out[0:idx].appending(model) + out[idx:len(out)]
+    out = out[0:idx] + [model] + out[idx:len(out)]
   }
   return out
 }
@@ -239,7 +239,7 @@ fn __provider_group(models: list) -> dict {
     } else {
       groups[provider]
     }
-    groups = groups + {[provider]: prior.appending(m)}
+    groups = groups + {[provider]: prior + [m]}
   }
   return groups
 }
@@ -272,34 +272,34 @@ fn __candidate(entry: dict, workload: string) -> BatchCandidate {
   const recommended = discount != nil && discount > 0 && (turnaround == nil || turnaround <= 24)
   let constraints: list<string> = []
   if wire_format == "" {
-    constraints = constraints.appending(
+    constraints.push(
       "Provider catalog omits batch wire format; submission must probe before enqueue.",
     )
   }
   if input_mode == "" {
-    constraints = constraints.appending(
+    constraints.push(
       "Provider catalog omits batch input mode; submission must choose a provider-native packer.",
     )
   }
   if discount == nil {
-    constraints = constraints.appending(
+    constraints.push(
       "Provider catalog does not publish a discount; cost planner must price from live usage tables.",
     )
   }
   if turnaround == nil {
-    constraints = constraints.appending(
+    constraints.push(
       "Provider catalog does not publish a turnaround bound; schedule as best-effort offline work.",
     )
   }
   if !safe_bool(live_adapter["submit"], false)
     || !safe_bool(live_adapter["status"], false)
     || !safe_bool(live_adapter["download"], false) {
-    constraints = constraints.appending(
+    constraints.push(
       "Harn can prepare this provider's batch request files, but live submit/status/download is not implemented; use --dry-run or add a provider adapter.",
     )
   }
   if !safe_bool(live_adapter["cancel"], false) {
-    constraints = constraints.appending(
+    constraints.push(
       "Harn cannot live-cancel this provider's batch jobs; use provider tooling if cancellation is required.",
     )
   }
@@ -366,7 +366,7 @@ fn __collect(
     if max_turnaround != nil && (turnaround == nil || turnaround > max_turnaround) {
       continue
     }
-    out = out.appending(__candidate(entry, workload))
+    out.push(__candidate(entry, workload))
   }
   return __sort_models_by_provider_id(out)
 }
@@ -631,7 +631,7 @@ fn __request_file_text(wire: string, records: list) -> string {
   }
   let lines = []
   for record in records {
-    lines = lines.appending(json_stringify(record))
+    lines.push(json_stringify(record))
   }
   return join(lines, "\n") + "\n"
 }
@@ -736,12 +736,12 @@ fn __prepare_artifact(out_dir: string, group: dict) -> dict {
   const wire = safe_string(batch["wire_format"], "")
   let errors = []
   if !__supported_prepare_wire(wire) {
-    errors = errors.appending("unsupported batch wire format for prepare: " + wire)
+    errors.push("unsupported batch wire format for prepare: " + wire)
     return {ok: false, errors: errors}
   }
   const requests = safe_list(group["requests"])
   if len(requests) == 0 {
-    errors = errors.appending("group " + safe_string(group["id"], "") + " contains no requests")
+    errors.push("group " + safe_string(group["id"], "") + " contains no requests")
     return {ok: false, errors: errors}
   }
   const endpoint = __batch_endpoint(group)
@@ -760,7 +760,7 @@ fn __prepare_artifact(out_dir: string, group: dict) -> dict {
         raw_row,
         body,
       )
-    records = records.appending(__provider_request_record(group, req, endpoint, body))
+    records.push(__provider_request_record(group, req, endpoint, body))
   }
   if len(errors) > 0 {
     return {ok: false, errors: errors}
@@ -823,16 +823,16 @@ fn __build_manifest(
     const provider = __row_string(row, "provider", provider_filter)
     const model = __row_string(row, "model", model_filter)
     if provider == "" && model == "" {
-      errors = errors.appending("line " + to_string(line_no) + ": provider/model missing")
+      errors.push("line " + to_string(line_no) + ": provider/model missing")
       continue
     }
     if model == "" {
-      errors = errors.appending("line " + to_string(line_no) + ": model missing")
+      errors.push("line " + to_string(line_no) + ": model missing")
       continue
     }
     const resolved = __resolve_candidate(catalog, provider, model, workload)
     if !safe_bool(resolved["ok"], false) {
-      errors = errors.appending(
+      errors.push(
         "line " + to_string(line_no) + ": " + safe_string(resolved["error"], "unresolved model"),
       )
       continue
@@ -841,7 +841,7 @@ fn __build_manifest(
     const batch = safe_dict(candidate["batch"])
     const discount = coerce_optional_int(batch["discount_percent"])
     if min_discount != nil && (discount == nil || discount < min_discount) {
-      errors = errors.appending(
+      errors.push(
         "line "
           + to_string(line_no)
           + ": model discount below --min-discount-percent for "
@@ -853,7 +853,7 @@ fn __build_manifest(
     }
     const turnaround = coerce_optional_int(batch["turnaround_hours"])
     if max_turnaround != nil && (turnaround == nil || turnaround > max_turnaround) {
-      errors = errors.appending(
+      errors.push(
         "line "
           + to_string(line_no)
           + ": model turnaround exceeds --max-turnaround-hours for "
@@ -878,7 +878,7 @@ fn __build_manifest(
       const input_s3_uri = safe_string(provider_policy["input_s3_uri"], "")
       const output_s3_uri = safe_string(provider_policy["output_s3_uri"], "")
       if region == "" || !safe_list(batch["regions"]).contains(region) {
-        errors = errors.appending(
+        errors.push(
           "line " + to_string(line_no) + ": unsupported Bedrock batch region '" + region
             + "' for model "
             + safe_string(candidate["id"], ""),
@@ -886,11 +886,11 @@ fn __build_manifest(
         continue
       }
       if !starts_with(role_arn, "arn:aws:iam::") || !contains(role_arn, ":role/") {
-        errors = errors.appending("line " + to_string(line_no) + ": invalid Bedrock role_arn")
+        errors.push("line " + to_string(line_no) + ": invalid Bedrock role_arn")
         continue
       }
       if !starts_with(input_s3_uri, "s3://") || !starts_with(output_s3_uri, "s3://") {
-        errors = errors.appending(
+        errors.push(
           "line " + to_string(line_no)
             + ": Bedrock input_s3_uri and output_s3_uri must use s3://",
         )
@@ -931,9 +931,9 @@ fn __build_manifest(
         requests: [request],
       }
       groups = groups + {[key]: group}
-      group_keys = group_keys.appending(key)
+      group_keys.push(key)
     } else {
-      const updated = current + {requests: safe_list(current["requests"]).appending(request)}
+      const updated = current + {requests: safe_list(current["requests"]) + [request]}
       groups = groups + {[key]: updated}
     }
     request_count = request_count + 1
@@ -941,13 +941,13 @@ fn __build_manifest(
   let group_list = []
   for key in group_keys {
     const group = safe_dict(groups[key])
-    group_list = group_list.appending(group + {request_count: len(safe_list(group["requests"]))})
+    group_list.push(group + {request_count: len(safe_list(group["requests"]))})
   }
   if len(request_rows) == 0 {
-    errors = errors.appending("request JSONL contains no request rows")
+    errors.push("request JSONL contains no request rows")
   }
   if out_path == "" {
-    errors = errors.appending("--out is required")
+    errors.push("--out is required")
   }
   const manifest = {
     schemaVersion: 1,
@@ -1136,7 +1136,7 @@ fn __run_prepare(harness: Harness) -> int {
   let errors = loaded.errors
   let warnings = []
   if out_dir == "" {
-    errors = errors.appending("--out-dir is required")
+    errors.push("--out-dir is required")
   }
   const manifest = loaded.artifact
   let artifacts = []
@@ -1147,9 +1147,9 @@ fn __run_prepare(harness: Harness) -> int {
       const artifact = __prepare_artifact(out_dir, safe_dict(group))
       errors = errors + safe_list(artifact["errors"])
       if safe_bool(artifact["ok"], false) {
-        artifacts = artifacts.appending(artifact)
+        artifacts.push(artifact)
         const job = safe_dict(artifact["job"])
-        jobs = jobs.appending(__with_batch_lifecycle(job, "prepare", false))
+        jobs.push(__with_batch_lifecycle(job, "prepare", false))
         request_count = request_count + (coerce_optional_int(job["request_count"]) ?? 0)
       }
     }
@@ -1240,14 +1240,14 @@ fn main(harness: Harness) -> int {
   )
   let warnings = []
   if workload != workload_raw && workload_raw != "" {
-    warnings = warnings.appending("unknown workload '" + workload_raw + "'; using generic policy")
+    warnings.push("unknown workload '" + workload_raw + "'; using generic policy")
   }
   if min_discount == nil && harness.env.get_or("HARN_MODELS_BATCH_MIN_DISCOUNT_PERCENT", "") != "" {
-    warnings = warnings.appending("ignored non-integer --min-discount-percent")
+    warnings.push("ignored non-integer --min-discount-percent")
   }
   if max_turnaround == nil
     && harness.env.get_or("HARN_MODELS_BATCH_MAX_TURNAROUND_HOURS", "") != "" {
-    warnings = warnings.appending("ignored non-integer --max-turnaround-hours")
+    warnings.push("ignored non-integer --max-turnaround-hours")
   }
   const mode = harness.env.get_or("HARN_MODELS_BATCH_MODE", "plan")
   if mode == "prepare" {

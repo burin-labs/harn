@@ -1,10 +1,35 @@
 use std::future::Future;
 use std::pin::Pin;
 
+use harn_parser::builtin_methods::{self, MethodReceiver};
+
 use crate::value::{VmError, VmValue};
 use crate::vm::iter::iter_from_value;
 
 impl crate::vm::Vm {
+    /// The error for a method a builtin receiver's plain dispatch does not
+    /// handle, naming the repair when the spelling was removed or the method
+    /// mutates its receiver and so needs a `let` place.
+    pub(in crate::vm) fn no_builtin_method_error(
+        receiver: MethodReceiver,
+        method: &str,
+    ) -> VmError {
+        let ty = receiver.type_name();
+        if let Some(removed) = builtin_methods::removed_method(receiver, method) {
+            return VmError::Runtime(format!(
+                "{ty} has no method `{method}`: it was removed; {}",
+                removed.repair_hint()
+            ));
+        }
+        if builtin_methods::method(receiver, method).is_some_and(|row| row.is_mutating()) {
+            return VmError::Runtime(format!(
+                "`{ty}.{method}` mutates its receiver, so call it on a `let` binding \
+                 (`let xs = ...; xs.{method}(...)`)"
+            ));
+        }
+        VmError::Runtime(format!("{ty} has no method `{method}`"))
+    }
+
     pub(in crate::vm) fn call_method_sync(
         obj: &VmValue,
         method: &str,
@@ -102,166 +127,5 @@ impl crate::vm::Vm {
 }
 
 #[cfg(test)]
-mod drift_guard_tests {
-    //! Keep the typechecker's builtin-method registry
-    //! (`harn_parser::typechecker::method_registry`) in sync with the VM
-    //! dispatch here. If a method name in a registry list is *not* accepted by
-    //! the corresponding VM dispatch, the typechecker would wrongly reject a
-    //! call the runtime supports — a false positive. These tests fail when
-    //! that drift is introduced (e.g. a VM method is renamed without updating
-    //! the registry).
-    //!
-    //! A `None` from a `*_sync` dispatcher means "handled by the async path",
-    //! which is still a valid method, so only an explicit `has no method`
-    //! error counts as rejection.
-    use crate::value::VmValue;
-    use harn_parser::typechecker::method_registry as reg;
-    use std::sync::Arc;
-
-    fn sample_args() -> Vec<VmValue> {
-        // Enough positional args (2 strings) to satisfy guarded arms such as
-        // `"replace" if args.len() >= 2`.
-        vec![VmValue::string("a"), VmValue::string("b"), VmValue::Int(1)]
-    }
-
-    fn is_no_method_rejection(result: Option<Result<VmValue, crate::value::VmError>>) -> bool {
-        matches!(result, Some(Err(e)) if format!("{e:?}").contains("has no method"))
-    }
-
-    #[test]
-    fn string_registry_matches_vm_dispatch() {
-        let s = arcstr::ArcStr::from("hello");
-        let args = sample_args();
-        for &name in reg::STRING_METHODS {
-            if name == "iter" {
-                continue; // dispatched in call_method_sync, not call_string_method
-            }
-            let res = crate::vm::Vm::call_string_method(&s, name, &args);
-            assert!(
-                !format!("{res:?}").contains("has no method"),
-                "STRING_METHODS lists `{name}` but the VM rejects it"
-            );
-        }
-        // Sanity: a name absent from the registry is genuinely rejected.
-        let bogus = crate::vm::Vm::call_string_method(&s, "frobnicate", &args);
-        assert!(format!("{bogus:?}").contains("has no method"));
-    }
-
-    #[test]
-    fn list_registry_matches_vm_dispatch() {
-        let items: Arc<Vec<VmValue>> = Arc::new(vec![VmValue::Int(1), VmValue::Int(2)]);
-        let args = sample_args();
-        for &name in reg::LIST_METHODS {
-            if name == "iter" {
-                continue;
-            }
-            let res = crate::vm::Vm::call_list_method_sync(&items, name, &args);
-            assert!(
-                !is_no_method_rejection(res),
-                "LIST_METHODS lists `{name}` but the VM rejects it"
-            );
-        }
-    }
-
-    #[test]
-    fn set_registry_matches_vm_dispatch() {
-        let VmValue::Set(set) = VmValue::set([VmValue::Int(1), VmValue::Int(2)]) else {
-            unreachable!("VmValue::set builds a Set");
-        };
-        let args = vec![VmValue::set([VmValue::Int(3)]), VmValue::string("a")];
-        for &name in reg::SET_METHODS {
-            if name == "iter" {
-                continue;
-            }
-            let res = crate::vm::Vm::call_set_method_sync(&set, name, &args);
-            assert!(
-                !is_no_method_rejection(res),
-                "SET_METHODS lists `{name}` but the VM rejects it"
-            );
-        }
-    }
-
-    #[test]
-    fn dict_registry_matches_vm_dispatch() {
-        let VmValue::Dict(map) = VmValue::dict([("k", VmValue::Int(1))]) else {
-            unreachable!("VmValue::dict builds a Dict");
-        };
-        let args = sample_args();
-        for &name in reg::DICT_METHODS {
-            if name == "iter" {
-                continue;
-            }
-            let res = crate::vm::Vm::call_dict_method_sync(&map, name, &args);
-            assert!(
-                !is_no_method_rejection(res),
-                "DICT_METHODS lists `{name}` but the VM rejects it"
-            );
-        }
-    }
-
-    /// Method names in the `match method { "a" | "b" => ... }` arms of a VM
-    /// dispatch source file, including continuation lines that start with
-    /// `| "c"`. Lines whose quoted names are followed by anything other than
-    /// `=>`, a guard, or a continuation (format args, `vec![...]` items) are
-    /// ignored.
-    fn vm_arm_method_names(source: &str) -> std::collections::BTreeSet<&str> {
-        let mut names = std::collections::BTreeSet::new();
-        for line in source.lines() {
-            let mut rest = line.trim_start();
-            rest = rest.strip_prefix("| ").unwrap_or(rest);
-            let mut found = Vec::new();
-            while let Some(after_quote) = rest.strip_prefix('"') {
-                let Some((name, tail)) = after_quote.split_once('"') else {
-                    break;
-                };
-                found.push(name);
-                rest = tail.trim_start();
-                match rest.strip_prefix("| ") {
-                    Some(next) => rest = next,
-                    None => break,
-                }
-            }
-            let is_arm = rest.is_empty() || rest.starts_with("=>") || rest.starts_with("if ");
-            let all_idents = found.iter().all(|name| {
-                !name.is_empty()
-                    && name.chars().all(|c| {
-                        c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '?'
-                    })
-            });
-            if is_arm && all_idents {
-                names.extend(found);
-            }
-        }
-        names
-    }
-
-    /// The reverse direction of the tests above: every method a VM dispatch
-    /// accepts must be in the registry, or `harn check` reports a false
-    /// HARN-NAM-005 for a call the runtime supports.
-    #[test]
-    fn vm_dispatch_methods_are_all_registered() {
-        let dispatches: [(&str, &str, &[&str]); 5] = [
-            ("string", include_str!("string.rs"), reg::STRING_METHODS),
-            ("list", include_str!("list.rs"), reg::LIST_METHODS),
-            ("set", include_str!("set.rs"), reg::SET_METHODS),
-            ("dict", include_str!("dict.rs"), reg::DICT_METHODS),
-            ("range", include_str!("range.rs"), reg::RANGE_METHODS),
-        ];
-        for (label, source, registry) in dispatches {
-            let vm_names = vm_arm_method_names(source);
-            assert!(
-                vm_names.contains("count"),
-                "{label} dispatch scan found no arms; the scanner no longer matches the source"
-            );
-            let missing: Vec<&str> = vm_names
-                .into_iter()
-                .filter(|name| !registry.contains(name))
-                .collect();
-            assert!(
-                missing.is_empty(),
-                "the VM {label} dispatch accepts {missing:?} but the typechecker registry \
-                 omits them; add them to method_registry.rs"
-            );
-        }
-    }
-}
+#[path = "dispatch_drift_tests.rs"]
+mod drift_guard_tests;

@@ -2,6 +2,7 @@ pub mod acp_ambient_globals;
 pub mod analysis;
 mod ast;
 pub mod ast_json;
+pub mod builtin_methods;
 pub mod builtin_signatures;
 pub mod const_eval;
 pub mod diagnostic;

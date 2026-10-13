@@ -400,7 +400,7 @@ fn __render_github(
 fn __public_principals(ctx: DisclosureContext) -> list<dict> {
   let principals = []
   for principal in ctx.principals {
-    principals = principals.appending(
+    principals.push(
       {
         subject: principal.subject,
         kind: principal.kind,

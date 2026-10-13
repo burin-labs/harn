@@ -332,7 +332,7 @@ pub fn tool_shape_findings(dropped: list<DroppedFragment>) -> list<ToolShapeFind
     if matched.shape == "" {
       continue
     }
-    findings = findings.appending(
+    findings.push(
       {
         shape: matched.shape,
         dropped_reason: run.reason,

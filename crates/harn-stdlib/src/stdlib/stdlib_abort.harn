@@ -254,7 +254,7 @@ pub fn settle_with_abort(
   const counter = runtime.atomic(0)
   let indexed = []
   for (position, item) in iter(items).enumerate() {
-    indexed = indexed.appending({index: position, item: item})
+    indexed.push({index: position, item: item})
   }
   const settled = parallel settle indexed with {
     max_concurrent: options?.max_concurrent ?? 0,
@@ -274,21 +274,21 @@ pub fn settle_with_abort(
         throw err
       }
       failed = failed + 1
-      results = results.appending(Err(err))
+      results.push(Err(err))
       index = index + 1
       continue
     }
     const record = unwrap(settled_result)
     if record.state == "ok" {
       succeeded = succeeded + 1
-      results = results.appending(Ok(record.value))
+      results.push(Ok(record.value))
     } else if record.state == "abandoned" {
       abandoned = abandoned + 1
-      abandoned_indexes = abandoned_indexes.appending(index)
-      results = results.appending(Err(record.error))
+      abandoned_indexes.push(index)
+      results.push(Err(record.error))
     } else {
       failed = failed + 1
-      results = results.appending(Err(record.error))
+      results.push(Err(record.error))
     }
     index = index + 1
   }

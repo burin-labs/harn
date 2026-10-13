@@ -93,12 +93,12 @@ fn __sort_by_ladder(rungs: list) -> list {
   let sorted = []
   for known in __CANONICAL_LADDER {
     if contains(rungs, known) {
-      sorted = sorted.appending(known)
+      sorted.push(known)
     }
   }
   for rung in rungs {
     if !contains(__CANONICAL_LADDER, rung) {
-      sorted = sorted.appending(rung)
+      sorted.push(rung)
     }
   }
   return sorted
@@ -108,7 +108,7 @@ fn __difference(left: list, right: list) -> list {
   let out = []
   for item in left {
     if !contains(right, item) && !contains(out, item) {
-      out = out.appending(item)
+      out.push(item)
     }
   }
   return out
@@ -118,7 +118,7 @@ fn __intersection(left: list, right: list) -> list {
   let out = []
   for item in left {
     if contains(right, item) && !contains(out, item) {
-      out = out.appending(item)
+      out.push(item)
     }
   }
   return out
@@ -129,7 +129,7 @@ fn __split_csv(raw: string?) -> list {
   for piece in split(to_string(raw ?? ""), ",") {
     const trimmed = trim(piece)
     if trimmed != "" && !contains(out, trimmed) {
-      out = out.appending(trimmed)
+      out.push(trimmed)
     }
   }
   return out
@@ -317,15 +317,15 @@ fn __probe_route(
         ungated,
       )
     }
-    attempts = attempts.appending(classified)
+    attempts.push(classified)
     if classified.verdict == "accepted" {
-      accepted = accepted.appending(rung)
+      accepted.push(rung)
     }
     if classified.verdict == "gated_locally" {
-      gated = gated.appending(rung)
+      gated.push(rung)
     }
     if classified.verdict == "inconclusive" {
-      inconclusive = inconclusive.appending(rung)
+      inconclusive.push(rung)
     }
   }
   // Only a rung that was actually measured can be evidence against the catalog.
@@ -387,7 +387,7 @@ fn __usage_unmoved(attempts: list) -> bool {
     }
     accepted_with_tokens = accepted_with_tokens + 1
     if !contains(values, tokens) {
-      values = values.appending(tokens)
+      values.push(tokens)
     }
   }
   return accepted_with_tokens >= 3 && len(values) <= 1
@@ -429,16 +429,16 @@ fn __one_per_claim(targets: list) -> list {
   for target in targets {
     const key = target.provider + "\t" + join(target.declared, ",")
     if representative[key] == nil {
-      order = order.appending(key)
+      order.push(key)
       representative = representative + {[key]: target}
       members = members + {[key]: [target.model]}
     } else {
-      members = members + {[key]: members[key].appending(target.model)}
+      members = members + {[key]: members[key] + [target.model]}
     }
   }
   let out = []
   for key in order {
-    out = out.appending(representative[key] + {covers: members[key]})
+    out.push(representative[key] + {covers: members[key]})
   }
   return out
 }
@@ -479,7 +479,7 @@ fn __resolve_targets(llm: HarnessLlm, requested: list, all_declared: bool) -> li
       if len(levels) == 0 {
         continue
       }
-      targets = targets.appending(
+      targets.push(
         {
           provider: to_string(row?.provider ?? ""),
           model: to_string(row?.id ?? ""),
@@ -499,7 +499,7 @@ fn __resolve_targets(llm: HarnessLlm, requested: list, all_declared: bool) -> li
     // `model_info` is used only to resolve an alias to its route. The declared
     // ladder is then read from the catalog row itself, so an alias and its
     // target can never report different ladders for the same route.
-    targets = targets.appending(
+    targets.push(
       {provider: provider, model: model, declared: __declared_ladder(catalog, provider, model)},
     )
   }
@@ -529,7 +529,7 @@ fn __fragment_for(route: dict) -> string {
   const rungs = route.accepted
   let quoted = []
   for rung in rungs {
-    quoted = quoted.appending("\"" + rung + "\"")
+    quoted.push("\"" + rung + "\"")
   }
   return "# Measured by `harn provider effort-probe` against the live route.\n"
     + "# Declared was ["
@@ -558,7 +558,7 @@ fn __translation_caveat(routes: list) -> list {
   let providers = []
   for route in routes {
     if contains(["gemini", "anthropic"], route.provider) && !contains(providers, route.provider) {
-      providers = providers.appending(route.provider)
+      providers.push(route.provider)
     }
   }
   if len(providers) == 0 {
@@ -577,57 +577,57 @@ fn __render_human(report: dict, suggest_fragment: bool) -> string {
   let lines = []
   for route in report.routes {
     const label = route.provider + ":" + route.model
-    lines = lines.appending(label)
+    lines.push(label)
     if len(route.covers) > 1 {
-      lines = lines.appending(
+      lines.push(
         "  stands for "
           + to_string(len(route.covers))
           + " routes sharing this claim: "
           + join(route.covers, ", "),
       )
     }
-    lines = lines.appending("  declared: [" + join(route.declared, ", ") + "]")
-    lines = lines.appending("  accepted: [" + join(route.accepted, ", ") + "]")
+    lines.push("  declared: [" + join(route.declared, ", ") + "]")
+    lines.push("  accepted: [" + join(route.accepted, ", ") + "]")
     if len(route.gated_locally) > 0 {
-      lines = lines.appending(
+      lines.push(
         "  not measured (blocked by the declared ladder; rerun ungated): ["
           + join(route.gated_locally, ", ")
           + "]",
       )
     }
     if len(route.declared_but_rejected) > 0 {
-      lines = lines.appending(
+      lines.push(
         "  DRIFT declared but rejected: ["
           + join(route.declared_but_rejected, ", ")
           + "] — callers asking for these take a provider error",
       )
     }
     if len(route.accepted_but_undeclared) > 0 {
-      lines = lines.appending(
+      lines.push(
         "  DRIFT accepted but undeclared: ["
           + join(route.accepted_but_undeclared, ", ")
           + "] — Harn snaps callers away from rungs this route serves",
       )
     }
     if route.unusable {
-      lines = lines.appending(
+      lines.push(
         "  NOT MEASURED — every rung failed for a reason unrelated to effort "
           + "(auth, rate limit, or provider error); this route reports no verdict",
       )
     } else if len(route.inconclusive) > 0 {
-      lines = lines.appending(
+      lines.push(
         "  inconclusive (excluded from the diff): [" + join(route.inconclusive, ", ") + "]",
       )
     }
     if route.no_declared_ladder && !route.unusable && len(route.accepted) > 0 {
-      lines = lines.appending(
+      lines.push(
         "  no declared ladder (unknown/all) — measured: [" + join(route.accepted, ", ") + "]",
       )
     } else if !__route_drifts(route) && !route.unusable {
-      lines = lines.appending("  ok — declared ladder matches the route")
+      lines.push("  ok — declared ladder matches the route")
     }
     if route.usage_unmoved {
-      lines = lines.appending(
+      lines.push(
         "  note: output tokens did not move across accepted rungs; the parameter may have been ignored",
       )
     }
@@ -635,9 +635,7 @@ fn __render_human(report: dict, suggest_fragment: bool) -> string {
     // meant a run could only be diagnosed by re-running it for JSON.
     for attempt in route.attempts {
       if attempt.verdict != "accepted" && attempt.error != nil {
-        lines = lines.appending(
-          "    " + attempt.effort + " [" + attempt.verdict + "]: " + attempt.error,
-        )
+        lines.push("    " + attempt.effort + " [" + attempt.verdict + "]: " + attempt.error)
       }
     }
     // Offered for a drifting route and for one that declares no ladder at all:
@@ -646,16 +644,16 @@ fn __render_human(report: dict, suggest_fragment: bool) -> string {
       && (__route_drifts(route) || (route.no_declared_ladder && len(route.accepted) > 0)) {
       const blocked = __fragment_blocked_reason(route)
       if blocked != nil {
-        lines = lines.appending("  " + blocked)
+        lines.push("  " + blocked)
       } else {
-        lines = lines.appending("  suggested fragment:")
+        lines.push("  suggested fragment:")
         for fragment_line in split(__fragment_for(route), "\n") {
-          lines = lines.appending("    " + fragment_line)
+          lines.push("    " + fragment_line)
         }
       }
     }
   }
-  lines = lines.appending(
+  lines.push(
     "effort-probe: "
       + to_string(report.drifting_routes)
       + "/"
@@ -663,7 +661,7 @@ fn __render_human(report: dict, suggest_fragment: bool) -> string {
       + " routes drift from the catalog",
   )
   if !report.ungated {
-    lines = lines.appending(
+    lines.push(
       "note: run was gated by the declared ladder, so it can confirm the catalog but not correct it",
     )
   }
@@ -713,7 +711,7 @@ fn main(harness: Harness) {
   let requested = []
   for raw in args.model ?? [] {
     for selector in __split_csv(raw) {
-      requested = requested.appending(selector)
+      requested.push(selector)
     }
   }
   if len(requested) == 0 && !args.all_declared {
@@ -732,7 +730,7 @@ fn main(harness: Harness) {
   if args.plan {
     let plan_lines = []
     for target in targets {
-      plan_lines = plan_lines.appending(
+      plan_lines.push(
         "  " + target.provider + ":" + target.model + "  declared=[" + join(target.declared, ", ")
           + "]",
       )
@@ -775,7 +773,7 @@ fn main(harness: Harness) {
       ungated,
       target?.covers ?? [],
     )
-    routes = routes.appending(route)
+    routes.push(route)
     if __route_drifts(route) {
       drifting = drifting + 1
     }

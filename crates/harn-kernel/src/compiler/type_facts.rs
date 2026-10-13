@@ -268,19 +268,6 @@ impl Compiler {
                     None
                 }
             }
-            Node::MethodCall {
-                object,
-                method,
-                args,
-            } if method == "appending"
-                && args.len() == 1
-                && !matches!(args[0].node, Node::Spread(_))
-                && Self::is_list_type(self.infer_expr_type(object).as_ref()) =>
-            {
-                // Appending preserves the list kind, but the new element may
-                // differ from every existing element.
-                Some(TypeExpr::Named("list".into()))
-            }
             Node::ListLiteral(items) => self.infer_list_literal_type(items),
             Node::FunctionCall { name, args, .. } if name == "tuple" => {
                 if args.iter().any(|arg| matches!(arg.node, Node::Spread(_))) {

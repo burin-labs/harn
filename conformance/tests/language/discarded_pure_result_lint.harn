@@ -5,5 +5,5 @@
  */
 pipeline main(harness: Harness, task: unknown) {
   const l = []
-  l.appending(1)
+  l + [1]
 }

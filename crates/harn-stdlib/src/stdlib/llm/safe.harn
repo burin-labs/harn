@@ -63,7 +63,7 @@ pub fn strip_code_fences(text: string?) {
     if starts_with(trim(line), "```") {
       continue
     }
-    out = out.appending(line)
+    out.push(line)
   }
   return trim(out.join("\n"))
 }
@@ -379,7 +379,7 @@ pub fn with_case_insensitive_keys(envelope: unknown) {
   if type_of(envelope) == "list" {
     let out = []
     for item in envelope {
-      out = out.appending(with_case_insensitive_keys(item))
+      out.push(with_case_insensitive_keys(item))
     }
     return out
   }
@@ -420,7 +420,7 @@ fn __unique_names(names: list) {
   let unique = []
   for name in names {
     if name != "" && !contains(unique, name) {
-      unique = unique.appending(name)
+      unique.push(name)
     }
   }
   return unique
@@ -430,7 +430,7 @@ fn __session_tool_names(messages: list) {
   let names = []
   for message in messages {
     if message?.role == "tool" {
-      names = names.appending(message?.name ?? "")
+      names.push(message?.name ?? "")
     }
   }
   return __unique_names(names)
@@ -535,7 +535,7 @@ pub fn schema_retry_nudge_for(schema: dict, hint: any) {
     required_line,
   ]
   if hint != nil && to_string(hint) != "" {
-    lines = lines.appending("Hint: " + to_string(hint))
+    lines.push("Hint: " + to_string(hint))
   }
   return join(lines, "\n")
 }

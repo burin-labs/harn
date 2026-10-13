@@ -677,7 +677,7 @@ pub fn edit_move_decl(code_index: HarnessCodeIndex, params: dict?) {
   const symbol = p?.symbol
   let req = p
   if type_of(symbol) == "dict" {
-    req = p.merging(
+    req = p.merge(
       {symbol: symbol?.name, line: p?.line ?? symbol?.line, kind: p?.kind ?? symbol?.kind},
     )
   }

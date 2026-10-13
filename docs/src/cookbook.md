@@ -153,7 +153,7 @@ pipeline default(harness: Harness) {
     const response = harness.llm.call(messages, system)
     const calls = tool_parse_call(response.text)
 
-    if calls.count() == 0 {
+    if calls.len() == 0 {
       harness.stdio.log(response)
       done = true
     } else {
@@ -975,7 +975,7 @@ pipeline default(harness: Harness) {
   let files: dict<string, string> = {}
   for item in contents {
     if item.content != "" {
-      files = files.merging({[item.path]: item.content})
+      files = files.merge({[item.path]: item.content})
     }
   }
 

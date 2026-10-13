@@ -443,30 +443,6 @@ harness.stdio.log(bytes_to_hex(uploaded))
 | `set_is_disjoint(a, b)` | a: set, b: set | bool | True if a and b share no elements |
 | `to_list(s)` | s: set | list | Convert a set to a list |
 
-### Set methods (dot syntax)
-
-Sets also support method syntax: `my_set.union(other)`.
-
-| Method | Parameters | Returns | Description |
-|---|---|---|---|
-| `.count()` / `.len()` | none | int | Number of elements |
-| `.empty()` | none | bool | True if set is empty |
-| `.contains(val)` | val: any | bool | Check membership |
-| `.adding(val)` | val: any | set | New set with val added |
-| `.removing(val)` | val: any | set | New set with val removed |
-| `.union(other)` | other: set | set | Union |
-| `.intersect(other)` | other: set | set | Intersection |
-| `.difference(other)` | other: set | set | Elements in self but not other |
-| `.symmetric_difference(other)` | other: set | set | Elements in either but not both |
-| `.is_subset(other)` | other: set | bool | True if self is a subset of other |
-| `.is_superset(other)` | other: set | bool | True if self is a superset of other |
-| `.is_disjoint(other)` | other: set | bool | True if no shared elements |
-| `.to_list()` | none | list | Convert to list |
-| `.map(fn)` | fn: closure | set | Transform elements (deduplicates) |
-| `.filter(fn)` | fn: closure | set | Keep elements matching predicate |
-| `.any(fn)` | fn: closure | bool | True if any element matches |
-| `.all(fn)` / `.every(fn)` | fn: closure | bool | True if all elements match |
-
 ## String functions
 
 | Function | Parameters | Returns | Description |
@@ -491,29 +467,6 @@ Sets also support method syntax: `my_set.union(other)`.
 | `indent(text, prefix?)` | text: string, prefix: string (default `"  "`) | string | Prefix every non-blank line with the given indent |
 | `dedent(text)` | text: string | string | Strip the longest common leading whitespace from every non-blank line |
 | `word_wrap(text, width?)` | text: string, width: int (default 80) | string | Greedy word-wrap that preserves existing newlines and never splits words mid-token |
-
-### String methods (dot syntax)
-
-These are called on string values with dot notation: `"hello".uppercase()`.
-
-| Method | Parameters | Returns | Description |
-|---|---|---|---|
-| `.trim()` | none | string | Remove leading/trailing whitespace |
-| `.trim_start()` | none | string | Remove leading whitespace only |
-| `.trim_end()` | none | string | Remove trailing whitespace only |
-| `.lines()` | none | list | Split string by newlines |
-| `.char_at(index)` | index: int | string or nil | Character at index (nil if out of bounds) |
-| `.index_of(substr)` | substr: string | int | First character offset of substring (-1 if not found) |
-| `.last_index_of(substr)` | substr: string | int | Last character offset of substring (-1 if not found) |
-| `.rfind(substr)` | substr: string | int | Alias for `.last_index_of(substr)` |
-| `.lower()` / `.to_lower()` | none | string | Lowercase string |
-| `.len()` | none | int | Character count |
-| `.upper()` / `.to_upper()` | none | string | Uppercase string |
-| `.chars()` | none | list | List of single-character strings |
-| `.reversed()` | none | string | Reversed string |
-| `.repeat(n)` | n: int | string | Repeat n times |
-| `.pad_left(width, char?)` | width: int, char: string | string | Pad to width with char (default space) |
-| `.pad_right(width, char?)` | width: int, char: string | string | Pad to width with char (default space) |
 
 ### Scanning large text
 
@@ -540,44 +493,6 @@ while i < cs.count {
 Prefer `str.lines()`, `split(str, sep)`, or the `regex_*` builtins when a
 line-, token-, or pattern-oriented scan suffices.
 
-### List methods (dot syntax)
-
-| Method | Parameters | Returns | Description |
-|---|---|---|---|
-| `.map(fn)` | fn: closure | list | Transform each element |
-| `.filter(fn)` | fn: closure | list | Keep elements where fn returns truthy |
-| `.reduce(init, fn)` | init: any, fn: closure | any | Fold with accumulator |
-| `.find(fn)` | fn: closure | any or nil | First element matching predicate |
-| `.find_index(fn)` | fn: closure | int | Index of first match (-1 if not found) |
-| `.any(fn)` | fn: closure | bool | True if any element matches |
-| `.all(fn)` / `.every(fn)` | fn: closure | bool | True if all elements match |
-| `.none(fn?)` | fn: closure | bool | True if no elements match (no arg: checks emptiness) |
-| `.first(n?)` | n: int (optional) | any or list | First element, or first n elements |
-| `.last(n?)` | n: int (optional) | any or list | Last element, or last n elements |
-| `.partition(fn)` | fn: closure | list | Split into `[[truthy], [falsy]]` |
-| `.group_by(fn)` | fn: closure | dict | Group into dict keyed by fn result |
-| `.sorted()` / `.sorted_by(fn)` | fn: closure for `.sorted_by` | list | Stable sort (natural or by key function). List-valued keys order lexicographically, so `xs.sorted_by({ x -> [x.a, x.b] })` sorts by `a`, then `b`. Use `sorted_by` for custom keys; `sorted` does not accept a comparator. |
-| `.min()` / `.max()` | none | any | Minimum/maximum value |
-| `.min_by(fn)` / `.max_by(fn)` | fn: closure | any | Min/max by key function |
-| `.chunk(size)` | size: int | list | Split into chunks of size |
-| `.window(size)` | size: int | list | Sliding windows of size |
-| `.each_cons(size)` | size: int | list | Sliding windows of size |
-| `.compact()` | none | list | Remove nil values |
-| `.unique()` | none | list | Remove duplicates |
-| `.flatten()` | none | list | Flatten one level of nesting |
-| `.flat_map(fn)` | fn: closure | list | Map then flatten |
-| `.tally()` | none | dict | Frequency count: `{value: count}` |
-| `.zip(other)` | other: list | list | Pair elements from two lists |
-| `.enumerate()` | none | list | List of `{index, value}` dicts |
-| `.take(n)` / `.skip(n)` | n: int | list | First/remaining n elements |
-| `.sum()` | none | int or float | Sum of numeric values |
-| `.join(sep?)` | sep: string | string | Join to string |
-| `.reversed()` | none | list | Reversed list |
-| `.appending(item)` / `.dropping_last()` | item: any | list | New list with item added/removed (immutable) |
-| `.contains(item)` | item: any | bool | Check if list contains item |
-| `.index_of(item)` | item: any | int | Index of item (-1 if not found) |
-| `.slice(start, end?)` | start: int, end: int | list | Slice with negative index support |
-
 ### Collection helper builtins
 
 | Function | Parameters | Returns | Description |
@@ -602,8 +517,8 @@ line-, token-, or pattern-oriented scan suffices.
 
 ### Iterator methods
 
-Eager list/dict/set/string methods listed above are unchanged — they
-still return eager collections. Lazy iteration is opt-in via
+Eager list, dict, set, and string methods return eager collections. Lazy
+iteration is opt-in via
 `.iter()`, which lifts a list, dict, set, string, generator, or
 channel into an `Iter<T>` value. Iterators are **single-pass, fused,
 and snapshot** — they `Rc`-clone the backing collection, so mutating
@@ -616,40 +531,248 @@ chars (Unicode scalar values).
 Printing with `harness.stdio.log(it)` renders `<iter>` or `<iter (exhausted)>` and
 does **not** drain the iterator.
 
-#### Lazy combinators (return a new `Iter`)
+## Builtin methods
 
-| Method | Parameters | Returns | Description |
+Strings, lists, sets, dicts, ranges, and iterators have methods called with
+dot syntax: `name.lower()`, `items.windows(2)`. Every operation has one name,
+and the tables below are generated from the method registry the typechecker,
+linter, and runtime all read, so they list exactly what exists.
+
+Methods marked **Mutates** change their receiver, Swift-style. Values stay
+immutable; `xs.push(v)` computes the next list and writes it back to `xs`, as
+`xs = xs + [v]` would, so an alias taken earlier keeps the old value. The
+receiver must be a `let` binding or a property or subscript path rooted at
+one (`state.items.push(v)`, `rows[0].push(v)`). Calling a mutating method on a
+`const` binding, a parameter, or a temporary such as `[1, 2].sort()` is a type
+error. `pop()` returns the removed element, or `nil` when the list is empty.
+Lists keep copy-returning `sorted()`, `sorted_by(key)`, and `reversed()` for
+when you want a new list instead.
+
+```harn
+let stack = [1, 2, 3]
+stack.push(4)
+const top = stack.pop()     // 4; stack is [1, 2, 3] again
+const ordered = stack.sorted()
+stack.reverse()             // stack is [3, 2, 1]
+```
+
+<!-- BEGIN GENERATED: builtin methods (make gen-builtin-methods) -->
+
+### String methods
+
+| Method | Signature | Mutates | Description |
 |---|---|---|---|
-| `.iter()` | none | `Iter<T>` | Lift a source into an iter; no-op on an existing iter |
-| `.map(fn)` | fn: closure | `Iter<U>` | Lazily transform each item |
-| `.filter(fn)` | fn: closure | `Iter<T>` | Lazily keep items where fn returns truthy |
-| `.flat_map(fn)` | fn: closure | `Iter<U>` | Map then flatten, lazily |
-| `.take(n)` | n: int | `Iter<T>` | First n items |
-| `.skip(n)` | n: int | `Iter<T>` | Drop first n items |
-| `.take_while(fn)` | fn: closure | `Iter<T>` | Items until predicate first returns falsy |
-| `.skip_while(fn)` | fn: closure | `Iter<T>` | Drop items while predicate is truthy |
-| `.zip(other)` | other: iter | `Iter<Pair<T, U>>` | Pair items from two iters, stops at shorter |
-| `.enumerate()` | none | `Iter<Pair<int, T>>` | Pair each item with a 0-based index |
-| `.chain(other)` | other: iter | `Iter<T>` | Yield items from self, then from other |
-| `.chunks(n)` | n: int | `Iter<list<T>>` | Non-overlapping fixed-size chunks |
-| `.windows(n)` | n: int | `Iter<list<T>>` | Sliding windows of size n |
+| `.len()` | `len() -> int` |  | Number of characters. |
+| `.empty()` | `empty() -> bool` |  | True when the string has no characters. |
+| `.contains()` | `contains(needle: string) -> bool` |  | True when `needle` occurs in the string. |
+| `.replace()` | `replace(old: string, new: string) -> string` |  | Replace every occurrence of `old` with `new`. |
+| `.split()` | `split(separator: string) -> list<string>` |  | Split on every occurrence of `separator`. |
+| `.trim()` | `trim() -> string` |  | Remove leading and trailing whitespace. |
+| `.trim_start()` | `trim_start() -> string` |  | Remove leading whitespace. |
+| `.trim_end()` | `trim_end() -> string` |  | Remove trailing whitespace. |
+| `.starts_with()` | `starts_with(prefix: string) -> bool` |  | True when the string begins with `prefix`. |
+| `.ends_with()` | `ends_with(suffix: string) -> bool` |  | True when the string ends with `suffix`. |
+| `.lower()` | `lower() -> string` |  | Lowercase copy. |
+| `.upper()` | `upper() -> string` |  | Uppercase copy. |
+| `.substring()` | `substring(start: int, end?: int) -> string` |  | Characters from `start` up to `end` (default: the end). |
+| `.slice()` | `slice(start: int, end?: int) -> string` |  | Characters from `start` up to `end`; negative indices count from the end. |
+| `.index_of()` | `index_of(needle: string) -> int` |  | Character offset of the first `needle`, or -1. |
+| `.last_index_of()` | `last_index_of(needle: string) -> int` |  | Character offset of the last `needle`, or -1. |
+| `.chars()` | `chars() -> list<string>` |  | List of single-character strings. |
+| `.repeat()` | `repeat(count: int) -> string` |  | The string repeated `count` times. |
+| `.reversed()` | `reversed() -> string` |  | Characters in reverse order. |
+| `.pad_left()` | `pad_left(width: int, fill?: string) -> string` |  | Pad on the left to `width` characters with `fill` (default: space). |
+| `.pad_right()` | `pad_right(width: int, fill?: string) -> string` |  | Pad on the right to `width` characters with `fill` (default: space). |
+| `.lines()` | `lines() -> list<string>` |  | Split into lines. |
+| `.char_at()` | `char_at(index: int) -> string?` |  | Character at `index`, or nil when out of range. |
+| `.iter()` | `iter() -> iter<string>` |  | Lazy iterator over the characters. |
 
-#### Sinks (drain the iter, return an eager value)
+### List methods
 
-| Method | Parameters | Returns | Description |
+| Method | Signature | Mutates | Description |
 |---|---|---|---|
-| `.to_list()` | none | list | Collect all items into a list |
-| `.to_set()` | none | set | Collect all items into a set |
-| `.to_dict()` | none | dict | Collect `Pair(key, value)` items into a dict |
-| `.count()` | none | int | Count remaining items |
-| `.sum()` | none | int or float | Sum of numeric items |
-| `.min()` / `.max()` | none | any | Min/max item |
-| `.reduce(init, fn)` | init: any, fn: closure | any | Fold with accumulator |
-| `.first()` / `.last()` | none | any or nil | First/last item |
-| `.any(fn)` | fn: closure | bool | True if any remaining item matches |
-| `.all(fn)` | fn: closure | bool | True if all remaining items match |
-| `.find(fn)` | fn: closure | any or nil | First item matching predicate |
-| `.for_each(fn)` | fn: closure | nil | Invoke fn on each remaining item |
+| `.len()` | `len() -> int` |  | Number of elements. |
+| `.empty()` | `empty() -> bool` |  | True when the list has no elements. |
+| `.first()` | `<T> first() -> T?` |  | First element, or nil when empty. |
+| `.last()` | `<T> last() -> T?` |  | Last element, or nil when empty. |
+| `.map()` | `<T, U> map(f: (T) -> U) -> list<U>` |  | Apply `f` to each element. |
+| `.filter()` | `<T> filter(predicate: (T) -> bool) -> list<T>` |  | Elements for which `predicate` is truthy. |
+| `.flat_map()` | `<T, U> flat_map(f: (T) -> list<U>) -> list<U>` |  | Apply `f` and flatten one level. |
+| `.reduce()` | `<T, U> reduce(initial: U, f: (U, T) -> U) -> U` |  | Fold the elements into an accumulator. |
+| `.find()` | `<T> find(predicate: (T) -> bool) -> T?` |  | First element matching `predicate`, or nil. |
+| `.find_index()` | `<T> find_index(predicate: (T) -> bool) -> int` |  | Index of the first match, or -1. |
+| `.any()` | `<T> any(predicate: (T) -> bool) -> bool` |  | True when any element matches. |
+| `.all()` | `<T> all(predicate: (T) -> bool) -> bool` |  | True when every element matches. |
+| `.none()` | `<T> none(predicate?: (T) -> bool) -> bool` |  | True when no element matches; with no argument, true when empty. |
+| `.partition()` | `<T> partition(predicate: (T) -> bool) -> list<list<T>>` |  | Split into `[matching, rest]`. |
+| `.group_by()` | `<T, U> group_by(key: (T) -> U) -> dict<string, list<T>>` |  | Group elements by `key`. |
+| `.count_by()` | `<T, U> count_by(key: (T) -> U) -> dict<string, int>` |  | Count elements per `key`. |
+| `.sorted()` | `<T> sorted() -> list<T>` |  | Sorted copy (stable, natural order). |
+| `.sorted_by()` | `<T, U> sorted_by(key: (T) -> U) -> list<T>` |  | Sorted copy ordered by `key`; list keys order lexicographically. |
+| `.reversed()` | `<T> reversed() -> list<T>` |  | Copy in reverse order. |
+| `.join()` | `join(separator?: string) -> string` |  | Join the elements' display text with `separator`. |
+| `.contains()` | `<T> contains(item: T) -> bool` |  | True when an element equals `item`. |
+| `.index_of()` | `<T> index_of(item: T) -> int` |  | Index of the first element equal to `item`, or -1. |
+| `.enumerate()` | `<T> enumerate() -> list<{index: int, value: T}>` |  | Pair each element with its index. |
+| `.zip()` | `<T, U> zip(other: list<U>) -> list<list<T \| U>>` |  | Pair elements with `other`, stopping at the shorter list. |
+| `.slice()` | `<T> slice(start: int, end?: int) -> list<T>` |  | Elements from `start` up to `end`; negative indices count from the end. |
+| `.take()` | `<T> take(count: int) -> list<T>` |  | The first `count` elements. |
+| `.skip()` | `<T> skip(count: int) -> list<T>` |  | All but the first `count` elements. |
+| `.take_while()` | `<T> take_while(predicate: (T) -> bool) -> list<T>` |  | Leading elements while `predicate` holds. |
+| `.drop_while()` | `<T> drop_while(predicate: (T) -> bool) -> list<T>` |  | Elements after the leading run where `predicate` holds. |
+| `.unique()` | `<T> unique() -> list<T>` |  | Copy without duplicates, keeping first occurrences. |
+| `.compact()` | `<T> compact() -> list<T>` |  | Copy without nil elements. |
+| `.flatten()` | `flatten() -> list<any>` |  | Flatten one level of nesting. |
+| `.chunks()` | `<T> chunks(size: int) -> list<list<T>>` |  | Consecutive non-overlapping chunks of `size`. |
+| `.windows()` | `<T> windows(size: int, step?: int) -> list<list<T>>` |  | Sliding windows of `size`, advancing by `step` (default 1). |
+| `.sum()` | `sum() -> any` |  | Sum of the numeric elements. |
+| `.min()` | `<T> min() -> T?` |  | Smallest element, or nil when empty. |
+| `.max()` | `<T> max() -> T?` |  | Largest element, or nil when empty. |
+| `.min_by()` | `<T, U> min_by(key: (T) -> U) -> T?` |  | Element with the smallest `key`, or nil when empty. |
+| `.max_by()` | `<T, U> max_by(key: (T) -> U) -> T?` |  | Element with the largest `key`, or nil when empty. |
+| `.tally()` | `tally() -> dict<string, int>` |  | Count occurrences of each string element. |
+| `.to_list()` | `<T> to_list() -> list<T>` |  | The list itself. |
+| `.to_set()` | `<T> to_set() -> set<T>` |  | Set of the elements. |
+| `.iter()` | `<T> iter() -> iter<T>` |  | Lazy iterator over the elements. |
+| `.push()` | `<T> push(item: T) -> nil` | yes | Append `item` to the end. |
+| `.pop()` | `<T> pop() -> T?` | yes | Remove and return the last element, or nil when empty. |
+| `.insert()` | `<T> insert(index: int, item: T) -> nil` | yes | Insert `item` before `index`; out-of-range indices clamp to the ends. |
+| `.extend()` | `<T> extend(items: list<T>) -> nil` | yes | Append every element of `items`. |
+| `.clear()` | `clear() -> nil` | yes | Remove every element. |
+| `.sort()` | `sort() -> nil` | yes | Sort in place (stable, natural order). |
+| `.sort_by()` | `<T, U> sort_by(key: (T) -> U) -> nil` | yes | Sort in place ordered by `key`. |
+| `.reverse()` | `reverse() -> nil` | yes | Reverse in place. |
+
+### Set methods
+
+| Method | Signature | Mutates | Description |
+|---|---|---|---|
+| `.len()` | `len() -> int` |  | Number of members. |
+| `.empty()` | `empty() -> bool` |  | True when the set has no members. |
+| `.contains()` | `<T> contains(item: T) -> bool` |  | True when `item` is a member. |
+| `.union()` | `<T> union(other: set<T>) -> set<T>` |  | Members of either set. |
+| `.intersection()` | `<T> intersection(other: set<T>) -> set<T>` |  | Members of both sets. |
+| `.difference()` | `<T> difference(other: set<T>) -> set<T>` |  | Members not in `other`. |
+| `.symmetric_difference()` | `<T> symmetric_difference(other: set<T>) -> set<T>` |  | Members of exactly one set. |
+| `.is_subset()` | `<T> is_subset(other: set<T>) -> bool` |  | True when every member is in `other`. |
+| `.is_superset()` | `<T> is_superset(other: set<T>) -> bool` |  | True when every member of `other` is a member. |
+| `.is_disjoint()` | `<T> is_disjoint(other: set<T>) -> bool` |  | True when the sets share no member. |
+| `.map()` | `<T, U> map(f: (T) -> U) -> set<U>` |  | Apply `f` to each member. |
+| `.filter()` | `<T> filter(predicate: (T) -> bool) -> set<T>` |  | Members for which `predicate` is truthy. |
+| `.any()` | `<T> any(predicate: (T) -> bool) -> bool` |  | True when any member matches. |
+| `.all()` | `<T> all(predicate: (T) -> bool) -> bool` |  | True when every member matches. |
+| `.to_list()` | `<T> to_list() -> list<T>` |  | Members in insertion order. |
+| `.to_set()` | `<T> to_set() -> set<T>` |  | The set itself. |
+| `.iter()` | `<T> iter() -> iter<T>` |  | Lazy iterator over the members. |
+| `.add()` | `<T> add(item: T) -> nil` | yes | Add `item`. |
+| `.remove()` | `<T> remove(item: T) -> bool` | yes | Remove `item`; true when it was a member. |
+| `.clear()` | `clear() -> nil` | yes | Remove every member. |
+
+### Dict methods
+
+| Method | Signature | Mutates | Description |
+|---|---|---|---|
+| `.len()` | `len() -> int` |  | Number of entries. |
+| `.keys()` | `<K> keys() -> list<K>` |  | Keys in sorted order. |
+| `.values()` | `<V> values() -> list<V>` |  | Values in key order. |
+| `.entries()` | `<K, V> entries() -> list<{key: K, value: V}>` |  | `{key, value}` records in key order. |
+| `.has()` | `has(key: string) -> bool` |  | True when `key` is present. |
+| `.get()` | `<V> get(key: string, default?: V) -> V?` |  | Value at `key`, else `default` (nil when omitted). |
+| `.merge()` | `<K, V> merge(other: dict<K, V>) -> dict<K, V>` |  | Copy with `other`'s entries added; `other` wins on conflicts. |
+| `.map_values()` | `<K, V, U> map_values(f: (V) -> U) -> dict<K, U>` |  | Apply `f` to each value. |
+| `.map_keys()` | `<K, V> map_keys(f: (K) -> string) -> dict<string, V>` |  | Rename each key to `f(key)`. |
+| `.filter()` | `<K, V> filter(predicate: (V) -> bool) -> dict<K, V>` |  | Entries whose value satisfies `predicate`. |
+| `.to_dict()` | `<K, V> to_dict() -> dict<K, V>` |  | The dict itself. |
+| `.to_list()` | `<K, V> to_list() -> list<{key: K, value: V}>` |  | Same as `entries()`. |
+| `.iter()` | `<K, V> iter() -> iter<Pair<K, V>>` |  | Lazy iterator over `Pair(key, value)`. |
+| `.remove()` | `<V> remove(key: string) -> V?` | yes | Remove `key` and return its value, or nil when absent. |
+| `.clear()` | `clear() -> nil` | yes | Remove every entry. |
+
+### Range methods
+
+| Method | Signature | Mutates | Description |
+|---|---|---|---|
+| `.len()` | `len() -> int` |  | Number of integers in the range. |
+| `.empty()` | `empty() -> bool` |  | True when the range is empty. |
+| `.contains()` | `contains(value: int) -> bool` |  | True when `value` is in the range. |
+| `.first()` | `first() -> int?` |  | First integer, or nil when empty. |
+| `.last()` | `last() -> int?` |  | Last integer, or nil when empty. |
+| `.to_string()` | `to_string() -> string` |  | Source form such as `1 to 5`. |
+| `.iter()` | `iter() -> iter<int>` |  | Lazy iterator; other iterator methods lift the range automatically. |
+
+### Iterator methods
+
+| Method | Signature | Mutates | Description |
+|---|---|---|---|
+| `.iter()` | `<T> iter() -> iter<T>` |  | The iterator itself. |
+| `.map()` | `<T, U> map(f: (T) -> U) -> iter<U>` |  | Lazily apply `f` to each item. |
+| `.flat_map()` | `<T, U> flat_map(f: (T) -> list<U>) -> iter<U>` |  | Lazily apply `f` and flatten. |
+| `.filter()` | `<T> filter(predicate: (T) -> bool) -> iter<T>` |  | Lazily keep items matching `predicate`. |
+| `.take()` | `<T> take(count: int) -> iter<T>` |  | The first `count` items. |
+| `.skip()` | `<T> skip(count: int) -> iter<T>` |  | Drop the first `count` items. |
+| `.take_while()` | `<T> take_while(predicate: (T) -> bool) -> iter<T>` |  | Items until `predicate` first fails. |
+| `.skip_while()` | `<T> skip_while(predicate: (T) -> bool) -> iter<T>` |  | Drop items while `predicate` holds. |
+| `.zip()` | `<T, U> zip(other: iter<U>) -> iter<Pair<T, U>>` |  | Pair items with `other`, stopping at the shorter. |
+| `.enumerate()` | `<T> enumerate() -> iter<Pair<int, T>>` |  | Pair each item with a 0-based index. |
+| `.chain()` | `<T> chain(other: iter<T>) -> iter<T>` |  | Items of this iterator, then of `other`. |
+| `.chunks()` | `<T> chunks(size: int) -> iter<list<T>>` |  | Non-overlapping chunks of `size`. |
+| `.windows()` | `<T> windows(size: int) -> iter<list<T>>` |  | Sliding windows of `size`. |
+| `.to_list()` | `<T> to_list() -> list<T>` |  | Drain into a list. |
+| `.to_set()` | `<T> to_set() -> set<T>` |  | Drain into a set. |
+| `.to_dict()` | `to_dict() -> dict<string, any>` |  | Drain `Pair(key, value)` items into a dict. |
+| `.count()` | `count() -> int` |  | Drain and count the items. |
+| `.sum()` | `sum() -> number` |  | Drain and sum numeric items. |
+| `.min()` | `<T> min() -> T?` |  | Drain and return the smallest item. |
+| `.max()` | `<T> max() -> T?` |  | Drain and return the largest item. |
+| `.first()` | `<T> first() -> T?` |  | The next item, or nil when exhausted. |
+| `.last()` | `<T> last() -> T?` |  | Drain and return the final item. |
+| `.find()` | `<T> find(predicate: (T) -> bool) -> T?` |  | First item matching `predicate`. |
+| `.any()` | `<T> any(predicate: (T) -> bool) -> bool` |  | True when any item matches. |
+| `.all()` | `<T> all(predicate: (T) -> bool) -> bool` |  | True when every item matches. |
+| `.for_each()` | `<T> for_each(f: (T) -> any) -> nil` |  | Drain, calling `f` on each item. |
+| `.reduce()` | `<T, U> reduce(initial: U, f: (U, T) -> U) -> U` |  | Drain into an accumulator. |
+
+### Removed method spellings
+
+Each of these is a type error (`HARN-NAM-013`).
+`harn fix --apply --safety behavior-preserving` rewrites the ones with a
+mechanical replacement.
+
+| Receiver | Removed | Use instead |
+|---|---|---|
+| `string` | `.count()` | did you mean `len`? |
+| `string` | `.includes()` | did you mean `contains`? |
+| `string` | `.lowercase()` | did you mean `lower`? |
+| `string` | `.to_lower()` | did you mean `lower`? |
+| `string` | `.uppercase()` | did you mean `upper`? |
+| `string` | `.to_upper()` | did you mean `upper`? |
+| `string` | `.reverse()` | did you mean `reversed`? |
+| `string` | `.rfind()` | did you mean `last_index_of`? |
+| `list` | `.count()` | did you mean `len`? |
+| `list` | `.includes()` | did you mean `contains`? |
+| `list` | `.every()` | did you mean `all`? |
+| `list` | `.chunk()` | did you mean `chunks`? |
+| `list` | `.each_slice()` | did you mean `chunks`? |
+| `list` | `.window()` | did you mean `windows`? |
+| `list` | `.each_cons()` | did you mean `windows`? |
+| `list` | `.sliding_window()` | did you mean `windows`? |
+| `list` | `.appending()` | use `xs.push(v)` to append in place, or `xs + [v]` for a new list |
+| `list` | `.dropping_last()` | use `xs.pop()` to remove the last element in place, or `xs.slice(0, -1)` for a new list |
+| `set` | `.count()` | did you mean `len`? |
+| `set` | `.includes()` | did you mean `contains`? |
+| `set` | `.every()` | did you mean `all`? |
+| `set` | `.intersect()` | did you mean `intersection`? |
+| `set` | `.adding()` | use `s.add(v)` on a `let` binding, or `s.union(set([v]))` for a new set |
+| `set` | `.removing()` | use `s.remove(v)` on a `let` binding, or `s.difference(set([v]))` for a new set |
+| `set` | `.delete()` | use `s.remove(v)` on a `let` binding, or `s.difference(set([v]))` for a new set |
+| `dict` | `.count()` | did you mean `len`? |
+| `dict` | `.merging()` | did you mean `merge`? |
+| `dict` | `.rekeyed()` | did you mean `map_keys`? |
+| `dict` | `.rekey()` | did you mean `map_keys`? |
+| `dict` | `.removing()` | use `d.remove(key)` on a `let` binding, or `omit(d, [key])` from `std/json` for a new dict |
+| `range` | `.count()` | did you mean `len`? |
+| `range` | `.includes()` | did you mean `contains`? |
+<!-- END GENERATED: builtin methods -->
 
 ## Path functions
 

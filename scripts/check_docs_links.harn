@@ -91,7 +91,7 @@ pub fn strip_chars(s: string, chars: string) -> string {
 
 /** Hex digit value of a single char (0-15), or -1 if not a hex digit. */
 pub fn hex_digit(c: string) -> int {
-  return "0123456789abcdef".index_of(c.to_lower())
+  return "0123456789abcdef".index_of(c.lower())
 }
 
 /** Printable-ASCII char (codes 32..126) for `code`, or "" otherwise. */
@@ -135,7 +135,7 @@ pub fn unquote(s: string) -> string {
 
 /** True when `c` is a valid URL-scheme character (letter/digit/+/-/.). */
 pub fn is_scheme_char(c: string) -> bool {
-  const lc = c.to_lower()
+  const lc = c.lower()
   if "abcdefghijklmnopqrstuvwxyz".contains(lc) {
     return true
   }

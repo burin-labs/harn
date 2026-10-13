@@ -30,6 +30,7 @@ mod error;
 mod error_handling;
 mod expressions;
 mod module;
+mod mutating_methods;
 mod optimizer;
 mod patterns;
 mod pipe;

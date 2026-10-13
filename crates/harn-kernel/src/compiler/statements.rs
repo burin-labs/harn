@@ -69,33 +69,6 @@ impl Compiler {
                         }
                     }
                 }
-                // `x = x.appending(v)` is the method spelling of the same list
-                // accumulator append. When the receiver is statically known to
-                // be a list and the target is a local slot, lower it through
-                // the same fused concat opcode as `x = x + [v]`.
-                if let Node::MethodCall {
-                    object,
-                    method,
-                    args,
-                } = &value.node
-                {
-                    if method == "appending" && args.len() == 1 {
-                        if let Node::Identifier(oname) = &object.node {
-                            if oname == name {
-                                let left_type = self.infer_expr_type(target);
-                                let value_type = self.infer_expr_type(value);
-                                if self.try_emit_list_append_assign(
-                                    name,
-                                    &args[0],
-                                    left_type.as_ref(),
-                                )? {
-                                    self.assign_type_fact(name, value_type);
-                                    return Ok(());
-                                }
-                            }
-                        }
-                    }
-                }
                 let value_type = self.infer_expr_type(value);
                 self.compile_node(value)?;
                 self.emit_set_binding(name);
@@ -175,7 +148,7 @@ impl Compiler {
 
     /// True when re-evaluating `index` cannot run user code or change between
     /// the read and write halves of a compound assignment.
-    fn is_effect_free_index(index: &SNode) -> bool {
+    pub(super) fn is_effect_free_index(index: &SNode) -> bool {
         matches!(
             index.node,
             Node::Identifier(_)
@@ -410,7 +383,7 @@ impl Compiler {
         Ok(true)
     }
 
-    /// Emit the fused local concat form for `x = x.appending(item)`.
+    /// Emit the fused local concat form for `x.push(item)`.
     ///
     /// This deliberately stays narrower than the runtime method: it only fires
     /// for a local receiver that is statically list-like and for exactly one
@@ -418,7 +391,7 @@ impl Compiler {
     /// original slot is still live, builds `[item]`, then lets
     /// `ConcatAssignLocal` perform the same immutable list append as
     /// `x = x + [item]`, including alias-safe fallback cloning.
-    fn try_emit_list_append_assign(
+    pub(super) fn try_emit_list_append_assign(
         &mut self,
         name: &str,
         item: &SNode,

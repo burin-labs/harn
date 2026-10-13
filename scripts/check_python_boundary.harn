@@ -145,7 +145,7 @@ fn git_python_files(fs: HarnessFs, process: HarnessProcess, root: string) -> lis
     { path -> path != "" && __visible_and_present(fs, path_join(root, path)) },
   )
     .to_list()
-    .sort()
+    .sorted()
 }
 
 /** True only when the path was actually inspected and is there; a denial throws. */
@@ -175,7 +175,7 @@ pub fn python_files(fs: HarnessFs, process: HarnessProcess, root: string = "") -
     }
     out = out + [rel]
   }
-  return out.sort()
+  return out.sorted()
 }
 
 pub fn line_invokes_python(line: string) -> bool {
@@ -234,7 +234,7 @@ fn git_embedded_text_files(fs: HarnessFs, process: HarnessProcess, root: string)
     },
   )
     .to_list()
-    .sort()
+    .sorted()
 }
 
 pub fn embedded_python_text_files(
@@ -280,7 +280,7 @@ pub fn embedded_python_text_files(
   if __visible_and_present(fs, root_makefile) {
     files = files + ["Makefile"]
   }
-  return files.unique().sort()
+  return files.unique().sorted()
 }
 
 pub fn embedded_python_findings(fs: HarnessFs, process: HarnessProcess, root: string) -> dict {

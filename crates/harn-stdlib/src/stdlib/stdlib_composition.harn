@@ -42,7 +42,7 @@ fn __composition_mcp_registry(harness: Harness, value: dict) {
   let tools = []
   for entry in registry?.tools ?? [] {
     if __composition_mcp_tool(entry) {
-      tools = tools.appending(entry)
+      tools.push(entry)
     }
   }
   return registry + {tools: tools}
@@ -62,7 +62,7 @@ fn __composition_mcp_ranked_names(registry: any, query: string?, options: dict?)
   let names = []
   for item in ranked {
     if item?.tool_name != nil {
-      names = names.appending(item.tool_name)
+      names.push(item.tool_name)
     }
   }
   return names
@@ -74,7 +74,7 @@ fn __composition_mcp_servers(manifest: dict) {
     const metadata = binding?.metadata ?? {}
     const server = metadata?._mcp_server ?? metadata?.mcp_server
     if server != nil && !contains(servers, server) {
-      servers = servers.appending(server)
+      servers.push(server)
     }
   }
   return servers

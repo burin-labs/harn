@@ -3886,8 +3886,8 @@ this binding's value never changes):
 
 ```harn
 let l = []
-l = l.appending(1)
-l = l.appending(2)
+l.push(1)
+l.push(2)
 // l == [1, 2]
 ```
 
@@ -3896,7 +3896,7 @@ When building a collection in a loop, the same shape applies:
 ```harn
 let out = []
 for item in items {
-  out = out.appending(transform(item))
+  out.push(transform(item))
 }
 ```
 

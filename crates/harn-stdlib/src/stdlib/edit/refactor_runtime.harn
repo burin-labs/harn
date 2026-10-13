@@ -92,7 +92,7 @@ pub fn __refactor_result(operation: string, language: any, fields: dict?) -> dic
       language: language,
     },
   }
-  return base.merging(fields ?? {})
+  return base.merge(fields ?? {})
 }
 
 /**
@@ -172,7 +172,7 @@ fn __refactor_exec_op(fs: HarnessFs, ast: HarnessAst, op: dict, session_id: any,
     }
   }
   if kind == "node_apply" {
-    const res = edit_apply_node(ast, (op?.params ?? {}).merging({session_id: session_id}))
+    const res = edit_apply_node(ast, (op?.params ?? {}).merge({session_id: session_id}))
     return {
       ok: res.result == "applied",
       result: res.result,
@@ -184,7 +184,7 @@ fn __refactor_exec_op(fs: HarnessFs, ast: HarnessAst, op: dict, session_id: any,
     }
   }
   if kind == "node_insert" {
-    const res = edit_insert_at_anchor(ast, (op?.params ?? {}).merging({session_id: session_id}))
+    const res = edit_insert_at_anchor(ast, (op?.params ?? {}).merge({session_id: session_id}))
     return {
       ok: res.result == "applied",
       result: res.result,
@@ -257,7 +257,7 @@ pub fn __refactor_run(
   let before_map = {}
   for path in touched {
     const r = fs.staged_read_text({path: path, session_id: session_id})
-    before_map = before_map.merging({[path]: r?.content ?? ""})
+    before_map = before_map.merge({[path]: r?.content ?? ""})
   }
   let conflicts = []
   let ok_all = true

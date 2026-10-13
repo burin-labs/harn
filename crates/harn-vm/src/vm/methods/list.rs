@@ -10,10 +10,10 @@ impl crate::vm::Vm {
         args: &[VmValue],
     ) -> Option<Result<VmValue, VmError>> {
         let result = match method {
-            "count" => Ok(VmValue::Int(items.len() as i64)),
+            "len" => Ok(VmValue::Int(items.len() as i64)),
             "empty" => Ok(VmValue::Bool(items.is_empty())),
-            "map" | "filter" | "find" | "flat_map" | "sorted_by" | "sort_by" | "partition"
-            | "group_by" | "take_while" | "drop_while" | "count_by" => {
+            "map" | "filter" | "find" | "flat_map" | "sorted_by" | "partition" | "group_by"
+            | "take_while" | "drop_while" | "count_by" => {
                 if args.first().is_some_and(Self::is_callable_value) {
                     return None;
                 }
@@ -31,13 +31,13 @@ impl crate::vm::Vm {
                 }
                 Ok(VmValue::Bool(false))
             }
-            "all" | "every" | "all?" => {
+            "all" => {
                 if args.first().is_some_and(Self::is_callable_value) {
                     return None;
                 }
                 Ok(VmValue::Bool(true))
             }
-            "sorted" | "sort" => {
+            "sorted" => {
                 if !args.is_empty() {
                     return Some(Err(VmError::TypeError(
                         "list.sorted takes no arguments; use list.sorted_by(fn) for key-based sorting"
@@ -48,7 +48,7 @@ impl crate::vm::Vm {
                 sorted.sort_by(|a, b| compare_values(a, b).cmp(&0));
                 Ok(VmValue::List(std::sync::Arc::new(sorted)))
             }
-            "reversed" | "reverse" => {
+            "reversed" => {
                 let mut rev: Vec<VmValue> = items.iter().cloned().collect();
                 rev.reverse();
                 Ok(VmValue::List(std::sync::Arc::new(rev)))
@@ -66,7 +66,7 @@ impl crate::vm::Vm {
                     .join(&sep);
                 Ok(VmValue::String(arcstr::ArcStr::from(joined)))
             }
-            "contains" | "includes" => {
+            "contains" => {
                 let needle = args.first().unwrap_or(&VmValue::Nil);
                 Ok(VmValue::Bool(items.iter().any(|v| values_equal(v, needle))))
             }
@@ -238,19 +238,7 @@ impl crate::vm::Vm {
                 }
                 Ok(VmValue::List(std::sync::Arc::new(result)))
             }
-            "appending" | "push" => {
-                let mut new_list: Vec<VmValue> = items.iter().cloned().collect();
-                if let Some(item) = args.first() {
-                    new_list.push(item.clone());
-                }
-                Ok(VmValue::List(std::sync::Arc::new(new_list)))
-            }
-            "dropping_last" | "pop" => {
-                let mut new_list: Vec<VmValue> = items.iter().cloned().collect();
-                new_list.pop();
-                Ok(VmValue::List(std::sync::Arc::new(new_list)))
-            }
-            "none" | "none?" => {
+            "none" => {
                 if args.first().is_some_and(Self::is_callable_value) {
                     return None;
                 }
@@ -262,29 +250,17 @@ impl crate::vm::Vm {
                 }
                 Ok(VmValue::Int(-1))
             }
-            "first" => {
-                let n = args.first().and_then(|a| a.as_int());
-                match n {
-                    Some(count) => Ok(VmValue::List(std::sync::Arc::new(
-                        items.iter().take(count.max(0) as usize).cloned().collect(),
-                    ))),
-                    None => Ok(items.first().cloned().unwrap_or(VmValue::Nil)),
+            "first" if args.is_empty() => Ok(items.first().cloned().unwrap_or(VmValue::Nil)),
+            "last" if args.is_empty() => Ok(items.last().cloned().unwrap_or(VmValue::Nil)),
+            "first" | "last" => Err(VmError::TypeError(format!(
+                "list.{method}() takes no arguments; use {} for several elements",
+                if method == "first" {
+                    "take(n)"
+                } else {
+                    "slice(-n)"
                 }
-            }
-            "last" => {
-                let n = args.first().and_then(|a| a.as_int());
-                match n {
-                    Some(count) => {
-                        let count = count.max(0) as usize;
-                        let skip = items.len().saturating_sub(count);
-                        Ok(VmValue::List(std::sync::Arc::new(
-                            items.iter().skip(skip).cloned().collect(),
-                        )))
-                    }
-                    None => Ok(items.last().cloned().unwrap_or(VmValue::Nil)),
-                }
-            }
-            "chunk" | "each_slice" => {
+            ))),
+            "chunks" => {
                 let size = args.first().and_then(|a| a.as_int()).unwrap_or(1).max(1) as usize;
                 let chunks: Vec<VmValue> = items
                     .chunks(size)
@@ -309,7 +285,7 @@ impl crate::vm::Vm {
                     .collect();
                 Ok(VmValue::List(std::sync::Arc::new(result)))
             }
-            "window" | "each_cons" | "sliding_window" => {
+            "windows" => {
                 let size = args.first().and_then(|a| a.as_int()).unwrap_or(2).max(1) as usize;
                 let step = args.get(1).and_then(|a| a.as_int()).unwrap_or(1).max(1) as usize;
                 if size > items.len() {
@@ -364,7 +340,10 @@ impl crate::vm::Vm {
             }
             "to_list" => Ok(VmValue::List(Arc::clone(items))),
             "to_set" => Ok(VmValue::set(items.iter().cloned())),
-            _ => Err(VmError::Runtime(format!("list has no method `{method}`"))),
+            _ => Err(Self::no_builtin_method_error(
+                harn_parser::builtin_methods::MethodReceiver::List,
+                method,
+            )),
         };
         Some(result)
     }
@@ -438,7 +417,7 @@ impl crate::vm::Vm {
                 }
                 Ok(VmValue::Bool(false))
             }
-            "all" | "every" | "all?" => {
+            "all" => {
                 let Some(callable) = args.first().filter(|v| Self::is_callable_value(v)) else {
                     return Ok(VmValue::Bool(true));
                 };
@@ -465,7 +444,7 @@ impl crate::vm::Vm {
                 }
                 Ok(VmValue::List(std::sync::Arc::new(results)))
             }
-            "sorted_by" | "sort_by" => {
+            "sorted_by" => {
                 let Some(callable) = args.first().filter(|v| Self::is_callable_value(v)) else {
                     return Ok(VmValue::Nil);
                 };
@@ -479,7 +458,7 @@ impl crate::vm::Vm {
                     keyed.into_iter().map(|(v, _)| v).collect(),
                 )))
             }
-            "none" | "none?" => {
+            "none" => {
                 let Some(callable) = args.first().filter(|v| Self::is_callable_value(v)) else {
                     return Ok(VmValue::Bool(items.is_empty()));
                 };
@@ -634,7 +613,10 @@ impl crate::vm::Vm {
                         .collect::<crate::value::DictMap>(),
                 ))
             }
-            _ => Err(VmError::Runtime(format!("list has no method `{method}`"))),
+            _ => Err(Self::no_builtin_method_error(
+                harn_parser::builtin_methods::MethodReceiver::List,
+                method,
+            )),
         }
     }
 }

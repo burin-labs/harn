@@ -24,6 +24,7 @@ pub(crate) mod doc;
 pub(crate) mod doctor;
 #[cfg(feature = "hostlib")]
 pub(crate) mod doctor_sandbox;
+pub(crate) mod dump_builtin_methods;
 pub(crate) mod dump_highlight_keywords;
 pub(crate) mod dump_portable_benchmark_schema;
 pub(crate) mod dump_prompt_grammar;

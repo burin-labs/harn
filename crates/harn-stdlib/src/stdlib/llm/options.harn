@@ -219,7 +219,7 @@ pub fn llm_call_options(options: dict? = nil) {
   let allowed = __llm_call_option_registry().keys
   for key in keys(base) {
     if starts_with(key, "_") {
-      allowed = allowed.appending(key)
+      allowed.push(key)
     }
   }
   return pick_keys(base, allowed, {drop_nil: true})
@@ -349,7 +349,10 @@ pub fn llm_clear_one_shot_prefill(options: any = nil) -> dict {
   if base?._harn_one_shot_prefill != true {
     return base
   }
-  return base.removing("prefill").removing("_harn_one_shot_prefill")
+  let cleared = base
+  cleared.remove("prefill")
+  cleared.remove("_harn_one_shot_prefill")
+  return cleared
 }
 
 /**

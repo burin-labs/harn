@@ -129,7 +129,7 @@ fn __comfy_upload_inputs_result(
     names = names + [uploaded_subfolder == "" ? name : uploaded_subfolder + "/" + name]
   }
   let prepared = request
-  prepared.params = (request.params ?? {}).merging({comfy_input_names: names})
+  prepared.params = (request.params ?? {}).merge({comfy_input_names: names})
   return Ok(prepared)
 }
 

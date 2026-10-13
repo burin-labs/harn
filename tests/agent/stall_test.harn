@@ -1211,7 +1211,7 @@ fn _parity_drive(agent: HarnessAgent, cfg: any) {
       },
     )
     s = o.state
-    out = out.appending(
+    out.push(
       {
         pattern: o.warning?.pattern,
         hard_stop: o.hard_stop,

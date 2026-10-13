@@ -172,7 +172,7 @@ fn __unique_names(names: any) -> list<string> {
   let unique = []
   for name in names {
     if name != "" && !contains(unique, name) {
-      unique = unique.appending(name)
+      unique.push(name)
     }
   }
   return unique
@@ -181,7 +181,7 @@ fn __unique_names(names: any) -> list<string> {
 fn __session_tool_names(lifecycle: AgentTranscriptToolLifecycleReport) -> list<string> {
   let names = []
   for call in lifecycle.calls {
-    names = names.appending(call.name)
+    names.push(call.name)
   }
   return __unique_names(names)
 }
@@ -212,7 +212,7 @@ pub fn __judge_evidence_projection(
 fn __judge_knowledge_state(lifecycle: AgentTranscriptToolLifecycleReport, text: string) -> string {
   let tool_evidence = []
   for call in lifecycle.calls {
-    tool_evidence = tool_evidence.appending(
+    tool_evidence.push(
       {
         name: call.name,
         tool_call_id: call.tool_call_id,
@@ -700,7 +700,7 @@ pub fn __done_contract_judge_system(opts: dict) -> string {
     "Keep `detail` as the one-line summary of the whole refusal.",
   ]
   if extra != "" {
-    lines = lines.appending("Additional rubric:\n" + extra)
+    lines.push("Additional rubric:\n" + extra)
   }
   return join(lines, "\n")
 }

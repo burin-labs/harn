@@ -59,14 +59,14 @@ fn __stance_read_only_names(registry: dict, policy: dict?, hard_keep: list?, esc
   }
   for name in hard_keep ?? [] {
     if !contains(names, name) {
-      names = names.appending(name)
+      names.push(name)
     }
   }
   for entry in __stance_registry_entries(registry) {
     const name = __stance_entry_name(entry)
     if agent_tool_is_read_only(entry, policy, name) {
       if name != "" && !contains(names, name) {
-        names = names.appending(name)
+        names.push(name)
       }
     }
   }
@@ -82,7 +82,7 @@ fn __stance_policy_patch(opts: dict, escape_tool: any) {
   if type_of(allowed) != "list" || len(allowed) == 0 || contains(allowed, escape_tool) {
     return {policy: policy}
   }
-  return {policy: policy + {tools: allowed.appending(escape_tool)}}
+  return {policy: policy + {tools: allowed + [escape_tool]}}
 }
 
 fn __stance_recent_user_messages(agent: HarnessAgent, session_id: any, limit: int = 6) {
@@ -94,7 +94,7 @@ fn __stance_recent_user_messages(agent: HarnessAgent, session_id: any, limit: in
   let recent = []
   for message in messages ?? [] {
     if (message?.role ?? "") == "user" {
-      recent = recent.appending(to_string(message?.content ?? ""))
+      recent.push(to_string(message?.content ?? ""))
     }
   }
   const count = len(recent)

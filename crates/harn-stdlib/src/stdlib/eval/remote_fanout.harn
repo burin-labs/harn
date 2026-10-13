@@ -146,7 +146,7 @@ fn __shard_safe(value: string) -> string {
   while out.contains("--") {
     out = out.replace("--", "-")
   }
-  const slug = lowercase(out.trim("-"))
+  const slug = lowercase(regex_replace("^-+|-+$", "", out))
   if slug == "" {
     return "case"
   }
@@ -409,8 +409,8 @@ pub fn remote_eval_fanout_trial_receipt(
 }
 
 fn __slash_join(base: string, tail: string) -> string {
-  const clean_base = base.trim_end("/")
-  const clean_tail = tail.trim_start("/")
+  const clean_base = regex_replace("/+$", "", base)
+  const clean_tail = regex_replace("^/+", "", tail)
   if clean_base == "" {
     return clean_tail
   }

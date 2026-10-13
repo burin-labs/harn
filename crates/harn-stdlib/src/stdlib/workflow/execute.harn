@@ -18,7 +18,7 @@ fn __workflow_execute_node_ids(value: unknown) -> list<string> {
   }
   for node_id in value {
     if type_of(node_id) == "string" {
-      node_ids = node_ids.appending(node_id)
+      node_ids.push(node_id)
     }
   }
   return node_ids
@@ -30,7 +30,7 @@ fn __workflow_execute_enqueue_unique(queue: list<string>, node_id: string) -> li
       return queue
     }
   }
-  return queue.appending(node_id)
+  return queue + [node_id]
 }
 
 fn __workflow_execute_pop_front(queue: list<string>) -> list<string> {

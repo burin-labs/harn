@@ -163,13 +163,13 @@ fn __render_sql_template(template: string, values: dict) {
         piece = __sql_fragment_text(value)
       } else {
         if positions[key] == nil {
-          params = params.appending(value)
+          params.push(value)
           positions[key] = len(params)
         }
         piece = "$" + to_string(positions[key])
       }
     }
-    pieces = pieces.appending(piece)
+    pieces.push(piece)
   }
   return {sql: join(pieces, ""), params: params}
 }
@@ -402,7 +402,7 @@ pub fn ident_path(parts: list<string>) -> PgSqlFragment {
   }
   let quoted = []
   for part in parts {
-    quoted = quoted.appending(quote_identifier(part))
+    quoted.push(quote_identifier(part))
   }
   return __sql_fragment(join(quoted, "."))
 }
@@ -498,7 +498,7 @@ pub fn sql_and(parts: list) -> PgSqlFragment {
   }
   let rendered = []
   for part in parts {
-    rendered = rendered.appending("(" + __predicate_part_text(part) + ")")
+    rendered.push("(" + __predicate_part_text(part) + ")")
   }
   return __sql_fragment("(" + join(rendered, " AND ") + ")")
 }
@@ -521,7 +521,7 @@ pub fn sql_or(parts: list) -> PgSqlFragment {
   }
   let rendered = []
   for part in parts {
-    rendered = rendered.appending("(" + __predicate_part_text(part) + ")")
+    rendered.push("(" + __predicate_part_text(part) + ")")
   }
   return __sql_fragment("(" + join(rendered, " OR ") + ")")
 }
@@ -571,8 +571,8 @@ pub fn jsonb_object(fields: list) -> PgSqlFragment {
     if !contains(field.keys(), "value") {
       throw "std/postgres/query: jsonb_object field value is required"
     }
-    rendered = rendered.appending(__sql_string_literal(field.key))
-    rendered = rendered.appending(__trusted_fragment_text(field.value, "jsonb_object field value"))
+    rendered.push(__sql_string_literal(field.key))
+    rendered.push(__trusted_fragment_text(field.value, "jsonb_object field value"))
   }
   return __sql_fragment("jsonb_build_object(" + join(rendered, ", ") + ")")
 }
@@ -607,7 +607,7 @@ pub fn columns(parts: list) -> PgSqlFragment {
   }
   let rendered = []
   for part in parts {
-    rendered = rendered.appending(__projection_part_text(part))
+    rendered.push(__projection_part_text(part))
   }
   return __sql_fragment(join(rendered, ", "))
 }
@@ -636,7 +636,7 @@ fn __qualified_column(name: string) -> string {
   const parts = split(name, ".")
   let validated = []
   for part in parts {
-    validated = validated.appending(identifier(part))
+    validated.push(identifier(part))
   }
   return join(validated, ".")
 }

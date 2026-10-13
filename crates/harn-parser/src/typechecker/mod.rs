@@ -12,7 +12,6 @@ mod binary_ops;
 mod exits;
 mod format;
 mod inference;
-pub mod method_registry;
 mod predicate;
 mod predicate_questions;
 mod schema_inference;

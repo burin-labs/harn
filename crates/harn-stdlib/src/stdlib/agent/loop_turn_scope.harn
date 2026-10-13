@@ -28,9 +28,7 @@ pub fn __scope_classifier_recent_context(
   let i = start
   while i < total {
     const msg = messages[i]
-    out = out.appending(
-      {role: to_string(msg?.role ?? ""), content: msg?.content ?? msg?.text ?? ""},
-    )
+    out.push({role: to_string(msg?.role ?? ""), content: msg?.content ?? msg?.text ?? ""})
     i = i + 1
   }
   return out
@@ -290,7 +288,7 @@ pub fn __scope_classifier_mounted_roots(anchor: dict) {
   }
   let lines = []
   for root in roots {
-    lines = lines.appending(
+    lines.push(
       "  - " + to_string(root?.path ?? root?.root ?? "")
         + " (mount_mode: "
         + to_string(root?.mount_mode ?? "")
@@ -597,7 +595,7 @@ pub fn __agent_loop_tool_call_names(tool_calls: list?) {
   for call in tool_calls ?? [] {
     const name = __tool_call_name(call)
     if name != "" && !contains(names, name) {
-      names = names.appending(name)
+      names.push(name)
     }
   }
   return names
@@ -890,9 +888,9 @@ pub fn __agent_loop_final_wrapup(
   } else {
     let parts = []
     if base_system != "" {
-      parts = parts.appending(base_system)
+      parts.push(base_system)
     }
-    parts = parts.appending(directive)
+    parts.push(directive)
     join(parts, "\n\n")
   }
   const wrapup_context = __agent_loop_effective_wrapup_context(
@@ -901,9 +899,8 @@ pub fn __agent_loop_final_wrapup(
     stop_reason,
   )
   const turn_messages = if host_wrapup {
-    turn_prompt.messages.appending(
-      {role: "user", content: directive + __agent_loop_render_wrapup_context(wrapup_context)},
-    )
+    turn_prompt.messages
+      + [{role: "user", content: directive + __agent_loop_render_wrapup_context(wrapup_context)}]
   } else {
     turn_prompt.messages
   }

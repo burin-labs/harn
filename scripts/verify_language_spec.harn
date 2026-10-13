@@ -32,7 +32,7 @@ fn is_word_or_dot(c: string) -> bool {
  * strip leading/trailing dashes. Empty results become "section".
  */
 pub fn slugify(value: string) -> string {
-  const lowered = value.trim().to_lower()
+  const lowered = value.trim().lower()
   const dashed = regex_replace(r"[^a-z0-9]+", "-", lowered)
   let start = 0
   let end = dashed.len()
@@ -109,7 +109,7 @@ pub fn normalize_snippet(snippet: string) -> string {
  * `# error:`.
  */
 pub fn should_skip_snippet(snippet: string) -> bool {
-  const lowered = snippet.to_lower()
+  const lowered = snippet.lower()
   return lowered.contains("// error:") || lowered.contains("# error:")
 }
 
@@ -126,7 +126,7 @@ pub fn fence_info(line: string) -> string? {
   if rest.contains("`") {
     return nil
   }
-  return rest.trim().to_lower()
+  return rest.trim().lower()
 }
 
 /**

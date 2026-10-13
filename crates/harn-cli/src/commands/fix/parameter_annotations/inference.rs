@@ -12,8 +12,9 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
+use harn_parser::builtin_methods::{self, MethodReceiver};
 use harn_parser::param_annotations::UnannotatedParam;
-use harn_parser::typechecker::{format_type, method_registry};
+use harn_parser::typechecker::format_type;
 use harn_parser::{visit, BindingPattern, Node, SNode, TypeExpr};
 
 /// Why a parameter got the annotation it got.
@@ -904,20 +905,20 @@ fn receiver_type(methods: &BTreeSet<String>) -> Option<String> {
     if methods.is_empty() {
         return None;
     }
-    let tables: [(&str, &[&str]); 4] = [
-        ("string", method_registry::STRING_METHODS),
-        ("list", method_registry::LIST_METHODS),
-        ("dict", method_registry::DICT_METHODS),
-        ("set", method_registry::SET_METHODS),
+    let receivers = [
+        MethodReceiver::String,
+        MethodReceiver::List,
+        MethodReceiver::Dict,
+        MethodReceiver::Set,
     ];
-    let mut candidates: Vec<&str> = tables
+    let mut candidates: Vec<&str> = receivers
         .iter()
-        .filter(|(_, table)| {
+        .filter(|receiver| {
             methods
                 .iter()
-                .all(|method| table.contains(&method.as_str()))
+                .all(|method| builtin_methods::method(**receiver, method).is_some())
         })
-        .map(|(name, _)| *name)
+        .map(|receiver| receiver.type_name())
         .collect();
     candidates.dedup();
     match candidates.as_slice() {

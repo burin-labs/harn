@@ -370,6 +370,20 @@ impl Compiler {
             }
         }
         let has_spread = args.iter().any(|a| matches!(&a.node, Node::Spread(_)));
+        if !has_spread && self.is_mutating_method_call(object, method) {
+            return self.compile_mutating_method_call(object, method, args);
+        }
+        self.compile_plain_method_call(object, method, args)
+    }
+
+    /// Compile `object.method(args)` as an ordinary method call.
+    pub(super) fn compile_plain_method_call(
+        &mut self,
+        object: &SNode,
+        method: &str,
+        args: &[SNode],
+    ) -> Result<(), CompileError> {
+        let has_spread = args.iter().any(|a| matches!(&a.node, Node::Spread(_)));
         self.compile_node(object)?;
         let name_idx = self.string_constant(method);
         if has_spread {

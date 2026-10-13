@@ -870,7 +870,7 @@ const appended = base.appending(2)
 
 let built = []
 // this is how a collection is built up
-built = built.appending(1)
+built.push(1)
 ```
 
 Because the methods are pure, discarding a result silently does nothing;
@@ -5999,10 +5999,10 @@ permissive in four ways:
 In addition to compile-time checking, function parameters with type annotations
 are enforced at runtime. When a function is called, the VM verifies that each
 annotated parameter matches its declared type before executing the function body.
-If the types do not match, a type error is thrown:
+If the types do not match, a `TypeError` is thrown:
 
 ```text
-Type error: function 'greet' parameter 'name' expected string, got int (42)
+TypeError: parameter 'name' expected string, got int (42)
 ```
 
 The following types are enforced at runtime: `int`, `float`, `string`, `bytes`,

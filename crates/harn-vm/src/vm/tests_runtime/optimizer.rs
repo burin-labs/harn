@@ -242,33 +242,33 @@ pipeline t(harness: Harness, task: unknown) {
 }
 
 #[test]
-fn list_appending_assign_preserves_alias_immutability() {
-    // The compiler lowers `x = x.appending(v)` through the same fused concat opcode
-    // as `x = x + [v]`. Rebinding `x` must still leave an existing alias `y`
+fn list_push_preserves_alias_immutability() {
+    // The compiler lowers `x.push(v)` through the same fused concat opcode
+    // as `x = x + [v]`. Pushing onto `x` must still leave an existing alias `y`
     // pointing at the original immutable list.
     let source = r#"
 pipeline t(harness: Harness, task: unknown) {
   let x = []
-  x = x.appending(1)
+  x.push(1)
   const y = x
-  x = x.appending(2)
+  x.push(2)
   harness.stdio.log("${x} ${y}")
 }"#;
     assert_eq!(run_output(source), "[harn] [1, 2] [1]");
 }
 
 #[test]
-fn list_appending_multiple_sites_matches_unoptimized() {
+fn list_push_multiple_sites_matches_unoptimized() {
     let source = r#"
 pipeline t(harness: Harness) {
   let x = [1]
   const before = x
   for i in [2, 3] {
-    if i == 2 { x = x.appending(i) } else { x = x.appending(i) }
+    if i == 2 { x.push(i) } else { x.push(i) }
   }
   const middle = x
-  x = x.appending("four")
-  x = x.appending(x)
+  x.push("four")
+  x.push(x)
   harness.stdio.println(before)
   harness.stdio.println(middle)
   harness.stdio.println(x)

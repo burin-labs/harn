@@ -33,6 +33,9 @@ pub(crate) fn dispatch(command: Command) {
         Command::DumpPromptGrammar(args) => {
             commands::dump_prompt_grammar::run(&args.output, args.check);
         }
+        Command::DumpBuiltinMethods(args) => {
+            commands::dump_builtin_methods::run(&args.output, args.check);
+        }
         Command::DumpTriggerQuickref(args) => {
             commands::dump_trigger_quickref::run(&args.output, args.check);
         }

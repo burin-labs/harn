@@ -95,16 +95,18 @@ const frozen = {}
 frozen["alice"] = 1    // error: `const` means this value never changes
 ```
 
-Methods never modify the receiver — `appending` returns a *new* list — so they are
-fine on a `const`, and you build a collection by assigning the result back:
+Mutating methods such as `push`, `pop`, and `sort` change the receiver the same
+way, so they also need `let`. Copy-returning methods such as `sorted` leave the
+receiver alone and return a new value, so they are fine on a `const`:
 
 ```harn
 let items = []
-items = items.appending("a")   // `items` is now ["a"]
+items.push("a")   // `items` is now ["a"]
 
-const base = []
-// error[HARN-LNT-066]: no effect — `base` is still []
-base.appending("a")
+const base = [2, 1]
+const ordered = base.sorted()   // `base` is still [2, 1]
+// error[HARN-OWN-001]: `push` would change `base`, which is `const`
+base.push(3)
 ```
 
 See [Binding mutability](./spec/language/04-scope-rules.md#binding-mutability)
@@ -349,9 +351,9 @@ const greeting = """
 "  hello  ".trim()              // "hello"
 "hello".starts_with("he")       // true
 "hello".ends_with("lo")         // true
-"hello hello".rfind("lo")       // 9
-"hello".uppercase()             // "HELLO"
-"hello".lowercase()             // "hello"
+"hello hello".last_index_of("lo")       // 9
+"hello".upper()             // "HELLO"
+"hello".lower()             // "hello"
 "hello world".substring(0, 5)   // "hello"
 ```
 
@@ -974,7 +976,7 @@ user.has("email")   // false
 user.keys()         // ["age", "name"] (sorted)
 user.values()       // [30, "Alice"]
 user.entries()      // [{key: "age", value: 30}, ...]
-user.merging({role: "admin"})  // new dict with merged keys
+user.merge({role: "admin"})  // new dict with merged keys
 user.map_values({ v -> to_string(v) })
 user.filter({ v -> type_of(v) == "int" })
 ```

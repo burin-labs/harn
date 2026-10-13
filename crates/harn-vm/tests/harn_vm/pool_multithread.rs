@@ -37,7 +37,7 @@ pipeline main(harness: Harness, task: unknown) {
   let handles = []
   for i in 0 to 8 exclusive {
     const seed = i
-    handles = handles.appending(pool.submit({ -> seed + 10 }))
+    handles.push(pool.submit({ -> seed + 10 }))
   }
   const results = pool_wait(harness.agent, handles)
   let completed = 0

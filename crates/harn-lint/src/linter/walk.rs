@@ -427,6 +427,12 @@ impl<'a> Linter<'a> {
                 method,
                 args,
             } => {
+                // `xs.push(v)` rewrites `xs` like `xs[i] = v` does.
+                if let Some(root) = harn_parser::builtin_methods::mutating_call_place(snode)
+                    .and_then(harn_parser::builtin_methods::place_root)
+                {
+                    self.assignments.insert(root.to_string());
+                }
                 self.check_harness_method_effect_policy(object, method, args, snode.span);
                 if self.harness_call_uses_background_flag(object, method, args) {
                     self.warn_unmanaged_long_running_call(method, snode.span);

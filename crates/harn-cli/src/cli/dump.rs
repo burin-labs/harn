@@ -19,6 +19,17 @@ pub(crate) struct DumpHighlightKeywordsArgs {
 }
 
 #[derive(Debug, Args)]
+pub(crate) struct DumpBuiltinMethodsArgs {
+    /// Markdown file whose generated builtin-method region is rewritten.
+    #[arg(long, default_value = "docs/src/builtins.md")]
+    pub output: String,
+    /// Verify the generated region matches the method registry; exit
+    /// non-zero if stale.
+    #[arg(long)]
+    pub check: bool,
+}
+
+#[derive(Debug, Args)]
 pub(crate) struct DumpPromptGrammarArgs {
     /// Path to the generated TextMate grammar (relative to the repo root).
     #[arg(

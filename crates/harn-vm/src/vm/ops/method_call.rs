@@ -17,7 +17,7 @@ impl super::super::Vm {
         }
 
         match (target, obj) {
-            (MethodCacheTarget::ListCount, VmValue::List(items)) => {
+            (MethodCacheTarget::ListLen, VmValue::List(items)) => {
                 Some(VmValue::Int(items.len() as i64))
             }
             (MethodCacheTarget::ListEmpty, VmValue::List(items)) => {
@@ -27,7 +27,7 @@ impl super::super::Vm {
                 let needle = args.first().unwrap_or(&VmValue::Nil);
                 Some(VmValue::Bool(items.iter().any(|v| values_equal(v, needle))))
             }
-            (MethodCacheTarget::StringCount, VmValue::String(s)) => {
+            (MethodCacheTarget::StringLen, VmValue::String(s)) => {
                 Some(VmValue::Int(string_char_count(s) as i64))
             }
             (MethodCacheTarget::StringEmpty, VmValue::String(s)) => {
@@ -36,16 +36,14 @@ impl super::super::Vm {
             (MethodCacheTarget::StringContains, VmValue::String(s)) => Some(VmValue::Bool(
                 s.contains(&*args.first().map(|arg| arg.display()).unwrap_or_default()),
             )),
-            (MethodCacheTarget::DictCount, VmValue::Dict(map)) => {
+            (MethodCacheTarget::DictLen, VmValue::Dict(map)) => {
                 Some(VmValue::Int(map.len() as i64))
             }
             (MethodCacheTarget::DictHas, VmValue::Dict(map)) => {
                 let key = args.first().map(|arg| arg.display()).unwrap_or_default();
                 Some(VmValue::Bool(map.contains_key(key.as_str())))
             }
-            (MethodCacheTarget::RangeCount | MethodCacheTarget::RangeLen, VmValue::Range(r)) => {
-                Some(VmValue::Int(r.len()))
-            }
+            (MethodCacheTarget::RangeLen, VmValue::Range(r)) => Some(VmValue::Int(r.len())),
             (MethodCacheTarget::RangeEmpty, VmValue::Range(r)) => Some(VmValue::Bool(r.is_empty())),
             (MethodCacheTarget::RangeFirst, VmValue::Range(r)) => {
                 Some(r.first().map(VmValue::Int).unwrap_or(VmValue::Nil))
@@ -53,7 +51,7 @@ impl super::super::Vm {
             (MethodCacheTarget::RangeLast, VmValue::Range(r)) => {
                 Some(r.last().map(VmValue::Int).unwrap_or(VmValue::Nil))
             }
-            (MethodCacheTarget::SetCount | MethodCacheTarget::SetLen, VmValue::Set(items)) => {
+            (MethodCacheTarget::SetLen, VmValue::Set(items)) => {
                 Some(VmValue::Int(items.len() as i64))
             }
             (MethodCacheTarget::SetEmpty, VmValue::Set(items)) => {
@@ -107,24 +105,23 @@ impl super::super::Vm {
         match obj {
             VmValue::Harness(handle) => Self::harness_sync_method_cache_target(handle, method),
             VmValue::List(_) => match (method, argc) {
-                ("count", 0) => Some(MethodCacheTarget::ListCount),
+                ("len", 0) => Some(MethodCacheTarget::ListLen),
                 ("empty", 0) => Some(MethodCacheTarget::ListEmpty),
-                ("contains" | "includes", 1) => Some(MethodCacheTarget::ListContains),
+                ("contains", 1) => Some(MethodCacheTarget::ListContains),
                 _ => None,
             },
             VmValue::String(_) => match (method, argc) {
-                ("count" | "len", 0) => Some(MethodCacheTarget::StringCount),
+                ("len", 0) => Some(MethodCacheTarget::StringLen),
                 ("empty", 0) => Some(MethodCacheTarget::StringEmpty),
-                ("contains" | "includes", 1) => Some(MethodCacheTarget::StringContains),
+                ("contains", 1) => Some(MethodCacheTarget::StringContains),
                 _ => None,
             },
             VmValue::Dict(_) => match (method, argc) {
-                ("count", 0) => Some(MethodCacheTarget::DictCount),
+                ("len", 0) => Some(MethodCacheTarget::DictLen),
                 ("has", 1) => Some(MethodCacheTarget::DictHas),
                 _ => None,
             },
             VmValue::Range(_) => match (method, argc) {
-                ("count", 0) => Some(MethodCacheTarget::RangeCount),
                 ("len", 0) => Some(MethodCacheTarget::RangeLen),
                 ("empty", 0) => Some(MethodCacheTarget::RangeEmpty),
                 ("first", 0) => Some(MethodCacheTarget::RangeFirst),
@@ -132,10 +129,9 @@ impl super::super::Vm {
                 _ => None,
             },
             VmValue::Set(_) => match (method, argc) {
-                ("count", 0) => Some(MethodCacheTarget::SetCount),
                 ("len", 0) => Some(MethodCacheTarget::SetLen),
                 ("empty", 0) => Some(MethodCacheTarget::SetEmpty),
-                ("contains" | "includes", 1) => Some(MethodCacheTarget::SetContains),
+                ("contains", 1) => Some(MethodCacheTarget::SetContains),
                 _ => None,
             },
             _ => None,

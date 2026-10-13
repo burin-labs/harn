@@ -799,25 +799,25 @@ pub fn __verification_delta_signature(agent: HarnessAgent, value: unknown, cfg: 
         __verification_delta_location(value)
       }
       if location != "" {
-        parts = parts.appending(location)
+        parts.push(location)
       }
     }
     if cfg?.include_severity == true {
       const severity = trim(to_string(value?.severity ?? value?.level ?? ""))
       if severity != "" {
-        parts = parts.appending(severity)
+        parts.push(severity)
       }
     }
     if cfg?.include_code != false {
       const code = trim(to_string(value?.code ?? value?.rule ?? value?.kind ?? ""))
       if code != "" {
-        parts = parts.appending(code)
+        parts.push(code)
       }
     }
   }
   const text = __verification_delta_raw_text(value)
   if text != "" {
-    parts = parts.appending(text)
+    parts.push(text)
   }
   return __verification_delta_normalize_text(agent, join(parts, " "), cfg)
 }
@@ -845,7 +845,7 @@ pub fn __verification_delta_info(agent: HarnessAgent, value: unknown, cfg: dict)
   for entry in entries {
     const signature = __verification_delta_signature(agent, entry, cfg)
     if signature != "" && !__verification_delta_ignored(signature, cfg) {
-      normalized = normalized.appending(signature)
+      normalized.push(signature)
       const severity = if type_of(entry) == "dict" {
         lowercase(to_string(entry?.severity ?? entry?.level ?? "error"))
       } else {
@@ -853,14 +853,14 @@ pub fn __verification_delta_info(agent: HarnessAgent, value: unknown, cfg: dict)
       }
       if !["warning", "warn", "note", "info", "help", "hint"].contains(severity)
         && !failure_signatures.contains(signature) {
-        failure_signatures = failure_signatures.appending(signature)
+        failure_signatures.push(signature)
       }
     }
   }
   let signatures: list<string> = []
   for signature in normalized {
     if !signatures.contains(signature) {
-      signatures = signatures.appending(signature)
+      signatures.push(signature)
     }
   }
   const direct_count = __verification_delta_direct_count(value)
@@ -885,7 +885,7 @@ pub fn __verification_delta_set_minus(left: list<string>, right: list<string>) -
   let out: list<string> = []
   for item in left {
     if !right.contains(item) && !out.contains(item) {
-      out = out.appending(item)
+      out.push(item)
     }
   }
   return out.sorted()
@@ -898,7 +898,7 @@ pub fn __verification_delta_set_intersection(
   let out: list<string> = []
   for item in left {
     if right.contains(item) && !out.contains(item) {
-      out = out.appending(item)
+      out.push(item)
     }
   }
   return out.sorted()
