@@ -199,7 +199,7 @@ pub(super) fn collect_workflow_jobs(
     required_checks: Option<&BTreeSet<String>>,
 ) -> Vec<WorkflowJobEvidence> {
     let mut entries = jobs.iter().collect::<Vec<_>>();
-    entries.sort_by(|(a, _), (b, _)| a.cmp(b));
+    entries.sort_by_key(|(a, _)| *a);
     entries
         .into_iter()
         .filter_map(|(job_id, job_value)| {
@@ -535,7 +535,7 @@ pub(super) fn collect_nested_run_commands(
                     }
                 }
                 let mut entries = mapping.iter().collect::<Vec<_>>();
-                entries.sort_by(|(a, _), (b, _)| a.cmp(b));
+                entries.sort_by_key(|(a, _)| *a);
                 for (key, child) in entries.into_iter().rev() {
                     if key == "run" {
                         continue;
