@@ -24,11 +24,6 @@ all-features = true
 # the tree; do not keep it "just in case" the crate returns.
 ignore = [
     # --- Unmaintained/unsound transitive deps, no vuln, no safe upgrade ---
-    # unsafe-libyaml is archived upstream; reached only through serde_yaml_ng.
-    # The exit is moving Harn's YAML handling to a safe-Rust parser, which
-    # deletes this entry. Expires 2027-01-12: past that date, migrate rather
-    # than renew.
-    { id = "RUSTSEC-2024-0449", reason = "unsafe-libyaml unmaintained (archived), no vuln. Transitive via serde_yaml_ng pending the move to a safe-Rust YAML parser. Expires 2027-01-12. https://rustsec.org/advisories/RUSTSEC-2024-0449" },
     { id = "RUSTSEC-2024-0436", reason = "paste 1.x unmaintained proc-macro; transitive, no vuln, no drop-in replacement. https://rustsec.org/advisories/RUSTSEC-2024-0436" },
     # --- quick-xml DoS advisories: transitive under xcap (screen capture for
     # computer-use), which is at its latest 0.9.6. The fix (>=0.41.0) is

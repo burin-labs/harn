@@ -22,7 +22,7 @@ async fn get(app: &Router, path: &str) -> Response {
 }
 
 fn assert_event_envelope(event: &Value) {
-    let specification: Value = serde_yaml_ng::from_str(OPENAPI_YAML).unwrap();
+    let specification: Value = harn_vm::yaml::from_str(OPENAPI_YAML).unwrap();
     for schema in [
         &specification["components"]["schemas"]["ResourceEnvelope"],
         &specification["components"]["schemas"]["Event"]["allOf"][1],

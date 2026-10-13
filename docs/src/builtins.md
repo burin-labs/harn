@@ -96,7 +96,7 @@ harness.stdio.log(unwrap_err(bad))         // something went wrong
 | `json_parse(str)` | str: string | value | Parse JSON into Harn values. Throws `{error: "json_parse_error", kind, message, line, column}` for malformed or over-depth input |
 | `json_stringify(value)` | value: any | string | Serialize Harn value to JSON. Closures and handles become `null` |
 | `json_stringify_pretty(value)` | value: any | string | Serialize Harn value to pretty-printed JSON with stable two-space indentation |
-| `yaml_parse(str)` | str: string | value | Parse YAML string into Harn values. Throws on invalid YAML |
+| `yaml_parse(str)` | str: string | value | Parse one YAML document into Harn values. Only `true`/`false` are booleans, merge keys expand, and mapping keys become strings. Throws on invalid YAML, duplicate keys, or multiple documents |
 | `yaml_stringify(value)` | value: any | string | Serialize Harn value to YAML |
 | `toml_parse(str)` | str: string | value | Parse TOML string into Harn values. Throws on invalid TOML |
 | `toml_stringify(value)` | value: any | string | Serialize Harn value to TOML |

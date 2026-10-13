@@ -3,8 +3,8 @@ use super::*;
 #[tokio::test]
 async fn advertised_live_control_paths_are_mounted() {
     let app = build_test_router().await;
-    let openapi: serde_yaml_ng::Value =
-        serde_yaml_ng::from_str(OPENAPI_YAML).expect("canonical OpenAPI YAML");
+    let openapi: serde_json::Value =
+        harn_vm::yaml::from_str(OPENAPI_YAML).expect("canonical OpenAPI YAML");
     for path in [
         "/v1/sessions/{session_id}/live-clients",
         "/v1/sessions/{session_id}/attach",
@@ -14,7 +14,7 @@ async fn advertised_live_control_paths_are_mounted() {
         "/v1/tasks/{task_id}/messages",
     ] {
         assert!(
-            openapi["paths"][path].is_mapping(),
+            openapi["paths"][path].is_object(),
             "canonical OpenAPI must advertise {path}"
         );
         let concrete_path = path

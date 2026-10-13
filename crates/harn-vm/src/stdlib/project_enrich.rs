@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use serde::{Deserialize, Serialize};
-use serde_yaml_ng::Value as YamlValue;
+use serde_json::Value as YamlValue;
 
 use crate::llm::{execute_llm_call, extract_llm_options, vm_value_to_json};
 use crate::runtime_limits::RuntimeLimits;
@@ -797,7 +797,7 @@ exit 1
 
     #[test]
     fn lefthook_run_collection_preserves_sorted_depth_first_order() {
-        let value: YamlValue = serde_yaml_ng::from_str(
+        let value: YamlValue = crate::yaml::from_str(
             r"
 commands:
   z:
@@ -819,14 +819,9 @@ commands:
 
     #[test]
     fn lefthook_run_collection_reports_yaml_depth_limit() {
-        let mut run = serde_yaml_ng::Mapping::new();
-        run.insert(
-            YamlValue::String("run".to_string()),
-            YamlValue::String("echo too-deep".to_string()),
-        );
-        let mut value = YamlValue::Mapping(run);
+        let mut value = serde_json::json!({"run": "echo too-deep"});
         for _ in 0..=PROJECT_ENRICH_YAML_MAX_DEPTH {
-            value = YamlValue::Sequence(vec![value]);
+            value = YamlValue::Array(vec![value]);
         }
 
         let mut commands = Vec::new();
@@ -1128,16 +1123,15 @@ jobs:
 
     #[test]
     fn collect_workflow_jobs_sorts_by_string_key() {
-        // serde_yaml_ng is Value-keyed, so job ids are `YamlValue`s, not
-        // `String`s. The collector sorts via `as_str().cmp(..)`; this pins the
-        // deterministic ordering that the old String-keyed `sort_by_key` gave.
-        let workflow: YamlValue = serde_yaml_ng::from_str(
+        // Job ids must come out in key order whatever order the document
+        // lists them in.
+        let workflow: YamlValue = crate::yaml::from_str(
             "jobs:\n  zeta:\n    steps: []\n  alpha:\n    steps: []\n  mid:\n    steps: []\n",
         )
         .expect("parse workflow yaml");
         let jobs = workflow
             .get("jobs")
-            .and_then(YamlValue::as_mapping)
+            .and_then(YamlValue::as_object)
             .expect("jobs mapping");
         let evidence = collect_workflow_jobs(jobs, "CI", None);
         let ids = evidence.iter().map(|j| j.id.as_str()).collect::<Vec<_>>();
@@ -1146,9 +1140,9 @@ jobs:
 
     #[test]
     fn lefthook_non_string_stage_key_does_not_crash() {
-        // A Value-keyed mapping can carry a non-string top-level key (here a
-        // number). The stage collector must skip it via its `as_str()` guard
-        // rather than panic, while still harvesting valid hyphenated stages.
+        // A numeric top-level key decodes as the string "123". It is not a
+        // hyphenated hook stage, so the collector skips it while still
+        // harvesting the valid stages.
         let content = "123:\n  commands:\n    lint:\n      run: echo numeric\n\
                        pre-commit:\n  commands:\n    fmt:\n      run: cargo fmt\n";
         let mut stages: BTreeMap<String, Vec<String>> = BTreeMap::new();

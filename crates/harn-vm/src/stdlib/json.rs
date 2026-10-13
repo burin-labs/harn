@@ -22,7 +22,7 @@ const JSON_PARSE_CACHE_LIMIT: usize = RuntimeLimits::DEFAULT.max_json_parse_cach
 const JSON_PARSE_MAX_CONTAINER_DEPTH: usize = 127;
 
 /// Deepest `VmValue` nesting we will hand to a third-party recursive encoder
-/// (pretty JSON via `serde_json`, YAML via `serde_yaml_ng`). Our own JSON writer
+/// (pretty JSON via `serde_json`, YAML via `crate::yaml`). Our own JSON writer
 /// grows the stack on demand, but those library serializers recurse without a
 /// hook we can guard, so a value past this depth is rejected with a catchable
 /// error rather than aborting the process. See `value::recursion`.
@@ -301,27 +301,14 @@ fn json_parse_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
 )]
 fn yaml_parse_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let text = args.first().map(|a| a.display()).unwrap_or_default();
-    match serde_yaml_ng::from_str::<serde_yaml_ng::Value>(&text) {
-        Ok(value) => match serde_json::to_value(value) {
-            Ok(json_value) => Ok(schema::json_to_vm_value(&json_value)),
-            Err(error) => Err(VmError::Thrown(structured_parse_error_value(
-                "yaml",
-                "malformed",
-                format!("YAML parse error: {error}"),
-                None,
-            ))),
-        },
-        Err(error) => {
-            let location = error
-                .location()
-                .map(|location| (location.line(), location.column()));
-            Err(VmError::Thrown(structured_parse_error_value(
-                "yaml",
-                "malformed",
-                format!("YAML parse error: {error}"),
-                location,
-            )))
-        }
+    match crate::yaml::from_str::<serde_json::Value>(&text) {
+        Ok(json_value) => Ok(schema::json_to_vm_value(&json_value)),
+        Err(error) => Err(VmError::Thrown(structured_parse_error_value(
+            "yaml",
+            "malformed",
+            format!("YAML parse error: {error}"),
+            error.location(),
+        ))),
     }
 }
 
@@ -334,7 +321,7 @@ fn yaml_stringify_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
     let value = args.first().unwrap_or(&VmValue::Nil);
     ensure_serializable_depth(value, "yaml_stringify")?;
     let data_value = vm_value_to_data_value(value);
-    serde_yaml_ng::to_string(&data_value)
+    crate::yaml::to_string(&data_value)
         .map(|text| VmValue::String(arcstr::ArcStr::from(text)))
         .map_err(|error| {
             VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
@@ -1401,6 +1388,17 @@ mod tests {
         // A value within the limit is accepted.
         let shallow = deep_list(8);
         assert!(ensure_serializable_depth(&shallow, "json_stringify_pretty").is_ok());
+        crate::value::recursion::dismantle(deep);
+    }
+
+    #[test]
+    fn yaml_stringify_encodes_the_deepest_accepted_value() {
+        // The depth guard is the only thing between the YAML serializer's
+        // recursion and the stack, so the deepest value it admits must encode.
+        let deep = deep_list(MAX_SERIALIZE_DEPTH);
+        let encoded = yaml_stringify_impl(std::slice::from_ref(&deep), &mut String::new())
+            .expect("a value at the depth limit encodes");
+        assert!(matches!(encoded, VmValue::String(text) if !text.is_empty()));
         crate::value::recursion::dismantle(deep);
     }
 

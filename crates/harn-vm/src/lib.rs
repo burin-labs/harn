@@ -282,6 +282,7 @@ pub mod waitpoints;
 pub mod windows_path;
 pub mod workspace_anchor;
 pub mod workspace_path;
+pub mod yaml;
 
 pub use persistent_state::{
     register_persistent_state_builtins_at_root, scope_persistent_state_root, PersistentStateRoot,
