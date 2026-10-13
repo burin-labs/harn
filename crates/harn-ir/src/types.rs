@@ -324,6 +324,21 @@ impl CapabilityEffect {
             access,
         }
     }
+
+    /// Capability a caller must hold to perform this effect.
+    ///
+    /// Authority effects keep their access and resource scope
+    /// (`authority.write@plan_admission`); every other effect requires its
+    /// capability's canonical name.
+    pub fn requirement(&self) -> String {
+        if self.capability == Capability::Authority {
+            return format!(
+                "authority.{}",
+                authority_effect_policy_operation(self.access, self.path.as_deref())
+            );
+        }
+        self.capability.canonical().to_string()
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

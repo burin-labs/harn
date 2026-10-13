@@ -1889,6 +1889,20 @@
       "name": "scan_tree_respects_gitignore_and_vendor_dirs_by_default",
       "reason": "Conformance scans a tree with a .gitignore'd directory and node_modules through project_scan_tree, which calls the same scanner, asserts both are excluded by default, and also checks the opt-in expanded mode.",
       "retainedPath": "conformance/tests/stdlib/project/project_scan_gitignore.harn"
+    },
+    {
+      "path": "crates/harn-cli/src/commands/routes.rs",
+      "name": "routes_preserve_scoped_authority_effect",
+      "reason": "DUP: routes and graph now share CapabilityEffect::requirement; the retained test asserts the same scoped authority and connector requirements plus graph's effect labels.",
+      "retainedPath": "crates/harn-cli/src/commands/graph.rs",
+      "retainedName": "graph_preserves_scoped_authority_effect"
+    },
+    {
+      "path": "crates/harn-cli/src/commands/quickstart.rs",
+      "name": "interactive_default_prefers_available_remote_provider",
+      "reason": "DUP: the interactive default and non-interactive selection now share preferred_choice_index; the retained test drives the same fixture through provider selection and asserts the chosen provider.",
+      "retainedPath": "crates/harn-cli/src/commands/quickstart.rs",
+      "retainedName": "non_interactive_prefers_available_remote_provider"
     }
   ],
   "retainedScenarios": [
