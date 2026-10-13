@@ -39,8 +39,13 @@ impl YamlError {
             .location()
             .filter(|location| location.line() > 0)
             .map(|location| (location.line() as usize, location.column() as usize));
+        // The user formatter leaves out the parser's Rust-API advice, and the
+        // rustc-style source snippet would bury the one-line cause in thrown
+        // Harn values and CLI output.
+        let mut render = serde_saphyr::RenderOptions::new(&serde_saphyr::UserMessageFormatter);
+        render.snippets = serde_saphyr::SnippetMode::Off;
         Self {
-            message: error.to_string(),
+            message: error.render_with_options(render),
             location,
         }
     }
@@ -68,9 +73,6 @@ fn options() -> serde_saphyr::Options {
         budget: Some(budget),
         strict_booleans: true,
         reject_non_finite_typeless_float: false,
-        // Messages travel into thrown Harn values and CLI output; the
-        // rustc-style source snippet would bury the one-line cause.
-        with_snippet: false,
     }
 }
 
@@ -113,10 +115,10 @@ mod tests {
         assert_eq!(
             parse(
                 "int: 37\nhex: 0x1F\noct: 0o17\nexp: 1e3\nfloat: 1.0\nver: 3.0.1\n\
-                   date: 2001-12-14\nnull: ~\nstr: !!str 123\n"
+                   date: 2001-12-14\nnothing: ~\nstr: !!str 123\n"
             ),
             json!({"int": 37, "hex": 31, "oct": 15, "exp": 1000.0, "float": 1.0,
-                   "ver": "3.0.1", "date": "2001-12-14", "null": null, "str": "123"})
+                   "ver": "3.0.1", "date": "2001-12-14", "nothing": null, "str": "123"})
         );
         // Non-finite floats have no JSON form, so they keep their spelling.
         assert_eq!(
@@ -159,6 +161,19 @@ mod tests {
     }
 
     #[test]
+    fn decode_errors_name_the_cause_and_place_without_parser_advice() {
+        let error = from_str::<Value>("a: 1\na: 2\n").expect_err("duplicate key");
+        assert_eq!(error.location(), Some((2, 1)));
+        let message = error.to_string();
+        assert!(message.contains("duplicate"), "{message}");
+        for advice in ["DuplicateKeyPolicy", "Options", "from_multiple", "Option<"] {
+            assert!(!message.contains(advice), "{advice} leaked into: {message}");
+        }
+        let multi = from_str::<Value>("a: 1\n---\nb: 2\n").expect_err("two documents");
+        assert!(!multi.to_string().contains("from_multiple"), "{multi}");
+    }
+
+    #[test]
     fn nesting_past_the_depth_cap_is_an_error() {
         let nested = |depth: usize| format!("{}1{}", "[".repeat(depth), "]".repeat(depth));
         assert!(from_str::<Value>(&nested(MAX_YAML_DEPTH - 1)).is_ok());
@@ -167,15 +182,19 @@ mod tests {
 
     #[test]
     fn alias_expansion_bombs_are_rejected() {
-        let mut text = String::from("a0: &a0 [x, x, x, x, x, x, x, x, x, x]\n");
-        for level in 1..10 {
-            let prev = level - 1;
-            text.push_str(&format!(
-                "a{level}: &a{level} [*a{prev}, *a{prev}, *a{prev}, *a{prev}, *a{prev}, \
-                 *a{prev}, *a{prev}, *a{prev}, *a{prev}, *a{prev}]\n"
-            ));
-        }
-        assert!(from_str::<Value>(&text).is_err());
+        let bomb = |levels: usize| {
+            let mut text = String::from("a0: &a0 [x, x, x, x, x, x, x, x, x, x]\n");
+            for level in 1..levels {
+                let prev = level - 1;
+                let refs = vec![format!("*a{prev}"); 10].join(", ");
+                text.push_str(&format!("a{level}: &a{level} [{refs}]\n"));
+            }
+            text
+        };
+        // The same shape at a harmless size decodes, so the rejection below is
+        // the expansion budget and not a malformed document.
+        assert!(from_str::<Value>(&bomb(2)).is_ok());
+        assert!(from_str::<Value>(&bomb(10)).is_err());
     }
 
     #[test]
