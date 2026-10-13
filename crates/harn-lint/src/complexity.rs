@@ -101,7 +101,7 @@ pub(crate) fn cyclomatic_complexity(nodes: &[SNode]) -> usize {
                     + node_complexity(false_expr)
             }
             Node::BinaryOp { op, left, right } => {
-                usize::frommatches!(op, BinaryOperator::And | BinaryOperator::Or)
+                usize::from(op.is_logical())
                     + node_complexity(left)
                     + node_complexity(right)
             }

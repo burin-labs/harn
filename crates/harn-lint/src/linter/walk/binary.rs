@@ -79,9 +79,9 @@ impl<'a> Linter<'a> {
             let is_bool_left = matches!(left.node, Node::BoolLiteral(_));
             let is_bool_right = matches!(right.node, Node::BoolLiteral(_));
             let compared_expression = if is_bool_left {
-                right.as_ref()
+                right
             } else {
-                left.as_ref()
+                left
             };
             // Equality with a Boolean literal is redundant only when
             // the other expression is proven to be exactly `bool`.
@@ -142,9 +142,9 @@ impl<'a> Linter<'a> {
                             return None;
                         }
                         let (str_node, other_node) = if is_left_str {
-                            (&**left, &**right)
+                            (left, right)
                         } else {
-                            (&**right, &**left)
+                            (right, left)
                         };
                         let str_text = src.get(str_node.span.start..str_node.span.end)?;
                         let other_text = src.get(other_node.span.start..other_node.span.end)?;
