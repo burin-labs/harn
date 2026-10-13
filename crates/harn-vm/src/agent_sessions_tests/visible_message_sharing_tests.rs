@@ -51,3 +51,70 @@ fn visible_messages_share_durable_message_values() {
         assert_eq!(lineage["projection"]["policy"], "raw");
     }
 }
+
+/// Each turn re-projects the whole durable transcript. A message that was
+/// projected at the same position on the previous turn comes back as the
+/// same shared value, so only appended messages get their lineage attached
+/// and options building downstream sees unchanged messages by identity.
+#[test]
+fn visible_messages_reproject_only_appended_messages() {
+    let session_id = open_or_create(Some(format!(
+        "visible-messages-reproject-{}",
+        uuid::Uuid::now_v7()
+    )));
+    let durable = |session_id: &str| match transcript(session_id)
+        .as_ref()
+        .and_then(|transcript| transcript.as_dict())
+        .and_then(|transcript| transcript.get("messages"))
+    {
+        Some(VmValue::List(messages)) => messages.as_ref().clone(),
+        other => panic!("expected durable messages, got {other:?}"),
+    };
+    let turns = 10;
+    let mut projected = 0;
+    let mut previous: Vec<VmValue> = Vec::new();
+    for turn in 0..turns {
+        let message = crate::stdlib::json_to_vm_value(&serde_json::json!({
+            "role": if turn % 2 == 0 { "user" } else { "assistant" },
+            "content": format!("turn {turn}"),
+        }));
+        inject_message(&session_id, message).expect("inject");
+        let messages = durable(&session_id);
+        let before = crate::llm::agent_session_host::visible_message_projections();
+        let visible =
+            crate::llm::agent_session_host::visible_message_values(&session_id, messages.clone());
+        projected += crate::llm::agent_session_host::visible_message_projections() - before;
+        for (position, (visible, earlier)) in visible.iter().zip(&previous).enumerate() {
+            let (VmValue::Dict(visible), VmValue::Dict(earlier)) = (visible, earlier) else {
+                panic!("visible messages are dicts");
+            };
+            assert!(
+                Arc::ptr_eq(visible, earlier),
+                "turn {turn}: unchanged message {position} was re-projected"
+            );
+        }
+        previous = visible;
+    }
+    // A fresh projection of rebuilt (unshared) messages matches the memoized
+    // one, so reuse never changes what the model sees.
+    let fresh = crate::llm::agent_session_host::visible_messages_with_lineage(
+        &session_id,
+        durable(&session_id)
+            .iter()
+            .map(crate::llm::helpers::vm_value_to_json)
+            .collect(),
+    );
+    let memoized: Vec<_> = previous
+        .iter()
+        .map(crate::llm::helpers::vm_value_to_json)
+        .collect();
+    assert_eq!(
+        memoized, fresh,
+        "memoized projection differs from a fresh one"
+    );
+    assert!(projected >= turns, "every message is projected once");
+    assert!(
+        projected <= turns,
+        "{projected} projections for {turns} messages: the transcript is re-projected every turn"
+    );
+}

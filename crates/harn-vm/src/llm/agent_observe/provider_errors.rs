@@ -16,14 +16,6 @@ pub(super) fn governor_throttle_signal_for_error(
     None
 }
 
-/// Estimated (input + output) tokens for a call, for the governor's TPM bucket.
-/// Reuses the same gross-token projection the route limiter charges, so the two
-/// agree. `0` when unprojectable.
-pub(super) fn governor_estimated_tokens(opts: &super::api::LlmCallOptions) -> u64 {
-    let projection = super::cost::project_llm_call_cost(opts, 0.0);
-    (projection.projected_input_tokens.max(0) + projection.projected_output_tokens.max(0)) as u64
-}
-
 /// Wait behind the rate governor until it admits this call. `Wait`/`CircuitOpen`
 /// resolve to a bounded back-off (honoring the mock clock) so retries pace
 /// themselves instead of blind-firing at a throttled provider.

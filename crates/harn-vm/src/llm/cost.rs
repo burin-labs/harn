@@ -283,8 +283,24 @@ pub(crate) fn project_llm_call_cost(
     opts: &super::api::LlmCallOptions,
     session_cost_usd: f64,
 ) -> LlmBudgetProjection {
-    let (projected_input_tokens, projected_output_tokens) =
-        super::cost_context::project_llm_call_tokens(opts);
+    project_llm_call_cost_for(
+        opts,
+        super::cost_context::LlmCallTokenProjection::for_options(opts),
+        session_cost_usd,
+    )
+}
+
+/// [`project_llm_call_cost`] priced from an attempt's existing token
+/// projection instead of re-projecting the transcript.
+pub(crate) fn project_llm_call_cost_for(
+    opts: &super::api::LlmCallOptions,
+    tokens: super::cost_context::LlmCallTokenProjection,
+    session_cost_usd: f64,
+) -> LlmBudgetProjection {
+    let super::cost_context::LlmCallTokenProjection {
+        input_tokens: projected_input_tokens,
+        output_budget_tokens: projected_output_tokens,
+    } = tokens;
     let output_budget_tokens = projected_output_tokens;
     let observed = peek_observed_session_usage();
     // A projection is a pre-call check, so the card it must respect is the one
@@ -460,11 +476,24 @@ pub(crate) fn check_budget_envelope(
     Ok(())
 }
 
+#[cfg(test)]
 pub(crate) fn check_llm_preflight_budget(
     opts: &super::api::LlmCallOptions,
 ) -> Result<LlmBudgetProjection, VmError> {
+    check_llm_preflight_budget_for(
+        opts,
+        super::cost_context::LlmCallTokenProjection::for_options(opts),
+    )
+}
+
+/// [`check_llm_preflight_budget`] for an attempt whose token projection is
+/// already known.
+pub(crate) fn check_llm_preflight_budget_for(
+    opts: &super::api::LlmCallOptions,
+    tokens: super::cost_context::LlmCallTokenProjection,
+) -> Result<LlmBudgetProjection, VmError> {
     let session_cost_usd = peek_total_cost();
-    let projection = project_llm_call_cost(opts, session_cost_usd);
+    let projection = project_llm_call_cost_for(opts, tokens, session_cost_usd);
     if let Some(envelope) = opts.budget.as_ref() {
         check_budget_envelope(envelope, &projection)?;
     }

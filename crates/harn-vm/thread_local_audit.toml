@@ -260,13 +260,19 @@ plan = "task_local_or_explicit"
 
 [[thread_local]]
 path = "src/llm/content_hash.rs"
-statics = ["REDACTED_CONTENT_MEMO", "VM_MESSAGE_MEMO", "VM_MESSAGE_PROJECTIONS", "FINGERPRINT_BUFFER", "LAST_FINGERPRINTED_SEQUENCE", "FINGERPRINT_COMPUTATIONS", "REDACTED_CONTENT_COMPUTATIONS"]
+statics = ["REDACTED_CONTENT_MEMO", "VM_MESSAGE_MEMO", "VM_MESSAGE_PROJECTIONS", "FINGERPRINT_BUFFER", "LAST_FINGERPRINTED_SEQUENCE", "FINGERPRINT_COMPUTATIONS", "REDACTED_CONTENT_COMPUTATIONS", "LAST_JSON_PROJECTED_SEQUENCE", "JSON_MESSAGE_PROJECTIONS"]
+category = "thread_private"
+plan = "thread_private_cache"
+
+[[thread_local]]
+path = "src/llm/agent_session_host/visible_messages.rs"
+statics = ["VISIBLE_MESSAGE_MEMO", "VISIBLE_MESSAGE_PROJECTIONS"]
 category = "thread_private"
 plan = "thread_private_cache"
 
 [[thread_local]]
 path = "src/llm/cost_context.rs"
-statics = ["MESSAGE_TOKEN_MEMO"]
+statics = ["MESSAGE_TOKEN_MEMO", "CONTEXT_BREAKDOWN_PROJECTIONS"]
 category = "thread_private"
 plan = "thread_private_cache"
 

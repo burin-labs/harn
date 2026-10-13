@@ -88,6 +88,8 @@ thread_local! {
             model: String::new(),
             entries: super::content_hash::ContentMemo::new(MESSAGE_TOKEN_MEMO_ENTRIES),
         });
+    #[cfg(test)]
+    static CONTEXT_BREAKDOWN_PROJECTIONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 const MESSAGE_TOKEN_MEMO_ENTRIES: usize = 65_536;
@@ -96,14 +98,43 @@ fn estimate_text_tokens_for_model(text: &str, model: &str) -> i64 {
     super::token_count::estimate_text_tokens(text, Some(model)).tokens
 }
 
-pub(crate) fn project_llm_call_tokens(opts: &super::api::LlmCallOptions) -> (i64, i64) {
-    let breakdown = project_llm_call_context_breakdown(opts);
-    (breakdown.input_tokens, breakdown.output_budget_tokens)
+/// How many tokens one provider attempt sends and may receive.
+///
+/// Cost admission, the route rate limiter, and the rate governor all charge
+/// this one projection. An observed attempt computes its
+/// [`LlmContextTokenBreakdown`] once and hands every consumer the projection
+/// taken from it, because each projection walks the whole transcript.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct LlmCallTokenProjection {
+    pub input_tokens: i64,
+    pub output_budget_tokens: i64,
+}
+
+impl LlmCallTokenProjection {
+    pub(crate) fn for_options(opts: &super::api::LlmCallOptions) -> Self {
+        project_llm_call_context_breakdown(opts).token_projection()
+    }
+
+    /// Gross input plus output budget, the quantity token-rate limits charge.
+    pub(crate) fn gross_tokens(self) -> u64 {
+        self.input_tokens.max(0) as u64 + self.output_budget_tokens.max(0) as u64
+    }
+}
+
+impl LlmContextTokenBreakdown {
+    pub(crate) fn token_projection(&self) -> LlmCallTokenProjection {
+        LlmCallTokenProjection {
+            input_tokens: self.input_tokens,
+            output_budget_tokens: self.output_budget_tokens,
+        }
+    }
 }
 
 pub(crate) fn project_llm_call_context_breakdown(
     opts: &super::api::LlmCallOptions,
 ) -> LlmContextTokenBreakdown {
+    #[cfg(test)]
+    CONTEXT_BREAKDOWN_PROJECTIONS.with(|count| count.set(count.get() + 1));
     let system_tokens = opts
         .system
         .as_deref()
@@ -248,6 +279,11 @@ pub(crate) fn project_llm_call_context_breakdown(
 }
 
 pub(crate) fn project_llm_call_context_tokens(opts: &super::api::LlmCallOptions) -> u64 {
-    let (input, output) = project_llm_call_tokens(opts);
-    input.max(0) as u64 + output.max(0) as u64
+    LlmCallTokenProjection::for_options(opts).gross_tokens()
+}
+
+/// Context-token breakdowns projected on this thread.
+#[cfg(test)]
+pub(crate) fn context_breakdown_projections() -> usize {
+    CONTEXT_BREAKDOWN_PROJECTIONS.with(std::cell::Cell::get)
 }

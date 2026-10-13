@@ -88,8 +88,9 @@ use session_policies::{
 pub(crate) use session_policies::{install_session_policy_guard, options_request_session_policies};
 mod visible_messages;
 #[cfg(test)]
-#[cfg(test)]
-pub(crate) use visible_messages::{visible_message_values, visible_messages_with_lineage};
+pub(crate) use visible_messages::{
+    visible_message_projections, visible_message_values, visible_messages_with_lineage,
+};
 
 #[cfg(test)]
 use inbox::{

@@ -106,7 +106,7 @@ use super::api::{
     vm_call_llm_full_streaming_single_route_prepared, DeltaSender,
 };
 use super::trace::{trace_llm_call, LlmTraceEntry};
-use super::{api, cost, first_token, rate_limit, resolved_dispatch, routing, trace};
+use super::{api, first_token, rate_limit, resolved_dispatch, routing, trace};
 
 mod raw_provider_capture;
 mod raw_tool_receipts;
@@ -442,18 +442,29 @@ pub(crate) struct ObservedAttemptToken {
     session_id: Option<String>,
     reasoning_receipts: super::reasoning_receipt::RequestReceipts,
     rate_limit: super::rate_limit::LlmCallAdmission,
+    token_projection: super::cost_context::LlmCallTokenProjection,
 }
 
 impl ObservedAttemptToken {
-    fn for_current_session(opts: &super::api::LlmCallOptions, call_id: &str) -> Self {
+    fn for_current_session(
+        opts: &super::api::LlmCallOptions,
+        call_id: &str,
+        token_projection: super::cost_context::LlmCallTokenProjection,
+    ) -> Self {
         Self {
             session_id: super::agent_runtime::current_agent_session_id(),
             reasoning_receipts: super::reasoning_receipt::RequestReceipts::for_journal(
                 opts.session_id.as_deref(),
                 call_id,
             ),
-            rate_limit: super::rate_limit::LlmCallAdmission::from_options(opts),
+            rate_limit: super::rate_limit::LlmCallAdmission::for_attempt(opts, token_projection),
+            token_projection,
         }
+    }
+
+    /// The attempt's context-token projection, which cost admission charges.
+    pub(crate) fn token_projection(&self) -> super::cost_context::LlmCallTokenProjection {
+        self.token_projection
     }
 
     pub(crate) fn reasoning_receipts(&self) -> super::reasoning_receipt::RequestReceipts {
@@ -565,7 +576,12 @@ pub(crate) async fn observed_llm_call(
         // another hammer at a throttled provider. `gate` reserves an in-flight
         // slot on `Proceed`; the outcome below releases it exactly once.
         let governor_org_key = crate::llm::rate_governor::org_key_id(&opts.api_key);
-        let governor_est_tokens = governor_estimated_tokens(opts);
+        // One context-token projection per attempt: the governor, the
+        // request receipt, the route rate limiter, and cost admission all
+        // charge it, and each projection walks the whole transcript.
+        let context_tokens = super::cost_context::project_llm_call_context_breakdown(opts);
+        let token_projection = context_tokens.token_projection();
+        let governor_est_tokens = token_projection.gross_tokens();
         let governor_reserved =
             await_governor_admission(&opts.provider, &governor_org_key, governor_est_tokens).await;
         let provider_was_throttled_during_call =
@@ -617,13 +633,15 @@ pub(crate) async fn observed_llm_call(
             b.send_call_start(&call_id, "llm", "llm_call", call_start_meta);
         }
 
-        let request = dump_llm_request(
+        let request = dump_llm_request_with_context(
             iteration.unwrap_or(0),
             &call_id,
             &effective_tool_format,
             opts,
+            &context_tokens,
         )?;
-        let observed_attempt = ObservedAttemptToken::for_current_session(opts, &call_id);
+        let observed_attempt =
+            ObservedAttemptToken::for_current_session(opts, &call_id, token_projection);
 
         let first_token = super::first_token::FirstTokenTimer::for_current_span();
         let start = std::time::Instant::now();

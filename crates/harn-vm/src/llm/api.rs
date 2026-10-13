@@ -271,7 +271,7 @@ pub(crate) async fn vm_call_llm_full_single_route_prepared(
     opts: &LlmCallOptions,
     request: &LlmRequestPayload,
 ) -> Result<LlmResult, VmError> {
-    let reservation = super::admission::reserve(opts, request)?;
+    let reservation = super::admission::reserve(opts, request, observed.token_projection())?;
     let (delta_tx, mut delta_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
     let mut first_token = super::first_token::FirstTokenTimer::for_current_span();
     let mut deltas_open = true;
@@ -331,7 +331,7 @@ pub(crate) async fn vm_call_llm_full_streaming_single_route_prepared(
     request: &LlmRequestPayload,
     delta_tx: DeltaSender,
 ) -> Result<LlmResult, VmError> {
-    let reservation = super::admission::reserve(opts, request)?;
+    let reservation = super::admission::reserve(opts, request, observed.token_projection())?;
     let result = vm_call_llm_full_inner_request(
         observed,
         request,
@@ -377,7 +377,7 @@ pub(crate) async fn vm_call_llm_full_streaming_offthread_single_route_prepared(
     request: LlmRequestPayload,
     delta_tx: DeltaSender,
 ) -> Result<LlmResult, VmError> {
-    let reservation = super::admission::reserve(opts, &request)?;
+    let reservation = super::admission::reserve(opts, &request, observed.token_projection())?;
     let result = vm_call_llm_full_inner_request(
         observed,
         &request,

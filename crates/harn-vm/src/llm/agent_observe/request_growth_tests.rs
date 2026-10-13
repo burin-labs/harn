@@ -93,3 +93,51 @@ fn per_call_request_work_hashes_and_redacts_only_new_messages() {
          the request is being re-redacted on every call"
     );
 }
+
+/// One observed attempt projects its context tokens exactly once. The
+/// governor, the request receipt, the route rate limiter, and cost admission
+/// each used to project it again, and every projection walks the transcript.
+#[test]
+fn an_observed_attempt_projects_context_tokens_once() {
+    use crate::llm::fake::{
+        install_fake_llm_script, FakeLlmEvent, FakeLlmScript, FakeLlmTurn, FakeStopReason,
+    };
+    let _guard = crate::llm::env_guard();
+    let transcript_dir = tempfile::tempdir().expect("transcript tempdir");
+    let run = uuid::Uuid::now_v7().to_string();
+    let mut messages = vec![serde_json::json!({"role": "user", "content": format!("task {run}")})];
+    messages.extend(turn(&run, 0));
+    let mut opts = request(&messages);
+    opts.provider = "fake".to_string();
+    opts.model = "fake-stream".to_string();
+    opts.native_tools = None;
+    opts.tools = None;
+    opts.tool_choice = None;
+    opts.provider_overrides = None;
+    let _script = install_fake_llm_script(FakeLlmScript::new().push(FakeLlmTurn::stream(vec![
+        FakeLlmEvent::Token("done".into()),
+        FakeLlmEvent::Done(FakeStopReason::EndTurn),
+    ])));
+    super::push_llm_transcript_dir(transcript_dir.path().to_str().expect("utf8 tempdir"));
+    let before = crate::llm::cost_context::context_breakdown_projections();
+    let result = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("runtime")
+        .block_on(super::observed_llm_call(
+            &opts, None, None, None, false, false, None, None,
+        ));
+    let projections = crate::llm::cost_context::context_breakdown_projections() - before;
+    super::pop_llm_transcript_dir();
+    assert_eq!(result.expect("scripted call").text, "done");
+    let transcript = std::fs::read_to_string(transcript_dir.path().join("llm_transcript.jsonl"))
+        .expect("request receipt");
+    assert!(
+        transcript.contains("\"context_token_breakdown\""),
+        "the attempt reached the request receipt that reports the projection"
+    );
+    assert_eq!(
+        projections, 1,
+        "{projections} context-token projections for one provider attempt"
+    );
+}

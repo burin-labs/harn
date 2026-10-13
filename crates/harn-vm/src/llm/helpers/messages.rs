@@ -8,66 +8,76 @@ use super::{
     transcript_summary_text, vm_value_dict_to_json, vm_value_to_json, TRANSCRIPT_TYPE,
 };
 
+/// Provider-neutral JSON projection of VM messages.
+///
+/// Every call re-sends the whole transcript, and the messages it carries over
+/// from the previous call are the same shared VM values, so each message's
+/// projection is memoized by identity and only messages new at their position
+/// are converted. Non-dict entries are skipped.
 pub(crate) fn vm_messages_to_json(msg_list: &[VmValue]) -> Result<Vec<serde_json::Value>, VmError> {
-    let mut messages = Vec::new();
-    for msg in msg_list {
-        if let VmValue::Dict(d) = msg {
-            let role = d
-                .get("role")
-                .map(|v| v.display())
-                .unwrap_or_else(|| "user".to_string());
-            let content = d
-                .get("content")
-                .cloned()
-                .unwrap_or_else(|| VmValue::String(arcstr::ArcStr::from("")));
-            let content_json = match &content {
-                VmValue::String(text) => serde_json::Value::String(text.to_string()),
-                other => vm_value_to_json(other),
-            };
+    Ok(
+        crate::llm::content_hash::memoized_json_messages(msg_list, vm_message_to_json)
+            .into_iter()
+            .flatten()
+            .collect(),
+    )
+}
 
-            // Preserve the complete provider-neutral message. Provider wire
-            // projection belongs exclusively to the selected adapter; doing
-            // it here made a transcript valid for only the provider that wrote
-            // it and broke model/provider switching on replay.
-            let mut message = vm_value_dict_to_json(d);
-            if !message
-                .get("content")
-                .map(|value| !value.is_null())
-                .unwrap_or(false)
-            {
-                message["content"] = content_json;
-            }
-            if message
-                .get("role")
-                .and_then(|value| value.as_str())
-                .is_none()
-            {
-                message["role"] = serde_json::json!(role);
-            }
-            if role == "tool" {
-                message["role"] = serde_json::json!("tool_result");
-            }
-            if matches!(role.as_str(), "tool" | "tool_result")
-                && message.get("tool_call_id").is_none()
-            {
-                if let Some(id) = message
-                    .get("tool_use_id")
-                    .or_else(|| message.get("call_id"))
-                    .cloned()
-                {
-                    message["tool_call_id"] = id;
-                }
-            }
-            if matches!(role.as_str(), "tool" | "tool_result") {
-                if let Some(object) = message.as_object_mut() {
-                    object.remove("tool_use_id");
-                    object.remove("call_id");
-                }
-            }
-            messages.push(message);
+fn vm_message_to_json(msg: &VmValue) -> Option<serde_json::Value> {
+    let VmValue::Dict(d) = msg else {
+        return None;
+    };
+    let role = d
+        .get("role")
+        .map(|v| v.display())
+        .unwrap_or_else(|| "user".to_string());
+    let content = d
+        .get("content")
+        .cloned()
+        .unwrap_or_else(|| VmValue::String(arcstr::ArcStr::from("")));
+    let content_json = match &content {
+        VmValue::String(text) => serde_json::Value::String(text.to_string()),
+        other => vm_value_to_json(other),
+    };
+
+    // Preserve the complete provider-neutral message. Provider wire
+    // projection belongs exclusively to the selected adapter; doing
+    // it here made a transcript valid for only the provider that wrote
+    // it and broke model/provider switching on replay.
+    let mut message = vm_value_dict_to_json(d);
+    if !message
+        .get("content")
+        .map(|value| !value.is_null())
+        .unwrap_or(false)
+    {
+        message["content"] = content_json;
+    }
+    if message
+        .get("role")
+        .and_then(|value| value.as_str())
+        .is_none()
+    {
+        message["role"] = serde_json::json!(role);
+    }
+    if role == "tool" {
+        message["role"] = serde_json::json!("tool_result");
+    }
+    if matches!(role.as_str(), "tool" | "tool_result") && message.get("tool_call_id").is_none() {
+        if let Some(id) = message
+            .get("tool_use_id")
+            .or_else(|| message.get("call_id"))
+            .cloned()
+        {
+            message["tool_call_id"] = id;
         }
     }
-    Ok(messages)
+    if matches!(role.as_str(), "tool" | "tool_result") {
+        if let Some(object) = message.as_object_mut() {
+            object.remove("tool_use_id");
+            object.remove("call_id");
+        }
+    }
+    Some(message)
 }
 
 pub(crate) fn vm_message(role: &str, content: &str) -> VmValue {
@@ -251,5 +261,47 @@ mod tests {
                 assert!(crate::values_equal(memoized, earlier));
             }
         }
+    }
+
+    /// Building each call's options converts the carried-over transcript,
+    /// which is the same shared VM values as on the previous call, so only
+    /// the messages appended since then are converted to JSON. Converting the
+    /// whole transcript every call is the quadratic cost this guards against.
+    #[test]
+    fn vm_messages_to_json_converts_only_new_messages() {
+        let tag = uuid::Uuid::now_v7().to_string();
+        let mut transcript = Vec::new();
+        let mut converted = 0;
+        let turns = 12;
+        for turn in 0..turns {
+            let mut appended = history(2);
+            for message in &mut appended {
+                message["tag"] = serde_json::json!(format!("{tag}-{turn}"));
+            }
+            transcript.extend(json_messages_to_vm(&appended));
+            let before = crate::llm::content_hash::json_message_projections();
+            let json = vm_messages_to_json(&transcript).expect("message json");
+            converted += crate::llm::content_hash::json_message_projections() - before;
+
+            assert_eq!(json.len(), transcript.len());
+            for (index, (memoized, message)) in json.iter().zip(&transcript).enumerate() {
+                assert_eq!(
+                    Some(memoized),
+                    vm_message_to_json(message).as_ref(),
+                    "memoized projection {index} differs from a fresh conversion"
+                );
+            }
+        }
+        // Every message is new once, so each was converted at least once and
+        // the counter is measuring the path under test.
+        assert!(converted >= transcript.len());
+        // Converting the whole transcript each call costs about
+        // turns * messages / 2 (here 156).
+        assert!(
+            converted <= transcript.len(),
+            "{converted} conversions for {} messages over {turns} calls: \
+             the transcript is being converted on every call",
+            transcript.len()
+        );
     }
 }

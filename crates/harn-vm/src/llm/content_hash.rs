@@ -123,6 +123,10 @@ thread_local! {
     static FINGERPRINT_COMPUTATIONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
     #[cfg(test)]
     static REDACTED_CONTENT_COMPUTATIONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static LAST_JSON_PROJECTED_SEQUENCE: RefCell<IdentitySequenceMemo<(), Option<serde_json::Value>>> =
+        const { RefCell::new(IdentitySequenceMemo::new(JSON_PROJECTED_SEQUENCE_BYTES)) };
+    #[cfg(test)]
+    static JSON_MESSAGE_PROJECTIONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 const REDACTED_CONTENT_MEMO_BYTES: usize = 32 * 1024 * 1024;
@@ -239,6 +243,140 @@ pub(crate) fn memoized_vm_messages(
 #[cfg(test)]
 pub(crate) fn vm_message_projections() -> usize {
     VM_MESSAGE_PROJECTIONS.with(std::cell::Cell::get)
+}
+
+/// A projection's memo keyed by position and shared VM identity: the
+/// sequence the projection last saw on this thread, with each position's
+/// input value, the other inputs the projection read, and its output.
+///
+/// Per-call projections of the transcript see the same shared VM values at
+/// the same positions call after call, with new messages appended, so
+/// identity is the whole check. A VM dict or list is immutable once shared,
+/// and the memo retains the input, so its address cannot be reused by a
+/// different value while the entry lives. An input without shared identity
+/// (a scalar) is always projected. The memo is bounded by `budget` in the
+/// caller's weight unit; past it, later positions are not retained.
+pub(crate) struct IdentitySequenceMemo<K, V> {
+    entries: Vec<(crate::value::VmValue, K, V, usize)>,
+    weight: usize,
+    budget: usize,
+}
+
+impl<K: PartialEq, V: Clone> IdentitySequenceMemo<K, V> {
+    pub(crate) const fn new(budget: usize) -> Self {
+        Self {
+            entries: Vec::new(),
+            weight: 0,
+            budget,
+        }
+    }
+
+    /// The projection of `input` at `position`, given the other inputs `key`
+    /// the projection reads. `project` must be a pure function of `input`
+    /// and `key`.
+    pub(crate) fn project(
+        &mut self,
+        position: usize,
+        input: &crate::value::VmValue,
+        key: K,
+        project: impl FnOnce() -> V,
+        weight: impl FnOnce(&V) -> usize,
+    ) -> V {
+        if let Some((retained, retained_key, output, _)) = self.entries.get(position) {
+            if same_shared_value(retained, input) && *retained_key == key {
+                return output.clone();
+            }
+        }
+        let output = project();
+        if !has_shared_identity(input) {
+            return output;
+        }
+        let entry_weight = weight(&output);
+        if let Some(entry) = self.entries.get_mut(position) {
+            self.weight = self.weight - entry.3 + entry_weight;
+            *entry = (input.clone(), key, output.clone(), entry_weight);
+            if self.weight > self.budget {
+                let dropped: usize = self.entries.drain(position..).map(|entry| entry.3).sum();
+                self.weight -= dropped;
+            }
+        } else if position == self.entries.len()
+            && self.weight.saturating_add(entry_weight) <= self.budget
+        {
+            self.weight += entry_weight;
+            self.entries
+                .push((input.clone(), key, output.clone(), entry_weight));
+        }
+        output
+    }
+}
+
+const JSON_PROJECTED_SEQUENCE_BYTES: usize = 32 * 1024 * 1024;
+
+/// `project(message)` for each VM message, reusing the projection made at the
+/// same position on the previous call when the message there is the same
+/// shared VM value. The inverse direction of [`memoized_vm_messages`]; see
+/// [`IdentitySequenceMemo`]. `project` must be a pure function of the message.
+pub(crate) fn memoized_json_messages(
+    messages: &[crate::value::VmValue],
+    project: fn(&crate::value::VmValue) -> Option<serde_json::Value>,
+) -> Vec<Option<serde_json::Value>> {
+    LAST_JSON_PROJECTED_SEQUENCE.with(|memo| {
+        let mut memo = memo.borrow_mut();
+        messages
+            .iter()
+            .enumerate()
+            .map(|(position, message)| {
+                memo.project(
+                    position,
+                    message,
+                    (),
+                    || {
+                        #[cfg(test)]
+                        JSON_MESSAGE_PROJECTIONS.with(|count| count.set(count.get() + 1));
+                        project(message)
+                    },
+                    |projected| projected.as_ref().map_or(1, json_weight),
+                )
+            })
+            .collect()
+    })
+}
+
+fn has_shared_identity(value: &crate::value::VmValue) -> bool {
+    matches!(
+        value,
+        crate::value::VmValue::Dict(_) | crate::value::VmValue::List(_)
+    )
+}
+
+fn same_shared_value(left: &crate::value::VmValue, right: &crate::value::VmValue) -> bool {
+    use crate::value::VmValue;
+    match (left, right) {
+        (VmValue::Dict(left), VmValue::Dict(right)) => std::sync::Arc::ptr_eq(left, right),
+        (VmValue::List(left), VmValue::List(right)) => std::sync::Arc::ptr_eq(left, right),
+        _ => false,
+    }
+}
+
+/// Approximate retained size of a JSON value, a memo weight.
+fn json_weight(value: &serde_json::Value) -> usize {
+    match value {
+        serde_json::Value::String(text) => text.len() + 8,
+        serde_json::Value::Array(items) => 8 + items.iter().map(json_weight).sum::<usize>(),
+        serde_json::Value::Object(members) => {
+            8 + members
+                .iter()
+                .map(|(key, member)| key.len() + json_weight(member))
+                .sum::<usize>()
+        }
+        _ => 8,
+    }
+}
+
+/// Messages [`memoized_json_messages`] has projected on this thread.
+#[cfg(test)]
+pub(crate) fn json_message_projections() -> usize {
+    JSON_MESSAGE_PROJECTIONS.with(std::cell::Cell::get)
 }
 
 /// Collision-resistant identity of a JSON value's content. Every node is
