@@ -21,21 +21,22 @@ fn host_agent_session_visible_messages_builtin(
     _out: &mut String,
 ) -> Result<VmValue, VmError> {
     let session_id = args.first().map(VmValue::display).unwrap_or_default();
-    let messages = args
-        .get(1)
-        .filter(|value| !matches!(value, VmValue::Nil))
-        .map(super::vm_to_json)
-        .and_then(|value| value.as_array().cloned())
-        .unwrap_or_else(|| durable_messages(&session_id));
-    Ok(super::json_to_vm(&serde_json::Value::Array(
-        visible_messages_with_lineage(&session_id, messages),
-    )))
+    // Only a list is a message array; anything else falls back to durable
+    // history, exactly as a non-array JSON projection of it would.
+    let messages = match args.get(1) {
+        Some(VmValue::List(messages)) => messages.as_ref().clone(),
+        _ => durable_messages(&session_id),
+    };
+    Ok(VmValue::List(std::sync::Arc::new(visible_message_values(
+        &session_id,
+        messages,
+    ))))
 }
 
-pub(crate) fn visible_messages_with_lineage(
-    session_id: &str,
-    messages: Vec<serde_json::Value>,
-) -> Vec<serde_json::Value> {
+/// The provider-visible message list for `messages`, each message carrying
+/// its lineage. Operates on the session's VM values in place: only the
+/// directive envelope, when one is pending, is built as a new message.
+pub(crate) fn visible_message_values(session_id: &str, messages: Vec<VmValue>) -> Vec<VmValue> {
     let reminders = crate::llm::helpers::pending_reminders_from_session(Some(session_id));
     let rendered = crate::llm::helpers::render_pending_reminders(
         &crate::llm::capabilities::Capabilities::default(),
@@ -43,33 +44,23 @@ pub(crate) fn visible_messages_with_lineage(
     );
     let directive_nonce = crate::llm::helpers::directive_nonce_for_session(session_id);
     let source_count = messages.len();
-    let mut visible = crate::llm::helpers::apply_rendered_reminder_messages(
-        messages,
-        &rendered,
-        &directive_nonce,
-    );
+    let mut visible = messages;
+    let pending = crate::llm::helpers::uncommitted_directives(&visible, &rendered);
+    if let Some(envelope) =
+        crate::llm::helpers::directive_envelope_message(&pending, &directive_nonce)
+    {
+        visible.push(super::json_to_vm(&envelope));
+    }
     let compaction_receipt_ref = latest_compaction_receipt_ref(session_id);
     for (position, message) in visible.iter_mut().enumerate() {
-        let semantic_kind = semantic_kind(message);
-        let metadata = message
-            .get(crate::llm::message_lineage::MESSAGE_LINEAGE_KEY)
-            .cloned();
-        let mut attached: crate::llm::message_lineage::AttachedMessageLineage = match metadata {
-            None => crate::llm::message_lineage::AttachedMessageLineage {
-                projection: crate::llm::message_lineage::raw_projection(),
-                message: crate::llm::message_lineage::MessageLineageEntry {
-                    source_message_index: (position < source_count).then_some(position),
-                    ..crate::llm::message_lineage::MessageLineageEntry::default()
-                },
-            },
-            Some(metadata) => serde_json::from_value(metadata).unwrap_or_else(|_| {
-                crate::llm::message_lineage::AttachedMessageLineage {
-                    projection: crate::llm::message_lineage::unknown_projection(),
-                    message: crate::llm::message_lineage::MessageLineageEntry::default(),
-                }
-            }),
+        let Some(fields) = message.as_dict() else {
+            continue;
         };
-        attached.message.semantic_kind = semantic_kind;
+        let mut attached = attached_lineage(
+            fields.get(crate::llm::message_lineage::MESSAGE_LINEAGE_KEY),
+            (position < source_count).then_some(position),
+        );
+        attached.message.semantic_kind = semantic_kind(message);
         if attached.message.source_message_index == Some(0) {
             attached.message.compaction_receipt_ref = compaction_receipt_ref.clone();
             if attached.message.compaction_receipt_ref.is_some() {
@@ -77,28 +68,70 @@ pub(crate) fn visible_messages_with_lineage(
                     crate::llm::message_lineage::MessageSemanticKind::CondensedMemory;
             }
         }
-        if let Some(object) = message.as_object_mut() {
-            object.insert(
-                crate::llm::message_lineage::MESSAGE_LINEAGE_KEY.to_string(),
-                serde_json::to_value(attached).expect("message lineage is JSON representable"),
-            );
-        }
+        let lineage = super::json_to_vm(
+            &serde_json::to_value(attached).expect("message lineage is JSON representable"),
+        );
+        let mut next = fields.clone();
+        next.insert(
+            crate::value::intern_key(crate::llm::message_lineage::MESSAGE_LINEAGE_KEY),
+            lineage,
+        );
+        *message = VmValue::dict_map(next);
     }
     visible
 }
 
-fn semantic_kind(message: &serde_json::Value) -> crate::llm::message_lineage::MessageSemanticKind {
+/// JSON form of [`visible_message_values`] for tests that build messages as JSON.
+#[cfg(test)]
+pub(crate) fn visible_messages_with_lineage(
+    session_id: &str,
+    messages: Vec<serde_json::Value>,
+) -> Vec<serde_json::Value> {
+    let messages = messages.iter().map(super::json_to_vm).collect();
+    visible_message_values(session_id, messages)
+        .iter()
+        .map(super::vm_to_json)
+        .collect()
+}
+
+fn attached_lineage(
+    metadata: Option<&VmValue>,
+    source_message_index: Option<usize>,
+) -> crate::llm::message_lineage::AttachedMessageLineage {
+    use crate::llm::message_lineage::{
+        raw_projection, unknown_projection, AttachedMessageLineage, MessageLineageEntry,
+    };
+    match metadata {
+        None => AttachedMessageLineage {
+            projection: raw_projection(),
+            message: MessageLineageEntry {
+                source_message_index,
+                ..MessageLineageEntry::default()
+            },
+        },
+        Some(metadata) => {
+            serde_json::from_value(super::vm_to_json(metadata)).unwrap_or_else(|_| {
+                AttachedMessageLineage {
+                    projection: unknown_projection(),
+                    message: MessageLineageEntry::default(),
+                }
+            })
+        }
+    }
+}
+
+fn semantic_kind(message: &VmValue) -> crate::llm::message_lineage::MessageSemanticKind {
+    use crate::llm::helpers::MessageView;
     use crate::llm::message_lineage::MessageSemanticKind;
     if crate::llm::helpers::has_directive_commit_metadata(message) {
         return MessageSemanticKind::ContextDirective;
     }
-    match message.get("role").and_then(serde_json::Value::as_str) {
+    match message.str_field("role") {
         Some("user") => MessageSemanticKind::User,
         Some("assistant")
             if message
-                .get("tool_calls")
-                .and_then(serde_json::Value::as_array)
-                .is_some_and(|calls| !calls.is_empty()) =>
+                .list_len_field("tool_calls")
+                .is_some_and(|calls| calls > 0) =>
         {
             MessageSemanticKind::AssistantToolCall
         }
@@ -110,6 +143,7 @@ fn semantic_kind(message: &serde_json::Value) -> crate::llm::message_lineage::Me
 }
 
 fn latest_compaction_receipt_ref(session_id: &str) -> Option<String> {
+    use crate::llm::helpers::MessageView;
     let transcript = crate::agent_sessions::transcript(session_id)?;
     let transcript = transcript.as_dict()?;
     match transcript.get("summary") {
@@ -120,16 +154,18 @@ fn latest_compaction_receipt_ref(session_id: &str) -> Option<String> {
         return None;
     };
     events.iter().rev().find_map(|event| {
-        let event = super::vm_to_json(event);
-        (event.get("kind").and_then(serde_json::Value::as_str) == Some("compaction"))
-            .then(|| {
-                event
-                    .pointer("/metadata/receipt/receipt_id")
-                    .and_then(serde_json::Value::as_str)
-                    .filter(|value| !value.is_empty())
-                    .map(str::to_string)
-            })
-            .flatten()
+        if event.str_field("kind") != Some("compaction") {
+            return None;
+        }
+        let receipt = event
+            .as_dict()?
+            .get("metadata")?
+            .as_dict()?
+            .get("receipt")?;
+        receipt
+            .str_field("receipt_id")
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
     })
 }
 
@@ -179,13 +215,14 @@ fn host_agent_session_commit_directives_builtin(
     Ok(VmValue::Int(pending.len() as i64))
 }
 
-fn durable_messages(session_id: &str) -> Vec<serde_json::Value> {
-    crate::agent_sessions::transcript(session_id)
+fn durable_messages(session_id: &str) -> Vec<VmValue> {
+    match crate::agent_sessions::transcript(session_id)
         .as_ref()
         .and_then(|value| super::dict_get(value, "messages"))
-        .map(super::vm_to_json)
-        .and_then(|value| value.as_array().cloned())
-        .unwrap_or_default()
+    {
+        Some(VmValue::List(messages)) => messages.as_ref().clone(),
+        _ => Vec::new(),
+    }
 }
 
 const VISIBLE_MESSAGE_BUILTINS: &[&VmBuiltinDef] = &[
@@ -195,4 +232,72 @@ const VISIBLE_MESSAGE_BUILTINS: &[&VmBuiltinDef] = &[
 
 pub(super) fn register_visible_message_primitives(vm: &mut Vm) {
     register_builtin_defs(vm, VISIBLE_MESSAGE_BUILTINS);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn content(message: &VmValue) -> std::sync::Arc<Vec<VmValue>> {
+        match message.as_dict().and_then(|dict| dict.get("content")) {
+            Some(VmValue::List(blocks)) => blocks.clone(),
+            other => panic!("expected list content, got {other:?}"),
+        }
+    }
+
+    /// The visible projection reads the durable transcript in place. A JSON
+    /// round trip of every message would rebuild each content list, so shared
+    /// identity is the falsifier for reintroducing a per-turn whole-transcript
+    /// conversion.
+    #[test]
+    fn visible_messages_share_durable_message_values() {
+        let session_id = crate::agent_sessions::open_or_create_for_test(Some(format!(
+            "visible-messages-share-{}",
+            uuid::Uuid::now_v7()
+        )));
+        for (role, text) in [("user", "read the file"), ("assistant", "done")] {
+            let message = crate::stdlib::json_to_vm_value(&serde_json::json!({
+                "role": role,
+                "content": [{"type": "text", "text": text}],
+            }));
+            crate::agent_sessions::inject_message(&session_id, message).expect("inject");
+        }
+        let durable = durable_messages(&session_id);
+        assert_eq!(durable.len(), 2);
+
+        let from_history = host_agent_session_visible_messages_builtin(
+            &[VmValue::string(&session_id), VmValue::Nil],
+            &mut String::new(),
+        )
+        .expect("visible messages from durable history");
+        let from_caller = host_agent_session_visible_messages_builtin(
+            &[
+                VmValue::string(&session_id),
+                VmValue::List(std::sync::Arc::new(durable.clone())),
+            ],
+            &mut String::new(),
+        )
+        .expect("visible messages from caller list");
+
+        for visible in [from_history, from_caller] {
+            let VmValue::List(visible) = visible else {
+                panic!("visible messages are a list");
+            };
+            assert_eq!(visible.len(), durable.len());
+            for (position, (visible, durable)) in visible.iter().zip(&durable).enumerate() {
+                assert!(
+                    std::sync::Arc::ptr_eq(&content(visible), &content(durable)),
+                    "message {position} content was rebuilt instead of shared"
+                );
+                let lineage = crate::llm::helpers::vm_value_to_json(
+                    visible
+                        .as_dict()
+                        .and_then(|dict| dict.get(crate::llm::message_lineage::MESSAGE_LINEAGE_KEY))
+                        .expect("lineage attached"),
+                );
+                assert_eq!(lineage["source_message_index"], position);
+                assert_eq!(lineage["projection"]["policy"], "raw");
+            }
+        }
+    }
 }

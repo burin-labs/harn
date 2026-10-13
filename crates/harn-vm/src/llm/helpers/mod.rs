@@ -1,5 +1,6 @@
 mod blocks;
 mod goal_pin;
+mod message_view;
 mod messages;
 mod opt_get;
 mod options;
@@ -18,19 +19,20 @@ impl From<crate::llm_config::ModelResolutionError> for VmError {
 }
 
 pub(crate) use goal_pin::GoalPinProjection;
+pub(crate) use message_view::{displays_as, MessageView};
 pub(crate) use messages::{
     json_messages_to_vm, vm_add_role_message, vm_message_value, vm_messages_to_json,
 };
 pub(crate) use opt_get::{opt_bool, opt_float, opt_int, opt_str};
 pub use options::admit_reasoning_literals;
 pub(crate) use options::{
-    apply_rendered_reminder_messages, assemble_system_prompt, compose_system_prompt,
-    directive_envelope_message, directive_nonce_for_session, expects_structured_output,
-    extract_json, extract_llm_options, has_directive_commit_metadata, parse_reasoning_effort_field,
-    pending_reminders_from_session, prepare_llm_options, prepare_llm_options_safe,
-    project_agent_tools, project_llm_options, render_pending_reminders,
-    resolve_catalog_thinking_config, resolve_thinking_config, system_prompt_event_metadata,
-    system_prompt_metadata, turn_boundary_directives, validate_llm_option_keys, validate_options,
+    assemble_system_prompt, compose_system_prompt, directive_envelope_message,
+    directive_nonce_for_session, expects_structured_output, extract_json, extract_llm_options,
+    has_directive_commit_metadata, parse_reasoning_effort_field, pending_reminders_from_session,
+    prepare_llm_options, prepare_llm_options_safe, project_agent_tools, project_llm_options,
+    render_pending_reminders, resolve_catalog_thinking_config, resolve_thinking_config,
+    system_prompt_event_metadata, system_prompt_metadata, turn_boundary_directives,
+    uncommitted_directives, validate_llm_option_keys, validate_options,
 };
 #[cfg(test)]
 pub(crate) use options::{strip_internal_message_metadata, tracked_directive_envelope_message};

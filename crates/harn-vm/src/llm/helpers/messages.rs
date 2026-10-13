@@ -81,70 +81,77 @@ pub(crate) fn vm_message_value(role: &str, content: VmValue) -> VmValue {
     VmValue::dict(msg)
 }
 
+/// VM projection of provider-neutral JSON messages.
+///
+/// Every call re-projects the whole request history, so each message's
+/// projection is memoized by content and only messages new to this thread are
+/// converted. The projection is a pure function of the message.
 pub(crate) fn json_messages_to_vm(msg_list: &[serde_json::Value]) -> Vec<VmValue> {
     msg_list
         .iter()
-        .filter_map(|msg| {
-            let role = msg.get("role").and_then(|v| v.as_str())?;
-
-            // Preserve all fields for tool messages; strict providers
-            // (Together AI and others) reject messages missing tool_calls
-            // / tool_call_id.
-            if role == "tool" || role == "tool_result" || msg.get("tool_calls").is_some() {
-                let mut message = msg.clone();
-                if role == "tool" {
-                    message["role"] = serde_json::json!("tool_result");
-                }
-                if message.get("tool_call_id").is_none() {
-                    if let Some(id) = message
-                        .get("tool_use_id")
-                        .or_else(|| message.get("call_id"))
-                        .cloned()
-                    {
-                        message["tool_call_id"] = id;
-                    }
-                }
-                if let Some(object) = message.as_object_mut() {
-                    object.remove("tool_use_id");
-                    object.remove("call_id");
-                }
-                return Some(crate::stdlib::json_to_vm_value(&message));
-            }
-
-            if let Some(content) = msg.get("content").and_then(|v| v.as_str()) {
-                return Some(vm_message(role, content));
-            }
-
-            if let Some(blocks) = msg.get("content").and_then(|v| v.as_array()) {
-                if role == "user" {
-                    for block in blocks {
-                        if block.get("type").and_then(|v| v.as_str()) == Some("tool_result") {
-                            let content = block
-                                .get("content")
-                                .and_then(|v| v.as_str())
-                                .unwrap_or_default();
-                            let tool_call_id = block
-                                .get("tool_use_id")
-                                .and_then(|v| v.as_str())
-                                .unwrap_or_default();
-                            let mut result = BTreeMap::new();
-                            result.put_str("role", "tool_result");
-                            result.put_str("tool_call_id", tool_call_id);
-                            result.put_str("content", content);
-                            return Some(VmValue::dict(result));
-                        }
-                    }
-                }
-                return Some(vm_message_value(
-                    role,
-                    crate::stdlib::json_to_vm_value(&serde_json::Value::Array(blocks.clone())),
-                ));
-            }
-
-            msg.get("content")
-                .map(|content| vm_message_value(role, crate::stdlib::json_to_vm_value(content)))
-        })
+        .filter_map(|msg| crate::llm::content_hash::memoized_vm_message(msg, json_message_to_vm))
         .collect()
+}
+
+fn json_message_to_vm(msg: &serde_json::Value) -> Option<VmValue> {
+    let role = msg.get("role").and_then(|v| v.as_str())?;
+
+    // Preserve all fields for tool messages; strict providers
+    // (Together AI and others) reject messages missing tool_calls
+    // / tool_call_id.
+    if role == "tool" || role == "tool_result" || msg.get("tool_calls").is_some() {
+        let mut message = msg.clone();
+        if role == "tool" {
+            message["role"] = serde_json::json!("tool_result");
+        }
+        if message.get("tool_call_id").is_none() {
+            if let Some(id) = message
+                .get("tool_use_id")
+                .or_else(|| message.get("call_id"))
+                .cloned()
+            {
+                message["tool_call_id"] = id;
+            }
+        }
+        if let Some(object) = message.as_object_mut() {
+            object.remove("tool_use_id");
+            object.remove("call_id");
+        }
+        return Some(crate::stdlib::json_to_vm_value(&message));
+    }
+
+    if let Some(content) = msg.get("content").and_then(|v| v.as_str()) {
+        return Some(vm_message(role, content));
+    }
+
+    if let Some(blocks) = msg.get("content").and_then(|v| v.as_array()) {
+        if role == "user" {
+            for block in blocks {
+                if block.get("type").and_then(|v| v.as_str()) == Some("tool_result") {
+                    let content = block
+                        .get("content")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or_default();
+                    let tool_call_id = block
+                        .get("tool_use_id")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or_default();
+                    let mut result = BTreeMap::new();
+                    result.put_str("role", "tool_result");
+                    result.put_str("tool_call_id", tool_call_id);
+                    result.put_str("content", content);
+                    return Some(VmValue::dict(result));
+                }
+            }
+        }
+        return Some(vm_message_value(
+            role,
+            crate::stdlib::json_to_vm_value(&serde_json::Value::Array(blocks.clone())),
+        ));
+    }
+
+    msg.get("content")
+        .map(|content| vm_message_value(role, crate::stdlib::json_to_vm_value(content)))
 }
 
 pub(crate) fn vm_add_role_message(args: &[VmValue], role: &str) -> Result<VmValue, VmError> {
@@ -185,5 +192,64 @@ pub(crate) fn vm_add_role_message(args: &[VmValue], role: &str) -> Result<VmValu
         _ => Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
             format!("add_{role}: first argument must be a message list or transcript"),
         )))),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn history(len: usize) -> Vec<serde_json::Value> {
+        (0..len)
+            .map(|index| {
+                if index % 2 == 0 {
+                    serde_json::json!({"role": "user", "content": format!("read file {index}")})
+                } else {
+                    serde_json::json!({
+                        "role": "tool",
+                        "tool_use_id": format!("call-{index}"),
+                        "content": [{"type": "text", "text": format!("body {index}")}],
+                    })
+                }
+            })
+            .collect()
+    }
+
+    /// Re-projecting a growing history converts only the appended message.
+    /// Converting the whole history again every call is the quadratic cost
+    /// this guards against.
+    #[test]
+    fn json_messages_to_vm_converts_only_new_messages() {
+        let tag = uuid::Uuid::now_v7().to_string();
+        let mut messages = history(6);
+        for message in &mut messages {
+            message["tag"] = serde_json::json!(tag);
+        }
+        let before = crate::llm::content_hash::vm_message_projections();
+        let first = json_messages_to_vm(&messages);
+        assert_eq!(
+            crate::llm::content_hash::vm_message_projections() - before,
+            messages.len()
+        );
+
+        messages.push(serde_json::json!({"role": "assistant", "content": "done", "tag": tag}));
+        let before = crate::llm::content_hash::vm_message_projections();
+        let second = json_messages_to_vm(&messages);
+        assert_eq!(
+            crate::llm::content_hash::vm_message_projections() - before,
+            1,
+            "only the appended message is converted"
+        );
+
+        for (index, (memoized, message)) in second.iter().zip(&messages).enumerate() {
+            let fresh = json_message_to_vm(message).expect("message has a role");
+            assert!(
+                crate::values_equal(memoized, &fresh),
+                "memoized projection {index} differs from a fresh conversion"
+            );
+            if let Some(earlier) = first.get(index) {
+                assert!(crate::values_equal(memoized, earlier));
+            }
+        }
     }
 }

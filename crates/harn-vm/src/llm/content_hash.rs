@@ -109,10 +109,44 @@ thread_local! {
         config: None,
         entries: ContentMemo::new(REDACTED_CONTENT_MEMO_BYTES),
     });
+    static VM_MESSAGE_MEMO: RefCell<ContentMemo<Option<crate::value::VmValue>>> =
+        RefCell::new(ContentMemo::new(VM_MESSAGE_MEMO_BYTES));
+    #[cfg(test)]
+    static VM_MESSAGE_PROJECTIONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
     static FINGERPRINT_BUFFER: RefCell<Vec<u8>> = const { RefCell::new(Vec::new()) };
 }
 
 const REDACTED_CONTENT_MEMO_BYTES: usize = 32 * 1024 * 1024;
+const VM_MESSAGE_MEMO_BYTES: usize = 32 * 1024 * 1024;
+
+/// `project(message)`, memoized by the message's content.
+///
+/// `project` must be a pure function of the message. VM values are immutable
+/// and shared, so a memoized projection is indistinguishable from a fresh one.
+/// Callers that re-project a whole transcript every turn therefore convert
+/// only the messages this thread has not projected before.
+pub(crate) fn memoized_vm_message(
+    message: &serde_json::Value,
+    project: fn(&serde_json::Value) -> Option<crate::value::VmValue>,
+) -> Option<crate::value::VmValue> {
+    let (key, weight) = fingerprint_and_weight(message);
+    if let Some(projected) = VM_MESSAGE_MEMO.with(|memo| memo.borrow_mut().get(&key)) {
+        return projected;
+    }
+    #[cfg(test)]
+    VM_MESSAGE_PROJECTIONS.with(|count| count.set(count.get() + 1));
+    let projected = project(message);
+    VM_MESSAGE_MEMO.with(|memo| {
+        memo.borrow_mut().insert(key, projected.clone(), weight);
+    });
+    projected
+}
+
+/// Messages [`memoized_vm_message`] has converted on this thread.
+#[cfg(test)]
+pub(crate) fn vm_message_projections() -> usize {
+    VM_MESSAGE_PROJECTIONS.with(std::cell::Cell::get)
+}
 
 /// Collision-resistant identity of a JSON value's content. Every node is
 /// framed with a type tag and length, so distinct values never feed the same
@@ -121,6 +155,11 @@ const REDACTED_CONTENT_MEMO_BYTES: usize = 32 * 1024 * 1024;
 pub(crate) type ContentFingerprint = [u8; 32];
 
 pub(crate) fn content_fingerprint(value: &serde_json::Value) -> ContentFingerprint {
+    fingerprint_and_weight(value).0
+}
+
+/// The fingerprint and the size of the framed content it hashed, a memo weight.
+fn fingerprint_and_weight(value: &serde_json::Value) -> (ContentFingerprint, usize) {
     fn frame(buffer: &mut Vec<u8>, tag: u8, bytes: &[u8]) {
         buffer.push(tag);
         buffer.extend_from_slice(&(bytes.len() as u64).to_le_bytes());
@@ -156,10 +195,11 @@ pub(crate) fn content_fingerprint(value: &serde_json::Value) -> ContentFingerpri
         buffer.clear();
         feed(&mut buffer, value);
         let fingerprint = *blake3::hash(&buffer).as_bytes();
+        let weight = buffer.len();
         if buffer.capacity() > FINGERPRINT_BUFFER_RETAINED_BYTES {
             *buffer = Vec::new();
         }
-        fingerprint
+        (fingerprint, weight)
     })
 }
 
