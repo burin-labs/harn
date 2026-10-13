@@ -220,7 +220,7 @@ impl CodeIndexCapability {
             Restored::Absent => Ok(false),
             Restored::Published { needs_persist } => {
                 if needs_persist {
-                    self.warm.persist_in_background(self.index.clone());
+                    warm::WarmCoordinator::persist_in_background(&self.warm, self.index.clone());
                 }
                 Ok(true)
             }
@@ -246,7 +246,6 @@ impl CodeIndexCapability {
     /// Returns immediately when nothing is running.
     pub fn wait_until_idle(&self) {
         self.warm.take_and_join_builder();
-        self.warm.join_persister();
         self.warm.wait_until_idle();
     }
 }
@@ -339,16 +338,15 @@ fn persist_shared(index: &SharedIndex) -> std::io::Result<bool> {
     let _order = PERSIST_ORDER
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    // Encode under the index lock, then release it for the file write.
-    let encoded = {
+    // Hold the index lock only to detach a copy; encode and write without it.
+    let (source, root) = {
         let guard = index.lock().expect("code_index mutex poisoned");
         match guard.as_ref() {
-            Some(state) => (state.encode_snapshot()?, state.root.clone()),
+            Some(state) => (state.snapshot_source(), state.root.clone()),
             None => return Ok(false),
         }
     };
-    let (snapshot, root) = encoded;
-    snapshot.write(&root)?;
+    source.encode()?.write(&root)?;
     Ok(true)
 }
 
