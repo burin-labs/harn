@@ -130,7 +130,9 @@ directory, and the directories above cannot be renamed or deleted; every other
 entry in those directories stays writable. A child that tries to carry the file
 out of the denial gets `Operation not permitted`. When Harn runs inside an outer
 sandbox it would inherit, that sandbox must deny the same unlinks, or the spawn
-is refused.
+is refused. A denied path under a writable root that does not exist yet also
+refuses inheritance: macOS reports every absent path as denied, so the outer
+sandbox cannot be asked whether it would hold a file created there later.
 
 On Linux, a writable root that contains a denial is granted whole rather than
 subtracted. Landlock could hold the denial only by withholding every directory
