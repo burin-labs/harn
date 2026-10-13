@@ -198,6 +198,19 @@ pub(crate) fn drop_unused_optional_path_args(
     );
 }
 
+/// Drop omitted optional paths, then refuse any malformed path left, against
+/// the tool's annotations as dispatch resolves them (catalog, then the
+/// installed session policy).
+pub(crate) fn prepare_path_args(
+    name: &str,
+    args: &mut serde_json::Value,
+    tools: Option<&crate::value::VmValue>,
+) -> Result<(), String> {
+    let annotations = crate::llm::agent_host_primitives::tool_catalog::annotations_for(tools, name);
+    drop_unused_optional_path_args(name, args, tools, annotations.as_ref());
+    crate::tool_annotations::path_inputs::validate_arguments(args, annotations.as_ref())
+}
+
 /// Recursively unwrap a leaked, fully-wrapping `<<TAG\n...\nTAG` heredoc from
 /// every string leaf of a tool-argument value. Recurses into nested
 /// objects/arrays so a batched `ops: [{ new_body: "<<EOF\n...\nEOF" }]` (the

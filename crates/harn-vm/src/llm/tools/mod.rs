@@ -24,6 +24,7 @@ pub(crate) use handle_local::{handle_tool_locally, is_vm_stdlib_short_circuit};
 pub(crate) use messages::build_assistant_tool_message;
 pub(crate) use messages::{
     build_assistant_response_message, drop_unused_optional_path_args, normalize_tool_args,
+    prepare_path_args,
 };
 pub(crate) use name_recovery::{
     normalize_repaired_denial, recover_provider_safe_alias, schema_match_repair_result,

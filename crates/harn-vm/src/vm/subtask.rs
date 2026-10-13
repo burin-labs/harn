@@ -206,12 +206,14 @@ pub(crate) fn prepare<F: Future>(
     PreparedSubtask {
         inner: scope_ambient(
             AmbientExecutionScope::capture_for_inline_subtask(),
+            // Boxed so the provider scope adds a pointer, not a nested state
+            // machine, to the frame of every `parallel` branch.
             crate::secrets::with_active_secret_provider(
                 crate::secrets::active_secret_provider(),
-                crate::tool_registry::preparation_scope::scope_subtask(
+                Box::pin(crate::tool_registry::preparation_scope::scope_subtask(
                     with_pool_registry_scope(registry, future),
                     true,
-                ),
+                )),
             ),
         ),
     }
