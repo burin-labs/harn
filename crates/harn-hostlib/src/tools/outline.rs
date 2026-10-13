@@ -130,7 +130,10 @@ fn outline(
     _max_depth: usize,
 ) -> Result<Result<Vec<VmValue>, Unsupported>, HostlibError> {
     Ok(Err(match language {
-        Some(_) => Unsupported::NoGrammar,
         None => Unsupported::UnknownLanguage,
+        Some(language) if language.class() != harn_languages::LanguageClass::Code => {
+            Unsupported::NoSymbolProjection
+        }
+        Some(_) => Unsupported::NoGrammar,
     }))
 }
