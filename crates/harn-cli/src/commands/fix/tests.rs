@@ -1181,6 +1181,33 @@ fn apply_rewrites_zero_and_optional_metadata_arguments_to_named_requests() {
 }
 
 #[test]
+fn apply_keeps_a_bundle_literal_when_an_unresolved_import_may_bind_pick() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let script = temp.path().join("host_projections.harn");
+    fs::write(
+        &script,
+        "import \"./missing_module\"\n\nfn describe() {\n  return platform() + \"-\" + arch() + home_dir()\n}\n\nfn main(harness: Harness) {\n  describe()\n}\n",
+    )
+    .unwrap();
+
+    apply_repairs_with_options_at(
+        &script,
+        RepairSafety::SurfaceChanging,
+        false,
+        FixOptions::capability_migrations(),
+    )
+    .unwrap();
+
+    // The import cannot be resolved, so nothing proves `pick` is the builtin.
+    let updated = fs::read_to_string(&script).unwrap();
+    assert!(!updated.contains("pick("), "{updated}");
+    assert!(
+        updated.contains("describe({fs: harness.fs, system: harness.system})"),
+        "{updated}"
+    );
+}
+
+#[test]
 fn apply_rewrites_legacy_host_projections_to_typed_snapshots() {
     let temp = tempfile::TempDir::new().unwrap();
     let script = temp.path().join("host_projections.harn");

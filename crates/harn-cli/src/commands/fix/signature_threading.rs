@@ -265,7 +265,7 @@ fn collect_binding_names(nodes: &[SNode], names: &mut BTreeSet<String>) {
 }
 
 /// Whether anything written in `program` binds `name`: a declaration, a
-/// parameter, a local, or a selective import. A wildcard import of a non-stdlib
+/// parameter, a local, a selective import, or a namespace alias. A wildcard import of a non-stdlib
 /// module may export any name, so it counts as binding unless the caller has
 /// resolved imports itself and passes `wildcard_imports_bind = false`.
 pub(super) fn program_binds_name(
@@ -300,6 +300,9 @@ pub(super) fn program_binds_name(
             }
             Node::SelectiveImport { names, .. } => {
                 found |= names.iter().any(|imported| imported == name);
+            }
+            Node::NamespaceImport { alias, .. } => {
+                found |= alias == name;
             }
             Node::ImportDecl { path, .. } => {
                 found |= wildcard_imports_bind && !path.starts_with("std/");

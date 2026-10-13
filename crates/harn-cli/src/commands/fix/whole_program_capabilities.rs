@@ -193,11 +193,11 @@ pub(super) fn plan(
             &imported_type_declarations,
         );
         let imported_capability_signatures = imported_signatures(file, module_graph, &type_aliases);
-        let pick_available =
-            !super::signature_threading::program_binds_name(&program, "pick", false)
-                && !module_graph
+        let pick_available = !super::signature_threading::program_binds_name(&program, "pick", false)
+                // `None` means an import is unresolved and may bind `pick`.
+                && module_graph
                     .imported_names_for_file(file)
-                    .is_some_and(|names| names.contains("pick"));
+                    .is_some_and(|names| !names.contains("pick"));
         for info in infos {
             let Some((params, body, boundary, flow_predicate)) =
                 declaration_parts(&program, &boundaries, info.span)
