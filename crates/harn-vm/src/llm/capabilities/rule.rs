@@ -428,10 +428,6 @@ pub struct ProviderRule {
     /// rejects forced/specified tool choices.
     #[serde(default)]
     pub allowed_tool_choice_modes: Option<Vec<String>>,
-    /// Whether an assistant `tool_calls` message must be followed immediately
-    /// by `role=tool` messages for every emitted `tool_call_id`.
-    #[serde(default)]
-    pub requires_tool_result_adjacency: Option<bool>,
     /// Whether a single assistant message may contain multiple tool calls.
     /// Some OpenAI-compatible providers reject replayed history with more than
     /// one `tool_calls[]` entry even when the calls were parsed from Harn's text
@@ -687,7 +683,6 @@ impl ProviderRule {
             stop_supported,
             advanced_generation_options,
             allowed_tool_choice_modes,
-            requires_tool_result_adjacency,
             supports_parallel_tool_calls,
             requires_parallel_tool_calls_false,
             tools_exclude_response_format,
@@ -861,10 +856,6 @@ impl ProviderRule {
         fill_opt(
             &mut self.allowed_tool_choice_modes,
             allowed_tool_choice_modes,
-        );
-        fill_opt(
-            &mut self.requires_tool_result_adjacency,
-            requires_tool_result_adjacency,
         );
         fill_opt(
             &mut self.supports_parallel_tool_calls,

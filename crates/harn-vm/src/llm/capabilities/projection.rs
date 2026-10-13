@@ -108,7 +108,6 @@ pub(super) fn defaults_to_caps(defaults: &ProviderDefaults) -> Capabilities {
         stop_supported: None,
         advanced_generation_options: None,
         allowed_tool_choice_modes: None,
-        requires_tool_result_adjacency: None,
         supports_parallel_tool_calls: None,
         requires_parallel_tool_calls_false: None,
         tools_exclude_response_format: None,
@@ -362,7 +361,6 @@ pub(super) fn rule_to_caps(rule: &ProviderRule, defaults: &ProviderDefaults) -> 
             .or(defaults.advanced_generation_options.clone())
             .unwrap_or_default(),
         allowed_tool_choice_modes: rule.allowed_tool_choice_modes.clone().unwrap_or_default(),
-        requires_tool_result_adjacency: rule.requires_tool_result_adjacency.unwrap_or(false),
         supports_parallel_tool_calls: rule
             .supports_parallel_tool_calls
             .or(defaults.supports_parallel_tool_calls)

@@ -1042,10 +1042,7 @@ impl From<&LlmCallOptions> for LlmRequestPayload {
             region: opts.region.clone(),
             api_key: opts.api_key.clone(),
             api_mode: opts.api_mode,
-            // A call left unanswered by a stopped turn is answered here, so no
-            // provider sees an invalid history (harn#8951).
-            messages: crate::llm::agent_session_host::answer_unanswered_tool_calls(&opts.messages)
-                .unwrap_or_else(|| opts.messages.clone()),
+            messages: opts.messages.clone(),
             system: opts.system.clone(),
             max_tokens: opts.max_tokens,
             temperature: opts.temperature,
@@ -1116,6 +1113,11 @@ impl From<&LlmCallOptions> for LlmRequestPayload {
             // persisted transcript keeps the original roles.
             crate::llm::system_placement::normalize_payload_system_messages(&mut payload);
         }
+        // Last, so the pairing it guarantees survives every rewrite above:
+        // every provider dialect lowers an already-valid tool-call history.
+        payload.messages = crate::llm::tool_call_history::repair_tool_call_history(std::mem::take(
+            &mut payload.messages,
+        ));
         payload
     }
 }

@@ -2,113 +2,12 @@
 //!
 //! Every rule here exists because some OpenAI-compatible route rejects, or
 //! silently mis-serves, a message sequence Harn can legitimately produce:
-//! tool results that must sit adjacent to the call they answer, parallel
-//! tool-call batches on single-call routes, orphaned results left behind by
-//! compaction, images riding on a `role:"tool"` message, provider-private
-//! fields, and reserved `<tool_call>` delimiters.
+//! parallel tool-call batches on single-call routes, images riding on a
+//! `role:"tool"` message, provider-private fields, and reserved `<tool_call>`
+//! delimiters. Call/result pairing is repaired for every provider before this
+//! module runs; see `crate::llm::tool_call_history`.
 
 use std::collections::HashSet;
-
-pub(super) fn enforce_tool_result_adjacency(
-    messages: Vec<serde_json::Value>,
-) -> Vec<serde_json::Value> {
-    let mut normalized = Vec::with_capacity(messages.len());
-    let mut cursor = 0;
-    while cursor < messages.len() {
-        let message = messages[cursor].clone();
-        let Some(mut pending_ids) = assistant_tool_call_ids(&message) else {
-            normalized.push(message);
-            cursor += 1;
-            continue;
-        };
-
-        normalized.push(message);
-        cursor += 1;
-
-        let mut results = Vec::new();
-        let mut deferred = Vec::new();
-        while cursor < messages.len() && !pending_ids.is_empty() {
-            let next = messages[cursor].clone();
-            let matching_ids = matching_tool_result_ids(&next, &pending_ids);
-            if !matching_ids.is_empty() {
-                for id in matching_ids {
-                    pending_ids.remove(&id);
-                }
-                results.push(next);
-                cursor += 1;
-                continue;
-            }
-            if is_deferable_non_tool_message(&next) {
-                deferred.push(next);
-                cursor += 1;
-                continue;
-            }
-            break;
-        }
-
-        normalized.extend(results);
-        normalized.extend(deferred);
-    }
-    normalized
-}
-
-/// Keep observations whose call envelope was removed by compaction,
-/// interruption, or session trimming without sending an invalid tool result.
-pub(super) fn preserve_orphan_tool_results_as_observations(
-    messages: Vec<serde_json::Value>,
-) -> Vec<serde_json::Value> {
-    let mut live_tool_call_ids = HashSet::new();
-    let mut normalized = Vec::with_capacity(messages.len());
-    let mut observations = Vec::new();
-    for message in messages {
-        // Observations are user messages. Land them after the entire tool
-        // result run so they cannot split a valid parallel result envelope.
-        if message.get("role").and_then(|role| role.as_str()) != Some("tool") {
-            normalized.append(&mut observations);
-        }
-        match message.get("role").and_then(|role| role.as_str()) {
-            Some("assistant") => {
-                if let Some(ids) = assistant_tool_call_ids(&message) {
-                    live_tool_call_ids.extend(ids);
-                }
-                normalized.push(message);
-            }
-            Some("tool") => {
-                let paired = message
-                    .get("tool_call_id")
-                    .and_then(|value| value.as_str())
-                    .is_some_and(|id| live_tool_call_ids.remove(id));
-                if paired {
-                    normalized.push(message);
-                } else {
-                    let content = message.get("content").cloned().unwrap_or_default();
-                    let content = match content {
-                        serde_json::Value::Array(mut parts) => {
-                            parts.insert(
-                                0,
-                                serde_json::json!({
-                                    "type": "text",
-                                    "text": "[unpaired durable tool result]",
-                                }),
-                            );
-                            serde_json::Value::Array(parts)
-                        }
-                        serde_json::Value::String(text) => {
-                            serde_json::json!(format!("[unpaired durable tool result]\n{text}"))
-                        }
-                        other => {
-                            serde_json::json!(format!("[unpaired durable tool result]\n{other}"))
-                        }
-                    };
-                    observations.push(serde_json::json!({"role": "user", "content": content}));
-                }
-            }
-            _ => normalized.push(message),
-        }
-    }
-    normalized.append(&mut observations);
-    normalized
-}
 
 pub(super) fn enforce_single_tool_call_history(
     messages: Vec<serde_json::Value>,
@@ -243,27 +142,6 @@ fn assistant_tool_calls(message: &serde_json::Value) -> Option<Vec<serde_json::V
         None
     } else {
         Some(calls)
-    }
-}
-
-fn assistant_tool_call_ids(message: &serde_json::Value) -> Option<HashSet<String>> {
-    if message.get("role").and_then(|role| role.as_str()) != Some("assistant") {
-        return None;
-    }
-    let ids: HashSet<String> = message
-        .get("tool_calls")?
-        .as_array()?
-        .iter()
-        .filter_map(|call| {
-            call.get("id")
-                .and_then(|value| value.as_str())
-                .map(ToString::to_string)
-        })
-        .collect();
-    if ids.is_empty() {
-        None
-    } else {
-        Some(ids)
     }
 }
 

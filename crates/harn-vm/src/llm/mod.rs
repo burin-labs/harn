@@ -332,6 +332,7 @@ pub(crate) mod rate_limit;
 pub mod receipts;
 pub(crate) mod route;
 mod stream;
+pub(crate) mod tool_call_history;
 pub(crate) mod tool_call_intent;
 pub(crate) mod tool_delimiter;
 pub(crate) mod tools;

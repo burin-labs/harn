@@ -161,6 +161,26 @@ pub(super) fn tool_result_message(input: ToolResultMessageInput<'_>) -> VmValue 
     )
 }
 
+/// The canonical failed result the harness writes for a native call it answers
+/// itself, marked `HarnessRepair` so completion authorities never read it as
+/// the tool's own outcome.
+pub(crate) fn harness_repair_tool_result(
+    name: &str,
+    tool_call_id: &str,
+    observation: &str,
+) -> serde_json::Value {
+    crate::llm::helpers::vm_value_to_json(&tool_result_message(ToolResultMessageInput {
+        channel: crate::llm_config::ToolFormatChannel::Native,
+        name,
+        tool_call_id,
+        observation,
+        ok: false,
+        screenshots: &[],
+        data: None,
+        origin: ToolResultOrigin::HarnessRepair,
+    }))
+}
+
 /// A short text summary for a screenshot tool result, stripped of the giant
 /// base64 payload that the display-stringified `ScreenImage` carries. Keeps any
 /// leading `[result of ...]` framing and the `text` field's human summary if one

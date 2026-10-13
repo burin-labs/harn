@@ -888,7 +888,6 @@ pub struct Capabilities {
     pub stop_supported: bool,
     pub advanced_generation_options: Vec<super::PortableOption>,
     pub allowed_tool_choice_modes: Vec<String>,
-    pub requires_tool_result_adjacency: bool,
     pub supports_parallel_tool_calls: bool,
     /// Whether the request must explicitly suppress parallel calls on the wire.
     pub requires_parallel_tool_calls_false: bool,
@@ -1034,7 +1033,6 @@ impl Default for Capabilities {
             stop_supported: true,
             advanced_generation_options: Vec::new(),
             allowed_tool_choice_modes: Vec::new(),
-            requires_tool_result_adjacency: false,
             supports_parallel_tool_calls: true,
             requires_parallel_tool_calls_false: false,
             tools_exclude_response_format: false,

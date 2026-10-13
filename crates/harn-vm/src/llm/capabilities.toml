@@ -290,11 +290,6 @@
 #                     `throttled` (full precision but rate-limited to unusable
 #                     timing — e.g. Cerebras gpt-oss), `unverified` (no verdict;
 #                     same as unset). Defaults to `unverified`.
-#   requires_tool_result_adjacency:
-#                     whether an assistant message with `tool_calls` must be
-#                     followed immediately by `role=tool` messages for every
-#                     emitted `tool_call_id`; strict OpenAI-compatible servers
-#                     reject interleaved runtime feedback before the result.
 #   supports_parallel_tool_calls:
 #                     whether one assistant history message may contain multiple
 #                     `tool_calls[]` entries; strict OpenAI-compatible servers
@@ -4557,7 +4552,6 @@ vision_supported = true
 prompt_caching = true
 # Directly measured with K3's mandatory reasoning on 2026-08-26.
 allowed_tool_choice_modes = ["auto", "required", "none"]
-requires_tool_result_adjacency = true
 # K3 always reasons, requires `max_completion_tokens`, and rejects fixed
 # sampling and penalty knobs.
 requires_completion_tokens = true
@@ -4593,7 +4587,6 @@ vision_supported = true
 video_supported = true
 prompt_caching = true
 allowed_tool_choice_modes = ["auto", "none"]
-requires_tool_result_adjacency = true
 temperature_supported = false
 top_p_supported = false
 frequency_penalty_supported = false
@@ -4616,7 +4609,6 @@ thinking_modes = ["enabled"]
 vision = true
 vision_supported = true
 prompt_caching = true
-requires_tool_result_adjacency = true
 allowed_tool_choice_modes = ["auto", "none"]
 # Every Kimi model pins these sampling fields to a single server-side value and
 # rejects any other with HTTP 400 ("invalid temperature: only 1 is allowed for
@@ -7426,7 +7418,6 @@ vision_supported = true
 video_supported = true
 prompt_caching = true
 reasoning_text_promotable = false
-requires_tool_result_adjacency = true
 text_tool_wire_format_supported = true
 prefers_xml_scaffolding = false
 prefers_markdown_scaffolding = true
@@ -7454,7 +7445,6 @@ prefers_xml_tools = false
 thinking_block_style = "inline"
 prompt_caching = true
 reasoning_text_promotable = false
-requires_tool_result_adjacency = true
 
 [[provider.minimax]]
 model_match = "minimax-m2.5*"
@@ -7471,7 +7461,6 @@ prefers_role_developer = false
 prefers_xml_tools = false
 thinking_block_style = "inline"
 reasoning_text_promotable = false
-requires_tool_result_adjacency = true
 
 [[provider.minimax]]
 model_match = "minimax-m2*"
@@ -7488,7 +7477,6 @@ prefers_role_developer = false
 prefers_xml_tools = false
 thinking_block_style = "inline"
 reasoning_text_promotable = false
-requires_tool_result_adjacency = true
 
 [[provider.minimax]]
 model_match = "minimax-text-*"
@@ -7503,7 +7491,6 @@ supports_assistant_prefill = false
 prefers_role_developer = false
 prefers_xml_tools = false
 thinking_block_style = "none"
-requires_tool_result_adjacency = true
 
 # --- source: 20-providers/98-zai.toml ---
 # ---------- Z.AI / GLM-5 family (open-weight, OpenAI-compatible /v1) ---------
