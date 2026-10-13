@@ -740,6 +740,12 @@ pub(super) async fn host_agent_dispatch_tool_call(
         None
     };
     let dispatch_annotations = tool_annotations_for(tools, &tool_name);
+    tools::drop_unused_optional_path_args(
+        &tool_name,
+        &mut tool_args,
+        tools,
+        dispatch_annotations.as_ref(),
+    );
     // Install typed session context before resolving catalog/ambient path
     // annotations, but refuse malformed paths before any policy callback or
     // permission prompt. Full schema validation stays after hooks and routing.

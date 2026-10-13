@@ -171,6 +171,33 @@ pub(crate) fn normalize_tool_args(
     super::compat::coerce_args_to_schema(normalized, schema.as_ref())
 }
 
+/// Drop optional path arguments a model sent empty, against the annotations
+/// in force at dispatch.
+///
+/// `normalize_tool_args` runs before the session's execution policy is
+/// installed, so a path parameter declared only by that policy's tool
+/// annotations is not yet known there, and its `""` reached path validation
+/// and was refused. Strict tool schemas make a model fill every optional field,
+/// so that refusal cost a turn on most calls to such a tool (harn#9816).
+pub(crate) fn drop_unused_optional_path_args(
+    name: &str,
+    args: &mut serde_json::Value,
+    tools: Option<&crate::value::VmValue>,
+    annotations: Option<&crate::tool_annotations::ToolAnnotations>,
+) {
+    let serde_json::Value::Object(obj) = args else {
+        return;
+    };
+    let schema = super::collect_tool_schemas(tools, None)
+        .into_iter()
+        .find(|schema| schema.name == name);
+    super::compat::drop_unused_optional_args(
+        obj,
+        schema.as_ref(),
+        &crate::tool_annotations::path_inputs::parameters(annotations),
+    );
+}
+
 /// Recursively unwrap a leaked, fully-wrapping `<<TAG\n...\nTAG` heredoc from
 /// every string leaf of a tool-argument value. Recurses into nested
 /// objects/arrays so a batched `ops: [{ new_body: "<<EOF\n...\nEOF" }]` (the
