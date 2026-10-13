@@ -17,11 +17,12 @@ use super::analysis::{
     analyze_file, render_file_analysis_error_to_string, span_from_lexer_error,
     span_from_parser_error, FileAnalysisError,
 };
-use super::host_capabilities::{resolve_host_capabilities, HostCapabilities};
+use super::host_capabilities::resolve_host_capabilities;
 use super::outcome::{render_lint_diagnostics, CommandOutcome};
 use super::preflight::{
-    collect_preflight_diagnostics_with_host_capabilities, is_preflight_allowed,
+    collect_preflight_diagnostics_with_host_capabilities, is_preflight_allowed, PreflightRun,
 };
+use super::scan_memo::ScanMemo;
 
 pub(crate) const CHECK_SCHEMA_VERSION: u32 = 1;
 
@@ -140,7 +141,10 @@ pub(crate) fn check_file_inner(
         config,
         externally_imported_names,
         module_graph,
-        &host_capabilities.capabilities,
+        PreflightRun {
+            host_capabilities: &host_capabilities.capabilities,
+            memo: &ScanMemo::default(),
+        },
         check_invariants,
         Some(&mut text),
     );
@@ -164,7 +168,10 @@ pub(crate) fn check_file_report(
         config,
         externally_imported_names,
         module_graph,
-        &host_capabilities.capabilities,
+        PreflightRun {
+            host_capabilities: &host_capabilities.capabilities,
+            memo: &ScanMemo::default(),
+        },
         check_invariants,
         None,
     )
@@ -176,7 +183,7 @@ pub(crate) fn check_file_report_inner(
     config: &CheckConfig,
     externally_imported_names: &std::collections::HashSet<String>,
     module_graph: &harn_modules::ModuleGraph,
-    host_capabilities: &HostCapabilities,
+    preflight: PreflightRun<'_>,
     check_invariants: bool,
     mut text: Option<&mut CheckTextOutput>,
 ) -> CheckFileReport {
@@ -382,7 +389,8 @@ pub(crate) fn check_file_report_inner(
         &program,
         config,
         module_graph,
-        host_capabilities,
+        preflight.host_capabilities,
+        preflight.memo,
     );
     let preflight_severity = PreflightSeverity::from_opt(config.preflight_severity.as_deref());
     if preflight_severity != PreflightSeverity::Off {

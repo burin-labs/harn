@@ -139,6 +139,41 @@ pub(super) fn with_probe_recording<T>(active: bool, f: impl FnOnce() -> T) -> (T
     (value, probes)
 }
 
+/// Run `f` with a private probe log, whatever the caller's recording state,
+/// and return the probes it made instead of appending them to the caller's
+/// log. The per-run preflight memo scans a module once and replays its probes
+/// into every dependent file's log through [`replay_probes`]; capturing
+/// unconditionally keeps a memo built while recording was off complete for a
+/// later file that records. `f` may call [`drain_captured_probes`] to split
+/// the capture at an import boundary.
+pub(super) fn capture_probes<T>(f: impl FnOnce() -> T) -> (T, Vec<Probe>) {
+    let outer = PROBE_LOG.with(|log| log.borrow_mut().replace(Vec::new()));
+    let value = f();
+    let probes = PROBE_LOG.with(|log| std::mem::replace(&mut *log.borrow_mut(), outer));
+    (value, probes.unwrap_or_default())
+}
+
+/// Take the probes recorded so far inside [`capture_probes`], leaving the
+/// capture open.
+pub(super) fn drain_captured_probes() -> Vec<Probe> {
+    PROBE_LOG
+        .with(|log| log.borrow_mut().as_mut().map(std::mem::take))
+        .unwrap_or_default()
+}
+
+/// Append previously captured probes to this thread's log when recording is
+/// on, exactly as if the scan that made them had run here.
+pub(super) fn replay_probes(probes: &[Probe]) {
+    if probes.is_empty() {
+        return;
+    }
+    PROBE_LOG.with(|log| {
+        if let Some(log) = log.borrow_mut().as_mut() {
+            log.extend_from_slice(probes);
+        }
+    });
+}
+
 fn record(probe: Probe) {
     PROBE_LOG.with(|log| {
         if let Some(probes) = log.borrow_mut().as_mut() {
@@ -283,6 +318,22 @@ fn manifest_digest<'a, E: std::fmt::Debug + 'a>(
         hasher.update(format!("{entry:?}").as_bytes());
         hasher.update(b"\0");
     }
+    hasher.finalize().into()
+}
+
+/// Digest of every `CheckConfig` field, the same fold the result key uses.
+pub(super) fn check_config_digest(config: &CheckConfig) -> [u8; 32] {
+    let mut hasher = Sha256::new();
+    fold_config(
+        &mut |label: &str, value: &[u8]| {
+            hasher.update(label.as_bytes());
+            hasher.update(b"\0");
+            hasher.update(value);
+            hasher.update(b"\0");
+        },
+        config,
+        None,
+    );
     hasher.finalize().into()
 }
 

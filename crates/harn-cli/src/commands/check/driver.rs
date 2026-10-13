@@ -26,6 +26,7 @@ use std::collections::{HashMap, HashSet};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 
 use harn_parser::analysis::{AnalysisDatabase, SourceId};
 
@@ -35,6 +36,8 @@ use super::check_cmd::{
     check_file_report_inner, CheckDiagnostic, CheckFileReport, CheckFileStatus, CheckTextOutput,
 };
 use super::host_capabilities::{resolve_host_capabilities, ResolvedHostCapabilities};
+use super::preflight::PreflightRun;
+use super::scan_memo::ScanMemo;
 
 /// Environment override for the check worker-pool size. `1` forces the
 /// serial path; unset defaults to the machine's available parallelism.
@@ -78,6 +81,8 @@ pub(crate) struct CheckedFile {
 struct EffectiveCheckConfig {
     config: package::CheckConfig,
     host_capabilities: ResolvedHostCapabilities,
+    /// The check run's module-scan memo, shared by every context of one run.
+    scan_memo: Arc<ScanMemo>,
     llm: super::llm_context::LlmCheckContext,
 }
 
@@ -453,7 +458,10 @@ fn check_one_in_context(
             config,
             cross_file_imports,
             module_graph,
-            &context.host_capabilities.capabilities,
+            PreflightRun {
+                host_capabilities: &context.host_capabilities.capabilities,
+                memo: &context.scan_memo,
+            },
             overrides.invariants,
             text.as_mut(),
         )
@@ -522,6 +530,7 @@ fn build_check_contexts_with(
     resolve: impl Fn(&package::CheckConfig) -> ResolvedHostCapabilities,
 ) -> HashMap<PathBuf, EffectiveCheckConfig> {
     let mut contexts = HashMap::new();
+    let scan_memo = Arc::new(ScanMemo::default());
     for file in files {
         let key = check_config_key(file);
         if contexts.contains_key(&key) {
@@ -562,6 +571,7 @@ fn build_check_contexts_with(
             EffectiveCheckConfig {
                 config,
                 host_capabilities,
+                scan_memo: Arc::clone(&scan_memo),
                 llm: super::llm_context::LlmCheckContext::load(file),
             },
         );

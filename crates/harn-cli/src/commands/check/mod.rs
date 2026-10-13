@@ -20,6 +20,7 @@ mod predicate_manifest;
 mod preflight;
 pub(crate) mod provider_matrix;
 mod result_cache;
+mod scan_memo;
 mod script_rules;
 mod source;
 mod template_lint;
@@ -75,5 +76,6 @@ pub(crate) fn collect_preflight_diagnostics_with_module_graph(
         config,
         module_graph,
         &host_capabilities.capabilities,
+        &scan_memo::ScanMemo::default(),
     )
 }

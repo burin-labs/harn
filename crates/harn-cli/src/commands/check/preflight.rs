@@ -1,4 +1,4 @@
-use std::collections::{BTreeSet, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use harn_modules::resolve_import_path;
@@ -9,6 +9,8 @@ use super::imports::{
     scan_import_collisions, scan_re_export_conflicts, scan_selective_import_visibility,
 };
 use super::mock_host::collect_mock_host_capabilities;
+use super::result_cache::Probe;
+use super::scan_memo::ScanMemo;
 use super::source::parse_resolved_module;
 use crate::package::CheckConfig;
 
@@ -32,7 +34,7 @@ pub(super) use targets::{
 pub(super) use tool_scans::dict_literal_field;
 use tool_scans::*;
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(crate) struct PreflightDiagnostic {
     pub(crate) code: Code,
     pub(crate) path: String,
@@ -60,6 +62,15 @@ pub(crate) fn is_preflight_allowed(tag: &Option<String>, allow: &[String]) -> bo
     })
 }
 
+/// What a file's preflight reads beyond the file and its config: the
+/// resolved host capability surface and the check run's shared module-scan
+/// memo.
+#[derive(Clone, Copy)]
+pub(crate) struct PreflightRun<'a> {
+    pub(crate) host_capabilities: &'a HostCapabilities,
+    pub(crate) memo: &'a ScanMemo,
+}
+
 pub(super) fn collect_preflight_diagnostics_with_host_capabilities(
     path: &Path,
     source: &str,
@@ -67,26 +78,34 @@ pub(super) fn collect_preflight_diagnostics_with_host_capabilities(
     config: &CheckConfig,
     module_graph: &harn_modules::ModuleGraph,
     configured_host_capabilities: &HostCapabilities,
+    memo: &ScanMemo,
 ) -> Vec<PreflightDiagnostic> {
     let mut diagnostics = Vec::new();
-    let mut visited = HashSet::new();
     let canonical = harn_modules::canonical_path(path);
-    let mut host_capabilities = configured_host_capabilities.clone();
-    let mut mocked_caps_visited = HashSet::new();
-    collect_mock_host_capabilities(
-        &canonical,
-        source,
-        program,
-        &mut mocked_caps_visited,
-        host_capabilities.operations_mut(),
-    );
+    let mut mocked = HashMap::new();
+    collect_mock_host_capabilities(&canonical, source, program, memo, &mut mocked);
+    let with_mocks;
+    let host_capabilities = if mocked.is_empty() {
+        configured_host_capabilities
+    } else {
+        let mut merged = configured_host_capabilities.clone();
+        for (capability, operations) in mocked {
+            merged
+                .operations_mut()
+                .entry(capability)
+                .or_default()
+                .extend(operations);
+        }
+        with_mocks = merged;
+        &with_mocks
+    };
     scan_program_preflight(
         &canonical,
         source,
         program,
         config,
-        &host_capabilities,
-        &mut visited,
+        host_capabilities,
+        memo,
         &mut diagnostics,
     );
     scan_import_collisions(&canonical, source, program, module_graph, &mut diagnostics);
@@ -103,29 +122,145 @@ pub(super) fn collect_preflight_diagnostics_with_host_capabilities(
     diagnostics
 }
 
+/// One module's own preflight scan, in walk order. Diagnostics and recorded
+/// filesystem probes are grouped into runs split at each import, so replaying
+/// the events and following each import in place reproduces the depth-first
+/// walk's diagnostic order and probe log exactly.
+pub(super) struct ModuleScan {
+    events: Vec<ScanEvent>,
+}
+
+enum ScanEvent {
+    Diagnostics(Vec<PreflightDiagnostic>),
+    Probes(Vec<Probe>),
+    Import { path: PathBuf, canonical: PathBuf },
+}
+
+/// Walk the entry file and, through the run's memo, every module it imports.
+/// Each imported module is scanned at most once per `(module, context)` per
+/// run; later files replay its events, including its probes, into their own
+/// diagnostics and probe log.
 fn scan_program_preflight(
     file_path: &Path,
     source: &str,
     program: &[SNode],
     config: &CheckConfig,
     host_capabilities: &HostCapabilities,
-    visited: &mut HashSet<PathBuf>,
+    memo: &ScanMemo,
     diagnostics: &mut Vec<PreflightDiagnostic>,
 ) {
     let canonical = harn_modules::canonical_path(file_path);
-    if !visited.insert(canonical.clone()) {
-        return;
+    let context = scan_context(config, host_capabilities);
+    let mut visited = HashSet::from([canonical.clone()]);
+    let entry = scan_module(&canonical, source, program, config, host_capabilities);
+    let mut replay = Replay {
+        config,
+        host_capabilities,
+        memo,
+        context,
+        visited: &mut visited,
+        diagnostics,
+    };
+    replay.events(&entry);
+}
+
+/// The inputs besides the module itself that its preflight events read.
+fn scan_context(config: &CheckConfig, host_capabilities: &HostCapabilities) -> [u8; 32] {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(super::result_cache::check_config_digest(config));
+    hasher.update(host_capabilities.fingerprint());
+    hasher.finalize().into()
+}
+
+fn scan_module(
+    canonical: &Path,
+    source: &str,
+    program: &[SNode],
+    config: &CheckConfig,
+    host_capabilities: &HostCapabilities,
+) -> ModuleScan {
+    let (mut events, probes) = super::result_cache::capture_probes(|| {
+        let mut events = Vec::new();
+        let mut diagnostics = Vec::new();
+        for node in program {
+            scan_node_preflight(
+                node,
+                canonical,
+                source,
+                config,
+                host_capabilities,
+                &mut events,
+                &mut diagnostics,
+            );
+        }
+        if !diagnostics.is_empty() {
+            events.push(ScanEvent::Diagnostics(diagnostics));
+        }
+        events
+    });
+    if !probes.is_empty() {
+        events.push(ScanEvent::Probes(probes));
     }
-    for node in program {
-        scan_node_preflight(
-            node,
-            &canonical,
-            source,
-            config,
-            host_capabilities,
-            visited,
-            diagnostics,
-        );
+    ModuleScan { events }
+}
+
+/// Close the current diagnostic and probe runs and record an import to follow.
+fn push_import(
+    events: &mut Vec<ScanEvent>,
+    diagnostics: &mut Vec<PreflightDiagnostic>,
+    path: PathBuf,
+) {
+    if !diagnostics.is_empty() {
+        events.push(ScanEvent::Diagnostics(std::mem::take(diagnostics)));
+    }
+    let probes = super::result_cache::drain_captured_probes();
+    if !probes.is_empty() {
+        events.push(ScanEvent::Probes(probes));
+    }
+    let canonical = harn_modules::canonical_path(&path);
+    events.push(ScanEvent::Import { path, canonical });
+}
+
+struct Replay<'a> {
+    config: &'a CheckConfig,
+    host_capabilities: &'a HostCapabilities,
+    memo: &'a ScanMemo,
+    context: [u8; 32],
+    visited: &'a mut HashSet<PathBuf>,
+    diagnostics: &'a mut Vec<PreflightDiagnostic>,
+}
+
+impl Replay<'_> {
+    fn events(&mut self, scan: &ModuleScan) {
+        for event in &scan.events {
+            match event {
+                ScanEvent::Diagnostics(diagnostics) => {
+                    self.diagnostics.extend(diagnostics.iter().cloned());
+                }
+                ScanEvent::Probes(probes) => super::result_cache::replay_probes(probes),
+                ScanEvent::Import { path, canonical } => {
+                    if self.visited.contains(canonical) {
+                        continue;
+                    }
+                    let (config, host_capabilities) = (self.config, self.host_capabilities);
+                    let imported = self.memo.preflight(canonical, self.context, || {
+                        let parsed = parse_resolved_module(path)?;
+                        Some(scan_module(
+                            canonical,
+                            &parsed.source,
+                            &parsed.program,
+                            config,
+                            host_capabilities,
+                        ))
+                    });
+                    if let Some(imported) = imported {
+                        self.visited.insert(canonical.clone());
+                        self.events(&imported);
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -135,26 +270,14 @@ fn scan_node_preflight(
     source: &str,
     config: &CheckConfig,
     host_capabilities: &HostCapabilities,
-    visited: &mut HashSet<PathBuf>,
+    events: &mut Vec<ScanEvent>,
     diagnostics: &mut Vec<PreflightDiagnostic>,
 ) {
     match &node.node {
         Node::ImportDecl { path, .. }
         | Node::SelectiveImport { path, .. }
         | Node::NamespaceImport { path, .. } => match resolve_import_path(file_path, path) {
-            Some(import_path) => {
-                if let Some(parsed) = parse_resolved_module(&import_path) {
-                    scan_program_preflight(
-                        &import_path,
-                        &parsed.source,
-                        &parsed.program,
-                        config,
-                        host_capabilities,
-                        visited,
-                        diagnostics,
-                    );
-                }
-            }
+            Some(import_path) => push_import(events, diagnostics, import_path),
             None => diagnostics.push(PreflightDiagnostic {
                 code: Code::ModuleImportUnresolved,
                 path: file_path.display().to_string(),
@@ -186,7 +309,7 @@ fn scan_node_preflight(
                         source,
                         config,
                         host_capabilities,
-                        visited,
+                        events,
                         diagnostics,
                     );
                     return;
@@ -266,7 +389,7 @@ fn scan_node_preflight(
                 source,
                 config,
                 host_capabilities,
-                visited,
+                events,
                 diagnostics,
             );
         }
@@ -289,7 +412,7 @@ fn scan_node_preflight(
                 source,
                 config,
                 host_capabilities,
-                visited,
+                events,
                 diagnostics,
             );
         }
@@ -314,7 +437,7 @@ fn scan_node_preflight(
                 source,
                 config,
                 host_capabilities,
-                visited,
+                events,
                 diagnostics,
             );
         }
@@ -424,7 +547,7 @@ fn scan_node_preflight(
                 source,
                 config,
                 host_capabilities,
-                visited,
+                events,
                 diagnostics,
             );
         }
@@ -440,7 +563,7 @@ fn scan_node_preflight(
                 source,
                 config,
                 host_capabilities,
-                visited,
+                events,
                 diagnostics,
             );
             scan_children(
@@ -449,7 +572,7 @@ fn scan_node_preflight(
                 source,
                 config,
                 host_capabilities,
-                visited,
+                events,
                 diagnostics,
             );
             if let Some(else_body) = else_body {
@@ -459,7 +582,7 @@ fn scan_node_preflight(
                     source,
                     config,
                     host_capabilities,
-                    visited,
+                    events,
                     diagnostics,
                 );
             }
@@ -475,7 +598,7 @@ fn scan_node_preflight(
                 source,
                 config,
                 host_capabilities,
-                visited,
+                events,
                 diagnostics,
             );
             scan_children(
@@ -484,7 +607,7 @@ fn scan_node_preflight(
                 source,
                 config,
                 host_capabilities,
-                visited,
+                events,
                 diagnostics,
             );
         }
@@ -495,7 +618,7 @@ fn scan_node_preflight(
                 source,
                 config,
                 host_capabilities,
-                visited,
+                events,
                 diagnostics,
             );
             scan_children(
@@ -504,7 +627,7 @@ fn scan_node_preflight(
                 source,
                 config,
                 host_capabilities,
-                visited,
+                events,
                 diagnostics,
             );
         }
@@ -516,7 +639,7 @@ fn scan_node_preflight(
                     source,
                     config,
                     host_capabilities,
-                    visited,
+                    events,
                     diagnostics,
                 );
             }
@@ -526,7 +649,7 @@ fn scan_node_preflight(
                 source,
                 config,
                 host_capabilities,
-                visited,
+                events,
                 diagnostics,
             );
         }
@@ -538,7 +661,7 @@ fn scan_node_preflight(
                     source,
                     config,
                     host_capabilities,
-                    visited,
+                    events,
                     diagnostics,
                 );
             }
@@ -550,7 +673,7 @@ fn scan_node_preflight(
                 source,
                 config,
                 host_capabilities,
-                visited,
+                events,
                 diagnostics,
             );
             if let Some(message) = message {
@@ -560,7 +683,7 @@ fn scan_node_preflight(
                     source,
                     config,
                     host_capabilities,
-                    visited,
+                    events,
                     diagnostics,
                 );
             }
@@ -578,7 +701,7 @@ fn scan_node_preflight(
                 source,
                 config,
                 host_capabilities,
-                visited,
+                events,
                 diagnostics,
             );
             scan_children(
@@ -587,7 +710,7 @@ fn scan_node_preflight(
                 source,
                 config,
                 host_capabilities,
-                visited,
+                events,
                 diagnostics,
             );
             if let Some(finally_body) = finally_body {
@@ -597,7 +720,7 @@ fn scan_node_preflight(
                     source,
                     config,
                     host_capabilities,
-                    visited,
+                    events,
                     diagnostics,
                 );
             }
@@ -613,7 +736,7 @@ fn scan_node_preflight(
                 source,
                 config,
                 host_capabilities,
-                visited,
+                events,
                 diagnostics,
             );
         }
@@ -627,7 +750,7 @@ fn scan_node_preflight(
                 source,
                 config,
                 host_capabilities,
-                visited,
+                events,
                 diagnostics,
             );
             scan_children(
@@ -636,7 +759,7 @@ fn scan_node_preflight(
                 source,
                 config,
                 host_capabilities,
-                visited,
+                events,
                 diagnostics,
             );
         }
@@ -648,7 +771,7 @@ fn scan_node_preflight(
                     source,
                     config,
                     host_capabilities,
-                    visited,
+                    events,
                     diagnostics,
                 );
             }
@@ -660,7 +783,7 @@ fn scan_node_preflight(
                 source,
                 config,
                 host_capabilities,
-                visited,
+                events,
                 diagnostics,
             );
             scan_children(
@@ -669,7 +792,7 @@ fn scan_node_preflight(
                 source,
                 config,
                 host_capabilities,
-                visited,
+                events,
                 diagnostics,
             );
         }
@@ -681,7 +804,7 @@ fn scan_node_preflight(
                     source,
                     config,
                     host_capabilities,
-                    visited,
+                    events,
                     diagnostics,
                 );
             }
@@ -693,7 +816,7 @@ fn scan_node_preflight(
                 source,
                 config,
                 host_capabilities,
-                visited,
+                events,
                 diagnostics,
             );
         }
@@ -704,7 +827,7 @@ fn scan_node_preflight(
                 source,
                 config,
                 host_capabilities,
-                visited,
+                events,
                 diagnostics,
             );
             scan_children(
@@ -713,7 +836,7 @@ fn scan_node_preflight(
                 source,
                 config,
                 host_capabilities,
-                visited,
+                events,
                 diagnostics,
             );
         }
@@ -729,7 +852,7 @@ fn scan_node_preflight(
                     source,
                     config,
                     host_capabilities,
-                    visited,
+                    events,
                     diagnostics,
                 );
                 scan_children(
@@ -738,7 +861,7 @@ fn scan_node_preflight(
                     source,
                     config,
                     host_capabilities,
-                    visited,
+                    events,
                     diagnostics,
                 );
             }
@@ -749,7 +872,7 @@ fn scan_node_preflight(
                     source,
                     config,
                     host_capabilities,
-                    visited,
+                    events,
                     diagnostics,
                 );
                 scan_children(
@@ -758,7 +881,7 @@ fn scan_node_preflight(
                     source,
                     config,
                     host_capabilities,
-                    visited,
+                    events,
                     diagnostics,
                 );
             }
@@ -769,7 +892,7 @@ fn scan_node_preflight(
                     source,
                     config,
                     host_capabilities,
-                    visited,
+                    events,
                     diagnostics,
                 );
             }
@@ -781,7 +904,7 @@ fn scan_node_preflight(
                 source,
                 config,
                 host_capabilities,
-                visited,
+                events,
                 diagnostics,
             );
         }
@@ -792,7 +915,7 @@ fn scan_node_preflight(
                 source,
                 config,
                 host_capabilities,
-                visited,
+                events,
                 diagnostics,
             );
             scan_children(
@@ -801,7 +924,7 @@ fn scan_node_preflight(
                 source,
                 config,
                 host_capabilities,
-                visited,
+                events,
                 diagnostics,
             );
         }
@@ -824,7 +947,7 @@ fn scan_node_preflight(
                 source,
                 config,
                 host_capabilities,
-                visited,
+                events,
                 diagnostics,
             );
             scan_children(
@@ -833,7 +956,7 @@ fn scan_node_preflight(
                 source,
                 config,
                 host_capabilities,
-                visited,
+                events,
                 diagnostics,
             );
         }
@@ -848,7 +971,7 @@ fn scan_node_preflight(
                 source,
                 config,
                 host_capabilities,
-                visited,
+                events,
                 diagnostics,
             );
         }
@@ -860,7 +983,7 @@ fn scan_node_preflight(
                 source,
                 config,
                 host_capabilities,
-                visited,
+                events,
                 diagnostics,
             );
             scan_node_preflight(
@@ -869,7 +992,7 @@ fn scan_node_preflight(
                 source,
                 config,
                 host_capabilities,
-                visited,
+                events,
                 diagnostics,
             );
         }
@@ -880,7 +1003,7 @@ fn scan_node_preflight(
                 source,
                 config,
                 host_capabilities,
-                visited,
+                events,
                 diagnostics,
             );
             if let Some(start) = start {
@@ -890,7 +1013,7 @@ fn scan_node_preflight(
                     source,
                     config,
                     host_capabilities,
-                    visited,
+                    events,
                     diagnostics,
                 );
             }
@@ -901,7 +1024,7 @@ fn scan_node_preflight(
                     source,
                     config,
                     host_capabilities,
-                    visited,
+                    events,
                     diagnostics,
                 );
             }
@@ -913,7 +1036,7 @@ fn scan_node_preflight(
                 source,
                 config,
                 host_capabilities,
-                visited,
+                events,
                 diagnostics,
             );
             scan_node_preflight(
@@ -922,7 +1045,7 @@ fn scan_node_preflight(
                 source,
                 config,
                 host_capabilities,
-                visited,
+                events,
                 diagnostics,
             );
         }
@@ -937,7 +1060,7 @@ fn scan_node_preflight(
                 source,
                 config,
                 host_capabilities,
-                visited,
+                events,
                 diagnostics,
             );
             scan_node_preflight(
@@ -946,7 +1069,7 @@ fn scan_node_preflight(
                 source,
                 config,
                 host_capabilities,
-                visited,
+                events,
                 diagnostics,
             );
             scan_node_preflight(
@@ -955,7 +1078,7 @@ fn scan_node_preflight(
                 source,
                 config,
                 host_capabilities,
-                visited,
+                events,
                 diagnostics,
             );
         }
@@ -966,7 +1089,7 @@ fn scan_node_preflight(
                 source,
                 config,
                 host_capabilities,
-                visited,
+                events,
                 diagnostics,
             );
             scan_node_preflight(
@@ -975,7 +1098,7 @@ fn scan_node_preflight(
                 source,
                 config,
                 host_capabilities,
-                visited,
+                events,
                 diagnostics,
             );
         }
@@ -986,7 +1109,7 @@ fn scan_node_preflight(
                 source,
                 config,
                 host_capabilities,
-                visited,
+                events,
                 diagnostics,
             );
         }
@@ -997,7 +1120,7 @@ fn scan_node_preflight(
                 source,
                 config,
                 host_capabilities,
-                visited,
+                events,
                 diagnostics,
             );
         }
@@ -1009,7 +1132,7 @@ fn scan_node_preflight(
                     source,
                     config,
                     host_capabilities,
-                    visited,
+                    events,
                     diagnostics,
                 );
             }
@@ -1021,7 +1144,7 @@ fn scan_node_preflight(
                 source,
                 config,
                 host_capabilities,
-                visited,
+                events,
                 diagnostics,
             );
             scan_node_preflight(
@@ -1030,7 +1153,7 @@ fn scan_node_preflight(
                 source,
                 config,
                 host_capabilities,
-                visited,
+                events,
                 diagnostics,
             );
         }
@@ -1044,7 +1167,7 @@ fn scan_node_preflight(
                 source,
                 config,
                 host_capabilities,
-                visited,
+                events,
                 diagnostics,
             );
         }
@@ -1056,7 +1179,7 @@ fn scan_node_preflight(
                     source,
                     config,
                     host_capabilities,
-                    visited,
+                    events,
                     diagnostics,
                 );
             }
@@ -1074,7 +1197,7 @@ fn scan_node_preflight(
                     source,
                     config,
                     host_capabilities,
-                    visited,
+                    events,
                     diagnostics,
                 );
             }
@@ -1084,7 +1207,7 @@ fn scan_node_preflight(
                 source,
                 config,
                 host_capabilities,
-                visited,
+                events,
                 diagnostics,
             );
             if let Some(summary_body) = summarize {
@@ -1094,7 +1217,7 @@ fn scan_node_preflight(
                     source,
                     config,
                     host_capabilities,
-                    visited,
+                    events,
                     diagnostics,
                 );
             }
@@ -1106,7 +1229,7 @@ fn scan_node_preflight(
                 source,
                 config,
                 host_capabilities,
-                visited,
+                events,
                 diagnostics,
             );
         }
@@ -1117,7 +1240,7 @@ fn scan_node_preflight(
                 source,
                 config,
                 host_capabilities,
-                visited,
+                events,
                 diagnostics,
             );
             for arm in arms {
@@ -1127,7 +1250,7 @@ fn scan_node_preflight(
                     source,
                     config,
                     host_capabilities,
-                    visited,
+                    events,
                     diagnostics,
                 );
                 scan_node_preflight(
@@ -1136,7 +1259,7 @@ fn scan_node_preflight(
                     source,
                     config,
                     host_capabilities,
-                    visited,
+                    events,
                     diagnostics,
                 );
             }
@@ -1148,7 +1271,7 @@ fn scan_node_preflight(
                 source,
                 config,
                 host_capabilities,
-                visited,
+                events,
                 diagnostics,
             );
         }
@@ -1162,7 +1285,7 @@ fn scan_node_preflight(
                 source,
                 config,
                 host_capabilities,
-                visited,
+                events,
                 diagnostics,
             );
         }
@@ -1173,7 +1296,7 @@ fn scan_node_preflight(
                 source,
                 config,
                 host_capabilities,
-                visited,
+                events,
                 diagnostics,
             );
         }
@@ -1199,7 +1322,7 @@ fn scan_node_preflight(
                 source,
                 config,
                 host_capabilities,
-                visited,
+                events,
                 diagnostics,
             );
         }
@@ -1211,7 +1334,7 @@ fn scan_node_preflight(
                     source,
                     config,
                     host_capabilities,
-                    visited,
+                    events,
                     diagnostics,
                 );
             }
@@ -1225,7 +1348,7 @@ fn scan_children(
     source: &str,
     config: &CheckConfig,
     host_capabilities: &HostCapabilities,
-    visited: &mut HashSet<PathBuf>,
+    events: &mut Vec<ScanEvent>,
     diagnostics: &mut Vec<PreflightDiagnostic>,
 ) {
     for node in nodes {
@@ -1235,7 +1358,7 @@ fn scan_children(
             source,
             config,
             host_capabilities,
-            visited,
+            events,
             diagnostics,
         );
     }
