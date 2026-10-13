@@ -365,14 +365,27 @@ pipeline test_sampled_profile_refuses_a_hand_written_reference(harness: Harness,
 }
 
 @test
-pipeline test_sampled_profile_refuses_too_few_or_misaligned_samples(
+pipeline test_sampled_profile_refuses_malformed_samples_without_throwing(
   harness: Harness,
   task: unknown,
 ) {
-  assert(resolve_references(sampled_profile(29)).error.contains("needs at least 30"))
   const profile = sampled_profile(31)
-  const misaligned = profile + {samples: profile.samples + {setup_p90_ms: [1, 2]}}
-  assert_eq(resolve_references(misaligned).error, "samples.setup_p90_ms has 2 values for 31 jobs")
+  const with_samples = { changed -> profile + {samples: profile.samples + changed} }
+  const cases = [
+    {profile: sampled_profile(29), error: "needs at least 30"},
+    {profile: with_samples({setup_p90_ms: [1, 2]}), error: "samples.setup_p90_ms has 2 values"},
+    {
+      profile: with_samples({execute_p90_ms: ["53"] + range(1, 31).to_list()}),
+      error: "samples table is malformed",
+    },
+    {profile: with_samples({jobs: "114613237276"}), error: "samples table is malformed"},
+    {profile: with_samples({max_child_wall_ms: nil}), error: "samples table is malformed"},
+  ]
+  for case in cases {
+    const resolved = resolve_references(case.profile)
+    assert_eq(resolved.ok, false)
+    assert(resolved.error.contains(case.error), resolved.error)
+  }
 }
 
 // The hosted macOS job only runs when crates change, so a malformed profile

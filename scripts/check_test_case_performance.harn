@@ -302,16 +302,38 @@ fn baseline_schema() {
 const MIN_REFERENCE_SAMPLES = 30
 
 /**
+ * Every column a sampled profile must carry: one job ID per round and one
+ * numeric list per gated metric. Shape is checked here, once, before any
+ * statistic reads a column.
+ */
+fn samples_schema() {
+  let fields = {jobs: schema_field(schema_list(schema_int()))}
+  for name in GATED_METRIC_FLOORS.keys().sorted() {
+    fields = fields
+      + {[name]: schema_field(schema_list(schema_union([schema_int(), schema_float()])))}
+  }
+  return schema_object(fields, {additional_properties: false})
+}
+
+/**
  * Resolve a profile's gated references. A profile with a `samples` table gets
  * each reference as the median of its recorded rounds, and may not also state
  * one by hand: the samples are the only owner of the number.
  */
 pub fn resolve_references(baseline: dict) -> dict {
-  const samples = baseline?.samples
-  if samples == nil {
+  if baseline?.samples == nil {
     return {ok: true, error: "", baseline: baseline}
   }
-  const jobs = samples?.jobs ?? []
+  const checked = schema_check(baseline.samples, samples_schema())
+  if is_err(checked) {
+    return {
+      ok: false,
+      error: "samples table is malformed: ${unwrap_err(checked).message}",
+      baseline: {},
+    }
+  }
+  const samples = unwrap(checked)
+  const jobs = samples.jobs
   if jobs.count < MIN_REFERENCE_SAMPLES {
     return {
       ok: false,
@@ -329,7 +351,7 @@ pub fn resolve_references(baseline: dict) -> dict {
         baseline: {},
       }
     }
-    const values = samples[name] ?? []
+    const values = samples[name]
     if values.count != jobs.count {
       return {
         ok: false,
