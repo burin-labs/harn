@@ -460,8 +460,12 @@ fn main() {
         matches!(result.get("match_count"), Some(VmValue::Int(2))),
         "both fixture occurrences must match"
     );
+    // A restore publishes before rewriting its snapshot. Record when the
+    // write lands too, so persistence cost stays visible.
+    capability.wait_until_idle();
+    let persisted_us = start.elapsed().as_micros();
     eprintln!(
-        "ready scenario={scenario} trial={trial} ready_us={ready_us} query_us={query_us} word_query_us={word_query_us} trigram_query_us={trigram_query_us} literal_query_us={literal_query_us} rows={}",
+        "ready scenario={scenario} trial={trial} ready_us={ready_us} persisted_us={persisted_us} query_us={query_us} word_query_us={word_query_us} trigram_query_us={trigram_query_us} literal_query_us={literal_query_us} rows={}",
         rows.len()
     );
     let shared = capability.shared();

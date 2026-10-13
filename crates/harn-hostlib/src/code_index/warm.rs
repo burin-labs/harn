@@ -52,6 +52,8 @@ pub(super) struct WarmCoordinator {
     state: Mutex<WarmState>,
     cv: Condvar,
     builder: Mutex<Option<thread::JoinHandle<()>>>,
+    /// The latest background snapshot write after a restore.
+    persister: Mutex<Option<thread::JoinHandle<()>>>,
 }
 
 impl Default for WarmCoordinator {
@@ -63,6 +65,7 @@ impl Default for WarmCoordinator {
             }),
             cv: Condvar::new(),
             builder: Mutex::new(None),
+            persister: Mutex::new(None),
         }
     }
 }
@@ -105,6 +108,40 @@ impl WarmCoordinator {
     pub(super) fn take_and_join_builder(&self) {
         let handle = self
             .builder
+            .lock()
+            .expect("warm coordinator poisoned")
+            .take();
+        if let Some(handle) = handle {
+            let _ = handle.join();
+        }
+    }
+
+    /// Rewrite the snapshot off the caller's thread. A write already in
+    /// flight finishes first.
+    pub(super) fn persist_in_background(&self, index: SharedIndex) {
+        let mut slot = self.persister.lock().expect("warm coordinator poisoned");
+        let previous = slot.take();
+        let spawned = harn_parser::runtime_stack::builder()
+            .name("harn-code-index-persist".to_string())
+            .spawn(move || {
+                if let Some(previous) = previous {
+                    let _ = previous.join();
+                }
+                super::persist_reconciled(&index);
+            });
+        match spawned {
+            Ok(handle) => *slot = Some(handle),
+            Err(error) => tracing::debug!(
+                target: "harn_hostlib::code_index",
+                %error,
+                "code-index persist thread could not start; snapshot left as is",
+            ),
+        }
+    }
+
+    pub(super) fn join_persister(&self) {
+        let handle = self
+            .persister
             .lock()
             .expect("warm coordinator poisoned")
             .take();
@@ -231,20 +268,27 @@ impl CodeIndexCapability {
         match harn_parser::runtime_stack::builder()
             .name("harn-code-index-warm".to_string())
             .spawn(move || {
-                let _flight = flight;
+                let flight = flight;
                 lower_to_background_priority();
                 let started = Instant::now();
                 match super::restore_shared(&index, resolver.as_ref(), &thread_root) {
-                    Ok(true) => {
+                    Ok(super::Restored::Published { needs_persist }) => {
                         tracing::info!(
                             target: "harn_hostlib::code_index",
                             root = %thread_root.display(),
                             elapsed_ms = started.elapsed().as_millis() as u64,
                             "code-index background restore complete",
                         );
+                        // Readers waiting on the flight need the published
+                        // index, not the snapshot write. The builder join in
+                        // `wait_until_idle` still covers the write.
+                        drop(flight);
+                        if needs_persist {
+                            super::persist_reconciled(&index);
+                        }
                         return;
                     }
-                    Ok(false) => {}
+                    Ok(super::Restored::Absent) => {}
                     Err(error) => {
                         tracing::debug!(
                             target: "harn_hostlib::code_index",
