@@ -414,7 +414,7 @@ fn rewrite_agent_manifest(
   }
   for {key, value} in binary.entries() {
     const archive_key = to_string(key ?? "")
-    const archive = to_string(value?.archive ?? "")
+    const archive = to_string(value.archive ?? "")
     if archive == "" || !archive.contains("/v" + current + "/") {
       throw "agent manifest archive for " + archive_key + " does not target v" + current
     }

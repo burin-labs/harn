@@ -442,7 +442,9 @@ mod registry_drift_tests {
         let end = source
             .find("pub(super) fn subscript(")
             .expect("subscript follows method_mutate");
-        for (section, mutates) in [(&source[..split], false), (&source[split..end], true)] {
+        let plain = source.get(..split).expect("plain section");
+        let mutating = source.get(split..end).expect("mutating section");
+        for (section, mutates) in [(plain, false), (mutating, true)] {
             let arms = dispatched(section);
             assert!(!arms.is_empty(), "scan found no kernel method arms");
             for (receiver, name) in arms {

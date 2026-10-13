@@ -123,12 +123,12 @@ async fn every_mutating_registry_row_is_handled_by_the_mutating_dispatch() {
                 "insert" => vec![VmValue::Int(0), VmValue::Int(9)],
                 "extend" => vec![VmValue::List(Arc::new(vec![VmValue::Int(3)]))],
                 "sort" | "pop" | "clear" | "reverse" => Vec::new(),
-                // No key call happens on the one-element receiver below.
+                // No key call happens on the empty receiver below.
                 "sort_by" => vec![VmValue::BuiltinRef("key".into())],
                 _ => vec![VmValue::Int(1)],
             };
             let value = if name == "sort_by" {
-                VmValue::List(Arc::new(vec![VmValue::Int(1)]))
+                VmValue::List(Arc::new(Vec::new()))
             } else {
                 value.clone()
             };
@@ -189,10 +189,9 @@ fn arm_names(source: &str) -> BTreeSet<&str> {
 
 fn section<'a>(source: &'a str, from: &str, to: Option<&str>) -> &'a str {
     let start = source.find(from).expect("section start marker");
-    let end = to.map_or(source.len(), |to| {
-        source[start..].find(to).expect("section end") + start
-    });
-    &source[start..end]
+    let rest = source.get(start..).expect("section start");
+    let end = to.map_or(rest.len(), |to| rest.find(to).expect("section end"));
+    rest.get(..end).expect("section end")
 }
 
 #[test]

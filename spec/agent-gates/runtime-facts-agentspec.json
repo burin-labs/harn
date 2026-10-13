@@ -337,6 +337,13 @@
   },
   {
     "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
+    "expression": "omit(\n    opts,\n    [\n      \"tool_format\",\n      \"_tool_format_source\",\n      \"_tool_format_capability_gap\",\n      \"_tool_format_override\",\n    ],\n  )",
+    "owner": "__clear_tool_format_resolution",
+    "evidence": "Dictionary key removal into a new value, not an option read."
+  },
+  {
+    "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/postturn.harn",
     "expression": "batch_state?.deferred_signatures",
     "owner": "__completion_result",
@@ -397,6 +404,13 @@
     "expression": "opts?._turn_tool_call_feedback",
     "owner": "__native_tool_text_completion",
     "evidence": "Computed runtime state or a method on projected tool data, carried beside configuration in the legacy options record; not an independent caller setting."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/prefill.harn",
+    "expression": "omit(base, [\"prefill\"])",
+    "owner": "agent_take_one_shot_prefill",
+    "evidence": "Dictionary key removal into a new value, not an option read."
   },
   {
     "scope": "AgentSpec",
@@ -614,5 +628,12 @@
     "expression": "value[key]",
     "owner": "__collect_unread_keys",
     "evidence": "Recurses into each supplied value using its declared child schema; this is generic shape validation, not a selected behavior setting."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/llm/options.harn",
+    "expression": "omit(base, [\"prefill\", \"_harn_one_shot_prefill\"])",
+    "owner": "llm_clear_one_shot_prefill",
+    "evidence": "Dictionary key removal into a new value, not an option read."
   }
 ]
