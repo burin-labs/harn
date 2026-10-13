@@ -379,7 +379,7 @@ fn dispatch_drops_empty_optional_paths_declared_by_policy_annotations() {
         json!(""),
         "normalization alone cannot see the policy's path params"
     );
-    crate::llm::tools::drop_unused_optional_path_args(
+    crate::llm::tools::messages::drop_unused_optional_path_args(
         "look",
         &mut args,
         Some(&tools),
@@ -391,7 +391,7 @@ fn dispatch_drops_empty_optional_paths_declared_by_policy_annotations() {
 
     // A required path sent empty is not an omission; it stays and is refused.
     let mut required = json!({"file": ""});
-    crate::llm::tools::drop_unused_optional_path_args(
+    crate::llm::tools::messages::drop_unused_optional_path_args(
         "look",
         &mut required,
         Some(&tools),
