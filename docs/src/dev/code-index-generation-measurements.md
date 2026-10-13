@@ -97,22 +97,43 @@ corpus, graph, and posting digests.
 ## Persisting after publication
 
 A restore that reconciled changes now publishes the index and rewrites the
-snapshot afterwards on a background thread, which
-`CodeIndexCapability::wait_until_idle` joins. Measured on a quiet host against
-the per-file strings build; the
+snapshot afterwards on a background thread; `CodeIndexCapability::wait_until_idle`
+waits for the write. The write detaches a copy of the index under its lock,
+which the shared generations make cheap (about 43 milliseconds here, mostly the
+file table), then encodes and writes without the lock. Measured on a quiet host
+against the per-file strings build; the
 [trial record](perf/code-index-background-persist.json) keeps when each write
-landed as `persisted_us`.
+landed and the time of the registered queries that follow readiness.
 
-| Operation | Baseline median | Candidate ready | Candidate persisted | Paired ratio [95% interval] |
+| Operation | Baseline ready | Candidate ready | Ready plus queries, baseline / candidate | Write landed | Ready ratio [95% interval] |
+| --- | --- | --- | --- | --- | --- |
+| Body edit on restart | 1.121 s | 0.501 s | 1.134 / 0.554 s | 1.173 s | 0.447 [0.440, 0.450] |
+| Declaration edit on restart | 1.114 s | 0.500 s | 1.123 / 0.552 s | 1.186 s | 0.448 [0.442, 0.451] |
+| Changed HEAD | 1.275 s | 0.680 s | 1.287 / 0.735 s | 1.310 s | 0.536 [0.479, 0.542] |
+
+Three accepted pairs per workload, with identical digests. Counting the first
+queries, the index is usable about twice as soon after an edit; those queries
+take about 50 milliseconds longer than before because they overlap the copy.
+An earlier version encoded under the lock, so its first queries waited about
+0.33 seconds; that measurement is superseded. Peak RSS rises by up to 31 MiB
+while the detached copy exists.
+
+## Cumulative quiet-host result
+
+The final #9712 artifact, before any of this work, against the build with every
+change above, on a quiet host; the
+[trial record](perf/code-index-cumulative-quiet.json) has every trial.
+
+| Operation | #9712 median | Current median | Paired ratio [95% interval] | Accepted pairs |
 | --- | --- | --- | --- | --- |
-| Body edit on restart | 1.149 s | 0.499 s | 1.169 s | 0.436 [0.413, 0.437] |
-| Declaration edit on restart | 1.133 s | 0.501 s | 1.180 s | 0.442 [0.413, 0.444] |
-| Changed HEAD | 1.327 s | 0.676 s | 1.276 s | 0.513 [0.250, 0.513] |
+| Unchanged restart | 4.186 s | 0.489 s | 0.117 | 2 of 5 |
+| Body edit on restart | 7.235 s | 0.498 s | 0.069 [0.068, 0.071] | 3 of 3 |
+| Changed HEAD | 7.483 s | 0.675 s | 0.090 [0.078, 0.091] | 3 of 3 |
+| Resident body edit | 1.3 ms | 0.2 ms | 0.163 [0.160, 0.168] | 3 of 3 |
 
-Three pairs per workload; two HEAD pairs saw up to 1.07 busy external cores
-and are retained but flagged. Readiness after an edit now matches an unchanged
-restart plus reconciliation; the write still takes about as long, but readers
-no longer wait for it. Peak memory is unchanged.
+Unchanged restart is about 8.5 times faster, a restart after an edit about 14
+times faster, and peak RSS for an unchanged restart falls from 1,089 to 576 MiB.
+Every pair has identical corpus, graph, and posting digests.
 
 ## Residuals
 
