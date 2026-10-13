@@ -236,13 +236,14 @@ impl IndexState {
         // Nothing reads trigram postings until the build returns, so they
         // are built in one pass on their own thread, off the publisher's
         // critical path. Word postings stay inline: REFS linking reads them.
-        std::thread::scope(|scope| {
+        harn_parser::runtime_stack::scope(|scope| {
             let (queue, queued) = std::sync::mpsc::sync_channel(QUEUED_TRIGRAM_FILES);
             // Ids are assigned in publication order, so the installer sees
             // ascending files and can append rather than insert.
-            let installer = std::thread::Builder::new()
-                .name("harn-code-index-trigrams".to_owned())
-                .spawn_scoped(scope, move || TrigramIndex::from_files(queued))
+            let installer = scope
+                .spawn_named("harn-code-index-trigrams", move || {
+                    TrigramIndex::from_files(queued)
+                })
                 .expect("spawn the code-index trigram installer");
             file_facts::publish_in_order(&jobs, workers, |job, facts| {
                 match state.install_facts(job, facts, TrigramSink::Queue(&queue)) {

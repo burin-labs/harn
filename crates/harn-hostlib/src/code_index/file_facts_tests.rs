@@ -245,7 +245,7 @@ fn a_later_worker_panic_does_not_hide_an_earlier_lost_job() {
     // loss, leaving the publisher waiting forever for job 5.
     for claimed in [5, 7] {
         let window = &window;
-        let unwound = std::thread::scope(|scope| {
+        let unwound = harn_parser::runtime_stack::scope(|scope| {
             scope
                 .spawn(move || {
                     let _flag = super::PanicFlag {
