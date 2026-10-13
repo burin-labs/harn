@@ -16,9 +16,10 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 use serde::{Deserialize, Serialize};
 use tree_sitter::{Node as TsNode, Tree};
 
-use crate::ast::{api as ast_api, Language, Symbol, SymbolKind};
+use crate::ast::{Language, Symbol, SymbolKind};
 use crate::ResolvedHarnReference;
 
+use super::file_facts::GraphFacts;
 use super::file_table::FileId;
 use super::graph_store::GraphStore;
 use super::name_index::NameIndex;
@@ -124,7 +125,7 @@ const COMPACTION_FLOOR: usize = 4096;
 
 /// Shortest declaration name the REFS heuristic links. Shorter words
 /// (`id`, `ok`) match too much to mean anything.
-const MIN_REF_WORD_LEN: usize = 3;
+pub(super) const MIN_REF_WORD_LEN: usize = 3;
 
 /// Coarse typed edge kinds defined in issue #2434.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -433,39 +434,42 @@ impl SymbolGraph {
         // scope, so the membership test is a set lookup rather than
         // a scan of the import list per candidate per call site.
         let visible: HashSet<FileId> = imported_files.iter().copied().collect();
-        self.rebuild_file_resolving(
+        let facts = GraphFacts::extract(path, language, source);
+        let ref_words = distinct_ref_words(source);
+        self.install_file(
             file_id,
             path,
-            language,
-            source,
+            facts,
             import_strings,
+            &ref_words,
             Some(&visible),
         )
     }
 
-    /// [`Self::rebuild_file`] without resolving this file's call sites.
-    /// The caller resolves them with every other affected site once the
-    /// whole batch is in: [`Self::take_dirty_call_sites`] then
-    /// [`Self::resolve_call_sites`].
-    pub(super) fn rebuild_file_deferring_calls(
+    /// Install one file's already-parsed facts without resolving its call
+    /// sites. The caller resolves them with every other affected site once
+    /// the whole batch is in: [`Self::take_dirty_call_sites`] then
+    /// [`Self::resolve_call_sites`]. `ref_words` are the file's distinct
+    /// word-index tokens; shorter ones are ignored.
+    pub(super) fn install_file_deferring_calls(
         &mut self,
         file_id: FileId,
         path: &str,
-        language: Language,
-        source: &str,
+        facts: GraphFacts,
         import_strings: &[String],
+        ref_words: &[&str],
     ) -> RebuildOutcome {
         self.dirty_call_files.insert(file_id);
-        self.rebuild_file_resolving(file_id, path, language, source, import_strings, None)
+        self.install_file(file_id, path, facts, import_strings, ref_words, None)
     }
 
-    fn rebuild_file_resolving(
+    fn install_file(
         &mut self,
         file_id: FileId,
         path: &str,
-        language: Language,
-        source: &str,
+        facts: GraphFacts,
         import_strings: &[String],
+        ref_words: &[&str],
         visible: Option<&HashSet<FileId>>,
     ) -> RebuildOutcome {
         let _phase = super::timing::Phase::start("graph.parse_and_replace");
@@ -473,24 +477,12 @@ impl SymbolGraph {
             let _phase = super::timing::Phase::start("graph.remove_file");
             self.remove_file(file_id);
         }
+        let GraphFacts {
+            language,
+            symbols,
+            call_sites,
+        } = facts;
         let module_id = self.add_module_for_file(file_id, path, &language);
-
-        // Parse once and reuse the tree for both symbol extraction and
-        // the call-site sweep. Falling back to empty results when the
-        // grammar is unhappy keeps one bad file from poisoning the
-        // wider rebuild.
-        let parse_phase = super::timing::Phase::start("graph.parse");
-        let (tree, symbols) = match ast_api::parse_with_symbols(source, language) {
-            Ok((t, s)) => (Some(t), s),
-            Err(err) => {
-                tracing::debug!(
-                    "code_index: tree-sitter parse failed for `{path}`: {err}; \
-                     symbol graph slice will be Module-only"
-                );
-                (None, Vec::new())
-            }
-        };
-        drop(parse_phase);
 
         // Functions / Types / Modules + CONTAINS edges. Nested decls
         // point at a previously-emitted container symbol when one
@@ -525,26 +517,25 @@ impl SymbolGraph {
 
         // CallSite nodes, plus CALLS edges unless resolution is deferred.
         // Resolving here sees only the declarations already in the graph.
-        if let Some(tree) = tree.as_ref() {
-            for (callee_name, line) in extract_call_sites_from_tree(tree, source) {
-                let call_id = self.add_node(Node {
-                    id: 0,
-                    kind: NodeKind::CallSite,
-                    name: callee_name.clone(),
-                    file_id,
-                    path: path.to_string(),
-                    line,
-                    signature: format!("{callee_name}(…)"),
-                    container: None,
-                    access_level: None,
-                    language: language.name().to_string(),
-                });
-                self.add_edge(module_id, call_id, EdgeKind::Contains);
-                if let Some(visible) = visible {
-                    for t in self.call_targets(&callee_name, file_id, visible) {
-                        self.add_edge(call_id, t, EdgeKind::Calls);
-                    }
-                }
+        for (callee_name, line) in call_sites {
+            let targets = visible
+                .map(|visible| self.call_targets(&callee_name, file_id, visible))
+                .unwrap_or_default();
+            let call_id = self.add_node(Node {
+                id: 0,
+                kind: NodeKind::CallSite,
+                signature: format!("{callee_name}(…)"),
+                name: callee_name,
+                file_id,
+                path: path.to_string(),
+                line,
+                container: None,
+                access_level: None,
+                language: language.name().to_string(),
+            });
+            self.add_edge(module_id, call_id, EdgeKind::Contains);
+            for target in targets {
+                self.add_edge(call_id, target, EdgeKind::Calls);
             }
         }
         self.mark_function_names_dirty(file_id);
@@ -574,7 +565,7 @@ impl SymbolGraph {
         // here would collapse a local `run` with an imported `run`.
         if language.name() != "harn" {
             let _phase = super::timing::Phase::start("graph.refs_outgoing");
-            for target in self.collect_cross_file_refs(source, file_id) {
+            for target in self.collect_cross_file_refs(ref_words, file_id) {
                 self.add_edge(module_id, target, EdgeKind::Refs);
             }
         }
@@ -730,16 +721,16 @@ impl SymbolGraph {
         }
     }
 
-    /// Collect the ids of declarations in other files whose name is a
-    /// token of `source`. Each target id appears at most once.
-    fn collect_cross_file_refs(&self, source: &str, this_file: FileId) -> BTreeSet<NodeId> {
+    /// Collect the ids of declarations in other files named by one of
+    /// `words`, the file's distinct word-index tokens. Each target id
+    /// appears at most once.
+    fn collect_cross_file_refs(&self, words: &[&str], this_file: FileId) -> BTreeSet<NodeId> {
         let mut out: BTreeSet<NodeId> = BTreeSet::new();
-        let mut seen = HashSet::new();
-        super::words::tokenize(source, |word| {
-            if word.len() >= MIN_REF_WORD_LEN && seen.insert(word) {
+        for word in words {
+            if word.len() >= MIN_REF_WORD_LEN {
                 self.absorb_word_refs(word, this_file, &mut out);
             }
-        });
+        }
         out
     }
 
@@ -892,6 +883,18 @@ impl SymbolGraph {
     }
 }
 
+/// `source`'s distinct word-index tokens long enough to name a REFS target.
+fn distinct_ref_words(source: &str) -> Vec<&str> {
+    let mut seen = HashSet::new();
+    let mut out = Vec::new();
+    super::words::tokenize(source, |word| {
+        if word.len() >= MIN_REF_WORD_LEN && seen.insert(word) {
+            out.push(word);
+        }
+    });
+    out
+}
+
 /// Derive a coarse module name from a workspace-relative path (basename
 /// without extension). Used to make Module-node queries human-readable.
 pub fn module_name_from_path(path: &str) -> String {
@@ -920,7 +923,7 @@ fn map_symbol_kind(kind: SymbolKind) -> Option<NodeKind> {
 /// set of node kinds we accept covers the major tree-sitter grammars
 /// wired into `harn-hostlib`. Returns `(callee_name, 1-based line)`
 /// pairs.
-fn extract_call_sites_from_tree(tree: &Tree, source: &str) -> Vec<(String, u32)> {
+pub(super) fn extract_call_sites_from_tree(tree: &Tree, source: &str) -> Vec<(String, u32)> {
     let mut out: Vec<(String, u32)> = Vec::new();
     let mut cursor = tree.root_node().walk();
     let mut stack: Vec<TsNode<'_>> = vec![tree.root_node()];

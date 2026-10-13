@@ -43,31 +43,38 @@ impl WordIndex {
     /// Tokenize `content` and record every hit under `id`. If `id` already
     /// has entries, they are dropped first.
     pub fn index_file(&mut self, id: FileId, content: &str) {
-        let mut contributed: HashMap<&str, Vec<WordHit>> = HashMap::new();
-        for (line_idx, line) in content.split('\n').enumerate() {
-            let line_no = (line_idx as u32) + 1;
-            tokenize(line, |word| {
-                if word.len() < MIN_WORD_LEN {
-                    return;
-                }
-                contributed.entry(word).or_default().push(WordHit {
-                    file: id,
-                    line: line_no,
-                });
-            });
-        }
-        let rows: Vec<_> = contributed
+        self.install_file(id, occurrence_lines(content), usize::MAX);
+    }
+
+    /// Replace `id`'s hits with already-tokenized `words`, as produced by
+    /// [`occurrence_lines`]. Returns the interned keys of the words at least
+    /// `ref_len` long, for the REFS scan that reads the same tokens.
+    pub(super) fn install_file(
+        &mut self,
+        id: FileId,
+        words: Vec<(String, Vec<u32>)>,
+        ref_len: usize,
+    ) -> Vec<Arc<str>> {
+        let mut refs = Vec::new();
+        let rows: Vec<_> = words
             .into_iter()
-            .map(|(word, hits)| {
+            .map(|(word, lines)| {
                 let key = self
                     .postings
-                    .key(word)
+                    .key(word.as_str())
                     .cloned()
                     .unwrap_or_else(|| Arc::from(word));
+                if key.len() >= ref_len {
+                    refs.push(Arc::clone(&key));
+                }
+                let hits = lines
+                    .into_iter()
+                    .map(move |line| WordHit { file: id, line });
                 (key, hits)
             })
             .collect();
         self.postings.replace_file(id, rows);
+        refs
     }
 
     /// Drop every hit contributed by `id`.
@@ -145,6 +152,24 @@ impl WordIndex {
 
 /// Shortest token the index records.
 const MIN_WORD_LEN: usize = 2;
+
+/// Distinct word-index tokens of `content`, each with the 1-based line of
+/// every occurrence in order.
+pub(super) fn occurrence_lines(content: &str) -> Vec<(String, Vec<u32>)> {
+    let mut lines: HashMap<&str, Vec<u32>> = HashMap::new();
+    for (index, line) in content.split('\n').enumerate() {
+        let line_no = index as u32 + 1;
+        tokenize(line, |word| {
+            if word.len() >= MIN_WORD_LEN {
+                lines.entry(word).or_default().push(line_no);
+            }
+        });
+    }
+    lines
+        .into_iter()
+        .map(|(word, lines)| (word.to_owned(), lines))
+        .collect()
+}
 
 /// Whether [`WordIndex`] records `word` at all, so an empty
 /// [`WordIndex::get`] means "absent" rather than "never indexed". False

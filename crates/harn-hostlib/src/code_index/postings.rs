@@ -191,6 +191,35 @@ impl<K: Eq + Hash + Clone, H: FilePosting> FilePostings<K, H> {
         }
     }
 
+    /// Build the base from whole files in strictly ascending id order, as a
+    /// cold build publishes them. Each hit is appended, never inserted, and
+    /// the base needs no per-file removal projection.
+    pub fn from_files<T>(files: impl IntoIterator<Item = (FileId, T)>) -> Self
+    where
+        T: IntoIterator<Item = (K, H)>,
+    {
+        let mut base: FastMap<K, Vec<H>> = FastMap::default();
+        let mut previous: Option<FileId> = None;
+        for (file, hits) in files {
+            debug_assert!(
+                previous < Some(file),
+                "files must arrive in ascending id order"
+            );
+            previous = Some(file);
+            for (key, hit) in hits {
+                debug_assert_eq!(hit.file(), file);
+                base.entry(key).or_default().push(hit);
+            }
+        }
+        // Ascending files leave membership postings sorted; this pass only
+        // confirms it.
+        base.values_mut().for_each(H::normalize);
+        Self {
+            base: Arc::new(base),
+            ..Self::default()
+        }
+    }
+
     /// Adopt snapshot vectors as the base, merging repeated keys.
     pub fn from_rows(rows: impl ExactSizeIterator<Item = (K, Vec<H>)>) -> Self {
         let mut base: FastMap<K, Vec<H>> =

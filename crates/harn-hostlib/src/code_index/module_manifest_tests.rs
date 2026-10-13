@@ -199,6 +199,8 @@ fn a_checkpoint_keeps_the_manifests_its_graph_was_linked_under() {
             CheckpointPolicy {
                 files: 2,
                 interval: Duration::MAX,
+                // Interrupt a live pool, not the single-thread fallback.
+                workers: 4,
             },
             |state| {
                 state.snapshot().save(&state.root).unwrap();

@@ -13,6 +13,8 @@ fn interrupt_after_two(state: &mut IndexState) {
             CheckpointPolicy {
                 files: 2,
                 interval: Duration::MAX,
+                // Interrupt a live pool, not the single-thread fallback.
+                workers: 4,
             },
             |state| {
                 state.snapshot().save(&state.root).unwrap();
@@ -35,13 +37,20 @@ fn a_checkpoint_uses_one_source_revision_for_hash_words_and_symbols() {
     let (mut state, _) = IndexState::build_from_root(root);
     let captured = "def checkpointed():\n    return 123\n";
     write(root, "a.py", captured);
-    let ingested = state.ingest(&root.join("a.py"), None).unwrap();
-    assert!(ingested.changed);
-    // This is the exact gap between ingest and graph parsing in the old
-    // reconcile. A second disk read would install disk_changed's symbols
-    // under checkpointed's content hash and word postings.
+    let path = root.join("a.py");
+    let job = state
+        .file_job(&path, &fs::metadata(&path).unwrap())
+        .unwrap();
+    let facts = crate::code_index::file_facts::extract(&job);
+    // A worker can finish extraction long before the publisher installs it.
+    // A second disk read would install disk_changed's symbols under
+    // checkpointed's content hash and word postings.
     write(root, "a.py", "def disk_changed():\n    return 123456789\n");
-    state.rebuild_symbol_graph_for(ingested.id, &ingested.source);
+    let ingested = state
+        .install_facts(&job, facts, crate::code_index::state::TrigramSink::Inline)
+        .unwrap();
+    assert!(ingested.changed);
+    state.rebuild_symbol_graph_for(ingested.id, ingested.graph);
     state.relink_dirty_calls();
     state.snapshot().save(root).unwrap();
     let snapshot = CodeIndexSnapshot::load(root).unwrap().unwrap();
@@ -66,6 +75,7 @@ fn elapsed_checkpoint_trigger_requires_completed_work() {
     let policy = || CheckpointPolicy {
         files: usize::MAX,
         interval: Duration::ZERO,
+        ..CheckpointPolicy::default()
     };
     let outcome = state.refresh_with_checkpoints(None, policy(), |_| checkpoints += 1);
     assert!(outcome.is_noop());
@@ -209,6 +219,7 @@ fn fast_head_verification_does_not_checkpoint_every_unchanged_file() {
         CheckpointPolicy {
             files: 1,
             interval: Duration::MAX,
+            ..CheckpointPolicy::default()
         },
         |_| checkpoints += 1,
     );

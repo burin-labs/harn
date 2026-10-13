@@ -76,14 +76,16 @@ An edited restart still writes the whole snapshot before readiness, about 0.6
 seconds; writing sections as they finish encoding, or persisting after the
 index is published, would remove most of it.
 
-For cold build, collect independent parsed-file facts on a bounded worker pool,
-then apply them through one graph owner and resolve calls after the complete
+Cold build collects independent parsed-file facts on a bounded worker pool and
+applies them through one publisher, which resolves calls after the complete
 declaration set exists. Source reading, parser selection, and extracted facts
-should have one boundary. Keep the live generation queryable until the next
-complete generation is published. Benchmark both single-core and bounded
-parallel behavior, peak memory, cancellation, and checkpoint recovery. Merely
-parallelizing parsing leaves ingestion, graph assembly, resolution, and
-persistence as the serial limit.
+share one boundary with reconciliation and single-file reindexing. The live
+generation stays queryable until the next complete one is published. Six
+workers made cold build and persist about 3.7 times faster; the
+[parallel build measurements](code-index-parallel-build-measurements.md)
+record the worker-count comparison. The publisher's word postings, graph
+installation, and reference linking, about 5.8 seconds, plus persistence are
+now the serial limit.
 
 For resident edits, first remove workspace-wide projections from per-file
 mutation. The previous release's tiny fixture spent roughly 8 milliseconds of

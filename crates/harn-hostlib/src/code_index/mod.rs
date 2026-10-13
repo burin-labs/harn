@@ -80,6 +80,7 @@ mod change_signature;
 mod cypher;
 mod extract;
 mod extract_plan;
+mod file_facts;
 mod file_table;
 mod git_head;
 mod graph;

@@ -19,23 +19,26 @@
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fs::Metadata;
+use std::ops::ControlFlow;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::agents::AgentRegistry;
-use super::file_table::{fnv1a64, FileId, IndexedFile, IndexedSymbol};
+use super::file_facts::{self, FileFacts, FileJob, GraphFacts, ParsedFile};
+use super::file_table::{FileId, IndexedFile, IndexedSymbol};
 use super::graph::DepGraph;
 use super::imports;
 use super::imports_go::{GoModules, GO_MANIFEST};
 use super::overlay::OverlayState;
-use super::symbol_graph::SymbolGraph;
-use super::trigram::TrigramIndex;
+use super::symbol_graph::{SymbolGraph, MIN_REF_WORD_LEN};
+use super::trigram::{Trigram, TrigramIndex};
 use super::versions::VersionLog;
-use super::walker::{indexable_language, is_indexable_file, walk_workspace, MAX_FILE_BYTES};
+use super::walker::{indexable_language, is_indexable_file, walk_workspace};
 use super::words::WordIndex;
 use crate::{HarnReferenceInput, HarnReferenceResolver};
 
-use crate::ast::{Language as AstLanguage, Symbol as AstSymbol};
+use crate::ast::Symbol as AstSymbol;
 
 /// In-memory index for one workspace. Composed from the per-file table,
 /// the trigram + word sub-indexes, the dep graph, the append-only version
@@ -85,13 +88,33 @@ pub struct BuildOutcome {
     pub files_skipped: u64,
 }
 
-/// File facts and graph parsing consume the same read. Keeping the source
-/// through the per-file commit prevents an editor write between two reads
-/// from giving a checkpoint one revision's hash and another's symbols.
+/// One installed file. File facts and graph facts come from the same read,
+/// so an editor write between two reads cannot give a checkpoint one
+/// revision's hash and another's symbols.
 pub(super) struct IngestedFile {
     pub id: FileId,
     pub changed: bool,
-    pub source: String,
+    /// The parse to install, for a changed file with a grammar.
+    pub graph: Option<ParsedGraph>,
+}
+
+/// Where [`IndexState::install_facts`] puts a changed file's trigrams.
+pub(super) enum TrigramSink<'a> {
+    /// Into [`IndexState::trigrams`] before returning, so every reader and
+    /// checkpoint sees the file whole.
+    Inline,
+    /// To the cold build's installer thread, which owns the index until
+    /// the build returns.
+    Queue(&'a std::sync::mpsc::SyncSender<(FileId, Vec<Trigram>)>),
+}
+
+/// Files whose trigrams may wait for the cold build's installer thread.
+const QUEUED_TRIGRAM_FILES: usize = 256;
+
+/// A changed file's graph facts and the word-index keys its REFS scan reads.
+pub(super) struct ParsedGraph {
+    facts: GraphFacts,
+    ref_words: Vec<Arc<str>>,
 }
 
 /// Summary returned from [`IndexState::refresh_from_root`].
@@ -165,6 +188,14 @@ impl IndexState {
     /// Build a fresh index over `root`. Returns the populated state plus a
     /// summary of how many files were indexed vs skipped.
     pub fn build_from_root(root: &Path) -> (Self, BuildOutcome) {
+        Self::build_from_root_with_workers(root, file_facts::default_workers())
+    }
+
+    /// [`Self::build_from_root`] with an explicit number of threads
+    /// extracting per-file facts. One publisher installs them in walk
+    /// order whatever the count, so every count builds the same index.
+    /// `0` and `1` both extract on the calling thread.
+    pub fn build_from_root_with_workers(root: &Path, workers: usize) -> (Self, BuildOutcome) {
         let _phase = super::timing::Phase::start("build.total");
         let canonical_root = canonicalize(root);
         let mut state = IndexState {
@@ -187,36 +218,65 @@ impl IndexState {
         let mut outcome = BuildOutcome::default();
         let mut to_resolve: Vec<(FileId, String)> = Vec::new();
         let mut manifests: Vec<String> = Vec::new();
-        walk_workspace(
-            &canonical_root,
-            |abs, meta| match state.ingest(abs, Some(meta)) {
-                Some(ingested) => {
-                    let file_id = ingested.id;
-                    outcome.files_indexed += 1;
-                    // CALLS and IMPORTS resolve after the full path/declaration
-                    // set exists. Parsing can stream without retaining every
-                    // file's source or reading it a second time.
-                    state.rebuild_symbol_graph_for(file_id, &ingested.source);
-                    if let Some(file) = state.files.get(&file_id) {
-                        to_resolve.push((file_id, file.relative_path.clone()));
+        let mut jobs = Vec::new();
+        {
+            let _phase = super::timing::Phase::start("build.walk");
+            walk_workspace(
+                &canonical_root,
+                |abs, meta| match state.file_job(abs, meta) {
+                    Some(job) => jobs.push(job),
+                    None => {
+                        super::timing::skipped(abs);
+                        outcome.files_skipped += 1;
+                    }
+                },
+                |manifest| manifests.push(manifest),
+            );
+        }
+        // Nothing reads trigram postings until the build returns, so they
+        // are built in one pass on their own thread, off the publisher's
+        // critical path. Word postings stay inline: REFS linking reads them.
+        harn_parser::runtime_stack::scope(|scope| {
+            let (queue, queued) = std::sync::mpsc::sync_channel(QUEUED_TRIGRAM_FILES);
+            // Ids are assigned in publication order, so the installer sees
+            // ascending files and can append rather than insert.
+            let installer = scope
+                .spawn_named("harn-code-index-trigrams", move || {
+                    TrigramIndex::from_files(queued)
+                })
+                .expect("spawn the code-index trigram installer");
+            file_facts::publish_in_order(&jobs, workers, |job, facts| {
+                match state.install_facts(job, facts, TrigramSink::Queue(&queue)) {
+                    Some(ingested) => {
+                        outcome.files_indexed += 1;
+                        // CALLS and IMPORTS resolve after the full path/declaration
+                        // set exists. Parsing streams without retaining every
+                        // file's source or reading it a second time.
+                        state.rebuild_symbol_graph_for(ingested.id, ingested.graph);
+                        to_resolve.push((ingested.id, job.rel.clone()));
+                    }
+                    None => {
+                        super::timing::skipped(&job.abs);
+                        outcome.files_skipped += 1;
                     }
                 }
-                None => {
-                    super::timing::skipped(abs);
-                    outcome.files_skipped += 1;
-                }
-            },
-            |manifest| manifests.push(manifest),
-        );
-        state.modules = imports::ModuleIndex::default()
-            .with_go_modules(GoModules::read(&canonical_root, manifests));
-        state.refresh_module_index();
-        for (id, rel) in to_resolve {
-            state.rebuild_deps(id, &rel);
-        }
-        // Second pass: every Module node exists now, so resolve IMPORTS.
-        state.link_symbol_imports();
-        state.relink_dirty_calls();
+                ControlFlow::Continue(())
+            });
+            drop(queue);
+            state.modules = imports::ModuleIndex::default()
+                .with_go_modules(GoModules::read(&canonical_root, manifests));
+            state.refresh_module_index();
+            for (id, rel) in to_resolve {
+                state.rebuild_deps(id, &rel);
+            }
+            // Second pass: every Module node exists now, so resolve IMPORTS.
+            state.link_symbol_imports();
+            state.relink_dirty_calls();
+            let _phase = super::timing::Phase::start("build.trigrams_wait");
+            state.trigrams = installer
+                .join()
+                .unwrap_or_else(|panic| std::panic::resume_unwind(panic));
+        });
         (state, outcome)
     }
 
@@ -272,7 +332,12 @@ impl IndexState {
         }
         let known =
             relative_path(&self.root, abs).is_some_and(|rel| self.path_to_id.contains_key(&rel));
-        let ingested = self.ingest(abs, None)?;
+        // Unchanged bytes keep their postings and graph slice, as in a
+        // refresh. Re-installing them would move the file's word hits behind
+        // every other file's in each shared posting.
+        let job = self.file_job(abs, &std::fs::metadata(abs).ok()?)?;
+        let facts = file_facts::extract(&job);
+        let ingested = self.install_facts(&job, facts, TrigramSink::Inline)?;
         let id = ingested.id;
         let rel = self
             .files
@@ -288,7 +353,13 @@ impl IndexState {
                 // A new path can resolve another file's dangling import.
                 self.rebuild_all_deps();
             }
-            self.rebuild_symbol_graph_for(id, &ingested.source);
+            if ingested.changed {
+                self.rebuild_symbol_graph_for(id, ingested.graph);
+            } else {
+                // The dependency rows were just re-resolved, so re-resolve
+                // this file's calls against them even though its slice stays.
+                self.symbols.invalidate_calls_in([id]);
+            }
             if known {
                 // Rebuilding replaces this file's Module node, including its
                 // incoming edges. Restore both directions from the explicit
@@ -340,95 +411,103 @@ impl IndexState {
         }
     }
 
-    /// Read `abs` and install (or update) its row in every flat
-    /// sub-index. Returns the file id, captured source, and whether the
-    /// **contents** changed; a file whose bytes hash the same as the indexed row
-    /// reports `false` so the caller can skip the tree-sitter re-parse,
-    /// and its recorded mtime is refreshed so the cheap stat gate stops
-    /// re-reading it on every later refresh.
-    ///
-    /// `known_metadata` lets the directory walk hand over the `stat` it
-    /// already performed instead of paying a second one per file.
-    pub(super) fn ingest(
+    /// Describe a file the walk (or a host) offered, or `None` when it is
+    /// not indexable or lies outside the root. The stat comes from the
+    /// caller, so the walk never pays a second one per file.
+    pub(super) fn file_job(&self, abs: &Path, metadata: &Metadata) -> Option<FileJob> {
+        let language = indexable_language(abs)?;
+        let rel = relative_path(&self.root, abs)?;
+        let known_hash = self
+            .path_to_id
+            .get(&rel)
+            .and_then(|id| self.files.get(id))
+            .map(|file| file.content_hash);
+        Some(FileJob {
+            abs: abs.to_path_buf(),
+            rel,
+            language,
+            size_bytes: metadata.len(),
+            mtime_ms: mtime_ms_of(metadata),
+            known_hash,
+        })
+    }
+
+    /// Install `job`'s extracted facts into every flat sub-index. Returns
+    /// the file id and whether the **contents** changed; a file whose bytes
+    /// hash the same as the indexed row reports `false` so the caller can
+    /// skip the graph rebuild, and its recorded mtime is refreshed so the
+    /// cheap stat gate stops re-reading it on every later refresh.
+    pub(super) fn install_facts(
         &mut self,
-        abs: &Path,
-        known_metadata: Option<&Metadata>,
+        job: &FileJob,
+        facts: FileFacts,
+        trigram_sink: TrigramSink<'_>,
     ) -> Option<IngestedFile> {
         let _phase = super::timing::Phase::start("ingest.total");
-        let language = indexable_language(abs)?;
-        let owned;
-        let metadata = match known_metadata {
-            Some(meta) => meta,
-            None => {
-                owned = std::fs::metadata(abs).ok()?;
-                &owned
+        let parsed = match facts {
+            FileFacts::Skipped => return None,
+            FileFacts::Unchanged { hash } => {
+                // Same bytes under a newer timestamp. Record the timestamp so
+                // the stat gate recognises it next time.
+                let id = *self.path_to_id.get(&job.rel)?;
+                let file = self.files.get_mut(&id).filter(|f| f.content_hash == hash)?;
+                file.mtime_ms = job.mtime_ms;
+                file.size_bytes = job.size_bytes;
+                return Some(IngestedFile {
+                    id,
+                    changed: false,
+                    graph: None,
+                });
             }
+            FileFacts::Changed(parsed) => *parsed,
         };
-        if metadata.len() > MAX_FILE_BYTES {
-            return None;
-        }
-        let content = std::fs::read_to_string(abs).ok()?;
-        if content.len() > MAX_FILE_BYTES as usize {
-            return None;
-        }
-        let rel = relative_path(&self.root, abs)?;
-        let hash = fnv1a64(content.as_bytes());
-        let mtime_ms = mtime_ms_of(metadata);
-        let id = match self.path_to_id.get(&rel) {
-            Some(existing_id) => {
-                let existing_id = *existing_id;
-                if let Some(file) = self.files.get_mut(&existing_id) {
-                    if file.content_hash == hash {
-                        // Same bytes under a newer timestamp. Record the
-                        // timestamp so the stat gate recognises it next
-                        // time, and tell the caller nothing changed.
-                        file.mtime_ms = mtime_ms;
-                        file.size_bytes = metadata.len();
-                        return Some(IngestedFile {
-                            id: existing_id,
-                            changed: false,
-                            source: content,
-                        });
-                    }
-                }
-                existing_id
-            }
+        let id = match self.path_to_id.get(&job.rel) {
+            Some(existing_id) => *existing_id,
             None => {
                 let id = self.next_id;
                 self.next_id = self.next_id.checked_add(1).expect("FileId overflow");
-                self.path_to_id.insert(rel.clone(), id);
+                self.path_to_id.insert(job.rel.clone(), id);
                 id
             }
         };
-
-        let language = language.name().to_string();
-        let imports = imports::extract_imports(&content, &language);
-        let line_count = crate::text::count_lines(content.as_bytes()) as u32;
-
+        let ParsedFile {
+            hash,
+            language,
+            imports,
+            line_count,
+            trigrams,
+            words,
+            graph,
+        } = parsed;
         let file = IndexedFile {
             id,
-            relative_path: rel,
+            relative_path: job.rel.clone(),
             language,
-            size_bytes: metadata.len(),
+            size_bytes: job.size_bytes,
             line_count,
             content_hash: hash,
-            mtime_ms,
+            mtime_ms: job.mtime_ms,
             symbols: Vec::new(),
             imports,
         };
-        {
-            let _phase = super::timing::Phase::start("ingest.trigrams");
-            self.trigrams.index_file(id, &content);
+        match trigram_sink {
+            TrigramSink::Inline => {
+                let _phase = super::timing::Phase::start("ingest.trigrams");
+                self.trigrams.install_file(id, trigrams);
+            }
+            TrigramSink::Queue(queue) => queue
+                .send((id, trigrams))
+                .expect("the code-index trigram installer stopped"),
         }
-        {
+        let ref_words = {
             let _phase = super::timing::Phase::start("ingest.words");
-            self.words.index_file(id, &content);
-        }
+            self.words.install_file(id, words, MIN_REF_WORD_LEN)
+        };
         self.files.insert(id, file);
         Some(IngestedFile {
             id,
             changed: true,
-            source: content,
+            graph: graph.map(|facts| ParsedGraph { facts, ref_words }),
         })
     }
 
@@ -568,32 +647,31 @@ impl IndexState {
         )
     }
 
-    /// Re-parse `id`'s source and replace its slice of the typed symbol
-    /// graph in [`Self::symbols`]. Cheap to call after a single-file
-    /// reindex; the full-rebuild loop calls this once per file. Files
-    /// with no recognised tree-sitter grammar (the index also handles
-    /// `.md`, `.json`, …) are skipped silently — `IndexedFile::symbols`
-    /// stays empty for those files. For grammar-recognised files the
-    /// same parse populates `IndexedFile::symbols` so the
-    /// `outline_get` builtin doesn't have to re-parse on every call
-    /// (issue #2456).
-    pub(super) fn rebuild_symbol_graph_for(&mut self, id: FileId, source: &str) {
+    /// Replace `id`'s slice of the typed symbol graph in [`Self::symbols`]
+    /// with an already-extracted parse. Cheap to call after a single-file
+    /// reindex; the full-rebuild loop calls this once per file. Files with
+    /// no recognised tree-sitter grammar (the index also handles `.md`,
+    /// `.json`, …) carry no parse and are skipped — `IndexedFile::symbols`
+    /// stays empty for those files. For grammar-recognised files the same
+    /// parse populates `IndexedFile::symbols` so the `outline_get` builtin
+    /// doesn't have to re-parse on every call (issue #2456).
+    pub(super) fn rebuild_symbol_graph_for(&mut self, id: FileId, parsed: Option<ParsedGraph>) {
         let _phase = super::timing::Phase::start("graph.rebuild_file");
-        let Some(file) = self.files.get(&id).cloned() else {
+        let Some(ParsedGraph { facts, ref_words }) = parsed else {
             return;
         };
-        let Some(language) = AstLanguage::detect(std::path::Path::new(&file.relative_path), None)
-        else {
+        let Some(file) = self.files.get(&id) else {
             return;
         };
+        let ref_words: Vec<&str> = ref_words.iter().map(|word| &**word).collect();
         // Calls resolve after the batch, in [`Self::relink_dirty_calls`],
         // once every declaration they can reach is in the graph.
-        let outcome = self.symbols.rebuild_file_deferring_calls(
+        let outcome = self.symbols.install_file_deferring_calls(
             id,
             &file.relative_path,
-            language,
-            source,
+            facts,
             &file.imports,
+            &ref_words,
         );
         // The rebuild linked this file to the declarations it names; now
         // link every file that names this file's declarations. Without
