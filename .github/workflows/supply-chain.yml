@@ -37,7 +37,10 @@ concurrency:
   # PR runs supersede each other. Main pushes key by SHA so each merge commit
   # keeps its own verdict instead of one cancelling the next (secret-scan.yml
   # uses the same key for the same reason).
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || (github.ref == 'refs/heads/main' && github.sha) || github.ref }}
+  # The event is part of the key: a `schedule` run sits on `refs/heads/main`
+  # at the same tip SHA as that commit's push run, so without it one cancels
+  # the other's verdict.
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || (github.ref == 'refs/heads/main' && github.sha) || github.ref }}
   cancel-in-progress: true
 
 jobs:
