@@ -1,8 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
-use crate::package_imports::acquire_package_snapshots;
-use crate::package_snapshot::PackageSnapshot;
+use crate::{package_imports::acquire_package_snapshots, package_snapshot::PackageSnapshot};
 use harn_lexer::Span;
 use harn_parser::{Parser, SNode};
 
