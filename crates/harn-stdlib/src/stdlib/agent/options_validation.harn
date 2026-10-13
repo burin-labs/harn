@@ -11,6 +11,7 @@ import { completion_judge_feedback_prompt, completion_judge_system_prompt } from
 import { agent_reasoning_apply } from "std/agent/reasoning"
 import { AgentLoopRetryOptions, agent_apply_default_retry } from "std/agent/retry"
 import { agent_scratchpad_options } from "std/agent/scratchpad"
+import { omit } from "std/json"
 import { pack_for } from "std/llm/defaults"
 import { project_context_profile } from "std/project"
 
@@ -803,12 +804,15 @@ pub fn __auto_tool_format_source(value: string?) {
 }
 
 pub fn __clear_tool_format_resolution(opts: any) {
-  let cleared = opts
-  cleared.remove("tool_format")
-  cleared.remove("_tool_format_source")
-  cleared.remove("_tool_format_capability_gap")
-  cleared.remove("_tool_format_override")
-  return cleared
+  return omit(
+    opts,
+    [
+      "tool_format",
+      "_tool_format_source",
+      "_tool_format_capability_gap",
+      "_tool_format_override",
+    ],
+  )
 }
 /**
  * Merge per-turn LLM overrides while preserving the difference between a

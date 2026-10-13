@@ -1,5 +1,6 @@
 // @harn-entrypoint-category llm.stdlib
 import { pick_keys } from "std/collections"
+import { omit } from "std/json"
 import { TokenBias } from "std/llm/tokenizer"
 
 // -------------------------------------------------------------------------------------------------
@@ -349,10 +350,7 @@ pub fn llm_clear_one_shot_prefill(options: any = nil) -> dict {
   if base?._harn_one_shot_prefill != true {
     return base
   }
-  let cleared = base
-  cleared.remove("prefill")
-  cleared.remove("_harn_one_shot_prefill")
-  return cleared
+  return omit(base, ["prefill", "_harn_one_shot_prefill"])
 }
 
 /**
