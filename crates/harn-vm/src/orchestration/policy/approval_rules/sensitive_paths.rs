@@ -2,7 +2,7 @@ use super::ToolApprovalPolicy;
 
 const EVIDENCE_MAX_CHARS: usize = 240;
 
-pub(super) fn first_candidate(
+pub(crate) fn first_candidate(
     policy: &ToolApprovalPolicy,
     candidates: &[String],
 ) -> Option<String> {
