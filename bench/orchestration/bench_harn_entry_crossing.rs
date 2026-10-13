@@ -10,12 +10,16 @@
 //!   the double-marshal path).
 //! - **parent module cache**: *warm* (parent VM already instantiated the
 //!   target module, children inherit it via Arc COW) vs *cold* (parent
-//!   cache misses, so every crossing replays module instantiation into
-//!   the child VM's copy and drops it on return — the
-//!   `modules.rs` `instantiate_module` re-instantiation tax).
+//!   cache misses). A cold crossing used to replay module instantiation
+//!   into the child VM's copy and drop it on return; an immutable stdlib
+//!   module is now instantiated once per execution tree and reused from
+//!   the tree's shared instance store (`vm/modules/shared_instances.rs`).
 //!
 //! The callee is `std/semver::parse("v1.2.3")` — pure and trivial — so
-//! the numbers isolate crossing overhead, not callee work.
+//! the numbers isolate crossing overhead, not callee work. `tool_parse_cold`
+//! drives the production text-tool parse seam every tool-bearing LLM
+//! response takes: a typed crossing into `std/llm/tool_parse`, an
+//! 11-module import closure that no parent VM ever holds warm.
 
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::hint::black_box;
@@ -125,40 +129,78 @@ fn crossing_by_name(runtime: &Runtime, ctx: &AsyncBuiltinCtx, args: &[VmValue]) 
         .expect("by-name boundary crossing should succeed")
 }
 
+const TOOL_PARSE_TEXT: &str = "<assistant_prose>Reading the file now.</assistant_prose>";
+
+fn crossing_tool_parse(runtime: &Runtime, ctx: &AsyncBuiltinCtx) -> String {
+    runtime
+        .block_on(harn_entry_crossing::parse_text_tool_calls(
+            ctx,
+            TOOL_PARSE_TEXT,
+        ))
+        .expect("text-tool parse crossing should succeed")
+}
+
 fn crossing_typed(runtime: &Runtime, ctx: &AsyncBuiltinCtx) -> ParsedVersion {
     runtime
         .block_on(harn_entry_crossing::call_export_typed(ctx, json!("v1.2.3")))
         .expect("typed boundary crossing should succeed")
 }
 
+#[derive(Clone, Copy)]
+enum Crossing {
+    ByName,
+    Typed,
+    ToolParse,
+}
+
+fn cross(runtime: &Runtime, ctx: &AsyncBuiltinCtx, args: &[VmValue], crossing: Crossing) {
+    match crossing {
+        Crossing::ByName => {
+            black_box(crossing_by_name(runtime, ctx, args));
+        }
+        Crossing::Typed => {
+            black_box(crossing_typed(runtime, ctx));
+        }
+        Crossing::ToolParse => {
+            black_box(crossing_tool_parse(runtime, ctx));
+        }
+    }
+}
+
 /// One instrumented sample per configuration: verifies the crossing
 /// returns the expected value and prints ns/call plus allocation counts
 /// so allocation regressions on the seam are visible in bench logs.
-fn measure_once(label: &str, runtime: &Runtime, ctx: &AsyncBuiltinCtx, typed: bool) {
+fn measure_once(label: &str, runtime: &Runtime, ctx: &AsyncBuiltinCtx, crossing: Crossing) {
     let args = by_name_args();
-    if typed {
-        let parsed = crossing_typed(runtime, ctx);
-        assert_eq!(
-            (parsed.major, parsed.minor, parsed.patch),
-            (1, 2, 3),
-            "typed crossing must round-trip std/semver::parse"
-        );
-    } else {
-        let result = crossing_by_name(runtime, ctx, &args);
-        assert!(
-            result.as_dict().is_some(),
-            "by-name crossing must return the parsed version dict"
-        );
+    match crossing {
+        Crossing::Typed => {
+            let parsed = crossing_typed(runtime, ctx);
+            assert_eq!(
+                (parsed.major, parsed.minor, parsed.patch),
+                (1, 2, 3),
+                "typed crossing must round-trip std/semver::parse"
+            );
+        }
+        Crossing::ByName => {
+            let result = crossing_by_name(runtime, ctx, &args);
+            assert!(
+                result.as_dict().is_some(),
+                "by-name crossing must return the parsed version dict"
+            );
+        }
+        Crossing::ToolParse => {
+            let prose = crossing_tool_parse(runtime, ctx);
+            assert!(
+                prose.contains("Reading the file now."),
+                "tool-parse crossing must return the response prose, got {prose:?}"
+            );
+        }
     }
 
     const CALLS: usize = 32;
     let started = Instant::now();
     for _ in 0..CALLS {
-        if typed {
-            black_box(crossing_typed(runtime, ctx));
-        } else {
-            black_box(crossing_by_name(runtime, ctx, &args));
-        }
+        cross(runtime, ctx, &args, crossing);
     }
     let elapsed_ns = started.elapsed().as_nanos() as f64;
 
@@ -166,11 +208,7 @@ fn measure_once(label: &str, runtime: &Runtime, ctx: &AsyncBuiltinCtx, typed: bo
     ALLOCATED_BYTES.store(0, Ordering::Relaxed);
     TRACK_ALLOCATIONS.store(true, Ordering::Relaxed);
     for _ in 0..CALLS {
-        if typed {
-            black_box(crossing_typed(runtime, ctx));
-        } else {
-            black_box(crossing_by_name(runtime, ctx, &args));
-        }
+        cross(runtime, ctx, &args, crossing);
     }
     TRACK_ALLOCATIONS.store(false, Ordering::Relaxed);
 
@@ -187,26 +225,32 @@ fn bench_harn_entry_crossing(c: &mut Criterion) {
     let runtime = runtime();
     let warm = warm_ctx(&runtime);
     let cold = cold_ctx();
+    let tool_parse = cold_ctx();
     let args = by_name_args();
 
-    measure_once("by_name_warm", &runtime, &warm, false);
-    measure_once("by_name_cold", &runtime, &cold, false);
-    measure_once("typed_warm", &runtime, &warm, true);
-    measure_once("typed_cold", &runtime, &cold, true);
+    measure_once("by_name_warm", &runtime, &warm, Crossing::ByName);
+    measure_once("by_name_cold", &runtime, &cold, Crossing::ByName);
+    measure_once("typed_warm", &runtime, &warm, Crossing::Typed);
+    measure_once("typed_cold", &runtime, &cold, Crossing::Typed);
+    measure_once(
+        "tool_parse_cold",
+        &runtime,
+        &tool_parse,
+        Crossing::ToolParse,
+    );
 
     let mut group = c.benchmark_group("harn_entry_crossing");
-    group.bench_function("by_name_warm", |b| {
-        b.iter(|| crossing_by_name(&runtime, &warm, black_box(&args)));
-    });
-    group.bench_function("by_name_cold", |b| {
-        b.iter(|| crossing_by_name(&runtime, &cold, black_box(&args)));
-    });
-    group.bench_function("typed_warm", |b| {
-        b.iter(|| crossing_typed(&runtime, &warm));
-    });
-    group.bench_function("typed_cold", |b| {
-        b.iter(|| crossing_typed(&runtime, &cold));
-    });
+    for (name, ctx, crossing) in [
+        ("by_name_warm", &warm, Crossing::ByName),
+        ("by_name_cold", &cold, Crossing::ByName),
+        ("typed_warm", &warm, Crossing::Typed),
+        ("typed_cold", &cold, Crossing::Typed),
+        ("tool_parse_cold", &tool_parse, Crossing::ToolParse),
+    ] {
+        group.bench_function(name, |b| {
+            b.iter(|| cross(&runtime, ctx, black_box(&args), crossing));
+        });
+    }
     group.finish();
 }
 

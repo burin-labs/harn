@@ -19,8 +19,10 @@ use crate::value::{ModuleFunctionRegistry, VmClosure, VmEnv, VmError, VmValue};
 use super::stdlib_artifact::stdlib_module_artifact;
 use super::{ScopeSpan, Vm};
 
+mod shared_instances;
 mod transaction;
 mod visibility;
+pub(crate) use shared_instances::SharedModuleInstanceStore;
 pub use visibility::resolve_module_import_path;
 // Reached by `modules_tests` through this module's bindings.
 #[cfg(test)]
@@ -522,6 +524,10 @@ impl Vm {
         if let Some(loaded) = self.module_cache.get(&synthetic).cloned() {
             return Ok(loaded);
         }
+        if let Some(loaded) = self.shared_module_instance(&synthetic, source) {
+            Arc::make_mut(&mut self.module_cache).insert(synthetic, Arc::clone(&loaded));
+            return Ok(loaded);
+        }
         Arc::make_mut(&mut self.source_cache).insert(synthetic.clone(), Arc::from(source));
 
         let artifact =
@@ -534,8 +540,9 @@ impl Vm {
         let loaded = Arc::new(loaded);
         {
             let _load_span = self.module_load_span();
-            Arc::make_mut(&mut self.module_cache).insert(synthetic, Arc::clone(&loaded));
+            Arc::make_mut(&mut self.module_cache).insert(synthetic.clone(), Arc::clone(&loaded));
         }
+        self.publish_shared_module_instance(&synthetic, source, &artifact, &loaded);
         self.record_module_loaded();
         Ok(loaded)
     }

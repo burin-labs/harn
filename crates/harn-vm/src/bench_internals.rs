@@ -668,6 +668,19 @@ pub mod harn_entry_crossing {
         .await
     }
 
+    /// The production text-tool parse seam every tool-bearing LLM response
+    /// takes (`llm::api::parse_text_tools_with_harn`): a typed crossing into
+    /// `std/llm/tool_parse`, whose import closure no other stdlib module
+    /// imports, so a parent VM never holds it warm. Returns the parsed prose.
+    pub async fn parse_text_tool_calls(
+        ctx: &AsyncBuiltinCtx,
+        text: &str,
+    ) -> Result<String, VmError> {
+        crate::llm::api::parse_text_tools_with_harn(Some(ctx), text, None, "")
+            .await
+            .map(|parsed| parsed.prose)
+    }
+
     /// One typed boundary crossing (`call_harn_export_typed`), including
     /// the full JSON double-marshal + serde deserialize.
     pub async fn call_export_typed(

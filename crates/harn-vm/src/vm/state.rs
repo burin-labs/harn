@@ -391,6 +391,8 @@ pub struct Vm {
     /// The complete export set is retained so handlers and predicates from the
     /// same module share one module state across repeated child invocations.
     pub(crate) lazy_callable_modules: LazyCallableModuleCache,
+    /// Immutable stdlib module instances shared by this execution tree.
+    pub(crate) shared_module_instances: Arc<super::modules::SharedModuleInstanceStore>,
     /// Source text keyed by canonical or synthetic module path for debugger
     /// retrieval. Entries share the bytes owned by
     /// [`crate::module_source`] rather than copying them.
@@ -582,6 +584,7 @@ impl VmBaseline {
             recorders: None,
             staged_module_load_count: None,
             lazy_callable_modules: Arc::new(crate::value::VmMutex::new(BTreeMap::new())),
+            shared_module_instances: Arc::default(),
             source_cache: Arc::clone(&self.source_cache),
             graph_link_table: self.graph_link_table.clone(),
             linked_program_repository: self.linked_program_repository.clone(),
@@ -861,6 +864,7 @@ impl Vm {
             recorders: None,
             staged_module_load_count: None,
             lazy_callable_modules: Arc::new(crate::value::VmMutex::new(BTreeMap::new())),
+            shared_module_instances: Arc::default(),
             source_cache: Arc::new(BTreeMap::new()),
             graph_link_table: None,
             linked_program_repository: None,
@@ -1150,6 +1154,7 @@ impl Vm {
             recorders: self.recorders.clone(),
             staged_module_load_count: None,
             lazy_callable_modules: Arc::clone(&self.lazy_callable_modules),
+            shared_module_instances: Arc::clone(&self.shared_module_instances),
             source_cache: Arc::clone(&self.source_cache),
             graph_link_table: self.graph_link_table.clone(),
             linked_program_repository: self.linked_program_repository.clone(),
