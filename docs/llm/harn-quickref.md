@@ -557,8 +557,8 @@ for {key, value} in my_dict.entries() { /* work */ }
 // [0, 1, 2, 3, 4] — half-open, Python-style
 const first_5 = range(5)
 const middle  = range(3, 7)      // [3, 4, 5, 6]
-const inc     = 1..=5            // [1, 2, 3, 4, 5]: `..=` includes the end
-const exc     = 1..5             // [1, 2, 3, 4]: `..` excludes it
+const inc     = 1..=5            // [1, 2, 3, 4, 5]: includes the end
+const exc     = 1..5             // [1, 2, 3, 4]: excludes it
 ```
 
 Note: `for` heads accept three destructuring shapes, each matching what the
