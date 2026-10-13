@@ -94,10 +94,28 @@ The snapshot shrinks from 191,222,003 to 143,450,072 bytes, and peak RSS for
 an unchanged restart falls from 707 to 575 MiB. Every pair has identical
 corpus, graph, and posting digests.
 
+## Persisting after publication
+
+A restore that reconciled changes now publishes the index and rewrites the
+snapshot afterwards on a background thread, which
+`CodeIndexCapability::wait_until_idle` joins. Measured on a quiet host against
+the per-file strings build; the
+[trial record](perf/code-index-background-persist.json) keeps when each write
+landed as `persisted_us`.
+
+| Operation | Baseline median | Candidate ready | Candidate persisted | Paired ratio [95% interval] |
+| --- | --- | --- | --- | --- |
+| Body edit on restart | 1.149 s | 0.499 s | 1.169 s | 0.436 [0.413, 0.437] |
+| Declaration edit on restart | 1.133 s | 0.501 s | 1.180 s | 0.442 [0.413, 0.444] |
+| Changed HEAD | 1.327 s | 0.676 s | 1.276 s | 0.513 [0.250, 0.513] |
+
+Three pairs per workload; two HEAD pairs saw up to 1.07 busy external cores
+and are retained but flagged. Readiness after an edit now matches an unchanged
+restart plus reconciliation; the write still takes about as long, but readers
+no longer wait for it. Peak memory is unchanged.
+
 ## Residuals
 
 - A quiet-host repetition of this matrix.
 - Decoding is now the largest unchanged-restart phase. Reading archived nodes
   in place would cut it further.
-- The file write after an edit. Writing sections as they finish encoding, or
-  persisting after the index is published, would remove most of it.
