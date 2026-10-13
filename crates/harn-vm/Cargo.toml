@@ -104,6 +104,7 @@ harn-clock = { path = "../harn-clock", version = "=0.10.166-dev" }
 harn-provider-catalog = { path = "../harn-provider-catalog", version = "=0.10.166-dev" }
 harn-flock = { path = "../harn-flock", version = "=0.10.166-dev" }
 harn-glob = { path = "../harn-glob", version = "=0.10.166-dev" }
+harn-languages = { path = "../harn-languages", version = "=0.10.166-dev" }
 harn-session-store = { path = "../harn-session-store", version = "=0.10.166-dev" }
 harn-sqlite = { path = "../harn-sqlite", version = "=0.10.166-dev" }
 harn-ir = { path = "../harn-ir", version = "=0.10.166-dev" }

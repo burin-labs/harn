@@ -10,6 +10,7 @@ members = [
     "crates/harn-clock",
     "crates/harn-flock",
     "crates/harn-glob",
+    "crates/harn-languages",
     "crates/harn-secret-catalog",
     "crates/harn-provider-catalog",
     "crates/harn-terminal",

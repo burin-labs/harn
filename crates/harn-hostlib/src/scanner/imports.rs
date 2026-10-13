@@ -4,14 +4,14 @@
 //! `extract_imports`. Import-rewriting belongs to editor-specific host
 //! surfaces and should be added as separate hostlib methods if needed.
 
+use harn_languages::Language;
 use regex::Regex;
 use std::sync::OnceLock;
 
 /// Extract zero or more import-target strings from `content`.
 ///
-/// `language` is the lowercase file extension (`"rs"`, `"ts"`, …). Unknown
-/// languages return an empty vec.
-pub fn extract_imports(content: &str, language: &str) -> Vec<String> {
+/// Languages without an import matcher return an empty vec.
+pub fn extract_imports(content: &str, language: Language) -> Vec<String> {
     let mut out = Vec::new();
     let mut in_go_block = false;
 
@@ -21,19 +21,19 @@ pub fn extract_imports(content: &str, language: &str) -> Vec<String> {
             continue;
         }
         match language {
-            "swift" => {
+            Language::Swift => {
                 if let Some(name) = capture(swift_import(), trimmed) {
                     out.push(name);
                 }
             }
-            "ts" | "tsx" | "js" | "jsx" | "mjs" | "cjs" => {
+            Language::TypeScript | Language::Tsx | Language::JavaScript | Language::Jsx => {
                 if let Some(name) = capture(js_from(), trimmed) {
                     out.push(name);
                 } else if let Some(name) = capture(js_require(), trimmed) {
                     out.push(name);
                 }
             }
-            "py" => {
+            Language::Python => {
                 if trimmed.starts_with('#') {
                     continue;
                 }
@@ -43,47 +43,47 @@ pub fn extract_imports(content: &str, language: &str) -> Vec<String> {
                     out.push(name);
                 }
             }
-            "go" => extract_go_import(trimmed, &mut out, &mut in_go_block),
-            "rs" => {
+            Language::Go => extract_go_import(trimmed, &mut out, &mut in_go_block),
+            Language::Rust => {
                 if let Some(name) = capture(rust_use(), trimmed) {
                     out.push(name);
                 } else if let Some(name) = capture(rust_extern_crate(), trimmed) {
                     out.push(name);
                 }
             }
-            "java" | "kt" | "scala" | "sc" => {
+            Language::Java | Language::Kotlin | Language::Scala => {
                 if let Some(name) = capture(jvm_import(), trimmed) {
                     out.push(name);
                 }
             }
-            "c" | "cpp" | "h" | "hpp" => {
+            Language::C | Language::Cpp => {
                 if let Some(name) = capture(c_include(), trimmed) {
                     out.push(name);
                 }
             }
-            "rb" => {
+            Language::Ruby => {
                 if let Some(name) = capture(ruby_require(), trimmed) {
                     out.push(name);
                 }
             }
-            "php" => {
+            Language::Php => {
                 if let Some(name) = capture(php_use(), trimmed) {
                     out.push(name);
                 } else if let Some(name) = capture(php_include(), trimmed) {
                     out.push(name);
                 }
             }
-            "cs" => {
+            Language::CSharp => {
                 if let Some(name) = capture(csharp_using(), trimmed) {
                     out.push(name);
                 }
             }
-            "sh" | "bash" | "zsh" => {
+            Language::Bash => {
                 if let Some(name) = capture(shell_source(), trimmed) {
                     out.push(name);
                 }
             }
-            "dart" => {
+            Language::Dart => {
                 if let Some(name) = capture(dart_import(), trimmed) {
                     out.push(name);
                 }
@@ -153,33 +153,33 @@ pattern!(dart_import, r#"^(?:import|export|part)\s+['"]([^'"]+)['"]"#);
 
 #[cfg(test)]
 mod tests {
-    use super::extract_imports;
+    use super::{extract_imports, Language};
 
     #[test]
     fn rust_use_and_extern_crate() {
         let src = "use std::collections::HashMap;\nextern crate serde_json;\n";
-        let imports = extract_imports(src, "rs");
+        let imports = extract_imports(src, Language::Rust);
         assert_eq!(imports, vec!["std::collections::HashMap", "serde_json"]);
     }
 
     #[test]
     fn typescript_imports() {
         let src = "import { Foo } from \"./foo\";\nconst y = require('./bar.js');\n";
-        let imports = extract_imports(src, "ts");
+        let imports = extract_imports(src, Language::TypeScript);
         assert_eq!(imports, vec!["./foo", "./bar.js"]);
     }
 
     #[test]
     fn python_import_and_from() {
         let src = "# header\nimport os.path\nfrom collections import deque\n";
-        let imports = extract_imports(src, "py");
+        let imports = extract_imports(src, Language::Python);
         assert_eq!(imports, vec!["os.path", "collections"]);
     }
 
     #[test]
     fn go_block_imports() {
         let src = "import (\n  \"fmt\"\n  \"os\"\n)\nimport \"errors\"\n";
-        let imports = extract_imports(src, "go");
+        let imports = extract_imports(src, Language::Go);
         assert_eq!(imports, vec!["fmt", "os", "errors"]);
     }
 }

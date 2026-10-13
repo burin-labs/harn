@@ -46,6 +46,7 @@
 //! - `harn.compass.fell_back` — rewrite considered but not provably
 //!   equivalent, so the original freeform call ran.
 
+use harn_languages::Language;
 use serde_json::{Map as JsonMap, Value as JsonValue};
 
 use crate::stdlib::observability::{emit_instrument, MetricInstrument};
@@ -232,36 +233,21 @@ struct FreeformEdit {
     whole_file: bool,
 }
 
-/// File extensions Harn has structural (tree-sitter) support for. The
-/// router only steers edits on these — for everything else the structural
-/// tools degrade to `Unsupported`, so a freeform patch is the right call
-/// and the compass stays out of the way. Kept conservative on purpose;
-/// `edit_capabilities()` is the authority at runtime, but a static allow
-/// list keeps this hook free of I/O. Keep this in sync with
-/// `harn_hostlib::ast::Language::from_extension`; `harn-vm` cannot import
-/// hostlib without creating a dependency cycle.
+/// Whether the language registry marks `path` as structural (tree-sitter).
+/// The router only steers edits on these — for everything else the
+/// structural tools degrade to `Unsupported`, so a freeform patch is the
+/// right call and the compass stays out of the way. `harn-hostlib` tests
+/// keep the registry's structural rows equal to its compiled grammars.
 fn parseable_extension(path: &str) -> bool {
-    const PARSEABLE: &[&str] = &[
-        "ts", "tsx", "js", "mjs", "cjs", "jsx", "py", "go", "rs", "java", "c", "h", "cpp", "cc",
-        "cxx", "hpp", "hxx", "hh", "cs", "csx", "rb", "kt", "kts", "php", "scala", "sc", "sh",
-        "bash", "zsh", "swift", "zig", "zon", "ex", "exs", "lua", "hs", "lhs", "r", "json", "yaml",
-        "yml", "toml", "css", "html", "htm", "sql", "md", "markdown",
-    ];
-    path_extension_matches(path, PARSEABLE)
+    Language::from_path(path)
+        .and_then(Language::structural)
+        .is_some()
 }
 
 fn rename_supported_extension(path: &str) -> bool {
-    const RENAME_SUPPORTED: &[&str] = &[
-        "rs", "ts", "tsx", "js", "mjs", "cjs", "jsx", "py", "go", "swift",
-    ];
-    path_extension_matches(path, RENAME_SUPPORTED)
-}
-
-fn path_extension_matches(path: &str, extensions: &[&str]) -> bool {
-    path.rsplit('.')
-        .next()
-        .map(|ext| extensions.contains(&ext.to_ascii_lowercase().as_str()))
-        .unwrap_or(false)
+    Language::from_path(path)
+        .and_then(Language::structural)
+        .is_some_and(|support| support.rename_symbol)
 }
 
 pub(crate) fn edit_path_from_args(args: &JsonValue) -> Option<String> {
@@ -712,23 +698,18 @@ mod tests {
     }
 
     #[test]
-    fn parseable_extensions_match_hostlib_ast_registry() {
-        // Mirror `harn_hostlib::ast::Language::from_extension` without
-        // importing hostlib into harn-vm and creating a dependency cycle.
-        let supported = [
-            "ts", "tsx", "js", "mjs", "cjs", "jsx", "py", "go", "rs", "java", "c", "h", "cpp",
-            "cc", "cxx", "hpp", "hxx", "hh", "cs", "csx", "rb", "kt", "kts", "php", "scala", "sc",
-            "sh", "bash", "zsh", "swift", "zig", "zon", "ex", "exs", "lua", "hs", "lhs", "r",
-            "json", "yaml", "yml", "toml", "css", "html", "htm", "sql", "md", "markdown",
-        ];
-        for ext in supported {
-            assert!(
-                parseable_extension(&format!("src/file.{ext}")),
-                "expected .{ext} to be parseable"
-            );
-        }
+    fn parseable_and_rename_follow_the_language_registry() {
+        assert!(parseable_extension("src/file.rs"));
+        assert!(parseable_extension("src/file.hxx"));
+        assert!(parseable_extension("scripts/build.harn"));
+        assert!(parseable_extension("docs/README.md"));
         assert!(!parseable_extension("src/file.txt"));
-        assert!(!parseable_extension("src/file.harn"));
+        assert!(!parseable_extension("lib/main.dart"));
+        assert!(!parseable_extension("Dockerfile"));
+        assert!(rename_supported_extension("src/App.tsx"));
+        assert!(rename_supported_extension("scripts/build.harn"));
+        assert!(!rename_supported_extension("src/Main.java"));
+        assert!(!rename_supported_extension("lib/main.dart"));
     }
 
     #[test]

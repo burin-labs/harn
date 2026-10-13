@@ -308,7 +308,7 @@ fn scan_project_emits_full_result_shape() {
         .iter()
         .find(|f| f.relative_path == "src/main.rs")
         .expect("main.rs file record");
-    assert_eq!(main.language, "rs");
+    assert_eq!(main.language, "rust");
     assert!(main.line_count > 0);
     assert!(main.size_bytes > 0);
     assert!(main.imports.iter().any(|i| i.contains("routes")));
@@ -344,8 +344,12 @@ fn scan_project_emits_full_result_shape() {
 
     // Project metadata: language stats, test commands, code patterns.
     assert_eq!(result.project.name, project_name(tmp.path()));
-    assert!(result.project.languages.iter().any(|l| l.name == "rs"));
-    assert!(result.project.languages.iter().any(|l| l.name == "ts"));
+    assert!(result.project.languages.iter().any(|l| l.name == "rust"));
+    assert!(result
+        .project
+        .languages
+        .iter()
+        .any(|l| l.name == "typescript"));
     assert!(result.project.test_commands.contains_key("cargo test"));
     assert!(result.project.test_commands.contains_key("npm test"));
     let detected = result

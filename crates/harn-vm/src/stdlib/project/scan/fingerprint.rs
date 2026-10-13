@@ -1,6 +1,7 @@
 //! Project fingerprint detection: languages, frameworks, package managers, test runners, and CI.
 
 use super::*;
+use harn_languages::Language;
 
 pub(in super::super) fn detect_project_fingerprint(dir: &Path) -> ProjectFingerprint {
     let mut signals = FingerprintSignals::default();
@@ -626,29 +627,36 @@ pub(super) fn source_language_for_file(
     name: &str,
     extension: Option<&str>,
 ) -> Option<&'static str> {
-    if is_tooling_source_file(name) {
+    // A bare `.h` header is shared by C, C++, and Objective-C, so it signals
+    // only the C family (see the caller) rather than counting as source.
+    if is_tooling_source_file(name) || extension.is_some_and(|ext| ext.eq_ignore_ascii_case("h")) {
         return None;
     }
-    match extension {
-        Some("rs") => Some("rust"),
-        Some("ts") | Some("tsx") | Some("js") | Some("jsx") | Some("mjs") | Some("cjs") => {
+    Language::from_path(name).and_then(project_language)
+}
+
+/// The project-ecosystem label a source file counts toward. JavaScript and
+/// its JSX dialect count as `typescript` because both share the Node
+/// toolchain signals the fingerprint ranks.
+pub(crate) fn project_language(language: Language) -> Option<&'static str> {
+    match language {
+        Language::TypeScript | Language::Tsx | Language::JavaScript | Language::Jsx => {
             Some("typescript")
         }
-        Some("py") => Some("python"),
-        Some("go") => Some("go"),
-        Some("swift") => Some("swift"),
-        Some("rb") => Some("ruby"),
-        Some("scala") | Some("sc") => Some("scala"),
-        Some("kt") | Some("kts") => Some("kotlin"),
-        Some("java") => Some("java"),
-        Some("ex") | Some("exs") => Some("elixir"),
-        Some("zig") | Some("zon") => Some("zig"),
-        Some("php") => Some("php"),
-        Some("cs") => Some("csharp"),
-        Some("c") => Some("c"),
-        Some("cpp") | Some("cc") | Some("cxx") | Some("hpp") | Some("hh") | Some("hxx")
-        | Some("mm") => Some("cpp"),
-        Some("h") => None,
+        Language::Cpp | Language::ObjectiveCpp => Some("cpp"),
+        Language::Rust
+        | Language::Python
+        | Language::Go
+        | Language::Swift
+        | Language::Ruby
+        | Language::Scala
+        | Language::Kotlin
+        | Language::Java
+        | Language::Elixir
+        | Language::Zig
+        | Language::Php
+        | Language::CSharp
+        | Language::C => Some(language.name()),
         _ => None,
     }
 }

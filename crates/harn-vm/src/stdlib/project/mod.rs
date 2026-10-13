@@ -16,6 +16,7 @@ use scan::*;
 use shared::*;
 
 pub(crate) use builtins::{project_scan_config_value, register_project_builtins};
+pub(crate) use scan::project_language;
 
 #[cfg(test)]
 #[path = "tests.rs"]

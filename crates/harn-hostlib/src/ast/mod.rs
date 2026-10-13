@@ -75,7 +75,7 @@ pub mod api {
     use crate::error::HostlibError;
 
     use super::language::Language;
-    use super::outline::build_outline;
+    use super::outline::{build_outline, outline_source};
     use super::parse::{parse_source, read_source};
     use super::symbols::extract;
     use super::types::{OutlineItem, Symbol};
@@ -98,6 +98,16 @@ pub mod api {
     ) -> Result<(Language, Vec<OutlineItem>), HostlibError> {
         let (language, symbols) = symbols(path, language_hint)?;
         Ok((language, build_outline(symbols)))
+    }
+
+    /// Parse a source `str` for `language` and fold its symbols into an
+    /// outline that keeps at most `max_depth` levels (`0` keeps all).
+    pub fn outline_from_source(
+        source: &str,
+        language: Language,
+        max_depth: usize,
+    ) -> Result<Vec<OutlineItem>, HostlibError> {
+        outline_source(source, language, max_depth)
     }
 
     /// Parse a source `str` for `language` and return its symbols. Useful

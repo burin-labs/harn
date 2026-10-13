@@ -1,47 +1,120 @@
 //! Symbol extraction for the scanner pipeline.
 //!
-//! This regex extractor covers pragma sections, Dart, and the generic
-//! fallback path used for languages where the scanner does not need a full
-//! tree-sitter pass. The scanner keeps the same public record shape so the
-//! orchestrator in [`super::run_scan`] can swap extraction engines without
-//! disturbing callers.
+//! Every language with a tree-sitter grammar goes through the same
+//! extractor as `ast.symbols`. [`regex_fallback_symbols`] is the one
+//! line-oriented fallback, used only for languages the registry knows but
+//! no grammar covers in this build (Dart, Objective-C, Vue, …). Section
+//! pragmas (`// MARK:`, `# TODO:`, `#pragma mark`) are comment conventions
+//! rather than syntax, so they are matched per line for every language.
 //!
 //! The output shape — `Vec<SymbolRecord>` — is the canonical scanner
 //! representation used by the scanner orchestrator.
 
+use harn_languages::Language;
 use regex::Regex;
 use std::sync::OnceLock;
 
 use crate::scanner::result::{SymbolKind, SymbolRecord};
 
-/// Extract every symbol the regex pipeline can recognize from `content`.
+/// Extract every symbol in `content`.
 ///
-/// `language` is the lowercase file extension; `file_path` is the
-/// repo-relative POSIX path (used to build stable symbol ids).
-pub fn extract_symbols(content: &str, language: &str, file_path: &str) -> Vec<SymbolRecord> {
-    let mut symbols = Vec::new();
-    let mut current_container: Option<String> = None;
-    let mut brace_depth: i64 = 0;
+/// `file_path` is the repo-relative POSIX path (used to build stable symbol
+/// ids).
+pub fn extract_symbols(content: &str, language: Language, file_path: &str) -> Vec<SymbolRecord> {
+    let mut symbols = pragma_symbols(content, language, file_path);
+    match structural_symbols(content, language, file_path) {
+        Some(found) => symbols.extend(found),
+        None => symbols.extend(regex_fallback_symbols(content, language, file_path)),
+    }
+    symbols.sort_by_key(|symbol| symbol.line);
+    symbols
+}
 
-    for (idx, line) in content.lines().enumerate() {
-        let trimmed = line.trim();
+/// Tree-sitter symbols, or `None` when no grammar is bound for `language`
+/// in this build.
+#[cfg(feature = "ast")]
+fn structural_symbols(
+    content: &str,
+    language: Language,
+    file_path: &str,
+) -> Option<Vec<SymbolRecord>> {
+    use crate::ast::SymbolKind as AstKind;
 
-        if let Some(pragma) = extract_pragma(trimmed, language) {
+    let grammar = crate::ast::Language::from_registry(language)?;
+    grammar.ts_language()?;
+    let symbols = crate::ast::api::symbols_from_source(content, grammar).ok()?;
+    Some(
+        symbols
+            .into_iter()
+            .map(|symbol| {
+                let kind = match symbol.kind {
+                    AstKind::Function => SymbolKind::Function,
+                    AstKind::Method => SymbolKind::Method,
+                    AstKind::Class => SymbolKind::ClassDecl,
+                    AstKind::Struct => SymbolKind::StructDecl,
+                    AstKind::Enum => SymbolKind::EnumDecl,
+                    AstKind::Interface => SymbolKind::InterfaceDecl,
+                    AstKind::Protocol => SymbolKind::ProtocolDecl,
+                    AstKind::Type => SymbolKind::TypeAlias,
+                    AstKind::Field => SymbolKind::Property,
+                    AstKind::Variable => SymbolKind::Variable,
+                    AstKind::Module => SymbolKind::Module,
+                    AstKind::EnumCase | AstKind::Other => SymbolKind::Other,
+                };
+                make_symbol(
+                    symbol.name,
+                    kind,
+                    symbol.signature,
+                    symbol.start_row as usize + 1,
+                    file_path,
+                    symbol.container,
+                )
+            })
+            .collect(),
+    )
+}
+
+#[cfg(not(feature = "ast"))]
+fn structural_symbols(
+    _content: &str,
+    _language: Language,
+    _file_path: &str,
+) -> Option<Vec<SymbolRecord>> {
+    None
+}
+
+fn pragma_symbols(content: &str, language: Language, file_path: &str) -> Vec<SymbolRecord> {
+    content
+        .lines()
+        .enumerate()
+        .filter_map(|(idx, line)| {
+            let pragma = extract_pragma(line.trim(), language)?;
             let signature = if pragma.has_separator {
                 format!("--- {} ---", pragma.name)
             } else {
                 pragma.name.clone()
             };
-            symbols.push(make_symbol(
+            Some(make_symbol(
                 pragma.name,
                 pragma.kind,
                 signature,
                 idx + 1,
                 file_path,
                 None,
-            ));
-        }
+            ))
+        })
+        .collect()
+}
 
+/// The line-oriented fallback for languages without a grammar binding.
+/// Containers are tracked by brace depth, so it is approximate by design.
+fn regex_fallback_symbols(content: &str, language: Language, file_path: &str) -> Vec<SymbolRecord> {
+    let mut symbols = Vec::new();
+    let mut current_container: Option<String> = None;
+    let mut brace_depth: i64 = 0;
+
+    for (idx, line) in content.lines().enumerate() {
+        let trimmed = line.trim();
         if trimmed.is_empty()
             || trimmed.starts_with("//")
             || trimmed.starts_with("/*")
@@ -58,7 +131,10 @@ pub fn extract_symbols(content: &str, language: &str, file_path: &str) -> Vec<Sy
             brace_depth = 0;
         }
 
-        let extracted = extract_from_line(trimmed, language, idx + 1, file_path);
+        let extracted = match language {
+            Language::Dart => extract_dart(trimmed, idx + 1, file_path),
+            _ => extract_generic(trimmed, idx + 1, file_path),
+        };
         for mut sym in extracted {
             if matches!(
                 sym.kind,
@@ -95,18 +171,6 @@ pub(super) fn make_symbol(
         container,
         reference_count: 0,
         importance_score: 0.0,
-    }
-}
-
-fn extract_from_line(
-    line: &str,
-    language: &str,
-    line_number: usize,
-    file_path: &str,
-) -> Vec<SymbolRecord> {
-    match language {
-        "dart" => extract_dart(line, line_number, file_path),
-        _ => extract_generic(line, line_number, file_path),
     }
 }
 
@@ -336,9 +400,12 @@ const HASH_PATTERNS: &[PragmaPattern] = &[
     },
 ];
 
-fn extract_pragma(line: &str, language: &str) -> Option<PragmaMatch> {
-    let is_python = language == "py";
-    let is_cpp = matches!(language, "cpp" | "cc" | "cxx" | "hpp" | "h" | "c" | "hxx");
+fn extract_pragma(line: &str, language: Language) -> Option<PragmaMatch> {
+    let is_python = language == Language::Python;
+    let is_cpp = matches!(
+        language,
+        Language::C | Language::Cpp | Language::ObjectiveC | Language::ObjectiveCpp
+    );
 
     if !is_python {
         if let Some(m) = match_patterns(SLASH_PATTERNS, line) {
@@ -430,34 +497,64 @@ pattern!(dart_function, r"^\s*(?:\w+\s+)?(\w+)\s*\((.*)");
 mod tests {
     use super::*;
 
+    #[cfg(feature = "grammars-all")]
     #[test]
-    fn extracts_swift_class_with_method_container() {
+    fn grammar_languages_use_tree_sitter_symbols() {
         let src = "class Foo {\n    func bar() {}\n}\n";
-        let symbols = extract_symbols(src, "swift", "Foo.swift");
+        let symbols = extract_symbols(src, Language::Swift, "Foo.swift");
         let names: Vec<_> = symbols
             .iter()
             .map(|s| (s.name.as_str(), s.kind, s.container.as_deref()))
             .collect();
-        // Class on line 1, function on line 2 with container "Foo"
-        assert!(names.contains(&("Foo", SymbolKind::ClassDecl, None)));
-        assert!(names.contains(&("bar", SymbolKind::Function, Some("Foo"))));
+        assert!(
+            names.contains(&("Foo", SymbolKind::ClassDecl, None)),
+            "{names:?}"
+        );
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name == "bar" && s.container.as_deref() == Some("Foo")),
+            "{names:?}"
+        );
+        // The regex fallback would read a call inside a body as a
+        // declaration; the grammar does not.
+        let src = "fn one() {\n    helper(1);\n}\n";
+        let symbols = extract_symbols(src, Language::Rust, "lib.rs");
+        let names: Vec<_> = symbols.iter().map(|s| s.name.as_str()).collect();
+        assert_eq!(names, vec!["one"]);
+    }
+
+    #[cfg(feature = "grammars-all")]
+    #[test]
+    fn extracts_scala_sealed_trait_symbol() {
+        let src = "package rulekit\n\nsealed trait Rule:\n  def name: String\n";
+        let symbols = extract_symbols(src, Language::Scala, "Rule.scala");
+        assert!(
+            symbols.iter().any(|s| s.name == "Rule"),
+            "expected sealed trait Rule to be indexed, got {symbols:?}"
+        );
+    }
+
+    #[cfg(feature = "grammars-all")]
+    #[test]
+    fn data_grammars_have_no_symbols_and_skip_the_fallback() {
+        let symbols = extract_symbols("{\"type Foo\": 1}\n", Language::Json, "a.json");
+        assert!(symbols.is_empty(), "{symbols:?}");
     }
 
     #[test]
     fn extracts_pragmas_in_python() {
         let src = "# MARK: - Section\n# TODO: write me\n";
-        let symbols = extract_symbols(src, "py", "x.py");
+        let symbols = extract_symbols(src, Language::Python, "x.py");
         assert!(symbols.iter().any(|s| s.kind == SymbolKind::Mark));
         assert!(symbols.iter().any(|s| s.kind == SymbolKind::Todo));
     }
 
     #[test]
     fn extracts_dart_function_with_signature() {
-        // The regex fallback matches any `<word> <ident>(` line, so a
-        // function-call inside a body shows up as another function entry.
-        // Production callers de-dupe at the tree-sitter / outline layer.
+        // Dart has no grammar, so it takes the regex fallback.
         let src = "void greet(String name) {\n  return name.length;\n}\n";
-        let symbols = extract_symbols(src, "dart", "main.dart");
+        let symbols = extract_symbols(src, Language::Dart, "main.dart");
         let fns: Vec<_> = symbols
             .iter()
             .filter(|s| s.kind == SymbolKind::Function && s.name == "greet")
@@ -467,19 +564,21 @@ mod tests {
     }
 
     #[test]
-    fn extracts_scala_sealed_trait_symbol() {
-        let src = "package rulekit\n\nsealed trait Rule:\n  def name: String\n";
-        let symbols = extract_symbols(src, "scala", "Rule.scala");
+    fn languages_without_a_grammar_use_the_generic_fallback() {
+        let src = "@interface Widget : NSObject\n@end\nstruct Point { int x; };\n";
+        let symbols = extract_symbols(src, Language::ObjectiveC, "Widget.m");
         assert!(
-            symbols.iter().any(|s| s.name == "Rule"),
-            "expected sealed trait Rule to be indexed, got {symbols:?}"
+            symbols
+                .iter()
+                .any(|s| s.name == "Point" && s.kind == SymbolKind::StructDecl),
+            "{symbols:?}"
         );
     }
 
     #[test]
     fn ids_are_stable_per_file_name_line() {
         let src = "fn one() {}\nfn two() {}\n";
-        let symbols = extract_symbols(src, "rs", "lib.rs");
+        let symbols = extract_symbols(src, Language::Rust, "lib.rs");
         let ids: Vec<_> = symbols.iter().map(|s| s.id.as_str()).collect();
         assert!(ids.contains(&"lib.rs:one:1"));
         assert!(ids.contains(&"lib.rs:two:2"));

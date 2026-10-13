@@ -512,14 +512,17 @@ fn parse_python_requirement_name(raw: &str) -> Option<String> {
     (!name.is_empty()).then(|| name.to_string())
 }
 
+/// The import extractor for a path. JavaScript and both JSX dialects share
+/// the Node module syntax, so they report as `typescript`.
 fn language_for_path(path: &Path) -> Option<&'static str> {
-    match path.extension().and_then(|ext| ext.to_str()) {
-        Some("py") => Some("python"),
-        Some("js") | Some("jsx") | Some("ts") | Some("tsx") | Some("mjs") | Some("cjs") => {
+    use harn_languages::Language;
+    match Language::from_path(path)? {
+        Language::Python => Some("python"),
+        Language::TypeScript | Language::Tsx | Language::JavaScript | Language::Jsx => {
             Some("typescript")
         }
-        Some("rs") => Some("rust"),
-        Some("harn") => Some("harn"),
+        Language::Rust => Some("rust"),
+        Language::Harn => Some("harn"),
         _ => None,
     }
 }

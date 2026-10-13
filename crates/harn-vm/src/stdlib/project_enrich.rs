@@ -364,18 +364,34 @@ fn collect_relevant_files(root: &Path, base_evidence: &VmValue) -> Vec<RelevantF
 }
 
 fn collect_source_files(root: &Path, languages: &[String]) -> Vec<String> {
-    let exts = source_extensions(languages);
-    if exts.is_empty() {
+    if languages.is_empty() {
         return Vec::new();
     }
     let mut files = Vec::new();
-    collect_source_files_recursive(root, root, &exts, &mut files);
+    collect_source_files_recursive(root, root, languages, &mut files);
     files.sort();
     files.truncate(MAX_SOURCE_FILES);
     files
 }
 
-fn collect_source_files_recursive(root: &Path, dir: &Path, exts: &[&str], files: &mut Vec<String>) {
+/// Whether a file's registry language is one of the requested project
+/// languages, by name or by the fingerprint's ecosystem label.
+fn is_requested_source(path: &Path, languages: &[String]) -> bool {
+    let Some(language) = harn_languages::Language::from_path(path) else {
+        return false;
+    };
+    languages.iter().any(|wanted| {
+        wanted == language.name()
+            || crate::stdlib::project::project_language(language) == Some(wanted.as_str())
+    })
+}
+
+fn collect_source_files_recursive(
+    root: &Path,
+    dir: &Path,
+    languages: &[String],
+    files: &mut Vec<String>,
+) {
     if files.len() >= MAX_SOURCE_FILES {
         return;
     }
@@ -393,18 +409,13 @@ fn collect_source_files_recursive(root: &Path, dir: &Path, exts: &[&str], files:
             if name.starts_with('.') || BUILTIN_IGNORED_DIRS.contains(&name.as_str()) {
                 continue;
             }
-            collect_source_files_recursive(root, &child.path(), exts, files);
+            collect_source_files_recursive(root, &child.path(), languages, files);
             if files.len() >= MAX_SOURCE_FILES {
                 return;
             }
             continue;
         }
-        let matches_ext = child
-            .path()
-            .extension()
-            .and_then(|ext| ext.to_str())
-            .is_some_and(|ext| exts.contains(&ext));
-        if !matches_ext {
+        if !is_requested_source(&child.path(), languages) {
             continue;
         }
         files.push(relative_posix(root, &child.path()));
@@ -412,30 +423,6 @@ fn collect_source_files_recursive(root: &Path, dir: &Path, exts: &[&str], files:
             return;
         }
     }
-}
-
-fn source_extensions(languages: &[String]) -> Vec<&'static str> {
-    let mut exts = Vec::new();
-    for language in languages {
-        match language.as_str() {
-            "rust" => push_unique_str(&mut exts, "rs"),
-            "go" => push_unique_str(&mut exts, "go"),
-            "python" => push_unique_str(&mut exts, "py"),
-            "typescript" => {
-                push_unique_str(&mut exts, "ts");
-                push_unique_str(&mut exts, "tsx");
-            }
-            "javascript" => {
-                push_unique_str(&mut exts, "js");
-                push_unique_str(&mut exts, "jsx");
-                push_unique_str(&mut exts, "mjs");
-                push_unique_str(&mut exts, "cjs");
-            }
-            "ruby" => push_unique_str(&mut exts, "rb"),
-            _ => {}
-        }
-    }
-    exts
 }
 
 fn enrichment_bindings(
@@ -696,12 +683,6 @@ fn relative_posix(base: &Path, path: &Path) -> String {
 
 fn estimate_tokens(text: &str) -> i64 {
     ((text.chars().count() as i64) + 3) / 4
-}
-
-fn push_unique_str<'a>(items: &mut Vec<&'a str>, value: &'a str) {
-    if !items.contains(&value) {
-        items.push(value);
-    }
 }
 
 fn value_as_string(value: &VmValue) -> Option<String> {

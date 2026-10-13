@@ -31,7 +31,7 @@ use super::overlay::OverlayState;
 use super::symbol_graph::SymbolGraph;
 use super::trigram::TrigramIndex;
 use super::versions::VersionLog;
-use super::walker::{is_indexable_file, language_for_extension, walk_workspace, MAX_FILE_BYTES};
+use super::walker::{indexable_language, is_indexable_file, walk_workspace, MAX_FILE_BYTES};
 use super::words::WordIndex;
 use crate::{HarnReferenceInput, HarnReferenceResolver};
 
@@ -355,9 +355,7 @@ impl IndexState {
         known_metadata: Option<&Metadata>,
     ) -> Option<IngestedFile> {
         let _phase = super::timing::Phase::start("ingest.total");
-        if !is_indexable_file(abs) {
-            return None;
-        }
+        let language = indexable_language(abs)?;
         let owned;
         let metadata = match known_metadata {
             Some(meta) => meta,
@@ -403,12 +401,7 @@ impl IndexState {
             }
         };
 
-        let ext = abs
-            .extension()
-            .and_then(|s| s.to_str())
-            .unwrap_or("")
-            .to_ascii_lowercase();
-        let language = language_for_extension(&ext).to_string();
+        let language = language.name().to_string();
         let imports = imports::extract_imports(&content, &language);
         let line_count = crate::text::count_lines(content.as_bytes()) as u32;
 

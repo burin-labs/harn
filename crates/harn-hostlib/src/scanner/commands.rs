@@ -346,10 +346,16 @@ fn collect_helper_candidates(files: &[FileRecord]) -> Vec<&FileRecord> {
         .iter()
         .filter(|f| {
             let lower = f.relative_path.to_ascii_lowercase();
-            let ext = f.language.as_str();
             let is_source = matches!(
-                ext,
-                "ts" | "js" | "py" | "go" | "rs" | "swift" | "java" | "kt"
+                f.language.as_str(),
+                "typescript"
+                    | "javascript"
+                    | "python"
+                    | "go"
+                    | "rust"
+                    | "swift"
+                    | "java"
+                    | "kotlin"
             );
             if !is_source {
                 return false;

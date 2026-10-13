@@ -3660,6 +3660,7 @@ dependencies = [
  "harn-builtin-meta",
  "harn-clock",
  "harn-flock",
+ "harn-languages",
  "harn-lexer",
  "harn-parser",
  "harn-session-store",
@@ -3750,6 +3751,10 @@ dependencies = [
  "serde_json",
  "sha2 0.11.0",
 ]
+
+[[package]]
+name = "harn-languages"
+version = "0.10.166-dev"
 
 [[package]]
 name = "harn-lexer"
@@ -4133,6 +4138,7 @@ dependencies = [
  "harn-glob",
  "harn-ir",
  "harn-kernel",
+ "harn-languages",
  "harn-lexer",
  "harn-modules",
  "harn-opcode-macros",

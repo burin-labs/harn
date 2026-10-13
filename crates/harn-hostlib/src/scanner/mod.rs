@@ -29,7 +29,7 @@ use crate::tools::args::{
 
 mod commands;
 mod discover;
-mod extensions;
+pub(crate) mod extensions;
 mod fingerprint;
 mod folders;
 mod git;
@@ -393,9 +393,14 @@ fn extract_per_file(
         if content.is_empty() && size != 0 {
             // Likely a non-utf8 binary; skip symbol/import extraction but still record the file.
         }
-        let language = extensions::file_extension(&entry.relative_path);
-        let imports = imports::extract_imports(&content, &language);
-        let file_symbols = symbols::extract_symbols(&content, &language, &entry.relative_path);
+        let language = extensions::file_language(&entry.relative_path);
+        let (imports, file_symbols) = match language {
+            Some(language) => (
+                imports::extract_imports(&content, language),
+                symbols::extract_symbols(&content, language, &entry.relative_path),
+            ),
+            None => (Vec::new(), Vec::new()),
+        };
         let line_count = crate::text::count_lines(content.as_bytes()) as usize;
 
         for imp in &imports {
@@ -410,7 +415,7 @@ fn extract_per_file(
             id: entry.relative_path.clone(),
             relative_path: entry.relative_path.clone(),
             file_name: extensions::file_name(&entry.relative_path).to_string(),
-            language,
+            language: language.map_or_else(String::new, |language| language.name().to_string()),
             line_count,
             size_bytes: size,
             last_modified_unix_ms: modified,

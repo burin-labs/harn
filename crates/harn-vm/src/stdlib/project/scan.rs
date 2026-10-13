@@ -17,6 +17,7 @@ use crate::stdlib::fs::ignore_policy::{
 };
 mod fingerprint;
 pub(super) use fingerprint::detect_project_fingerprint;
+pub(crate) use fingerprint::project_language;
 use fingerprint::*;
 
 const PROJECT_FINGERPRINT_MAX_DEPTH: usize = RuntimeLimits::DEFAULT.max_project_fingerprint_depth;
