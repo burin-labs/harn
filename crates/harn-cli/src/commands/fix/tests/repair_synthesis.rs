@@ -248,7 +248,7 @@ fn attenuated_capability_bundle_repair_emits_pick_only_when_the_builtin_is_in_sc
         );
         let program = harn_parser::parse_source(&source).unwrap();
         let start = source.find("harness, \"").unwrap();
-        let line = source[..start].matches('\n').count() + 1;
+        let line = source.get(..start).unwrap().matches('\n').count() + 1;
         let span = harn_lexer::Span::with_offsets(start, start + "harness".len(), line, 10);
         let (_, edits, _) = synthesize_missing_capability_argument_repair(
             span,
