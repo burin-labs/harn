@@ -400,6 +400,90 @@ if grep -Eq '^cache delete (402|403|404|405) ' "$tmp/superseded-gh.log"; then
   exit 1
 fi
 
+# One generation per merge-gate family, as on main after every retirement
+# succeeded. The fixed reservation sized for the largest generation ever seen,
+# held beside all three protected generations, exceeds the ceiling by itself,
+# so no deletion can admit the save. The replacement estimate is measured from
+# the family's own newest main generation instead, capped by the configured
+# headroom.
+pa=v0-rust-package-audit-workspace-crates-v3-Linux-x64
+cli=v0-rust-harn-ci-cli-workspace-crates-v3-Linux-x64
+cat >"$tmp/bin/gh" <<MOCK
+#!/usr/bin/env bash
+set -euo pipefail
+args="\$*"
+printf '%s\n' "\$args" >>"\$MOCK_GH_LOG"
+if [[ "\$args" == *'/actions/caches?per_page=100'* ]]; then
+  printf '%s\n' '[{"total_count":5,"actions_caches":[
+    {"id":501,"ref":"refs/heads/main","key":"$ws-2af81dbb-309b4b72","size_in_bytes":1073741824,"created_at":"2026-10-13T12:29:17Z"},
+    {"id":502,"ref":"refs/heads/main","key":"$cli-2af81dbb-efd08ae0","size_in_bytes":805306368,"created_at":"2026-10-13T14:35:29Z"},
+    {"id":503,"ref":"refs/heads/main","key":"$pa-e8124b01-309b4b72","size_in_bytes":805306368,"created_at":"2026-10-13T12:48:13Z"},
+    {"id":504,"ref":"refs/heads/main","key":"node-cache-Linux-X64-npm-current","size_in_bytes":1073741824,"created_at":"2026-10-13T05:00:00Z"},
+    {"id":505,"ref":"refs/heads/main","key":"setup-harn-v2-Linux-X64-0.10.160","size_in_bytes":268435456,"created_at":"2026-10-13T04:00:00Z"}]}]'
+elif [[ "\$args" == cache\ delete\ *\ --repo\ burin-labs/harn ]]; then
+  exit 0
+else
+  echo "unexpected gh arguments: \$args" >&2
+  exit 64
+fi
+MOCK
+chmod +x "$tmp/bin/gh"
+# 5 GiB policy: protected 1 + 0.75 + 0.75 = 2.5 GiB, eligible 1.25 GiB. A
+# fixed 3 GiB reservation leaves a 2 GiB ceiling under the protected bytes
+# alone, so it must refuse and delete nothing (the negative control).
+if PATH="$tmp/bin:$PATH" MOCK_GH_LOG="$tmp/fixed-headroom-gh.log" \
+  HARN_CACHE_POLICY_PATH="$tmp/protect-policy.json" \
+  GITHUB_REPOSITORY=burin-labs/harn \
+  "$repo_root/scripts/prune_ci_cache_generations.sh" --ensure-headroom 3221225472 \
+  >"$tmp/fixed-headroom.out" 2>"$tmp/fixed-headroom.err"; then
+  echo "a fixed reservation beside the protected generations must refuse" >&2
+  exit 1
+fi
+grep -q 'without deleting protected CI caches' "$tmp/fixed-headroom.err"
+if grep -q '^cache delete ' "$tmp/fixed-headroom-gh.log"; then
+  echo "a refused headroom step must delete nothing" >&2
+  exit 1
+fi
+# Replacing workspace-tests (1 GiB) reserves 1.5 GiB: a 3.5 GiB ceiling
+# against 3.75 GiB listed. The 0.25 GiB deficit takes only the smallest
+# eligible entry that covers it (505); every merge-gate generation stays.
+PATH="$tmp/bin:$PATH" MOCK_GH_LOG="$tmp/measured-headroom-gh.log" \
+  HARN_CACHE_POLICY_PATH="$tmp/protect-policy.json" \
+  GITHUB_REPOSITORY=burin-labs/harn \
+  "$repo_root/scripts/prune_ci_cache_generations.sh" --ensure-headroom 3221225472 \
+  --replacing v0-rust-workspace-tests- >"$tmp/measured-headroom.json"
+jq -e '
+  .headroom_cap_bytes == 3221225472 and
+  .replacement_basis.id == 501 and
+  .headroom_bytes == 1610612736 and
+  .listed_ceiling_bytes == 3758096384 and
+  (.deleted | map(.id)) == [505] and
+  (.protected_generations | map(.id) | sort) == [501, 502, 503]
+' "$tmp/measured-headroom.json" >/dev/null
+if grep -Eq '^cache delete (501|502|503|504) ' "$tmp/measured-headroom-gh.log"; then
+  echo "measured headroom must delete only the covering eligible entry" >&2
+  cat "$tmp/measured-headroom-gh.log" >&2
+  exit 1
+fi
+# The configured headroom caps the estimate: 1.5 x 1 GiB exceeds a 1.25 GiB
+# cap, so the cap is reserved (3.75 GiB ceiling, no deficit).
+PATH="$tmp/bin:$PATH" MOCK_GH_LOG="$tmp/capped-headroom-gh.log" \
+  HARN_CACHE_POLICY_PATH="$tmp/protect-policy.json" \
+  GITHUB_REPOSITORY=burin-labs/harn \
+  "$repo_root/scripts/prune_ci_cache_generations.sh" --ensure-headroom 1342177280 \
+  --replacing v0-rust-workspace-tests- >"$tmp/capped-headroom.json"
+jq -e '.headroom_bytes == 1342177280 and .deficit_bytes == 0 and .deleted == []' \
+  "$tmp/capped-headroom.json" >/dev/null
+# Only a merge-gate family has a replacement to measure.
+if PATH="$tmp/bin:$PATH" MOCK_GH_LOG="$tmp/bad-replacing-gh.log" \
+  HARN_CACHE_POLICY_PATH="$tmp/protect-policy.json" \
+  GITHUB_REPOSITORY=burin-labs/harn \
+  "$repo_root/scripts/prune_ci_cache_generations.sh" --ensure-headroom 1342177280 \
+  --replacing v0-rust-release-x86_64- >/dev/null 2>&1; then
+  echo "--replacing must name a merge-gate family" >&2
+  exit 1
+fi
+
 # Restore the baseline mock for the remaining authorization-failure case.
 cat >"$tmp/bin/gh" <<'MOCK'
 #!/usr/bin/env bash

@@ -658,7 +658,7 @@ pub fn rust_cache_generation_admission_errors(job: dict) -> list<string> {
     step_by_name(job?.steps ?? [], "Prepare Linux cache generation save")?.run ?? "",
   )
   if command
-    != "./scripts/prune_ci_cache_generations.sh --ensure-headroom \"$HARN_CACHE_SAVE_HEADROOM_BYTES\"" {
+    != "./scripts/prune_ci_cache_generations.sh --ensure-headroom \"$HARN_CACHE_SAVE_HEADROOM_BYTES\" --replacing \"$HARN_CACHE_FAMILY_PREFIX\"" {
     return [
       "${CACHE_REFRESH_WORKFLOW}:rust-cache-refresh must admit save headroom without deleting its current generation",
     ]
