@@ -90,29 +90,38 @@ The following identifiers are reserved:
 | `throws` | `.throwsKw` |
 | `finally` | `.finally` |
 | `fn` | `.fnKw` |
-| `emit` | `.emit` |
 | `spawn` | `.spawnKw` |
 | `while` | `.whileKw` |
 | `type` | `.typeKw` |
 | `enum` | `.enum` |
-| `eval_pack` | `.evalPack` |
 | `struct` | `.struct` |
 | `interface` | `.interface` |
 | `pub` | `.pub` |
-| `from` | `.from` |
-| `to` | `.to` |
-| `tool` | `.tool` |
-| `skill` | `.skill` |
-| `exclusive` | `.exclusive` |
 | `guard` | `.guard` |
-| `require` | `.require` |
-| `deadline` | `.deadline` |
 | `yield` | `.yield` |
-| `mutex` | `.mutex` |
 | `break` | `.break` |
 | `continue` | `.continue` |
-| `select` | `.select` |
 | `impl` | `.impl` |
+
+### Contextual keywords
+
+These words introduce syntax only in one position and are ordinary
+identifiers everywhere else, so `let tool = ...`, `let select = ...`, and
+`config.from` work:
+
+| Word | Introduces syntax when |
+|---|---|
+| `select` | followed by `{` at statement position |
+| `tool`, `skill`, `eval_pack` | followed by a declaration name |
+| `mutex` | followed by `{` or by `( key ) {` |
+| `deadline` | followed by a duration, number, or name, or by `( duration ) {` |
+| `require`, `emit` | at statement position, unless the next token continues a value expression (`=`, `.`, a binary operator, `,`, a closing bracket, or a line break) |
+| `scope`, `block`, `cost_route` | followed by `{` at statement position |
+| `from` | after an import list or a `select` case variable |
+| `gen` | followed by `fn` |
+
+`to` and `exclusive` are not keywords. They spelled ranges before Harn 0.11;
+ranges are now `a..b` and `a..=b`, and `a to b` reports `HARN-PAR-007`.
 
 ### Identifiers
 
@@ -130,7 +139,13 @@ float_literal ::= digit+ '.' digit+
 ```
 
 A number followed by `.` where the next character is not a digit is lexed as an integer
-followed by the `.` operator (enabling `42.method`).
+followed by the `.` operator (enabling `42.method`). `1..3` therefore lexes as an
+integer, the `..` range operator, and an integer.
+
+### Range operators
+
+`..` and `..=` are single tokens. A run of three dots stays three `.` tokens, which the
+parser reads as a spread or rest marker (`[...xs]`).
 
 ### Duration literals
 
@@ -635,16 +650,16 @@ introduce dict literals in expression position, including dict-valued function t
 
 ```ebnf
 expression         ::= pipe_expr
-pipe_expr          ::= range_expr ('|>' range_expr)*
-range_expr         ::= ternary_expr ['to' ternary_expr ['exclusive']]
+pipe_expr          ::= ternary_expr ('|>' ternary_expr)*
 ternary_expr       ::= logical_or ['?' ternary_expr ':' ternary_expr]
 logical_or         ::= logical_and ('||' logical_and)*
 logical_and        ::= equality ('&&' equality)*
 equality           ::= comparison (('==' | '!=') comparison)*
-comparison         ::= additive
-                       (('<' | '>' | '<=' | '>=' | 'in' | 'not in') additive)*
-additive           ::= nil_coal_expr (('+' | '-') nil_coal_expr)*
-nil_coal_expr      ::= multiplicative ('??' multiplicative)*
+comparison         ::= nil_coal_expr
+                       (('<' | '>' | '<=' | '>=' | 'in' | 'not in') nil_coal_expr)*
+nil_coal_expr      ::= range_expr ('??' range_expr)*
+range_expr         ::= additive [('..' | '..=') additive]
+additive           ::= multiplicative (('+' | '-') multiplicative)*
 multiplicative     ::= unary (('*' | '/' | '%') unary)*
 unary              ::= ('!' | '-') unary | power_expr
 power_expr         ::= postfix ['**' unary]
@@ -728,6 +743,7 @@ The table runs from lowest to highest binding. Operators with higher binding
 group first. For example, `a && b || c` parses as `(a && b) || c` because `&&`
 binds more tightly than `||`.
 
+<!-- operator-precedence:begin -->
 | Precedence | Operators | Associativity | Description |
 |---|---|---|---|
 | 1 | `\|>` | Left | Pipe |
@@ -736,15 +752,30 @@ binds more tightly than `||`.
 | 4 | `&&` | Left | Logical AND |
 | 5 | `==` `!=` | Left | Equality |
 | 6 | `<` `>` `<=` `>=` `in` `not in` | Left | Comparison / membership |
-| 7 | `+` `-` | Left | Additive |
-| 8 | `??` | Left | Nil coalescing |
-| 9 | `*` `/` `%` | Left | Multiplicative |
-| 10 | `!` `-` (unary) | Right (prefix) | Unary |
-| 11 | `**` | Right | Exponentiation |
-| 12 | `.` `?.` `[]` `?.[]` `[:]` `()` `?` `!` | Left | Postfix |
+| 7 | `??` | Left | Nil coalescing |
+| 8 | `..` `..=` | None | Range formation |
+| 9 | `+` `-` | Left | Additive |
+| 10 | `*` `/` `%` | Left | Multiplicative |
+| 11 | `!` `-` | Right | Unary prefix |
+| 12 | `**` | Right | Exponentiation |
+| 13 | `.` `?.` `[]` `?.[]` `[:]` `()` `?` `!` | Left | Postfix |
+<!-- operator-precedence:end -->
+
+The table is generated from `harn_parser::operators::Precedence` by
+`make gen-operator-precedence`, which also writes the tree-sitter grammar's
+precedence constants, so the parser, formatter, editor grammar, and this
+table cannot disagree.
+
+`??` and range formation follow Swift's `NilCoalescingPrecedence` and
+`RangeFormationPrecedence`: `??` binds looser than arithmetic and range
+formation and tighter than comparison, so `count ?? 0 + 1` is
+`count ?? (0 + 1)` and `count ?? 0 == 1` is `(count ?? 0) == 1`. Swift makes
+`??` right-associative; Harn groups it to the left, which yields the same
+value because `??` returns its first non-nil operand. Ranges do not chain:
+`a..b..c` is a parse error.
 
 `!` appears at two precedence levels with two distinct meanings: a **prefix**
-`!` (level 10) is logical negation (`!ok`), while a **postfix** `!` (level 12)
+`!` (level 11) is logical negation (`!ok`), while a **postfix** `!` (level 13)
 is the non-null assertion (`value!`). They never collide — a `!` before an
 operand is negation, a `!` after one is the assertion — and `!=` is a single
 token, so neither reading is ambiguous.
@@ -758,14 +789,14 @@ and chained `**` remains right-associative (`2 ** 3 ** 2` is `2 ** (3 ** 2)`).
 ### Multiline expressions
 
 Binary operators `|>`, `||`, `&&`, `==`, `!=`, `<`, `>`, `<=`, `>=`, `??`,
-`+`, `*`, `/`, `%`, `**`, and the `.` / `?.` member access operators can span
-multiple lines. The operator at the start of a continuation line causes the
+`..`, `..=`, `+`, `*`, `/`, `%`, `**`, and the `.` / `?.` member access
+operators can span multiple lines. The operator at the start of a continuation line causes the
 parser to treat it as a continuation of the previous expression rather than a
 new statement.
 
 Note: `-` does not support multiline continuation because it is also a unary
-negation prefix. Keyword operators `in`, `not in`, and `to` also require an
-explicit backslash continuation.
+negation prefix. Keyword operators `in` and `not in` also require an explicit
+backslash continuation.
 
 ```harn,ignore
 const result = items
@@ -1431,21 +1462,22 @@ formats as `classified == (fixture?.expect_missing_dep ?? false)`.
 `condition ? trueExpr : falseExpr` evaluates `condition`, then evaluates and returns
 either `trueExpr` (if truthy) or `falseExpr`.
 
-### Ranges (`to`, `to … exclusive`)
+### Ranges (`..`, `..=`)
 
-`a to b` evaluates `a` and `b` (both must be integers) and produces a list of
-consecutive integers. The form is **inclusive** by default — `1 to 5` is
-`[1, 2, 3, 4, 5]` — because that matches how the expression reads aloud.
+`a..b` and `a..=b` evaluate `a` and `b` (both must be integers) and produce a
+lazy range of consecutive integers. `a..b` excludes `b`; `a..=b` includes it,
+matching Rust.
 
-Add the trailing modifier `exclusive` to get the half-open form:
-`1 to 5 exclusive` is `[1, 2, 3, 4]`.
+| Expression | Value             | Shape    |
+|------------|-------------------|----------|
+| `1..=5`    | `[1, 2, 3, 4, 5]` | `[a, b]` |
+| `1..5`     | `[1, 2, 3, 4]`    | `[a, b)` |
+| `0..=3`    | `[0, 1, 2, 3]`    | `[a, b]` |
+| `0..3`     | `[0, 1, 2]`       | `[a, b)` |
 
-| Expression           | Value               | Shape      |
-|----------------------|---------------------|------------|
-| `1 to 5`             | `[1, 2, 3, 4, 5]`   | `[a, b]`   |
-| `1 to 5 exclusive`   | `[1, 2, 3, 4]`      | `[a, b)`   |
-| `0 to 3`             | `[0, 1, 2, 3]`      | `[a, b]`   |
-| `0 to 3 exclusive`   | `[0, 1, 2]`         | `[a, b)`   |
+Range formation binds looser than arithmetic, so `0..n - 1` is `0..(n - 1)`,
+and tighter than `??` and comparison, so `x in 0..n` tests membership in the
+range. Ranges print in source form (`1..=5`, `0..3`).
 
 If `b < a`, the result is the empty list. The `range(n)` / `range(a, b)` stdlib
 builtins always produce the half-open form, for Python-compatible indexing.
