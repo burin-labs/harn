@@ -66,9 +66,23 @@ impl std::fmt::Display for YamlError {
 
 impl std::error::Error for YamlError {}
 
-fn options() -> serde_saphyr::Options {
+/// Parser options for one document of `input_len` bytes.
+///
+/// The parser's default node, event, scalar, and comment budgets are fixed
+/// counts that ordinary large documents exceed, such as a long comment block
+/// in a workflow or an 80 MB relocation map. Each is raised to what the input
+/// itself can hold: a document without aliases cannot produce more of them
+/// than it has bytes. Alias expansion beyond the input's size stays bounded by
+/// these limits, and the depth, alias, anchor, and merge-key budgets are
+/// unchanged.
+fn options(input_len: usize) -> serde_saphyr::Options {
     let mut budget = serde_saphyr::Budget::default();
     budget.max_depth = MAX_YAML_DEPTH;
+    budget.max_buffered_comment_events = budget.max_buffered_comment_events.max(input_len);
+    budget.max_nodes = budget.max_nodes.max(input_len);
+    budget.max_events = budget.max_events.max(input_len.saturating_mul(2));
+    budget.max_total_scalar_bytes = budget.max_total_scalar_bytes.max(input_len);
+    budget.max_total_comment_bytes = budget.max_total_comment_bytes.max(input_len);
     serde_saphyr::options! {
         budget: Some(budget),
         strict_booleans: true,
@@ -78,12 +92,12 @@ fn options() -> serde_saphyr::Options {
 
 /// Decode one YAML document into `T`.
 pub fn from_str<T: DeserializeOwned>(text: &str) -> Result<T, YamlError> {
-    serde_saphyr::from_str_with_options(text, options()).map_err(YamlError::decode)
+    serde_saphyr::from_str_with_options(text, options(text.len())).map_err(YamlError::decode)
 }
 
 /// Decode one UTF-8 YAML document into `T`.
 pub fn from_slice<T: DeserializeOwned>(bytes: &[u8]) -> Result<T, YamlError> {
-    serde_saphyr::from_slice_with_options(bytes, options()).map_err(YamlError::decode)
+    serde_saphyr::from_slice_with_options(bytes, options(bytes.len())).map_err(YamlError::decode)
 }
 
 /// Encode `value` as a YAML document.
@@ -178,6 +192,23 @@ mod tests {
         let nested = |depth: usize| format!("{}1{}", "[".repeat(depth), "]".repeat(depth));
         assert!(from_str::<Value>(&nested(MAX_YAML_DEPTH - 1)).is_ok());
         assert!(from_str::<Value>(&nested(MAX_YAML_DEPTH + 1)).is_err());
+    }
+
+    #[test]
+    fn long_comment_blocks_and_large_documents_decode() {
+        // A workflow-style block of 40 comment lines before an entry exceeded
+        // the parser's default buffer of 32 comment events (#9824).
+        let comments = format!("jobs:\n{}  build: 1\n", "  # note\n".repeat(40));
+        assert_eq!(
+            from_str::<Value>(&comments).expect("decodes"),
+            json!({"jobs": {"build": 1}})
+        );
+        // 300,000 sequence entries exceed the default 250,000-node budget but
+        // need no expansion, as in a large relocation map.
+        let entries = 300_000;
+        let large = "- 1\n".repeat(entries);
+        let decoded = from_slice::<Value>(large.as_bytes()).expect("decodes");
+        assert_eq!(decoded.as_array().map(Vec::len), Some(entries));
     }
 
     #[test]
