@@ -30,6 +30,15 @@ pub type CheckExpectations = {
   path_required_names: list<string>,
 }
 
+/** Why a head's CI cannot start: GitHub runs no `pull_request` workflow on a conflicting PR. */
+pub type PrBlock = {pr: int, reason: "merge_conflict"}
+
+/**
+ * Outcome of the best-effort PR mergeability lookup. `not_run` means the
+ * verdict was not `missing`, so no extra API call was made.
+ */
+pub type BlockLookup = "not_run" | "ok" | "unavailable"
+
 pub type CheckCensus = {
   head_sha: string,
   total: int,
@@ -45,6 +54,8 @@ pub type CheckCensus = {
   expected_names: list<string>,
   path_required_names: list<string>,
   expectation_source: ExpectationSource,
+  blocked_by: list<PrBlock>,
+  blocked_lookup: BlockLookup,
   verdict: "green" | "bad" | "missing" | "pending",
   exit_code: int,
 }
@@ -402,9 +413,40 @@ pub fn build_census(
     expected_names: (expected_names ?? []).sorted(),
     path_required_names: (path_required_names ?? []).sorted(),
     expectation_source: expectation_source,
+    blocked_by: [],
+    blocked_lookup: "not_run",
     verdict: verdict,
     exit_code: exit_code,
   }
+}
+
+/**
+ * Conflicting PRs among `/pulls/{n}` payloads. A PR whose mergeability GitHub
+ * has not computed yet (`mergeable_state` "unknown") is not reported.
+ */
+pub fn classify_pr_blocks(pulls: list<any>) -> list<PrBlock> {
+  let blocks: list<PrBlock> = []
+  for pull in pulls {
+    const number = to_int(pull?.number)
+    if number != nil && to_string(pull?.mergeable_state ?? "") == "dirty" {
+      blocks = blocks.appending({pr: number, reason: "merge_conflict"})
+    }
+  }
+  return blocks
+}
+
+/** Human lines naming why a head's CI never started. Empty when nothing blocks it. */
+pub fn render_block_lines(blocked_by: list<PrBlock>, lookup: BlockLookup) -> list<string> {
+  let lines: list<string> = []
+  for block in blocked_by {
+    lines = lines.appending(
+      "  blocked: PR #${to_string(block.pr)} conflicts with its base; GitHub runs no pull_request CI on a conflicting PR - rebase onto the base branch",
+    )
+  }
+  if lookup == "unavailable" {
+    lines = lines.appending("  blocked: could not check PR mergeability")
+  }
+  return lines
 }
 
 /** Turn one check-runs API page into observations. */
@@ -545,6 +587,32 @@ fn api_json(
   return receipt.value
 }
 
+/** Best-effort: open PRs headed at `sha` that conflict with their base. */
+fn lookup_blocks(
+  process: HarnessProcess,
+  clock: HarnessClock,
+  stdio: HarnessStdio,
+  repo: string,
+  sha: string,
+) -> {blocked_by: list<PrBlock>, blocked_lookup: BlockLookup} {
+  const listed = api_json(process, clock, stdio, "/repos/${repo}/commits/${sha}/pulls")
+  if listed == nil {
+    return {blocked_by: [], blocked_lookup: "unavailable"}
+  }
+  let pulls: list<any> = []
+  for entry in listed {
+    if to_string(entry?.state ?? "") != "open" {
+      continue
+    }
+    const pull = api_json(process, clock, stdio, "/repos/${repo}/pulls/${to_string(entry?.number)}")
+    if pull == nil {
+      return {blocked_by: [], blocked_lookup: "unavailable"}
+    }
+    pulls = pulls.appending(pull)
+  }
+  return {blocked_by: classify_pr_blocks(pulls), blocked_lookup: "ok"}
+}
+
 fn collect_observations(
   process: HarnessProcess,
   clock: HarnessClock,
@@ -681,6 +749,7 @@ fn render(census: CheckCensus) -> string {
       "  required by changed paths: " + join(census.path_required_names, ", "),
     )
   }
+  lines = lines + render_block_lines(census.blocked_by, census.blocked_lookup)
   return join(lines, "\n")
 }
 
@@ -752,13 +821,16 @@ fn main(harness: Harness) {
       "gh_check_state: automatic expectations require Harn's own repository and workflow; supply --expect NAME",
     )
   }
-  const census = build_census(
+  let census = build_census(
     sha,
     collected.observations,
     expectations.expected_names,
     expectations.path_required_names,
     expectations.source,
   )
+  if census.verdict == "missing" {
+    census = census + lookup_blocks(harness.process, harness.clock, harness.stdio, repo, sha)
+  }
   harness.stdio.println(
     if parsed?.json ?? false {
       json_stringify_pretty(census)

@@ -6,11 +6,13 @@ import {
   check_run_observations,
   classify_check_run,
   classify_commit_status,
+  classify_pr_blocks,
   commit_status_observations,
   filter_matches_paths,
   glob_match,
   latest_per_name,
   path_required_check_names,
+  render_block_lines,
   workflow_surface_filters,
 } from "../gh_check_state.harn"
 
@@ -429,4 +431,39 @@ pipeline test_an_in_flight_run_reads_pending_not_missing(harness: Harness, task:
   )
   assert_eq(settled.verdict, "missing")
   assert_eq(settled.exit_code, 3)
+}
+
+pipeline test_conflicting_pr_is_named_as_the_reason_ci_never_started(task: unknown) {
+  const blocks = classify_pr_blocks(
+    [
+      {number: 9807, mergeable_state: "dirty", mergeable: false},
+      {number: 9808, mergeable_state: "clean", mergeable: true},
+    ],
+  )
+  assert_eq(blocks, [{pr: 9807, reason: "merge_conflict"}])
+  const lines = render_block_lines(blocks, "ok")
+  assert_eq(len(lines), 1)
+  assert(lines[0].contains("PR #9807 conflicts with its base"))
+  assert(lines[0].contains("rebase"))
+}
+
+pipeline test_clean_or_unknown_mergeability_names_no_block(task: unknown) {
+  assert_eq(classify_pr_blocks([{number: 1, mergeable_state: "clean"}]), [])
+  assert_eq(classify_pr_blocks([{number: 2, mergeable_state: "unknown"}]), [])
+  assert_eq(classify_pr_blocks([]), [])
+  assert_eq(render_block_lines([], "ok"), [])
+  assert_eq(render_block_lines([], "not_run"), [])
+}
+
+pipeline test_failed_mergeability_lookup_is_said_not_silent(task: unknown) {
+  const lines = render_block_lines([], "unavailable")
+  assert_eq(lines, ["  blocked: could not check PR mergeability"])
+}
+
+pipeline test_block_fields_default_to_not_run_and_leave_the_verdict(task: unknown) {
+  const census = build_census("a".repeat(40), [], ["CI status"], [], "explicit")
+  assert_eq(census.verdict, "missing")
+  assert_eq(census.exit_code, 3)
+  assert_eq(census.blocked_by, [])
+  assert_eq(census.blocked_lookup, "not_run")
 }
