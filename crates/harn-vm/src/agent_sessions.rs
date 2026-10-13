@@ -804,7 +804,7 @@ pub fn open_or_create_with_actor_chain(
         if let Some(parent) = parent_session.as_deref() {
             crate::agent_events::mirror_session_sinks(parent, &resolved);
         }
-        try_register_event_log(&resolved);
+        register_event_log_sink(&resolved);
     }
     Ok(resolved)
 }
@@ -927,7 +927,7 @@ fn admit_linked_sessions(
         if id == child_id {
             crate::agent_events::clear_session_parent_routes(&id);
         }
-        try_register_event_log(&id);
+        register_event_log_sink(&id);
     }
     // Linked lineage owns observation. A background worker has no ambient
     // session, and an unrelated ambient session must not receive these events.
@@ -974,32 +974,8 @@ pub fn ancestry(id: &str) -> Option<SessionAncestry> {
     })
 }
 
-/// Auto-register a persistent sink for a newly-created session.
-/// Silent no-op on failure — a broken observability sink must never
-/// prevent a session from starting.
-fn try_register_event_log(session_id: &str) {
-    if let Some(log) = crate::event_log::active_event_log() {
-        crate::agent_events::register_sink(
-            session_id,
-            crate::agent_events::EventLogSink::new(log, session_id),
-        );
-        return;
-    }
-    let Ok(dir) = std::env::var("HARN_EVENT_LOG_DIR") else {
-        return;
-    };
-    if dir.is_empty() {
-        return;
-    }
-    let path = std::path::PathBuf::from(dir).join(format!("event_log-{session_id}.jsonl"));
-    if let Ok(sink) = crate::agent_events::JsonlEventSink::open(&path) {
-        crate::agent_events::register_sink(session_id, sink);
-    }
-}
-
-pub fn register_event_log_sink(session_id: &str) {
-    try_register_event_log(session_id);
-}
+mod durable_sink;
+pub use durable_sink::{register_event_log_sink, DurableEventSink};
 
 /// Close an idle session.
 ///
@@ -1211,7 +1187,7 @@ pub fn fork(src_id: &str, dst_id: Option<String>) -> Result<Option<String>, Sess
     clear_session_changed_paths(&dst);
     crate::agent_events::clear_session_parent_routes(&dst);
     crate::agent_events::link_session_sinks(src_id, &dst);
-    try_register_event_log(&dst);
+    register_event_log_sink(&dst);
     publish_transcript_budget_event(budget_event);
     Ok(Some(dst))
 }
