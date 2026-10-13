@@ -1,4 +1,4 @@
-use harn_parser::{Node, SNode, TypeExpr};
+use harn_parser::{BinaryOperator, Node, SNode, TypeExpr};
 
 use crate::chunk::Op;
 
@@ -11,16 +11,16 @@ impl Compiler {
         &mut self,
         target: &SNode,
         value: &SNode,
-        op: &Option<String>,
+        op: &Option<BinaryOperator>,
     ) -> Result<(), CompileError> {
         if let Node::Identifier(name) = &target.node {
             if let Some(op) = op {
                 let left_type = self.infer_expr_type(target);
                 let right_type = self.infer_expr_type(value);
                 let result_type =
-                    self.infer_binary_result_type(op, left_type.as_ref(), right_type.as_ref());
+                    self.infer_binary_result_type(*op, left_type.as_ref(), right_type.as_ref());
                 // `x += list` — in-place concat (see try_emit_inplace_concat_assign).
-                if op == "+"
+                if matches!(op, BinaryOperator::Add)
                     && self.try_emit_inplace_concat_assign(name, value, left_type.as_ref())?
                 {
                     self.assign_type_fact(name, result_type);
@@ -32,13 +32,13 @@ impl Compiler {
                     .options
                     .optimizations_enabled()
                     .then(|| {
-                        self.specialized_binary_op(op, left_type.as_ref(), right_type.as_ref())
+                        self.specialized_binary_op(*op, left_type.as_ref(), right_type.as_ref())
                     })
                     .flatten()
                 {
                     self.chunk.emit(typed_op, self.line);
                 } else {
-                    self.emit_compound_op(op)?;
+                    self.emit_compound_op(*op)?;
                 }
                 self.emit_set_binding(name);
                 self.assign_type_fact(name, result_type);
@@ -52,7 +52,7 @@ impl Compiler {
                     right,
                 } = &value.node
                 {
-                    if bop == "+" {
+                    if matches!(bop, BinaryOperator::Add) {
                         if let Node::Identifier(lname) = &left.node {
                             if lname == name {
                                 let left_type = self.infer_expr_type(target);
@@ -109,7 +109,7 @@ impl Compiler {
                 if let Some(op) = op {
                     self.compile_node(target)?;
                     self.compile_node(value)?;
-                    self.emit_compound_op(op)?;
+                    self.emit_compound_op(*op)?;
                 } else {
                     self.compile_node(value)?;
                 }
@@ -144,7 +144,7 @@ impl Compiler {
                     if let Some(op) = op {
                         self.compile_node(target)?;
                         self.compile_node(value)?;
-                        self.emit_compound_op(op)?;
+                        self.emit_compound_op(*op)?;
                     } else {
                         self.compile_node(value)?;
                     }
@@ -215,7 +215,7 @@ impl Compiler {
         &mut self,
         target: &SNode,
         value: &SNode,
-        op: &Option<String>,
+        op: &Option<BinaryOperator>,
     ) -> Result<(), CompileError> {
         // `Index` carries a full `SNode`; the size gap to `Prop(String)` is
         // inherent to this short-lived path-desugaring helper, not worth an
@@ -592,7 +592,7 @@ impl Compiler {
                         self.chunk
                             .emit_u8(Op::TailCall, args.len() as u8, self.line);
                     } else if let Node::BinaryOp { op, left, right } = &val.node {
-                        if op == "|>" && !contains_pipe_placeholder(right) {
+                        if matches!(op, BinaryOperator::Pipe) && !contains_pipe_placeholder(right) {
                             self.compile_node(left)?;
                             self.compile_node(right)?;
                             self.chunk.emit(Op::Swap, self.line);

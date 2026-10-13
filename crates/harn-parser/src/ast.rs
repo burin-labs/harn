@@ -1,5 +1,7 @@
 use harn_lexer::{Span, StringSegment};
 
+pub use crate::operators::{BinaryOperator, UnaryOperator};
+
 /// A node wrapped with source location information.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct Spanned<T> {
@@ -331,7 +333,7 @@ pub enum Node {
     },
     /// Duration literal: 500ms, 5s, 30m, 2h, 1d, 1w
     DurationLiteral(u64),
-    /// Range expression: `start to end` (inclusive) or `start to end exclusive` (half-open)
+    /// Range expression: `start..end` (half-open) or `start..=end` (inclusive)
     RangeExpr {
         start: Box<SNode>,
         end: Box<SNode>,
@@ -443,12 +445,12 @@ pub enum Node {
         end: Option<Box<SNode>>,
     },
     BinaryOp {
-        op: String,
+        op: BinaryOperator,
         left: Box<SNode>,
         right: Box<SNode>,
     },
     UnaryOp {
-        op: String,
+        op: UnaryOperator,
         operand: Box<SNode>,
     },
     Ternary {
@@ -459,8 +461,8 @@ pub enum Node {
     Assignment {
         target: Box<SNode>,
         value: Box<SNode>,
-        /// None = plain `=`, Some("+") = `+=`, etc.
-        op: Option<String>,
+        /// None = plain `=`, `Some(BinaryOperator::Add)` = `+=`, etc.
+        op: Option<BinaryOperator>,
     },
     ThrowStmt {
         value: Box<SNode>,

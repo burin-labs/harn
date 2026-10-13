@@ -297,7 +297,7 @@ impl TypeChecker {
             Node::BoolLiteral(_) => Some(TypeExpr::Named("bool".into())),
             Node::NilLiteral => Some(TypeExpr::Named("nil".into())),
             Node::ListLiteral(items) => Some(self.infer_list_literal_type(items, scope)),
-            // `a to b` (and `a to b exclusive`) produce a lazy Range value.
+            // `a..=b` (and `a..b`) produce a lazy Range value.
             // Expose it as a named `range` type; for-in and method resolution
             // special-case this type where needed.
             Node::RangeExpr { .. } => Some(TypeExpr::Named("range".into())),
@@ -490,12 +490,12 @@ impl TypeChecker {
             }
 
             Node::BinaryOp { op, left, right } => {
-                if op == "|>" {
+                if matches!(op, BinaryOperator::Pipe) {
                     return self.infer_pipe_type(left, right, scope);
                 }
                 let lt = self.infer_type(left, scope);
                 let rt = self.infer_type(right, scope);
-                if op == "??" {
+                if matches!(op, BinaryOperator::NilCoalesce) {
                     // `??` strips the nil arm from its left operand, but the
                     // structural `without_nil`/`contains_nil` helpers can't see
                     // through a named alias — so `type T = {..}?; x: T; x ?? d`
@@ -503,17 +503,16 @@ impl TypeChecker {
                     // aliases first so the coalesce drops nil for aliased
                     // nilable types exactly as it does for inline unions.
                     let lt = lt.map(|t| self.resolve_alias(&t, scope));
-                    return infer_binary_op_type(op, &lt, &rt);
+                    return infer_binary_op_type(*op, &lt, &rt);
                 }
-                infer_binary_op_type(op, &lt, &rt)
+                infer_binary_op_type(*op, &lt, &rt)
             }
 
             Node::UnaryOp { op, operand } => {
                 let t = self.infer_type(operand, scope);
-                match op.as_str() {
-                    "!" => Some(TypeExpr::Named("bool".into())),
-                    "-" => t, // negation preserves type
-                    _ => None,
+                match op {
+                    UnaryOperator::Not => Some(TypeExpr::Named("bool".into())),
+                    UnaryOperator::Neg => t, // negation preserves type
                 }
             }
 

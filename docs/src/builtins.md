@@ -2164,7 +2164,7 @@ Example:
 ```harn
 circuit_breaker("api", 3, 10000)
 
-for i in 0 to 5 exclusive {
+for i in 0..5 {
   if circuit_check("api") == "open" {
     harness.stdio.log("circuit open, skipping call")
   } else {

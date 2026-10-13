@@ -1,7 +1,7 @@
 mod casts;
 
 use harn_lexer::{FixEdit, Span, StringSegment};
-use harn_parser::{BindingPattern, DiagnosticCode as Code, Node, SNode};
+use harn_parser::{BinaryOperator, BindingPattern, DiagnosticCode as Code, Node, SNode};
 
 use self::casts::unnecessary_cast_target;
 use super::Linter;
@@ -462,7 +462,7 @@ impl<'a> Linter<'a> {
 
             Node::BinaryOp { op, left, right } => {
                 if let Some((message, replacement)) =
-                    Self::constant_logical_reduction(op, left, right)
+                    Self::constant_logical_reduction(*op, left, right)
                 {
                     self.diagnostics.push(LintDiagnostic {
                         code: Code::LintConstantLogicalOperand,
@@ -477,11 +477,16 @@ impl<'a> Linter<'a> {
                         }]),
                     });
                 }
-                let is_self_comparison = (op == "==" || op == "!=")
+                let is_self_comparison = (matches!(op, BinaryOperator::Eq)
+                    || matches!(op, BinaryOperator::Neq))
                     && left.node == right.node
                     && is_pure_expression(&left.node);
                 if is_self_comparison {
-                    let replacement = if op == "==" { "true" } else { "false" };
+                    let replacement = if matches!(op, BinaryOperator::Eq) {
+                        "true"
+                    } else {
+                        "false"
+                    };
                     // A float operand may be NaN, for which `x == x` is `false`
                     // and `x != x` is `true` (the idiomatic NaN test). Folding
                     // the comparison to a constant is only sound when the
@@ -516,7 +521,9 @@ impl<'a> Linter<'a> {
                         fix,
                     });
                 }
-                if (op == "==" || op == "!=") && !is_self_comparison {
+                if (matches!(op, BinaryOperator::Eq) || matches!(op, BinaryOperator::Neq))
+                    && !is_self_comparison
+                {
                     let is_bool_left = matches!(left.node, Node::BoolLiteral(_));
                     let is_bool_right = matches!(right.node, Node::BoolLiteral(_));
                     let compared_expression = if is_bool_left {
@@ -531,7 +538,7 @@ impl<'a> Linter<'a> {
                     if (is_bool_left || is_bool_right)
                         && self.expression_is_non_optional_bool(compared_expression)
                     {
-                        let (suggestion, msg) = if op == "==" {
+                        let (suggestion, msg) = if matches!(op, BinaryOperator::Eq) {
                             if matches!(right.node, Node::BoolLiteral(true))
                                 || matches!(left.node, Node::BoolLiteral(true))
                             {
@@ -571,12 +578,12 @@ impl<'a> Linter<'a> {
                         });
                     }
                 }
-                if matches!(op.as_str(), "+" | "-" | "*" | "/" | "%") {
+                if op.is_compound_assignable() {
                     let has_bad_literal =
                         matches!(left.node, Node::BoolLiteral(_) | Node::NilLiteral)
                             || matches!(right.node, Node::BoolLiteral(_) | Node::NilLiteral);
                     if has_bad_literal {
-                        let fix = if op == "+" {
+                        let fix = if matches!(op, BinaryOperator::Add) {
                             self.source.and_then(|src| {
                                 let is_left_str = matches!(&left.node, Node::StringLiteral(_));
                                 let is_right_str = matches!(&right.node, Node::StringLiteral(_));

@@ -12,7 +12,7 @@ impl TypeChecker {
     /// `for`-`in` pattern).
     ///
     /// For a dict field `{ key = default }`, the binding type is computed as
-    /// `infer_binary_op_type("??", source?.key, default)` — the same pipeline
+    /// `infer_binary_op_type(BinaryOperator::NilCoalesce, source?.key, default)` — the same pipeline
     /// the desugared `let key = source?.key ?? default` would produce, including
     /// the untyped-`dict` case where `source?.key` is unknown and the default's
     /// type carries through. A field without a default keeps the optional
@@ -60,7 +60,11 @@ impl TypeChecker {
                         match &field.default_value {
                             Some(default) => {
                                 let default_ty = self.infer_type(default, scope);
-                                infer_binary_op_type("??", &field_ty, &default_ty)
+                                infer_binary_op_type(
+                                    BinaryOperator::NilCoalesce,
+                                    &field_ty,
+                                    &default_ty,
+                                )
                             }
                             None => field_ty,
                         }
@@ -95,7 +99,11 @@ impl TypeChecker {
                         match &elem.default_value {
                             Some(default) => {
                                 let default_ty = self.infer_type(default, scope);
-                                infer_binary_op_type("??", &positional_ty, &default_ty)
+                                infer_binary_op_type(
+                                    BinaryOperator::NilCoalesce,
+                                    &positional_ty,
+                                    &default_ty,
+                                )
                             }
                             None => positional_ty,
                         }

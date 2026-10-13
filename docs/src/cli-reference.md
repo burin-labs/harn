@@ -1487,6 +1487,7 @@ harn fix --apply --dry-run --json --safety scope-local src/
 harn fix --apply --safety surface-changing src/
 harn fix --apply --safety surface-changing --code HARN-TYP-028 src/
 harn fix --apply --safety behavior-preserving --preserve-implicit-any --json src/
+harn fix --apply --migrate-operator-syntax --dry-run src/
 harn fix --apply --safety surface-changing --code HARN-LNT-073 src/
 ```
 
@@ -1515,6 +1516,19 @@ parameter remains unannotated, or the audited result is anything other than
 `any`. Intentionally invalid fixtures with a sibling `.error` declaration are
 listed under `excludedFiles`. Use the ordinary `--code HARN-TYP-028`
 surface-changing repair when authoring a narrower contract.
+
+`--migrate-operator-syntax` rewrites source written for the operator grammar
+before Harn 0.11. It replaces `a to b` with `a..=b` and `a to b exclusive` with
+`a..b`, and inserts parentheses wherever the current precedence of `??` and
+range formation would regroup an expression, so `b ?? 0 + 1` becomes
+`(b ?? 0) + 1`. Interpolation holes are rewritten in place. Every rewritten
+file is parsed again under the current grammar and is written only if its
+syntax tree matches the original's, so a migrated file keeps its meaning.
+Files that do not parse under the old grammar are reported as failures and
+exit nonzero; intentionally invalid fixtures with a sibling `.error` file are
+listed under `excludedFiles`. Run it once per tree: source already written for
+the current grammar can be misread as old source. No `--safety` ceiling is
+needed.
 
 Ambient-capability migrations add an explicit `harness: Harness` parameter and
 update callers. This is a surface-changing repair because Harn has no ambient

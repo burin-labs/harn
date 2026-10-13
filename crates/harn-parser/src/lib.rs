@@ -9,6 +9,8 @@ pub mod diagnostic_codes;
 pub mod interpolation;
 pub mod lexical;
 mod namespace_demand;
+pub mod operator_migration;
+pub mod operators;
 pub mod param_annotations;
 mod parser;
 pub mod runtime_stack;
@@ -235,6 +237,7 @@ impl PipelineError {
             PipelineError::Parse(e) => match e {
                 ParserError::Unexpected { span, .. } => Some(span),
                 ParserError::UnexpectedEof { span, .. } => Some(span),
+                ParserError::RemovedRangeSyntax { span } => Some(span),
             },
             PipelineError::TypeCheck(diag) => diag.span.as_ref(),
         }

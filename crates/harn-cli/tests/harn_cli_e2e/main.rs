@@ -89,6 +89,7 @@ mod merge_captain_mock_cli;
 mod model_context;
 mod models_dispatch;
 mod native_rule_libraries;
+mod operator_syntax_migration_cli;
 mod orchestrator_cli;
 #[cfg(unix)]
 mod orchestrator_cli_e2e;

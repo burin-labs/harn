@@ -91,6 +91,7 @@ pub(crate) fn error_span_from_parse(e: &harn_parser::ParserError) -> harn_lexer:
     match e {
         harn_parser::ParserError::Unexpected { span, .. } => *span,
         harn_parser::ParserError::UnexpectedEof { span, .. } => *span,
+        harn_parser::ParserError::RemovedRangeSyntax { span } => *span,
     }
 }
 

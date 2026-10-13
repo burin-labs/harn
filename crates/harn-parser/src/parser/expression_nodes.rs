@@ -1,4 +1,4 @@
-use crate::ast::{spanned, Node, SNode};
+use crate::ast::{spanned, BinaryOperator, Node, SNode, UnaryOperator};
 use harn_lexer::Span;
 
 // Precedence levels forward the same allocation. Materializing nodes here
@@ -11,26 +11,18 @@ pub(super) fn expression(make: impl FnOnce() -> Node, span: Span) -> Expression 
 }
 
 #[cfg_attr(debug_assertions, inline(never))]
-pub(super) fn binary(op: &str, left: Expression, right: Expression, span: Span) -> Expression {
-    Box::new(spanned(
-        Node::BinaryOp {
-            op: op.into(),
-            left,
-            right,
-        },
-        span,
-    ))
+pub(super) fn binary(
+    op: BinaryOperator,
+    left: Expression,
+    right: Expression,
+    span: Span,
+) -> Expression {
+    Box::new(spanned(Node::BinaryOp { op, left, right }, span))
 }
 
 #[cfg_attr(debug_assertions, inline(never))]
-pub(super) fn unary(op: &str, operand: Expression, span: Span) -> Expression {
-    Box::new(spanned(
-        Node::UnaryOp {
-            op: op.into(),
-            operand,
-        },
-        span,
-    ))
+pub(super) fn unary(op: UnaryOperator, operand: Expression, span: Span) -> Expression {
+    Box::new(spanned(Node::UnaryOp { op, operand }, span))
 }
 
 #[cfg_attr(debug_assertions, inline(never))]

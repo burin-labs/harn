@@ -211,6 +211,7 @@ diagnostic_codes! {
     ParserUnterminatedString, "HARN-PAR-004", Par, "string literal is unterminated";
     ParserUnterminatedBlockComment, "HARN-PAR-005", Par, "block comment is unterminated";
     ParserIntegerLiteralOutOfRange, "HARN-PAR-006", Par, "integer literal is out of range for int (i64)";
+    ParserRemovedRangeSyntax, "HARN-PAR-007", Par, "the `start to end` range spelling was removed";
     CompilerError, "HARN-CMP-001", Cmp, "the program failed to compile to bytecode";
     UndefinedVariable, "HARN-NAM-001", Nam, "variable name cannot be resolved";
     UndefinedFunction, "HARN-NAM-002", Nam, "function name cannot be resolved";

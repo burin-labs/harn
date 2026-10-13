@@ -26,7 +26,7 @@ fn bench_tools() {
 pipeline default(harness: Harness, task: unknown) {
   const turns = 120
   let script = []
-  for i in 0 to turns - 1 {
+  for i in 0..=turns - 1 {
     script = script
       + [
         {

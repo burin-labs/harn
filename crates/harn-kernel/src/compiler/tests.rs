@@ -1032,9 +1032,8 @@ fn list_appending_assign_optimizes_every_assignment_site() {
         "if i % 2 == 0 { x = x.appending(i) } else { x = x.appending(i) }",
         "x = x.appending(i)\n x = x.appending(\"text\")",
     ] {
-        let source = format!(
-            "pipeline t(harness: Harness) {{ let x = []\n for i in 0 to 10 exclusive {{ {body} }} }}"
-        );
+        let source =
+            format!("pipeline t(harness: Harness) {{ let x = []\n for i in 0..10 {{ {body} }} }}");
         let chunk = compile_source(&source);
         let d = chunk.disassemble("t");
         assert_eq!(

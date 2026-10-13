@@ -1,4 +1,4 @@
-use harn_parser::{Node, SNode, TypeExpr, TypeParam};
+use harn_parser::{Node, SNode, TypeExpr, TypeParam, UnaryOperator};
 
 /// One declared struct field retained through compilation for construction
 /// layout and runtime field-type assertions (harn#6268).
@@ -559,14 +559,13 @@ impl Compiler {
                 self.compile_assignment(target, value, op)?;
             }
             Node::BinaryOp { op, left, right } => {
-                self.compile_binary_op(op, left, right)?;
+                self.compile_binary_op(*op, left, right)?;
             }
             Node::UnaryOp { op, operand } => {
                 self.compile_node(operand)?;
-                match op.as_str() {
-                    "-" => self.chunk.emit(Op::Negate, self.line),
-                    "!" => self.chunk.emit(Op::Not, self.line),
-                    _ => {}
+                match op {
+                    UnaryOperator::Neg => self.chunk.emit(Op::Negate, self.line),
+                    UnaryOperator::Not => self.chunk.emit(Op::Not, self.line),
                 }
             }
             Node::NonNullAssert { operand } => {

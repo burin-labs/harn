@@ -69,29 +69,38 @@ The following identifiers are reserved:
 | `throws` | `.throwsKw` |
 | `finally` | `.finally` |
 | `fn` | `.fnKw` |
-| `emit` | `.emit` |
 | `spawn` | `.spawnKw` |
 | `while` | `.whileKw` |
 | `type` | `.typeKw` |
 | `enum` | `.enum` |
-| `eval_pack` | `.evalPack` |
 | `struct` | `.struct` |
 | `interface` | `.interface` |
 | `pub` | `.pub` |
-| `from` | `.from` |
-| `to` | `.to` |
-| `tool` | `.tool` |
-| `skill` | `.skill` |
-| `exclusive` | `.exclusive` |
 | `guard` | `.guard` |
-| `require` | `.require` |
-| `deadline` | `.deadline` |
 | `yield` | `.yield` |
-| `mutex` | `.mutex` |
 | `break` | `.break` |
 | `continue` | `.continue` |
-| `select` | `.select` |
 | `impl` | `.impl` |
+
+### Contextual keywords
+
+These words introduce syntax only in one position and are ordinary
+identifiers everywhere else, so `let tool = ...`, `let select = ...`, and
+`config.from` work:
+
+| Word | Introduces syntax when |
+|---|---|
+| `select` | followed by `{` at statement position |
+| `tool`, `skill`, `eval_pack` | followed by a declaration name |
+| `mutex` | followed by `{` or by `( key ) {` |
+| `deadline` | followed by a duration, number, or name, or by `( duration ) {` |
+| `require`, `emit` | at statement position, unless the next token continues a value expression (`=`, `.`, a binary operator, `,`, a closing bracket, or a line break) |
+| `scope`, `block`, `cost_route` | followed by `{` at statement position |
+| `from` | after an import list or a `select` case variable |
+| `gen` | followed by `fn` |
+
+`to` and `exclusive` are not keywords. They spelled ranges before Harn 0.11;
+ranges are now `a..b` and `a..=b`, and `a to b` reports `HARN-PAR-007`.
 
 ### Identifiers
 
@@ -109,7 +118,13 @@ float_literal ::= digit+ '.' digit+
 ```
 
 A number followed by `.` where the next character is not a digit is lexed as an integer
-followed by the `.` operator (enabling `42.method`).
+followed by the `.` operator (enabling `42.method`). `1..3` therefore lexes as an
+integer, the `..` range operator, and an integer.
+
+### Range operators
+
+`..` and `..=` are single tokens. A run of three dots stays three `.` tokens, which the
+parser reads as a spread or rest marker (`[...xs]`).
 
 ### Duration literals
 

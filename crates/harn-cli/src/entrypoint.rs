@@ -1044,6 +1044,7 @@ async fn dispatch(subcommand: Command) {
         },
         // Hidden dev-only generators; see commands::generate.
         Command::DumpHighlightKeywords(_)
+        | Command::DumpOperatorPrecedence(_)
         | Command::DumpPortableBenchmarkSchema(_)
         | Command::DumpPromptGrammar(_)
         | Command::DumpTriggerQuickref(_)

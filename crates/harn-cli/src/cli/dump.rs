@@ -19,6 +19,26 @@ pub(crate) struct DumpHighlightKeywordsArgs {
 }
 
 #[derive(Debug, Args)]
+pub(crate) struct DumpOperatorPrecedenceArgs {
+    /// Markdown files holding a generated precedence table region.
+    #[arg(
+        long = "markdown",
+        default_values = [
+            "spec/chapters/03-operator-precedence-table.md",
+            "docs/src/language-basics.md",
+        ]
+    )]
+    pub markdown: Vec<String>,
+    /// Generated `PREC` constants the tree-sitter grammar reads.
+    #[arg(long, default_value = "tree-sitter-harn/grammar/precedence.js")]
+    pub tree_sitter: String,
+    /// Verify both outputs match the parser's precedence table; exit non-zero
+    /// if either is stale.
+    #[arg(long)]
+    pub check: bool,
+}
+
+#[derive(Debug, Args)]
 pub(crate) struct DumpPromptGrammarArgs {
     /// Path to the generated TextMate grammar (relative to the repo root).
     #[arg(

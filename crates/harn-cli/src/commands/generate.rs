@@ -27,6 +27,9 @@ pub(crate) fn dispatch(command: Command) {
                 args.check,
             );
         }
+        Command::DumpOperatorPrecedence(args) => {
+            commands::dump_operator_precedence::run(&args.markdown, &args.tree_sitter, args.check);
+        }
         Command::DumpPortableBenchmarkSchema(args) => {
             commands::dump_portable_benchmark_schema::run(&args.output, args.check);
         }

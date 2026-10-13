@@ -175,6 +175,7 @@ GATES=(
   fmt-harn
   check-highlight
   check-prompt-grammar
+  check-operator-precedence
   check-grammar-keywords
   check-tree-sitter-parser
   verify-tree-sitter-parse

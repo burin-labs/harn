@@ -205,6 +205,11 @@ impl<'src> Lexer<'src> {
                 return Err(self.unexpected_character(ch));
             }
 
+            if let Some(tok) = self.try_range_op() {
+                tokens.push(tok);
+                continue;
+            }
+
             if let Some(tok) = self.try_two_char_op() {
                 tokens.push(tok);
                 continue;
@@ -942,6 +947,31 @@ impl<'src> Lexer<'src> {
             kind,
             Span::with_offsets(start_byte, self.byte_pos(), self.line, start_col),
         )
+    }
+
+    /// Lex `..` and `..=`. A run of three dots stays three `Dot` tokens, which
+    /// the parser reads as a spread or rest marker.
+    fn try_range_op(&mut self) -> Option<Token> {
+        if self.byte_at(self.pos)? != b'.' || self.byte_at(self.pos + 1)? != b'.' {
+            return None;
+        }
+        let after_dot_run = self.pos > 0 && self.byte_at(self.pos - 1) == Some(b'.');
+        if after_dot_run || self.byte_at(self.pos + 2) == Some(b'.') {
+            return None;
+        }
+        let (kind, len) = if self.byte_at(self.pos + 2) == Some(b'=') {
+            (TokenKind::DotDotEq, 3)
+        } else {
+            (TokenKind::DotDot, 2)
+        };
+        let start_byte = self.byte_pos();
+        let col = self.column;
+        self.pos += len;
+        self.column += len;
+        Some(Token::with_span(
+            kind,
+            Span::with_offsets(start_byte, self.byte_pos(), self.line, col),
+        ))
     }
 
     fn try_two_char_op(&mut self) -> Option<Token> {

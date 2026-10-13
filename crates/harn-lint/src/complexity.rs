@@ -2,7 +2,7 @@
 //! rule. Isolated from the main linter so the scoring logic is easy to
 //! evolve without touching rule dispatch.
 
-use harn_parser::{Node, SNode};
+use harn_parser::{BinaryOperator, Node, SNode};
 
 pub(crate) fn cyclomatic_complexity(nodes: &[SNode]) -> usize {
     fn node_complexity(node: &SNode) -> usize {
@@ -101,7 +101,7 @@ pub(crate) fn cyclomatic_complexity(nodes: &[SNode]) -> usize {
                     + node_complexity(false_expr)
             }
             Node::BinaryOp { op, left, right } => {
-                usize::from(op == "&&" || op == "||")
+                usize::from(matches!(op, BinaryOperator::And) || matches!(op, BinaryOperator::Or))
                     + node_complexity(left)
                     + node_complexity(right)
             }

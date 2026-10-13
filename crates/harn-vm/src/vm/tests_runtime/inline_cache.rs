@@ -141,7 +141,7 @@ fn test_inline_cache_warms_method_sites() {
 const list = [1, 2, 3]
 const text = "abc"
 const dict = {a: 1, b: 2}
-const range = 1 to 3
+const range = 1..=3
 const values = set(1, 2)
 let i = 0
 let total = 0

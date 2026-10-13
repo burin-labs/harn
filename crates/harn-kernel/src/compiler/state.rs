@@ -1,4 +1,6 @@
-use harn_parser::{substitute_type_expr, Node, SNode, ShapeField, TypeExpr, TypedParam};
+use harn_parser::{
+    substitute_type_expr, BinaryOperator, Node, SNode, ShapeField, TypeExpr, TypedParam,
+};
 use std::collections::BTreeMap;
 
 use crate::chunk::{Chunk, Constant, Op};
@@ -1456,13 +1458,13 @@ impl Compiler {
     }
 
     /// Emit the binary op instruction for a compound assignment operator.
-    pub(super) fn emit_compound_op(&mut self, op: &str) -> Result<(), CompileError> {
+    pub(super) fn emit_compound_op(&mut self, op: BinaryOperator) -> Result<(), CompileError> {
         match op {
-            "+" => self.chunk.emit(Op::Add, self.line),
-            "-" => self.chunk.emit(Op::Sub, self.line),
-            "*" => self.chunk.emit(Op::Mul, self.line),
-            "/" => self.chunk.emit(Op::Div, self.line),
-            "%" => self.chunk.emit(Op::Mod, self.line),
+            BinaryOperator::Add => self.chunk.emit(Op::Add, self.line),
+            BinaryOperator::Sub => self.chunk.emit(Op::Sub, self.line),
+            BinaryOperator::Mul => self.chunk.emit(Op::Mul, self.line),
+            BinaryOperator::Div => self.chunk.emit(Op::Div, self.line),
+            BinaryOperator::Mod => self.chunk.emit(Op::Mod, self.line),
             _ => {
                 return Err(CompileError {
                     message: format!("Unknown compound operator: {op}"),

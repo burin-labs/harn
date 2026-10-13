@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use harn_parser::{DictEntry, Node, SNode};
+use harn_parser::{BinaryOperator, DictEntry, Node, SNode, UnaryOperator};
 
 use crate::runtime_limits::RuntimeLimits;
 use crate::value::{try_compare_values, values_equal, VmValue};
@@ -37,9 +37,9 @@ pub(super) fn constant_value(expr: &SNode) -> Option<VmValue> {
         Node::BoolLiteral(value) => Some(VmValue::Bool(*value)),
         Node::NilLiteral => Some(VmValue::Nil),
         Node::DurationLiteral(ms) => i64::try_from(*ms).ok().map(VmValue::Duration),
-        Node::UnaryOp { op, operand } => fold_unary(op, constant_value(operand)?),
+        Node::UnaryOp { op, operand } => fold_unary(*op, constant_value(operand)?),
         Node::BinaryOp { op, left, right } => {
-            fold_binary(op, constant_value(left)?, constant_value(right)?)
+            fold_binary(*op, constant_value(left)?, constant_value(right)?)
         }
         Node::Ternary {
             condition,
@@ -85,53 +85,53 @@ pub(super) fn constant_value(expr: &SNode) -> Option<VmValue> {
     }
 }
 
-fn fold_unary(op: &str, value: VmValue) -> Option<VmValue> {
+fn fold_unary(op: UnaryOperator, value: VmValue) -> Option<VmValue> {
     match (op, value) {
         // Decline to fold the one overflowing case (`-i64::MIN`); the runtime
         // negate op promotes it to float. Folding to a wrapped `i64::MIN` here
         // would disagree with the VM.
-        ("-", VmValue::Int(value)) => value.checked_neg().map(VmValue::Int),
-        ("-", VmValue::Float(value)) => Some(VmValue::Float(-value)),
-        ("!", value) => Some(VmValue::Bool(!value.is_truthy())),
+        (UnaryOperator::Neg, VmValue::Int(value)) => value.checked_neg().map(VmValue::Int),
+        (UnaryOperator::Neg, VmValue::Float(value)) => Some(VmValue::Float(-value)),
+        (UnaryOperator::Not, value) => Some(VmValue::Bool(!value.is_truthy())),
         _ => None,
     }
 }
 
-fn fold_binary(op: &str, left: VmValue, right: VmValue) -> Option<VmValue> {
+fn fold_binary(op: BinaryOperator, left: VmValue, right: VmValue) -> Option<VmValue> {
     match op {
-        "+" => fold_add(left, right),
-        "-" => fold_sub(left, right),
-        "*" => fold_mul(left, right),
-        "/" => fold_div(left, right),
-        "%" => fold_mod(left, right),
-        "**" => fold_pow(left, right),
-        "==" => Some(VmValue::Bool(values_equal(&left, &right))),
-        "!=" => Some(VmValue::Bool(!values_equal(&left, &right))),
+        BinaryOperator::Add => fold_add(left, right),
+        BinaryOperator::Sub => fold_sub(left, right),
+        BinaryOperator::Mul => fold_mul(left, right),
+        BinaryOperator::Div => fold_div(left, right),
+        BinaryOperator::Mod => fold_mod(left, right),
+        BinaryOperator::Pow => fold_pow(left, right),
+        BinaryOperator::Eq => Some(VmValue::Bool(values_equal(&left, &right))),
+        BinaryOperator::Neq => Some(VmValue::Bool(!values_equal(&left, &right))),
         // Mirror the runtime: NaN is unordered, so every relational operator is
         // `false` when `try_compare_values` returns `None`.
-        "<" => Some(VmValue::Bool(
+        BinaryOperator::Lt => Some(VmValue::Bool(
             matches!(try_compare_values(&left, &right), Some(o) if o < 0),
         )),
-        ">" => Some(VmValue::Bool(
+        BinaryOperator::Gt => Some(VmValue::Bool(
             matches!(try_compare_values(&left, &right), Some(o) if o > 0),
         )),
-        "<=" => Some(VmValue::Bool(
+        BinaryOperator::Lte => Some(VmValue::Bool(
             matches!(try_compare_values(&left, &right), Some(o) if o <= 0),
         )),
-        ">=" => Some(VmValue::Bool(
+        BinaryOperator::Gte => Some(VmValue::Bool(
             matches!(try_compare_values(&left, &right), Some(o) if o >= 0),
         )),
-        "&&" => Some(VmValue::Bool(left.is_truthy() && right.is_truthy())),
-        "||" => Some(VmValue::Bool(left.is_truthy() || right.is_truthy())),
-        "??" => {
+        BinaryOperator::And => Some(VmValue::Bool(left.is_truthy() && right.is_truthy())),
+        BinaryOperator::Or => Some(VmValue::Bool(left.is_truthy() || right.is_truthy())),
+        BinaryOperator::NilCoalesce => {
             if matches!(left, VmValue::Nil) {
                 Some(right)
             } else {
                 Some(left)
             }
         }
-        "in" => Some(VmValue::Bool(contains_value(&left, &right))),
-        "not_in" => Some(VmValue::Bool(!contains_value(&left, &right))),
+        BinaryOperator::In => Some(VmValue::Bool(contains_value(&left, &right))),
+        BinaryOperator::NotIn => Some(VmValue::Bool(!contains_value(&left, &right))),
         _ => None,
     }
 }

@@ -8,6 +8,7 @@ mod scoped_blocks;
 mod semantic_tokens;
 
 use harn_lexer::Lexer;
+use harn_parser::operators::OperatorGrammar;
 use harn_parser::Parser;
 
 use crate::helpers::format_duration;
@@ -20,9 +21,15 @@ pub(super) fn assert_roundtrip(source: &str) {
         .tokenize()
         .unwrap_or_else(|e| panic!("Formatted output failed to lex:\n{formatted}\nError: {e}"));
     let mut parser = Parser::new(tokens);
-    parser
+    let reparsed = parser
         .parse()
         .unwrap_or_else(|e| panic!("Formatted output failed to parse:\n{formatted}\nError: {e}"));
+    let original = harn_parser::parse_source(source).expect("roundtrip source must parse");
+    assert_eq!(
+        harn_parser::ast_json::structural_projection(&original, OperatorGrammar::CURRENT),
+        harn_parser::ast_json::structural_projection(&reparsed, OperatorGrammar::CURRENT),
+        "Formatter changed the meaning of:\n{source}\nformatted as:\n{formatted}"
+    );
     let formatted2 = format_source(&formatted).unwrap();
     assert_eq!(formatted, formatted2, "Formatter is not idempotent");
 }

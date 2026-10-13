@@ -174,7 +174,7 @@ impl Parser {
             }
             self.advance();
             let alias = self.consume_identifier("namespace import alias")?;
-            self.consume(&TokenKind::From, "from")?;
+            self.consume_contextual_keyword("from", "from")?;
             if let Some(tok) = self.current() {
                 if let TokenKind::StringLiteral(path) = &tok.kind {
                     let path = path.clone();
@@ -207,7 +207,7 @@ impl Parser {
                 }
             }
             self.consume(&TokenKind::RBrace, "}")?;
-            self.consume(&TokenKind::From, "from")?;
+            self.consume_contextual_keyword("from", "from")?;
             if let Some(tok) = self.current() {
                 if let TokenKind::StringLiteral(path) = &tok.kind {
                     let path = path.clone();
@@ -620,7 +620,7 @@ impl Parser {
 
     pub(super) fn parse_tool_decl(&mut self, is_pub: bool) -> Result<SNode, ParserError> {
         let start = self.current_span();
-        self.consume(&TokenKind::Tool, "tool")?;
+        self.consume_contextual_keyword("tool", "tool")?;
         let name = self.consume_identifier("tool name")?;
 
         self.consume(&TokenKind::LParen, "(")?;
@@ -688,7 +688,7 @@ impl Parser {
     /// reserved at the parser level — the compiler validates the schema.
     pub(super) fn parse_skill_decl(&mut self, is_pub: bool) -> Result<SNode, ParserError> {
         let start = self.current_span();
-        self.consume(&TokenKind::Skill, "skill")?;
+        self.consume_contextual_keyword("skill", "skill")?;
         let name = self.consume_identifier("skill name")?;
         self.consume(&TokenKind::LBrace, "{")?;
 
@@ -732,7 +732,7 @@ impl Parser {
     /// `summarize { ... }` block.
     pub(super) fn parse_eval_pack_decl(&mut self, is_pub: bool) -> Result<SNode, ParserError> {
         let start = self.current_span();
-        self.consume(&TokenKind::EvalPack, "eval_pack")?;
+        self.consume_contextual_keyword("eval_pack", "eval_pack")?;
 
         let (binding_name, pack_id) = match self.current_kind().cloned() {
             Some(TokenKind::Identifier(name)) => {

@@ -95,7 +95,7 @@ fn main(harness: Harness) {
   const learned = "SELECT $1::int AS v"
   const ambiguous = "SELECT $1 IS NULL AS v"
   assert(pg_query_one(db, known, [nil]).v == nil)
-  for i in 0 to 2 exclusive {
+  for i in 0..2 {
     pg_transaction(db, { tx ->
       assert(pg_query_one(tx, known, [nil]).v == nil)
       assert(pg_query_one(tx, learned, [nil]).v == nil)
@@ -109,7 +109,7 @@ fn main(harness: Harness) {
   assert(pg_query_one(db, learned, [nil]).v == nil)
   assert(pg_query_one(db, ambiguous, [nil]).v)
   // A cold first statement publishes types for the next transaction.
-  for i in 0 to 2 exclusive {
+  for i in 0..2 {
     pg_transaction(db, { tx ->
       pg_execute(tx, "SELECT $1::smallint", [nil])
       pg_execute(tx, "SELECT $1::smallint", [nil])

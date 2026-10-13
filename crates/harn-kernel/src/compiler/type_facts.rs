@@ -1,4 +1,6 @@
-use harn_parser::{BindingPattern, Node, SNode, ShapeField, TypeExpr, TypedParam};
+use harn_parser::{
+    BinaryOperator, BindingPattern, Node, SNode, ShapeField, TypeExpr, TypedParam, UnaryOperator,
+};
 
 use crate::chunk::{Op, ParamSlot};
 
@@ -238,22 +240,23 @@ impl Compiler {
             Node::Identifier(name) => self.lookup_type_fact(name),
             Node::UnaryOp { op, operand } => {
                 let operand_type = self.infer_expr_type(operand)?;
-                match op.as_str() {
-                    "-" if matches!(
-                        Self::primitive_kind(&self.expand_alias(&operand_type)),
-                        Some(PrimitiveType::Int | PrimitiveType::Float)
-                    ) =>
+                match op {
+                    UnaryOperator::Neg
+                        if matches!(
+                            Self::primitive_kind(&self.expand_alias(&operand_type)),
+                            Some(PrimitiveType::Int | PrimitiveType::Float)
+                        ) =>
                     {
                         Some(operand_type)
                     }
-                    "!" => Some(TypeExpr::Named("bool".into())),
-                    _ => None,
+                    UnaryOperator::Not => Some(TypeExpr::Named("bool".into())),
+                    UnaryOperator::Neg => None,
                 }
             }
             Node::BinaryOp { op, left, right } => {
                 let left_type = self.infer_expr_type(left);
                 let right_type = self.infer_expr_type(right);
-                self.infer_binary_result_type(op, left_type.as_ref(), right_type.as_ref())
+                self.infer_binary_result_type(*op, left_type.as_ref(), right_type.as_ref())
             }
             Node::Ternary {
                 true_expr,
@@ -337,7 +340,7 @@ impl Compiler {
 
     pub(super) fn specialized_binary_op(
         &self,
-        op: &str,
+        op: BinaryOperator,
         left: Option<&TypeExpr>,
         right: Option<&TypeExpr>,
     ) -> Option<Op> {
@@ -345,41 +348,41 @@ impl Compiler {
         let right = Self::primitive_kind(&self.expand_alias(right?))?;
         match (left, right) {
             (PrimitiveType::Int, PrimitiveType::Int) => match op {
-                "+" => Some(Op::AddInt),
-                "-" => Some(Op::SubInt),
-                "*" => Some(Op::MulInt),
-                "/" => Some(Op::DivInt),
-                "%" => Some(Op::ModInt),
-                "==" => Some(Op::EqualInt),
-                "!=" => Some(Op::NotEqualInt),
-                "<" => Some(Op::LessInt),
-                ">" => Some(Op::GreaterInt),
-                "<=" => Some(Op::LessEqualInt),
-                ">=" => Some(Op::GreaterEqualInt),
+                BinaryOperator::Add => Some(Op::AddInt),
+                BinaryOperator::Sub => Some(Op::SubInt),
+                BinaryOperator::Mul => Some(Op::MulInt),
+                BinaryOperator::Div => Some(Op::DivInt),
+                BinaryOperator::Mod => Some(Op::ModInt),
+                BinaryOperator::Eq => Some(Op::EqualInt),
+                BinaryOperator::Neq => Some(Op::NotEqualInt),
+                BinaryOperator::Lt => Some(Op::LessInt),
+                BinaryOperator::Gt => Some(Op::GreaterInt),
+                BinaryOperator::Lte => Some(Op::LessEqualInt),
+                BinaryOperator::Gte => Some(Op::GreaterEqualInt),
                 _ => None,
             },
             (PrimitiveType::Float, PrimitiveType::Float) => match op {
-                "+" => Some(Op::AddFloat),
-                "-" => Some(Op::SubFloat),
-                "*" => Some(Op::MulFloat),
-                "/" => Some(Op::DivFloat),
-                "%" => Some(Op::ModFloat),
-                "==" => Some(Op::EqualFloat),
-                "!=" => Some(Op::NotEqualFloat),
-                "<" => Some(Op::LessFloat),
-                ">" => Some(Op::GreaterFloat),
-                "<=" => Some(Op::LessEqualFloat),
-                ">=" => Some(Op::GreaterEqualFloat),
+                BinaryOperator::Add => Some(Op::AddFloat),
+                BinaryOperator::Sub => Some(Op::SubFloat),
+                BinaryOperator::Mul => Some(Op::MulFloat),
+                BinaryOperator::Div => Some(Op::DivFloat),
+                BinaryOperator::Mod => Some(Op::ModFloat),
+                BinaryOperator::Eq => Some(Op::EqualFloat),
+                BinaryOperator::Neq => Some(Op::NotEqualFloat),
+                BinaryOperator::Lt => Some(Op::LessFloat),
+                BinaryOperator::Gt => Some(Op::GreaterFloat),
+                BinaryOperator::Lte => Some(Op::LessEqualFloat),
+                BinaryOperator::Gte => Some(Op::GreaterEqualFloat),
                 _ => None,
             },
             (PrimitiveType::Bool, PrimitiveType::Bool) => match op {
-                "==" => Some(Op::EqualBool),
-                "!=" => Some(Op::NotEqualBool),
+                BinaryOperator::Eq => Some(Op::EqualBool),
+                BinaryOperator::Neq => Some(Op::NotEqualBool),
                 _ => None,
             },
             (PrimitiveType::String, PrimitiveType::String) => match op {
-                "==" => Some(Op::EqualString),
-                "!=" => Some(Op::NotEqualString),
+                BinaryOperator::Eq => Some(Op::EqualString),
+                BinaryOperator::Neq => Some(Op::NotEqualString),
                 _ => None,
             },
             _ => None,
@@ -442,11 +445,21 @@ impl Compiler {
 
     pub(super) fn infer_binary_result_type(
         &self,
-        op: &str,
+        op: BinaryOperator,
         left: Option<&TypeExpr>,
         right: Option<&TypeExpr>,
     ) -> Option<TypeExpr> {
-        if matches!(op, "==" | "!=" | "<" | ">" | "<=" | ">=" | "&&" | "||") {
+        if matches!(
+            op,
+            BinaryOperator::Eq
+                | BinaryOperator::Neq
+                | BinaryOperator::Lt
+                | BinaryOperator::Gt
+                | BinaryOperator::Lte
+                | BinaryOperator::Gte
+                | BinaryOperator::And
+                | BinaryOperator::Or
+        ) {
             return Some(TypeExpr::Named("bool".into()));
         }
         let left = self.expand_alias(left?);
@@ -455,7 +468,7 @@ impl Compiler {
         let right_kind = Self::primitive_kind(&right);
 
         match op {
-            "+" => match (left_kind, right_kind) {
+            BinaryOperator::Add => match (left_kind, right_kind) {
                 (Some(PrimitiveType::Int), Some(PrimitiveType::Int)) => {
                     Some(TypeExpr::Named("int".into()))
                 }
@@ -469,7 +482,10 @@ impl Compiler {
                 }
                 _ => None,
             },
-            "-" | "/" | "%" | "**" => match (left_kind, right_kind) {
+            BinaryOperator::Sub
+            | BinaryOperator::Div
+            | BinaryOperator::Mod
+            | BinaryOperator::Pow => match (left_kind, right_kind) {
                 (Some(PrimitiveType::Int), Some(PrimitiveType::Int)) => {
                     Some(TypeExpr::Named("int".into()))
                 }
@@ -480,7 +496,7 @@ impl Compiler {
                 }
                 _ => None,
             },
-            "*" => match (left_kind, right_kind) {
+            BinaryOperator::Mul => match (left_kind, right_kind) {
                 (Some(PrimitiveType::Int), Some(PrimitiveType::Int)) => {
                     Some(TypeExpr::Named("int".into()))
                 }
@@ -712,7 +728,7 @@ impl Compiler {
         //    candidate, anywhere in this scope's statement subtree.
         let candidate_names: std::collections::HashSet<&str> =
             order.iter().map(String::as_str).collect();
-        let mut reassigns: std::collections::HashMap<String, Vec<(Option<String>, SNode)>> =
+        let mut reassigns: std::collections::HashMap<String, Vec<(Option<BinaryOperator>, SNode)>> =
             std::collections::HashMap::new();
         for sn in stmts {
             harn_parser::visit::walk_node(sn, &mut |node| {
@@ -754,8 +770,7 @@ impl Compiler {
                     .into_iter()
                     .flatten()
                     .all(|(op, value)| {
-                        self.reassignment_primitive_tag(expected, op.as_deref(), value)
-                            == Some(expected)
+                        self.reassignment_primitive_tag(expected, *op, value) == Some(expected)
                     });
                 if !preserved {
                     newly_demoted.push(name.clone());
@@ -862,7 +877,7 @@ impl Compiler {
     fn reassignment_primitive_tag(
         &self,
         expected: &str,
-        op: Option<&str>,
+        op: Option<BinaryOperator>,
         value: &SNode,
     ) -> Option<&'static str> {
         match op {
@@ -893,7 +908,7 @@ impl Compiler {
         if !self.options.optimizations_enabled() {
             return false;
         }
-        let mut reassigns: Vec<(Option<String>, SNode)> = Vec::new();
+        let mut reassigns: Vec<(Option<BinaryOperator>, SNode)> = Vec::new();
         for sn in body {
             harn_parser::visit::walk_node(sn, &mut |node| {
                 if let Node::Assignment { target, value, op } = &node.node {
@@ -912,7 +927,7 @@ impl Compiler {
         assumptions.insert(name.to_string(), TypeExpr::Named(item_tag.to_string()));
         self.type_scopes.push(assumptions);
         let preserved = reassigns.iter().all(|(op, value)| {
-            self.reassignment_primitive_tag(item_tag, op.as_deref(), value) == Some(item_tag)
+            self.reassignment_primitive_tag(item_tag, *op, value) == Some(item_tag)
         });
         self.type_scopes.pop();
         preserved

@@ -22,10 +22,10 @@ pipeline default(harness: Harness) {
     return now
   }
   let handles = []
-  for _i in 0 to 6 exclusive {
+  for _i in 0..6 {
     handles = handles.appending(pool.submit(body))
   }
-  for _i in 0 to 6 exclusive {
+  for _i in 0..6 {
     harness.runtime.send(gate, "go")
   }
   pool_wait(harness.agent, handles)

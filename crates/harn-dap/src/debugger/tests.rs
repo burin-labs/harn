@@ -297,7 +297,7 @@ import { pool_create, pool_wait } from "std/lifecycle/pool"
 pipeline test(harness: Harness, task: unknown) {
   const pool = pool_create(harness.agent, {name: "dap-pool-runtime", max_concurrent: 4})
   let handles = []
-  for i in 0 to 8 exclusive {
+  for i in 0..8 {
     const seed = i
     handles = handles.appending(pool.submit({ -> seed + 10 }))
   }
