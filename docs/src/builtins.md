@@ -1204,6 +1204,12 @@ values stringified), `auth` (string or `{bearer: "token"}` or
 `tls` (`{ca_bundle_path?, client_cert_path?, client_key_path?, client_identity_path?, pinned_sha256?}`),
 and `decompress` (bool, default `true`). `timeout_ms` and `total_timeout_ms`
 apply per attempt.
+HTTPS, SSE, and `wss://` connections verify servers against the operating
+system's certificate store: Keychain on macOS, the Windows certificate store,
+and the system CA bundle on Linux (`SSL_CERT_FILE` or `SSL_CERT_DIR` override
+its location). `tls.ca_bundle_path` adds roots to that store rather than
+replacing it. A Linux container image therefore needs the `ca-certificates`
+package or an `SSL_CERT_FILE` bundle.
 Retryable responses default to `408`, `429`, `500`, `502`, `503`, and
 `504`; `Retry-After` is honored on `429` and `503` when retries are
 enabled. Throws on network errors. `harness.net.request(..., {session: handle})`

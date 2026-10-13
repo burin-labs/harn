@@ -119,7 +119,7 @@ run_artifact() {
       FAKE_NEXTEST_VERSION="${FAKE_NEXTEST_VERSION_OVERRIDE:-$policy_nextest}" \
       FAKE_RUSTC_IDENTITY="${FAKE_RUSTC_IDENTITY_OVERRIDE:-rustc 1.95.0 (fake)}" \
       RUSTFLAGS="${RUSTFLAGS_OVERRIDE:--D warnings -Clink-arg=-fuse-ld=mold}" \
-      CARGO_PROFILE_DEV_DEBUG="${DEV_DEBUG_OVERRIDE:-line-tables-only}" \
+      CARGO_PROFILE_DEV_DEBUG="${DEV_DEBUG_OVERRIDE:-}" \
       HARN_VERIFY_RUST_RUNTIME="${VERIFY_RUNTIME_OVERRIDE:-0}" \
       HARN_RUST_TEST_ARTIFACT_MAX_BYTES="${MAX_BYTES_OVERRIDE:-9663676416}" \
       HARN_SECURITY_ARTIFACT_MAX_BYTES="${SECURITY_MAX_BYTES_OVERRIDE:-1073741824}" \
@@ -213,6 +213,19 @@ FAKE_RUSTC_IDENTITY_OVERRIDE='rustc 1.96.0 (wrong)' VERIFY_RUNTIME_OVERRIDE=1 \
 RUSTFLAGS_OVERRIDE='-D warnings' VERIFY_RUNTIME_OVERRIDE=1 \
   expect_failure "restore accepted the wrong Rust flags" \
   run_artifact restore-tests "$bundle" "$tmpdir/wrong-flags" "$commit"
+
+DEV_DEBUG_OVERRIDE=full \
+  expect_failure "build-tests accepted a dev debuginfo override that disagrees with Cargo.toml" \
+  run_artifact build-tests "$tmpdir/out/wrong-dev-debug.tar.zst" "$commit"
+
+# The artifact manifest records the dev debuginfo the script expects; that
+# value must be the one `[profile.dev]` in Cargo.toml actually builds with.
+manifest_dev_debug="$(awk '/^\[profile\.dev\]$/ { p = 1; next } /^\[/ { p = 0 } p && $1 == "debug" { gsub(/"/, "", $3); print $3 }' "$repo_root/Cargo.toml")"
+script_dev_debug="$(sed -n "s/^readonly EXPECTED_DEV_DEBUG='\(.*\)'$/\1/p" "$script")"
+if [[ -z "$manifest_dev_debug" || "$manifest_dev_debug" != "$script_dev_debug" ]]; then
+  echo "rust_artifact.sh EXPECTED_DEV_DEBUG ('$script_dev_debug') does not match Cargo.toml [profile.dev] debug ('$manifest_dev_debug')" >&2
+  exit 1
+fi
 
 expect_failure "restore overwrote an existing destination" \
   run_artifact restore-tests "$bundle" "$tmpdir/restored" "$commit"

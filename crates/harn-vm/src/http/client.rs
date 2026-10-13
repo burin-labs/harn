@@ -606,22 +606,21 @@ fn configure_tls(
                 resolved.display()
             ))
         })?;
-        match reqwest::Certificate::from_pem_bundle(&bytes) {
-            Ok(certs) => {
-                for cert in certs {
-                    builder = builder.add_root_certificate(cert);
-                }
-            }
+        // The bundle adds to the OS trust store; it does not replace it.
+        let certs = match reqwest::Certificate::from_pem_bundle(&bytes) {
+            Ok(certs) => certs,
             Err(pem_error) => {
-                let cert = reqwest::Certificate::from_der(&bytes).map_err(|der_error| {
-                    vm_error(format!(
-                        "http: failed to parse CA bundle {} as PEM ({pem_error}) or DER ({der_error})",
-                        resolved.display()
-                    ))
-                })?;
-                builder = builder.add_root_certificate(cert);
+                vec![
+                    reqwest::Certificate::from_der(&bytes).map_err(|der_error| {
+                        vm_error(format!(
+                            "http: failed to parse CA bundle {} as PEM ({pem_error}) or DER ({der_error})",
+                            resolved.display()
+                        ))
+                    })?,
+                ]
             }
-        }
+        };
+        builder = builder.tls_certs_merge(certs);
     }
 
     if let Some(path) = &tls.client_identity_path {

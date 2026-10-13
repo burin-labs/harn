@@ -67,7 +67,6 @@ jobs:
       contents: read
       actions: write
     env: &cache-writer-environment
-      CARGO_PROFILE_DEV_DEBUG: line-tables-only
       RUSTFLAGS: ${{ matrix.rustflags }}
       HARN_RUNNER_TIER: github-hosted
       # Do NOT set CARGO_BUILD_JOBS here. Swatinem hashes every CARGO_* env var
