@@ -1,17 +1,24 @@
-//! One owner for forward postings and their per-file removal projection.
+//! One owner for postings: a shared base generation, file tombstones, and a
+//! delta.
 //!
-//! Posting vectors remain contiguous across recovery. The reverse projection
-//! stores one shared term per contributing file, never one key per occurrence.
+//! Postings restored from a snapshot, or folded in by compaction, form an
+//! immutable base shared by clones. A file indexed or removed afterwards is
+//! tombstoned in the base, and its new hits live in a delta that keeps the
+//! per-file removal projection, so the base never needs one: restoring it is
+//! one pass over the snapshot rows. Reads drop tombstoned files from base hits
+//! and add the delta's. [`FilePostings::compact_if_heavy`] folds the delta and
+//! tombstones into a fresh base once they accumulate.
 
-use std::borrow::Borrow;
+use std::borrow::{Borrow, Cow};
 use std::collections::hash_map::Entry;
 use std::hash::Hash;
+use std::sync::Arc;
 
 use foldhash::HashMap as FastMap;
 
 use super::file_table::FileId;
 
-pub(super) trait FilePosting: Sized {
+pub(super) trait FilePosting: Sized + Clone {
     fn file(&self) -> FileId;
 
     fn normalize(_hits: &mut Vec<Self>) {}
@@ -50,17 +57,30 @@ impl FilePosting for FileId {
     }
 }
 
+/// Fewer tombstones than this are not worth a whole-index compaction.
+const TOMBSTONE_FLOOR: usize = 256;
+/// Fewer delta terms than this are not worth a whole-index compaction.
+const DELTA_FLOOR: usize = 4096;
+
 #[derive(Debug, Clone)]
 pub(super) struct FilePostings<K, H> {
     // Word keys come from file contents, so the hasher stays seeded per
     // process; foldhash does that at a fraction of SipHash's cost.
+    base: Arc<FastMap<K, Vec<H>>>,
+    /// Files whose base hits no longer count: removed or re-indexed since
+    /// the base was built.
+    stale: FileSet,
+    /// Hits of files indexed since the base was built.
     forward: FastMap<K, Vec<H>>,
+    /// Each delta file's terms, for removing it again.
     reverse: FastMap<FileId, Vec<K>>,
 }
 
 impl<K, H> Default for FilePostings<K, H> {
     fn default() -> Self {
         Self {
+            base: Arc::default(),
+            stale: FileSet::default(),
             forward: FastMap::default(),
             reverse: FastMap::default(),
         }
@@ -68,29 +88,73 @@ impl<K, H> Default for FilePostings<K, H> {
 }
 
 impl<K: Eq + Hash + Clone, H: FilePosting> FilePostings<K, H> {
-    pub fn get<Q: Eq + Hash + ?Sized>(&self, key: &Q) -> &[H]
+    /// Every live hit for `key`. Borrowed when no edit touched the term.
+    pub fn get<Q: Eq + Hash + ?Sized>(&self, key: &Q) -> Cow<'_, [H]>
     where
         K: Borrow<Q>,
     {
-        self.forward.get(key).map(Vec::as_slice).unwrap_or(&[])
+        let base = self.base.get(key).map_or(&[][..], Vec::as_slice);
+        let delta = self.forward.get(key).map_or(&[][..], Vec::as_slice);
+        let base_live =
+            self.stale.is_empty() || !base.iter().any(|hit| self.stale.contains(hit.file()));
+        if base_live && delta.is_empty() {
+            return Cow::Borrowed(base);
+        }
+        if base.is_empty() {
+            return Cow::Borrowed(delta);
+        }
+        let mut hits: Vec<H> = base
+            .iter()
+            .filter(|hit| !self.stale.contains(hit.file()))
+            .cloned()
+            .collect();
+        H::append(&mut hits, delta.iter().cloned());
+        Cow::Owned(hits)
     }
 
     pub fn key<Q: Eq + Hash + ?Sized>(&self, key: &Q) -> Option<&K>
     where
         K: Borrow<Q>,
     {
-        self.forward.get_key_value(key).map(|(key, _)| key)
+        self.forward
+            .get_key_value(key)
+            .or_else(|| self.base.get_key_value(key))
+            .map(|(key, _)| key)
     }
 
-    pub fn terms(&self) -> impl Iterator<Item = (&K, &Vec<H>)> {
-        self.forward.iter()
+    /// Visit every term with live hits, in no particular order.
+    pub fn for_each_term(&self, mut visit: impl FnMut(&K, &[H])) {
+        for key in self.base.keys() {
+            let hits = self.get(key);
+            if !hits.is_empty() {
+                visit(key, &hits);
+            }
+        }
+        for (key, hits) in &self.forward {
+            if !self.base.contains_key(key) {
+                visit(key, hits);
+            }
+        }
     }
 
+    /// Every stored term, including any whose hits are all tombstoned.
+    pub fn keys(&self) -> impl Iterator<Item = &K> {
+        self.base.keys().chain(
+            self.forward
+                .keys()
+                .filter(|key| !self.base.contains_key(*key)),
+        )
+    }
+
+    /// Distinct terms with live hits.
     pub fn len(&self) -> usize {
-        self.forward.len()
+        let mut count = 0;
+        self.for_each_term(|_, _| count += 1);
+        count
     }
 
     pub fn remove_file(&mut self, file: FileId) {
+        self.stale.insert(file);
         let Some(terms) = self.reverse.remove(&file) else {
             return;
         };
@@ -126,12 +190,12 @@ impl<K: Eq + Hash + Clone, H: FilePosting> FilePostings<K, H> {
         }
     }
 
-    /// Adopt snapshot vectors, merge repeated keys, then derive removal once.
+    /// Adopt snapshot vectors as the base, merging repeated keys.
     pub fn from_rows(rows: impl ExactSizeIterator<Item = (K, Vec<H>)>) -> Self {
-        let mut forward: FastMap<K, Vec<H>> =
+        let mut base: FastMap<K, Vec<H>> =
             FastMap::with_capacity_and_hasher(rows.len(), Default::default());
         for (key, hits) in rows {
-            match forward.entry(key) {
+            match base.entry(key) {
                 Entry::Vacant(entry) => {
                     entry.insert(hits);
                 }
@@ -140,34 +204,56 @@ impl<K: Eq + Hash + Clone, H: FilePosting> FilePostings<K, H> {
                 }
             }
         }
-        let mut reverse: FastMap<FileId, Vec<K>> = FastMap::default();
-        let mut files = Vec::new();
-        forward.retain(|key, hits| {
+        base.retain(|_, hits| {
             H::normalize(hits);
-            files.clear();
-            for hit in hits.iter() {
-                let file = hit.file();
-                if files.last() != Some(&file) {
-                    files.push(file);
-                }
+            !hits.is_empty()
+        });
+        Self {
+            base: Arc::new(base),
+            ..Self::default()
+        }
+    }
+
+    /// Fold the delta and tombstones into a fresh base once they are a
+    /// sizable fraction of it. A full build indexes every file into the
+    /// delta, so its first batch boundary always compacts.
+    pub fn compact_if_heavy(&mut self) {
+        let heavy_delta = self.forward.len() > DELTA_FLOOR.max(self.base.len() / 4);
+        if heavy_delta || self.stale.len() > TOMBSTONE_FLOOR {
+            self.compact();
+        }
+    }
+
+    /// Fold every edit into a fresh base. Reads before and after are identical.
+    pub fn compact(&mut self) {
+        let mut forward = std::mem::take(&mut self.forward);
+        let stale = std::mem::take(&mut self.stale);
+        self.reverse.clear();
+        let mut base = Arc::try_unwrap(std::mem::take(&mut self.base))
+            .unwrap_or_else(|shared| (*shared).clone());
+        base.retain(|key, hits| {
+            if !stale.is_empty() {
+                hits.retain(|hit| !stale.contains(hit.file()));
             }
-            files.sort_unstable();
-            files.dedup();
-            for file in &files {
-                reverse.entry(*file).or_default().push(key.clone());
+            if let Some(delta) = forward.remove(key) {
+                H::append(hits, delta);
             }
             !hits.is_empty()
         });
-        Self { forward, reverse }
+        base.extend(forward);
+        self.base = Arc::new(base);
     }
 
     pub fn estimated_bytes(&self) -> usize {
-        self.forward.capacity() * (std::mem::size_of::<K>() + std::mem::size_of::<Vec<H>>())
-            + self
-                .forward
-                .values()
-                .map(|hits| hits.capacity() * std::mem::size_of::<H>())
-                .sum::<usize>()
+        let map_bytes = |map: &FastMap<K, Vec<H>>| {
+            map.capacity() * (std::mem::size_of::<K>() + std::mem::size_of::<Vec<H>>())
+                + map
+                    .values()
+                    .map(|hits| hits.capacity() * std::mem::size_of::<H>())
+                    .sum::<usize>()
+        };
+        map_bytes(&self.base)
+            + map_bytes(&self.forward)
             + self.reverse.capacity()
                 * (std::mem::size_of::<FileId>() + std::mem::size_of::<Vec<K>>())
             + self
@@ -175,5 +261,49 @@ impl<K: Eq + Hash + Clone, H: FilePosting> FilePostings<K, H> {
                 .values()
                 .map(|terms| terms.capacity() * std::mem::size_of::<K>())
                 .sum::<usize>()
+            + self.stale.bytes()
     }
 }
+
+/// A set of file ids as a bitmap. File ids are small and dense, so a
+/// membership test on every base hit is one shift and mask.
+#[derive(Debug, Default, Clone)]
+struct FileSet {
+    bits: Vec<u64>,
+    len: usize,
+}
+
+impl FileSet {
+    fn insert(&mut self, file: FileId) {
+        let (word, bit) = (file as usize / 64, file % 64);
+        if word >= self.bits.len() {
+            self.bits.resize(word + 1, 0);
+        }
+        if self.bits[word] & (1 << bit) == 0 {
+            self.bits[word] |= 1 << bit;
+            self.len += 1;
+        }
+    }
+
+    fn contains(&self, file: FileId) -> bool {
+        self.bits
+            .get(file as usize / 64)
+            .is_some_and(|word| word & (1 << (file % 64)) != 0)
+    }
+
+    fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+
+    fn len(&self) -> usize {
+        self.len
+    }
+
+    fn bytes(&self) -> usize {
+        self.bits.capacity() * std::mem::size_of::<u64>()
+    }
+}
+
+#[cfg(test)]
+#[path = "posting_store_tests.rs"]
+mod tests;

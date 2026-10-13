@@ -7,6 +7,7 @@
 //! byte (`A-Z` -> `a-z`), leaves non-ASCII bytes unchanged, and packs each
 //! 3-byte sliding window as `(a << 16) | (b << 8) | c` into a `u32`.
 
+use std::borrow::Cow;
 use std::collections::HashSet;
 
 use super::file_table::FileId;
@@ -15,11 +16,11 @@ use super::file_table::FileId;
 /// case-folded on the ASCII range so lookups are case-insensitive.
 pub type Trigram = u32;
 
-/// Trigram posting list: `trigram -> set of file ids that contain it`,
-/// plus a per-file reverse map for cheap re-indexing.
+/// Trigram posting list: `trigram -> set of file ids that contain it`.
+/// See [`super::postings`] for the base, tombstone, and delta layers.
 #[derive(Debug, Default, Clone)]
 pub struct TrigramIndex {
-    postings: super::postings::FilePostings<Trigram, FileId>,
+    pub(super) postings: super::postings::FilePostings<Trigram, FileId>,
 }
 
 impl TrigramIndex {
@@ -46,7 +47,7 @@ impl TrigramIndex {
         if trigrams.is_empty() {
             return HashSet::new();
         }
-        let mut postings: Vec<&[FileId]> = Vec::with_capacity(trigrams.len());
+        let mut postings: Vec<Cow<'_, [FileId]>> = Vec::with_capacity(trigrams.len());
         for tg in trigrams {
             let files = self.postings.get(tg);
             if files.is_empty() {
@@ -75,14 +76,13 @@ impl TrigramIndex {
     /// the on-disk snapshot path; sorted by trigram for deterministic
     /// serialisation.
     pub fn snapshot_postings(&self) -> Vec<super::snapshot::TrigramPosting> {
-        let mut out: Vec<super::snapshot::TrigramPosting> = self
-            .postings
-            .terms()
-            .map(|(tg, files)| super::snapshot::TrigramPosting {
+        let mut out: Vec<super::snapshot::TrigramPosting> = Vec::new();
+        self.postings.for_each_term(|tg, files| {
+            out.push(super::snapshot::TrigramPosting {
                 trigram: *tg,
-                files: files.clone(),
-            })
-            .collect();
+                files: files.to_vec(),
+            });
+        });
         out.sort_unstable_by_key(|p| p.trigram);
         out
     }
@@ -100,6 +100,11 @@ impl TrigramIndex {
     /// `code_index.stats.memory_bytes`.
     pub fn estimated_bytes(&self) -> usize {
         self.postings.estimated_bytes()
+    }
+
+    /// Fold accumulated edits into a fresh shared base once they are worth it.
+    pub(super) fn compact_if_heavy(&mut self) {
+        self.postings.compact_if_heavy();
     }
 }
 

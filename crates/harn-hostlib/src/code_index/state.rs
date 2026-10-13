@@ -648,11 +648,13 @@ impl IndexState {
     /// own module's other files without importing them.
     ///
     /// Every mutation path ends here, so this is also the batch boundary
-    /// where accumulated graph edits are folded into a fresh shared
-    /// generation once they are worth it.
+    /// where accumulated graph and posting edits are folded into fresh
+    /// shared generations once they are worth it.
     pub(super) fn relink_dirty_calls(&mut self) {
         self.resolve_dirty_call_sites();
         self.symbols.compact_if_heavy();
+        self.trigrams.compact_if_heavy();
+        self.words.compact_if_heavy();
     }
 
     fn resolve_dirty_call_sites(&mut self) {
