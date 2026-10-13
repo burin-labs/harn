@@ -57,8 +57,11 @@ pub(super) fn estimate_json_tokens(value: &serde_json::Value, model: &str) -> i6
 /// Token estimate for one transcript message. Each call re-sends the whole
 /// transcript, so estimates are memoized by message content and model rather
 /// than re-tokenized on every turn.
-fn message_tokens(message: &serde_json::Value, model: &str) -> i64 {
-    let key = super::content_hash::content_fingerprint(message);
+fn message_tokens(
+    message: &serde_json::Value,
+    key: super::content_hash::ContentFingerprint,
+    model: &str,
+) -> i64 {
     MESSAGE_TOKEN_MEMO.with(|memo| {
         let mut memo = memo.borrow_mut();
         if memo.model != model {
@@ -110,8 +113,9 @@ pub(crate) fn project_llm_call_context_breakdown(
     let mut assistant_message_tokens = 0;
     let mut tool_result_tokens = 0;
     let mut other_message_tokens = 0;
-    for message in &opts.messages {
-        let tokens = message_tokens(message, &opts.model);
+    let keys = super::content_hash::content_fingerprints(&opts.messages);
+    for (message, key) in opts.messages.iter().zip(keys) {
+        let tokens = message_tokens(message, key, &opts.model);
         if super::context_breakdown::message_is_tool_result(message) {
             tool_result_tokens += tokens;
             continue;

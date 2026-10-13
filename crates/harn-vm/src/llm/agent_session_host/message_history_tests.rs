@@ -2,7 +2,10 @@
 //! later provider request carrying it is refused. These cases pin the repair
 //! at the shape level and at each provider's real request body.
 
-use super::{answer_unanswered_tool_calls, UNANSWERED_TOOL_CALL_OBSERVATION};
+use super::{
+    answer_unanswered_tool_calls, answer_unanswered_tool_calls_in_vm_view,
+    every_json_tool_call_answered, UNANSWERED_TOOL_CALL_OBSERVATION,
+};
 use crate::llm::api::{LlmCallOptions, LlmRequestPayload};
 use crate::llm::providers::{AnthropicProvider, OpenAiCompatibleProvider, OpenAiResponsesProvider};
 use serde_json::{json, Value};
@@ -206,4 +209,68 @@ fn the_unrepaired_history_is_the_request_providers_refuse() {
         chat_unanswered(&OpenAiCompatibleProvider::build_request_body(&raw)),
         vec!["\"call_stopped\"".to_string()]
     );
+}
+
+/// The JSON read decides only what the VM view would decide the same way:
+/// whenever it reports every call answered, the VM view finds nothing to
+/// answer, and the common well-formed shapes are decided without the VM view.
+#[test]
+fn the_json_read_agrees_with_the_vm_view_and_decides_well_formed_histories() {
+    let user = json!({"role": "user", "content": "go"});
+    let decided_answered = [
+        vec![user.clone(), openai_call("a"), tool_result("a")],
+        vec![
+            user,
+            json!({"role": "assistant", "content": [{"type": "tool_use", "id": "t1", "name": "read"}]}),
+            json!({"role": "user", "content": [{"type": "tool_result", "tool_use_id": "t1", "content": "ok"}]}),
+        ],
+        vec![
+            json!({"role": "model", "content": [{"functionCall": {"id": "g1", "name": "read"}}]}),
+            json!({"role": "assistant", "content": [{"functionCall": {"id": "g1", "name": "read"}}]}),
+            json!({"role": "user", "content": [{"functionResponse": {"id": "g1"}}]}),
+        ],
+        vec![
+            json!({"role": "assistant", "tool_calls": [{"id": "r1"}]}),
+            json!({"role": "user", "content": [{"type": "function_call_output", "call_id": "r1"}]}),
+        ],
+        vec![json!({"role": "assistant", "tool_calls": [{"name": "id-less"}]})],
+        vec![
+            json!({"role": "tool_result", "tool_use_id": "x"}),
+            json!({"role": "assistant", "tool_calls": [{"id": "x"}]}),
+        ],
+    ];
+    for messages in &decided_answered {
+        assert!(every_json_tool_call_answered(messages), "{messages:?}");
+        assert!(
+            answer_unanswered_tool_calls_in_vm_view(messages).is_none(),
+            "{messages:?}"
+        );
+    }
+    let undecided_or_open = [
+        stopped_mid_tool(),
+        vec![
+            json!({"role": "assistant", "tool_calls": [{"id": 7}]}),
+            json!({"role": "tool", "tool_call_id": 7}),
+        ],
+        vec![
+            json!({"role": "assistant", "tool_calls": [{"id": "n"}]}),
+            json!({"role": "tool", "tool_call_id": null, "call_id": "n"}),
+        ],
+        vec![json!({"role": 3, "tool_calls": [{"id": "z"}]})],
+        vec![json!({"role": "assistant", "content": [{"type": 1, "id": "q"}]})],
+        vec![json!({"role": "user", "content": [{"functionResponse": {"id": null}}]})],
+    ];
+    for messages in &undecided_or_open {
+        if every_json_tool_call_answered(messages) {
+            assert!(
+                answer_unanswered_tool_calls_in_vm_view(messages).is_none(),
+                "{messages:?}"
+            );
+        }
+        assert_eq!(
+            answer_unanswered_tool_calls(messages),
+            answer_unanswered_tool_calls_in_vm_view(messages),
+            "{messages:?}"
+        );
+    }
 }

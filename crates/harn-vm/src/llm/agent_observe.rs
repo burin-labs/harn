@@ -1318,6 +1318,8 @@ mod empty_completion_retry_tests;
 #[cfg(test)]
 mod event_log_definition_tests;
 #[cfg(test)]
+mod request_growth_tests;
+#[cfg(test)]
 mod retry_tests;
 #[cfg(test)]
 mod served_lineage_chain_tests;

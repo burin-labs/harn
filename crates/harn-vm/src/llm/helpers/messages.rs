@@ -87,9 +87,9 @@ pub(crate) fn vm_message_value(role: &str, content: VmValue) -> VmValue {
 /// projection is memoized by content and only messages new to this thread are
 /// converted. The projection is a pure function of the message.
 pub(crate) fn json_messages_to_vm(msg_list: &[serde_json::Value]) -> Vec<VmValue> {
-    msg_list
-        .iter()
-        .filter_map(|msg| crate::llm::content_hash::memoized_vm_message(msg, json_message_to_vm))
+    crate::llm::content_hash::memoized_vm_messages(msg_list, json_message_to_vm)
+        .into_iter()
+        .flatten()
         .collect()
 }
 

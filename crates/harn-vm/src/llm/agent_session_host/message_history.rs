@@ -353,6 +353,103 @@ fn block_result_ids(message: &VmValue) -> Vec<String> {
         .collect()
 }
 
+/// Whether every tool call in `messages` is answered, read from the JSON in
+/// place. `answer_unanswered_tool_calls` runs on every provider request, and
+/// converting the whole transcript to VM values to learn that nothing needs
+/// answering made each turn cost more than the last.
+///
+/// This applies the same rules as the VM path below to string fields. A field
+/// the VM path would read through `display()` but that is not a JSON string
+/// makes the answer inconclusive, and the caller falls back to the VM path, so
+/// `true` is returned only when the VM path would return `None`.
+fn every_json_tool_call_answered(messages: &[serde_json::Value]) -> bool {
+    fn text(value: Option<&serde_json::Value>) -> Option<&str> {
+        match value {
+            None => Some(""),
+            Some(serde_json::Value::String(text)) => Some(text),
+            Some(_) => None,
+        }
+    }
+    fn items(value: Option<&serde_json::Value>) -> &[serde_json::Value] {
+        value
+            .and_then(serde_json::Value::as_array)
+            .map_or(&[], Vec::as_slice)
+    }
+    fn first_present<'a>(
+        value: &'a serde_json::Value,
+        keys: &[&str],
+    ) -> Option<&'a serde_json::Value> {
+        keys.iter().find_map(|key| value.get(*key))
+    }
+
+    let mut paired = std::collections::BTreeSet::new();
+    let mut calls = Vec::new();
+    for message in messages {
+        let Some(role) = text(message.get("role")) else {
+            return false;
+        };
+        if is_tool_result_role(role) {
+            let Some(id) = text(first_present(
+                message,
+                &["tool_call_id", "tool_use_id", "call_id"],
+            )) else {
+                return false;
+            };
+            if !id.is_empty() {
+                paired.insert(id);
+            }
+        }
+        for block in items(message.get("content")) {
+            let Some(block_type) = text(block.get("type")) else {
+                return false;
+            };
+            let id = match block_type {
+                "tool_result" => block.get("tool_use_id"),
+                "function_call_output" => block.get("call_id"),
+                _ => block
+                    .get("functionResponse")
+                    .and_then(|part| part.get("id")),
+            };
+            if id.is_some() {
+                let Some(id) = text(id) else {
+                    return false;
+                };
+                if !id.is_empty() {
+                    paired.insert(id);
+                }
+            }
+        }
+        if role != "assistant" {
+            continue;
+        }
+        for call in items(message.get("tool_calls")) {
+            let Some(id) = text(call.get("id")) else {
+                return false;
+            };
+            calls.push(id);
+        }
+        for block in items(message.get("content")) {
+            let Some(block_type) = text(block.get("type")) else {
+                return false;
+            };
+            let id = if block_type == "tool_use" {
+                block.get("id")
+            } else if let Some(function_call) = block.get("functionCall") {
+                function_call.get("id")
+            } else {
+                continue;
+            };
+            let Some(id) = text(id) else {
+                return false;
+            };
+            calls.push(id);
+        }
+    }
+    calls
+        .into_iter()
+        .all(|id| id.is_empty() || paired.contains(id))
+}
+
 /// What the model reads for a tool call no result answered (harn#8951).
 pub(crate) const UNANSWERED_TOOL_CALL_OBSERVATION: &str =
     "No result: the turn was stopped before this tool call finished.";
@@ -373,6 +470,17 @@ pub(crate) const UNANSWERED_TOOL_CALL_OBSERVATION: &str =
 /// provider, and inventing a result for it would add a message the provider
 /// never asked for. Returns `None` when every call is already answered.
 pub(crate) fn answer_unanswered_tool_calls(
+    messages: &[serde_json::Value],
+) -> Option<Vec<serde_json::Value>> {
+    if every_json_tool_call_answered(messages) {
+        return None;
+    }
+    answer_unanswered_tool_calls_in_vm_view(messages)
+}
+
+/// The VM-view rules [`every_json_tool_call_answered`] mirrors for string
+/// fields; also the path for every message shape it cannot decide.
+fn answer_unanswered_tool_calls_in_vm_view(
     messages: &[serde_json::Value],
 ) -> Option<Vec<serde_json::Value>> {
     let vm_messages: Vec<VmValue> = messages

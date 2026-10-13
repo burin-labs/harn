@@ -260,7 +260,7 @@ plan = "task_local_or_explicit"
 
 [[thread_local]]
 path = "src/llm/content_hash.rs"
-statics = ["REDACTED_CONTENT_MEMO", "VM_MESSAGE_MEMO", "VM_MESSAGE_PROJECTIONS", "FINGERPRINT_BUFFER"]
+statics = ["REDACTED_CONTENT_MEMO", "VM_MESSAGE_MEMO", "VM_MESSAGE_PROJECTIONS", "FINGERPRINT_BUFFER", "LAST_FINGERPRINTED_SEQUENCE", "FINGERPRINT_COMPUTATIONS", "REDACTED_CONTENT_COMPUTATIONS"]
 category = "thread_private"
 plan = "thread_private_cache"
 
