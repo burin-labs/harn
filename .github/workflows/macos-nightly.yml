@@ -185,6 +185,7 @@ jobs:
           # A skipped budget step yields an empty output, which Cargo rejects,
           # so non-hosted runs name Cargo's own default explicitly.
           CARGO_BUILD_JOBS: ${{ runner.environment == 'github-hosted' && steps.resource-budget.outputs.build_jobs || 'default' }}
+          RUST_TEST_JOB_LIMIT_MINUTES: ${{ github.event_name == 'workflow_dispatch' && 45 || 75 }}
         # The whole workspace runs, less one member that contributes nothing to
         # it. `harn-wasm` carries no `#[test]` and produces no test binary here;
         # its declared test framework is `wasm-bindgen-test`, which a native
