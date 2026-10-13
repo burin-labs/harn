@@ -1,0 +1,10 @@
+- The language server analyzes a document without holding the lock every
+  request reads, so hover, completion, and the other open documents answer
+  from the last analysis while a new one runs.
+- The language server keeps each document's module graph and reuses it while
+  the document's import declarations are unchanged, instead of re-reading
+  every imported module from disk on each edit, and reads project lint
+  settings once per directory until a watched file or the configuration
+  changes.
+- Imported modules resolve against the unsaved text of open documents, and
+  editing a module re-checks the open documents that import it.

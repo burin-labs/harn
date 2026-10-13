@@ -1,4 +1,7 @@
 use harn_parser::analysis::{AnalysisDatabase, AnalysisError, SourceId, SourceVersion};
+use std::sync::Arc;
+
+use harn_modules::project_config::LintConfig;
 use harn_parser::{Node, SNode};
 use harn_vm::stdlib::template::outline::OutlineBlock;
 use tower_lsp::lsp_types::*;
@@ -11,6 +14,7 @@ use crate::helpers::{
 use crate::rules::{RuleDiagnostic, RuleWorkspace};
 use crate::source_text::SourceText;
 use crate::symbols::{build_symbol_table, SymbolInfo};
+use crate::workspace_cache::WorkspaceCache;
 
 pub(crate) struct DocumentState {
     /// The document text and the line index positions resolve against. Both
@@ -38,6 +42,8 @@ pub(crate) struct DocumentState {
     pub(crate) invariant_diagnostics: Vec<harn_ir::InvariantDiagnostic>,
     pub(crate) inlay_hints: std::sync::Arc<Vec<harn_parser::InlayHintInfo>>,
     pub(crate) dirty: bool,
+    /// An analysis of this document is running detached from it.
+    analyzing: bool,
 }
 
 impl DocumentState {
@@ -56,6 +62,7 @@ impl DocumentState {
         state
     }
 
+    #[cfg(test)]
     pub(crate) fn new_for_language_with_rules(
         source: String,
         language_id: impl Into<String>,
@@ -65,8 +72,61 @@ impl DocumentState {
         let language_id = language_id.into();
         let kind = DocumentKind::classify(uri, &language_id);
         let mut state = Self::new_unparsed(source, language_id, kind);
-        state.reparse_if_dirty_with_rules(Some(uri), Some(rule_workspace));
+        state.reparse_if_dirty_with_rules(Some(uri), Some(rule_workspace), None);
         state
+    }
+
+    /// A newly opened document, not yet analyzed; the server analyzes it
+    /// outside its document lock.
+    pub(crate) fn new_for_language(
+        source: String,
+        language_id: impl Into<String>,
+        uri: &Url,
+    ) -> Self {
+        let language_id = language_id.into();
+        let kind = DocumentKind::classify(uri, &language_id);
+        Self::new_unparsed(source, language_id, kind)
+    }
+
+    /// Move the inputs of a pending analysis into a detached state, so the
+    /// analysis can run while other requests read this document's previous
+    /// results. `None` when nothing changed or an analysis is already running;
+    /// that one notices the newer edit in [`Self::finish_analysis`].
+    pub(crate) fn begin_analysis(&mut self) -> Option<DocumentState> {
+        if !self.dirty || self.analyzing {
+            return None;
+        }
+        self.analyzing = true;
+        let mut detached = Self::new_detached(
+            self.source.clone(),
+            self.language_id.clone(),
+            self.kind,
+            std::mem::take(&mut self.analysis),
+            self.source_id.clone(),
+        );
+        detached.version = self.version;
+        Some(detached)
+    }
+
+    /// Install a detached analysis. Returns `false`, leaving the document
+    /// dirty, when an edit arrived while it ran, so the caller analyzes again.
+    pub(crate) fn finish_analysis(&mut self, analyzed: DocumentState) -> bool {
+        self.analyzing = false;
+        if analyzed.version != self.version {
+            return false;
+        }
+        self.analysis = analyzed.analysis;
+        self.cached_ast = analyzed.cached_ast;
+        self.prompt_outline = analyzed.prompt_outline;
+        self.symbols = analyzed.symbols;
+        self.diagnostics = analyzed.diagnostics;
+        self.lint_diagnostics = analyzed.lint_diagnostics;
+        self.type_diagnostics = analyzed.type_diagnostics;
+        self.rule_diagnostics = analyzed.rule_diagnostics;
+        self.invariant_diagnostics = analyzed.invariant_diagnostics;
+        self.inlay_hints = analyzed.inlay_hints;
+        self.dirty = false;
+        true
     }
 
     /// Stand-in for a document the client is editing but never opened.
@@ -77,12 +137,27 @@ impl DocumentState {
     }
 
     fn new_unparsed(source: String, language_id: impl Into<String>, kind: DocumentKind) -> Self {
-        let language_id = language_id.into();
         let mut analysis = AnalysisDatabase::new();
         let source_id = SourceId::new("document");
         analysis.set_source(source_id.clone(), source.clone(), SourceVersion(1));
+        Self::new_detached(
+            SourceText::new(source),
+            language_id.into(),
+            kind,
+            analysis,
+            source_id,
+        )
+    }
+
+    fn new_detached(
+        source: SourceText,
+        language_id: String,
+        kind: DocumentKind,
+        analysis: AnalysisDatabase,
+        source_id: SourceId,
+    ) -> Self {
         Self {
-            source: SourceText::new(source),
+            source,
             language_id,
             kind,
             analysis,
@@ -98,6 +173,7 @@ impl DocumentState {
             invariant_diagnostics: Vec::new(),
             inlay_hints: Default::default(),
             dirty: true,
+            analyzing: false,
         }
     }
 
@@ -113,13 +189,17 @@ impl DocumentState {
     /// skipped. Tests only: the server always has a rule workspace.
     #[cfg(test)]
     pub(crate) fn reparse_if_dirty(&mut self) {
-        self.reparse_if_dirty_with_rules(None, None);
+        self.reparse_if_dirty_with_rules(None, None, None);
     }
 
+    /// Re-run analysis when the source changed. `workspace` supplies cached
+    /// module graphs and project configuration; without one, both are read
+    /// fresh.
     pub(crate) fn reparse_if_dirty_with_rules(
         &mut self,
         uri: Option<&Url>,
         rule_workspace: Option<&RuleWorkspace>,
+        workspace: Option<&WorkspaceCache>,
     ) {
         if !self.dirty {
             return;
@@ -136,8 +216,8 @@ impl DocumentState {
         self.prompt_outline.clear();
 
         match self.kind {
-            DocumentKind::Harn => self.analyze_harn_program(uri),
-            DocumentKind::Prompt => self.analyze_prompt_template(uri),
+            DocumentKind::Harn => self.analyze_harn_program(uri, workspace),
+            DocumentKind::Prompt => self.analyze_prompt_template(uri, workspace),
             // The language-agnostic rule engine below is all we have to
             // offer a document in some other language.
             DocumentKind::Other => {}
@@ -147,11 +227,12 @@ impl DocumentState {
         self.dirty = false;
     }
 
-    fn analyze_harn_program(&mut self, uri: Option<&Url>) {
+    fn analyze_harn_program(&mut self, uri: Option<&Url>, workspace: Option<&WorkspaceCache>) {
         let file_path = uri.and_then(|uri| uri.to_file_path().ok());
         // Parse through the same cache the checker uses. Import signatures must
         // reach that checker before diagnostics are projected to the editor.
-        let has_imports = self.analysis.parse(&self.source_id).is_ok_and(|parsed| {
+        let parsed = self.analysis.parse(&self.source_id).ok();
+        let has_imports = parsed.as_ref().is_some_and(|parsed| {
             parsed.program.iter().any(|node| {
                 matches!(
                     &node.node,
@@ -164,10 +245,14 @@ impl DocumentState {
         let module_graph = file_path
             .as_deref()
             .filter(|_| has_imports)
-            .map(|path| harn_modules::build_with_source(path, &self.source));
+            .zip(parsed.as_ref())
+            .map(|(path, parsed)| match workspace {
+                Some(workspace) => workspace.module_graph(path, &self.source, &parsed.program),
+                None => Arc::new(harn_modules::build_with_source(path, &self.source)),
+            });
         let config = file_path
             .as_deref()
-            .zip(module_graph.as_ref())
+            .zip(module_graph.as_deref())
             .map(|(path, graph)| graph.typecheck_import_config_for_file(path))
             .unwrap_or_default();
         let mut analysis = match self.analysis.typecheck(&self.source_id, config) {
@@ -237,7 +322,8 @@ impl DocumentState {
         }
         self.invariant_diagnostics = invariant_report.diagnostics;
 
-        if let (Some(file_path), Some(module_graph)) = (file_path.as_deref(), module_graph.as_ref())
+        if let (Some(file_path), Some(module_graph)) =
+            (file_path.as_deref(), module_graph.as_deref())
         {
             for issue in module_graph.selective_import_issues(file_path) {
                 let code = harn_parser::DiagnosticCode::ImportSymbolMissing.to_string();
@@ -258,11 +344,7 @@ impl DocumentState {
         let is_stdlib_source = file_path
             .as_deref()
             .is_some_and(harn_lint::path_is_stdlib_source);
-        let project_lint = file_path
-            .as_deref()
-            .and_then(|path| harn_modules::project_config::load_for_path(path).ok())
-            .map(|config| config.lint)
-            .unwrap_or_default();
+        let project_lint = project_lint_config(file_path.as_deref(), workspace);
         let disabled_rules = project_lint.disabled.clone().unwrap_or_default();
         let lint_options = harn_lint::LintOptions {
             binding_types: Some(&analysis.binding_types),
@@ -278,7 +360,7 @@ impl DocumentState {
         };
         let externally_imported_names = std::collections::HashSet::new();
         let lint_diags = if let (Some(file_path), Some(module_graph)) =
-            (file_path.as_deref(), module_graph.as_ref())
+            (file_path.as_deref(), module_graph.as_deref())
         {
             harn_lint::lint_with_module_graph(
                 &program,
@@ -323,13 +405,10 @@ impl DocumentState {
     /// applies to it — template parse errors plus the
     /// `template-*` rules — and cache the block outline that folding
     /// ranges are built from.
-    fn analyze_prompt_template(&mut self, uri: Option<&Url>) {
-        let project_lint = uri
-            .and_then(|uri| uri.to_file_path().ok())
-            .and_then(|path| harn_modules::project_config::load_for_path(&path).ok())
-            .map(|config| config.lint)
-            .unwrap_or_default();
-        let disabled_rules = project_lint.disabled.unwrap_or_default();
+    fn analyze_prompt_template(&mut self, uri: Option<&Url>, workspace: Option<&WorkspaceCache>) {
+        let file_path = uri.and_then(|uri| uri.to_file_path().ok());
+        let project_lint = project_lint_config(file_path.as_deref(), workspace);
+        let disabled_rules = project_lint.disabled.clone().unwrap_or_default();
         self.publish_lint_diagnostics(harn_lint::lint_prompt_template(
             &self.source,
             project_lint.template_variant_branch_threshold,
@@ -380,6 +459,23 @@ impl DocumentState {
                 .iter()
                 .map(|item| item.diagnostic.clone()),
         );
+    }
+}
+
+/// The `[lint]` table of the project that owns `path`, from the workspace
+/// cache when there is one.
+fn project_lint_config(
+    path: Option<&std::path::Path>,
+    workspace: Option<&WorkspaceCache>,
+) -> Arc<LintConfig> {
+    match (path, workspace) {
+        (Some(path), Some(workspace)) => workspace.lint_config(path),
+        (Some(path), None) => Arc::new(
+            harn_modules::project_config::load_for_path(path)
+                .map(|config| config.lint)
+                .unwrap_or_default(),
+        ),
+        (None, _) => Arc::default(),
     }
 }
 

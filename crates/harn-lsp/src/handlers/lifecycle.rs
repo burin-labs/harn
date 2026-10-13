@@ -161,23 +161,22 @@ impl HarnLsp {
         let uri = params.text_document.uri.clone();
         let source = params.text_document.text.clone();
         let language_id = params.text_document.language_id.clone();
-
-        let rule_workspace = self.rule_workspace.lock().unwrap().clone();
-        let state =
-            DocumentState::new_for_language_with_rules(source, language_id, &uri, &rule_workspace);
-        let diagnostics = state.diagnostics.clone();
+        if let Ok(path) = uri.to_file_path() {
+            self.workspace.set_buffer(path, source.clone());
+        }
+        let state = DocumentState::new_for_language(source, language_id, &uri);
         self.documents.lock().unwrap().insert(uri.clone(), state);
-
-        self.client
-            .publish_diagnostics(uri, diagnostics, None)
-            .await;
+        self.reanalyze_and_publish(&uri).await;
+        self.recheck_importers_of(&uri).await;
     }
 
     pub(super) async fn handle_did_change(&self, params: DidChangeTextDocumentParams) {
         let uri = params.text_document.uri.clone();
         if let Some(change) = params.content_changes.into_iter().last() {
             let source = change.text;
-            let diagnostics;
+            if let Ok(path) = uri.to_file_path() {
+                self.workspace.set_buffer(path, source.clone());
+            }
             {
                 let mut docs = self.documents.lock().unwrap();
                 let entry = docs
@@ -202,54 +201,31 @@ impl HarnLsp {
                 }
             }
 
-            {
-                let mut docs = self.documents.lock().unwrap();
-                let Some(entry) = docs.get_mut(&uri) else {
-                    return;
-                };
-                let rule_workspace = self.rule_workspace.lock().unwrap().clone();
-                entry.reparse_if_dirty_with_rules(Some(&uri), Some(&rule_workspace));
-                diagnostics = entry.diagnostics.clone();
-            }
-            self.client
-                .publish_diagnostics(uri, diagnostics, None)
-                .await;
+            self.reanalyze_and_publish(&uri).await;
+            self.recheck_importers_of(&uri).await;
         }
     }
 
     pub(super) async fn handle_did_close(&self, params: DidCloseTextDocumentParams) {
-        self.documents
-            .lock()
-            .unwrap()
-            .remove(&params.text_document.uri);
+        let uri = params.text_document.uri;
+        self.documents.lock().unwrap().remove(&uri);
+        if let Ok(path) = uri.to_file_path() {
+            // The file on disk is authoritative again for its importers.
+            self.workspace.remove_buffer(&path);
+        }
+        self.recheck_importers_of(&uri).await;
     }
 
     pub(super) async fn handle_did_change_configuration(
         &self,
         params: DidChangeConfigurationParams,
     ) {
-        let rule_workspace = {
+        {
             let mut workspace = self.rule_workspace.lock().unwrap();
             workspace.reconfigure(Some(&params.settings));
-            workspace.clone()
-        };
-
-        let updates = {
-            let mut docs = self.documents.lock().unwrap();
-            docs.iter_mut()
-                .map(|(uri, state)| {
-                    state.dirty = true;
-                    state.reparse_if_dirty_with_rules(Some(uri), Some(&rule_workspace));
-                    (uri.clone(), state.diagnostics.clone())
-                })
-                .collect::<Vec<_>>()
-        };
-
-        for (uri, diagnostics) in updates {
-            self.client
-                .publish_diagnostics(uri, diagnostics, None)
-                .await;
         }
+        self.workspace.invalidate_all();
+        self.reanalyze_all_open().await;
     }
 
     pub(super) async fn handle_did_change_watched_files(
@@ -258,33 +234,238 @@ impl HarnLsp {
     ) {
         // An external change to a `.harn` file (git checkout, another editor,
         // a codegen step) can invalidate the diagnostics of open documents
-        // that import it. We don't own the on-disk buffer for open documents
-        // — the editor's text is authoritative — so we don't re-read files
-        // here; instead we mark every open document dirty and re-run its
-        // analysis so cross-file diagnostics stop being stale. Ignore the
-        // notification entirely when nothing is open.
+        // that import it, and a changed `harn.toml` changes lint settings. We
+        // don't own the on-disk buffer for open documents — the editor's text
+        // is authoritative — so we drop the cached graphs and configuration
+        // and re-run every open document's analysis.
         if params.changes.is_empty() {
             return;
         }
+        self.workspace.invalidate_all();
+        self.reanalyze_all_open().await;
+    }
+
+    /// Analyze `uri` without holding the document lock, so hover, completion,
+    /// and every other open document stay readable while it runs, then
+    /// publish its diagnostics. An edit that lands mid-analysis runs another
+    /// pass.
+    pub(crate) async fn reanalyze_and_publish(&self, uri: &Url) {
         let rule_workspace = self.rule_workspace.lock().unwrap().clone();
-        let updates = {
-            let mut docs = self.documents.lock().unwrap();
-            if docs.is_empty() {
+        loop {
+            let Some(job) = self
+                .documents
+                .lock()
+                .unwrap()
+                .get_mut(uri)
+                .and_then(DocumentState::begin_analysis)
+            else {
                 return;
-            }
+            };
+            let workspace = std::sync::Arc::clone(&self.workspace);
+            let rule_workspace = rule_workspace.clone();
+            let job_uri = uri.clone();
+            #[cfg(test)]
+            let probe = self.analysis_probe.lock().unwrap().clone();
+            let analyzed = tokio::task::spawn_blocking(move || {
+                #[cfg(test)]
+                if let Some(probe) = probe {
+                    probe();
+                }
+                let mut job = job;
+                job.reparse_if_dirty_with_rules(
+                    Some(&job_uri),
+                    Some(&rule_workspace),
+                    Some(&workspace),
+                );
+                job
+            })
+            .await
+            .expect("document analysis panicked");
+            let diagnostics = {
+                let mut docs = self.documents.lock().unwrap();
+                let Some(entry) = docs.get_mut(uri) else {
+                    return;
+                };
+                if !entry.finish_analysis(analyzed) {
+                    continue;
+                }
+                entry.diagnostics.clone()
+            };
+            self.client
+                .publish_diagnostics(uri.clone(), diagnostics, None)
+                .await;
+            return;
+        }
+    }
+
+    /// Re-check every open document whose module graph reached `uri`, after
+    /// `uri`'s text changed.
+    async fn recheck_importers_of(&self, uri: &Url) {
+        let Ok(path) = uri.to_file_path() else {
+            return;
+        };
+        let importers = self.workspace.invalidate_module(&path);
+        if importers.is_empty() {
+            return;
+        }
+        let uris: Vec<Url> = {
+            let mut docs = self.documents.lock().unwrap();
+            docs.iter_mut()
+                .filter(|(open, _)| {
+                    open.to_file_path()
+                        .is_ok_and(|open_path| importers.contains(&open_path))
+                })
+                .map(|(open, state)| {
+                    state.dirty = true;
+                    open.clone()
+                })
+                .collect()
+        };
+        for importer in uris {
+            self.reanalyze_and_publish(&importer).await;
+        }
+    }
+
+    async fn reanalyze_all_open(&self) {
+        let uris: Vec<Url> = {
+            let mut docs = self.documents.lock().unwrap();
             docs.iter_mut()
                 .map(|(uri, state)| {
                     state.dirty = true;
-                    state.reparse_if_dirty_with_rules(Some(uri), Some(&rule_workspace));
-                    (uri.clone(), state.diagnostics.clone())
+                    uri.clone()
                 })
-                .collect::<Vec<_>>()
+                .collect()
+        };
+        for uri in uris {
+            self.reanalyze_and_publish(&uri).await;
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    use tower_lsp::lsp_types::*;
+    use tower_lsp::LspService;
+
+    use crate::HarnLsp;
+
+    /// Hover, completion, and every other request read the shared document
+    /// map. Analysis must not hold it, or one slow file stalls all of them.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn analysis_runs_without_holding_the_document_lock() {
+        let (service, _socket) = LspService::new(HarnLsp::new);
+        let server = service.inner();
+        let documents = Arc::clone(&server.documents);
+        let analyses = Arc::new(AtomicUsize::new(0));
+        let lock_was_free = Arc::new(AtomicBool::new(true));
+        let probe: Arc<dyn Fn() + Send + Sync> = {
+            let analyses = Arc::clone(&analyses);
+            let lock_was_free = Arc::clone(&lock_was_free);
+            Arc::new(move || {
+                analyses.fetch_add(1, Ordering::SeqCst);
+                if documents.try_lock().is_err() {
+                    lock_was_free.store(false, Ordering::SeqCst);
+                }
+            })
         };
 
-        for (uri, diagnostics) in updates {
-            self.client
-                .publish_diagnostics(uri, diagnostics, None)
-                .await;
+        // The probe can see a held lock, so a pass below is not vacuous.
+        {
+            let _held = server.documents.lock().unwrap();
+            probe();
+            assert!(!lock_was_free.swap(true, Ordering::SeqCst));
         }
+        analyses.store(0, Ordering::SeqCst);
+
+        *server.analysis_probe.lock().unwrap() = Some(probe);
+        let uri = Url::parse("file:///analysis-lock/main.harn").unwrap();
+        server
+            .handle_did_open(DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri: uri.clone(),
+                    language_id: "harn".to_string(),
+                    version: 1,
+                    text: "pipeline main() {\n  log(1)\n}\n".to_string(),
+                },
+            })
+            .await;
+
+        assert_eq!(analyses.load(Ordering::SeqCst), 1);
+        assert!(
+            lock_was_free.load(Ordering::SeqCst),
+            "analysis ran while the document lock was held"
+        );
+        let docs = server.documents.lock().unwrap();
+        let state = docs.get(&uri).expect("document stays open");
+        assert!(!state.dirty);
+        assert!(
+            state.cached_ast.is_some(),
+            "the detached analysis was installed"
+        );
+    }
+
+    fn open(uri: &Url, text: &str) -> DidOpenTextDocumentParams {
+        DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "harn".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        }
+    }
+
+    fn type_errors(server: &HarnLsp, uri: &Url) -> Vec<String> {
+        server.documents.lock().unwrap()[uri]
+            .diagnostics
+            .iter()
+            .filter(|d| d.source.as_deref() == Some("harn-typecheck"))
+            .filter(|d| d.severity == Some(DiagnosticSeverity::ERROR))
+            .map(|d| d.message.clone())
+            .collect()
+    }
+
+    /// Editing an imported module re-checks the open documents that import
+    /// it, against the edited buffer rather than the file on disk.
+    #[tokio::test(start_paused = true)]
+    async fn editing_an_imported_module_rechecks_its_importers() {
+        let dir = tempfile::tempdir().unwrap();
+        let lib_path = dir.path().join("lib.harn");
+        let app_path = dir.path().join("app.harn");
+        let lib_source = "pub fn helper() -> int {\n  return 1\n}\n";
+        let app_source =
+            "import { helper } from \"./lib\"\n\npub fn total() -> int {\n  const n: int = helper()\n  return n\n}\n";
+        std::fs::write(&lib_path, lib_source).unwrap();
+        std::fs::write(&app_path, app_source).unwrap();
+        let lib = Url::from_file_path(&lib_path).unwrap();
+        let app = Url::from_file_path(&app_path).unwrap();
+
+        let (service, _socket) = LspService::new(HarnLsp::new);
+        let server = service.inner();
+        server.handle_did_open(open(&lib, lib_source)).await;
+        server.handle_did_open(open(&app, app_source)).await;
+        assert_eq!(type_errors(server, &app), Vec::<String>::new());
+
+        server
+            .handle_did_change(DidChangeTextDocumentParams {
+                text_document: VersionedTextDocumentIdentifier {
+                    uri: lib.clone(),
+                    version: 2,
+                },
+                content_changes: vec![TextDocumentContentChangeEvent {
+                    range: None,
+                    range_length: None,
+                    text: "pub fn helper() -> string {\n  return \"one\"\n}\n".to_string(),
+                }],
+            })
+            .await;
+        let errors = type_errors(server, &app);
+        assert!(
+            !errors.is_empty(),
+            "the importer must see the unsaved return type change"
+        );
     }
 }
