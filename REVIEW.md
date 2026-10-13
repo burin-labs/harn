@@ -1,4 +1,4 @@
-<!-- Written by scripts/review-profile.harn in burin-code (anthropic:claude-opus-5-5) for burin-labs/harn.
+<!-- Written by a review-profile calibration session (anthropic:claude-opus-5-5).
      Edit freely; a rerun copies forward rules a person wrote. -->
 # Review profile
 
