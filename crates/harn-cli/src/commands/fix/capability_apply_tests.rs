@@ -718,6 +718,7 @@ fn capability_apply_recognizes_a_local_named_capability_bundle() {
     let plan = build_plan(temp.path(), None).unwrap();
     let codes: Vec<_> = plan.diagnostics.iter().map(|d| d.code.as_str()).collect();
     assert_eq!(codes, ["HARN-LNT-077"], "{plan:#?}");
+    assert_eq!(result.post_apply_diagnostics_count, 1, "{result:#?}");
     assert_eq!(
         callable_params(&updated, "with_scenario"),
         vec![
