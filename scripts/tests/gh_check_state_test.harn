@@ -443,8 +443,8 @@ pipeline test_conflicting_pr_is_named_as_the_reason_ci_never_started(task: unkno
   assert_eq(blocks, [{pr: 9807, reason: "merge_conflict"}])
   const lines = render_block_lines(blocks, "ok")
   assert_eq(len(lines), 1)
-  assert(lines[0].contains("PR #9807 conflicts with its base"))
-  assert(lines[0].contains("rebase"))
+  assert((lines[0] ?? "").contains("PR #9807 conflicts with its base"))
+  assert((lines[0] ?? "").contains("rebase"))
 }
 
 pipeline test_clean_or_unknown_mergeability_names_no_block(task: unknown) {
