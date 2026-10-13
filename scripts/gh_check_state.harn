@@ -435,7 +435,7 @@ pub fn classify_pr_blocks(head_sha: string, pulls: list<any>) -> list<PrBlock> {
       continue
     }
     if number != nil && to_string(pull?.mergeable_state ?? "") == "dirty" {
-      blocks = blocks.appending({pr: number, reason: "merge_conflict"})
+      blocks.push({pr: number, reason: "merge_conflict"})
     }
   }
   return blocks
@@ -445,12 +445,12 @@ pub fn classify_pr_blocks(head_sha: string, pulls: list<any>) -> list<PrBlock> {
 pub fn render_block_lines(blocked_by: list<PrBlock>, lookup: BlockLookup) -> list<string> {
   let lines: list<string> = []
   for block in blocked_by {
-    lines = lines.appending(
+    lines.push(
       "  blocked: PR #${to_string(block.pr)} conflicts with its base; GitHub runs no pull_request CI on a conflicting PR - rebase onto the base branch",
     )
   }
   if lookup == "unavailable" {
-    lines = lines.appending("  blocked: could not check PR mergeability")
+    lines.push("  blocked: could not check PR mergeability")
   }
   return lines
 }
@@ -635,7 +635,7 @@ fn lookup_blocks(
     if pull == nil {
       return {blocked_by: [], blocked_lookup: "unavailable"}
     }
-    pulls = pulls.appending(pull)
+    pulls.push(pull)
   }
   return {blocked_by: classify_pr_blocks(sha, pulls), blocked_lookup: "ok"}
 }
