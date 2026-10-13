@@ -41,6 +41,16 @@ struct WarmState {
     in_flight_root: Option<PathBuf>,
     /// Generation bumped whenever an in-flight build finishes.
     generation: u64,
+    /// Snapshot writes scheduled after a restore published its index and not
+    /// yet finished. `wait_until_idle` waits for these as well as the flight.
+    pending_persists: usize,
+}
+
+impl WarmState {
+    /// No build in flight and no snapshot write outstanding.
+    fn is_idle(&self) -> bool {
+        self.in_flight_root.is_none() && self.pending_persists == 0
+    }
 }
 
 /// How often a waiter emits progress while an in-flight build holds the gate.
@@ -52,8 +62,6 @@ pub(super) struct WarmCoordinator {
     state: Mutex<WarmState>,
     cv: Condvar,
     builder: Mutex<Option<thread::JoinHandle<()>>>,
-    /// The latest background snapshot write after a restore.
-    persister: Mutex<Option<thread::JoinHandle<()>>>,
 }
 
 impl Default for WarmCoordinator {
@@ -62,11 +70,25 @@ impl Default for WarmCoordinator {
             state: Mutex::new(WarmState {
                 in_flight_root: None,
                 generation: 0,
+                pending_persists: 0,
             }),
             cv: Condvar::new(),
             builder: Mutex::new(None),
-            persister: Mutex::new(None),
         }
+    }
+}
+
+/// RAII guard for one scheduled snapshot write; wakes waiters on drop.
+struct PendingPersist {
+    warm: Arc<WarmCoordinator>,
+}
+
+impl Drop for PendingPersist {
+    fn drop(&mut self) {
+        let mut state = self.warm.state.lock().expect("warm coordinator poisoned");
+        state.pending_persists -= 1;
+        drop(state);
+        self.warm.cv.notify_all();
     }
 }
 
@@ -101,7 +123,7 @@ impl WarmCoordinator {
             .in_flight_root
             .clone()
             .unwrap_or_else(|| PathBuf::from("."));
-        guard = self.wait_while(guard, &root, |state| state.in_flight_root.is_some());
+        guard = self.wait_while(guard, &root, |state| !state.is_idle());
         drop(guard);
     }
 
@@ -116,37 +138,31 @@ impl WarmCoordinator {
         }
     }
 
-    /// Rewrite the snapshot off the caller's thread. A write already in
-    /// flight finishes first.
-    pub(super) fn persist_in_background(&self, index: SharedIndex) {
-        let mut slot = self.persister.lock().expect("warm coordinator poisoned");
-        let previous = slot.take();
+    /// Count a snapshot write that `wait_until_idle` must wait for. The
+    /// count drops when the returned guard does, including on panic.
+    fn begin_persist(self: &Arc<Self>) -> PendingPersist {
+        self.state
+            .lock()
+            .expect("warm coordinator poisoned")
+            .pending_persists += 1;
+        PendingPersist { warm: self.clone() }
+    }
+
+    /// Rewrite the snapshot off the caller's thread.
+    pub(super) fn persist_in_background(self: &Arc<Self>, index: SharedIndex) {
+        let pending = self.begin_persist();
         let spawned = harn_parser::runtime_stack::builder()
             .name("harn-code-index-persist".to_string())
             .spawn(move || {
-                if let Some(previous) = previous {
-                    let _ = previous.join();
-                }
+                let _pending = pending;
                 super::persist_reconciled(&index);
             });
-        match spawned {
-            Ok(handle) => *slot = Some(handle),
-            Err(error) => tracing::debug!(
+        if let Err(error) = spawned {
+            tracing::debug!(
                 target: "harn_hostlib::code_index",
                 %error,
                 "code-index persist thread could not start; snapshot left as is",
-            ),
-        }
-    }
-
-    pub(super) fn join_persister(&self) {
-        let handle = self
-            .persister
-            .lock()
-            .expect("warm coordinator poisoned")
-            .take();
-        if let Some(handle) = handle {
-            let _ = handle.join();
+            );
         }
     }
 
@@ -265,6 +281,7 @@ impl CodeIndexCapability {
         let index = self.index.clone();
         let resolver = self.harn_reference_resolver.clone();
         let thread_root = root.clone();
+        let warm = self.warm.clone();
         match harn_parser::runtime_stack::builder()
             .name("harn-code-index-warm".to_string())
             .spawn(move || {
@@ -280,10 +297,11 @@ impl CodeIndexCapability {
                             "code-index background restore complete",
                         );
                         // Readers waiting on the flight need the published
-                        // index, not the snapshot write. The builder join in
-                        // `wait_until_idle` still covers the write.
+                        // index, not the snapshot write. Count the write
+                        // before ending the flight so no waiter misses it.
+                        let pending = needs_persist.then(|| warm.begin_persist());
                         drop(flight);
-                        if needs_persist {
+                        if pending.is_some() {
                             super::persist_reconciled(&index);
                         }
                         return;
@@ -644,6 +662,23 @@ mod tests {
             VmValue::String(arcstr::ArcStr::from(root.to_string_lossy().as_ref())),
         );
         VmValue::dict(map)
+    }
+
+    #[test]
+    fn a_scheduled_snapshot_write_keeps_the_coordinator_busy() {
+        let warm = Arc::new(WarmCoordinator::default());
+        let idle = |warm: &WarmCoordinator| warm.state.lock().unwrap().is_idle();
+        assert!(idle(&warm));
+        let first = warm.begin_persist();
+        let second = warm.begin_persist();
+        // No build is in flight, yet a waiter must still wait for the writes.
+        assert!(warm.state.lock().unwrap().in_flight_root.is_none());
+        assert!(!idle(&warm));
+        drop(first);
+        assert!(!idle(&warm), "one write is still outstanding");
+        drop(second);
+        assert!(idle(&warm));
+        warm.wait_until_idle();
     }
 
     #[test]
