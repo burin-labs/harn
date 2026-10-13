@@ -35,6 +35,18 @@ fn meaning(program: &[harn_parser::SNode]) -> serde_json::Value {
     let mut projection =
         harn_parser::ast_json::structural_projection(program, OperatorGrammar::CURRENT);
     sort_import_names(&mut projection);
+    // The formatter also orders import statements; compare them as a set.
+    if let serde_json::Value::Array(items) = &mut projection {
+        let is_import = |item: &serde_json::Value| {
+            item.get("node")
+                .and_then(serde_json::Value::as_object)
+                .is_some_and(|node| node.keys().any(|kind| kind.contains("Import")))
+        };
+        let (mut imports, rest): (Vec<_>, Vec<_>) = items.drain(..).partition(is_import);
+        imports.sort_by_key(ToString::to_string);
+        items.extend(imports);
+        items.extend(rest);
+    }
     projection
 }
 

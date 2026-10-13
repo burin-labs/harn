@@ -2,18 +2,17 @@ mod binary;
 mod casts;
 
 use harn_lexer::{FixEdit, Span, StringSegment};
-use harn_parser::{BinaryOperator, BindingPattern, DiagnosticCode as Code, Node, SNode};
+use harn_parser::{BindingPattern, DiagnosticCode as Code, Node, SNode};
 
 use self::casts::unnecessary_cast_target;
 use super::Linter;
 use crate::decls::{FnDeclaration, ImportInfo, TypeDeclaration};
 use crate::diagnostic::{LintDiagnostic, LintSeverity};
 use crate::fixes::{
-    empty_statement_removal_fix, is_nan_free, is_pure_expression, nil_fallback_ternary_parts,
+    empty_statement_removal_fix, is_pure_expression, nil_fallback_ternary_parts,
     unnecessary_cast_fix,
 };
 use crate::harndoc::extract_harndoc;
-use crate::naming::simplify_bool_comparison;
 
 impl<'a> Linter<'a> {
     pub(super) fn lint_node(&mut self, snode: &SNode) {

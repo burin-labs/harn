@@ -300,11 +300,10 @@ id = "operator-precedence"
 description = "Operator precedence tables in the spec and the language guide, and the tree-sitter grammar's PREC constants, generated from the parser's typed precedence table so the parser, formatter, editor grammar, and docs agree on binding order."
 gen = "gen-operator-precedence"
 check = "check-operator-precedence"
-outputs = [
-  "spec/chapters/03-operator-precedence-table.md",
-  "docs/src/language-basics.md",
-  "tree-sitter-harn/grammar/precedence.js",
-]
+# The precedence tables are marked regions inside hand-written Markdown, so
+# only the wholly generated constants file is a registered output; the check
+# still verifies both table regions.
+outputs = ["tree-sitter-harn/grammar/precedence.js"]
 sources = [
   "crates/harn-parser/src/operators.rs",
   "crates/harn-cli/src/commands/dump_operator_precedence.rs",

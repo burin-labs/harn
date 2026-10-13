@@ -264,9 +264,11 @@ impl TypeChecker {
             Node::UnaryOp { op, operand } if *op == UnaryOperator::Not => {
                 self.check_predicate_boolean(operand, scope);
             }
-            Node::BinaryOp { op, left, right }
-                if matches!(op, BinaryOperator::And | BinaryOperator::Or) =>
-            {
+            Node::BinaryOp {
+                op: BinaryOperator::And | BinaryOperator::Or,
+                left,
+                right,
+            } => {
                 self.check_predicate_boolean(left, scope);
                 self.check_predicate_boolean(right, scope);
             }

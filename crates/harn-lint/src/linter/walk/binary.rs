@@ -2,7 +2,7 @@
 //! self-comparisons, comparisons against boolean literals, and arithmetic on
 //! `bool`/`nil` literals.
 
-use harn_lexer::{FixEdit, Span, StringSegment};
+use harn_lexer::FixEdit;
 use harn_parser::{BinaryOperator, DiagnosticCode as Code, Node, SNode};
 
 use super::super::Linter;
@@ -78,11 +78,7 @@ impl<'a> Linter<'a> {
         if matches!(op, BinaryOperator::Eq | BinaryOperator::Neq) && !is_self_comparison {
             let is_bool_left = matches!(left.node, Node::BoolLiteral(_));
             let is_bool_right = matches!(right.node, Node::BoolLiteral(_));
-            let compared_expression = if is_bool_left {
-                right
-            } else {
-                left
-            };
+            let compared_expression = if is_bool_left { right } else { left };
             // Equality with a Boolean literal is redundant only when
             // the other expression is proven to be exactly `bool`.
             // Optional and gradual values have distinct nil behavior,
