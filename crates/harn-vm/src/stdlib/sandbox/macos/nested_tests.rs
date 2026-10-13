@@ -33,6 +33,8 @@ enum Case {
     GrantOutside,
     /// A read denial on a file inside the writable workspace.
     DenyInside,
+    /// The same denial on a file that does not exist yet.
+    DenyAbsent,
 }
 
 impl Case {
@@ -41,6 +43,7 @@ impl Case {
             Self::Workspace => "workspace",
             Self::GrantOutside => "grant_outside",
             Self::DenyInside => "deny_inside",
+            Self::DenyAbsent => "deny_absent",
         }
     }
 
@@ -48,12 +51,14 @@ impl Case {
         match std::env::var(CASE_ENV).as_deref() {
             Ok("grant_outside") => Self::GrantOutside,
             Ok("deny_inside") => Self::DenyInside,
+            Ok("deny_absent") => Self::DenyAbsent,
             _ => Self::Workspace,
         }
     }
 }
 
 const DENIED_FILE: &str = "denied/secret.json";
+const ABSENT_DENIED_FILE: &str = "denied/future.json";
 
 fn case_policy(workspace: &Path, outside: &Path, case: Case) -> CapabilityPolicy {
     let mut policy = workspace_policy(workspace);
@@ -65,6 +70,10 @@ fn case_policy(workspace: &Path, outside: &Path, case: Case) -> CapabilityPolicy
         Case::DenyInside => {
             policy.process_sandbox.read_deny_roots =
                 vec![workspace.join(DENIED_FILE).display().to_string()];
+        }
+        Case::DenyAbsent => {
+            policy.process_sandbox.read_deny_roots =
+                vec![workspace.join(ABSENT_DENIED_FILE).display().to_string()];
         }
     }
     policy
@@ -274,6 +283,28 @@ fn an_outer_sandbox_must_pin_a_denial_inside_a_writable_root() {
     let error = unpinned.report["error"].as_str().unwrap_or_default();
     assert!(
         error.contains("reads of") && error.contains(DENIED_FILE),
+        "{error}"
+    );
+}
+
+/// A denied path that does not exist yet cannot be measured against the outer
+/// sandbox, which answers "denied" for every absent path. The spawn is refused
+/// even under Harn's own pinned profile, rather than inherited on an answer
+/// that proves nothing.
+#[test]
+fn an_absent_denial_inside_a_writable_root_is_not_inherited() {
+    if std::env::var_os(CHILD_ENV).is_some() {
+        return run_child();
+    }
+    let nested = run_nested(
+        "stdlib::sandbox::macos::nested::tests::an_absent_denial_inside_a_writable_root_is_not_inherited",
+        Case::DenyAbsent,
+        harn_profile,
+    );
+    assert_eq!(nested.report["spawned"], false, "{}", nested.report);
+    let error = nested.report["error"].as_str().unwrap_or_default();
+    assert!(
+        error.contains("reads of") && error.contains(ABSENT_DENIED_FILE),
         "{error}"
     );
 }

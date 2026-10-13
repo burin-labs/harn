@@ -100,14 +100,19 @@ pub(super) fn nesting(policy: &CapabilityPolicy) -> Nesting {
     }
     // A denial inside a writable root holds only while nothing on its path can
     // be renamed, which the rendered profile ensures with unlink denials.
+    // `sandbox_check` answers "denied" for any path that does not exist,
+    // whatever the profile says (measured on macOS 27), so an absent denied
+    // path cannot be proven safe from a later create-and-rename. Refuse it
+    // rather than inherit a profile whose answer for it is unknown.
     for denied in super::super::process_sandbox_read_deny_roots(policy) {
-        if !denied.exists() || !covered(&denied, &writable) {
+        if !covered(&denied, &writable) {
             continue;
         }
-        let renamable = denied
-            .ancestors()
-            .take_while(|path| covered(path, &writable))
-            .any(|path| !outer_denies("file-write-unlink", Some(path)));
+        let renamable = !denied.exists()
+            || denied
+                .ancestors()
+                .take_while(|path| covered(path, &writable))
+                .any(|path| !outer_denies("file-write-unlink", Some(path)));
         if renamable {
             return Nesting::Unenforceable(Narrowing::Read(denied));
         }
