@@ -53,9 +53,6 @@ pub struct ConformanceReport {
     /// Whether the backend reports it can enforce filesystem confinement on
     /// this host. A case that needs it and ran without it is `not_measured`.
     pub enforcing: bool,
-    /// How that mechanism on this host falls short of the backend's row, such
-    /// as an older Landlock ABI. Empty when it holds everything the row says.
-    pub mechanism_limits: Vec<harn_vm::process_sandbox::enforcement::MechanismLimit>,
     /// One report per contract case, in contract order.
     pub cases: Vec<CaseReport>,
 }
@@ -227,7 +224,6 @@ pub fn run_conformance_with_progress(
         filesystem_mechanism: harn_vm::process_sandbox::active_backend_filesystem_mechanism()
             .to_string(),
         enforcing,
-        mechanism_limits: harn_vm::process_sandbox::active_backend_mechanism_limits(),
         cases,
     }
 }
