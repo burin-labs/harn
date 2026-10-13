@@ -1069,6 +1069,9 @@ fn an_unreadable_ancestor_grants_nothing_beneath_it_and_never_itself() {
 /// * claim: the denied file is refused;
 /// * revert: with `read_deny_roots` cleared the same file is readable,
 ///   which is what proves the refusal was the denylist.
+///
+/// The root is granted read-only. A writable root keeps its denials unheld;
+/// `linux_writable_denial_tests.rs` covers that shape.
 #[test]
 fn a_live_landlock_child_is_refused_a_denied_file_and_allowed_its_sibling() {
     if !live_landlock_available("landlock-live") {
@@ -1076,6 +1079,7 @@ fn a_live_landlock_child_is_refused_a_denied_file_and_allowed_its_sibling() {
     }
     let home = tempfile::TempDir::new().expect("temp home");
     let home_path = home.path().canonicalize().expect("canonical home");
+    let workspace = tempfile::TempDir::new().expect("workspace");
 
     let secrets = home_path.join("secrets");
     std::fs::create_dir_all(&secrets).expect("secrets dir");
@@ -1086,7 +1090,8 @@ fn a_live_landlock_child_is_refused_a_denied_file_and_allowed_its_sibling() {
 
     let read_under = |deny: &[String], target: &std::path::Path| -> std::io::Result<bool> {
         let policy = CapabilityPolicy {
-            workspace_roots: vec![home_path.display().to_string()],
+            workspace_roots: vec![workspace.path().display().to_string()],
+            read_only_roots: vec![home_path.display().to_string()],
             sandbox_profile: SandboxProfile::Worktree,
             process_sandbox: Box::new(crate::orchestration::ProcessSandboxPolicy {
                 read_deny_roots: deny.to_vec(),
@@ -1113,7 +1118,7 @@ fn a_live_landlock_child_is_refused_a_denied_file_and_allowed_its_sibling() {
     let control = read_under(&deny, &allowed_file).expect("control read");
     assert!(
         control,
-        "the control file inside the same workspace root must be readable, or the denial \
+        "the control file inside the same read-only root must be readable, or the denial \
              below proves nothing"
     );
 
@@ -1198,6 +1203,7 @@ fn an_unreadable_optional_root_is_skipped_and_a_required_one_still_fails() {
         symlinks: std::collections::BTreeMap::new(),
         handled_access_fs: 0,
         read_deny_roots: Vec::new(),
+        unheld_read_denials: Vec::new(),
     };
     let optional = push_rule_exact(
         &mut profile,

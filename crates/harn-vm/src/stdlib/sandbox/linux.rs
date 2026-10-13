@@ -136,6 +136,9 @@ struct FilesystemProfile {
     /// enforced by never granting a path that contains one; see
     /// [`expand_around_denied`].
     read_deny_roots: Vec<PathBuf>,
+    /// Denials a writable grant contains, which no grant can hold; see
+    /// [`filesystem::keep_writable_grant`].
+    unheld_read_denials: Vec<filesystem::UnheldReadDenial>,
 }
 
 struct FilesystemRule {
@@ -456,6 +459,7 @@ fn landlock_profile(
             symlinks: std::collections::BTreeMap::new(),
             handled_access_fs,
             read_deny_roots: Vec::new(),
+            unheld_read_denials: Vec::new(),
         },
     };
     profile.filesystem = filesystem_profile(
@@ -543,6 +547,8 @@ fn standard_device_rules() -> Vec<(PathBuf, u64)> {
 /// Newly created siblings are NOT granted: a directory added after expansion is
 /// invisible to the child. That is the safe direction, and it is why this is
 /// done per spawn rather than cached.
+///
+/// Only read-only grants are subtracted; see [`filesystem::keep_writable_grant`].
 fn expand_around_denied(root: &Path, denied: &[PathBuf]) -> Result<Vec<PathBuf>, VmError> {
     let inside: Vec<&PathBuf> = denied
         .iter()
@@ -680,6 +686,12 @@ fn push_rule(
             return Err(sandbox_rejection(
                 "credential subtraction exceeded its grant expansion ceiling".into(),
             ));
+        }
+        if allowed_access & filesystem::LANDLOCK_WRITE_ACCESS != 0 {
+            if filesystem::keep_writable_grant(profile, &path) {
+                push_rule_exact(profile, path, allowed_access, optional)?;
+            }
+            continue;
         }
         // Expanded siblings can themselves be aliases to denied paths, or
         // back to a previously expanded root. Normalize and subtract every
@@ -1471,3 +1483,7 @@ mod socket_root_tests;
 #[cfg(test)]
 #[path = "linux_credential_denylist_tests.rs"]
 mod credential_denylist_tests;
+
+#[cfg(test)]
+#[path = "linux_writable_denial_tests.rs"]
+mod writable_denial_tests;

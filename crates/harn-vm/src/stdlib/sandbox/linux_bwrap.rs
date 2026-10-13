@@ -102,6 +102,7 @@ pub(in crate::stdlib::sandbox) fn prepare(
         symlinks: Default::default(),
         handled_access_fs: filesystem.handled_access_fs,
         read_deny_roots: filesystem.read_deny_roots.clone(),
+        unheld_read_denials: Vec::new(),
     };
     let seccomp = TransferableConfinement {
         ruleset: None,

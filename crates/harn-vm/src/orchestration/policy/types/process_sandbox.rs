@@ -70,7 +70,8 @@ pub struct ProcessSandboxPolicy {
     ///
     /// macOS renders it as a trailing `deny file-read*` (last-match-wins);
     /// Linux, whose Landlock is allow-only, grants the siblings that do not
-    /// lead to it. Which backends hold it is the `credential_reads` column of
+    /// lead to it. Linux keeps a writable root that contains a denial whole,
+    /// and reports that denial as not enforced. Which backends hold it is the `credential_reads` column of
     /// the enforcement table (`process_sandbox::enforcement`), not this
     /// comment.
     ///

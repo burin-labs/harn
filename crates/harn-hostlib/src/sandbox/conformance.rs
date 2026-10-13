@@ -364,8 +364,10 @@ struct Layout {
     /// A root the read-only role cases grant read-only, holding a file.
     read_only: PathBuf,
     socket_root: PathBuf,
-    /// A directory under the workspace that the credential case puts on the
-    /// denylist. The workspace grant covers it, so only the denial can refuse.
+    /// A directory under the read-only root that the credential case puts on
+    /// the denylist. The read-only grant covers it, so only the denial can
+    /// refuse. A denial under a writable root is reported as not enforced
+    /// rather than held (harn#9028), so it cannot measure the denylist.
     credentials: PathBuf,
     /// A loopback listener the network cases connect to. Nonblocking, so a
     /// connection that never came reads as `WouldBlock` rather than a hang.
@@ -395,7 +397,7 @@ impl Layout {
         let outside = base.join("outside");
         let read_only = base.join("read-only");
         let socket_root = base.join("sockets");
-        let credentials = workspace.join(".harn-conformance-credentials");
+        let credentials = read_only.join(".harn-conformance-credentials");
         for dir in [&workspace, &outside, &read_only, &socket_root, &credentials] {
             std::fs::create_dir_all(dir)?;
         }
@@ -449,6 +451,7 @@ fn case_policy(case: ConformanceCase, layout: &Layout) -> CapabilityPolicy {
             });
         }
         ConformanceCase::DeniedCredentialReadRefused => {
+            policy.read_only_roots = vec![layout.read_only.display().to_string()];
             policy.process_sandbox = Box::new(ProcessSandboxPolicy {
                 read_deny_roots: vec![layout.credentials.display().to_string()],
                 ..ProcessSandboxPolicy::default()

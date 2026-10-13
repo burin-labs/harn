@@ -48,7 +48,7 @@ pub enum ConformanceCase {
     /// readable. Build tools need a temp dir, not everyone else's.
     SiblingTempReadRefused,
     /// A file on the credential denylist is not readable, although it sits
-    /// under the workspace root, which is otherwise readable. The denylist is
+    /// under a read-only root, which is otherwise readable. The denylist is
     /// the one subtractive term, so this is the case that measures it.
     DeniedCredentialReadRefused,
     /// A policy below the `network` ceiling cannot connect to a TCP listener

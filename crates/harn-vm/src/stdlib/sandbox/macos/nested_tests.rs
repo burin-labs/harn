@@ -14,6 +14,7 @@ use crate::stdlib::sandbox::{ProcessCommandConfig, SandboxBackend};
 const CHILD_ENV: &str = "NESTED_SANDBOX_CHILD";
 const WORKSPACE_ENV: &str = "NESTED_SANDBOX_WORKSPACE";
 const OUTSIDE_ENV: &str = "NESTED_SANDBOX_OUTSIDE";
+const GRANT_OUTSIDE_ENV: &str = "NESTED_SANDBOX_GRANT_OUTSIDE";
 const RESULT_PREFIX: &str = "NESTED_SANDBOX_RESULT ";
 
 fn workspace_policy(workspace: &Path) -> CapabilityPolicy {
@@ -24,11 +25,25 @@ fn workspace_policy(workspace: &Path) -> CapabilityPolicy {
     }
 }
 
+/// The workspace policy, plus an explicit write grant for `outside` when the
+/// case asks for one.
+fn case_policy(workspace: &Path, outside: &Path, grant_outside: bool) -> CapabilityPolicy {
+    let mut policy = workspace_policy(workspace);
+    if grant_outside {
+        policy.process_sandbox.write_roots = vec![outside.display().to_string()];
+    }
+    policy
+}
+
 /// The child side: spawn a shell under the policy and report the outcome.
 fn run_child() {
     let workspace = PathBuf::from(std::env::var(WORKSPACE_ENV).expect("workspace"));
     let outside = PathBuf::from(std::env::var(OUTSIDE_ENV).expect("outside"));
-    let policy = workspace_policy(&workspace);
+    let policy = case_policy(
+        &workspace,
+        &outside,
+        std::env::var_os(GRANT_OUTSIDE_ENV).is_some(),
+    );
     let script = format!(
         "echo in > '{}'; echo out > '{}'",
         workspace.join("inside.txt").display(),
@@ -61,8 +76,13 @@ struct Nested {
     outside_written: bool,
 }
 
-/// Run `test` again under `outer_profile`, as the child side.
-fn run_nested(test: &str, outer_profile: impl FnOnce(&Path, &Path) -> String) -> Nested {
+/// Run `test` again under `outer_profile`, as the child side. With
+/// `grant_outside`, the child's policy also grants the outside fixture.
+fn run_nested(
+    test: &str,
+    grant_outside: bool,
+    outer_profile: impl FnOnce(&CapabilityPolicy, &Path) -> String,
+) -> Nested {
     let workspace = tempfile::tempdir().expect("workspace");
     let exe = std::env::current_exe().expect("test binary");
     // Cargo targets may be inside a granted compiler cache. Use the owning
@@ -83,8 +103,22 @@ fn run_nested(test: &str, outer_profile: impl FnOnce(&Path, &Path) -> String) ->
             root.display()
         );
     }
-    let profile = outer_profile(&workspace_path, &exe);
-    let output = Command::new("/usr/bin/sandbox-exec")
+    let policy = case_policy(&workspace_path, &outside_path, grant_outside);
+    if grant_outside {
+        assert!(
+            super::writable_roots(&policy)
+                .iter()
+                .any(|root| outside_path.starts_with(root)),
+            "the explicit grant did not make {} writable",
+            outside_path.display()
+        );
+    }
+    let profile = outer_profile(&policy, &exe);
+    let mut command = Command::new("/usr/bin/sandbox-exec");
+    if grant_outside {
+        command.env(GRANT_OUTSIDE_ENV, "1");
+    }
+    let output = command
         .arg("-p")
         .arg(&profile)
         .arg(&exe)
@@ -119,11 +153,11 @@ fn build_root(exe: &Path) -> &Path {
     exe.ancestors().nth(3).unwrap_or(exe)
 }
 
-/// Harn's own profile for the workspace, plus reading the test binary's tree.
-fn harn_profile(workspace: &Path, exe: &Path) -> String {
+/// Harn's own profile for the policy, plus reading the test binary's tree.
+fn harn_profile(policy: &CapabilityPolicy, exe: &Path) -> String {
     format!(
         "{}(allow file-read* (subpath \"{}\"))\n",
-        super::super::render_profile_for_program(&workspace_policy(workspace), "/bin/sh"),
+        super::super::render_profile_for_program(policy, "/bin/sh"),
         build_root(exe).display()
     )
 }
@@ -138,11 +172,31 @@ fn a_child_inherits_an_outer_sandbox_as_strict_as_its_policy() {
     }
     let nested = run_nested(
         "stdlib::sandbox::macos::nested::tests::a_child_inherits_an_outer_sandbox_as_strict_as_its_policy",
+        false,
         harn_profile,
     );
     assert_eq!(nested.report["spawned"], true, "{}", nested.report);
     assert!(nested.inside_written, "{}", nested.report);
     assert!(!nested.outside_written, "{}", nested.report);
+}
+
+/// The control for the refusal above: the same fixture, explicitly granted,
+/// takes the write. Without it, an outside directory that nothing could write
+/// would pass the strict case for a reason that has nothing to do with the
+/// policy.
+#[test]
+fn an_explicitly_granted_outside_directory_takes_the_nested_write() {
+    if std::env::var_os(CHILD_ENV).is_some() {
+        return run_child();
+    }
+    let nested = run_nested(
+        "stdlib::sandbox::macos::nested::tests::an_explicitly_granted_outside_directory_takes_the_nested_write",
+        true,
+        harn_profile,
+    );
+    assert_eq!(nested.report["spawned"], true, "{}", nested.report);
+    assert!(nested.inside_written, "{}", nested.report);
+    assert!(nested.outside_written, "{}", nested.report);
 }
 
 /// An outer sandbox that allows what the policy denies is not inherited: the
@@ -154,6 +208,7 @@ fn a_weaker_outer_sandbox_refuses_the_spawn_with_its_reason() {
     }
     let nested = run_nested(
         "stdlib::sandbox::macos::nested::tests::a_weaker_outer_sandbox_refuses_the_spawn_with_its_reason",
+        false,
         |_, _| "(version 1)(allow default)(deny network-outbound)".to_string(),
     );
     assert_eq!(nested.report["spawned"], false, "{}", nested.report);

@@ -1,6 +1,6 @@
 //! One normalized, opened grant set for both Linux filesystem renderers.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use super::{
     developer_toolchain_system_read_roots, network_name_service_read_roots,
@@ -10,12 +10,12 @@ use super::{
     LANDLOCK_ACCESS_FS_READ_DIR, LANDLOCK_ACCESS_FS_READ_FILE, LANDLOCK_ACCESS_FS_REMOVE_FILE,
     LANDLOCK_ACCESS_FS_WRITE_FILE,
 };
-use crate::orchestration::CapabilityPolicy;
+use crate::orchestration::{CapabilityPolicy, SandboxProfile};
 use crate::stdlib::sandbox::{
     policy_allows_child_writes, process_sandbox_developer_toolchain_read_roots,
     process_sandbox_package_manager_config_read_roots, process_sandbox_policy_read_roots,
     process_sandbox_policy_write_roots, process_sandbox_readonly_roots, process_sandbox_roots,
-    sandbox_rejection,
+    sandbox_rejection, warn_once,
 };
 use crate::VmError;
 
@@ -31,6 +31,7 @@ pub(super) fn filesystem_profile(
         symlinks: std::collections::BTreeMap::new(),
         handled_access_fs,
         read_deny_roots: super::super::process_sandbox_read_deny_roots(policy),
+        unheld_read_denials: Vec::new(),
     };
     for (path, access) in standard_device_rules() {
         push_rule(&mut profile, path, access, true)?;
@@ -147,7 +148,82 @@ pub(super) fn filesystem_profile(
             )?;
         }
     }
+    report_unheld_read_denials(policy, &profile.unheld_read_denials)?;
     Ok(profile)
+}
+
+/// A read denial inside a writable grant, which that grant cannot hold.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct UnheldReadDenial {
+    pub(super) denied: PathBuf,
+    pub(super) writable_grant: PathBuf,
+}
+
+/// Whether to issue the writable `grant`, recording each denial inside it.
+///
+/// A read-only grant is subtracted around a denial (see
+/// [`super::expand_around_denied`]). A writable one is not. Landlock could hold
+/// the denial only by withholding every directory on the path to it, and a
+/// child refused those directories cannot create a file anywhere along that
+/// path (harn#9028). The grant keeps its whole root, so the denial is not
+/// enforced inside it, and that is reported rather than silent. A grant that
+/// sits inside a denial is still withheld.
+pub(super) fn keep_writable_grant(profile: &mut FilesystemProfile, grant: &Path) -> bool {
+    if profile
+        .read_deny_roots
+        .iter()
+        .any(|denied| grant.starts_with(denied))
+    {
+        return false;
+    }
+    for denied in &profile.read_deny_roots {
+        let unheld = UnheldReadDenial {
+            denied: denied.clone(),
+            writable_grant: grant.to_path_buf(),
+        };
+        if denied.starts_with(grant) && !profile.unheld_read_denials.contains(&unheld) {
+            profile.unheld_read_denials.push(unheld);
+        }
+    }
+    true
+}
+
+/// An unheld denial refuses an `os_hardened` spawn, as every other requirement
+/// a backend cannot hold does. Other profiles run, and the warning names each
+/// denial and the writable root that contains it.
+fn report_unheld_read_denials(
+    policy: &CapabilityPolicy,
+    unheld: &[UnheldReadDenial],
+) -> Result<(), VmError> {
+    if unheld.is_empty() {
+        return Ok(());
+    }
+    let pairs = unheld
+        .iter()
+        .map(|entry| {
+            format!(
+                "'{}' inside writable root '{}'",
+                entry.denied.display(),
+                entry.writable_grant.display()
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    let fact = format!(
+        "credential read denials are not enforced for {pairs}: the writable root is granted \
+         whole, so a child can read the denied path"
+    );
+    if policy.sandbox_profile == SandboxProfile::OsHardened {
+        return Err(sandbox_rejection(format!(
+            "{fact}; the requested sandbox profile requires every denial to hold. Move the \
+             denied path out of the writable root, or grant that root read-only."
+        )));
+    }
+    warn_once(
+        &format!("sandbox_unheld_read_denial:{pairs}"),
+        &format!("{fact}. The writable roots keep their full access."),
+    );
+    Ok(())
 }
 
 /// The write side of the grant set a confined child would run under, for
@@ -179,7 +255,7 @@ pub(crate) fn installed_write_grants(
 }
 
 /// Every Landlock right that changes the filesystem.
-const LANDLOCK_WRITE_ACCESS: u64 = super::LANDLOCK_ACCESS_FS_WRITE_FILE
+pub(super) const LANDLOCK_WRITE_ACCESS: u64 = super::LANDLOCK_ACCESS_FS_WRITE_FILE
     | super::LANDLOCK_ACCESS_FS_REMOVE_DIR
     | super::LANDLOCK_ACCESS_FS_REMOVE_FILE
     | super::LANDLOCK_ACCESS_FS_MAKE_CHAR

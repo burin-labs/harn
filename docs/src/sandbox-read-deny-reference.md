@@ -101,9 +101,9 @@ than a claim the code does not honor.
 the generated profile is the enforcement.
 
 Linux has no deny rule. Landlock is allow-only, so `expand_around_denied`
-expresses a denial by not granting: it walks from the granted root toward each
-denied path and substitutes, at every level, the sibling entries that do not
-lead to the denial.
+expresses a denial by not granting: it walks from a read-only granted root
+toward each denied path and substitutes, at every level, the sibling entries
+that do not lead to the denial.
 
 - An ancestor that cannot be enumerated **ends the walk**, granting nothing
   beneath it and never the ancestor itself. That covers both a missing
@@ -118,6 +118,23 @@ lead to the denial.
   the twelve original defaults on a real home directory was 187 to 190 rules in 10 to 45
   ms; `report_default_denylist_expansion_cost` prints the number for the host
   you are on.
+
+### A denial inside a writable root
+
+On Linux, a writable root that contains a denial is granted whole rather than
+subtracted. Landlock could hold the denial only by withholding every directory
+on the path to it, and the child would then be unable to create a file
+anywhere on that path. A writable root stays writable, so the denial inside it
+is not enforced, and Harn says so.
+
+| Profile | Result |
+| --- | --- |
+| `os_hardened` | the spawn is refused; the error names each denied path and the writable root that contains it |
+| any other | the child runs with the writable root intact, and a `handler_sandbox` warning names each denied path and its writable root |
+
+A writable root that sits inside a denial is still not granted. To keep a
+credential denial enforced, put it under a read-only root, or outside every
+writable root.
 
 ## Refusal event
 
