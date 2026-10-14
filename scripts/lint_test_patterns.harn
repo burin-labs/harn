@@ -68,6 +68,9 @@ const THREAD_SLEEP_ALLOWLIST: list<string> = [
 //   - `executor_tests.rs`: pre-existing budget, fairness, and finish-order
 //     tests extracted from executor.rs's inline test module.
 const TOKIO_SLEEP_ALLOWLIST: list<string> = [
+  // Credential capture probes real OS descendant death against a calibrated
+  // unmanaged writer. Virtual Tokio time cannot advance that subprocess.
+  "crates/harn-vm/src/harness_methods/cli_credential.rs",
   // `sse_telemetry_tests.rs`: one virtual-time test measures the wait before
   // a provider's first stream frame. Under `start_paused` the runtime
   // auto-advances only when every task is idle, so `sleep` is the

@@ -8,6 +8,32 @@ use std::sync::atomic::AtomicI32;
 
 static MARKER_FD: AtomicI32 = AtomicI32::new(-1);
 
+#[test]
+fn reaped_root_cleanup_cannot_signal_an_unrelated_reused_pid() {
+    let mut unrelated = start_process_probe("immune", true, None);
+    let registration =
+        register_active_process_cleanup(Some(unrelated.id()), &new_process_cleanup_token(), None)
+            .terminate_on_drop();
+    registration.update_root_pid(None);
+    drop(registration);
+    assert!(
+        unrelated.try_wait().unwrap().is_none(),
+        "an obsolete root must not signal the current process at that PID"
+    );
+    unrelated.kill().unwrap();
+    unrelated.wait().unwrap();
+
+    let mut owned = start_process_probe("immune", true, None);
+    let registration =
+        register_active_process_cleanup(Some(owned.id()), &new_process_cleanup_token(), None)
+            .terminate_on_drop();
+    drop(registration);
+    assert!(
+        !owned.wait().unwrap().success(),
+        "a known live root must actually be terminated by the same guard"
+    );
+}
+
 extern "C" fn handle_term(_: libc::c_int) {
     // The handler can run on libtest's driver thread. Use only
     // async-signal-safe syscalls, with an already-open marker file.

@@ -320,10 +320,48 @@ static ACTIVE_PROCESS_CLEANUPS: LazyLock<Mutex<BTreeMap<u64, ActiveProcessCleanu
 /// cleanup hook when `harn run` is interrupted or reaches its run deadline.
 pub struct ActiveProcessCleanupGuard {
     id: u64,
+    terminate_on_drop: bool,
+}
+
+impl ActiveProcessCleanupGuard {
+    /// Own normal completion, timeout, and future cancellation through the
+    /// same process registry used by out-of-band interruption.
+    pub fn terminate_on_drop(mut self) -> Self {
+        self.terminate_on_drop = true;
+        self
+    }
+
+    /// Close the process group while its unreaped root still reserves the
+    /// PID. Call before waiting the child, then update the root identity.
+    pub fn terminate(&self) -> ProcessCleanupReport {
+        let entry = ACTIVE_PROCESS_CLEANUPS
+            .lock()
+            .expect("active process cleanup registry poisoned")
+            .get(&self.id)
+            .cloned();
+        entry.map_or_else(ProcessCleanupReport::default, |entry| {
+            signal_registered_process(&entry, 9)
+        })
+    }
+
+    /// Replace the root identity after waiting a Tokio child. Once reaped,
+    /// only the inherited cleanup token can name any surviving descendants.
+    pub fn update_root_pid(&self, pid: Option<u32>) {
+        if let Some(entry) = ACTIVE_PROCESS_CLEANUPS
+            .lock()
+            .expect("active process cleanup registry poisoned")
+            .get_mut(&self.id)
+        {
+            entry.pid = pid;
+        }
+    }
 }
 
 impl Drop for ActiveProcessCleanupGuard {
     fn drop(&mut self) {
+        if self.terminate_on_drop {
+            let _ = self.terminate();
+        }
         unregister_active_process_cleanup(self.id);
     }
 }
@@ -345,7 +383,10 @@ pub fn register_active_process_cleanup(
                 owner_cancel_token,
             },
         );
-    ActiveProcessCleanupGuard { id }
+    ActiveProcessCleanupGuard {
+        id,
+        terminate_on_drop: false,
+    }
 }
 
 fn unregister_active_process_cleanup(id: u64) {
@@ -419,15 +460,36 @@ fn signal_active_process_cleanups_matching(
         .collect::<Vec<_>>();
     let mut report = ProcessCleanupReport::default();
     for entry in entries {
-        if let Some(pid) = entry.pid {
-            report.merge(signal_pid_tree_group_and_token_with_report(
-                pid,
-                Some(&entry.cleanup_token),
-                signal,
-            ));
-        }
+        report.merge(signal_registered_process(&entry, signal));
     }
     report
+}
+
+fn signal_registered_process(entry: &ActiveProcessCleanup, signal: i32) -> ProcessCleanupReport {
+    if let Some(pid) = entry.pid {
+        return signal_pid_tree_group_and_token_with_report(
+            pid,
+            Some(&entry.cleanup_token),
+            signal,
+        );
+    }
+    #[cfg(unix)]
+    {
+        let mut report = ProcessCleanupReport::for_signal(None, signal);
+        for child in cleanup_token_processes(&entry.cleanup_token) {
+            signal_pid_and_group(child.pid, signal);
+            report.merge_child(child.with_signal(signal));
+        }
+        if signal == 9 {
+            wait_for_report_children_to_exit(&report, SUBPROCESS_KILL_SETTLE);
+        }
+        report.refresh_survivor_status();
+        report
+    }
+    #[cfg(not(unix))]
+    {
+        ProcessCleanupReport::for_signal(None, signal)
+    }
 }
 
 /// Put the child in its own session (`setsid()`), which also makes it the

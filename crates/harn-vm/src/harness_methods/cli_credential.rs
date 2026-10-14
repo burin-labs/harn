@@ -134,7 +134,14 @@ impl Request {
 /// This secret source never searches workspace-controlled PATH entries.
 /// Package-manager symlinks must resolve inside the corresponding installation.
 fn trusted_github_cli() -> Option<PathBuf> {
-    let mut installed = vec![
+    installed_github_cli_locations()
+        .into_iter()
+        .find_map(|(path, root)| trusted_installed_binary(&path, &root))
+}
+
+#[cfg(not(windows))]
+fn installed_github_cli_locations() -> Vec<(PathBuf, PathBuf)> {
+    vec![
         (PathBuf::from("/usr/bin/gh"), PathBuf::from("/usr/bin")),
         (
             PathBuf::from("/usr/local/bin/gh"),
@@ -144,19 +151,54 @@ fn trusted_github_cli() -> Option<PathBuf> {
             PathBuf::from("/opt/homebrew/bin/gh"),
             PathBuf::from("/opt/homebrew"),
         ),
-    ];
-    if cfg!(windows) {
-        installed.clear();
-        for key in ["ProgramFiles", "ProgramFiles(x86)"] {
-            if let Some(root) = std::env::var_os(key) {
-                let root = PathBuf::from(root).join("GitHub CLI");
-                installed.push((root.join("gh.exe"), root));
-            }
-        }
-    }
-    installed
+    ]
+}
+
+#[cfg(windows)]
+fn installed_github_cli_locations() -> Vec<(PathBuf, PathBuf)> {
+    use windows_sys::Win32::UI::Shell::{FOLDERID_ProgramFiles, FOLDERID_ProgramFilesX86};
+    [FOLDERID_ProgramFiles, FOLDERID_ProgramFilesX86]
         .into_iter()
-        .find_map(|(path, root)| trusted_installed_binary(&path, &root))
+        .filter_map(|id| windows_known_install_root(&id))
+        .map(|root| {
+            let root = root.join("GitHub CLI");
+            (root.join("gh.exe"), root)
+        })
+        .collect()
+}
+
+#[cfg(windows)]
+fn windows_known_install_root(id: &windows_sys::core::GUID) -> Option<PathBuf> {
+    use std::ffi::OsString;
+    use std::os::windows::ffi::OsStringExt;
+    use windows_sys::Win32::System::Com::CoTaskMemFree;
+    use windows_sys::Win32::UI::Shell::{SHGetKnownFolderPath, KF_FLAG_DEFAULT_PATH};
+    let mut pointer = std::ptr::null_mut();
+    // Read the OS's default installer directory, never ProgramFiles from the
+    // caller's environment or a user-redirected known-folder path.
+    let status = unsafe {
+        SHGetKnownFolderPath(
+            id,
+            KF_FLAG_DEFAULT_PATH as u32,
+            std::ptr::null_mut(),
+            &mut pointer,
+        )
+    };
+    let result = if status >= 0 && !pointer.is_null() {
+        let mut length = 0;
+        while length < 32768 && unsafe { *pointer.add(length) } != 0 {
+            length += 1;
+        }
+        (length > 0 && length < 32768).then(|| {
+            PathBuf::from(OsString::from_wide(unsafe {
+                std::slice::from_raw_parts(pointer, length)
+            }))
+        })
+    } else {
+        None
+    };
+    unsafe { CoTaskMemFree(pointer.cast()) };
+    result
 }
 
 fn trusted_installed_binary(path: &Path, root: &Path) -> Option<PathBuf> {
@@ -204,24 +246,6 @@ pub(super) async fn read(args: &[VmValue]) -> Result<String, VmError> {
     Ok(value)
 }
 
-struct PrivateCaptureCleanup {
-    pid: Option<u32>,
-    token: String,
-}
-
-impl Drop for PrivateCaptureCleanup {
-    fn drop(&mut self) {
-        if let Some(pid) = self.pid {
-            let _ = crate::op_interrupt::signal_pid_tree_group_and_token_with_report(
-                pid,
-                Some(&self.token),
-                9,
-            );
-        }
-        crate::op_interrupt::remove_process_owner_group_journal(&self.token);
-    }
-}
-
 async fn capture(
     mut command: tokio::process::Command,
     deadline: Duration,
@@ -239,15 +263,16 @@ async fn capture(
         .stderr(Stdio::null())
         .kill_on_drop(true);
     let mut child = command.spawn().map_err(|_| unavailable())?;
-    let _cleanup = PrivateCaptureCleanup {
-        pid: child.id(),
-        token: cleanup_token.clone(),
-    };
-    crate::op_interrupt::record_tokio_process_owner_group(&mut child, &cleanup_token)
+    let registration =
+        crate::op_interrupt::register_active_process_cleanup(child.id(), &cleanup_token, None)
+            .terminate_on_drop();
+    if crate::op_interrupt::record_tokio_process_owner_group(&mut child, &cleanup_token)
         .await
-        .map_err(|_| unavailable())?;
-    let _registration =
-        crate::op_interrupt::register_active_process_cleanup(child.id(), &cleanup_token, None);
+        .is_err()
+    {
+        registration.update_root_pid(child.id());
+        return Err(unavailable());
+    }
     let mut stdout = child
         .stdout
         .take()
@@ -262,7 +287,12 @@ async fn capture(
         if bytes.len() as u64 > MAX_CREDENTIAL_BYTES {
             return Err(unavailable());
         }
-        let status = child.wait().await.map_err(|_| unavailable())?;
+        // EOF closes the private capture. Kill any helpers while the original
+        // unreaped root still owns its PID and process-group identity.
+        let _ = registration.terminate();
+        let status = child.wait().await;
+        registration.update_root_pid(child.id());
+        let status = status.map_err(|_| unavailable())?;
         if !status.success() {
             return Err(unavailable());
         }
@@ -277,8 +307,10 @@ async fn capture(
     match result {
         Ok(Ok(value)) => Ok(value),
         _ => {
+            let _ = registration.terminate();
             let _ = child.kill().await;
             let _ = child.wait().await;
+            registration.update_root_pid(child.id());
             Err(unavailable())
         }
     }
@@ -347,7 +379,7 @@ mod tests {
             std::fs::remove_file(&ready).ok();
             let mut command = tokio::process::Command::new("python3");
             command.args(["-c", &parent(linger)]);
-            let result = capture(command, Duration::from_millis(1000)).await;
+            let result = capture(command, Duration::from_secs(1)).await;
             assert_eq!(result.is_err(), linger);
             assert!(
                 ready.exists(),
@@ -427,4 +459,32 @@ mod tests {
             }
         ));
     }
+}
+#[cfg(windows)]
+#[test]
+fn windows_installer_roots_ignore_caller_environment() {
+    const PROBE: &str = "HARN_TEST_CLI_INSTALL_ROOT";
+    if let Some(hostile) = std::env::var_os(PROBE) {
+        let hostile = PathBuf::from(hostile);
+        let locations = installed_github_cli_locations();
+        assert!(
+            !locations.is_empty(),
+            "calibrate a real non-null OS installer root"
+        );
+        assert!(locations
+            .iter()
+            .all(|(path, _)| !path.starts_with(&hostile)));
+        return;
+    }
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().join("GitHub CLI");
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(root.join("gh.exe"), "synthetic hostile executable").unwrap();
+    let status = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "harness_methods::cli_credential::tests::windows_installer_roots_ignore_caller_environment", "--nocapture"])
+            .env("ProgramFiles", temp.path())
+            .env("ProgramFiles(x86)", temp.path())
+            .env(PROBE, temp.path())
+            .status().unwrap();
+    assert!(status.success());
 }
