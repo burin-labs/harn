@@ -118,8 +118,9 @@ take effect in builds that do **not** pull in the full CLI.
 
 Use `harn_serve::try_load_provider_connectors` with the project directory or
 source anchor before initializing package-backed connector clients. It uses
-the CLI's package resolver, including dependency materialization, root
-overrides, provider deduplication, and explicit dependency failures.
+the shared `harn-package` resolver, also used by the CLI, including dependency
+materialization, root overrides, provider deduplication, and explicit dependency
+failures.
 
 ```rust
 # fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -143,6 +144,13 @@ missing or malformed dependency returns an error. Use
 root declarations without resolving package contributions. Keep the returned
 `ResolvedProviderConnectors` alive through initialization so concurrent
 package publication cannot collect its generation.
+
+To launch a Harn child, pass the discovered outbound IDs to
+`harn_vm::secrets::ParentSecretHandoff::capture` with the selected parent
+provider, then use `harn_hostlib::process::spawn_harn_with_parent_secrets`.
+The child independently resolves the same manifest declarations. The handoff
+keeps values out of its launch environment and closes ambient provider
+fallback, including when a required grant is missing.
 
 ## Start an embedded agent
 
