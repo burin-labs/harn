@@ -438,9 +438,23 @@ impl<'a> Scan<'a> {
     fn text_run_end(&self, start: usize) -> usize {
         let bytes = self.src.as_bytes();
         let mut probe = start;
+        let mut quoted = false;
+        let mut escaped = false;
         loop {
             while probe < bytes.len() && bytes[probe] != b'<' {
+                if escaped {
+                    escaped = false;
+                } else if bytes[probe] == b'\\' && quoted {
+                    escaped = true;
+                } else if bytes[probe] == b'"' {
+                    quoted = !quoted;
+                }
                 probe += 1;
+            }
+            if probe < bytes.len() && quoted {
+                escaped = false;
+                probe += 1;
+                continue;
             }
             if probe + 1 < bytes.len() && bytes[probe] == b'<' && bytes[probe + 1] == b'<' {
                 if let Some(after) = skip_heredoc_body(self.src, probe) {
@@ -457,15 +471,37 @@ impl<'a> Scan<'a> {
                 probe = after;
                 continue;
             }
-            // Inline '<' is literal text, not a structural boundary. Splitting
-            // JSON strings or generic types here makes prose assembly insert
-            // protocol separators inside the provider's answer.
-            if probe < bytes.len() && !self.index.is_line_leading(self.src, probe) {
+            // Literal inline '<' must stay in one text span. Protocol markup
+            // still delimits a span even beside another tag or prose.
+            if probe < bytes.len()
+                && !self.index.is_line_leading(self.src, probe)
+                && !self.inline_protocol_boundary(probe)
+            {
                 probe += 1;
                 continue;
             }
             return probe;
         }
+    }
+
+    fn inline_protocol_boundary(&self, cursor: usize) -> bool {
+        let tail = &self.src[cursor..];
+        tail.starts_with("</")
+            || self
+                .spec
+                .call_tags
+                .iter()
+                .chain(&self.spec.block_tags)
+                .chain(&self.spec.wrapper_tags)
+                .any(|tag| {
+                    tail.starts_with(&format!("<{tag}>")) || tail.starts_with(&format!("</{tag}>"))
+                })
+            || self
+                .spec
+                .markup_openers
+                .iter()
+                .any(|markup| tail.starts_with(&markup.opener))
+            || self.angle_wrapped_call(cursor).is_some()
     }
 
     /// Branch 9's extent. `<name(…)>` is a unit only when `name` is a known
