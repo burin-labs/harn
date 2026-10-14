@@ -1084,20 +1084,9 @@ pub fn push_process_sandbox_scope(
         }
     }
 
-    let mut merged_roots = if policy.workspace_roots.is_empty() {
-        Vec::new()
-    } else {
-        normalized_workspace_roots(&policy)
-    };
-    for requested in requested_roots {
-        if !merged_roots
-            .iter()
-            .any(|existing| path_is_within(&requested, existing))
-        {
-            merged_roots.push(requested);
-        }
-    }
-    policy.workspace_roots = merged_roots
+    // A per-command scope narrows the jail. Keeping a broader parent root
+    // would let the command read its controller's files and sibling jobs.
+    policy.workspace_roots = requested_roots
         .into_iter()
         .map(|root| root.display().to_string())
         .collect();

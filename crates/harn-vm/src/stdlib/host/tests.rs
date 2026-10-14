@@ -35,6 +35,40 @@ fn command_env(
 }
 
 #[test]
+fn build_sandboxed_command_refuses_cwd_outside_its_per_command_scope() {
+    crate::reset_thread_local_state();
+    let workspace = tempfile::tempdir().unwrap();
+    let worker = workspace.path().join("worker");
+    std::fs::create_dir(&worker).unwrap();
+    crate::orchestration::push_execution_policy(crate::orchestration::CapabilityPolicy {
+        sandbox_profile: crate::orchestration::SandboxProfile::Worktree,
+        workspace_roots: vec![workspace.path().to_string_lossy().into_owned()],
+        ..Default::default()
+    });
+    let mut params = crate::value::DictMap::new();
+    params.put_str("mode", "argv");
+    params.put(
+        "argv",
+        VmValue::List(Arc::new(vec![VmValue::string("/bin/true")])),
+    );
+    params.put_str("cwd", &workspace.path().to_string_lossy());
+    let mut sandbox = crate::value::DictMap::new();
+    sandbox.put(
+        "workspace_roots",
+        VmValue::List(Arc::new(vec![VmValue::string(worker.to_string_lossy())])),
+    );
+    params.put("sandbox", VmValue::dict_map(sandbox));
+    let error = build_sandboxed_command(&params, "process.exec")
+        .expect_err("a worker command cannot launch from its controller root");
+    assert!(error.to_string().contains("process.exec cwd"), "{error}");
+    assert!(
+        crate::process_sandbox::enforce_process_cwd(workspace.path()).is_ok(),
+        "the caller's original scope is restored after refusal"
+    );
+    crate::reset_thread_local_state();
+}
+
+#[test]
 fn build_sandboxed_command_forces_deterministic_message_locale() {
     // A verify command spawned by a non-Anglosphere user whose *shell*
     // exports LC_ALL (inherited via the parent env, NOT pinned by the

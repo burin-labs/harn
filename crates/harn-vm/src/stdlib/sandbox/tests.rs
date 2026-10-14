@@ -181,12 +181,20 @@ fn scoped_process_sandbox_roots_cannot_widen_explicit_workspace_roots() {
         ..CapabilityPolicy::default()
     });
 
-    assert!(
-        push_process_sandbox_scope(ProcessSandboxScope {
+    {
+        let _guard = push_process_sandbox_scope(ProcessSandboxScope {
             workspace_roots: vec![inside.to_string_lossy().into_owned()],
         })
-        .is_ok(),
-        "a command subroot inside the explicit workspace ceiling is allowed"
+        .expect("a command subroot inside the explicit workspace ceiling is allowed");
+        assert!(enforce_process_cwd(&inside).is_ok());
+        assert!(
+            enforce_process_cwd(workspace.path()).is_err(),
+            "the explicit parent must no longer be a launchable root"
+        );
+    }
+    assert!(
+        enforce_process_cwd(workspace.path()).is_ok(),
+        "the surrounding controller scope must be restored"
     );
     assert!(
         push_process_sandbox_scope(ProcessSandboxScope {

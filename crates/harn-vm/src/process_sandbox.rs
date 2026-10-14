@@ -38,6 +38,41 @@ pub use crate::stdlib::sandbox::{
 pub use crate::stdlib::git_topology::check_repository_metadata_scope;
 pub use crate::stdlib::sandbox::command_output_with_declared_roots;
 
+impl ProcessSandboxScope {
+    /// Parse the shared per-command workspace scope at the process boundary.
+    pub fn from_value(value: Option<&crate::VmValue>) -> Result<Self, crate::VmError> {
+        use crate::VmValue;
+        let invalid = |message: String| crate::VmError::TypeError(format!("sandbox: {message}"));
+        let map = match value {
+            None | Some(VmValue::Nil) => return Ok(Self::default()),
+            Some(VmValue::Dict(map)) => map,
+            Some(other) => {
+                return Err(invalid(format!("expected dict, got {}", other.type_name())))
+            }
+        };
+        let roots = match map.get("workspace_roots") {
+            None | Some(VmValue::Nil) => return Ok(Self::default()),
+            Some(VmValue::List(roots)) => roots,
+            Some(other) => {
+                return Err(invalid(format!(
+                    "workspace_roots must be a list of strings, got {}",
+                    other.type_name()
+                )))
+            }
+        };
+        let workspace_roots = roots
+            .iter()
+            .map(|root| match root {
+                VmValue::String(root) if !root.trim().is_empty() => Ok(root.to_string()),
+                _ => Err(invalid(
+                    "workspace_roots entries must be nonempty strings".into(),
+                )),
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(Self { workspace_roots })
+    }
+}
+
 /// Confine the running process, not a child, under a capability policy. An
 /// agent server calls this once before it serves; see the module for what a
 /// confined process's children inherit on each platform.

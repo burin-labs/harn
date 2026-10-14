@@ -123,17 +123,6 @@ pub(super) async fn dispatch_process_exec_after_policy(
         .or_else(|| optional_i64(params, "timeout_ms"))
         .filter(|value| *value > 0)
         .map(|value| value as u64);
-    // Optional per-call profile override. Pipelines that want to
-    // promote a single spawn to `os_hardened` (e.g. running
-    // attacker-controlled code) pass `sandbox_profile: "os_hardened"`
-    // without having to rewrite the surrounding policy. The override
-    // is scoped to this call and pops with the guard at end-of-scope.
-    let profile_guard = match optional_string(params, "sandbox_profile") {
-        Some(value) => Some(crate::process_sandbox::push_sandbox_profile_override(
-            &value,
-        )?),
-        None => None,
-    };
     let mut cmd = build_sandboxed_command(params, "process.exec")?;
     crate::op_interrupt::configure_tokio_kill_group(&mut cmd);
     let cleanup_token = crate::op_interrupt::new_process_cleanup_token();
@@ -176,7 +165,6 @@ pub(super) async fn dispatch_process_exec_after_policy(
         }
         crate::stdlib::sandbox::ProcessStdin::Null => None,
     };
-    drop(profile_guard);
     let pid = child.id();
     crate::op_interrupt::record_tokio_process_owner_group(&mut child, &cleanup_token)
         .await
@@ -401,6 +389,13 @@ pub(crate) fn build_sandboxed_command(
     params: &crate::value::DictMap,
     label: &str,
 ) -> Result<tokio::process::Command, VmError> {
+    let _profile_guard = optional_string(params, "sandbox_profile")
+        .as_deref()
+        .map(crate::process_sandbox::push_sandbox_profile_override)
+        .transpose()?;
+    let _scope_guard = crate::process_sandbox::push_process_sandbox_scope(
+        crate::process_sandbox::ProcessSandboxScope::from_value(params.get("sandbox"))?,
+    )?;
     let launch = ProcessExecLaunch::from_params(params, label)?;
     let (mut cmd, session_closed) =
         crate::process_sandbox::tokio_command_for_with_env_state(&launch.program, &launch.args)

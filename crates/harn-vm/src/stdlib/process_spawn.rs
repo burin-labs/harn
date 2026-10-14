@@ -396,14 +396,6 @@ async fn spawn(
         .filter(|value| *value > 0)
         .map(|value| value as u64);
 
-    // Honor an optional per-call sandbox_profile override identically to
-    // process.exec — the guard must be live across the command build.
-    let profile_guard = match optional_string(params, "sandbox_profile") {
-        Some(value) => Some(crate::process_sandbox::push_sandbox_profile_override(
-            &value,
-        )?),
-        None => None,
-    };
     let mut cmd = build_sandboxed_command(params, "process.spawn")?;
     crate::op_interrupt::configure_tokio_kill_group(&mut cmd);
     let cleanup_token = crate::op_interrupt::new_process_cleanup_token();
@@ -422,8 +414,6 @@ async fn spawn(
     let mut child = cmd
         .spawn()
         .map_err(|e| VmError::Runtime(format!("host_call process.spawn: {e}")))?;
-    drop(profile_guard);
-
     let pid = child.id();
     crate::op_interrupt::record_tokio_process_owner_group(&mut child, &cleanup_token)
         .await
