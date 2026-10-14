@@ -19,11 +19,8 @@
 //! on consecutive iterations of a real `agent_loop` and compare the arrays
 //! element by element. No provider and no model inference is involved.
 
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
-
-use harn_vm::bridge::HostBridge;
-use harn_vm::value::VmError;
+use crate::support::output_lines as out_lines;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 static SESSION_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -36,7 +33,6 @@ fn fresh_session_id(prefix: &str) -> String {
 }
 
 fn run_with_bridge(source: &str) -> Result<String, String> {
-    harn_vm::reset_thread_local_state();
     let session_store_root = tempfile::tempdir().map_err(|e| e.to_string())?;
     let session_store_root_path = session_store_root
         .path()
@@ -45,41 +41,7 @@ fn run_with_bridge(source: &str) -> Result<String, String> {
         .replace('"', "\\\"");
     let source = source.replace("__HARN_TEST_SESSION_STORE_ROOT__", &session_store_root_path);
     let source = format!("import {{ agent_loop }} from \"std/agent/loop\"\n{source}");
-    let chunk = harn_vm::compile_source(&source)?;
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .map_err(|e| e.to_string())?;
-    rt.block_on(async {
-        let local = tokio::task::LocalSet::new();
-        local
-            .run_until(async {
-                let bridge = Arc::new(HostBridge::from_parts(
-                    Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
-                    Arc::new(AtomicBool::new(false)),
-                    Arc::new(Mutex::new(())),
-                    1,
-                ));
-                harn_vm::llm::install_current_host_bridge(bridge.clone());
-                let mut vm = harn_vm::Vm::new();
-                harn_vm::register_vm_stdlib(&mut vm);
-                let result = vm
-                    .execute(&chunk)
-                    .await
-                    .map_err(|e: VmError| format!("{e:?}"));
-                harn_vm::llm::clear_current_host_bridge();
-                result?;
-                Ok(vm.output().to_string())
-            })
-            .await
-    })
-}
-
-fn out_lines(raw: &str) -> Vec<String> {
-    raw.lines()
-        .filter_map(|l| l.strip_prefix("[harn] "))
-        .map(|s| s.to_string())
-        .collect()
+    crate::support::run_with_host_bridge(&source)
 }
 
 /// Two-iteration `agent_loop` with one pending reminder alive across both
