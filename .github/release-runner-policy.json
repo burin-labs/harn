@@ -32,7 +32,7 @@
       "glibc_max": null,
       "release_codegen_units": 16,
       "use_sccache": "true",
-      "sccache_backend": "sticky",
+      "sccache_backend": "local",
       "runners": {
         "warm": "macos-15-intel",
         "primary": "macos-15-intel",
