@@ -1167,7 +1167,7 @@ async fn reload_swaps_routes_without_losing_inflight_request() {
         .collect();
     assert_eq!(versions, vec![1, 2]);
     assert_eq!(task_ids, vec!["task-1".to_string(), "task-2".to_string()]);
-    assert_eq!(kinds, vec!["push".to_string(), "push".to_string()]);
+    assert_eq!(kinds, ["a2a.task.update", "a2a.task.update"]);
     assert_eq!(
         dedupe_keys,
         vec!["delivery-1".to_string(), "delivery-2".to_string()]
