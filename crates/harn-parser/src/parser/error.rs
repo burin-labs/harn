@@ -1,6 +1,9 @@
 use harn_lexer::Span;
 use std::fmt;
 
+/// The retired range keyword, kept for diagnostics and the migration.
+pub const REMOVED_RANGE_KEYWORD: &str = "to";
+
 /// Parser errors.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ParserError {
@@ -13,6 +16,11 @@ pub enum ParserError {
         expected: String,
         span: Span,
     },
+    /// The retired `start to end [exclusive]` range spelling. `span` covers
+    /// the `to` keyword.
+    RemovedRangeSyntax {
+        span: Span,
+    },
 }
 
 impl ParserError {
@@ -20,7 +28,9 @@ impl ParserError {
     #[must_use]
     pub fn span(&self) -> Span {
         match self {
-            ParserError::Unexpected { span, .. } | ParserError::UnexpectedEof { span, .. } => *span,
+            ParserError::Unexpected { span, .. }
+            | ParserError::UnexpectedEof { span, .. }
+            | ParserError::RemovedRangeSyntax { span } => *span,
         }
     }
 }
@@ -40,6 +50,11 @@ impl fmt::Display for ParserError {
             ParserError::UnexpectedEof { expected, .. } => {
                 write!(f, "Unexpected end of file, expected {expected}")
             }
+            ParserError::RemovedRangeSyntax { span } => write!(
+                f,
+                "`{REMOVED_RANGE_KEYWORD}` ranges were removed; write `start..=end` (or `start..end` for `exclusive`) at {}:{}",
+                span.line, span.column
+            ),
         }
     }
 }

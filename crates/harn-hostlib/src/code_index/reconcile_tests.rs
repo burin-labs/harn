@@ -94,8 +94,8 @@ fn calls(state: &IndexState) -> Vec<(String, String)> {
             .filter(|e| e.kind == EdgeKind::Calls)
         {
             calls.push((
-                site.path.clone(),
-                state.symbols.node(edge.to).unwrap().path.clone(),
+                site.path.to_string(),
+                state.symbols.node(edge.to).unwrap().path.to_string(),
             ));
         }
     }

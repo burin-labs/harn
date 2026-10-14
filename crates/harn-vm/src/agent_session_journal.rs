@@ -12,7 +12,10 @@ use harn_session_store::{
     SessionWriteLease,
 };
 
-use crate::agent_sessions::event_facts as facts;
+use crate::agent_sessions::session_event::{
+    CompactionRecord, MessageRemovedRecord, SessionEventPayload, TranscriptKind, TranscriptRecord,
+    SESSION_EVENT_SCHEMA_HEADER, SESSION_EVENT_SCHEMA_VERSION,
+};
 use crate::stdlib::session_store;
 use crate::value::{DictMap, VmError};
 
@@ -35,29 +38,9 @@ struct JournalConfig {
     workflow_learning_eligibility: String,
 }
 
-#[derive(Clone)]
-enum TranscriptMutation {
-    MessageAdded {
-        transcript_event: serde_json::Value,
-        raw_message: serde_json::Value,
-    },
-    AuditEventAdded {
-        transcript_event: serde_json::Value,
-    },
-    MessagesReplaced {
-        messages: Vec<serde_json::Value>,
-        summary: Option<String>,
-        source_event_ids: Vec<Option<String>>,
-    },
-    MessageRemoved {
-        source_event_id: String,
-        raw_message: serde_json::Value,
-    },
-}
-
 pub(crate) struct JournalState {
     config: JournalConfig,
-    pending: VecDeque<TranscriptMutation>,
+    pending: VecDeque<SessionEventPayload>,
     first_event_id: Option<u64>,
     terminal_queued: bool,
     execution_id: Option<String>,
@@ -140,8 +123,8 @@ impl JournalState {
         self.pending
             .front()
             .cloned()
-            .map(|mutation| {
-                append_event_for_mutation(&self.config, mutation)
+            .map(|payload| {
+                append_event_for_payload(&self.config, payload)
                     .map(|event| (self.config.store.clone(), event))
             })
             .transpose()
@@ -153,7 +136,7 @@ impl JournalState {
             .pending
             .iter()
             .cloned()
-            .map(|mutation| append_event_for_mutation(&self.config, mutation))
+            .map(|payload| append_event_for_payload(&self.config, payload))
             .collect::<Result<Vec<_>, _>>()?;
         Ok((self.config.store.clone(), events))
     }
@@ -294,10 +277,7 @@ pub(crate) fn enqueue_message(
 ) {
     enqueue(
         journal,
-        TranscriptMutation::MessageAdded {
-            transcript_event,
-            raw_message,
-        },
+        SessionEventPayload::Transcript(TranscriptRecord::new(transcript_event, Some(raw_message))),
     );
 }
 
@@ -307,7 +287,7 @@ pub(crate) fn enqueue_audit_event(
 ) {
     enqueue(
         journal,
-        TranscriptMutation::AuditEventAdded { transcript_event },
+        SessionEventPayload::Transcript(TranscriptRecord::new(transcript_event, None)),
     );
 }
 
@@ -319,11 +299,11 @@ pub(crate) fn enqueue_messages_replaced(
 ) {
     enqueue(
         journal,
-        TranscriptMutation::MessagesReplaced {
+        SessionEventPayload::Compaction(CompactionRecord {
             messages,
             summary,
             source_event_ids,
-        },
+        }),
     );
 }
 
@@ -334,16 +314,16 @@ pub(crate) fn enqueue_message_removed(
 ) {
     enqueue(
         journal,
-        TranscriptMutation::MessageRemoved {
+        SessionEventPayload::MessageRemoved(MessageRemovedRecord {
             source_event_id,
-            raw_message,
-        },
+            raw_message: Some(raw_message),
+        }),
     );
 }
 
-fn enqueue(journal: &mut Option<JournalState>, mutation: TranscriptMutation) {
+fn enqueue(journal: &mut Option<JournalState>, payload: SessionEventPayload) {
     if let Some(journal) = journal {
-        journal.pending.push_back(mutation);
+        journal.pending.push_back(payload);
     }
 }
 
@@ -371,88 +351,40 @@ pub(crate) async fn flush(session_id: &str) -> Result<(), VmError> {
     Ok(())
 }
 
-fn append_event_for_mutation(
+fn append_event_for_payload(
     config: &JournalConfig,
-    mutation: TranscriptMutation,
+    payload: SessionEventPayload,
 ) -> Result<AppendEvent, VmError> {
-    match mutation {
-        TranscriptMutation::MessageAdded {
-            transcript_event,
-            raw_message,
-        } => {
-            let kind = event_kind_for_transcript(&transcript_event, true);
-            let actor = json_string(&transcript_event, "role");
-            let mut event = AppendEvent::new(
-                kind,
-                serde_json::json!({
-                    "transcript_event": transcript_event,
-                    "raw_message": raw_message,
-                }),
-            );
-            event.actor = actor;
-            let source_event_id = source_event_id(&event.payload);
-            let message_id = message_id(&event.payload);
-            let tool_call_id = tool_call_id(&event.payload);
-            // A narrated native call has a public message as well as tool
-            // lifecycle events. Converting that message into a tool row lets
-            // the result merge erase its text and chronological position.
-            let has_public_text = facts::string_at(&event.payload, facts::VISIBILITY).as_deref()
-                == Some("public")
-                && facts::semantic_string(&event.payload, &facts::TEXT).is_some();
-            if tool_call_id.is_some()
-                && matches!(&event.kind, SessionEventKind::Message)
-                && !has_public_text
-            {
-                event.kind = SessionEventKind::ToolCall;
-            }
-            apply_identity(
-                &mut event,
-                config,
-                source_event_id,
-                message_id,
-                tool_call_id,
-            )?;
-            Ok(event)
+    let (actor, source_event_id, message_id, tool_call_id) = match &payload {
+        SessionEventPayload::Transcript(record) => (
+            record
+                .transcript_event
+                .role
+                .clone()
+                .filter(|role| !role.trim().is_empty()),
+            record
+                .transcript_event
+                .id
+                .clone()
+                .filter(|id| !id.trim().is_empty()),
+            record.message_id(),
+            record.journal_tool_call_id(),
+        ),
+        SessionEventPayload::Compaction(_) => (None, None, None, None),
+        SessionEventPayload::MessageRemoved(record) => {
+            (None, Some(record.source_event_id.clone()), None, None)
         }
-        TranscriptMutation::AuditEventAdded { transcript_event } => {
-            let kind = event_kind_for_transcript(&transcript_event, false);
-            let actor = json_string(&transcript_event, "role");
-            let mut event = AppendEvent::new(
-                kind,
-                serde_json::json!({"transcript_event": transcript_event}),
-            );
-            event.actor = actor;
-            let source_event_id = source_event_id(&event.payload);
-            let tool_call_id = tool_call_id(&event.payload);
-            apply_identity(&mut event, config, source_event_id, None, tool_call_id)?;
-            Ok(event)
-        }
-        TranscriptMutation::MessagesReplaced {
-            messages,
-            summary,
-            source_event_ids,
-        } => {
-            let mut event = messages_replaced_event(messages, summary, source_event_ids);
-            apply_identity(&mut event, config, None, None, None)?;
-            Ok(event)
-        }
-        TranscriptMutation::MessageRemoved {
-            source_event_id,
-            raw_message,
-        } => {
-            let mut event = AppendEvent::new(
-                SessionEventKind::Custom {
-                    custom_type: "message_removed".to_string(),
-                },
-                serde_json::json!({
-                    "source_event_id": source_event_id,
-                    "raw_message": raw_message,
-                }),
-            );
-            apply_identity(&mut event, config, Some(source_event_id), None, None)?;
-            Ok(event)
-        }
-    }
+    };
+    let mut event = AppendEvent::new(payload.store_kind(), payload.to_json());
+    event.actor = actor;
+    apply_identity(
+        &mut event,
+        config,
+        source_event_id,
+        message_id,
+        tool_call_id,
+    )?;
+    Ok(event)
 }
 
 pub(crate) fn messages_replaced_event(
@@ -460,38 +392,17 @@ pub(crate) fn messages_replaced_event(
     summary: Option<String>,
     source_event_ids: Vec<Option<String>>,
 ) -> AppendEvent {
-    AppendEvent::new(
-        SessionEventKind::Compaction,
-        serde_json::json!({
-            "messages": messages,
-            "summary": summary,
-            "source_event_ids": source_event_ids,
-        }),
-    )
-}
-
-fn event_kind_for_transcript(event: &serde_json::Value, message_default: bool) -> SessionEventKind {
-    match json_string(event, "kind").as_deref() {
-        Some("tool_result") => SessionEventKind::ToolResult,
-        Some("tool_call") => SessionEventKind::ToolCall,
-        Some("plan" | "plan_document") => SessionEventKind::Plan,
-        Some("compaction") => SessionEventKind::Compaction,
-        Some("system_reminder") => SessionEventKind::SystemReminder,
-        Some("reminder") => SessionEventKind::Reminder,
-        Some("permission_decision") => SessionEventKind::PermissionDecision,
-        // An accepted control word. The typed variant is what lets an
-        // exit authority read "the user stopped this run" instead of
-        // matching prose; see `harn_session_store::control`.
-        Some(harn_session_store::CONTROL_EVENT_KIND) => SessionEventKind::Control,
-        Some("message") if message_default => SessionEventKind::Message,
-        Some(kind) => SessionEventKind::Custom {
-            custom_type: kind.to_string(),
-        },
-        None if message_default => SessionEventKind::Message,
-        None => SessionEventKind::Custom {
-            custom_type: "transcript_event".to_string(),
-        },
-    }
+    let payload = SessionEventPayload::Compaction(CompactionRecord {
+        messages,
+        summary,
+        source_event_ids,
+    });
+    let mut event = AppendEvent::new(payload.store_kind(), payload.to_json());
+    event.headers.insert(
+        SESSION_EVENT_SCHEMA_HEADER.to_string(),
+        SESSION_EVENT_SCHEMA_VERSION.to_string(),
+    );
+    event
 }
 
 fn apply_identity(
@@ -522,6 +433,10 @@ fn apply_identity(
     event.headers.insert(
         WORKFLOW_LEARNING_ELIGIBILITY_HEADER.to_string(),
         config.workflow_learning_eligibility.clone(),
+    );
+    event.headers.insert(
+        SESSION_EVENT_SCHEMA_HEADER.to_string(),
+        SESSION_EVENT_SCHEMA_VERSION.to_string(),
     );
     Ok(())
 }
@@ -563,73 +478,61 @@ impl TranscriptHydration {
             summary,
             publications,
         } = self;
-        if matches!(
-            event.kind,
-            SessionEventKind::Message | SessionEventKind::ToolCall | SessionEventKind::ToolResult
-        ) {
-            if let Some(message) = event.payload.get("raw_message").cloned() {
-                messages.push((event.headers.get("source_event_id").cloned(), message));
-                return;
-            }
-        }
-        match &event.kind {
-            SessionEventKind::Custom { custom_type } if custom_type == "assistant_publication" => {
-                publications.extend(crate::llm::assistant_publication::replay(
-                    messages,
-                    &event.payload["transcript_event"]["metadata"],
-                    event.headers.get("source_event_id").map(String::as_str),
-                ));
-            }
-            SessionEventKind::Compaction => {
-                if let Some(replaced) = event
-                    .payload
-                    .get("messages")
-                    .and_then(|value| value.as_array())
-                {
-                    let source_event_ids = event
-                        .payload
-                        .get("source_event_ids")
-                        .and_then(serde_json::Value::as_array);
-                    *messages = replaced
-                        .iter()
-                        .enumerate()
-                        .map(|(index, message)| {
-                            let source_event_id = source_event_ids
-                                .and_then(|ids| ids.get(index))
-                                .and_then(serde_json::Value::as_str)
-                                .map(str::to_string);
-                            (source_event_id, message.clone())
-                        })
-                        .collect();
+        let source_event_id = event.headers.get("source_event_id");
+        match SessionEventPayload::decode(event) {
+            Some(SessionEventPayload::Transcript(record)) => {
+                if matches!(
+                    event.kind,
+                    SessionEventKind::Message
+                        | SessionEventKind::ToolCall
+                        | SessionEventKind::ToolResult
+                ) {
+                    if let Some(message) = record.raw_message {
+                        messages.push((source_event_id.cloned(), message));
+                        return;
+                    }
                 }
-                *summary = event
-                    .payload
-                    .get("summary")
-                    .and_then(serde_json::Value::as_str)
-                    .map(str::to_string);
-            }
-            SessionEventKind::Custom { custom_type } if custom_type == "message_removed" => {
-                if let Some(source_event_id) = event
-                    .payload
-                    .get("source_event_id")
-                    .and_then(serde_json::Value::as_str)
+                if record
+                    .transcript_event
+                    .is(TranscriptKind::AssistantPublication)
                 {
+                    publications.extend(crate::llm::assistant_publication::replay(
+                        messages,
+                        &record.transcript_event.metadata_json(),
+                        source_event_id.map(String::as_str),
+                    ));
+                }
+            }
+            Some(SessionEventPayload::Compaction(record)) => {
+                *messages = record
+                    .messages
+                    .into_iter()
+                    .enumerate()
+                    .map(|(index, message)| {
+                        (
+                            record.source_event_ids.get(index).cloned().flatten(),
+                            message,
+                        )
+                    })
+                    .collect();
+                *summary = record.summary;
+            }
+            Some(SessionEventPayload::MessageRemoved(record)) => {
+                if let Some(index) = messages
+                    .iter()
+                    .rposition(|(source, _)| source.as_deref() == Some(&record.source_event_id))
+                {
+                    messages.remove(index);
+                } else if let Some(raw_message) = &record.raw_message {
                     if let Some(index) = messages
                         .iter()
-                        .rposition(|(source, _)| source.as_deref() == Some(source_event_id))
+                        .rposition(|(_, message)| message == raw_message)
                     {
                         messages.remove(index);
-                    } else if let Some(raw_message) = event.payload.get("raw_message") {
-                        if let Some(index) = messages
-                            .iter()
-                            .rposition(|(_, message)| message == raw_message)
-                        {
-                            messages.remove(index);
-                        }
                     }
                 }
             }
-            _ => {}
+            None => {}
         }
     }
 
@@ -668,51 +571,6 @@ impl TranscriptHydration {
             publications,
         )
     }
-}
-
-fn source_event_id(payload: &serde_json::Value) -> Option<String> {
-    payload
-        .get("transcript_event")
-        .and_then(|event| json_string(event, "id"))
-}
-
-fn message_id(payload: &serde_json::Value) -> Option<String> {
-    let message = payload.get("raw_message")?;
-    json_string(message, "message_id").or_else(|| json_string(message, "messageId"))
-}
-
-fn tool_call_id(payload: &serde_json::Value) -> Option<String> {
-    let transcript_event = payload.get("transcript_event");
-    [
-        payload.get("raw_message"),
-        transcript_event,
-        transcript_event.and_then(|event| event.get("metadata")),
-    ]
-    .into_iter()
-    .flatten()
-    .find_map(tool_call_id_from_value)
-}
-
-fn tool_call_id_from_value(value: &serde_json::Value) -> Option<String> {
-    json_string(value, "tool_call_id")
-        .or_else(|| json_string(value, "tool_use_id"))
-        .or_else(|| json_string(value, "toolUseId"))
-        .or_else(|| {
-            value
-                .get("tool_calls")
-                .and_then(serde_json::Value::as_array)
-                .filter(|calls| calls.len() == 1)
-                .and_then(|calls| calls.first())
-                .and_then(|call| json_string(call, "id"))
-        })
-}
-
-fn json_string(value: &serde_json::Value, key: &str) -> Option<String> {
-    value
-        .get(key)
-        .and_then(serde_json::Value::as_str)
-        .filter(|value| !value.trim().is_empty())
-        .map(str::to_string)
 }
 
 #[cfg(test)]

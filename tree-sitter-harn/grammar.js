@@ -1,6 +1,36 @@
 /// <reference types="tree-sitter-cli/dsl" />
 
 const KEYWORD_IDENTIFIERS = require("./grammar/keywords");
+// Expression precedence groups, generated from
+// crates/harn-parser/src/operators.rs. Every expression operator below reads
+// its level from here so the editor grammar groups exactly like the parser.
+const PREC = require("./grammar/precedence");
+
+// `try* EXPR` is not a table operator: it is a prefix form whose operand
+// extends as far right as possible, so it sits above every table group.
+const TRY_STAR_PREC = 20; // must stay above PREC.postfix
+
+// Statement-level tie-break, not an operator level: it only has to beat the
+// zero precedence of a bare identifier primary (see require_statement).
+const CONTEXTUAL_STATEMENT_PREC = 1;
+
+// Words that introduce a construct only in position (see
+// crates/harn-parser/src/parser/contextual.rs and the lexer's
+// CONTEXTUAL_STATEMENT_KEYWORDS). Tree-sitter returns the keyword token
+// wherever the construct is valid, so each word is also accepted as an
+// ordinary identifier in value position.
+const CONTEXTUAL_VALUE_WORDS = [
+  "scope",
+  "block",
+  "select",
+  "tool",
+  "skill",
+  "eval_pack",
+  "mutex",
+  "deadline",
+  "require",
+  "emit",
+];
 
 module.exports = grammar({
   name: "harn",
@@ -18,36 +48,35 @@ module.exports = grammar({
     // same way `dict_literal`/`shape_type` is already disambiguated above.
     [$._primary, $.typed_parameter, $.type_annotation],
     [$._statement, $._expression],
+    // `deadline` is also an identifier in value position (`deadline - 1`);
+    // GLR keeps both readings until a trailing block settles it.
+    [$.deadline_block, $._primary],
+    // `deadline(x) { }` versus a call `deadline(x)`.
+    [$.parenthesized_expression, $._argument_element],
+    // `mutex(k) { }` versus a call `mutex(k)`.
+    [$.mutex_block, $._argument_element],
     [$._primary, $.type_annotation],
     [$._primary, $.typed_parameter],
     [$.typed_parameter, $.shape_field],
     [$.parallel_expression],
     [$.typed_parameter, $.type_annotation],
-    [$.type_arguments, $.type_annotation],
     [$.shape_type],
-    [$.block],
-    [$.closure],
     [$.select_block],
     [$.parallel_each_expression],
-    [$.parallel_settle_expression],
     [$._primary, $.struct_construct],
     [$.struct_declaration],
-    [$.tool_declaration],
     [$.impl_block],
     [$.interface_declaration],
     [$.match_statement],
-    [$.skill_declaration, $.pipe_expression, $.binary_expression, $.method_call, $.property_access],
-    [$.skill_declaration, $.pipe_expression, $.nil_coalescing_expression, $.binary_expression, $.method_call, $.property_access],
-    [$.eval_pack_declaration, $.pipe_expression, $.binary_expression, $.method_call, $.property_access],
-    [$.eval_pack_declaration, $.pipe_expression, $.nil_coalescing_expression, $.binary_expression, $.method_call, $.property_access],
-    [$.pipe_expression, $.binary_expression, $.unary_expression, $.method_call, $.property_access],
-    [$.pipe_expression, $.binary_expression, $.method_call, $.property_access],
-    [$.pipe_expression, $.nil_coalescing_expression, $.binary_expression, $.method_call, $.property_access],
-    [$.pipe_expression, $.ternary_expression, $.binary_expression, $.method_call, $.property_access],
-    [$.pipe_expression, $.range_expression, $.binary_expression, $.method_call, $.property_access],
+    // A line break may precede a continuable binary operator (`??`, `..`,
+    // `+`, `|>`, `.`), so a newline after an operand is either a statement
+    // separator or a continuation. These sets list every rule whose operand
+    // can end at that newline.
+    [$.skill_declaration, $.pipe_expression, $.nil_coalescing_expression, $.binary_expression, $.range_expression, $.method_call, $.property_access],
+    [$.eval_pack_declaration, $.pipe_expression, $.nil_coalescing_expression, $.binary_expression, $.range_expression, $.method_call, $.property_access],
     [$.pipe_expression, $.nil_coalescing_expression, $.binary_expression, $.range_expression, $.method_call, $.property_access],
-    [$.pipe_expression, $.ternary_expression, $.nil_coalescing_expression, $.binary_expression, $.method_call, $.property_access],
-    [$.pipe_expression, $.nil_coalescing_expression, $.binary_expression, $.unary_expression, $.method_call, $.property_access],
+    [$.pipe_expression, $.ternary_expression, $.nil_coalescing_expression, $.binary_expression, $.range_expression, $.method_call, $.property_access],
+    [$.pipe_expression, $.nil_coalescing_expression, $.binary_expression, $.range_expression, $.unary_expression, $.method_call, $.property_access],
   ],
 
   word: ($) => $.identifier,
@@ -508,12 +537,16 @@ module.exports = grammar({
     guard_statement: ($) =>
       seq("guard", field("condition", $._expression), "else", field("else_body", $.block)),
 
+    // `require`/`emit` start a statement unless the next token continues a
+    // value expression. Every token that can also start an expression (`-`,
+    // `(`, `[`, a literal) therefore selects the statement, which this
+    // precedence encodes over the plain-identifier reading.
     require_statement: ($) =>
-      seq(
+      prec(CONTEXTUAL_STATEMENT_PREC, seq(
         "require",
         field("condition", $._expression),
         optional(seq(",", repeat(lineBreak($)), field("message", $._expression)))
-      ),
+      )),
 
     mutex_block: ($) =>
       seq(
@@ -556,7 +589,7 @@ module.exports = grammar({
       prec.right(seq("yield", optional($._expression))),
 
     emit_expression: ($) =>
-      prec.right(seq("emit", $._expression)),
+      prec.right(CONTEXTUAL_STATEMENT_PREC, seq("emit", $._expression)),
 
     fn_declaration: ($) =>
       seq(
@@ -756,48 +789,56 @@ module.exports = grammar({
       ),
 
     pipe_expression: ($) =>
-      prec.left(1, seq($._expression, repeat($._newline), "|>", repeat($._newline), $._expression)),
+      prec.left(PREC.pipe, seq($._expression, repeat($._newline), "|>", repeat($._newline), $._expression)),
 
     ternary_expression: ($) =>
-      prec.right(2, seq($._expression, "?", $._expression, ":", $._expression)),
+      prec.right(PREC.ternary, seq($._expression, "?", $._expression, ":", $._expression)),
 
-    // `??` binds tighter than `+ -` but looser than `* / %`, matching the
-    // canonical parser (crates/harn-parser parse_nil_coalescing). Keeping the
-    // tree-sitter precedence in sync ensures structural tools see the same
-    // grouping the interpreter does, e.g. `a ?? b + c` is `(a ?? b) + c` and
-    // `a ?? b * c` is `a ?? (b * c)`.
+    // `??` sits between comparison and range: `a ?? 0 == 1` is
+    // `(a ?? 0) == 1` and `b ?? 0 + 1` is `b ?? (0 + 1)`.
     nil_coalescing_expression: ($) =>
-      prec.left(9, seq($._expression, repeat($._newline), "??", repeat($._newline), $._expression)),
+      prec.left(PREC.nil_coalescing, seq($._expression, repeat($._newline), "??", repeat($._newline), $._expression)),
 
     binary_expression: ($) =>
       choice(
-        prec.left(4, seq($._expression, repeat($._newline), "||", repeat($._newline), $._expression)),
-        prec.left(5, seq($._expression, repeat($._newline), "&&", repeat($._newline), $._expression)),
-        prec.left(6, seq($._expression, repeat($._newline), choice("==", "!="), repeat($._newline), $._expression)),
-        prec.left(7, seq($._expression, repeat($._newline), choice("<", ">", "<=", ">="), repeat($._newline), $._expression)),
-        prec.left(7, seq($._expression, "in", $._expression)),
-        prec.left(7, seq($._expression, "not", "in", $._expression)),
-        prec.left(8, seq($._expression, repeat($._newline), "+", repeat($._newline), $._expression)),
-        prec.left(8, seq($._expression, "-", $._expression)),
-        prec.left(10, seq($._expression, repeat($._newline), "*", repeat($._newline), $._expression)),
-        prec.left(10, seq($._expression, repeat($._newline), "/", repeat($._newline), $._expression)),
-        prec.left(10, seq($._expression, repeat($._newline), "%", repeat($._newline), $._expression)),
-        // `**` binds tighter than a unary prefix on its left operand, so
-        // `-2 ** 2` is `-(2 ** 2)` (see unary_expression below at prec 11).
-        prec.right(12, seq($._expression, repeat($._newline), "**", repeat($._newline), $._expression))
+        prec.left(PREC.logical_or, seq($._expression, repeat($._newline), "||", repeat($._newline), $._expression)),
+        prec.left(PREC.logical_and, seq($._expression, repeat($._newline), "&&", repeat($._newline), $._expression)),
+        prec.left(PREC.equality, seq($._expression, repeat($._newline), choice("==", "!="), repeat($._newline), $._expression)),
+        prec.left(PREC.comparison, seq($._expression, repeat($._newline), choice("<", ">", "<=", ">="), repeat($._newline), $._expression)),
+        prec.left(PREC.comparison, seq($._expression, "in", $._expression)),
+        prec.left(PREC.comparison, seq($._expression, "not", "in", $._expression)),
+        prec.left(PREC.additive, seq($._expression, repeat($._newline), "+", repeat($._newline), $._expression)),
+        prec.left(PREC.additive, seq($._expression, "-", $._expression)),
+        prec.left(PREC.multiplicative, seq($._expression, repeat($._newline), "*", repeat($._newline), $._expression)),
+        prec.left(PREC.multiplicative, seq($._expression, repeat($._newline), "/", repeat($._newline), $._expression)),
+        prec.left(PREC.multiplicative, seq($._expression, repeat($._newline), "%", repeat($._newline), $._expression)),
+        // `**` binds tighter than a prefix on its left operand, so `-2 ** 2`
+        // is `-(2 ** 2)`; its right operand may itself be a prefix (`2 ** -1`).
+        prec.right(PREC.exponent, seq($._expression, repeat($._newline), "**", repeat($._newline), $._expression))
       ),
 
+    // `a..b` excludes the end and `a..=b` includes it. The canonical parser
+    // rejects a chained `a..b..c`. Tree-sitter has no non-associative
+    // precedence: restricting both operands to non-range expressions turns
+    // every operator after a range end into a reduce/reduce conflict that
+    // static precedence resolves wrongly (`0..n - 1` became `(0..n) - 1`).
+    // The editor grammar therefore accepts the chain as left-nested; the
+    // compiler still reports it.
     range_expression: ($) =>
-      prec.left(7, seq($._expression, "to", $._expression, optional("exclusive"))),
+      prec.left(PREC.range, seq(
+        field("start", $._expression),
+        repeat($._newline),
+        field("operator", choice("..", "..=")),
+        repeat($._newline),
+        field("end", $._expression)
+      )),
 
-    // Unary prefix binds looser than `**` (prec 12) so `-2 ** 2` parses as
-    // `-(2 ** 2)`, and tighter than `* / %` (prec 10) so `-a * b` is `(-a) * b`.
     unary_expression: ($) =>
-      prec.right(11, seq(choice("!", "-"), $._expression)),
+      prec.right(PREC.prefix, seq(choice("!", "-"), $._expression)),
 
     call_expression: ($) =>
       prec.left(
-        13,
+        PREC.postfix,
         seq(
           field("function", choice(
             $._value_identifier,
@@ -824,7 +865,7 @@ module.exports = grammar({
     // matching how generic calls are written in real Harn corpora.
     generic_call_expression: ($) =>
       prec.left(
-        13,
+        PREC.postfix,
         seq(
           field("function", choice(
             $.identifier,
@@ -843,7 +884,7 @@ module.exports = grammar({
 
     method_call: ($) =>
       prec.left(
-        13,
+        PREC.postfix,
         seq(
           field("object", $._expression),
           repeat($._newline),
@@ -859,7 +900,7 @@ module.exports = grammar({
 
     property_access: ($) =>
       prec.left(
-        13,
+        PREC.postfix,
         seq(
           field("object", $._expression),
           repeat($._newline),
@@ -870,7 +911,7 @@ module.exports = grammar({
 
     subscript_expression: ($) =>
       prec.left(
-        13,
+        PREC.postfix,
         seq(
           field("object", $._expression),
           choice("[", "?[", "?.["),
@@ -881,7 +922,7 @@ module.exports = grammar({
 
     slice_expression: ($) =>
       prec.left(
-        13,
+        PREC.postfix,
         seq(
           field("object", $._expression),
           "[",
@@ -893,10 +934,10 @@ module.exports = grammar({
       ),
 
     try_unwrap_expression: ($) =>
-      prec.left(13, seq($._expression, token.immediate("?"))),
+      prec.left(PREC.postfix, seq($._expression, token.immediate("?"))),
 
     non_null_expression: ($) =>
-      prec.left(13, seq($._expression, token.immediate("!"))),
+      prec.left(PREC.postfix, seq($._expression, token.immediate("!"))),
 
     parenthesized_expression: ($) => seq("(", $._expression, ")"),
 
@@ -932,7 +973,7 @@ module.exports = grammar({
     // Whitespace between `try` and `*` is allowed but not required —
     // matching the runtime parser, which treats `try*` as a token pair.
     try_star_expression: ($) =>
-      prec.right(20, seq("try", "*", field("operand", $._expression))),
+      prec.right(TRY_STAR_PREC, seq("try", "*", field("operand", $._expression))),
 
     parallel_options: ($) =>
       seq(
@@ -1091,8 +1132,7 @@ module.exports = grammar({
     // identifier nodes for their ordinary value, call and assignment uses.
     _value_identifier: ($) => choice(
       $.identifier,
-      alias("scope", $.identifier),
-      alias("block", $.identifier)
+      ...CONTEXTUAL_VALUE_WORDS.map((word) => alias(word, $.identifier))
     ),
 
     list_literal: ($) =>
@@ -1210,8 +1250,7 @@ module.exports = grammar({
       choice(
         $.fn_type,
         seq("[", $.type_annotation, "]"),
-        seq($.identifier, "<", $.type_annotation, ",", $.type_annotation, ">"),
-        seq($.identifier, "<", $.type_annotation, ">"),
+        seq($.identifier, $._type_argument_list),
         prec.left(1, seq($.type_annotation, "|", $.type_annotation)),
         prec.left(2, seq($.type_annotation, "&", $.type_annotation)),
         // Postfix `?` is sugar for `T | nil`. Higher precedence than
@@ -1223,6 +1262,19 @@ module.exports = grammar({
         $.raw_string_literal,
         $.integer_literal,
         seq("-", $.integer_literal)
+      ),
+
+    // `Name<A, B, ...>` in annotation position: any arity, a trailing comma,
+    // and line breaks between arguments (`Result<\n  Ok,\n  Err,\n>`).
+    _type_argument_list: ($) =>
+      seq(
+        "<",
+        repeat(lineBreak($)),
+        $.type_annotation,
+        repeat(seq(",", repeat(lineBreak($)), $.type_annotation)),
+        optional(","),
+        repeat(lineBreak($)),
+        ">"
       ),
 
     fn_type: ($) =>

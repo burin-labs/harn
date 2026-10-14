@@ -371,7 +371,6 @@ jobs:
       contents: read
       actions: write
     env:
-      CARGO_PROFILE_DEV_DEBUG: line-tables-only
       # Keep this lane on the combined Harn/AOT-generator Cargo invocation.
       # Supplying a warmed HARN_BIN selects the narrow release-gate path and
       # forfeits feature unification across the shared cold dependency graph.
@@ -426,8 +425,6 @@ jobs:
     timeout-minutes: 30
     permissions:
       contents: read
-    env:
-      CARGO_PROFILE_DEV_DEBUG: line-tables-only
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -670,13 +667,7 @@ jobs:
             name: Check Rust code (lean LSP features)
           - kind: freshness-checker
             name: Check Rust code (freshness checker)
-    # Linux-only: emit line-tables-only debuginfo for dev builds. Trims link
-    # time and disk on these link-bound lanes while keeping panic line numbers
-    # for nextest backtraces. NOT applied to the Windows/macOS jobs — #2127/
-    # #2128/#2129 found `line-tables-only` REGRESSED Windows compile time, and
-    # the macOS lane mirrors that decision.
     env:
-      CARGO_PROFILE_DEV_DEBUG: line-tables-only
       # Link the Linux Rust lanes with mold. Warm lanes become link-bound once
       # the persistent local cache has hits, so mold lowers the remaining
       # wall-clock floor. GOTCHA: a job-level RUSTFLAGS env var
@@ -842,7 +833,6 @@ jobs:
       contents: read
       actions: write
     env:
-      CARGO_PROFILE_DEV_DEBUG: line-tables-only
       RUSTFLAGS: "-D warnings -Clink-arg=-fuse-ld=mold"
       SCCACHE_CACHE_SIZE: 15G
       HARN_RUNNER_TIER: ${{ 'github-hosted' }}
@@ -1028,7 +1018,6 @@ jobs:
     outputs:
       workspace_tests_ok: ${{ steps.workspace-tests-ok.outputs.ok }}
     env:
-      CARGO_PROFILE_DEV_DEBUG: line-tables-only
       RUSTFLAGS: "-D warnings -Clink-arg=-fuse-ld=mold"
       # The producer is the only sticky-cache writer. Fifteen GiB covered the
       # previously measured workspace graph and caps storage near $7.50/month.
@@ -1252,7 +1241,6 @@ jobs:
             partition: vm:3/3
     env:
       # Match rust-check-inputs, so the workspace-tests cache key restores.
-      CARGO_PROFILE_DEV_DEBUG: line-tables-only
       RUSTFLAGS: "-D warnings -Clink-arg=-fuse-ld=mold"
       HARN_RUNNER_TIER: github-hosted
     steps:
@@ -1364,7 +1352,6 @@ jobs:
     # cache; keep ~2x headroom so a slow runner day cancels nothing.
     timeout-minutes: 35
     env:
-      CARGO_PROFILE_DEV_DEBUG: line-tables-only
       # Match rust-check-inputs RUSTFLAGS. Nested cargo fixtures (hostlib verdict tests)
       # inherit this and must be able to link; mold is not on the image by default.
       RUSTFLAGS: "-D warnings -Clink-arg=-fuse-ld=mold"
@@ -1452,7 +1439,6 @@ jobs:
     # artifact throughput varied from ~1.5m to ~16.5m and forced a 30m cap).
     timeout-minutes: 15
     env:
-      CARGO_PROFILE_DEV_DEBUG: line-tables-only
       RUSTFLAGS: "-D warnings -Clink-arg=-fuse-ld=mold"
       # This job is the one runner class the workflow relies on for a real
       # Landlock boundary, so it declares that. The shared guard in the Linux
@@ -1947,7 +1933,6 @@ jobs:
     outputs:
       gate_ok: ${{ steps.stack-frames-ok.outputs.ok }}
     env:
-      CARGO_PROFILE_DEV_DEBUG: line-tables-only
       HARN_RUNNER_TIER: github-hosted
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

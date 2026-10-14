@@ -216,7 +216,7 @@ fn runs_report_correlates_root_and_child_on_the_real_cli_path() {
         String::from_utf8_lossy(&output.stderr)
     );
     let value = stdout_json(&output);
-    assert_eq!(value["schema"], "harn.run_report.v1");
+    assert_eq!(value["schema"], "harn.run_report.v2");
     assert_eq!(value["root_run_id"], "root");
     assert_eq!(value["agents"].as_array().unwrap().len(), 2);
     assert_eq!(value["delegations"][0]["forward_pointer"], true);

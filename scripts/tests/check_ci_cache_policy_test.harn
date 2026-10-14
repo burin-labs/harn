@@ -802,7 +802,7 @@ pipeline test_cache_refresh_admits_capacity_without_clearing_current_generation(
   task: unknown,
 ) {
   const command =
-    "./scripts/prune_ci_cache_generations.sh --ensure-headroom \"$HARN_CACHE_SAVE_HEADROOM_BYTES\""
+    "./scripts/prune_ci_cache_generations.sh --ensure-headroom \"$HARN_CACHE_SAVE_HEADROOM_BYTES\" --replacing \"$HARN_CACHE_FAMILY_PREFIX\""
   const job = {steps: [{name: "Prepare Linux cache generation save", run: command}]}
   assert_eq(rust_cache_generation_admission_errors(job), [])
   assert_eq(len(rust_cache_generation_admission_errors({steps: []})), 1)

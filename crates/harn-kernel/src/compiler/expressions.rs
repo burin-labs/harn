@@ -1,5 +1,5 @@
 use harn_lexer::StringSegment;
-use harn_parser::{DictEntry, Node, SNode, TypedParam};
+use harn_parser::{BinaryOperator, DictEntry, Node, SNode, TypedParam};
 
 use crate::chunk::Op;
 use crate::BuiltinId;
@@ -27,12 +27,12 @@ impl Compiler {
 
     pub(super) fn compile_binary_op(
         &mut self,
-        op: &str,
+        op: BinaryOperator,
         left: &SNode,
         right: &SNode,
     ) -> Result<(), CompileError> {
         match op {
-            "&&" => {
+            BinaryOperator::And => {
                 self.compile_node(left)?;
                 let jump = self.chunk.emit_jump(Op::JumpIfFalse, self.line);
                 self.chunk.emit(Op::Pop, self.line);
@@ -43,7 +43,7 @@ impl Compiler {
                 self.chunk.emit(Op::Not, self.line);
                 return Ok(());
             }
-            "||" => {
+            BinaryOperator::Or => {
                 self.compile_node(left)?;
                 let jump = self.chunk.emit_jump(Op::JumpIfTrue, self.line);
                 self.chunk.emit(Op::Pop, self.line);
@@ -53,7 +53,7 @@ impl Compiler {
                 self.chunk.emit(Op::Not, self.line);
                 return Ok(());
             }
-            "??" => {
+            BinaryOperator::NilCoalesce => {
                 self.compile_node(left)?;
                 self.chunk.emit(Op::Dup, self.line);
                 self.chunk.emit(Op::Nil, self.line);
@@ -68,7 +68,7 @@ impl Compiler {
                 self.chunk.patch_jump(end);
                 return Ok(());
             }
-            "|>" => {
+            BinaryOperator::Pipe => {
                 self.compile_node(left)?;
                 // `value |> func(_, arg)` desugars to `value |> { __pipe -> func(__pipe, arg) }`.
                 if contains_pipe_placeholder(right) {
@@ -112,22 +112,25 @@ impl Compiler {
         Ok(())
     }
 
-    pub(super) fn emit_generic_binary_op(&mut self, op: &str) -> Result<(), CompileError> {
+    pub(super) fn emit_generic_binary_op(
+        &mut self,
+        op: BinaryOperator,
+    ) -> Result<(), CompileError> {
         match op {
-            "+" => self.chunk.emit(Op::Add, self.line),
-            "-" => self.chunk.emit(Op::Sub, self.line),
-            "*" => self.chunk.emit(Op::Mul, self.line),
-            "/" => self.chunk.emit(Op::Div, self.line),
-            "%" => self.chunk.emit(Op::Mod, self.line),
-            "**" => self.chunk.emit(Op::Pow, self.line),
-            "==" => self.chunk.emit(Op::Equal, self.line),
-            "!=" => self.chunk.emit(Op::NotEqual, self.line),
-            "<" => self.chunk.emit(Op::Less, self.line),
-            ">" => self.chunk.emit(Op::Greater, self.line),
-            "<=" => self.chunk.emit(Op::LessEqual, self.line),
-            ">=" => self.chunk.emit(Op::GreaterEqual, self.line),
-            "in" => self.chunk.emit(Op::Contains, self.line),
-            "not_in" => {
+            BinaryOperator::Add => self.chunk.emit(Op::Add, self.line),
+            BinaryOperator::Sub => self.chunk.emit(Op::Sub, self.line),
+            BinaryOperator::Mul => self.chunk.emit(Op::Mul, self.line),
+            BinaryOperator::Div => self.chunk.emit(Op::Div, self.line),
+            BinaryOperator::Mod => self.chunk.emit(Op::Mod, self.line),
+            BinaryOperator::Pow => self.chunk.emit(Op::Pow, self.line),
+            BinaryOperator::Eq => self.chunk.emit(Op::Equal, self.line),
+            BinaryOperator::Neq => self.chunk.emit(Op::NotEqual, self.line),
+            BinaryOperator::Lt => self.chunk.emit(Op::Less, self.line),
+            BinaryOperator::Gt => self.chunk.emit(Op::Greater, self.line),
+            BinaryOperator::Lte => self.chunk.emit(Op::LessEqual, self.line),
+            BinaryOperator::Gte => self.chunk.emit(Op::GreaterEqual, self.line),
+            BinaryOperator::In => self.chunk.emit(Op::Contains, self.line),
+            BinaryOperator::NotIn => {
                 self.chunk.emit(Op::Contains, self.line);
                 self.chunk.emit(Op::Not, self.line);
             }

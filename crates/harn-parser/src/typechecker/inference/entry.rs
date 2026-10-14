@@ -20,6 +20,7 @@ use super::decls::{CallableBodyContract, CallableDeclarationContext};
 
 impl TypeChecker {
     pub(in crate::typechecker) fn check_inner(mut self, program: &[SNode]) -> TypeCheckFacts {
+        crate::analysis::record_typecheck_run();
         self.check_parameter_annotations(program);
         // Pre-pass mutations: nobody else holds an `Rc` to `self.scope`
         // yet, so `Rc::make_mut` resolves to a direct `&mut TypeScope`

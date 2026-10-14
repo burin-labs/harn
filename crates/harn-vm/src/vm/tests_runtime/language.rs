@@ -261,7 +261,7 @@ fn test_contains_is_the_membership_method_on_every_collection() {
 harness.stdio.log("hello world".contains("world"))
 harness.stdio.log(["alpha", "beta"].contains("beta"))
 harness.stdio.log(set("read", "write").contains("write"))
-harness.stdio.log((1 to 4).contains(3))
+harness.stdio.log((1..=4).contains(3))
 }"#,
     );
     assert_eq!(out, "[harn] true\n[harn] true\n[harn] true\n[harn] true");

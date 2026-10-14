@@ -1434,7 +1434,7 @@ pipeline default(harness: Harness) {
                     r"
 pipeline default(harness: Harness) {
   let total = 0
-  for i in 0 to 10000 {
+  for i in 0..=10000 {
     total = total + i
   }
   return total
@@ -1473,7 +1473,7 @@ pipeline default(harness: Harness) {
                     r"
 pipeline default(harness: Harness) {
   let total = 0
-  for i in 0 to 10000 {
+  for i in 0..=10000 {
     total = total + i
   }
   return total

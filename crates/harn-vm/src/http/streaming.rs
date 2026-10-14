@@ -22,9 +22,10 @@ use super::{
     DEFAULT_MAX_STREAM_EVENTS, DEFAULT_TRANSPORT_RECEIVE_TIMEOUT_MS, MAX_SSE_SERVER_STREAMS,
     MAX_SSE_STREAMS,
 };
+use event_source::{EventSource, SseEvent};
 use futures::StreamExt;
-use reqwest_eventsource::{Event as SseEvent, EventSource};
 
+mod event_source;
 mod websocket;
 
 struct SseMock {

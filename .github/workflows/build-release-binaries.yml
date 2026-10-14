@@ -633,14 +633,13 @@ jobs:
     # macOS is the slowest surface; if it cannot finish inside this budget,
     # fail loudly so the release queue does not burn hours silently.
     timeout-minutes: 150
-    # Every Cargo consumer in this job must resolve the same release artifact.
-    # Keeping these at job scope prevents diagnostics such as cargo-bloat from
-    # silently selecting Cargo's default release profile and paying for a
-    # second LTO link after the canonical build has already completed.
+    # Every Cargo consumer in this job builds `--profile dist` (Cargo.toml owns
+    # its LTO and strip settings) and must resolve the same artifact. The
+    # codegen-unit count is per-target policy a profile cannot express, so it
+    # stays here at job scope, where diagnostics such as cargo-bloat see it too
+    # instead of paying for a second LTO link with different settings.
     env:
-      CARGO_PROFILE_RELEASE_LTO: thin
-      CARGO_PROFILE_RELEASE_CODEGEN_UNITS: ${{ matrix.release_codegen_units }}
-      CARGO_PROFILE_RELEASE_STRIP: symbols
+      CARGO_PROFILE_DIST_CODEGEN_UNITS: ${{ matrix.release_codegen_units }}
       # Compilation, size measurement, and cargo-bloat attribution must share
       # one build identity. Step-scoping this value made the growth signal
       # misclassify required-AOT release binaries as non-comparable.
@@ -878,9 +877,9 @@ jobs:
           # via argv[0] dispatch; we ship them as symlinks/copies at package
           # time. Building only `harn` runs the expensive final LTO link once
           # per target instead of three times.
-          cargo build --locked --release -p harn-cli --bin harn --features embedded-stdlib --target "$HARN_RELEASE_TARGET"
+          cargo build --locked --profile dist -p harn-cli --bin harn --features embedded-stdlib --target "$HARN_RELEASE_TARGET"
           if [[ "$HARN_RELEASE_TARGET" == *unknown-linux-gnu ]]; then
-            cargo build --locked --release -p harn-cli --bin harn-container-probe --features embedded-stdlib --target "$HARN_RELEASE_TARGET"
+            cargo build --locked --profile dist -p harn-cli --bin harn-container-probe --features embedded-stdlib --target "$HARN_RELEASE_TARGET"
           fi
           duration=$((SECONDS - start))
           echo "duration_seconds=${duration}" >> "$GITHUB_OUTPUT"
@@ -897,8 +896,8 @@ jobs:
             echo "| Duration | ${duration}s |"
             echo "| Rust wrapper | ${RUSTC_WRAPPER:-<none>} |"
             echo "| Swatinem cache hit | $HARN_RELEASE_RUST_CACHE_HIT |"
-            echo "| Release LTO | ${CARGO_PROFILE_RELEASE_LTO:-<unset>} |"
-            echo "| Release codegen units | ${CARGO_PROFILE_RELEASE_CODEGEN_UNITS:-<unset>} |"
+            echo "| Cargo profile | dist |"
+            echo "| Codegen units | ${CARGO_PROFILE_DIST_CODEGEN_UNITS:-<unset>} |"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Enforce portable Linux glibc floor
@@ -910,7 +909,7 @@ jobs:
         run: |
           for binary in harn harn-container-probe; do
             scripts/check_linux_glibc_floor.sh \
-              "target/${HARN_RELEASE_TARGET}/release/${binary}" \
+              "target/${HARN_RELEASE_TARGET}/dist/${binary}" \
               "$HARN_RELEASE_GLIBC_MAX"
           done
 
@@ -1072,14 +1071,14 @@ jobs:
           rm -f "$CERT_FILE"
 
           SIGN_ID="Developer ID Application: Burin Labs, LLC (${APPLE_TEAM_ID})"
-          bin="target/${TARGET}/release/harn"
+          bin="target/${TARGET}/dist/harn"
           echo "Signing $bin"
           codesign --force --options runtime --timestamp \
             --sign "$SIGN_ID" \
             "$bin"
           codesign --verify --strict --verbose=2 "$bin"
 
-          (cd "target/${TARGET}/release" && zip -j "$NOTARY_ZIP" harn)
+          (cd "target/${TARGET}/dist" && zip -j "$NOTARY_ZIP" harn)
           notary_submit_with_retry() {
             local attempt=1
             local max_attempts=4
@@ -1146,7 +1145,7 @@ jobs:
           set -euo pipefail
           start=$SECONDS
           mkdir -p dist
-          cp "target/${HARN_RELEASE_TARGET}/release/harn" dist/harn
+          cp "target/${HARN_RELEASE_TARGET}/dist/harn" dist/harn
           for notice in LICENSE-MIT LICENSE-APACHE THIRD-PARTY-NOTICES.txt; do
             test -s "dist/release-notices/$notice"
             cp "dist/release-notices/$notice" "dist/$notice"
@@ -1160,7 +1159,7 @@ jobs:
           ln -s harn dist/harn-dap
           package_entries=(harn harn-dap harn-lsp LICENSE-MIT LICENSE-APACHE THIRD-PARTY-NOTICES.txt)
           if [[ "$HARN_RELEASE_TARGET" == *unknown-linux-gnu ]]; then
-            cp "target/${HARN_RELEASE_TARGET}/release/harn-container-probe" dist/harn-container-probe
+            cp "target/${HARN_RELEASE_TARGET}/dist/harn-container-probe" dist/harn-container-probe
             package_entries+=(harn-container-probe)
           fi
           cd dist
@@ -1189,7 +1188,7 @@ jobs:
           set -euo pipefail
           start=$SECONDS
           mkdir -p dist
-          cp target/${{ matrix.target }}/release/harn.exe dist/harn.exe
+          cp target/${{ matrix.target }}/dist/harn.exe dist/harn.exe
           for notice in LICENSE-MIT LICENSE-APACHE THIRD-PARTY-NOTICES.txt; do
             test -s "dist/release-notices/$notice"
             cp "dist/release-notices/$notice" "dist/$notice"
@@ -1241,7 +1240,7 @@ jobs:
           HARN_RELEASE_TARGET: ${{ matrix.target }}
         run: |
           set -euo pipefail
-          harn_bin="target/${HARN_RELEASE_TARGET}/release/harn"
+          harn_bin="target/${HARN_RELEASE_TARGET}/dist/harn"
           if [[ ! -f "$harn_bin" ]]; then
             echo "::error::harn binary not found at $harn_bin"
             exit 1
@@ -1330,7 +1329,7 @@ jobs:
           # Named explicitly rather than resolved through CARGO_TARGET_DIR: the
           # build writes to ./target regardless of the ambient value this
           # workflow exports.
-          harn_bin="./target/${HARN_RELEASE_TARGET}/release/harn"
+          harn_bin="./target/${HARN_RELEASE_TARGET}/dist/harn"
           "$harn_bin" run scripts/check_binary_size.harn -- \
             --no-build --skip-bloat \
             --target "$HARN_RELEASE_TARGET" --bin "$harn_bin" \
@@ -1351,7 +1350,7 @@ jobs:
           # The build writes to ./target regardless of the ambient
           # CARGO_TARGET_DIR this workflow exports, and the budget step above
           # reads it from there. Name the same path explicitly.
-          harn_bin="./target/${HARN_RELEASE_TARGET}/release/harn"
+          harn_bin="./target/${HARN_RELEASE_TARGET}/dist/harn"
           mkdir -p "$BINARY_SIZE_REPORT_DIR"
 
           # cargo-bloat performs an analysis build. Restore the exact binary
@@ -1379,10 +1378,10 @@ jobs:
           # gate fails. Record each status instead of letting the first failure
           # prevent the second command from running.
           set +e
-          cargo bloat --release --crates -p harn-cli --bin harn --target "$HARN_RELEASE_TARGET" -n 40 \
+          cargo bloat --profile dist --crates -p harn-cli --bin harn --target "$HARN_RELEASE_TARGET" -n 40 \
             > "$crates_report" 2>&1
           crates_status=$?
-          cargo bloat --release -p harn-cli --bin harn --target "$HARN_RELEASE_TARGET" --filter deserialize -n 100 \
+          cargo bloat --profile dist -p harn-cli --bin harn --target "$HARN_RELEASE_TARGET" --filter deserialize -n 100 \
             > "$filtered_report" 2>&1
           filtered_status=$?
           set -e

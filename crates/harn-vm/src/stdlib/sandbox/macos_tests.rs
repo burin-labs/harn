@@ -392,10 +392,10 @@ fn sandbox_profile_honors_explicit_process_presets() {
 fn sandbox_profile_allows_package_manager_config_read_only() {
     let temp_home = tempfile::tempdir().expect("temp home");
     std::fs::write(
-        temp_home.path().join(".npmrc"),
-        "registry=https://registry.example\n",
+        temp_home.path().join(".gitconfig"),
+        "[user]\n\tname = Example\n",
     )
-    .expect("write npmrc");
+    .expect("write gitconfig");
 
     let package_roots = super::super::package_manager_config_read_roots_for_home(temp_home.path());
     let profile = render_profile_with_extra_read_roots(
@@ -404,13 +404,13 @@ fn sandbox_profile_allows_package_manager_config_read_only() {
         &package_roots,
         &[],
     );
-    let npmrc_path = super::super::package_manager_config_read_roots_for_home(temp_home.path())
+    let gitconfig_path = super::super::package_manager_config_read_roots_for_home(temp_home.path())
         .into_iter()
-        .find(|path| path.ends_with(".npmrc"))
-        .expect("npmrc root")
+        .find(|path| path.ends_with(".gitconfig"))
+        .expect("gitconfig root")
         .display()
         .to_string();
-    let escaped = sandbox_profile_escape(&npmrc_path);
+    let escaped = sandbox_profile_escape(&gitconfig_path);
 
     assert!(
         profile.contains(&format!("(allow file-read* (subpath \"{escaped}\"))")),

@@ -211,7 +211,7 @@ pub fn truncate_text(text: string?, max_chars: int? = 4000, marker: any = nil) {
   if limit <= 0 || len(value) <= limit {
     return value
   }
-  const suffix = marker ?? ("\n... truncated " + to_string(len(value) - limit) + " chars ...")
+  const suffix = marker ?? "\n... truncated " + to_string(len(value) - limit) + " chars ..."
   return substring(value, 0, limit) + suffix
 }
 

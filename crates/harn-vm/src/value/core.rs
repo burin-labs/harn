@@ -923,13 +923,15 @@ impl VmValue {
                     out.push_str("<stream>");
                 }
             }
-            // Print form mirrors source syntax: `1 to 5` / `0 to 3 exclusive`.
+            // Print form mirrors source syntax: `1..=5` / `0..3`.
             // `.to_list()` is the explicit path to materialize for display.
             VmValue::Range(r) => {
-                let _ = write!(out, "{} to {}", r.start, r.end);
-                if !r.inclusive {
-                    out.push_str(" exclusive");
-                }
+                let operator = if r.inclusive {
+                    harn_parser::operators::RANGE_INCLUSIVE
+                } else {
+                    harn_parser::operators::RANGE_EXCLUSIVE
+                };
+                let _ = write!(out, "{}{operator}{}", r.start, r.end);
             }
             VmValue::Iter(h) => {
                 if matches!(&*h.lock(), crate::vm::iter::VmIter::Exhausted) {

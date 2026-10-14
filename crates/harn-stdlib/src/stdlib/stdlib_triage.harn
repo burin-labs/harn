@@ -553,7 +553,7 @@ pub fn triage_normalize(input: any, options: dict? = nil) -> TriageEvent {
   const summary = __triage_text(__triage_summary(provider, source_kind, input, payload, opts))
   const event = {
     schema: TRIAGE_EVENT_SCHEMA,
-    id: opts.id ?? input?.triage_event_id ?? ("triage_evt_" + substring(sha256(dedupe_key), 0, 24)),
+    id: opts.id ?? input?.triage_event_id ?? "triage_evt_" + substring(sha256(dedupe_key), 0, 24),
     provider: provider,
     source_kind: source_kind,
     source_id: source_id,

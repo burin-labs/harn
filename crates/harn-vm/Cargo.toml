@@ -150,13 +150,18 @@ serde_json = { version = "1", features = ["unbounded_depth"] }
 semver = "1"
 rand = "0.10"
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync", "time", "test-util", "process", "io-util", "io-std", "macros"] }
-reqwest = { version = "0.12", default-features = false, features = ["json", "multipart", "rustls-tls"] }
-reqwest-eventsource = "0.6"
+reqwest = { workspace = true, features = ["form", "json", "multipart", "stream"] }
+eventsource-stream = "0.2"
 rmcp = { version = "=3.1.4", default-features = false, features = ["client", "transport-child-process"] }
-tokio-tungstenite = { version = "0.30", default-features = false, features = ["connect", "rustls-tls-webpki-roots"] }
+rustls.workspace = true
+rustls-platform-verifier.workspace = true
+# `websocket_connect` passes its own platform-verifier connector, so the
+# bundled roots this feature names are never consulted; the feature only
+# compiles tungstenite's rustls support in.
+tokio-tungstenite = { version = "0.30", default-features = false, features = ["connect", "rustls-tls-native-roots"] }
 jsonwebtoken = { version = "11", default-features = false, features = ["use_pem", "aws_lc_rs"] }
 jsonschema.workspace = true
-rcgen = "0.14"
+rcgen.workspace = true
 libc = "0.2"
 tokio-stream = "0.1"
 base64 = "0.23"
@@ -275,8 +280,6 @@ criterion = "0.8"
 harn-clock = { path = "../harn-clock", version = "=0.10.166", features = ["test-support"] }
 http = "1"
 proptest = "1"
-rcgen = "0.14"
-rustls = { version = "0.23", features = ["aws-lc-rs"] }
 static_assertions = "1.1"
 tempfile = "3"
 

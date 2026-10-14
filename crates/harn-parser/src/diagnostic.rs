@@ -695,6 +695,9 @@ pub fn parser_error_code(err: &crate::parser::ParserError) -> crate::diagnostic_
         crate::parser::ParserError::UnexpectedEof { .. } => {
             crate::diagnostic_codes::Code::ParserUnexpectedEof
         }
+        crate::parser::ParserError::RemovedRangeSyntax { .. } => {
+            crate::diagnostic_codes::Code::ParserRemovedRangeSyntax
+        }
     }
 }
 
@@ -839,6 +842,9 @@ pub fn parser_error_message(err: &ParserError) -> String {
         ParserError::UnexpectedEof { expected, .. } => {
             format!("unexpected end of file, expected {expected}")
         }
+        ParserError::RemovedRangeSyntax { .. } => {
+            "`start to end` ranges were removed; ranges are `start..end` (end excluded) or `start..=end` (end included)".to_string()
+        }
     }
 }
 
@@ -847,11 +853,15 @@ pub fn parser_error_label(err: &ParserError) -> &'static str {
         ParserError::Unexpected { got, .. } if got == "Newline" => "line break not allowed here",
         ParserError::Unexpected { .. } => "unexpected token",
         ParserError::UnexpectedEof { .. } => "file ends here",
+        ParserError::RemovedRangeSyntax { .. } => "retired range keyword",
     }
 }
 
 pub fn parser_error_help(err: &ParserError) -> Option<&'static str> {
     match err {
+        ParserError::RemovedRangeSyntax { .. } => Some(
+            "write `a..=b` for `a to b` and `a..b` for `a to b exclusive`; `harn fix --apply --migrate-operator-syntax <path>` rewrites every range and keeps `??` groupings",
+        ),
         ParserError::UnexpectedEof { expected, .. } | ParserError::Unexpected { expected, .. } => {
             match expected.as_str() {
                 "}" => Some("add a closing `}` to finish this block"),

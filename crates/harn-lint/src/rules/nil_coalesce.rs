@@ -9,7 +9,7 @@
 //! lints with local fixes that remove the operator and fallback.
 
 use harn_lexer::{FixEdit, Span};
-use harn_parser::{visit, BindingPattern, DiagnosticCode as Code, Node, SNode};
+use harn_parser::{visit, BinaryOperator, BindingPattern, DiagnosticCode as Code, Node, SNode};
 
 use crate::diagnostic::{LintDiagnostic, LintSeverity};
 
@@ -34,7 +34,7 @@ pub(crate) fn check_nil_coalesce_noop(
         let Node::BinaryOp { op, left, right } = &node.node else {
             return;
         };
-        if op != "??" {
+        if !matches!(op, BinaryOperator::NilCoalesce) {
             return;
         }
         if matches!(right.node, Node::NilLiteral) {
@@ -100,7 +100,7 @@ fn assert_false_fallback(argument: &SNode) -> Option<(&SNode, &SNode)> {
     let Node::BinaryOp { op, left, right } = &argument.node else {
         return None;
     };
-    (op == "??" && matches!(right.node, Node::BoolLiteral(false)))
+    (matches!(op, BinaryOperator::NilCoalesce) && matches!(right.node, Node::BoolLiteral(false)))
         .then_some((left.as_ref(), right.as_ref()))
 }
 

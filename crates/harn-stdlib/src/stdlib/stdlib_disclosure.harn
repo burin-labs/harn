@@ -180,7 +180,7 @@ fn __principal(subject: string, config: DisclosureConfig, role: string, position
   const label = to_string(profile?.label ?? profile?.slack_label ?? profile?.display_name ?? name)
   const email_domain = to_string(config.defaults?.email_domain ?? "actors.harn.invalid")
   const email = to_string(
-    profile?.email ?? (__slug(parts.kind + "+" + parts.id) + "@" + email_domain),
+    profile?.email ?? __slug(parts.kind + "+" + parts.id) + "@" + email_domain,
   )
   let principal = {
     subject: subject,

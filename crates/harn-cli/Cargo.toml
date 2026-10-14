@@ -104,7 +104,7 @@ nu-ansi-term = "0.50"
 toml = "1.1"
 serde = { version = "1", features = ["derive"] }
 notify = "8"
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "blocking", "stream"] }
+reqwest = { workspace = true, features = ["blocking", "form", "json", "stream"] }
 futures = "0.3"
 blake3 = "1.8.7"
 # Read the linker-owned ELF build-id, Mach-O LC_UUID, or Windows CodeView
@@ -138,7 +138,7 @@ time = { version = "0.3", features = ["formatting", "parsing"] }
 tempfile = "3"
 include_dir = "0.7"
 uuid = { version = "1", features = ["v4", "v7"] }
-rustls = { version = "0.23", features = ["aws-lc-rs"] }
+rustls.workspace = true
 tracing = "0.1"
 thiserror = "2"
 which = "8"
@@ -216,8 +216,8 @@ embedded-stdlib = ["harn-stdlib-artifacts/embed"]
 harn-clock = { path = "../harn-clock", version = "=0.10.166", features = ["test-support"] }
 harn-mcp-compat = { path = "../harn-mcp-compat" }
 syn = { version = "3", features = ["full", "visit"] }
-rcgen = "0.14"
-tokio-tungstenite = { version = "0.30", default-features = false, features = ["connect", "rustls-tls-webpki-roots"] }
+rcgen.workspace = true
+tokio-tungstenite = { version = "0.30", default-features = false, features = ["connect"] }
 wat = "1"
 
 [lints]

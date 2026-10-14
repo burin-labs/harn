@@ -586,8 +586,8 @@ for {key, value} in my_dict.entries() { /* work */ }
 // [0, 1, 2, 3, 4] — half-open, Python-style
 const first_5 = range(5)
 const middle  = range(3, 7)      // [3, 4, 5, 6]
-const inc     = 1 to 5            // [1, 2, 3, 4, 5] — inclusive default
-const exc     = 1 to 5 exclusive  // [1, 2, 3, 4]    — half-open
+const inc     = 1..=5            // [1, 2, 3, 4, 5]: includes the end
+const exc     = 1..5             // [1, 2, 3, 4]: excludes it
 ```
 
 Note: `for` heads accept three destructuring shapes, each matching what the
@@ -995,10 +995,11 @@ Optional chaining works for properties, methods, and subscripts:
 return `nil` when the receiver is `nil`; otherwise they perform the same
 access as `.`, method call, or `[]`.
 
-`??` binds tighter than comparisons/logical operators and looser than
-multiplication. Read `classified == maybe_flag ?? false` as
-`classified == (maybe_flag ?? false)`. `harn fmt` inserts those clarifying
-parentheses automatically.
+`??` binds like Swift's: looser than arithmetic and ranges, tighter than
+comparisons and logical operators. Read `count ?? 0 + 1` as
+`count ?? (0 + 1)` and `classified == maybe_flag ?? false` as
+`classified == (maybe_flag ?? false)`. `harn fmt` keeps clarifying
+parentheses around a `??` that is an operand of another operator.
 
 `try* EXPR` (prefix) evaluates `EXPR` and rethrows any throw so an
 enclosing `try { ... } catch (e) { ... }` sees it. Use it instead of
@@ -1276,7 +1277,7 @@ explicitly; `.zip` and `.enumerate` also emit pairs.
 
 ### Ranges and iters
 
-`Range` (from `a to b` / `range(n)`) is its own value type with O(1)
+`Range` (from `a..b`, `a..=b`, or `range(n)`) is its own value type with O(1)
 `.len() / .first() / .last() / .contains(x)` and `r[k]` subscript —
 no materialization. Calling any lazy combinator on a Range
 (`.map / .filter / .flat_map / .take / .skip / .take_while /
@@ -1284,7 +1285,7 @@ no materialization. Calling any lazy combinator on a Range
 returns a lazy `iter`. Sinks (`.to_list / .sum / .reduce / ...`)
 drain through the iter. In short: Range handles integer ranges
 with O(1) ops; Iter handles arbitrary lazy sequences. Chaining
-`(1 to 10000000).map(...).take(5).to_list()` finishes instantly
+`(1..=10000000).map(...).take(5).to_list()` finishes instantly
 because only 5 elements flow through the pipeline.
 
 ## Regex

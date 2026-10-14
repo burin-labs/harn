@@ -1,5 +1,6 @@
 .PHONY: repository-policies repository-policies-source run-policy-list setup setup-rust setup-bootstrap clean-stale-targets install-hooks build build-harn build-release sign-local check fmt fmt-app-host fmt-harn fmt-harn-fix lint lint-md lint-actions lint-actions-source lint-actions-harn lint-harn lint-harn-conformance lint-harn-scripts lint-harn-trees lint-harn-stdlib-metadata check-app-host spec-lint gen-openapi-snapshot check-openapi-snapshot test test-focused test-one test-e2e test-cargo test-fast test-harn-scripts test-agent-scripts test-pr-gate-scripts conformance mechanism-contracts protocol-conformance mcp-conformance replay-oracle replay-bench eval-tool-calls bench bench-vm bench-vm-micro bench-vm-clone check-vm-rss-soak check-test-case-performance bench-llm bench-orchestration bench-cli-cold-start loadgen-postgres all release-gate release-smoke smoke-audit portal portal-check portal-demo gen-cli-aot check-cli-aot gen-highlight check-highlight gen-prompt-grammar check-prompt-grammar gen-builtin-methods check-builtin-methods gen-protocol-artifacts check-protocol-artifacts gen-connector-schemas check-connector-schemas gen-harness-migrations check-harness-migrations check-downstream-protocol-artifacts check-bindings gen-session-bundle-schema check-session-bundle-schema gen-run-view-fixtures check-run-view-fixtures gen-trigger-quickref check-trigger-quickref gen-cli-surface check-cli-surface gen-provider-matrix check-provider-matrix check-provider-support check-provider-catalog check-connector-matrix check-trigger-examples check-docs-model-refs check-docs-snippets check-docs-symbols check-docs-cli-flags check-docs-links check-site-snippets check-docs-workflow-quickstart sync-language-spec check-language-spec sync-diagnostics-catalog check-diagnostics-catalog lint-test-patterns lint-diagnostic-codes check-stdlib-host-neutral check-public-product-names check-stdlib-strict-types check-stdlib-public-return-types check-schema-strict check-optional-dep-feature-contracts check-receipt-structs lint-no-rust-prompt-prose lint-cancellation-owner lint-agent-path-normalization lint-no-xfail-regression check-provider-catalog-drift check-ported-handler-loc check-harn-vm-layering check-source-file-lengths check-stack-frames check-test-target-coverage check-gate-path-visibility check-python-boundary check-harn-syntax-sensitive-scans check-agent-guidance check-crate-sibling-versions check-protocol-symbol-removals check-dependabot-groups gen-tree-sitter-keywords check-tree-sitter-keywords gen-tree-sitter-parser check-tree-sitter-parser check-grammar-keywords gen-grammar-fitness check-grammar-fitness check-loud-boundaries check-turn-end-boundary check-generated-registry gen-release-contract check-release-contract check-release-audit-contract check-ci-cache-policy check-rust-test-lane-policy check-cargo-lock-contract gen-vm-exposures check-vm-exposures check-binary-size-policy check-all-features
 .PHONY: test-pr-gate-post-warm-integrations test-rust-lint-lane-cache gh-check-state
+.PHONY: gen-operator-precedence check-operator-precedence
 .PHONY: check-docs check-docs-portable check-docs-exact check-docs-cookbook-entrypoints
 .PHONY: check-typescript-protocol-binding check-swift-protocol-binding
 .PHONY: check-provider-catalog-drift-core
@@ -66,6 +67,7 @@ all: fmt
 	trap 'rm -rf "$$stable_root"' EXIT; \
 	harn_bin="$$(./scripts/snapshot_harn_bin.sh "$$harn_bin" "$$stable_root/harn-bin")" || exit 1; \
 	$(MAKE) HARN_BIN="$$harn_bin" check-agent-gates || exit 1; \
+	$(MAKE) HARN_BIN="$$harn_bin" check-operator-precedence || exit 1; \
 	$(MAKE) test-release-notices || exit 1; \
 	$(MAKE) check-aws-config-vendor test-aws-config-vendor || exit 1; \
 	$(MAKE) HARN_BIN="$$harn_bin" lint lint-md lint-actions lint-harn check-app-host spec-lint check-openapi-snapshot fmt-harn test test-harn-scripts test-agent-scripts test-pr-gate-scripts test-rust-lint-lane-cache conformance protocol-conformance mcp-conformance replay-oracle replay-bench check-highlight check-portable-benchmark-schema check-portable-demo-package check-prompt-grammar check-builtin-methods check-protocol-artifacts check-connector-schemas check-harness-migrations check-cli-surface check-bindings check-session-bundle-schema check-run-view-fixtures check-docs lint-test-patterns lint-diagnostic-codes check-stdlib-host-neutral check-public-product-names check-stdlib-strict-types check-stdlib-public-return-types check-schema-strict check-optional-dep-feature-contracts check-receipt-structs check-provider-catalog-drift check-source-file-lengths check-test-target-coverage check-gate-path-visibility check-python-boundary check-harn-syntax-sensitive-scans check-agent-guidance check-crate-sibling-versions check-protocol-symbol-removals check-dependabot-groups check-tree-sitter-keywords check-tree-sitter-parser check-grammar-keywords check-grammar-fitness check-loud-boundaries check-turn-end-boundary check-release-contract check-release-audit-contract check-ci-cache-policy check-rust-test-lane-policy check-cargo-lock-contract check-scheduled-workflows check-vm-exposures portal-check || exit 1; \
@@ -758,6 +760,7 @@ test-pr-gate-scripts:
 	./scripts/tests/pre_push_signature_census_test.sh
 	./scripts/tests/ci_rust_test_lane_test.sh
 	bash ./scripts/tests/rust_test_duration_budget_test.sh
+	bash ./scripts/tests/rust_test_duration_budget_test.sh
 	./scripts/tests/thread_parity_receipt_test.sh
 	./scripts/tests/macos_nightly_test_env_test.sh
 	./scripts/tests/ci_finalize_sccache_test.sh
@@ -858,8 +861,8 @@ release-gate:
 # you only get the host platform, but the driver still exercises every
 # user-visible capability and prints a per-step status summary.
 release-smoke:
-	CARGO_PROFILE_RELEASE_LTO=thin $(HARN_CARGO_CMD) build --release -p harn-cli --bin harn --features embedded-stdlib
-	target/release/harn run --no-sandbox scripts/release_smoke.harn -- --candidate target/release/harn --require-embedded-stdlib
+	$(HARN_CARGO_CMD) build --profile dist -p harn-cli --bin harn --features embedded-stdlib
+	target/dist/harn run --no-sandbox scripts/release_smoke.harn -- --candidate target/dist/harn --require-embedded-stdlib
 
 # Faster `release-smoke` variant that reuses the debug `harn` binary.
 # Used by the parallel audit lanes in release_gate.sh because the warm
@@ -942,6 +945,12 @@ check-prompt-grammar:
 	@echo "=== Checking the .harn.prompt editor grammar is up to date ==="
 	@$(HARN_CLI_CMD) dump-prompt-grammar --check
 	@echo "    Prompt grammar OK."
+
+gen-operator-precedence:
+	$(HARN_CLI_CMD) dump-operator-precedence
+
+check-operator-precedence:
+	@$(HARN_CLI_CMD) dump-operator-precedence --check
 
 gen-builtin-methods:
 	$(HARN_CLI_CMD) dump-builtin-methods

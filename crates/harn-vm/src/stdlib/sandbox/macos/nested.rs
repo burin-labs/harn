@@ -89,11 +89,9 @@ pub(super) fn nesting(policy: &CapabilityPolicy) -> Nesting {
             return Nesting::Unenforceable(Narrowing::Write(dir));
         }
     }
-    let readable = readable_roots(policy);
-    let credential_dirs = read_probes()
-        .into_iter()
-        .filter(|dir| !covered(dir, &readable));
-    for dir in credential_dirs.chain(super::super::process_sandbox_read_deny_roots(policy)) {
+    // Every credential path is a read-deny root, so probing the denials covers
+    // the credential stores the policy must not read.
+    for dir in super::super::process_sandbox_read_deny_roots(policy) {
         if dir.exists() && !outer_denies("file-read-data", Some(&dir)) {
             return Nesting::Unenforceable(Narrowing::Read(dir));
         }
@@ -208,17 +206,6 @@ fn write_probes(policy: &CapabilityPolicy) -> Vec<PathBuf> {
     probes
 }
 
-/// Credential directories a policy reads only when a read root names them.
-fn read_probes() -> Vec<PathBuf> {
-    let Some(home) = crate::user_dirs::home_dir() else {
-        return Vec::new();
-    };
-    [".ssh", ".aws", ".gnupg"]
-        .iter()
-        .map(|name| home.join(name))
-        .collect()
-}
-
 /// Every root the rendered profile makes writable. A root missing here can
 /// only make a probe fail, which refuses the spawn: it was refused before.
 fn writable_roots(policy: &CapabilityPolicy) -> Vec<PathBuf> {
@@ -229,22 +216,6 @@ fn writable_roots(policy: &CapabilityPolicy) -> Vec<PathBuf> {
         roots.extend(super::preset_write_roots(policy).iter().map(PathBuf::from));
         roots.extend(super::super::process_sandbox_developer_toolchain_cache_roots(policy));
     }
-    roots
-}
-
-/// Every root the rendered profile makes readable, with the same caveat.
-fn readable_roots(policy: &CapabilityPolicy) -> Vec<PathBuf> {
-    let mut roots = writable_roots(policy);
-    roots.extend(super::process_sandbox_roots(policy));
-    roots.extend(super::preset_read_roots(policy).iter().map(PathBuf::from));
-    roots.extend(super::process_sandbox_developer_toolchain_read_roots(
-        policy,
-    ));
-    roots.extend(super::process_sandbox_readonly_roots(policy));
-    roots.extend(super::process_sandbox_policy_read_roots(policy));
-    roots.extend(super::process_sandbox_package_manager_config_read_roots(
-        policy,
-    ));
     roots
 }
 

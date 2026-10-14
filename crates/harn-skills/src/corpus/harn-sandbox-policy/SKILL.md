@@ -50,9 +50,14 @@ before it.
 
 ## Adding a denylist row
 
-`crates/harn-vm/src/orchestration/policy/read_deny_defaults.toml`. One line
-under `defaults.home_relative`, plus a line under `[reason]` saying why. It is
-data on purpose: nothing in the Rust module decides what belongs on the list.
+`crates/harn-vm/src/known_paths/known_paths.toml`. One line under
+`[credential] home`, plus a line under `[credential.reason]` saying why. It is
+data on purpose: the sandbox denylist, the taint gate's secret-read check, the
+command risk scan, and the default approval patterns all derive from it, and
+`credential_path_parity_tests` fails if any of them misses an entry. A
+credential file name that can live anywhere (`*.pem`) goes under
+`basename_globs` instead; the sandbox cannot deny a name, so only the path
+matchers see those.
 
 The denylist **beats every grant**. `PackageManagerConfig` admits measured
 tool roots, including credential-bearing `~/.config/composer`; unknown

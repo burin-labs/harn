@@ -14,7 +14,7 @@ use harn_parser::analysis::AnalysisDatabase;
 use crate::package::CheckConfig;
 
 use super::analysis::{analyze_file, render_file_analysis_error_or_exit};
-use super::outcome::{print_lint_diagnostics, CommandOutcome};
+use super::outcome::{print_lint_diagnostics, render_lint_diagnostics, CommandOutcome};
 
 use harn_lint::is_generated_path;
 
@@ -86,6 +86,8 @@ fn rule_targets_harn(src: &str) -> bool {
         == Some("harn")
 }
 
+/// Lint one file and print its findings, exiting on a lex or parse error.
+#[cfg(test)]
 pub(crate) fn lint_file_inner(
     analysis: &mut AnalysisDatabase,
     path: &Path,
@@ -98,9 +100,107 @@ pub(crate) fn lint_file_inner(
     let path_str = path.to_string_lossy().into_owned();
     let output = analyze_file(analysis, path, config, module_graph)
         .unwrap_or_else(|error| render_file_analysis_error_or_exit(&path_str, error));
-    let source = output.source;
-    let program = output.program;
+    let (outcome, rendered) = lint_analyzed_file(
+        path,
+        &output,
+        config,
+        externally_imported_names,
+        module_graph,
+        lint_config,
+        script_rule_diagnostics,
+    );
+    eprint!("{rendered}");
+    outcome
+}
 
+/// One file's lint result with its rendered text, replayed in input order by
+/// [`lint_files`].
+pub(crate) struct LintedFile {
+    pub(crate) outcome: CommandOutcome,
+    pub(crate) rendered: String,
+    pub(crate) strict: bool,
+}
+
+/// Lint every file on a worker pool, as `harn check` does, and return the
+/// results in input order. Each worker seeds its analysis database with the
+/// file's parse from the module-graph build, so a file is lexed, parsed, and
+/// type checked once, and the linter reads that type check's facts.
+pub(crate) fn lint_files(
+    files: &[PathBuf],
+    module_graph: &harn_modules::ModuleGraph,
+    parsed_targets: &super::config::ParsedTargets,
+    externally_imported_names: &HashSet<String>,
+    script_rule_diagnostics: &std::collections::HashMap<PathBuf, Vec<harn_lint::LintDiagnostic>>,
+    require_file_header: bool,
+    trusted_host_dispatch: bool,
+) -> Vec<LintedFile> {
+    super::driver::run_ordered(
+        files,
+        super::driver::worker_count(files.len()),
+        AnalysisDatabase::new,
+        |analysis, file| {
+            let mut config = crate::package::load_check_config(Some(file));
+            let mut lint_config = super::config::load_harn_lint_config(file);
+            lint_config.require_file_header |= require_file_header;
+            super::config::apply_loaded_harn_lint_config(&lint_config, &mut config);
+            config.trusted_host_dispatch |= trusted_host_dispatch;
+            parsed_targets.seed(analysis, file);
+            let path_str = file.to_string_lossy().into_owned();
+            let output = analyze_file(analysis, file, &config, module_graph);
+            // Release the file's AST and facts once it is linted, so a
+            // worker's memory stays bounded by one file, not its shard.
+            analysis.remove_source(&harn_parser::analysis::SourceId::path(file));
+            let (outcome, rendered) = match output {
+                Ok(output) => lint_analyzed_file(
+                    file,
+                    &output,
+                    &config,
+                    externally_imported_names,
+                    module_graph,
+                    &lint_config,
+                    script_rule_diagnostics
+                        .get(file)
+                        .map(Vec::as_slice)
+                        .unwrap_or(&[]),
+                ),
+                Err(error) => (
+                    CommandOutcome {
+                        has_error: true,
+                        ..CommandOutcome::default()
+                    },
+                    super::analysis::render_file_analysis_error_to_string(&path_str, &error),
+                ),
+            };
+            LintedFile {
+                outcome,
+                rendered,
+                strict: config.strict,
+            }
+        },
+        |file| LintedFile {
+            outcome: CommandOutcome {
+                has_error: true,
+                ..CommandOutcome::default()
+            },
+            rendered: format!(
+                "{}: error: internal `harn lint` failure while analyzing this file\n",
+                file.display()
+            ),
+            strict: false,
+        },
+    )
+}
+
+fn lint_analyzed_file(
+    path: &Path,
+    output: &harn_parser::analysis::TypeCheckOutput,
+    config: &CheckConfig,
+    externally_imported_names: &HashSet<String>,
+    module_graph: &harn_modules::ModuleGraph,
+    lint_config: &super::config::HarnLintConfig,
+    script_rule_diagnostics: &[harn_lint::LintDiagnostic],
+) -> (CommandOutcome, String) {
+    let path_str = path.to_string_lossy().into_owned();
     let engine_rules = project_engine_rule_sources(path);
     let native_rule_paths = project_native_rule_paths(path);
     let options = super::config::lint_options(
@@ -111,14 +211,18 @@ pub(crate) fn lint_file_inner(
         &native_rule_paths,
         super::config::LintSurface::Lint,
     );
+    let options = harn_lint::LintOptions {
+        binding_types: Some(&output.binding_types),
+        ..options
+    };
     // Generated files (`*.generated.harn`) skip style/declaration lints inside
     // `lint_with_module_graph`; type diagnostics still flow so real correctness
     // errors are never hidden.
     let generated = is_generated_path(path);
     let mut diagnostics = harn_lint::lint_with_module_graph(
-        &program,
+        &output.program,
         &config.disable_rules,
-        Some(&source),
+        Some(&output.source),
         externally_imported_names,
         module_graph,
         path,
@@ -146,21 +250,26 @@ pub(crate) fn lint_file_inner(
     }
 
     if diagnostics.is_empty() {
-        eprintln!("{path_str}: no issues found");
-        return CommandOutcome::default();
+        return (
+            CommandOutcome::default(),
+            format!("{path_str}: no issues found\n"),
+        );
     }
 
     let has_warning = diagnostics
         .iter()
         .any(|d| d.severity == LintSeverity::Warning);
-    let (has_error, fixable) = print_lint_diagnostics(&path_str, &source, &diagnostics);
-
-    CommandOutcome {
-        has_error,
-        has_warning,
-        findings: diagnostics.len(),
-        fixable,
-    }
+    let (has_error, fixable, rendered) =
+        render_lint_diagnostics(&path_str, &output.source, &diagnostics);
+    (
+        CommandOutcome {
+            has_error,
+            has_warning,
+            findings: diagnostics.len(),
+            fixable,
+        },
+        rendered,
+    )
 }
 
 /// Apply autofix edits from lint and type-check diagnostics and write back to
@@ -194,6 +303,10 @@ pub(crate) fn lint_fix_file(
         &native_rule_paths,
         super::config::LintSurface::Lint,
     );
+    let options = harn_lint::LintOptions {
+        binding_types: Some(&output.binding_types),
+        ..options
+    };
     // Generated files self-skip style lints inside `lint_with_module_graph`, so
     // no style-lint autofix edits are produced for them.
     let lint_diags = harn_lint::lint_with_module_graph(
@@ -254,7 +367,10 @@ pub(crate) fn lint_fix_file(
         externally_imported_names,
         module_graph,
         path,
-        &options,
+        &harn_lint::LintOptions {
+            binding_types: Some(&output2.binding_types),
+            ..options
+        },
     );
     remaining.extend(harn_lint::lint_diagnostics_from_type_diagnostics(
         &output2.diagnostics,

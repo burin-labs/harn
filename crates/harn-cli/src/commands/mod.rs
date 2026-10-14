@@ -26,6 +26,7 @@ pub(crate) mod doctor;
 pub(crate) mod doctor_sandbox;
 pub(crate) mod dump_builtin_methods;
 pub(crate) mod dump_highlight_keywords;
+pub(crate) mod dump_operator_precedence;
 pub(crate) mod dump_portable_benchmark_schema;
 pub(crate) mod dump_prompt_grammar;
 pub(crate) mod dump_protocol_artifacts;

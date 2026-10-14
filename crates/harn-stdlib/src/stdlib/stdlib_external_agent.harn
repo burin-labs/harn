@@ -18,7 +18,7 @@ pub fn external_agent_delegate(
   options: dict? = nil,
 ) {
   const opts = options ?? {}
-  const key = opts?.idempotency_key ?? ("external-agent-" + random.uuid_v7())
+  const key = opts?.idempotency_key ?? "external-agent-" + random.uuid_v7()
   const checkpoint = opts?.checkpoint ?? {}
   return agent.external_agent_delegate(
     task,

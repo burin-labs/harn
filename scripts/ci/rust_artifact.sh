@@ -14,6 +14,7 @@ readonly NEXTEST_VERSION
 readonly NEUTRAL_FILTER='all()'
 readonly SECURITY_FILTER='(package(harn-vm) and binary(harn_vm)) or (package(harn-hostlib) and binary(harn_hostlib))'
 readonly EXPECTED_RUSTFLAGS='-D warnings -Clink-arg=-fuse-ld=mold'
+# Mirrors `[profile.dev] debug` in Cargo.toml.
 readonly EXPECTED_DEV_DEBUG='line-tables-only'
 # The shared CLI bundle every Harn proof lane executes is built in the
 # `ci-cli` profile (Cargo.toml): dev semantics, debug assertions and overflow
@@ -119,8 +120,11 @@ require_build_contract() {
     echo "error: Rust artifact build requires RUSTFLAGS=${EXPECTED_RUSTFLAGS}" >&2
     exit 1
   fi
-  if [[ "${CARGO_PROFILE_DEV_DEBUG:-}" != "$EXPECTED_DEV_DEBUG" ]]; then
-    echo "error: Rust artifact build requires CARGO_PROFILE_DEV_DEBUG=${EXPECTED_DEV_DEBUG}" >&2
+  # `[profile.dev]` in Cargo.toml owns dev debuginfo. An environment override
+  # that disagrees with it would build a different artifact than the manifest
+  # records.
+  if [[ -n "${CARGO_PROFILE_DEV_DEBUG:-}" && "$CARGO_PROFILE_DEV_DEBUG" != "$EXPECTED_DEV_DEBUG" ]]; then
+    echo "error: Rust artifact build requires the Cargo.toml dev debuginfo (${EXPECTED_DEV_DEBUG}); unset CARGO_PROFILE_DEV_DEBUG" >&2
     exit 1
   fi
 }

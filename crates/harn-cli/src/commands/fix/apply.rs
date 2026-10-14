@@ -497,7 +497,10 @@ fn count_remaining_diagnostics(targets: &[PathBuf]) -> Result<RemainingDiagnosti
             .count();
 
         let lint_context = FixLintContext::load(file);
-        let options = lint_context.options(file);
+        let options = harn_lint::LintOptions {
+            binding_types: Some(&output.binding_types),
+            ..lint_context.options(file)
+        };
         count += harn_lint::lint_with_module_graph(
             &program,
             &config.disable_rules,

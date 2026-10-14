@@ -41,7 +41,7 @@ use std::collections::HashMap;
 
 use harn_lexer::{Span, StringSegment};
 
-use crate::ast::{DictEntry, Node, SNode};
+use crate::ast::{BinaryOperator, DictEntry, Node, SNode, UnaryOperator};
 
 /// Hard cap on the number of reduction steps performed by a single
 /// `const_eval` call. Checked on every step.
@@ -222,8 +222,22 @@ const PURE_BUILTINS: &[&str] = &[
 /// Const-friendly binary operators. Mirror of the runtime set that has no
 /// side effects and well-defined value semantics on the
 /// [`ConstValue`] subset.
-const PURE_BINARY_OPS: &[&str] = &[
-    "+", "-", "*", "/", "%", "**", "==", "!=", "<", ">", "<=", ">=", "&&", "||", "??",
+const PURE_BINARY_OPS: &[BinaryOperator] = &[
+    BinaryOperator::Add,
+    BinaryOperator::Sub,
+    BinaryOperator::Mul,
+    BinaryOperator::Div,
+    BinaryOperator::Mod,
+    BinaryOperator::Pow,
+    BinaryOperator::Eq,
+    BinaryOperator::Neq,
+    BinaryOperator::Lt,
+    BinaryOperator::Gt,
+    BinaryOperator::Lte,
+    BinaryOperator::Gte,
+    BinaryOperator::And,
+    BinaryOperator::Or,
+    BinaryOperator::NilCoalesce,
 ];
 
 /// Environment mapping a `const` name to its already-folded value. The
@@ -354,14 +368,14 @@ impl<'a> EvalCtx<'a> {
 
             Node::UnaryOp { op, operand } => {
                 let value = ctx.eval_node(operand)?;
-                match (op.as_str(), &value) {
-                    ("-", ConstValue::Int(n)) => {
+                match (op, &value) {
+                    (UnaryOperator::Neg, ConstValue::Int(n)) => {
                         Ok(ConstValue::Int(n.checked_neg().ok_or_else(|| {
                             ConstEvalError::runtime(node.span, "integer overflow in unary minus")
                         })?))
                     }
-                    ("-", ConstValue::Float(f)) => Ok(ConstValue::Float(-f)),
-                    ("!", ConstValue::Bool(b)) => Ok(ConstValue::Bool(!b)),
+                    (UnaryOperator::Neg, ConstValue::Float(f)) => Ok(ConstValue::Float(-f)),
+                    (UnaryOperator::Not, ConstValue::Bool(b)) => Ok(ConstValue::Bool(!b)),
                     _ => Err(ConstEvalError::runtime(
                         node.span,
                         format!("unary `{op}` is not defined for the operand"),
@@ -370,7 +384,7 @@ impl<'a> EvalCtx<'a> {
             }
 
             Node::BinaryOp { op, left, right } => {
-                if !PURE_BINARY_OPS.contains(&op.as_str()) {
+                if !PURE_BINARY_OPS.contains(op) {
                     return Err(ConstEvalError::disallowed(
                         node.span,
                         format!("binary operator `{op}` is not const-evaluable"),
@@ -378,7 +392,7 @@ impl<'a> EvalCtx<'a> {
                 }
                 let lhs = ctx.eval_node(left)?;
                 let rhs = ctx.eval_node(right)?;
-                ctx.apply_binary(op, lhs, rhs, node.span)
+                ctx.apply_binary(*op, lhs, rhs, node.span)
             }
 
             Node::Ternary {
@@ -591,7 +605,7 @@ impl<'a> EvalCtx<'a> {
 
     fn apply_binary(
         &self,
-        op: &str,
+        op: BinaryOperator,
         lhs: ConstValue,
         rhs: ConstValue,
         span: Span,
@@ -599,30 +613,34 @@ impl<'a> EvalCtx<'a> {
         use ConstValue::*;
 
         // Special cases first.
-        if op == "&&" || op == "||" {
+        if op.is_logical() {
             let (Bool(l), Bool(r)) = (&lhs, &rhs) else {
                 return Err(ConstEvalError::runtime(
                     span,
                     format!("`{op}` requires bool operands"),
                 ));
             };
-            return Ok(Bool(if op == "&&" { *l && *r } else { *l || *r }));
+            return Ok(Bool(if op == BinaryOperator::And {
+                *l && *r
+            } else {
+                *l || *r
+            }));
         }
-        if op == "??" {
+        if op == BinaryOperator::NilCoalesce {
             return Ok(match lhs {
                 Nil => rhs,
                 other => other,
             });
         }
-        if op == "==" {
+        if op == BinaryOperator::Eq {
             return Ok(Bool(lhs == rhs));
         }
-        if op == "!=" {
+        if op == BinaryOperator::Neq {
             return Ok(Bool(lhs != rhs));
         }
 
         // String concat via `+`.
-        if op == "+" {
+        if op == BinaryOperator::Add {
             if let (String(a), String(b)) = (&lhs, &rhs) {
                 return Ok(String(format!("{a}{b}")));
             }
@@ -644,13 +662,13 @@ impl<'a> EvalCtx<'a> {
         };
 
         // Comparisons.
-        if matches!(op, "<" | ">" | "<=" | ">=") {
+        if op.precedence() == crate::operators::Precedence::Comparison {
             let (l, r) = (as_float(&lhs_num), as_float(&rhs_num));
             let out = match op {
-                "<" => l < r,
-                ">" => l > r,
-                "<=" => l <= r,
-                ">=" => l >= r,
+                BinaryOperator::Lt => l < r,
+                BinaryOperator::Gt => l > r,
+                BinaryOperator::Lte => l <= r,
+                BinaryOperator::Gte => l >= r,
                 _ => unreachable!(),
             };
             return Ok(Bool(out));
@@ -659,22 +677,22 @@ impl<'a> EvalCtx<'a> {
         // Arithmetic.
         if let (Int(a), Int(b)) = (&lhs_num, &rhs_num) {
             let result = match op {
-                "+" => a.checked_add(*b),
-                "-" => a.checked_sub(*b),
-                "*" => a.checked_mul(*b),
-                "/" => {
+                BinaryOperator::Add => a.checked_add(*b),
+                BinaryOperator::Sub => a.checked_sub(*b),
+                BinaryOperator::Mul => a.checked_mul(*b),
+                BinaryOperator::Div => {
                     if *b == 0 {
                         return Err(ConstEvalError::runtime(span, "division by zero"));
                     }
                     a.checked_div(*b)
                 }
-                "%" => {
+                BinaryOperator::Mod => {
                     if *b == 0 {
                         return Err(ConstEvalError::runtime(span, "modulo by zero"));
                     }
                     a.checked_rem(*b)
                 }
-                "**" => {
+                BinaryOperator::Pow => {
                     if *b < 0 || *b > u32::MAX as i64 {
                         return Err(ConstEvalError::runtime(
                             span,
@@ -692,22 +710,22 @@ impl<'a> EvalCtx<'a> {
 
         let (l, r) = (as_float(&lhs_num), as_float(&rhs_num));
         let value = match op {
-            "+" => l + r,
-            "-" => l - r,
-            "*" => l * r,
-            "/" => {
+            BinaryOperator::Add => l + r,
+            BinaryOperator::Sub => l - r,
+            BinaryOperator::Mul => l * r,
+            BinaryOperator::Div => {
                 if r == 0.0 {
                     return Err(ConstEvalError::runtime(span, "division by zero"));
                 }
                 l / r
             }
-            "%" => {
+            BinaryOperator::Mod => {
                 if r == 0.0 {
                     return Err(ConstEvalError::runtime(span, "modulo by zero"));
                 }
                 l % r
             }
-            "**" => l.powf(r),
+            BinaryOperator::Pow => l.powf(r),
             _ => unreachable!(),
         };
         Ok(Float(value))

@@ -98,7 +98,7 @@ top-level keys before `v0.8`).
 | `turn_end_condition` | dict | Present when `turn_end_condition` is configured. `{invocations, vetoes, max_invocations, cap_reached}` — the per-session turn-end-judge call/veto counts, the resolved top-level cap (`nil` when disabled or not configured), and whether that cap was hit. This is separate from `turn_end_condition.cadence.max_invocations`, which only gates when the judge is due |
 
 `judge_decision` agent events carry `{verdict, confirm, reason, reasoning,
-next_step, trigger, escalation_recommended?, escalation_target?}`.
+next_step, trigger, escalation_recommended?, escalation_target?, requirement_report?}`.
 `verify_completion` closures, `verify_completion_judge`,
 and `turn_end_condition` all use this event, so harnesses can measure completion-gate
 class fire rates from structured fields instead of parsing feedback prose.

@@ -67,7 +67,7 @@ fn fixture_run() -> RunRecord {
             tool_use_id: "toolu_1".to_string(),
             args_hash: "abc123".to_string(),
             result: synthetic_bearer,
-            is_rejected: false,
+            status: crate::orchestration::ToolCallRecordStatus::Completed,
             duration_ms: Some(7),
             iteration: 1,
             timestamp: "2026-05-01T00:00:30Z".to_string(),

@@ -72,7 +72,72 @@ fn test_keywords() {
     assert_eq!(tokens[4].kind, TokenKind::Else);
     assert_eq!(tokens[5].kind, TokenKind::For);
     assert_eq!(tokens[6].kind, TokenKind::In);
-    assert_eq!(tokens[7].kind, TokenKind::Require);
+    assert_eq!(tokens[7].kind, TokenKind::Identifier("require".into()));
+}
+
+#[test]
+fn contextual_keywords_lex_as_identifiers() {
+    for word in CONTEXTUAL_KEYWORDS {
+        let tokens = Lexer::new(word).tokenize().expect("lex contextual keyword");
+        assert_eq!(
+            tokens[0].kind,
+            TokenKind::Identifier((*word).to_string()),
+            "contextual keyword `{word}` must lex as an identifier"
+        );
+        assert!(
+            !KEYWORDS.contains(word),
+            "`{word}` is both reserved and contextual"
+        );
+    }
+    for removed in ["to", "exclusive"] {
+        assert_eq!(keyword_token_kind(removed), None);
+    }
+}
+
+#[test]
+fn range_operators_do_not_split_spreads_or_floats() {
+    let kinds = |source: &str| -> Vec<TokenKind> {
+        Lexer::new(source)
+            .tokenize()
+            .unwrap()
+            .into_iter()
+            .map(|token| token.kind)
+            .filter(|kind| *kind != TokenKind::Eof)
+            .collect()
+    };
+    assert_eq!(
+        kinds("1..3"),
+        vec![
+            TokenKind::IntLiteral(1),
+            TokenKind::DotDot,
+            TokenKind::IntLiteral(3)
+        ]
+    );
+    assert_eq!(
+        kinds("a..=b"),
+        vec![
+            TokenKind::Identifier("a".into()),
+            TokenKind::DotDotEq,
+            TokenKind::Identifier("b".into()),
+        ]
+    );
+    assert_eq!(
+        kinds("1.5..2.5"),
+        vec![
+            TokenKind::FloatLiteral(1.5),
+            TokenKind::DotDot,
+            TokenKind::FloatLiteral(2.5),
+        ]
+    );
+    assert_eq!(
+        kinds("...xs"),
+        vec![
+            TokenKind::Dot,
+            TokenKind::Dot,
+            TokenKind::Dot,
+            TokenKind::Identifier("xs".into()),
+        ]
+    );
 }
 
 #[test]

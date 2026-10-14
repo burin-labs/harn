@@ -30,6 +30,8 @@ pub use path_guards::{
     SOURCE_NET_POLICY,
 };
 pub use rule_source::PolicyRuleSource;
+#[cfg(test)]
+pub(crate) use sensitive_paths::first_candidate as first_sensitive_path;
 
 const POLICY_RECEIPT_TYPE: &str = "harn.permission_policy_decision.v1";
 

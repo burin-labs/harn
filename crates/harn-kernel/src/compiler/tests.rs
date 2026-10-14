@@ -1033,9 +1033,8 @@ fn list_push_optimizes_every_site() {
         "x.push(i)\n x.push(\"text\")",
         "x.pop()\n x.push(i)",
     ] {
-        let source = format!(
-            "pipeline t(harness: Harness) {{ let x = []\n for i in 0 to 10 exclusive {{ {body} }} }}"
-        );
+        let source =
+            format!("pipeline t(harness: Harness) {{ let x = []\n for i in 0..10 {{ {body} }} }}");
         let chunk = compile_source(&source);
         let d = chunk.disassemble("t");
         let fused = disasm_opcodes(&d)

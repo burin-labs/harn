@@ -8,10 +8,47 @@ mod scoped_blocks;
 mod semantic_tokens;
 
 use harn_lexer::Lexer;
+use harn_parser::operators::OperatorGrammar;
 use harn_parser::Parser;
 
 use crate::helpers::format_duration;
 use crate::{format_source, format_source_opts, FmtOptions, AUTO_SEPARATOR_WIDTH};
+
+/// The program's structure without positions. The formatter sorts selective
+/// import names, which does not change meaning, so they compare sorted.
+fn meaning(program: &[harn_parser::SNode]) -> serde_json::Value {
+    fn sort_import_names(value: &mut serde_json::Value) {
+        match value {
+            serde_json::Value::Object(map) => {
+                if let Some(serde_json::Value::Array(names)) = map
+                    .get_mut("SelectiveImport")
+                    .and_then(|import| import.get_mut("names"))
+                {
+                    names.sort_by(|a, b| a.as_str().cmp(&b.as_str()));
+                }
+                map.values_mut().for_each(sort_import_names);
+            }
+            serde_json::Value::Array(items) => items.iter_mut().for_each(sort_import_names),
+            _ => {}
+        }
+    }
+    let mut projection =
+        harn_parser::ast_json::structural_projection(program, OperatorGrammar::CURRENT);
+    sort_import_names(&mut projection);
+    // The formatter also orders import statements; compare them as a set.
+    if let serde_json::Value::Array(items) = &mut projection {
+        let is_import = |item: &serde_json::Value| {
+            item.get("node")
+                .and_then(serde_json::Value::as_object)
+                .is_some_and(|node| node.keys().any(|kind| kind.contains("Import")))
+        };
+        let (mut imports, rest): (Vec<_>, Vec<_>) = items.drain(..).partition(is_import);
+        imports.sort_by_key(ToString::to_string);
+        items.extend(imports);
+        items.extend(rest);
+    }
+    projection
+}
 
 pub(super) fn assert_roundtrip(source: &str) {
     let formatted = format_source(source).unwrap();
@@ -20,9 +57,15 @@ pub(super) fn assert_roundtrip(source: &str) {
         .tokenize()
         .unwrap_or_else(|e| panic!("Formatted output failed to lex:\n{formatted}\nError: {e}"));
     let mut parser = Parser::new(tokens);
-    parser
+    let reparsed = parser
         .parse()
         .unwrap_or_else(|e| panic!("Formatted output failed to parse:\n{formatted}\nError: {e}"));
+    let original = harn_parser::parse_source(source).expect("roundtrip source must parse");
+    assert_eq!(
+        meaning(&original),
+        meaning(&reparsed),
+        "Formatter changed the meaning of:\n{source}\nformatted as:\n{formatted}"
+    );
     let formatted2 = format_source(&formatted).unwrap();
     assert_eq!(formatted, formatted2, "Formatter is not idempotent");
 }

@@ -107,15 +107,12 @@ async fn journal_records_explicit_workflow_learning_eligibility_at_creation() {
         meta.attributes.is_empty(),
         "workflow eligibility belongs to each run, not the long-lived session"
     );
-    let event = append_event_for_mutation(
+    let event = append_event_for_payload(
         &prepared.state.config,
-        TranscriptMutation::AuditEventAdded {
-            transcript_event: transcript_event(
-                "eligible-terminal",
-                "agent_run_terminal",
-                "assistant",
-            ),
-        },
+        SessionEventPayload::Transcript(TranscriptRecord::new(
+            transcript_event("eligible-terminal", "agent_run_terminal", "assistant"),
+            None,
+        )),
     )
     .expect("build eligible terminal event");
     assert_eq!(
@@ -480,16 +477,16 @@ async fn maintenance_open_is_contended_by_a_live_vm_writer() {
 
 #[test]
 fn singular_tool_call_message_uses_tool_call_row() {
-    let event = append_event_for_mutation(
+    let event = append_event_for_payload(
         &mapping_config(),
-        TranscriptMutation::MessageAdded {
-            transcript_event: transcript_event("event-call", "message", "assistant"),
-            raw_message: serde_json::json!({
+        SessionEventPayload::Transcript(TranscriptRecord::new(
+            transcript_event("event-call", "message", "assistant"),
+            Some(serde_json::json!({
                 "role": "assistant",
                 "content": "",
                 "tool_calls": [{"id": "tool-1", "name": "look", "arguments": {}}],
-            }),
-        },
+            })),
+        )),
     )
     .expect("map tool call");
 
@@ -502,16 +499,17 @@ fn singular_tool_call_message_uses_tool_call_row() {
 
 #[test]
 fn tool_lifecycle_event_uses_tool_call_row_and_metadata_identity() {
-    let event = append_event_for_mutation(
+    let event = append_event_for_payload(
         &mapping_config(),
-        TranscriptMutation::AuditEventAdded {
-            transcript_event: serde_json::json!({
+        SessionEventPayload::Transcript(TranscriptRecord::new(
+            serde_json::json!({
                 "id": "event-call",
                 "kind": "tool_call",
                 "role": "assistant",
                 "metadata": {"tool_call_id": "tool-1", "tool_name": "look"},
             }),
-        },
+            None,
+        )),
     )
     .expect("map lifecycle tool call");
 
@@ -524,10 +522,10 @@ fn tool_lifecycle_event_uses_tool_call_row_and_metadata_identity() {
 
 #[test]
 fn plan_document_event_uses_the_canonical_plan_kind() {
-    let event = append_event_for_mutation(
+    let event = append_event_for_payload(
         &mapping_config(),
-        TranscriptMutation::AuditEventAdded {
-            transcript_event: serde_json::json!({
+        SessionEventPayload::Transcript(TranscriptRecord::new(
+            serde_json::json!({
                 "id": "plan-event",
                 "kind": "plan_document",
                 "role": "tool",
@@ -540,7 +538,8 @@ fn plan_document_event_uses_the_canonical_plan_kind() {
                     }
                 }
             }),
-        },
+            None,
+        )),
     )
     .expect("map plan document");
 

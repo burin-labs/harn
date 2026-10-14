@@ -34,16 +34,32 @@ configured_limit_bytes() {
     "$policy_path"
 }
 
+# A save reserves room for its replacement generation. The replacement of an
+# existing family generation is estimated from that generation's measured size
+# with growth margin (observed growth per refresh is at most 36%), and the
+# configured headroom caps the estimate. A fixed reservation sized for the
+# largest generation ever seen, held beside all three protected generations,
+# exceeded the ceiling by itself once those generations shrank and stayed
+# there, so no deletion could admit any save.
+replacement_growth_numerator=3
+replacement_growth_denominator=2
+
+# Mode to_budget takes a listed ceiling; ensure_headroom takes the headroom cap
+# and the replacing family prefix, possibly empty, and derives the ceiling.
 prune_to_listed_ceiling() {
-  local ceiling_bytes=$1
-  local mode_name=$2
+  local mode_name=$1
+  local bytes=$2
+  local replacing_prefix=${3:-}
   local pages plan deficit_bytes selected_bytes
 
   pages="$(list_cache_pages)"
   plan="$(jq -cer \
-    --argjson ceiling_bytes "$ceiling_bytes" \
+    --argjson bytes "$bytes" \
+    --arg replacing_prefix "$replacing_prefix" \
     --arg mode_name "$mode_name" \
     --argjson configured_limit_bytes "$(configured_limit_bytes)" \
+    --argjson growth_numerator "$replacement_growth_numerator" \
+    --argjson growth_denominator "$replacement_growth_denominator" \
     '
       def linux_merge_gate_key:
         (.key | startswith("v0-rust-workspace-tests"))
@@ -89,6 +105,19 @@ prune_to_listed_ceiling() {
             created_at: (.created_at // "")
           }
       ] as $caches
+      | (if $mode_name == "ensure_headroom" and $replacing_prefix != "" then
+          [ $caches[]
+            | select(.ref == "refs/heads/main" and (.key | startswith($replacing_prefix))) ]
+          | sort_by(.created_at, .id) | last
+        else null end) as $replacement_basis
+      | (if $mode_name != "ensure_headroom" then null
+          elif $replacement_basis == null then $bytes
+          else [$bytes,
+              (($replacement_basis.size_in_bytes * $growth_numerator + $growth_denominator - 1)
+                / $growth_denominator | floor)] | min
+          end) as $headroom_bytes
+      | (if $headroom_bytes == null then $bytes
+          else $configured_limit_bytes - $headroom_bytes end) as $ceiling_bytes
       | ($caches | map(.size_in_bytes) | add // 0) as $listed_bytes
       | ([ $caches[]
           | select(.ref == "refs/heads/main")
@@ -117,6 +146,9 @@ prune_to_listed_ceiling() {
           mode: $mode_name,
           configured_limit_bytes: $configured_limit_bytes,
           listed_ceiling_bytes: $ceiling_bytes,
+          headroom_cap_bytes: (if $headroom_bytes == null then null else $bytes end),
+          replacement_basis: $replacement_basis,
+          headroom_bytes: $headroom_bytes,
           listed_bytes_before: $listed_bytes,
           observed: ($caches | length),
           pending: 0,
@@ -165,7 +197,7 @@ per_commit_family_selector='
   | .id
 '
 
-usage_modes="--retain-qualified-generation <identity-file> [--dry-run] | --family-prefix v0-rust-release-<target>- | --local-sccache-family-prefix <repository>-sccache-local-<cache-key>-<os>-<arch>- | --harn-check-cache-family-prefix harn-check-cache-v<N>-<family>-<os>-<arch>- | --all-release-families | --clear-family-prefix v0-rust-{workspace-tests|package-audit|harn-ci-cli}- | --to-budget <bytes-at-least-1GiB> | --ensure-headroom <positive-bytes>"
+usage_modes="--retain-qualified-generation <identity-file> [--dry-run] | --family-prefix v0-rust-release-<target>- | --local-sccache-family-prefix <repository>-sccache-local-<cache-key>-<os>-<arch>- | --harn-check-cache-family-prefix harn-check-cache-v<N>-<family>-<os>-<arch>- | --all-release-families | --clear-family-prefix v0-rust-{workspace-tests|package-audit|harn-ci-cli}- | --to-budget <bytes-at-least-1GiB> | --ensure-headroom <positive-bytes> [--replacing v0-rust-{workspace-tests|package-audit|harn-ci-cli}-]"
 
 case "$mode" in
   --retain-qualified-generation)
@@ -271,13 +303,24 @@ case "$mode" in
       echo "usage: $0 --to-budget <bytes-at-least-1GiB>" >&2
       exit 64
     fi
-    prune_to_listed_ceiling "$budget_bytes" "to_budget"
+    prune_to_listed_ceiling "to_budget" "$budget_bytes"
     exit 0
     ;;
   --ensure-headroom)
     headroom_bytes="${2:-}"
-    if [[ ! "$headroom_bytes" =~ ^[1-9][0-9]*$ ]] || [[ -n "${3:-}" ]]; then
-      echo "usage: $0 --ensure-headroom <positive-bytes>" >&2
+    replacing_prefix=""
+    if [[ "${3:-}" == --replacing ]]; then
+      replacing_prefix="${4:-}"
+      if [[ "$replacing_prefix" != "v0-rust-workspace-tests-" \
+        && "$replacing_prefix" != "v0-rust-package-audit-" \
+        && "$replacing_prefix" != "v0-rust-harn-ci-cli-" ]] || [[ -n "${5:-}" ]]; then
+        replacing_prefix="invalid"
+      fi
+    elif [[ -n "${3:-}" ]]; then
+      replacing_prefix="invalid"
+    fi
+    if [[ ! "$headroom_bytes" =~ ^[1-9][0-9]*$ || "$replacing_prefix" == invalid ]]; then
+      echo "usage: $0 --ensure-headroom <positive-bytes> [--replacing v0-rust-{workspace-tests|package-audit|harn-ci-cli}-]" >&2
       exit 64
     fi
     limit_bytes="$(configured_limit_bytes)"
@@ -285,8 +328,7 @@ case "$mode" in
       echo "error: headroom ${headroom_bytes} must be smaller than policy limit ${limit_bytes}" >&2
       exit 64
     fi
-    ceiling=$((limit_bytes - headroom_bytes))
-    prune_to_listed_ceiling "$ceiling" "ensure_headroom"
+    prune_to_listed_ceiling "ensure_headroom" "$headroom_bytes" "$replacing_prefix"
     exit 0
     ;;
   *)

@@ -35,12 +35,12 @@ async fn directive_frames_keep_internal_visibility_in_the_persisted_timeline() {
                 &raw_message,
             )),
         );
-        let event = append_event_for_mutation(
+        let event = append_event_for_payload(
             &config,
-            TranscriptMutation::MessageAdded {
+            SessionEventPayload::Transcript(TranscriptRecord::new(
                 transcript_event,
-                raw_message,
-            },
+                Some(raw_message),
+            )),
         )
         .expect("map message");
         store
@@ -257,9 +257,9 @@ async fn raw_tool_arguments_survive_canonical_result_merging() {
             },
         }),
     ] {
-        let event = append_event_for_mutation(
+        let event = append_event_for_payload(
             &config,
-            TranscriptMutation::AuditEventAdded { transcript_event },
+            SessionEventPayload::Transcript(TranscriptRecord::new(transcript_event, None)),
         )
         .expect("map tool event");
         store

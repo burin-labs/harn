@@ -67,7 +67,6 @@ jobs:
       contents: read
       actions: write
     env: &cache-writer-environment
-      CARGO_PROFILE_DEV_DEBUG: line-tables-only
       RUSTFLAGS: ${{ matrix.rustflags }}
       HARN_RUNNER_TIER: github-hosted
       # Do NOT set CARGO_BUILD_JOBS here. Swatinem hashes every CARGO_* env var
@@ -135,7 +134,7 @@ jobs:
           HARN_CACHE_FAMILY_PREFIX: v0-rust-${{ matrix.cache_key }}-
           HARN_CACHE_SAVE_HEADROOM_BYTES: ${{ matrix.save_headroom_bytes }}
         run: |
-          ./scripts/prune_ci_cache_generations.sh --ensure-headroom "$HARN_CACHE_SAVE_HEADROOM_BYTES"
+          ./scripts/prune_ci_cache_generations.sh --ensure-headroom "$HARN_CACHE_SAVE_HEADROOM_BYTES" --replacing "$HARN_CACHE_FAMILY_PREFIX"
       - name: Report cache generation already current
         if: steps.rust-cache.outputs.cache-hit == 'true'
         env:
@@ -173,8 +172,9 @@ jobs:
             install_nextest: true
             warm_script: ./scripts/ci/warm_rust_cache.sh
             save_headroom_bytes: 4294967296
-          # The measured audit generation is 3,138,292,985 bytes. Refuse
-          # insufficient replacement space while retaining the old generation.
+          # save_headroom_bytes caps the reservation. Admission reserves 1.5x
+          # the family's newest main generation when one exists, and refuses
+          # insufficient replacement space while retaining that generation.
           - cache_key: package-audit
             rustflags: "-D warnings"
             install_mold: false

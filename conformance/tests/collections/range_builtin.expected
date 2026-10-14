@@ -1,4 +1,4 @@
-[harn] 0 to 5 exclusive
+[harn] 0..5
 [harn] [3, 4, 5, 6]
 [harn] 45
 [harn] 0

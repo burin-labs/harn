@@ -296,6 +296,19 @@ ci = true
 make_all = true
 
 [[artifact]]
+id = "operator-precedence"
+description = "Operator precedence tables in the spec and language guide and tree-sitter PREC constants, generated from the parser's typed precedence table."
+gen = "gen-operator-precedence"
+check = "check-operator-precedence"
+outputs = ["tree-sitter-harn/grammar/precedence.js"]
+sources = [
+  "crates/harn-parser/src/operators.rs",
+  "crates/harn-cli/src/commands/dump_operator_precedence.rs",
+]
+ci = true
+make_all = true
+
+[[artifact]]
 id = "builtin-methods"
 description = "The builtin value-method reference region of docs/src/builtins.md, rendered from the method registry (harn_parser::builtin_methods) that also drives the typechecker, linter, language server, and VM drift checks."
 gen = "gen-builtin-methods"
@@ -765,6 +778,7 @@ make_all = false  # excluded from `make all` for the same reason (no sibling che
 "check-portable-demo-package" = "binary"
 "check-prompt-grammar" = "binary"
 "check-builtin-methods" = "binary"
+"check-operator-precedence" = "binary"
 "check-protocol-artifacts" = "binary"
 "check-connector-schemas" = "binary"
 # The table is read out of the linked runtime registry, so a stale executable

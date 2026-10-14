@@ -669,13 +669,13 @@ impl TypeChecker {
             }
 
             Node::BinaryOp { op, left, right } => {
-                if self.check_pipe_operands(op, left, right, scope) {
+                if self.check_pipe_operands(*op, left, right, scope) {
                     return;
                 }
-                if op == "&&" || op == "||" {
+                if matches!(op, BinaryOperator::And | BinaryOperator::Or) {
                     let refs = self.extract_refinements(left, scope);
                     let mut right_scope = scope.child();
-                    if op == "&&" {
+                    if matches!(op, BinaryOperator::And) {
                         refs.apply_truthy(&mut right_scope);
                     } else {
                         refs.apply_falsy(&mut right_scope);
@@ -687,11 +687,11 @@ impl TypeChecker {
                 let lt = self.infer_type(left, scope);
                 let rt = self.infer_type(right, scope);
                 self.check_closed_string_comparison(
-                    op,
+                    *op,
                     [(left, lt.as_ref()), (right, rt.as_ref())],
                     scope,
                 );
-                if op == "??" {
+                if matches!(op, BinaryOperator::NilCoalesce) {
                     self.warn_unreachable_nil_coalesce_fallback(left, right, lt.as_ref(), scope);
                 }
                 // A nil-able operand to an arithmetic / concatenation operator
@@ -704,7 +704,7 @@ impl TypeChecker {
                 // skipping gradual remainders (`any?`). Assignment / guard
                 // narrowing has already run, so a value proven non-nil by an
                 // earlier `=` or `!= nil` check is not flagged.
-                if matches!(op.as_str(), "+" | "-" | "*" | "/" | "%" | "**") {
+                if op.is_arithmetic() {
                     for (ty, operand) in [(&lt, left), (&rt, right)] {
                         let Some(ty) = ty else { continue };
                         let resolved = self.resolve_alias(ty, scope);
@@ -746,15 +746,17 @@ impl TypeChecker {
                     _ => None,
                 };
                 if let Some((l, r)) = named_pair {
-                    match op.as_str() {
-                        "-" | "/" | "%" if !super::super::binary_ops::numeric_binop_ok(l, r) => {
+                    match op {
+                        BinaryOperator::Sub | BinaryOperator::Div | BinaryOperator::Mod
+                            if !super::super::binary_ops::numeric_binop_ok(l, r) =>
+                        {
                             self.error_at(
                                 Code::InvalidBinaryOperator,
                                 format!("can't use '{op}' on {l} and {r} (needs numeric operands)"),
                                 span,
                             );
                         }
-                        "**" => {
+                        BinaryOperator::Pow => {
                             // Exponentiation is int/float only; `decimal` has no
                             // `**` at runtime (convert explicitly if needed).
                             let numeric = ["int", "float"];
@@ -768,7 +770,7 @@ impl TypeChecker {
                                 );
                             }
                         }
-                        "*" => {
+                        BinaryOperator::Mul => {
                             let is_numeric = super::super::binary_ops::numeric_binop_ok(l, r);
                             let is_string_repeat =
                                 (l == "string" && r == "int") || (l == "int" && r == "string");
@@ -780,7 +782,7 @@ impl TypeChecker {
                                 );
                             }
                         }
-                        "+" => {
+                        BinaryOperator::Add => {
                             let valid = super::super::binary_ops::numeric_binop_ok(l, r)
                                 || matches!(
                                     (l.as_str(), r.as_str()),
@@ -806,7 +808,10 @@ impl TypeChecker {
                                 }
                             }
                         }
-                        "<" | ">" | "<=" | ">=" => {
+                        BinaryOperator::Lt
+                        | BinaryOperator::Gt
+                        | BinaryOperator::Lte
+                        | BinaryOperator::Gte => {
                             let comparable = ["int", "float", "string", "decimal"];
                             if !comparable.contains(&l.as_str())
                                 || !comparable.contains(&r.as_str())

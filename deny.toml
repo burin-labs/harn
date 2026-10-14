@@ -73,6 +73,23 @@ ignore = true
 multiple-versions = "warn"
 wildcards = "warn"
 workspace-default-features = "allow"
+# One HTTP client major. reqwest 0.12 carried its own rustls stack on the
+# `ring` crypto provider beside the aws-lc-rs one everything else uses.
+deny = [
+    { crate = "reqwest:<0.13", reason = "the workspace uses one reqwest major (0.13, rustls + aws-lc-rs); see the workspace Cargo.toml" },
+    { crate = "reqwest-eventsource", reason = "pins reqwest 0.12; harn-vm owns its SSE client in http/streaming/event_source.rs" },
+]
+# One TLS crypto provider: aws-lc-rs. The default CLI build compiles no
+# `ring`. These are the switches that used to pull it in. `ring` itself
+# cannot be banned outright: the off-by-default `guard-neural` feature's
+# build-time ONNX Runtime downloader (ort-sys -> ureq) selects it, and this
+# gate resolves the graph with every feature on.
+features = [
+    { crate = "rcgen", deny = ["ring"], reason = "use the workspace rcgen dependency (aws_lc_rs)" },
+    { crate = "hyper-rustls", deny = ["ring"], reason = "TLS uses the aws-lc-rs provider" },
+    { crate = "tokio-rustls", deny = ["ring"], reason = "TLS uses the aws-lc-rs provider" },
+    { crate = "sqlx-core", deny = ["_tls-rustls-ring-native-roots", "_tls-rustls-ring-webpki"], reason = "TLS uses the aws-lc-rs provider" },
+]
 
 [sources]
 unknown-registry = "deny"

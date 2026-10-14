@@ -24,7 +24,8 @@ pub(crate) struct DocumentState {
     analysis: AnalysisDatabase,
     source_id: SourceId,
     version: SourceVersion,
-    pub(crate) cached_ast: Option<Vec<SNode>>,
+    /// The parsed program, shared with the analysis cache.
+    pub(crate) cached_ast: Option<std::sync::Arc<Vec<SNode>>>,
     /// Block geometry of a [`DocumentKind::Prompt`] document, cached so
     /// folding doesn't re-parse the template per request. Empty for
     /// every other kind, and for a template that doesn't parse.
@@ -32,10 +33,10 @@ pub(crate) struct DocumentState {
     pub(crate) symbols: Vec<SymbolInfo>,
     pub(crate) diagnostics: Vec<Diagnostic>,
     pub(crate) lint_diagnostics: Vec<harn_lint::LintDiagnostic>,
-    pub(crate) type_diagnostics: Vec<harn_parser::TypeDiagnostic>,
+    pub(crate) type_diagnostics: std::sync::Arc<Vec<harn_parser::TypeDiagnostic>>,
     pub(crate) rule_diagnostics: Vec<RuleDiagnostic>,
     pub(crate) invariant_diagnostics: Vec<harn_ir::InvariantDiagnostic>,
-    pub(crate) inlay_hints: Vec<harn_parser::InlayHintInfo>,
+    pub(crate) inlay_hints: std::sync::Arc<Vec<harn_parser::InlayHintInfo>>,
     pub(crate) dirty: bool,
 }
 
@@ -92,10 +93,10 @@ impl DocumentState {
             symbols: Vec::new(),
             diagnostics: Vec::new(),
             lint_diagnostics: Vec::new(),
-            type_diagnostics: Vec::new(),
+            type_diagnostics: Default::default(),
             rule_diagnostics: Vec::new(),
             invariant_diagnostics: Vec::new(),
-            inlay_hints: Vec::new(),
+            inlay_hints: Default::default(),
             dirty: true,
         }
     }
@@ -126,10 +127,10 @@ impl DocumentState {
 
         self.diagnostics.clear();
         self.lint_diagnostics.clear();
-        self.type_diagnostics.clear();
+        self.type_diagnostics = Default::default();
         self.rule_diagnostics.clear();
         self.invariant_diagnostics.clear();
-        self.inlay_hints.clear();
+        self.inlay_hints = Default::default();
         self.symbols.clear();
         self.cached_ast = None;
         self.prompt_outline.clear();
@@ -186,15 +187,15 @@ impl DocumentState {
                 return;
             }
         };
-        analysis
-            .diagnostics
-            .extend(harn_vm::provider_catalog::validate_predicate_models(
-                &analysis.predicate_sites,
-            ));
+        let model_diagnostics =
+            harn_vm::provider_catalog::validate_predicate_models(&analysis.predicate_sites);
+        if !model_diagnostics.is_empty() {
+            std::sync::Arc::make_mut(&mut analysis.diagnostics).extend(model_diagnostics);
+        }
         let program = analysis.program;
         let type_diags = analysis.diagnostics;
         self.inlay_hints = analysis.inlay_hints;
-        for diag in &type_diags {
+        for diag in type_diags.iter() {
             let severity = match diag.severity {
                 harn_parser::DiagnosticSeverity::Error => DiagnosticSeverity::ERROR,
                 harn_parser::DiagnosticSeverity::Warning => DiagnosticSeverity::WARNING,
@@ -264,6 +265,7 @@ impl DocumentState {
             .unwrap_or_default();
         let disabled_rules = project_lint.disabled.clone().unwrap_or_default();
         let lint_options = harn_lint::LintOptions {
+            binding_types: Some(&analysis.binding_types),
             file_path: file_path.as_deref(),
             require_file_header: project_lint.require_file_header.unwrap_or(false),
             require_docstrings: project_lint.require_docstrings.unwrap_or(false),
@@ -301,12 +303,17 @@ impl DocumentState {
         self.symbols = build_symbol_table(&program, &self.source);
         let binding_types: std::collections::BTreeMap<_, _> = analysis
             .binding_types
-            .into_iter()
-            .map(|binding| ((binding.span.start, binding.name), binding.type_expr))
+            .iter()
+            .map(|binding| {
+                (
+                    (binding.span.start, binding.name.as_str()),
+                    &binding.type_expr,
+                )
+            })
             .collect();
         for symbol in &mut self.symbols {
-            if let Some(ty) = binding_types.get(&(symbol.def_span.start, symbol.name.clone())) {
-                symbol.type_info = Some(ty.clone());
+            if let Some(ty) = binding_types.get(&(symbol.def_span.start, symbol.name.as_str())) {
+                symbol.type_info = Some((*ty).clone());
             }
         }
         self.cached_ast = Some(program);

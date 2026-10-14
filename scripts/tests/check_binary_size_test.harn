@@ -21,9 +21,7 @@ type ReleaseWorkflowStep = {
   uses?: string,
   run?: string,
   env?: {
-    CARGO_PROFILE_RELEASE_LTO?: string,
-    CARGO_PROFILE_RELEASE_CODEGEN_UNITS?: string,
-    CARGO_PROFILE_RELEASE_STRIP?: string,
+    CARGO_PROFILE_DIST_CODEGEN_UNITS?: string,
     HARN_REQUIRE_CLI_AOT?: string,
     BINARY_SIZE_FUSE_BYTES?: string,
     BINARY_SIZE_SOURCE_REF?: string,
@@ -37,12 +35,7 @@ type ReleaseWorkflow = {
     prepare_cli_aot: {needs: string, if: string, steps: list<ReleaseWorkflowStep>},
     build: {
       needs: list<string>,
-      env: {
-        CARGO_PROFILE_RELEASE_LTO: string,
-        CARGO_PROFILE_RELEASE_CODEGEN_UNITS: string,
-        CARGO_PROFILE_RELEASE_STRIP: string,
-        HARN_REQUIRE_CLI_AOT: string,
-      },
+      env: {CARGO_PROFILE_DIST_CODEGEN_UNITS: string, HARN_REQUIRE_CLI_AOT: string},
       steps: list<ReleaseWorkflowStep>,
     },
     collect_candidate_manifest: {needs: list<string>, if: string},
@@ -59,9 +52,7 @@ fn release_workflow(fs: HarnessFs) -> ReleaseWorkflow {
       env: schema_field(
         schema_object(
           {
-            CARGO_PROFILE_RELEASE_LTO: schema_field(schema_string(), false),
-            CARGO_PROFILE_RELEASE_CODEGEN_UNITS: schema_field(schema_string(), false),
-            CARGO_PROFILE_RELEASE_STRIP: schema_field(schema_string(), false),
+            CARGO_PROFILE_DIST_CODEGEN_UNITS: schema_field(schema_string(), false),
             HARN_REQUIRE_CLI_AOT: schema_field(schema_string(), false),
             BINARY_SIZE_FUSE_BYTES: schema_field(schema_string(), false),
             BINARY_SIZE_SOURCE_REF: schema_field(schema_string(), false),
@@ -105,9 +96,7 @@ fn release_workflow(fs: HarnessFs) -> ReleaseWorkflow {
                     env: schema_field(
                       schema_object(
                         {
-                          CARGO_PROFILE_RELEASE_LTO: schema_field(schema_string()),
-                          CARGO_PROFILE_RELEASE_CODEGEN_UNITS: schema_field(schema_string()),
-                          CARGO_PROFILE_RELEASE_STRIP: schema_field(schema_string()),
+                          CARGO_PROFILE_DIST_CODEGEN_UNITS: schema_field(schema_string()),
                           HARN_REQUIRE_CLI_AOT: schema_field(schema_string()),
                         },
                       ),
@@ -156,7 +145,7 @@ fn defaults() {
 
 fn valid_build_identity() -> ReleaseBuildIdentity {
   return {
-    profile: "release",
+    profile: "dist",
     codegen_units: 8,
     lto: "thin",
     strip: "symbols",
@@ -731,18 +720,25 @@ pipeline test_workflow_preserves_bloat_after_a_failed_size_gate(harness: Harness
   const build = release_workflow(harness.fs).jobs.build
   const steps = build.steps
   const bloat = release_workflow_step(steps, "Generate cargo-bloat report")
-  // Cargo's environment-backed profile configuration is job-wide so the
-  // canonical build and every later Cargo diagnostic share one fingerprint.
-  assert_eq(build.env.CARGO_PROFILE_RELEASE_LTO, "thin")
+  // `[profile.dist]` owns LTO and stripping. The per-target codegen-unit
+  // count is the one environment-backed profile setting, and it is job-wide
+  // so the canonical build and every later Cargo diagnostic share one
+  // fingerprint.
   assert_eq(
-    build.env.CARGO_PROFILE_RELEASE_CODEGEN_UNITS,
+    build.env.CARGO_PROFILE_DIST_CODEGEN_UNITS,
     gha_expression("matrix.release_codegen_units"),
   )
-  assert_eq(build.env.CARGO_PROFILE_RELEASE_STRIP, "symbols")
+  assert(
+    !harness.fs.read_text("../../.github/workflows/build-release-binaries.yml").contains(
+      "CARGO_PROFILE_RELEASE_",
+    ),
+    "release builds use --profile dist; a CARGO_PROFILE_RELEASE_* override would not reach them",
+  )
   const canonical_build = release_workflow_step(steps, "Build")
-  assert_eq(canonical_build.env?.CARGO_PROFILE_RELEASE_LTO, nil)
-  assert_eq(canonical_build.env?.CARGO_PROFILE_RELEASE_CODEGEN_UNITS, nil)
-  assert_eq(canonical_build.env?.CARGO_PROFILE_RELEASE_STRIP, nil)
+  assert_eq(canonical_build.env?.CARGO_PROFILE_DIST_CODEGEN_UNITS, nil)
+  assert(
+    canonical_build.run?.contains("cargo build --locked --profile dist -p harn-cli --bin harn "),
+  )
   // Install precedes both size gates, so it cannot read their outcome. It must
   // stay unconditional on the measured target or a size failure would try to
   // attribute itself with cargo-bloat missing.
@@ -750,14 +746,14 @@ pipeline test_workflow_preserves_bloat_after_a_failed_size_gate(harness: Harness
   assert_eq(bloat.if, diagnostics)
   assert_eq(bloat["continue-on-error"], nil)
   assert(!bloat.run?.contains("run scripts/check_binary_size.harn"))
-  assert(bloat.run?.contains("cargo bloat --release --crates"))
+  assert(bloat.run?.contains("cargo bloat --profile dist --crates"))
   assert(bloat.run?.contains("cargo-bloat-crates.txt"))
   assert(bloat.run?.contains("cargo-bloat-deserialize.txt"))
   assert(bloat.run?.contains("crates_status=$?"))
   assert(bloat.run?.contains("filtered_status=$?"))
   assert(
     bloat.run?.index_of("crates_status=$?")
-      < bloat.run?.index_of("cargo bloat --release -p harn-cli"),
+      < bloat.run?.index_of("cargo bloat --profile dist -p harn-cli"),
   )
   assert(
     bloat.run?.index_of("filtered_status=$?")
@@ -906,14 +902,14 @@ pipeline test_format_mib_two_decimals(harness: Harness, task: unknown) {
 // --- default_bin_path -------------------------------------------------------
 @test
 pipeline test_default_bin_path_host(harness: Harness, task: unknown) {
-  assert_eq(default_bin_path("/r/target", ""), "/r/target/release/harn")
+  assert_eq(default_bin_path("/r/target", ""), "/r/target/dist/harn")
 }
 
 @test
 pipeline test_default_bin_path_target_triple(harness: Harness, task: unknown) {
   assert_eq(
     default_bin_path("/r/target", "x86_64-unknown-linux-gnu"),
-    "/r/target/x86_64-unknown-linux-gnu/release/harn",
+    "/r/target/x86_64-unknown-linux-gnu/dist/harn",
   )
 }
 
@@ -921,7 +917,7 @@ pipeline test_default_bin_path_target_triple(harness: Harness, task: unknown) {
 pipeline test_default_bin_path_windows_exe(harness: Harness, task: unknown) {
   assert_eq(
     default_bin_path("/r/target", "x86_64-pc-windows-msvc"),
-    "/r/target/x86_64-pc-windows-msvc/release/harn.exe",
+    "/r/target/x86_64-pc-windows-msvc/dist/harn.exe",
   )
 }
 
@@ -1167,12 +1163,12 @@ pipeline test_verdict_report_lines_carry_both_build_identities(harness: Harness,
   assert(lines.contains("baseline_source_sha: ${entry.baseline.source_sha}"))
   assert(
     lines.contains(
-      "baseline_build_identity: profile=release codegen_units=8 lto=thin strip=symbols rustc=1.95.0 aot_embedded=true",
+      "baseline_build_identity: profile=dist codegen_units=8 lto=thin strip=symbols rustc=1.95.0 aot_embedded=true",
     ),
   )
   assert(
     lines.contains(
-      "observed_build_identity: profile=release codegen_units=8 lto=thin strip=symbols rustc=1.95.0 aot_embedded=true",
+      "observed_build_identity: profile=dist codegen_units=8 lto=thin strip=symbols rustc=1.95.0 aot_embedded=true",
     ),
   )
 }

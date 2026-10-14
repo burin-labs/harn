@@ -280,7 +280,7 @@ fn refresh_drops_a_deleted_file_from_every_sub_index() {
     assert!(state
         .symbols
         .iter_nodes()
-        .any(|n| n.path == "src/util.rs" && n.name == "helper"));
+        .any(|n| &*n.path == "src/util.rs" && n.name == "helper"));
 
     fs::remove_file(dir.path().join("src/util.rs")).unwrap();
     let refresh = state.refresh_from_root(None);
@@ -289,7 +289,10 @@ fn refresh_drops_a_deleted_file_from_every_sub_index() {
     assert_eq!(refresh.files_unchanged, 3);
     assert!(state.lookup_path("src/util.rs").is_none());
     assert!(
-        !state.symbols.iter_nodes().any(|n| n.path == "src/util.rs"),
+        !state
+            .symbols
+            .iter_nodes()
+            .any(|n| &*n.path == "src/util.rs"),
         "every node owned by the deleted file must leave the typed graph"
     );
     assert!(

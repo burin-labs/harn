@@ -609,7 +609,7 @@ pub fn crystallization_curate(harness: Harness, options: any = nil) -> dict {
       loop_until_done: true,
       max_iterations: min(max(2, route?.max_iterations ?? 8), 24),
       max_nudges: 2,
-      session_id: route?.session_id ?? ("crystallization-curator-" + harness.random.uuid_v7()),
+      session_id: route?.session_id ?? "crystallization-curator-" + harness.random.uuid_v7(),
       budget: route?.budget ?? {max_cost_usd: 0.75, max_total_tokens: 60000},
       // A curator reviews evidence; it must never recursively become evidence.
       workflow_learning_eligibility: "excluded",

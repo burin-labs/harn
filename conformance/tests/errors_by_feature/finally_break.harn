@@ -1,6 +1,6 @@
 pipeline test(harness: Harness, task: unknown) {
   let cleanup_count = 0
-  for i in 0 to 5 exclusive {
+  for i in 0..5 {
     try {
       if i == 2 {
         break

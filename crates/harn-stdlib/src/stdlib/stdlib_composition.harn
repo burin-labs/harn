@@ -111,7 +111,7 @@ fn __composition_dispatch_value(result: dict, name: string) {
     return result?.result
   }
   throw result?.error ?? result?.rendered_result
-    ?? ("composition_mcp_execute: tool failed: " + name)
+    ?? "composition_mcp_execute: tool failed: " + name
 }
 
 fn __composition_mcp_reduced_result(report: dict, opts: dict) {

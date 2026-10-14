@@ -66,11 +66,11 @@ pub(super) fn collect(
                         path.display()
                     )
                 })?;
-            checked
-                .diagnostics
-                .extend(harn_vm::provider_catalog::validate_predicate_models(
-                    &checked.predicate_sites,
-                ));
+            let model_diagnostics =
+                harn_vm::provider_catalog::validate_predicate_models(&checked.predicate_sites);
+            if !model_diagnostics.is_empty() {
+                std::sync::Arc::make_mut(&mut checked.diagnostics).extend(model_diagnostics);
+            }
             let errors: Vec<_> = checked
                 .diagnostics
                 .iter()
@@ -135,9 +135,10 @@ fn census_parse(
             path.display()
         )
     })?;
+    // The database entry is gone, so the program unwraps without a copy.
     Ok(super::source::ParsedModuleSource::new(
-        parsed.source,
-        parsed.program,
+        parsed.source.to_string(),
+        std::sync::Arc::unwrap_or_clone(parsed.program),
     ))
 }
 

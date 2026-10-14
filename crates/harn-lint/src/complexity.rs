@@ -101,9 +101,7 @@ pub(crate) fn cyclomatic_complexity(nodes: &[SNode]) -> usize {
                     + node_complexity(false_expr)
             }
             Node::BinaryOp { op, left, right } => {
-                usize::from(op == "&&" || op == "||")
-                    + node_complexity(left)
-                    + node_complexity(right)
+                usize::from(op.is_logical()) + node_complexity(left) + node_complexity(right)
             }
             Node::Parallel { expr, body, .. }
             | Node::DeadlineBlock {

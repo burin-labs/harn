@@ -684,16 +684,15 @@ fn read_only_access_is_independent_of_workspace_write_capability() {
 #[test]
 fn package_manager_config_roots_are_read_only() {
     let temp_home = tempfile::tempdir().expect("temp home");
-    std::fs::write(
-        temp_home.path().join(".npmrc"),
-        "registry=https://registry.example\n",
-    )
-    .expect("write npmrc");
     let roots = super::super::package_manager_config_read_roots_for_home(temp_home.path());
 
     assert!(
-        roots.iter().any(|path| path.ends_with(".npmrc")),
-        "npmrc should be part of the package-manager preset"
+        roots.iter().any(|path| path.ends_with(".gitconfig")),
+        "gitconfig should be part of the package-manager preset"
+    );
+    assert!(
+        !roots.iter().any(|path| path.ends_with(".npmrc")),
+        "npmrc is a credential, never a package-manager grant"
     );
     assert!(
         roots

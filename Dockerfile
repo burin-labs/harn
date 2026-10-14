@@ -45,10 +45,10 @@ RUN --mount=type=cache,id=harn-cargo-registry,target=/usr/local/cargo/registry,s
     RUST_TARGET="$(cat /tmp/rust-target)" \
     && if [ "${TARGETARCH}" = "arm64" ] && [ "${BUILDARCH}" != "arm64" ]; then export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc; fi \
     && if [ "${TARGETARCH}" = "amd64" ] && [ "${BUILDARCH}" != "amd64" ]; then export CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=x86_64-linux-gnu-gcc; fi \
-    && cargo build --locked --release -p harn-cli --bin harn --bin harn-container-probe --features embedded-stdlib --target "${RUST_TARGET}" \
+    && cargo build --locked --profile dist -p harn-cli --bin harn --bin harn-container-probe --features embedded-stdlib --target "${RUST_TARGET}" \
     && install -d /out/usr/local/bin /out/etc/harn /out/var/lib/harn/state \
-    && install -m 0755 "/tmp/harn-target/${RUST_TARGET}/release/harn" /out/usr/local/bin/harn \
-    && install -m 0755 "/tmp/harn-target/${RUST_TARGET}/release/harn-container-probe" /out/usr/local/bin/harn-container-probe \
+    && install -m 0755 "/tmp/harn-target/${RUST_TARGET}/dist/harn" /out/usr/local/bin/harn \
+    && install -m 0755 "/tmp/harn-target/${RUST_TARGET}/dist/harn-container-probe" /out/usr/local/bin/harn-container-probe \
     && printf "# Mount a Harn orchestrator manifest here.\n" > /out/etc/harn/triggers.toml
 
 FROM gcr.io/distroless/cc-debian12

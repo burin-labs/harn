@@ -2,6 +2,8 @@ use std::collections::{HashMap, HashSet};
 use std::hash::Hasher;
 use std::io::Write;
 use std::path::Path;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 
 use harn_lexer::{Lexer, LexerError};
 
@@ -59,20 +61,47 @@ pub struct AnalysisStats {
     pub typecheck_runs: usize,
 }
 
-#[derive(Debug, Clone)]
-pub struct ParseOutput {
-    pub source: String,
-    pub program: Vec<SNode>,
+static PARSE_RUNS: AtomicUsize = AtomicUsize::new(0);
+static TYPECHECK_RUNS: AtomicUsize = AtomicUsize::new(0);
+
+pub(crate) fn record_parse_run() {
+    PARSE_RUNS.fetch_add(1, Ordering::Relaxed);
 }
 
+pub(crate) fn record_typecheck_run() {
+    TYPECHECK_RUNS.fetch_add(1, Ordering::Relaxed);
+}
+
+/// Every tokenization, parse, and type check this process has run, whether
+/// through an [`AnalysisDatabase`] or directly. A driver that analyzes each
+/// file once reads one of each per file here, so a second, uncached pass over
+/// the same program shows up as a count instead of only as wall time.
+pub fn process_stats() -> AnalysisStats {
+    AnalysisStats {
+        lex_runs: harn_lexer::process_tokenize_runs(),
+        parse_runs: PARSE_RUNS.load(Ordering::Relaxed),
+        typecheck_runs: TYPECHECK_RUNS.load(Ordering::Relaxed),
+    }
+}
+
+/// A parsed source. The text and AST are shared with the database cache, so
+/// handing one out costs two reference-count bumps, not a deep copy.
+#[derive(Debug, Clone)]
+pub struct ParseOutput {
+    pub source: Arc<str>,
+    pub program: Arc<Vec<SNode>>,
+}
+
+/// One type-check result, shared with the database cache like
+/// [`ParseOutput`]. Consumers that want to extend `diagnostics` copy it first.
 #[derive(Debug, Clone)]
 pub struct TypeCheckOutput {
-    pub source: String,
-    pub program: Vec<SNode>,
-    pub diagnostics: Vec<TypeDiagnostic>,
-    pub inlay_hints: Vec<InlayHintInfo>,
-    pub binding_types: Vec<BindingTypeInfo>,
-    pub predicate_sites: Vec<PredicateSite>,
+    pub source: Arc<str>,
+    pub program: Arc<Vec<SNode>>,
+    pub diagnostics: Arc<Vec<TypeDiagnostic>>,
+    pub inlay_hints: Arc<Vec<InlayHintInfo>>,
+    pub binding_types: Arc<Vec<BindingTypeInfo>>,
+    pub predicate_sites: Arc<Vec<PredicateSite>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -207,24 +236,24 @@ struct TypeCheckCacheKey {
 
 #[derive(Debug, Clone)]
 struct CachedTypeCheck {
-    diagnostics: Vec<TypeDiagnostic>,
-    inlay_hints: Vec<InlayHintInfo>,
-    binding_types: Vec<BindingTypeInfo>,
-    predicate_sites: Vec<PredicateSite>,
+    diagnostics: Arc<Vec<TypeDiagnostic>>,
+    inlay_hints: Arc<Vec<InlayHintInfo>>,
+    binding_types: Arc<Vec<BindingTypeInfo>>,
+    predicate_sites: Arc<Vec<PredicateSite>>,
 }
 
 #[derive(Debug, Clone)]
 struct SourceEntry {
-    source: String,
+    source: Arc<str>,
     version: SourceVersion,
     digest: SourceDigest,
     lex_error: Option<LexerError>,
-    program: Option<Result<Vec<SNode>, Vec<ParserError>>>,
+    program: Option<Result<Arc<Vec<SNode>>, Vec<ParserError>>>,
     typechecks: HashMap<TypeCheckCacheKey, CachedTypeCheck>,
 }
 
 impl SourceEntry {
-    fn new(source: String, version: SourceVersion, digest: SourceDigest) -> Self {
+    fn new(source: Arc<str>, version: SourceVersion, digest: SourceDigest) -> Self {
         Self {
             source,
             version,
@@ -235,7 +264,7 @@ impl SourceEntry {
         }
     }
 
-    fn replace_source(&mut self, source: String, version: SourceVersion, digest: SourceDigest) {
+    fn replace_source(&mut self, source: Arc<str>, version: SourceVersion, digest: SourceDigest) {
         self.source = source;
         self.version = version;
         self.digest = digest;
@@ -281,7 +310,7 @@ impl AnalysisDatabase {
         match self.entries.get_mut(&id) {
             None => {
                 self.entries
-                    .insert(id, SourceEntry::new(source, version, digest));
+                    .insert(id, SourceEntry::new(source.into(), version, digest));
                 SourceUpdate::Inserted
             }
             Some(entry) if entry.digest == digest => {
@@ -289,7 +318,7 @@ impl AnalysisDatabase {
                 SourceUpdate::Unchanged
             }
             Some(entry) => {
-                entry.replace_source(source, version, digest);
+                entry.replace_source(source.into(), version, digest);
                 SourceUpdate::Changed
             }
         }
@@ -305,19 +334,19 @@ impl AnalysisDatabase {
         let digest = SourceDigest::from_source(&source);
         match self.entries.get_mut(&id) {
             None => {
-                let mut entry = SourceEntry::new(source, version, digest);
-                entry.program = Some(Ok(program));
+                let mut entry = SourceEntry::new(source.into(), version, digest);
+                entry.program = Some(Ok(Arc::new(program)));
                 self.entries.insert(id, entry);
                 SourceUpdate::Inserted
             }
             Some(entry) if entry.digest == digest => {
                 entry.version = version;
-                entry.program = Some(Ok(program));
+                entry.program = Some(Ok(Arc::new(program)));
                 SourceUpdate::Unchanged
             }
             Some(entry) => {
-                entry.replace_source(source, version, digest);
-                entry.program = Some(Ok(program));
+                entry.replace_source(source.into(), version, digest);
+                entry.program = Some(Ok(Arc::new(program)));
                 SourceUpdate::Changed
             }
         }
@@ -331,7 +360,7 @@ impl AnalysisDatabase {
         if entry.program.is_none() {
             if let Some(error) = &entry.lex_error {
                 return Err(AnalysisError::Lex {
-                    source: entry.source.clone(),
+                    source: entry.source.to_string(),
                     error: error.clone(),
                 });
             }
@@ -339,13 +368,13 @@ impl AnalysisDatabase {
             let tokens = Lexer::new(&entry.source).tokenize().map_err(|error| {
                 entry.lex_error = Some(error.clone());
                 AnalysisError::Lex {
-                    source: entry.source.clone(),
+                    source: entry.source.to_string(),
                     error,
                 }
             })?;
             self.stats.parse_runs += 1;
             let mut parser = Parser::new(tokens);
-            entry.program = Some(parser.parse().map_err(|error| {
+            entry.program = Some(parser.parse().map(Arc::new).map_err(|error| {
                 let mut errors = parser.all_errors().to_vec();
                 if errors.is_empty() {
                     errors.push(error);
@@ -355,11 +384,11 @@ impl AnalysisDatabase {
         }
         match entry.program.as_ref().expect("program initialized") {
             Ok(program) => Ok(ParseOutput {
-                source: entry.source.clone(),
-                program: program.clone(),
+                source: Arc::clone(&entry.source),
+                program: Arc::clone(program),
             }),
             Err(errors) => Err(AnalysisError::Parse {
-                source: entry.source.clone(),
+                source: entry.source.to_string(),
                 errors: errors.clone(),
             }),
         }
@@ -379,14 +408,7 @@ impl AnalysisDatabase {
             .typechecks
             .get(&key)
         {
-            return Ok(TypeCheckOutput {
-                source: parsed.source,
-                program: parsed.program,
-                diagnostics: cached.diagnostics.clone(),
-                inlay_hints: cached.inlay_hints.clone(),
-                binding_types: cached.binding_types.clone(),
-                predicate_sites: cached.predicate_sites.clone(),
-            });
+            return Ok(TypeCheckOutput::from_cache(parsed, cached));
         }
 
         self.stats.typecheck_runs += 1;
@@ -399,24 +421,31 @@ impl AnalysisDatabase {
             .into_checker()
             .check_with_facts(&parsed.program, &parsed.source);
         let cached = CachedTypeCheck {
-            diagnostics: diagnostics.clone(),
-            inlay_hints: inlay_hints.clone(),
-            binding_types: binding_types.clone(),
-            predicate_sites: predicate_sites.clone(),
+            diagnostics: Arc::new(diagnostics),
+            inlay_hints: Arc::new(inlay_hints),
+            binding_types: Arc::new(binding_types),
+            predicate_sites: Arc::new(predicate_sites),
         };
+        let output = TypeCheckOutput::from_cache(parsed, &cached);
         self.entries
             .get_mut(id)
             .expect("parse verified source entry")
             .typechecks
             .insert(key, cached);
-        Ok(TypeCheckOutput {
+        Ok(output)
+    }
+}
+
+impl TypeCheckOutput {
+    fn from_cache(parsed: ParseOutput, cached: &CachedTypeCheck) -> Self {
+        Self {
             source: parsed.source,
             program: parsed.program,
-            diagnostics,
-            inlay_hints,
-            binding_types,
-            predicate_sites,
-        })
+            diagnostics: Arc::clone(&cached.diagnostics),
+            inlay_hints: Arc::clone(&cached.inlay_hints),
+            binding_types: Arc::clone(&cached.binding_types),
+            predicate_sites: Arc::clone(&cached.predicate_sites),
+        }
     }
 }
 
@@ -491,6 +520,22 @@ mod tests {
         db.parse(&id).expect("same digest parse");
         assert_eq!(db.stats().lex_runs, 1);
         assert_eq!(db.stats().parse_runs, 1);
+    }
+
+    #[test]
+    fn cached_results_are_shared_not_copied() {
+        let mut db = AnalysisDatabase::new();
+        let id = source_id();
+        db.set_source(id.clone(), "const x = 1\n".to_string(), SourceVersion(1));
+        let parsed = db.parse(&id).expect("parse");
+        let checked = db.typecheck(&id, TypeCheckConfig::new()).expect("check");
+        let again = db
+            .typecheck(&id, TypeCheckConfig::new())
+            .expect("cached check");
+        assert!(Arc::ptr_eq(&parsed.program, &checked.program));
+        assert!(Arc::ptr_eq(&parsed.source, &again.source));
+        assert!(Arc::ptr_eq(&checked.binding_types, &again.binding_types));
+        assert!(Arc::ptr_eq(&checked.diagnostics, &again.diagnostics));
     }
 
     #[test]

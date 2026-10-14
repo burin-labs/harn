@@ -1,3 +1,4 @@
+mod contextual;
 mod decls;
 mod error;
 mod expression_nodes;
@@ -12,7 +13,11 @@ mod types;
 #[cfg(test)]
 mod stack_tests;
 
-pub use error::ParserError;
+#[cfg(test)]
+mod operator_tests;
+
+pub use contextual::contextual_statement_at;
+pub use error::{ParserError, REMOVED_RANGE_KEYWORD};
 pub use state::{Parser, MAX_NESTING_DEPTH};
 
 #[cfg(test)]
@@ -437,8 +442,10 @@ let threshold = snap?.total_iterations ?? 0 < 2
         else {
             panic!("expected top-level comparison binary op");
         };
-        assert_eq!(comparison_op, "==");
-        assert!(matches!(&comparison_right.node, Node::BinaryOp { op, .. } if op == "??"));
+        assert_eq!(*comparison_op, BinaryOperator::Eq);
+        assert!(
+            matches!(&comparison_right.node, Node::BinaryOp { op, .. } if matches!(op, BinaryOperator::NilCoalesce))
+        );
 
         let Node::LetBinding {
             value: threshold, ..
@@ -454,8 +461,10 @@ let threshold = snap?.total_iterations ?? 0 < 2
         else {
             panic!("expected top-level threshold binary op");
         };
-        assert_eq!(threshold_op, "<");
-        assert!(matches!(&threshold_left.node, Node::BinaryOp { op, .. } if op == "??"));
+        assert_eq!(*threshold_op, BinaryOperator::Lt);
+        assert!(
+            matches!(&threshold_left.node, Node::BinaryOp { op, .. } if matches!(op, BinaryOperator::NilCoalesce))
+        );
     }
 
     #[test]

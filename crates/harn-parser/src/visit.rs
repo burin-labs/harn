@@ -506,7 +506,7 @@ fn collect_binding_pattern<'a>(pattern: &'a BindingPattern, children: &mut impl 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ast::{spanned, Node, TypedParam};
+    use crate::ast::{spanned, BinaryOperator, Node, TypedParam, UnaryOperator};
     use harn_lexer::Span;
 
     fn dummy(node: Node) -> SNode {
@@ -519,7 +519,7 @@ mod tests {
             pattern: BindingPattern::Identifier("x".to_string()),
             type_ann: None,
             value: Box::new(dummy(Node::BinaryOp {
-                op: "+".to_string(),
+                op: BinaryOperator::Add,
                 left: Box::new(dummy(Node::IntLiteral(1))),
                 right: Box::new(dummy(Node::IntLiteral(2))),
             })),
@@ -585,7 +585,7 @@ mod tests {
         let mut node = dummy(Node::IntLiteral(0));
         for _ in 0..10_000 {
             node = dummy(Node::UnaryOp {
-                op: "!".to_string(),
+                op: UnaryOperator::Not,
                 operand: Box::new(node),
             });
         }
