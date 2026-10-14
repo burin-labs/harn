@@ -2,8 +2,10 @@ import { execution, fixture, proof } from "../../../personas/smart_ship/fixtures
 import { freeze_snapshot, verify } from "../../../personas/smart_ship/lib/main"
 import { contract_effect, contract_negative } from "./lib/mechanism_contract"
 
-// Exercises the public verifier. The stock-runner package regressions separately
-// prove preparation, dispatch, execution, source checks, and original signatures.
+/**
+ * Exercise the public verifier. Stock-runner regressions separately prove
+ * preparation, dispatch, execution, source checks, and original signatures.
+ */
 pipeline default(harness: Harness) {
   const f = fixture(harness.random)
   const prior = proof(f, execution(f))

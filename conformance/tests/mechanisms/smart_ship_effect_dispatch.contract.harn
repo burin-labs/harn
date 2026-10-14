@@ -15,8 +15,10 @@ fn fence(state: Controller) -> Fence {
   return pick(state.authority, ["installation", "generation", "revision", "controller"])
 }
 
-// This is the deterministic controller guard contract. The package's owning
-// effect-owner regressions additionally reach remote Git CAS and real callbacks.
+/**
+ * Deterministic controller guard contract. The package's owning effect-owner
+ * regressions additionally reach remote Git CAS and real callbacks.
+ */
 pipeline default(harness: Harness) {
   const f = fixture(harness.random)
   const initial: Controller = {
