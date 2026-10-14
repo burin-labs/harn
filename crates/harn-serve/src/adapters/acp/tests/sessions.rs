@@ -1239,7 +1239,7 @@ pipeline default(harness: Harness, task: unknown) {
                 }
             }
             assert!(saw_completed, "prompt should complete successfully");
-            assert_eq!(output.trim(), vec!["true"; 11].join("\n"), "every prompt assertion must run");
+            assert_eq!(output.trim(), ["true"; 11].join("\n"), "every prompt assertion must run");
             drop(request_tx);
             server.await.expect("ACP channel server task");
         })
