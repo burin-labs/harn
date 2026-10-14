@@ -697,7 +697,7 @@ stack.reverse()             // stack is [3, 2, 1]
 | `.contains()` | `contains(value: int) -> bool` |  | True when `value` is in the range. |
 | `.first()` | `first() -> int?` |  | First integer, or nil when empty. |
 | `.last()` | `last() -> int?` |  | Last integer, or nil when empty. |
-| `.to_string()` | `to_string() -> string` |  | Source form such as `1 to 5`. |
+| `.to_string()` | `to_string() -> string` |  | Source form such as `1..=5`. |
 | `.iter()` | `iter() -> iter<int>` |  | Lazy iterator; other iterator methods lift the range automatically. |
 
 ### Iterator methods
