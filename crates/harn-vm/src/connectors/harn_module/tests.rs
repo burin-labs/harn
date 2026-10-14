@@ -900,7 +900,13 @@ async fn poll_tick_emits_inbox_events_and_persists_cursor_state() {
             .iter()
             .map(|outcome| outcome.trigger_id.as_str())
             .collect::<Vec<_>>(),
-        ["other-poll-source"]
+        ["other-poll-source", "subscriber"]
+    );
+    assert_eq!(outcomes[0].status, crate::DispatchStatus::Succeeded);
+    assert_eq!(outcomes[1].status, crate::DispatchStatus::Skipped);
+    assert_eq!(
+        outcomes[1].result.as_ref().unwrap()["skip_stage"],
+        "inbox_dedupe"
     );
     duplicate.event.tenant_id = Some(crate::TenantId("tenant-b".to_string()));
     let outcomes = restarted.dispatch_inbox_envelope(duplicate).await.unwrap();

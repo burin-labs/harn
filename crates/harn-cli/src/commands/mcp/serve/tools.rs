@@ -15,7 +15,7 @@ use super::types::{
 };
 use super::util::{
     handler_json, inject_trace_headers, merge_json_object, parse_trust_query_timestamp,
-    preview_events, report_milestone, trigger_kind_name, trigger_replay_steering_from_request,
+    preview_events, report_milestone, trigger_replay_steering_from_request,
 };
 use super::DEFAULT_TASK_TTL_MS;
 use crate::commands::orchestrator::common::{
@@ -486,15 +486,15 @@ impl McpOrchestratorService {
         }
 
         let mut triggers = Vec::new();
-        for trigger in &ctx.collected_triggers {
-            let Some(snapshot) = snapshots_by_id.get(&trigger.config.id) else {
+        for trigger in &ctx.bindings {
+            let Some(snapshot) = snapshots_by_id.get(&trigger.id) else {
                 continue;
             };
             triggers.push(TriggerListEntry {
-                trigger_id: trigger.config.id.clone(),
-                kind: trigger_kind_name(trigger.config.kind).to_string(),
-                provider: trigger.config.provider.as_str().to_string(),
-                when: trigger.when.as_ref().map(|when| when.reference.raw.clone()),
+                trigger_id: trigger.id.clone(),
+                kind: trigger.kind.clone(),
+                provider: trigger.provider.as_str().to_string(),
+                when: trigger.when.as_ref().map(|when| when.raw.clone()),
                 handler: handler_json(&trigger.handler),
                 version: snapshot.version,
                 state: snapshot.state.as_str().to_string(),

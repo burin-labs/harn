@@ -133,6 +133,9 @@ The dispatcher uses the shared `EventLog` instead of a parallel queue layer:
 `trigger.inbox.claims` stores TTL-bound dedupe claims for `InboxIndex`.
 For a routed or polled connector event, the dispatcher checks the named
 binding's provider and event selectors, then selects matching persona subscriptions.
+Selector mismatches and duplicate subscription deliveries produce `dispatch_skipped`
+outbox records with `ingress_selector` or `inbox_dedupe` stages. Recovery treats those
+deliveries as settled rather than stranded.
 It doesn't dispatch to other routed bindings. Each subscription claims the
 connector's delivery key independently, scoped by tenant and binding id.
 Duplicate deliveries across routes or dispatcher restarts don't run that subscription again

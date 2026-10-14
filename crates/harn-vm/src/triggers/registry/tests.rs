@@ -289,6 +289,45 @@ async fn gc_drops_terminated_versions_beyond_retention_limit() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn current_binding_prefers_restored_definition_over_newer_history() {
+    clear_trigger_registry();
+    reset_active_event_log();
+    install_test_memory_event_log();
+    install_manifest_triggers(vec![manifest_spec("github-new-issue", "v1")])
+        .await
+        .unwrap();
+    install_manifest_triggers(vec![manifest_spec("github-new-issue", "v2")])
+        .await
+        .unwrap();
+    begin_in_flight("github-new-issue", 2).unwrap();
+    install_manifest_triggers(vec![manifest_spec("github-new-issue", "v1")])
+        .await
+        .unwrap();
+    let restored = resolve_live_trigger_binding("github-new-issue", None).unwrap();
+    assert_eq!(restored.version, 1);
+    assert_eq!(current_trigger_binding_snapshots().len(), 1);
+    assert_eq!(current_trigger_binding_snapshots()[0].version, 1);
+    assert!(snapshot_trigger_bindings()
+        .iter()
+        .any(|binding| binding.version == 2 && binding.state == TriggerState::Draining));
+    finish_in_flight("github-new-issue", 2, TriggerDispatchOutcome::Dispatched)
+        .await
+        .unwrap();
+    let current = current_trigger_binding_snapshots();
+    assert_eq!(current.len(), 1);
+    assert_eq!(current[0].version, 1);
+    assert_eq!(current[0].state, TriggerState::Active);
+    assert_eq!(
+        resolve_live_trigger_binding("github-new-issue", None)
+            .unwrap()
+            .version,
+        1
+    );
+    reset_active_event_log();
+    clear_trigger_registry();
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn lifecycle_transitions_append_to_event_log() {
     clear_trigger_registry();
     reset_active_event_log();

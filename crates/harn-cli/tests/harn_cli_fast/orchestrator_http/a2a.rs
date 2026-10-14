@@ -253,13 +253,65 @@ async fn a2a_push_route_requires_bearer_or_valid_hmac() {
         .unwrap();
     assert_status(response, StatusCode::OK).await;
 
+    await_pump_dispatch_completed(&harness).await;
+    let log = harness.event_log();
+    let before = log
+        .latest(&Topic::new(harn_vm::TRIGGER_INBOX_ENVELOPES_TOPIC).unwrap())
+        .await
+        .unwrap()
+        .unwrap();
+    let response = client
+        .post(format!("{base_url}/a2a/review"))
+        .bearer_auth("test-key-2")
+        .header(CONTENT_TYPE, "application/json")
+        .body(r#"{"kind":"a2a.task.completed","task":{"id":"task-124"}}"#)
+        .send()
+        .await
+        .unwrap();
+    assert_status(response, StatusCode::OK).await;
+    await_topic_event(&log, "orchestrator.lifecycle", |event| {
+        event.kind == "pump_dispatch_completed"
+            && event.payload["event_log_id"]
+                .as_u64()
+                .is_some_and(|id| id > before)
+    })
+    .await;
+    let successes = read_topic_events(&log, harn_vm::TRIGGER_OUTBOX_TOPIC)
+        .await
+        .into_iter()
+        .filter(|(_, event)| event.kind == "dispatch_succeeded")
+        .collect::<Vec<_>>();
+    assert_eq!(
+        successes.len(),
+        1,
+        "a received selector must skip completed tasks"
+    );
+    assert_eq!(successes[0].1.payload["result"], "a2a.task.received");
+    let skipped = read_topic_events(&log, harn_vm::TRIGGER_OUTBOX_TOPIC)
+        .await
+        .into_iter()
+        .filter(|(_, event)| event.kind == "dispatch_skipped")
+        .collect::<Vec<_>>();
+    assert_eq!(skipped.len(), 1);
+    assert_eq!(skipped[0].1.payload["skip_stage"], "ingress_selector");
+    let inbox = read_topic_events(&log, harn_vm::TRIGGER_INBOX_ENVELOPES_TOPIC).await;
+    let received: harn_vm::triggers::dispatcher::InboxEnvelope =
+        serde_json::from_value(inbox[0].1.payload.clone()).unwrap();
+    assert_eq!(received.event.kind, "a2a.task.received");
+    let harn_vm::ProviderPayload::Known(harn_vm::triggers::event::KnownProviderPayload::A2aPush(
+        payload,
+    )) = received.event.provider_payload
+    else {
+        panic!("A2A ingress must retain its typed task payload");
+    };
+    assert_eq!(payload.task_id.as_deref(), Some("task-123"));
     shutdown(harness).await;
 
     let snapshot = state_snapshot(&temp);
-    assert!(snapshot.contains("\"received\": 3"), "snapshot={snapshot}");
+    assert!(snapshot.contains("\"received\": 4"), "snapshot={snapshot}");
     assert!(snapshot.contains("\"failed\": 2"), "snapshot={snapshot}");
     assert!(
-        snapshot.contains("\"dispatched\": 1"),
+        snapshot.contains("\"dispatched\": 2"),
         "snapshot={snapshot}"
     );
 }

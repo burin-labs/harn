@@ -765,6 +765,29 @@ pub fn snapshot_trigger_bindings() -> Vec<TriggerBindingSnapshot> {
     })
 }
 
+fn current_binding_key(state: TriggerState, version: u32) -> (u8, u32) {
+    let priority = match state {
+        TriggerState::Terminated => 0,
+        TriggerState::Draining => 1,
+        _ => 2,
+    };
+    (priority, version)
+}
+
+/// Return one current binding per id, preferring serving versions over history.
+pub fn current_trigger_binding_snapshots() -> Vec<TriggerBindingSnapshot> {
+    let mut current = BTreeMap::<String, TriggerBindingSnapshot>::new();
+    for binding in snapshot_trigger_bindings() {
+        if current.get(&binding.id).is_none_or(|previous| {
+            current_binding_key(binding.state, binding.version)
+                > current_binding_key(previous.state, previous.version)
+        }) {
+            current.insert(binding.id.clone(), binding);
+        }
+    }
+    current.into_values().collect()
+}
+
 #[allow(clippy::arc_with_non_send_sync)]
 pub fn resolve_trigger_binding_as_of(
     id: &str,
@@ -855,7 +878,7 @@ pub fn resolve_live_trigger_binding(
         registry
             .live_bindings_any_source(id)
             .into_iter()
-            .max_by_key(|binding| binding.version)
+            .max_by_key(|binding| current_binding_key(binding.state_snapshot(), binding.version))
             .ok_or_else(|| TriggerRegistryError::UnknownId(id.to_string()))
     })
 }
@@ -944,13 +967,23 @@ mod selector;
 
 impl TriggerBinding {
     pub(crate) fn matches_event(&self, event: &super::TriggerEvent) -> bool {
-        self.provider == event.provider
-            && (self.match_events.is_empty()
-                || self
-                    .match_events
-                    .iter()
-                    .any(|selector| selector::event_selector_matches(event, selector)))
+        matches_event(&self.provider, &self.match_events, event)
     }
+}
+
+impl TriggerBindingSpec {
+    /// Match the provider and event selectors using the dispatcher's ingress contract.
+    pub fn matches_event(&self, event: &super::TriggerEvent) -> bool {
+        matches_event(&self.provider, &self.match_events, event)
+    }
+}
+
+fn matches_event(provider: &ProviderId, selectors: &[String], event: &super::TriggerEvent) -> bool {
+    *provider == event.provider
+        && (selectors.is_empty()
+            || selectors
+                .iter()
+                .any(|value| selector::event_selector_matches(event, value)))
 }
 
 pub async fn install_manifest_triggers(

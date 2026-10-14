@@ -81,6 +81,14 @@ pub enum ProviderPayload {
 }
 
 impl ProviderPayload {
+    /// Use the core payload's task event kind when it owns that classification.
+    pub fn event_kind(&self, fallback: &str) -> String {
+        match self {
+            Self::Known(KnownProviderPayload::A2aPush(payload)) => payload.kind.clone(),
+            _ => fallback.to_string(),
+        }
+    }
+
     pub(crate) fn extension(provider: &str, schema_name: &str, raw: JsonValue) -> ProviderPayload {
         ProviderPayload::Extension(ExtensionProviderPayload {
             provider: provider.to_string(),

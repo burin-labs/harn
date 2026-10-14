@@ -388,17 +388,14 @@ fn provider_requires_harn_connector(provider: &str) -> bool {
 
 pub(super) fn live_manifest_binding_versions() -> BTreeMap<String, u32> {
     let mut versions = BTreeMap::new();
-    for binding in harn_vm::snapshot_trigger_bindings() {
+    for binding in harn_vm::current_trigger_binding_snapshots() {
         if binding.source != harn_vm::TriggerBindingSource::Manifest {
             continue;
         }
         if binding.state == harn_vm::TriggerState::Terminated {
             continue;
         }
-        versions
-            .entry(binding.id)
-            .and_modify(|current: &mut u32| *current = (*current).max(binding.version))
-            .or_insert(binding.version);
+        versions.insert(binding.id, binding.version);
     }
     versions
 }
@@ -407,21 +404,11 @@ pub(super) fn trigger_state_snapshots(
     triggers: &[harn_vm::TriggerBindingSpec],
     listener_metrics: &BTreeMap<String, TriggerMetricSnapshot>,
 ) -> Vec<TriggerStateSnapshot> {
-    let bindings_by_id = harn_vm::snapshot_trigger_bindings()
+    let bindings_by_id = harn_vm::current_trigger_binding_snapshots()
         .into_iter()
         .filter(|binding| binding.source == harn_vm::TriggerBindingSource::Manifest)
-        .fold(
-            BTreeMap::<String, harn_vm::TriggerBindingSnapshot>::new(),
-            |mut acc, binding| {
-                match acc.get(&binding.id) {
-                    Some(current) if current.version >= binding.version => {}
-                    _ => {
-                        acc.insert(binding.id.clone(), binding);
-                    }
-                }
-                acc
-            },
-        );
+        .map(|binding| (binding.id.clone(), binding))
+        .collect::<BTreeMap<_, _>>();
 
     triggers
         .iter()
