@@ -1,0 +1,53 @@
+import {
+  Controller,
+  Installation,
+  commit_state,
+  control,
+  initialize_installation,
+  inspect_installation,
+  is_digest,
+  load_installation,
+  prepare_state,
+  read_state,
+  transfer,
+} from "./lib/main"
+
+type Request = {
+  action: "init" | "inspect" | "control" | "transfer",
+  configuration: string,
+  mode?: "shadow" | "active" | "draining" | "stopped",
+  target_controller?: string,
+}
+
+fn change(process: HarnessProcess, config: Installation, request: Request) {
+  const previous = read_state(process, config.store)
+  const state = previous.state
+  require state != nil && state.authority.installation == config.policy.installation
+    && state.authority.controller == config.controller,
+    "this controller artifact does not own the installation"
+  const fence = pick(state.authority, ["installation", "generation", "revision", "controller"])
+  const next: Controller = if request.action == "transfer" {
+    require request.target_controller != nil && is_digest(request.target_controller),
+      "transfer requires the new pinned controller identity"
+    unwrap(transfer(state, fence, request.target_controller))
+  } else {
+    require request.mode != nil, "control requires a mode"
+    unwrap(control(state, fence, request.mode))
+  }
+  const result = commit_state(
+    process,
+    config.store,
+    prepare_state(process, config.store, previous, next),
+  )
+  require result.status == "committed", "control change is unconfirmed: " + result.status
+}
+
+fn main(harness: Harness, request: Request) {
+  const config = load_installation(harness.fs, request.configuration)
+  if request.action == "init" {
+    initialize_installation(harness.process, config)
+  } else if request.action != "inspect" {
+    change(harness.process, config, request)
+  }
+  harness.stdio.println(json_stringify(inspect_installation(harness.process, config)))
+}

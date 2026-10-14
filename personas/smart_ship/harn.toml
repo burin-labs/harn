@@ -1,0 +1,19 @@
+[package]
+name = "harn-smart-ship"
+version = "0.1.0"
+description = "Grouped verification, forward repair, and proven release checkpoints for ordinary Git projects."
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/burin-labs/harn"
+provenance = "https://github.com/burin-labs/harn/tree/main/personas/smart_ship"
+harn = ">=0.10.166,<0.11"
+docs_url = "docs/api.md"
+permissions = []
+host_requirements = []
+
+[exports]
+lib = "lib/main.harn"
+
+[tests]
+roots = ["tests"]
+
+[dependencies]

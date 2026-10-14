@@ -1,0 +1,115 @@
+import { prepare_interaction } from "../fixtures/interaction"
+import { STACKS, Stack, git, job } from "../fixtures/neutral"
+import {
+  Controller,
+  Fence,
+  checkpoint_id,
+  complete,
+  local_lineage,
+  offer,
+  run_job,
+  start,
+} from "../lib/main"
+
+fn fence(state: Controller) -> Fence {
+  return pick(state.authority, ["installation", "generation", "revision", "controller"])
+}
+
+pipeline test_python_combined_failure_holds_the_checkpoint_until_forward_repair(harness: Harness) {
+  const stack = STACKS.find({ item -> item.name == "python" })
+  if stack == nil {
+    throw "Python fixture is missing"
+  }
+  interaction(harness, stack)
+}
+
+pipeline test_typescript_combined_failure_holds_the_checkpoint_until_forward_repair(
+  harness: Harness,
+) {
+  const stack = STACKS.find({ item -> item.name == "typescript" })
+  if stack == nil {
+    throw "TypeScript fixture is missing"
+  }
+  interaction(harness, stack)
+}
+
+fn interaction(harness: Harness, stack: Stack) {
+  const scenario = prepare_interaction(harness, stack)
+  const f = scenario.fixture
+  const root = scenario.root
+  defer {
+    harness.fs.delete(root)
+  }
+  const local = pick(harness, ["clock", "fs", "process", "system"])
+  const signer = {id: "executor", private_key: f.private_key}
+  const previous = checkpoint_id(scenario.checkpoint)
+  const authority = scenario.authority
+  harness.fs.write_text(path_join(root, stack.capacity_path), stack.repair)
+  git(harness.process, root, ["add", stack.capacity_path])
+  git(harness.process, root, ["commit", "--quiet", "-m", "size capacity for active workers"])
+  const repaired = run_job(
+    local,
+    job(pick(harness, ["env", "system"]), stack, root, "repaired"),
+    signer,
+  )
+  assert_eq(repaired.proof.original.result, "passed")
+  const lineage = local_lineage(
+    harness.process,
+    root,
+    repaired.proof.original.source,
+    scenario.candidate.changes,
+  )
+  assert_eq(lineage.required, 2)
+  assert_eq(lineage.checked, 2)
+  assert_eq(lineage.missing, [])
+  assert_eq(lineage.unknown, [])
+  const original_a = scenario.candidate.changes[0]
+  assert(original_a != nil)
+  const missing = local_lineage(
+    harness.process,
+    root,
+    repaired.proof.original.source,
+    [original_a + {integrated_commit: original_a.head}],
+  )
+  assert_eq(missing.checked, 1)
+  assert_eq(missing.missing, ["change-a"])
+  const unknown = local_lineage(
+    harness.process,
+    root,
+    repaired.proof.original.source,
+    [original_a + {integrated_commit: sha256_hex("absent object")}],
+  )
+  assert_eq(unknown.checked, 0)
+  assert_eq(unknown.unknown, ["change-a"])
+  const initial: Controller = {
+    schema: "smart-ship.controller.v1",
+    authority: authority,
+    active: scenario.candidate,
+    pending: nil,
+    checkpoint: scenario.checkpoint,
+    incidents: [],
+    effects: [],
+    unverified_since_ms: harness.clock.now_ms(),
+  }
+  const failed = unwrap(
+    complete(initial, fence(initial), scenario.candidate, [scenario.combined.proof], f.policy),
+  )
+  assert_eq(failed.authority.previous_checkpoint, previous)
+  const repaired_candidate = scenario.candidate
+    + {
+      sequence: 3,
+      sources: [repaired.proof.original.source],
+      requirements: [repaired.proof.original.requirement],
+    }
+  const admitted = unwrap(
+    offer(failed, fence(failed), repaired_candidate, f.policy, harness.clock.now_ms()),
+  )
+  const running = unwrap(start(admitted, fence(admitted)))
+  const settled = unwrap(
+    complete(running, fence(running), repaired_candidate, [repaired.proof], f.policy),
+  )
+  assert(settled.checkpoint != nil)
+  assert(checkpoint_id(settled.checkpoint) != previous)
+  assert_eq(len(settled.incidents), 1)
+  assert_eq(settled.incidents[0]?.resolved, true)
+}
