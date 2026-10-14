@@ -23,13 +23,15 @@ impl DaemonProbe {
         // The stdout line is a readiness handshake: on macOS `/bin/sh` is a
         // shim that re-execs the real shell, and the helper's argv cannot be
         // read mid-exec. Detached helpers discard it; tests block on it.
+        // A blocking drain reaches EOF for every reader. The shell's line-read
+        // loop can leave a second helper blocked after custody closes on macOS.
         std::fs::write(
             &helper,
             format!(
                 "exec 3<> {fifo}\nexec 4< {fifo}\nexec 3>&-\n\
                  printf '%s\\n' \"$$\" >> {started}\n\
                  printf '%s\\n' \"$$\"\n\
-                 while IFS= read -r line <&4; do :; done\n",
+                 cat <&4 >/dev/null\n",
                 fifo = shell_path(&fifo),
                 started = shell_path(&started),
             ),
