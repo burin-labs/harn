@@ -22,6 +22,9 @@ harn-modules = { path = "../harn-modules", version = "=0.10.166" }
 harn-package = { path = "../harn-package", version = "=0.10.166" }
 harn-parser = { path = "../harn-parser", version = "=0.10.166" }
 harn-session-store = { path = "../harn-session-store", version = "=0.10.166" }
+# Server assembly is a concrete host: install the bundled catalog here while
+# compiler and VM crates keep depending only on harn-stdlib-catalog.
+harn-stdlib = { path = "../harn-stdlib", version = "=0.10.166" }
 # `default-features = false` keeps the in-process embedding surface lean:
 # Postgres (sqlx) and the hostlib grammars are opt-in via this crate's
 # feature flags rather than dragged in unconditionally. harn-cli re-enables
@@ -85,6 +88,7 @@ default-features = false
 features = ["use_pem", "aws_lc_rs"]
 
 [dev-dependencies]
+harn-stdlib-catalog = { path = "../harn-stdlib-catalog", version = "=0.10.166" }
 harn-modules = { path = "../harn-modules", version = "=0.10.166", features = ["bundled-stdlib"] }
 rusqlite = { version = "0.40", features = ["bundled"] }
 async-compression = { version = "0.4", features = ["tokio", "gzip"] }

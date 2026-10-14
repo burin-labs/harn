@@ -4004,6 +4004,8 @@ dependencies = [
  "harn-package",
  "harn-parser",
  "harn-session-store",
+ "harn-stdlib",
+ "harn-stdlib-catalog",
  "harn-vm",
  "hex",
  "hmac 0.13.0",
