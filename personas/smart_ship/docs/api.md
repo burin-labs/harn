@@ -325,6 +325,34 @@ pub type Proof = {
 }
 ```
 
+### type `ReleaseArtifact`
+
+Original execution provenance remains attached to every selected output, including reuse.
+
+```harn
+pub type ReleaseArtifact = {artifact: Artifact, original: Execution, mode: "executed" | "reused"}
+```
+
+### type `ReleaseQualification`
+
+Qualification permits publication of these bytes; it does not report a completed deployment.
+
+```harn
+pub type ReleaseQualification = {
+  checkpoint: string,
+  source: Source,
+  artifacts: list<ReleaseArtifact>,
+}
+```
+
+### type `ReleaseRequest`
+
+A consumer pins the checkpoint and the exact source and output it intends to publish.
+
+```harn
+pub type ReleaseRequest = {checkpoint: string, source: Source, artifacts: list<Artifact>}
+```
+
 ### type `RepairAttempt`
 
 An unreported attempt retains its full allowance, even after revocation or expiry.
@@ -787,6 +815,19 @@ pub fn promote(
   authority: Authority,
   fence: Fence,
 ) -> Promotion {
+}
+```
+
+### fn `qualify_release`
+
+Refuse moving-source or substituted-output requests even when the checkpoint is valid.
+
+```harn
+pub fn qualify_release(
+  signed: SignedCheckpoint,
+  trust: CheckpointTrust,
+  request: ReleaseRequest,
+) -> Result<ReleaseQualification, string> {
 }
 ```
 

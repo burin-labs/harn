@@ -66,3 +66,20 @@ Disable the installation's event triggers, drain admitted work, and reconcile
 external requests. Set `mode: stopped` and inspect the confirmed durable state.
 Remove the `harn-smart-ship` dependency from `harn.toml`, then run `harn install`.
 Retain remote state and signed checkpoint history for release consumers and recovery.
+
+## Guard a release
+
+Before publication, hash the actual artifact bytes and name their exact source
+commit and tree. Put that source and the artifact names and digests in a
+`ReleaseRequest`, together with the pinned checkpoint digest. Invoke the guard
+against the signed checkpoint file:
+
+```sh
+harn run .smart-ship-source/personas/smart_ship/cli.harn -- '{"action":"release-guard","configuration":"smart-ship.json","release":{"checkpoint_file":"checkpoint.json","request":{"checkpoint":"sha256:<checkpoint-digest>","source":{"repository":"project","commit":"<commit>","tree":"<tree>"},"artifacts":[{"name":"binary","digest":"sha256:<artifact-digest>"}]}}}'
+```
+
+The guard refuses invalid signatures, incomplete verification, another checkpoint,
+a changed source, missing outputs, substituted bytes, or ambiguous producers.
+Successful output retains each original execution's provenance, including reuse.
+Publish the qualified bytes through your deployment adapter and record its actual
+receipt separately. Qualification does not report that deployment succeeded.

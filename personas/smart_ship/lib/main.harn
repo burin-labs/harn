@@ -61,6 +61,12 @@ pub import {
   run_job,
 } from "./local"
 pub import { checkpoint_valid, fence_matches, promote, release_identity } from "./promotion"
+pub import {
+  ReleaseArtifact,
+  ReleaseQualification,
+  ReleaseRequest,
+  qualify_release,
+} from "./release"
 pub import { RepairContext, RepairModel, RepairRun, run_repair } from "./repair"
 pub import {
   Artifact,

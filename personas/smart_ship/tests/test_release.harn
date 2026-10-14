@@ -1,0 +1,41 @@
+import { digest, execution, fixture, proof } from "../fixtures/support"
+import { checkpoint_bytes, checkpoint_id, promote, qualify_release } from "../lib/main"
+
+pipeline test_release_binds_checkpoint_source_and_output_and_retains_reused_producer(
+  harness: Harness,
+) {
+  const f = fixture(harness.random)
+  const current = execution(f)
+  const original = current + {source: current.source + {commit: sha256_hex("prior source")}}
+  const reused = proof(f, original) + {mode: "reused"}
+  const checkpoint = promote(f.snapshot, [reused], f.policy, f.authority, f.fence).checkpoint!
+  const signed = {
+    checkpoint: checkpoint,
+    signer: "publisher",
+    signature: ed25519_sign(f.private_key, checkpoint_bytes(checkpoint)),
+  }
+  const request = {
+    checkpoint: checkpoint_id(checkpoint),
+    source: current.source,
+    artifacts: current.artifacts,
+  }
+  const qualified = unwrap(qualify_release(signed, f.policy, request))
+  assert_eq(qualified.source, current.source)
+  assert_eq(qualified.artifacts[0]?.original, original)
+  assert_eq(qualified.artifacts[0]?.mode, "reused")
+  assert_eq(qualified.artifacts[0]?.artifact, current.artifacts[0])
+  for invalid in [
+    request + {checkpoint: digest("another checkpoint")},
+    request + {source: current.source + {commit: sha256_hex("moving main")}},
+    request + {source: current.source + {tree: sha256_hex("another tree")}},
+    request + {source: current.source + {repository: "foreign"}},
+    request + {artifacts: []},
+    request + {artifacts: current.artifacts + current.artifacts},
+    request + {artifacts: [{name: "binary", digest: digest("substituted bytes")}]},
+    request + {artifacts: [{name: "unproven", digest: digest("binary bytes")}]},
+  ] {
+    assert(is_err(qualify_release(signed, f.policy, invalid)))
+  }
+  assert(is_err(qualify_release(signed + {signature: ""}, f.policy, request)))
+  assert(is_err(qualify_release(signed, f.policy + {installation: "foreign"}, request)))
+}

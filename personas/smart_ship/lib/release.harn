@@ -1,0 +1,58 @@
+import { checkpoint_id, is_digest } from "./identity"
+import { checkpoint_valid } from "./promotion"
+import { Artifact, CheckpointTrust, Execution, SignedCheckpoint, Source } from "./types"
+
+/** A consumer pins the checkpoint and the exact source and output it intends to publish. */
+pub type ReleaseRequest = {checkpoint: string, source: Source, artifacts: list<Artifact>}
+
+/** Original execution provenance remains attached to every selected output, including reuse. */
+pub type ReleaseArtifact = {artifact: Artifact, original: Execution, mode: "executed" | "reused"}
+
+/** Qualification permits publication of these bytes; it does not report a completed deployment. */
+pub type ReleaseQualification = {
+  checkpoint: string,
+  source: Source,
+  artifacts: list<ReleaseArtifact>,
+}
+
+/** Refuse moving-source or substituted-output requests even when the checkpoint is valid. */
+pub fn qualify_release(
+  signed: SignedCheckpoint,
+  trust: CheckpointTrust,
+  request: ReleaseRequest,
+) -> Result<ReleaseQualification, string> {
+  if !checkpoint_valid(signed, trust) {
+    return Err("checkpoint signature or verification evidence is invalid")
+  }
+  const checkpoint = signed.checkpoint
+  const identity = checkpoint_id(checkpoint)
+  if request.checkpoint != identity {
+    return Err("release request does not name the pinned checkpoint")
+  }
+  if !checkpoint.snapshot.sources.contains(request.source) {
+    return Err("release source is not the exact source in the checkpoint")
+  }
+  if len(request.artifacts) == 0 {
+    return Err("release output inventory is empty")
+  }
+  let selected: list<ReleaseArtifact> = []
+  for artifact in request.artifacts {
+    if trim(artifact.name) == "" || !is_digest(artifact.digest)
+      || selected.any({ item -> item.artifact.name == artifact.name }) {
+      return Err("release output identity is invalid or repeated")
+    }
+    const producers = checkpoint.proofs.filter(
+      { proof ->
+        proof.original.requirement.repository == request.source.repository
+          && proof.original.requirement.artifacts.contains(artifact.name)
+          && proof.original.artifacts.contains(artifact)
+      },
+    )
+    if len(producers) != 1 {
+      return Err("release output requires one proven producer with the exact digest")
+    }
+    const producer = producers[0]!
+    selected.push({artifact: artifact, original: producer.original, mode: producer.mode})
+  }
+  return Ok({checkpoint: identity, source: request.source, artifacts: selected})
+}

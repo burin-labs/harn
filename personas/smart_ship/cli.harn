@@ -1,6 +1,8 @@
 import {
   Controller,
   Installation,
+  ReleaseRequest,
+  SignedCheckpoint,
   commit_state,
   control,
   initialize_installation,
@@ -8,15 +10,17 @@ import {
   is_digest,
   load_installation,
   prepare_state,
+  qualify_release,
   read_state,
   transfer,
 } from "./lib/main"
 
 type Request = {
-  action: "init" | "inspect" | "control" | "transfer",
+  action: "init" | "inspect" | "control" | "transfer" | "release-guard",
   configuration: string,
   mode?: "shadow" | "active" | "draining" | "stopped",
   target_controller?: string,
+  release?: {checkpoint_file: string, request: ReleaseRequest},
 }
 
 fn change(process: HarnessProcess, config: Installation, request: Request) {
@@ -46,6 +50,20 @@ fn main(harness: Harness) {
   require len(argv) == 1, "pass one JSON installation request after --"
   const request: Request = schema_expect(json_parse(argv[0]), schema_of(Request))
   const config = load_installation(harness.fs, request.configuration)
+  if request.action == "release-guard" {
+    require request.release != nil, "release-guard requires a checkpoint file and pinned request"
+    const text = harness.fs.read_text(request.release.checkpoint_file)
+    require len(text) <= 16777216, "checkpoint manifest exceeds its size limit"
+    const signed: SignedCheckpoint = schema_expect(json_parse(text), schema_of(SignedCheckpoint))
+    const result = qualify_release(signed, config.policy, request.release.request)
+    match result {
+      Ok(qualification) -> { harness.stdio.println(json_stringify(qualification)) }
+      Err(reason) -> {
+        throw "release refused: " + reason
+      }
+    }
+    return
+  }
   if request.action == "init" {
     initialize_installation(harness.process, config)
   } else if request.action != "inspect" {
