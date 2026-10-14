@@ -250,8 +250,9 @@ impl HarnLsp {
     /// publish its diagnostics. An edit that lands mid-analysis runs another
     /// pass.
     pub(crate) async fn reanalyze_and_publish(&self, uri: &Url) {
-        let rule_workspace = self.rule_workspace.lock().unwrap().clone();
         loop {
+            let input_generation = self.workspace.generation();
+            let rule_workspace = self.rule_workspace.lock().unwrap().clone();
             let Some(job) = self
                 .documents
                 .lock()
@@ -286,7 +287,8 @@ impl HarnLsp {
                 let Some(entry) = docs.get_mut(uri) else {
                     return;
                 };
-                if !entry.finish_analysis(analyzed) {
+                if !entry.finish_analysis(analyzed, input_generation == self.workspace.generation())
+                {
                     continue;
                 }
                 entry.diagnostics.clone()
@@ -426,6 +428,79 @@ mod tests {
             .filter(|d| d.severity == Some(DiagnosticSeverity::ERROR))
             .map(|d| d.message.clone())
             .collect()
+    }
+
+    #[tokio::test]
+    async fn a_reopened_document_keeps_its_own_detached_analysis() {
+        let (service, _socket) = LspService::new(HarnLsp::new);
+        let server = service.inner();
+        let uri = Url::parse("file:///analysis-reopen/main.harn").unwrap();
+        let reached = Arc::new([tokio::sync::Notify::new(), tokio::sync::Notify::new()]);
+        let gates = Arc::new([
+            (std::sync::Mutex::new(false), std::sync::Condvar::new()),
+            (std::sync::Mutex::new(false), std::sync::Condvar::new()),
+        ]);
+        let analyses = Arc::new(AtomicUsize::new(0));
+        *server.analysis_probe.lock().unwrap() = Some({
+            let reached = Arc::clone(&reached);
+            let gates = Arc::clone(&gates);
+            let analyses = Arc::clone(&analyses);
+            Arc::new(move || {
+                let index = analyses.fetch_add(1, Ordering::SeqCst);
+                if let Some((ready, wake)) = gates.get(index) {
+                    reached[index].notify_one();
+                    let mut ready = ready.lock().unwrap();
+                    while !*ready {
+                        ready = wake.wait(ready).unwrap();
+                    }
+                }
+            })
+        });
+        let release = |index: usize| {
+            let (ready, wake) = &gates[index];
+            *ready.lock().unwrap() = true;
+            wake.notify_one();
+        };
+        let old_finished = tokio::sync::Notify::new();
+        let original = async {
+            server
+                .handle_did_open(open(&uri, "pub fn value() -> int { return 1 }\n"))
+                .await;
+            old_finished.notify_one();
+        };
+        let replacement = async {
+            reached[0].notified().await;
+            server
+                .handle_did_close(DidCloseTextDocumentParams {
+                    text_document: TextDocumentIdentifier { uri: uri.clone() },
+                })
+                .await;
+            let text = "pub fn value() -> int { return \"new\" }\n";
+            let reopen = server.handle_did_open(open(&uri, text));
+            let finish_original = async {
+                reached[1].notified().await;
+                release(0);
+                old_finished.notified().await;
+                let still_pending = {
+                    let docs = server.documents.lock().unwrap();
+                    let state = &docs[&uri];
+                    state.dirty && state.cached_ast.is_none()
+                };
+                // Release before asserting so a failed control cannot strand
+                // a blocking analysis worker inside the test runtime.
+                release(1);
+                still_pending
+            };
+            tokio::join!(reopen, finish_original).1
+        };
+        let (_, still_pending) = tokio::join!(original, replacement);
+        assert!(
+            still_pending,
+            "the old job released or installed over the new job"
+        );
+        assert_eq!(analyses.load(Ordering::SeqCst), 2);
+        assert_eq!(type_errors(server, &uri).len(), 1);
+        assert!(!server.documents.lock().unwrap()[&uri].dirty);
     }
 
     /// Editing an imported module re-checks the open documents that import

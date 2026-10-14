@@ -29,10 +29,35 @@ pub(crate) fn scope<R>(source: &str, f: impl FnOnce() -> R) -> R {
         len: source.len(),
         tokens: OnceCell::new(),
     });
-    let previous = LINTED.with(|cell| cell.replace(Some(linted)));
-    let result = f();
-    LINTED.with(|cell| *cell.borrow_mut() = previous);
-    result
+    struct Restore(Option<Rc<Linted>>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            LINTED.with(|cell| *cell.borrow_mut() = self.0.take());
+        }
+    }
+    let _restore = Restore(LINTED.with(|cell| cell.replace(Some(linted))));
+    f()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_unwinding_nested_scope_restores_the_previous_tokens() {
+        scope("outer", || {
+            let outer = with_comments("outer").unwrap();
+            let result = std::panic::catch_unwind(|| {
+                scope("inner", || {
+                    assert!(!Rc::ptr_eq(&outer, &with_comments("inner").unwrap()));
+                    panic!("rule failed");
+                });
+            });
+            assert!(result.is_err());
+            assert!(Rc::ptr_eq(&outer, &with_comments("outer").unwrap()));
+        });
+        LINTED.with(|cell| assert!(cell.borrow().is_none()));
+    }
 }
 
 /// `source` tokenized with comments, or `None` when it fails to lex.

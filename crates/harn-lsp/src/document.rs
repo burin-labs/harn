@@ -28,6 +28,7 @@ pub(crate) struct DocumentState {
     analysis: AnalysisDatabase,
     source_id: SourceId,
     version: SourceVersion,
+    identity: Arc<()>,
     /// The parsed program, shared with the analysis cache.
     pub(crate) cached_ast: Option<std::sync::Arc<Vec<SNode>>>,
     /// Block geometry of a [`DocumentKind::Prompt`] document, cached so
@@ -105,14 +106,23 @@ impl DocumentState {
             self.source_id.clone(),
         );
         detached.version = self.version;
+        detached.identity = Arc::clone(&self.identity);
         Some(detached)
     }
 
     /// Install a detached analysis. Returns `false`, leaving the document
     /// dirty, when an edit arrived while it ran, so the caller analyzes again.
-    pub(crate) fn finish_analysis(&mut self, analyzed: DocumentState) -> bool {
+    pub(crate) fn finish_analysis(
+        &mut self,
+        analyzed: DocumentState,
+        inputs_unchanged: bool,
+    ) -> bool {
+        if !Arc::ptr_eq(&self.identity, &analyzed.identity) {
+            return false;
+        }
         self.analyzing = false;
-        if analyzed.version != self.version {
+        if !inputs_unchanged || analyzed.version != self.version {
+            self.dirty = true;
             return false;
         }
         self.analysis = analyzed.analysis;
@@ -163,6 +173,7 @@ impl DocumentState {
             analysis,
             source_id,
             version: SourceVersion(1),
+            identity: Arc::new(()),
             cached_ast: None,
             prompt_outline: Vec::new(),
             symbols: Vec::new(),
@@ -530,6 +541,36 @@ mod tests {
             !state.diagnostics.is_empty(),
             "invalid source should produce diagnostics after reparse"
         );
+    }
+
+    #[test]
+    fn detached_analysis_cannot_replace_a_reopened_document() {
+        let uri = Url::parse("file:///reopened/main.harn").unwrap();
+        let mut old = DocumentState::new_for_language("let old = 1\n".into(), "harn", &uri);
+        let job = old.begin_analysis().unwrap();
+        let mut reopened =
+            DocumentState::new_for_language("let current = 2\n".into(), "harn", &uri);
+        let current_job = reopened.begin_analysis().unwrap();
+        assert!(!reopened.finish_analysis(job, true));
+        assert!(
+            reopened.analyzing,
+            "an obsolete job cannot release the replacement's analysis"
+        );
+        assert!(reopened.finish_analysis(current_job, true));
+        assert_eq!(reopened.source.as_str(), "let current = 2\n");
+    }
+
+    #[test]
+    fn a_dependency_change_rejects_detached_facts_even_without_a_source_edit() {
+        let uri = Url::parse("file:///dependency/main.harn").unwrap();
+        let mut state = DocumentState::new_for_language("let value = 1\n".into(), "harn", &uri);
+        let job = state.begin_analysis().unwrap();
+        assert!(!state.finish_analysis(job, false));
+        assert!(state.dirty);
+        let fresh = state
+            .begin_analysis()
+            .expect("the stale job releases its analysis");
+        assert!(state.finish_analysis(fresh, true));
     }
 
     #[test]

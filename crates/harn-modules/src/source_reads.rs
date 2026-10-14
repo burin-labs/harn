@@ -19,17 +19,19 @@ pub fn read_module_source(path: &Path) -> Option<String> {
     if let Some(stdlib_module) = stdlib_module_name(path) {
         return stdlib::get_stdlib_source(stdlib_module).map(ToString::to_string);
     }
-    MODULE_DISK_READS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    MODULE_DISK_READS.with(|reads| reads.set(reads.get() + 1));
     std::fs::read_to_string(path).ok()
 }
 
-static MODULE_DISK_READS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+thread_local! {
+    static MODULE_DISK_READS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
 
-/// How many module sources this process has read from disk while building
+/// How many module sources this thread has read from disk while building
 /// module graphs. Embedded stdlib modules and caller-supplied sources are not
 /// disk reads.
 pub fn module_source_disk_reads() -> usize {
-    MODULE_DISK_READS.load(std::sync::atomic::Ordering::Relaxed)
+    MODULE_DISK_READS.with(std::cell::Cell::get)
 }
 
 /// Build a module graph using caller-owned source for one root file.

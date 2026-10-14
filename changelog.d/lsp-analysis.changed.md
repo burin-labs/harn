@@ -8,3 +8,5 @@
   changes.
 - Imported modules resolve against the unsaved text of open documents, and
   editing a module re-checks the open documents that import it.
+- A dependency edit during analysis causes another pass, and results from a
+  closed document cannot overwrite a reopened document at the same URI.

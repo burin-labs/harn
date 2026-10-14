@@ -12,6 +12,7 @@ use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use harn_modules::project_config::LintConfig;
@@ -21,6 +22,7 @@ use harn_parser::{Node, SNode};
 struct CachedGraph {
     imports_key: u64,
     graph: Arc<ModuleGraph>,
+    valid: bool,
 }
 
 #[derive(Default)]
@@ -28,6 +30,9 @@ pub(crate) struct WorkspaceCache {
     graphs: Mutex<HashMap<PathBuf, CachedGraph>>,
     lint_configs: Mutex<HashMap<PathBuf, Arc<LintConfig>>>,
     buffers: Mutex<HashMap<PathBuf, String>>,
+    generation: AtomicU64,
+    #[cfg(test)]
+    graph_probe: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
 }
 
 impl WorkspaceCache {
@@ -40,74 +45,109 @@ impl WorkspaceCache {
         program: &[SNode],
     ) -> Arc<ModuleGraph> {
         let imports_key = imports_key(source, program);
-        if let Some(cached) = lock(&self.graphs).get(path) {
-            if cached.imports_key == imports_key {
-                return Arc::clone(&cached.graph);
+        loop {
+            let (generation, mut sources) = {
+                let graphs = lock(&self.graphs);
+                if let Some(cached) = graphs.get(path) {
+                    if cached.valid && cached.imports_key == imports_key {
+                        return Arc::clone(&cached.graph);
+                    }
+                }
+                (self.generation(), lock(&self.buffers).clone())
+            };
+            sources.insert(path.to_path_buf(), source.to_string());
+            let graph = Arc::new(harn_modules::build_with_sources(path, &sources));
+            #[cfg(test)]
+            if let Some(probe) = lock(&self.graph_probe).clone() {
+                probe();
             }
+            let mut graphs = lock(&self.graphs);
+            if generation != self.generation() {
+                continue;
+            }
+            graphs.insert(
+                path.to_path_buf(),
+                CachedGraph {
+                    imports_key,
+                    graph: Arc::clone(&graph),
+                    valid: true,
+                },
+            );
+            return graph;
         }
-        // Build outside the cache lock: a build reads modules from disk.
-        let mut sources = lock(&self.buffers).clone();
-        sources.insert(path.to_path_buf(), source.to_string());
-        let graph = Arc::new(harn_modules::build_with_sources(path, &sources));
-        lock(&self.graphs).insert(
-            path.to_path_buf(),
-            CachedGraph {
-                imports_key,
-                graph: Arc::clone(&graph),
-            },
-        );
-        graph
+    }
+
+    pub(crate) fn generation(&self) -> u64 {
+        self.generation.load(Ordering::Acquire)
     }
 
     /// The `[lint]` table of the project that owns `path`, read once per
     /// directory until [`Self::invalidate_all`].
     pub(crate) fn lint_config(&self, path: &Path) -> Arc<LintConfig> {
         let dir = path.parent().unwrap_or(path).to_path_buf();
-        if let Some(config) = lock(&self.lint_configs).get(&dir) {
-            return Arc::clone(config);
+        loop {
+            let generation = self.generation();
+            if let Some(config) = lock(&self.lint_configs).get(&dir) {
+                return Arc::clone(config);
+            }
+            let config = Arc::new(
+                harn_modules::project_config::load_for_path(path)
+                    .map(|config| config.lint)
+                    .unwrap_or_default(),
+            );
+            let mut configs = lock(&self.lint_configs);
+            if generation != self.generation() {
+                continue;
+            }
+            configs.insert(dir.clone(), Arc::clone(&config));
+            return config;
         }
-        let config = Arc::new(
-            harn_modules::project_config::load_for_path(path)
-                .map(|config| config.lint)
-                .unwrap_or_default(),
-        );
-        lock(&self.lint_configs).insert(dir, Arc::clone(&config));
-        config
     }
 
     /// Record an open document's text, which every graph build uses in place
     /// of the file on disk.
     pub(crate) fn set_buffer(&self, path: PathBuf, source: String) {
-        lock(&self.buffers).insert(path, source);
+        let mut graphs = lock(&self.graphs);
+        lock(&self.buffers).insert(path.clone(), source);
+        self.generation.fetch_add(1, Ordering::Release);
+        invalidate_graphs(&mut graphs, &path);
     }
 
     pub(crate) fn remove_buffer(&self, path: &Path) {
+        let mut graphs = lock(&self.graphs);
         lock(&self.buffers).remove(path);
+        graphs.remove(path);
+        self.generation.fetch_add(1, Ordering::Release);
+        invalidate_graphs(&mut graphs, path);
     }
 
-    /// Drop every cached graph that reached `changed`, other than `changed`'s
-    /// own, and return the roots whose graphs were dropped.
+    /// Invalidate graphs that reached `changed`, preserving their dependency
+    /// paths until they rebuild so concurrent notifications still find them.
     pub(crate) fn invalidate_module(&self, changed: &Path) -> Vec<PathBuf> {
         let mut graphs = lock(&self.graphs);
-        let dependents: Vec<PathBuf> = graphs
-            .iter()
-            .filter(|(root, cached)| {
-                root.as_path() != changed && cached.graph.contains_module(changed)
-            })
-            .map(|(root, _)| root.clone())
-            .collect();
-        for root in &dependents {
-            graphs.remove(root);
-        }
-        dependents
+        self.generation.fetch_add(1, Ordering::Release);
+        invalidate_graphs(&mut graphs, changed)
     }
 
     /// Forget every graph and project configuration, after an external file
     /// change or a configuration change the cache cannot attribute.
     pub(crate) fn invalidate_all(&self) {
-        lock(&self.graphs).clear();
+        let mut graphs = lock(&self.graphs);
+        graphs.clear();
         lock(&self.lint_configs).clear();
+        self.generation.fetch_add(1, Ordering::Release);
     }
+}
+
+fn invalidate_graphs(graphs: &mut HashMap<PathBuf, CachedGraph>, changed: &Path) -> Vec<PathBuf> {
+    graphs
+        .iter()
+        .filter(|(root, cached)| root.as_path() != changed && cached.graph.contains_module(changed))
+        .map(|(root, _)| root.clone())
+        .collect::<Vec<_>>()
+        .into_iter()
+        .inspect(|root| graphs.get_mut(root).unwrap().valid = false)
+        .collect()
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
@@ -132,6 +172,8 @@ fn imports_key(source: &str, program: &[SNode]) -> u64 {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
     use tower_lsp::lsp_types::Url;
 
     use super::WorkspaceCache;
@@ -187,5 +229,42 @@ mod tests {
             1,
             "the importer re-reads the changed module"
         );
+    }
+
+    #[test]
+    fn a_graph_built_during_a_dependency_edit_is_rebuilt_before_publication() {
+        let dir = tempfile::tempdir().unwrap();
+        let lib = dir.path().join("lib.harn");
+        let app = dir.path().join("app.harn");
+        std::fs::write(&lib, "pub fn helper() -> int { return 1 }\n").unwrap();
+        let source =
+            "import { helper } from \"./lib\"\npub fn total() -> int { return helper() }\n";
+        std::fs::write(&app, source).unwrap();
+        let uri = Url::from_file_path(&app).unwrap();
+        let workspace = Arc::new(WorkspaceCache::default());
+        let reached = Arc::new(AtomicBool::new(false));
+        let weak = Arc::downgrade(&workspace);
+        let observed = Arc::clone(&reached);
+        *super::lock(&workspace.graph_probe) = Some(Arc::new(move || {
+            if !observed.swap(true, Ordering::SeqCst) {
+                weak.upgrade().unwrap().set_buffer(
+                    lib.clone(),
+                    "pub fn helper() -> string { return \"changed\" }\n".into(),
+                );
+            }
+        }));
+        let mut state = DocumentState::new_for_language(source.into(), "harn", &uri);
+        analyze(&mut state, &uri, Some(&workspace));
+        assert!(
+            reached.load(Ordering::SeqCst),
+            "the edit occurred after a real graph build"
+        );
+        assert!(state
+            .type_diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.severity == harn_parser::DiagnosticSeverity::Error));
+        assert!(workspace
+            .invalidate_module(&dir.path().join("lib.harn"))
+            .contains(&app));
     }
 }
