@@ -298,9 +298,10 @@ async fn capture(
         if bytes.len() as u64 > MAX_CREDENTIAL_BYTES {
             return Err(unavailable());
         }
-        // EOF closes the private capture. Kill any helpers while the original
-        // unreaped root still owns its PID and process-group identity.
-        let _ = registration.terminate();
+        // EOF can precede the CLI's successful exit. Remove descendants while
+        // the root still reserves its PID, then let it report its own status.
+        #[cfg(unix)]
+        let _ = registration.terminate_descendants();
         let status = child.wait().await;
         registration.update_root_pid(child.id());
         let status = status.map_err(|_| unavailable())?;
@@ -371,27 +372,34 @@ mod tests {
             "import pathlib,time;time.sleep(2);pathlib.Path({:?}).write_text('alive')",
             survivor.to_str().unwrap()
         );
-        let parent = |linger: bool| {
+        let parent = |finish: &str| {
             format!(
             "import pathlib,subprocess,sys,time;child=subprocess.Popen([sys.executable,'-c',{:?}],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL);pathlib.Path({:?}).write_text(str(child.pid));print('synthetic-cli-token',flush=True);{}",
-            descendant, ready.to_str().unwrap(), if linger { "time.sleep(20)" } else { "pass" }
+            descendant, ready.to_str().unwrap(), finish
         )
         };
         let mut control = tokio::process::Command::new("python3");
-        control.args(["-c", &parent(false)]);
+        control.args(["-c", &parent("pass")]);
         assert!(control.status().await.unwrap().success());
         tokio::time::sleep(Duration::from_millis(2500)).await;
         assert!(
             survivor.exists(),
             "the known unmanaged child must reach the same sentinel path"
         );
-        for linger in [false, true] {
+        for (finish, refuses) in [
+            ("pass", false),
+            (
+                "sys.stdout.close();__import__('os').close(1);time.sleep(0.4)",
+                false,
+            ),
+            ("time.sleep(20)", true),
+        ] {
             std::fs::remove_file(&survivor).ok();
             std::fs::remove_file(&ready).ok();
             let mut command = tokio::process::Command::new("python3");
-            command.args(["-c", &parent(linger)]);
+            command.args(["-c", &parent(finish)]);
             let result = capture(command, Duration::from_secs(1)).await;
-            assert_eq!(result.is_err(), linger);
+            assert_eq!(result.is_err(), refuses);
             assert!(
                 ready.exists(),
                 "the negative must have spawned its descendant"
@@ -474,7 +482,7 @@ mod tests {
 #[cfg(windows)]
 #[test]
 fn windows_installer_roots_ignore_caller_environment() {
-    const PROBE: &str = "HARN_TEST_CLI_INSTALL_ROOT";
+    const PROBE: &str = "CLI_TEST_INSTALL_ROOT";
     if let Some(hostile) = std::env::var_os(PROBE) {
         let hostile = PathBuf::from(hostile);
         let locations = installed_github_cli_locations();

@@ -12,6 +12,8 @@
 //! identify descendants. Windows Job Object ownership is shared with hostlib.
 
 mod context;
+#[cfg(unix)]
+mod eof_cleanup;
 
 #[cfg(target_os = "windows")]
 pub mod windows;
