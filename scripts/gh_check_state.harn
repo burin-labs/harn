@@ -30,6 +30,76 @@ pub type CheckExpectations = {
   path_required_names: list<string>,
 }
 
+type CheckRunsPage = {
+  total_count: int,
+  check_runs: list<{id: int, name: string, status: string, conclusion: string?}>,
+}
+
+type CommitStatusesPage = {
+  total_count: int,
+  statuses: list<{id: int, context: string, state: string}>,
+}
+
+/** The declared inventory and unique records read so far from one endpoint. */
+pub type CheckInventory = {
+  declared_total: int?,
+  seen_ids: list<int>,
+  observations: list<CheckObservation>,
+  complete: bool,
+}
+
+pub type CheckInventoryError = {
+  code: "invalid_page" | "changed_inventory" | "incomplete_page",
+  detail: string,
+}
+
+/** Advance a complete, stable, bounded inventory without accepting missing or duplicate rows. */
+pub fn advance_check_inventory(
+  prior: CheckInventory,
+  declared_total: int,
+  ids: list<int>,
+  batch: list<CheckObservation>,
+  page_size: int,
+) -> Result<CheckInventory, CheckInventoryError> {
+  if prior.complete || declared_total < 0 || page_size <= 0 || len(batch) > page_size
+    || len(ids) != len(batch) {
+    return Err({code: "invalid_page", detail: "invalid check inventory page"})
+  }
+  if prior.declared_total != nil && prior.declared_total != declared_total {
+    return Err({code: "changed_inventory", detail: "check inventory changed during pagination"})
+  }
+  let observations = prior.observations + []
+  let seen_ids = prior.seen_ids + []
+  let index = 0
+  for row in batch {
+    const id = ids[index]
+    index = index + 1
+    if id <= 0 || trim(row.name) == "" || trim(row.raw_status) == "" {
+      return Err({code: "invalid_page", detail: "check inventory row lacks identity or status"})
+    }
+    if seen_ids.contains(id) {
+      return Err({code: "invalid_page", detail: "check inventory repeats an object identity"})
+    }
+    seen_ids.push(id)
+    observations.push(row)
+  }
+  if len(observations) > declared_total {
+    return Err({code: "invalid_page", detail: "check inventory exceeds its declared count"})
+  }
+  const complete = len(observations) == declared_total
+  if !complete && len(batch) < page_size {
+    return Err({code: "incomplete_page", detail: "check inventory ended before its declared count"})
+  }
+  return Ok(
+    {
+      declared_total: declared_total,
+      seen_ids: seen_ids,
+      observations: observations,
+      complete: complete,
+    },
+  )
+}
+
 /** Why a head's CI cannot start: GitHub runs no `pull_request` workflow on a conflicting PR. */
 pub type PrBlock = {pr: int, reason: "merge_conflict"}
 
@@ -337,6 +407,10 @@ pub fn build_census(
   path_required_names: list<string>,
   expectation_source: ExpectationSource,
 ) -> CheckCensus {
+  let measured_expectations: ExpectationSource = expectation_source
+  if len(expected_names) == 0 {
+    measured_expectations = "unobservable"
+  }
   const latest = latest_per_name(observations)
   let success = 0
   let intentional_skip = 0
@@ -380,7 +454,7 @@ pub fn build_census(
   // distinction changes the message rather than the decision.
   const verdict = if bad > 0 {
     "bad"
-  } else if expectation_source == "unobservable" {
+  } else if measured_expectations == "unobservable" {
     "missing"
   } else if missing > 0 && pending == 0 {
     "missing"
@@ -412,7 +486,7 @@ pub fn build_census(
     missing_names: missing_names.sorted(),
     expected_names: (expected_names ?? []).sorted(),
     path_required_names: (path_required_names ?? []).sorted(),
-    expectation_source: expectation_source,
+    expectation_source: measured_expectations,
     blocked_by: [],
     blocked_lookup: "not_run",
     verdict: verdict,
@@ -476,9 +550,9 @@ pub fn check_run_observations(page: any) -> list<CheckObservation> {
 }
 
 /** Turn the combined commit-status payload into observations. */
-pub fn commit_status_observations(payload: any) -> list<CheckObservation> {
+pub fn commit_status_observations(payload: any, offset: int = 0) -> list<CheckObservation> {
   let out: list<CheckObservation> = []
-  let ordinal = len(payload?.statuses ?? [])
+  let ordinal = (to_int(payload?.total_count) ?? len(payload?.statuses ?? [])) - offset
   for status in payload?.statuses ?? [] {
     const state = to_string(status?.state ?? "")
     out.push(
@@ -640,49 +714,91 @@ fn lookup_blocks(
   return {blocked_by: classify_pr_blocks(sha, pulls), blocked_lookup: "ok"}
 }
 
+type CollectedChecks = {ok: bool, observations: list<CheckObservation>, detail?: string}
+
+fn collect_inventory(
+  process: HarnessProcess,
+  clock: HarnessClock,
+  stdio: HarnessStdio,
+  repo: string,
+  sha: string,
+  kind: "check_runs" | "statuses",
+) -> CollectedChecks {
+  let inventory: CheckInventory = {
+    declared_total: nil,
+    seen_ids: [],
+    observations: [],
+    complete: false,
+  }
+  let page = 1
+  const endpoint = if kind == "check_runs" {
+    "check-runs"
+  } else {
+    "status"
+  }
+  const path = "/repos/${repo}/commits/${sha}/${endpoint}"
+  while page <= MAX_PAGES {
+    const payload = api_json(
+      process,
+      clock,
+      stdio,
+      "${path}?per_page=${to_string(PAGE_SIZE)}&page=${to_string(page)}",
+    )
+    if payload == nil {
+      return {ok: false, observations: inventory.observations}
+    }
+    let total_count = 0
+    let ids: list<int> = []
+    let batch: list<CheckObservation> = []
+    if kind == "check_runs" {
+      if !schema_is(payload, schema_of(CheckRunsPage)) {
+        return {ok: false, observations: inventory.observations, detail: "invalid check-runs page"}
+      }
+      const decoded: CheckRunsPage = schema_expect(payload, schema_of(CheckRunsPage))
+      total_count = decoded.total_count
+      ids = decoded.check_runs.map({ row -> row.id })
+      batch = check_run_observations(decoded)
+    } else {
+      if !schema_is(payload, schema_of(CommitStatusesPage)) {
+        return {ok: false, observations: inventory.observations, detail: "invalid status page"}
+      }
+      const decoded: CommitStatusesPage = schema_expect(payload, schema_of(CommitStatusesPage))
+      total_count = decoded.total_count
+      ids = decoded.statuses.map({ row -> row.id })
+      batch = commit_status_observations(decoded, len(inventory.observations))
+    }
+    match advance_check_inventory(inventory, total_count, ids, batch, PAGE_SIZE) {
+      Ok(next) -> { inventory = next }
+      Err(error) -> {
+        const failed: CollectedChecks = {
+          ok: false,
+          observations: inventory.observations,
+          detail: error.detail,
+        }
+        return failed
+      }
+    }
+    if inventory.complete {
+      return {ok: true, observations: inventory.observations}
+    }
+    page = page + 1
+  }
+  return {ok: false, observations: inventory.observations, detail: "check page limit reached"}
+}
+
 fn collect_observations(
   process: HarnessProcess,
   clock: HarnessClock,
   stdio: HarnessStdio,
   repo: string,
   sha: string,
-) -> any {
-  let observations: list<CheckObservation> = []
-  let page = 1
-  let seen = 0
-  let total_count = -1
-  let ok = false
-  while page <= MAX_PAGES {
-    const payload = api_json(
-      process,
-      clock,
-      stdio,
-      "/repos/${repo}/commits/${sha}/check-runs?per_page=${to_string(PAGE_SIZE)}&page=${to_string(page)}",
-    )
-    if payload == nil {
-      return {ok: false, observations: observations}
-    }
-    ok = true
-    total_count = to_int(payload?.total_count) ?? 0
-    const batch = check_run_observations(payload)
-    observations = observations + batch
-    seen = seen + len(batch)
-    if len(batch) == 0 || seen >= total_count {
-      break
-    }
-    page = page + 1
+) -> CollectedChecks {
+  const checks = collect_inventory(process, clock, stdio, repo, sha, "check_runs")
+  if !checks.ok {
+    return checks
   }
-  const statuses = api_json(
-    process,
-    clock,
-    stdio,
-    "/repos/${repo}/commits/${sha}/status?per_page=${to_string(PAGE_SIZE)}",
-  )
-  if statuses == nil {
-    return {ok: false, observations: observations}
-  }
-  observations = observations + commit_status_observations(statuses)
-  return {ok: ok, observations: observations}
+  const statuses = collect_inventory(process, clock, stdio, repo, sha, "statuses")
+  return statuses + {observations: checks.observations + statuses.observations}
 }
 
 fn changed_paths(
@@ -808,7 +924,10 @@ fn main(harness: Harness) {
     harness.stdio.eprintln(
       "gh_check_state: could not read check state for ${sha}; treating it as unobservable",
     )
-    const census = build_census(sha, [], explicit_expected, [], "unobservable")
+    if collected.detail != nil {
+      harness.stdio.eprintln(collected.detail)
+    }
+    const census = build_census(sha, collected.observations, explicit_expected, [], "unobservable")
     harness.stdio.println(
       if parsed?.json ?? false {
         json_stringify_pretty(census)
