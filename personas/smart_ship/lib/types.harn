@@ -14,6 +14,7 @@ pub type Change = {
 /** A required job's complete execution inputs, independent of runner placement. */
 pub type Requirement = {
   id: string,
+  execution_request: string,
   kind: "tests" | "check",
   repository: string,
   input_digest: string,

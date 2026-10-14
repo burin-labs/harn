@@ -2,6 +2,7 @@ import { digest, execution, fixture, proof } from "../fixtures/support"
 import {
   checkpoint_bytes,
   checkpoint_id,
+  freeze_snapshot,
   promote,
   qualify_release,
   qualify_release_files,
@@ -12,7 +13,9 @@ pipeline test_release_binds_checkpoint_source_and_output_and_retains_reused_prod
 ) {
   const f = fixture(harness.random)
   const current = execution(f)
-  const original = current + {source: current.source + {commit: sha256_hex("prior source")}}
+  const prior_source = current.source + {commit: sha256_hex("prior source")}
+  const prior_snapshot = freeze_snapshot(f.snapshot + {sources: [prior_source]})
+  const original = current + {source: prior_source, requirement: prior_snapshot.requirements[0]!}
   const reused = proof(f, original) + {mode: "reused"}
   const checkpoint = promote(f.snapshot, [reused], f.policy, f.authority, f.fence).checkpoint!
   const signed = {

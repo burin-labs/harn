@@ -4,7 +4,9 @@ import {
   is_git_id,
   policy_digest,
   requirement_identity,
+  snapshot_verification_id,
   source_identity,
+  verification_request,
 } from "./identity"
 import { Execution, Policy, Proof, Requirement, Snapshot, Verification } from "./types"
 
@@ -14,6 +16,7 @@ fn duplicate(values: list<string>) -> bool {
 
 fn requirement_valid(requirement: Requirement) -> bool {
   return requirement.id != "" && requirement.repository != "" && requirement.trust_domain != ""
+    && is_digest(requirement.execution_request)
     && is_digest(requirement.input_digest)
     && is_digest(requirement.runtime_digest)
     && is_digest(requirement.environment_digest)
@@ -69,11 +72,13 @@ fn coverage_errors(snapshot: Snapshot, policy: Policy) -> list<string> {
     }
   }
   const repositories = snapshot.sources.map({ source -> source.repository })
+  const frontier = snapshot_verification_id(snapshot)
   if duplicate(snapshot.requirements.map({ requirement -> requirement.id })) {
     errors = errors + ["required job inventory contains duplicates"]
   }
   for requirement in snapshot.requirements {
-    if !requirement_valid(requirement) || !repositories.contains(requirement.repository) {
+    if !requirement_valid(requirement) || !repositories.contains(requirement.repository)
+      || requirement.execution_request != verification_request(frontier, requirement.id) {
       errors = errors + ["invalid required job: " + requirement.id]
     }
   }
@@ -132,6 +137,7 @@ fn tests_valid(original: Execution) -> bool {
 
 fn provenance_valid(original: Execution) -> bool {
   return original.run != "" && original.attempt > 0 && original.job != ""
+    && is_digest(original.requirement.execution_request)
     && original.source.repository == original.requirement.repository
     && is_git_id(original.source.commit)
     && is_git_id(original.source.tree)
@@ -151,7 +157,9 @@ fn proof_valid(proof: Proof, requirement: Requirement, snapshot: Snapshot, polic
   const original = proof.original
   if original.installation != policy.installation || !provenance_valid(original)
     || requirement_identity(original.requirement) != requirement_identity(requirement)
-    || (proof.mode == "reused" && !requirement.reuse_allowed) {
+    || (proof.mode == "reused" && !requirement.reuse_allowed)
+    || proof.mode == "executed"
+      != (original.requirement.execution_request == requirement.execution_request) {
     return false
   }
   const key = policy.verifier_keys.find({ candidate -> candidate.id == proof.signer })

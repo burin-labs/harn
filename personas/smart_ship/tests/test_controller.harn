@@ -12,6 +12,7 @@ import {
   start,
   transfer,
 } from "../lib/controller"
+import { freeze_snapshot } from "../lib/identity"
 import { Fence } from "../lib/types"
 
 fn fence(state: Controller) -> Fence {
@@ -38,17 +39,29 @@ pipeline test_newest_pending_preserves_running_source_and_admitted_work(harness:
   }
   const admitted = unwrap(offer(initial, fence(initial), f.snapshot, f.policy, 1000))
   const running = unwrap(start(admitted, fence(admitted)))
-  const second = f.snapshot + {sequence: 2}
+  const second = freeze_snapshot(f.snapshot + {sequence: 2})
   const pending = unwrap(offer(running, fence(running), second, f.policy, 2000))
-  const third = f.snapshot + {sequence: 3}
+  const third = freeze_snapshot(f.snapshot + {sequence: 3})
   const coalesced = unwrap(offer(pending, fence(pending), third, f.policy, 3000))
   assert_eq(coalesced.active, f.snapshot)
   assert_eq(coalesced.pending, third)
   assert(!is_ok(start(coalesced, fence(coalesced))))
   assert(
-    !is_ok(offer(coalesced, fence(coalesced), third + {sequence: 4, changes: []}, f.policy, 4000)),
+    !is_ok(
+      offer(
+        coalesced,
+        fence(coalesced),
+        freeze_snapshot(third + {sequence: 4, changes: []}),
+        f.policy,
+        4000,
+      ),
+    ),
   )
-  assert(!is_ok(offer(coalesced, fence(coalesced), third + {sequence: 4}, f.policy, 601000)))
+  assert(
+    !is_ok(
+      offer(coalesced, fence(coalesced), freeze_snapshot(third + {sequence: 4}), f.policy, 601000),
+    ),
+  )
   const verified = unwrap(
     complete(coalesced, fence(coalesced), f.snapshot, [proof(f, execution(f))], f.policy),
   )
@@ -198,7 +211,7 @@ pipeline test_drain_settles_verified_work_and_preserves_unproven_incidents(harne
   )
   const unrelated = failed.incidents[0]
   assert(unrelated != nil)
-  const candidate = f.snapshot + {sequence: 2}
+  const candidate = freeze_snapshot(f.snapshot + {sequence: 2})
   const admitted = unwrap(offer(failed, fence(failed), candidate, f.policy, 2000))
   const draining = unwrap(control(admitted, fence(admitted), "draining"))
   assert(!is_ok(offer(draining, fence(draining), candidate + {sequence: 3}, f.policy, 2000)))
@@ -216,7 +229,13 @@ pipeline test_drain_settles_verified_work_and_preserves_unproven_incidents(harne
     }
   const with_other = running + {incidents: running.incidents + [changed_suite]}
   const settled = unwrap(
-    complete(with_other, fence(with_other), candidate, [proof(f, execution(f))], f.policy),
+    complete(
+      with_other,
+      fence(with_other),
+      candidate,
+      [proof(f, execution(f) + {requirement: candidate.requirements[0]!})],
+      f.policy,
+    ),
   )
   assert(settled.checkpoint != nil)
   assert_eq(settled.active, nil)

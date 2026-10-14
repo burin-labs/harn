@@ -33,6 +33,14 @@ invalid jobs. Reused evidence retains the signed original run, attempt, job,
 source, logs, and artifacts. Input, runtime, environment, coverage, and trust
 identities must all match the candidate's requirement.
 
+`prepare_job` measures the clean source and verification inputs without running
+the test command. `freeze_snapshot` derives each job's dispatch request from the
+complete frontier; `bind_job` connects the preparation to that request. Claim
+the snapshot through `start`, then call `execute_job`. An execution's signature
+binds its original request. An older job cannot be relabelled as a current
+execution or copy its old request into a new frontier. `run_job` remains a
+one-shot diagnostic check and does not claim a controller snapshot.
+
 `promote` evaluates that evidence and the current controller fence. A stopped,
 held, shadow, or stale controller receives a refusal. A draining controller can
 finish already admitted verification while refusing new admission. Successful

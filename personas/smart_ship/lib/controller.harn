@@ -1,4 +1,4 @@
-import { checkpoint_id, is_digest, is_git_id, snapshot_id } from "./identity"
+import { checkpoint_id, is_digest, is_git_id, requirement_identity, snapshot_id } from "./identity"
 import { fence_matches, promote } from "./promotion"
 import { Authority, Checkpoint, Fence, Policy, Proof, Snapshot, Verification } from "./types"
 import { policy_errors, verify } from "./verification"
@@ -380,7 +380,10 @@ pub fn complete(
           && incident.snapshot.requirements.all(
             { required ->
               completed.requirements.any(
-                { job -> job == required + {input_digest: job.input_digest} },
+                { job ->
+                  requirement_identity(job)
+                    == requirement_identity(required + {input_digest: job.input_digest})
+                },
               )
             },
           ) {

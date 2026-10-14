@@ -4,10 +4,14 @@ import { fixture } from "../fixtures/support"
 import {
   Controller,
   Fence,
+  bind_job,
   checkpoint_id,
   complete,
+  execute_job,
+  freeze_snapshot,
   local_lineage,
   offer,
+  prepare_job,
   run_job,
   start,
 } from "../lib/main"
@@ -41,18 +45,46 @@ fn interaction(harness: Harness, stack: Stack) {
   defer {
     harness.fs.delete(root)
   }
-  const local = pick(harness, ["clock", "fs", "process", "system"])
+  const local = pick(harness, ["clock", "fs", "process", "random", "system"])
   const signer = {id: "executor", private_key: f.private_key}
   const previous = checkpoint_id(scenario.checkpoint)
   const authority = scenario.authority
   harness.fs.write_text(path_join(root, stack.capacity_path), stack.repair)
   git(harness.process, root, ["add", stack.capacity_path])
   git(harness.process, root, ["commit", "--quiet", "-m", "size capacity for active workers"])
-  const repaired = run_job(
+  const repaired_plan = prepare_job(
     local,
     job(pick(harness, ["env", "system"]), stack, root, "repaired"),
-    signer,
   )
+  const repaired_candidate = freeze_snapshot(
+    scenario.candidate
+      + {
+        sequence: 3,
+        sources: [repaired_plan.source],
+        requirements: [repaired_plan.requirement],
+        created_at_ms: harness.clock.now_ms(),
+      },
+  )
+  const initial: Controller = {
+    schema: "smart-ship.controller.v1",
+    authority: authority,
+    active: scenario.candidate,
+    pending: nil,
+    checkpoint: scenario.checkpoint,
+    incidents: [],
+    effects: [],
+    unverified_since_ms: harness.clock.now_ms(),
+  }
+  const failed = unwrap(
+    complete(initial, fence(initial), scenario.candidate, [scenario.combined.proof], f.policy),
+  )
+  assert_eq(failed.authority.previous_checkpoint, previous)
+  const admitted = unwrap(
+    offer(failed, fence(failed), repaired_candidate, f.policy, harness.clock.now_ms()),
+  )
+  const running = unwrap(start(admitted, fence(admitted)))
+  assert_eq(running.active, repaired_candidate)
+  const repaired = execute_job(local, bind_job(repaired_plan, repaired_candidate), signer)
   assert_eq(repaired.proof.original.result, "passed")
   const lineage = local_lineage(
     harness.process,
@@ -82,30 +114,6 @@ fn interaction(harness: Harness, stack: Stack) {
   )
   assert_eq(unknown.checked, 0)
   assert_eq(unknown.unknown, ["change-a"])
-  const initial: Controller = {
-    schema: "smart-ship.controller.v1",
-    authority: authority,
-    active: scenario.candidate,
-    pending: nil,
-    checkpoint: scenario.checkpoint,
-    incidents: [],
-    effects: [],
-    unverified_since_ms: harness.clock.now_ms(),
-  }
-  const failed = unwrap(
-    complete(initial, fence(initial), scenario.candidate, [scenario.combined.proof], f.policy),
-  )
-  assert_eq(failed.authority.previous_checkpoint, previous)
-  const repaired_candidate = scenario.candidate
-    + {
-      sequence: 3,
-      sources: [repaired.proof.original.source],
-      requirements: [repaired.proof.original.requirement],
-    }
-  const admitted = unwrap(
-    offer(failed, fence(failed), repaired_candidate, f.policy, harness.clock.now_ms()),
-  )
-  const running = unwrap(start(admitted, fence(admitted)))
   const settled = unwrap(
     complete(running, fence(running), repaired_candidate, [repaired.proof], f.policy),
   )
@@ -157,7 +165,7 @@ fn isolate(harness: Harness, name: string, test_path: string, probe: string) {
     }
   const f = fixture(harness.random)
   const measured = run_job(
-    pick(harness, ["clock", "fs", "process", "system"]),
+    pick(harness, ["clock", "fs", "process", "random", "system"]),
     request,
     {id: "executor", private_key: f.private_key},
   )

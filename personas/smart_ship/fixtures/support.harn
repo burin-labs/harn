@@ -7,6 +7,7 @@ import {
   Requirement,
   Snapshot,
   execution_bytes,
+  freeze_snapshot,
   policy_digest,
 } from "../lib/main"
 
@@ -39,6 +40,7 @@ pub fn fixture(random: HarnessRandom) -> Fixture {
   }
   const requirement: Requirement = {
     id: "tests",
+    execution_request: digest("fixture verification dispatch"),
     kind: "check",
     repository: "project",
     input_digest: digest("inputs"),
@@ -83,7 +85,7 @@ pub fn fixture(random: HarnessRandom) -> Fixture {
   }
   return {
     policy: policy,
-    snapshot: snapshot,
+    snapshot: freeze_snapshot(snapshot),
     authority: authority,
     fence: {installation: "neutral", generation: 1, revision: 1, controller: "owner"},
     private_key: keys.private,

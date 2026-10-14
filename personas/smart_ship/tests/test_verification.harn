@@ -3,11 +3,48 @@ import {
   checkpoint_bytes,
   checkpoint_id,
   checkpoint_valid,
+  freeze_snapshot,
   policy_digest,
   promote,
   release_identity,
   verify,
 } from "../lib/main"
+
+pipeline test_prior_execution_cannot_be_relabelled_as_the_current_dispatch(harness: Harness) {
+  const f = fixture(harness.random)
+  const original_snapshot = freeze_snapshot(
+    f.snapshot
+      + {
+        requirements: f.snapshot.requirements.map(
+          { requirement -> requirement + {reuse_allowed: false} },
+        ),
+      },
+  )
+  const original_requirement = original_snapshot.requirements[0]!
+  const prior = proof(f, execution(f) + {requirement: original_requirement})
+  assert_eq(verify(original_snapshot, [prior], f.policy).status, "verified")
+  const current = freeze_snapshot(original_snapshot + {sequence: 2, created_at_ms: 3000})
+  const current_requirement = current.requirements[0]!
+  assert(current_requirement.execution_request != original_requirement.execution_request)
+  assert_eq(
+    verify(current, [prior], f.policy).status,
+    "invalid",
+    "a prior execution must not bypass disabled reuse by claiming it executed for a new dispatch",
+  )
+  assert_eq(verify(current, [prior + {mode: "reused"}], f.policy).status, "invalid")
+  const copied_request = current + {requirements: [original_requirement]}
+  assert_eq(
+    verify(copied_request, [prior], f.policy).status,
+    "invalid",
+    "copying an old request must not make it belong to a new frontier",
+  )
+  const forged = prior + {original: prior.original + {requirement: current_requirement}}
+  assert_eq(
+    verify(current, [forged], f.policy).status,
+    "invalid",
+    "the execution signature must bind its original request",
+  )
+}
 
 pipeline test_complete_execution_promotes_and_tampered_checkpoint_cannot_release(harness: Harness) {
   const f = fixture(harness.random)
@@ -70,26 +107,35 @@ pipeline test_missing_and_empty_inventory_never_advance_checkpoint(harness: Harn
 pipeline test_reuse_requires_original_signature_and_all_semantic_inputs(harness: Harness) {
   const f = fixture(harness.random)
   const current = execution(f)
-  const old = current + {source: current.source + {commit: sha256_hex("older commit")}}
+  const prior_source = current.source + {commit: sha256_hex("older commit")}
+  const origin = freeze_snapshot(f.snapshot + {sources: [prior_source]})
+  const old = current + {source: prior_source, requirement: origin.requirements[0]!}
   const reused = proof(f, old) + {mode: "reused"}
-  const green = verify(f.snapshot, [reused], f.policy)
+  const target = freeze_snapshot(f.snapshot + {sequence: 2})
+  const green = verify(target, [reused], f.policy)
   assert_eq(green.status, "verified")
   assert_eq(green.executed, 0)
   assert_eq(green.reused, 1)
   assert_eq(reused.original.run, "run-1")
-  assert_eq(verify(f.snapshot, [reused + {mode: "executed"}], f.policy).status, "invalid")
+  assert_eq(verify(target, [reused + {mode: "executed"}], f.policy).status, "invalid")
+  const wrong_source = proof(f, old + {requirement: target.requirements[0]!})
+  assert_eq(
+    verify(target, [wrong_source], f.policy).status,
+    "invalid",
+    "a current request still requires the exact source that executed",
+  )
   for altered in [
     current.requirement + {input_digest: digest("changed")},
     current.requirement + {runtime_digest: digest("changed")},
     current.requirement + {environment_digest: digest("changed")},
     current.requirement + {coverage_digest: digest("changed")},
   ] {
-    const candidate = f.snapshot + {requirements: [altered]}
+    const candidate = freeze_snapshot(target + {requirements: [altered]})
     assert_eq(verify(candidate, [reused], f.policy).status, "invalid")
   }
-  assert_eq(verify(f.snapshot, [reused + {signature: ""}], f.policy).status, "invalid")
+  assert_eq(verify(target, [reused + {signature: ""}], f.policy).status, "invalid")
   const tampered = reused + {original: old + {run: "fake"}}
-  assert_eq(verify(f.snapshot, [tampered], f.policy).status, "invalid")
+  assert_eq(verify(target, [tampered], f.policy).status, "invalid")
 }
 
 pipeline test_duplicate_unknown_and_cross_installation_proofs_are_invalid(harness: Harness) {

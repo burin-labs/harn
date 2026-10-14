@@ -40,13 +40,16 @@ pub import {
   checkpoint_bytes,
   checkpoint_id,
   execution_bytes,
+  freeze_snapshot,
   is_digest,
   is_git_id,
   policy_digest,
   requirement_identity,
   snapshot_bytes,
   snapshot_id,
+  snapshot_verification_id,
   source_identity,
+  verification_request,
 } from "./identity"
 pub import {
   Inspection,
@@ -57,14 +60,17 @@ pub import {
 } from "./installation"
 pub import {
   Command,
+  JobPlan,
   JobRun,
   LineageEvidence,
   LocalJob,
   Output,
   SigningIdentity,
+  bind_job,
+  execute_job,
   local_lineage,
-  local_requirement,
   local_source,
+  prepare_job,
   run_job,
 } from "./local"
 pub import { checkpoint_valid, fence_matches, promote, release_identity } from "./promotion"

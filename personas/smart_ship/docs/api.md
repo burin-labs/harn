@@ -284,6 +284,14 @@ pub type Installation = {
 }
 ```
 
+### type `JobPlan`
+
+Preparation leaves an empty request; bind it to a frozen snapshot before managed execution.
+
+```harn
+pub type JobPlan = {job: LocalJob, source: Source, requirement: Requirement}
+```
+
 ### type `JobRun`
 
 A measured job preserves its diagnostic output alongside its signed original proof.
@@ -509,6 +517,7 @@ A required job's complete execution inputs, independent of runner placement.
 ```harn
 pub type Requirement = {
   id: string,
+  execution_request: string,
   kind: "tests" | "check",
   repository: string,
   input_digest: string,
@@ -677,6 +686,15 @@ pub fn begin_effect(
 }
 ```
 
+### fn `bind_job`
+
+A prepared job cannot borrow a request from another frontier or verification plan.
+
+```harn
+pub fn bind_job(plan: JobPlan, snapshot: Snapshot) -> JobPlan {
+}
+```
+
 ### fn `checkpoint_bytes`
 
 Checkpoint identity includes original proofs, their signatures, and how each was used.
@@ -795,6 +813,15 @@ pub fn effect_authorized(state: Controller, effect: Effect) -> bool {
 }
 ```
 
+### fn `execute_job`
+
+Execute the frozen request; changed source or toolchain refuses before the verification command.
+
+```harn
+pub fn execute_job(harness: LocalHarness, plan: JobPlan, signer: SigningIdentity) -> JobRun {
+}
+```
+
 ### fn `execution_bytes`
 
 Signing bytes bind execution provenance, result, logs, artifacts, and timing.
@@ -826,6 +853,15 @@ pub fn finish_repair(
   attempt: int,
   spent_usd: float?,
 ) -> Result<Controller, string> {
+}
+```
+
+### fn `freeze_snapshot`
+
+Freeze the request for every declared job before dispatch. Incomplete inventories stay incomplete.
+
+```harn
+pub fn freeze_snapshot(snapshot: Snapshot) -> Snapshot {
 }
 ```
 
@@ -888,15 +924,6 @@ pub fn local_lineage(
 }
 ```
 
-### fn `local_requirement`
-
-Derive conservative input identity from the actual tree, command, toolchain, and environment.
-
-```harn
-pub fn local_requirement(harness: LocalHarness, job: LocalJob, source: Source) -> Requirement {
-}
-```
-
 ### fn `local_source`
 
 Measure an actual clean Git checkout. A failed read never becomes an empty source identity.
@@ -936,6 +963,15 @@ Validate installation policy before accepting any submitted work.
 
 ```harn
 pub fn policy_errors(policy: Policy) -> list<string> {
+}
+```
+
+### fn `prepare_job`
+
+Measure one complete command plan and issue a fresh dispatch identity before execution.
+
+```harn
+pub fn prepare_job(harness: LocalHarness, job: LocalJob) -> JobPlan {
 }
 ```
 
@@ -1066,7 +1102,7 @@ pub fn reserve_effect(
 
 ### fn `run_job`
 
-Execute one job at its exact measured source and refuse evidence if the checkout changes.
+One-shot diagnostic checks are signed but cannot masquerade as a snapshot-bound dispatch.
 
 ```harn
 pub fn run_job(harness: LocalHarness, job: LocalJob, signer: SigningIdentity) -> JobRun {
@@ -1105,7 +1141,7 @@ pub fn settle_effect(
 
 ### fn `snapshot_bytes`
 
-Snapshot identity covers the immutable frontier and the explicit coverage census.
+Snapshot identity covers the immutable frontier and its derived verification requests.
 
 ```harn
 pub fn snapshot_bytes(snapshot: Snapshot) -> string {
@@ -1118,6 +1154,15 @@ Stable name for an exact frozen frontier.
 
 ```harn
 pub fn snapshot_id(snapshot: Snapshot) -> string {
+}
+```
+
+### fn `snapshot_verification_id`
+
+The verification frontier excludes dispatch bindings so requests can be derived without a cycle.
+
+```harn
+pub fn snapshot_verification_id(snapshot: Snapshot) -> string {
 }
 ```
 
@@ -1154,6 +1199,15 @@ Live adapters and replay readers enter through the same source and inventory con
 
 ```harn
 pub fn validate_review_observation(value: ReviewObservation) -> ReviewObservation {
+}
+```
+
+### fn `verification_request`
+
+Bind one required job to the complete immutable frontier, not just to its source tree.
+
+```harn
+pub fn verification_request(frontier: string, requirement: string) -> string {
 }
 ```
 

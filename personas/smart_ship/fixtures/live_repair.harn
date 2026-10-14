@@ -6,15 +6,19 @@ import {
   GitStore,
   RepairModel,
   RepairPermit,
+  bind_job,
   checkpoint_bytes,
   checkpoint_id,
   checkpoint_valid,
   claim_repair,
   commit_state,
   complete,
+  execute_job,
   finish_repair,
+  freeze_snapshot,
   local_lineage,
   offer,
+  prepare_job,
   prepare_state,
   read_state,
   repair_allowance,
@@ -126,7 +130,7 @@ fn workspace_tools(
           )
         }
         const measured = run_job(
-          pick(harness, ["clock", "fs", "process", "system"]),
+          pick(harness, ["clock", "fs", "process", "random", "system"]),
           job(
             pick(harness, ["env", "system"]),
             stack,
@@ -290,9 +294,26 @@ fn main(harness: Harness) {
   require repair.successful_tools.contains("write_file")
     && repair.successful_tools.contains("run_tests"),
     "repair did not reach source mutation and passing verification"
-  const measured = run_job(
-    pick(harness, ["clock", "fs", "process", "system"]),
+  const final_plan = prepare_job(
+    pick(harness, ["clock", "fs", "process", "random", "system"]),
     job(pick(harness, ["env", "system"]), stack, scenario.root, "independent-verification"),
+  )
+  const repaired = freeze_snapshot(
+    scenario.candidate
+      + {
+        sequence: 3,
+        sources: [final_plan.source],
+        requirements: [final_plan.requirement],
+        created_at_ms: harness.clock.now_ms(),
+      },
+  )
+  const next = unwrap(offer(accounted, fence(accounted), repaired, policy, harness.clock.now_ms()))
+  save(harness.process, store, next)
+  const verifying = unwrap(start(next, fence(next)))
+  save(harness.process, store, verifying)
+  const measured = execute_job(
+    pick(harness, ["clock", "fs", "process", "random", "system"]),
+    bind_job(final_plan, repaired),
     {id: "executor", private_key: scenario.fixture.private_key},
   )
   require measured.proof.original.result == "passed"
@@ -307,17 +328,6 @@ fn main(harness: Harness) {
   require lineage.required == 2 && lineage.checked == 2 && len(lineage.missing) == 0
     && len(lineage.unknown) == 0,
     "repair lost admitted work or source ancestry is unmeasured"
-  const repaired = scenario.candidate
-    + {
-      sequence: 3,
-      sources: [measured.proof.original.source],
-      requirements: [measured.proof.original.requirement],
-      created_at_ms: harness.clock.now_ms(),
-    }
-  const next = unwrap(offer(accounted, fence(accounted), repaired, policy, harness.clock.now_ms()))
-  save(harness.process, store, next)
-  const verifying = unwrap(start(next, fence(next)))
-  save(harness.process, store, verifying)
   const finished = unwrap(complete(verifying, fence(verifying), repaired, [measured.proof], policy))
   save(harness.process, store, finished)
   require current(harness.process, store).incidents.all({ item -> item.resolved }),

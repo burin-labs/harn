@@ -1,5 +1,21 @@
-import { execution_bytes, is_git_id, source_identity } from "./identity"
-import { Artifact, Change, Execution, Proof, Requirement, Source, TestEvidence } from "./types"
+import {
+  execution_bytes,
+  freeze_snapshot,
+  is_digest,
+  is_git_id,
+  requirement_identity,
+  source_identity,
+} from "./identity"
+import {
+  Artifact,
+  Change,
+  Execution,
+  Proof,
+  Requirement,
+  Snapshot,
+  Source,
+  TestEvidence,
+} from "./types"
 
 /** One stock command and its toolchain probe. Arguments never pass through a shell. */
 pub type Command = {
@@ -33,6 +49,9 @@ pub type SigningIdentity = {id: string, private_key: string}
 
 /** A measured job preserves its diagnostic output alongside its signed original proof. */
 pub type JobRun = {proof: Proof, stdout: string, stderr: string, exit_code: int}
+
+/** Preparation leaves an empty request; bind it to a frozen snapshot before managed execution. */
+pub type JobPlan = {job: LocalJob, source: Source, requirement: Requirement}
 
 /** Measured Git ancestry preserves admitted work across later forward repairs. */
 pub type LineageEvidence = {
@@ -97,6 +116,7 @@ type LocalHarness = {
   clock: HarnessClock,
   fs: HarnessFs,
   process: HarnessProcess,
+  random: HarnessRandom,
   system: HarnessSystem,
 }
 
@@ -165,8 +185,12 @@ fn execute(process: HarnessProcess, job: LocalJob, args: list<string>) {
 }
 
 /** Derive conservative input identity from the actual tree, command, toolchain, and environment. */
-pub fn local_requirement(harness: LocalHarness, job: LocalJob, source: Source) -> Requirement {
-  check_job(job)
+fn measure_requirement(
+  harness: LocalHarness,
+  job: LocalJob,
+  source: Source,
+  execution_request: string,
+) -> Requirement {
   const version = execute(harness.process, job, job.command.version_args)
   require version.success && version.exit_code == 0
     && (version.stdout.trim() != "" || version.stderr.trim() != ""),
@@ -196,6 +220,7 @@ pub fn local_requirement(harness: LocalHarness, job: LocalJob, source: Source) -
     )
   return {
     id: job.id,
+    execution_request: execution_request,
     kind: job.command.kind,
     repository: job.repository,
     input_digest: inputs,
@@ -222,6 +247,32 @@ pub fn local_requirement(harness: LocalHarness, job: LocalJob, source: Source) -
     reuse_allowed: false,
     artifacts: job.outputs.map({ output -> output.name }),
   }
+}
+
+/** Measure one complete command plan and issue a fresh dispatch identity before execution. */
+pub fn prepare_job(harness: LocalHarness, job: LocalJob) -> JobPlan {
+  check_job(job)
+  const source = local_source(harness.process, job.repository, job.workspace)
+  const requirement = measure_requirement(harness, job, source, "")
+  require local_source(harness.process, job.repository, job.workspace) == source,
+    "toolchain preparation changed the verification source"
+  return {job: job, source: source, requirement: requirement}
+}
+
+/** A prepared job cannot borrow a request from another frontier or verification plan. */
+pub fn bind_job(plan: JobPlan, snapshot: Snapshot) -> JobPlan {
+  require snapshot.inventory_complete && snapshot.installation == plan.job.installation
+    && freeze_snapshot(snapshot) == snapshot,
+    "job requires a complete frozen verification frontier"
+  const requirements = snapshot.requirements.filter(
+    { requirement -> requirement.id == plan.job.id },
+  )
+  const required = requirements[0]
+  require len(requirements) == 1 && required != nil
+    && requirement_identity(required) == requirement_identity(plan.requirement)
+    && snapshot.sources.contains(plan.source),
+    "prepared job differs from the frozen source or required inputs"
+  return plan + {requirement: required}
 }
 
 type TestRead = {evidence: TestEvidence?, error: string}
@@ -281,11 +332,17 @@ fn artifacts(fs: HarnessFs, job: LocalJob) -> list<Artifact> {
     .to_list()
 }
 
-/** Execute one job at its exact measured source and refuse evidence if the checkout changes. */
-pub fn run_job(harness: LocalHarness, job: LocalJob, signer: SigningIdentity) -> JobRun {
+/**
+ * Execute the frozen request; changed source or toolchain refuses before the verification command.
+ */
+pub fn execute_job(harness: LocalHarness, plan: JobPlan, signer: SigningIdentity) -> JobRun {
+  const job = plan.job
   check_job(job)
+  require is_digest(plan.requirement.execution_request), "verification dispatch identity is missing"
   const source = local_source(harness.process, job.repository, job.workspace)
-  const requirement = local_requirement(harness, job, source)
+  require source == plan.source, "verification source differs from the frozen plan"
+  const requirement = measure_requirement(harness, job, source, plan.requirement.execution_request)
+  require requirement == plan.requirement, "verification inputs differ from the frozen plan"
   prepare_report(pick(harness, ["fs", "process"]), job)
   const started = harness.clock.now_ms()
   const result = execute(harness.process, job, job.command.args)
@@ -345,4 +402,15 @@ pub fn run_job(harness: LocalHarness, job: LocalJob, signer: SigningIdentity) ->
     stderr: stderr,
     exit_code: result.exit_code,
   }
+}
+
+/** One-shot diagnostic checks are signed but cannot masquerade as a snapshot-bound dispatch. */
+pub fn run_job(harness: LocalHarness, job: LocalJob, signer: SigningIdentity) -> JobRun {
+  const prepared = prepare_job(harness, job)
+  const standalone = prepared
+    + {
+      requirement: prepared.requirement
+        + {execution_request: "sha256:" + sha256_hex(harness.random.uuid())},
+    }
+  return execute_job(harness, standalone, signer)
 }

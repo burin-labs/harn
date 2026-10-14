@@ -87,6 +87,19 @@ external requests. Set `mode: stopped` and inspect the confirmed durable state.
 Remove the `harn-smart-ship` dependency from `harn.toml`, then run `harn install`.
 Retain remote state and signed checkpoint history for release consumers and recovery.
 
+## Prepare verification
+
+Call `prepare_job` for each declared stock command, then build the complete
+snapshot from those measured sources and requirements. Call `freeze_snapshot`
+before offering or starting it. Bind each preparation with `bind_job` and pass
+that plan to `execute_job` after the durable `start` transition is confirmed.
+Execution rechecks source and toolchain identity before running the command.
+
+Use `run_job` for diagnostic checks during a repair. Those checks retain signed
+provenance, but they cannot substitute for a controller snapshot's independently
+dispatched verification. A later snapshot must identify a prior proof as reused
+and its qualified scope policy must permit reuse.
+
 ## Guard a release
 
 Before publication, hash the actual artifact bytes and name their exact source

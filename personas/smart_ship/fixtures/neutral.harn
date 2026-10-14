@@ -1,4 +1,4 @@
-import { LocalJob, Proof, Snapshot } from "../lib/main"
+import { JobPlan, LocalJob, Snapshot, freeze_snapshot } from "../lib/main"
 import { Fixture } from "./support"
 
 pub type Stack = {
@@ -120,7 +120,9 @@ pub fn job(
   }
 }
 
-pub fn snapshot(f: Fixture, proof: Proof) -> Snapshot {
-  return f.snapshot
-    + {sources: [proof.original.source], requirements: [proof.original.requirement], changes: []}
+pub fn snapshot(f: Fixture, plan: JobPlan) -> Snapshot {
+  return freeze_snapshot(
+    f.snapshot
+      + {sources: [plan.source], requirements: [plan.requirement], changes: []},
+  )
 }
