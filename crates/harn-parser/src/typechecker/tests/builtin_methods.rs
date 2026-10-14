@@ -28,14 +28,14 @@ fn apply_fixes(source: &str) -> String {
 #[test]
 fn methods_from_other_receivers_are_rejected_on_numbers_and_bools() {
     let errs = errors(
-        r#"fn f() {
+        r"fn f() {
   const flag = true
   const count = 1
   const fraction = 1.5
   flag.lower()
   count.len()
   fraction.upper()
-}"#,
+}",
     );
     assert_eq!(errs.len(), 3, "{errs:?}");
     for (error, (method, receiver)) in

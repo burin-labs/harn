@@ -890,9 +890,8 @@ fn method_on_dict_receiver_defers_to_runtime() {
 }
 
 #[test]
-fn recognized_method_name_on_number_is_not_flagged() {
-    // The permissive number tier only rejects names unknown on every builtin;
-    // a real builtin method name (even if odd on a number) is tolerated.
+fn recognized_method_name_on_number_is_flagged() {
+    // A method on another builtin does not make it available on numbers.
     let diags = nam_005(
         r"fn f() {
   const n: int = 5
@@ -900,7 +899,7 @@ fn recognized_method_name_on_number_is_not_flagged() {
 }",
     );
     assert!(
-        diags.is_empty(),
-        "known method name should defer: {diags:?}"
+        diags.len() == 1 && diags[0].contains("method `to_string` does not exist on `int`"),
+        "number methods must agree with runtime dispatch: {diags:?}"
     );
 }
