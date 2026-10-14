@@ -52,10 +52,10 @@ fn inline_angles_preserve_one_literal_text_span() {
         r#"{"verdict":"refuted","reason":"size_of::<u64>() is available"}"#,
         r#"{"verdict":"refuted","reason":"<user_response>literal</user_response> and <div></div>"}"#,
         "The comparison is x < 0 and y > 1.",
-        r#"run({command: 'x <look({})>'})"#,
-        r#"run({command: `x <look({})>`})"#,
-        r#"run({command: 'x \' <look({})>'})"#,
-        r#"run({command: `x \` <look({})>`})"#,
+        r"run({command: 'x <look({})>'})",
+        r"run({command: `x <look({})>`})",
+        r"run({command: 'x \' <look({})>'})",
+        r"run({command: `x \` <look({})>`})",
     ] {
         let (source, units) = scan(text);
         assert_eq!(units.len(), 1, "inline literal text is one span: {text}");
