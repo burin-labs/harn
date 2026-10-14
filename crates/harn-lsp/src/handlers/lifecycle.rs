@@ -264,7 +264,6 @@ impl HarnLsp {
                 return false;
             };
             let workspace = std::sync::Arc::clone(&self.workspace);
-            let rule_workspace = rule_workspace.clone();
             let job_uri = uri.clone();
             #[cfg(test)]
             let probe = self.analysis_probe.lock().unwrap().clone();

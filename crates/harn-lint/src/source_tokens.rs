@@ -24,17 +24,17 @@ thread_local! {
 
 /// Run `f` with `source` as the source whose tokens are shared.
 pub(crate) fn scope<R>(source: &str, f: impl FnOnce() -> R) -> R {
-    let linted = Rc::new(Linted {
-        start: source.as_ptr(),
-        len: source.len(),
-        tokens: OnceCell::new(),
-    });
     struct Restore(Option<Rc<Linted>>);
     impl Drop for Restore {
         fn drop(&mut self) {
             LINTED.with(|cell| *cell.borrow_mut() = self.0.take());
         }
     }
+    let linted = Rc::new(Linted {
+        start: source.as_ptr(),
+        len: source.len(),
+        tokens: OnceCell::new(),
+    });
     let _restore = Restore(LINTED.with(|cell| cell.replace(Some(linted))));
     f()
 }
