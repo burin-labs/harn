@@ -51,7 +51,7 @@ fn build_sandboxed_command_refuses_cwd_outside_its_per_command_scope() {
         "argv",
         VmValue::List(Arc::new(vec![VmValue::string("/bin/true")])),
     );
-    params.put_str("cwd", &workspace.path().to_string_lossy());
+    params.put_str("cwd", workspace.path().to_string_lossy());
     let mut sandbox = crate::value::DictMap::new();
     sandbox.put(
         "workspace_roots",

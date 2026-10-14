@@ -12,6 +12,11 @@ pub(crate) const WORKSPACE_TMPDIR_NAME: &str = ".harn-tmp";
 pub(crate) const TMPDIR_ENV_KEYS: [&str; 3] = ["TMPDIR", "TMP", "TEMP"];
 pub(crate) const WORKSPACE_TOOLCHAIN_CACHE_NAME: &str = ".harn-toolchain-cache";
 
+/// Reserved workspace directory names owned by the runtime rather than the application.
+pub fn is_workspace_runtime_directory(name: &OsStr) -> bool {
+    name == OsStr::new(WORKSPACE_TMPDIR_NAME) || name == OsStr::new(WORKSPACE_TOOLCHAIN_CACHE_NAME)
+}
+
 fn create_self_ignored_dir(
     policy: &CapabilityPolicy,
     name: &str,

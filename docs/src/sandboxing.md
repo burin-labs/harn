@@ -874,6 +874,19 @@ reaches Bubblewrap only when Landlock is not functional for that child.
 
 ### macOS (`crates/harn-vm/src/stdlib/sandbox/macos.rs`)
 
+Before starting a confined command, Harn marks its host process with the sticky
+`CS_RESTRICT` flag and reads the flag back. XNU then omits that host's launch
+environment from ordinary readers' `KERN_PROCARGS` and `KERN_PROCARGS2` reads.
+Seatbelt's `sysctl-read` and `process-info` rules do not block the numeric
+argument-read path. Commands retain their own environment and ordinary process
+execution. Harn refuses the spawn when this protection cannot be established,
+including development kernels and systems that permit unrestricted DTrace.
+
+Apple's privileged environment-read entitlement bypasses that redaction.
+This protects the Harn host's environment from ordinary commands. It does not isolate commands from
+every other same-user process or prove complete IPC isolation. Use a separately
+isolated execution host for untrusted repair code that requires that guarantee.
+
 | Capability / policy | `sandbox-exec` rule | Effect |
 |---|---|---|
 | always | `(deny default)` | every operation requires an explicit allow |

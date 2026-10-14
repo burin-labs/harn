@@ -19,6 +19,7 @@ use crate::value::VmError;
 const BOUNDARY_PROBE: &str = "/.harn-confinement-probe";
 
 pub(super) fn confine(policy: &CapabilityPolicy) -> Result<(), VmError> {
+    super::parent_environment::protect()?;
     // A process already inside a sandbox (App Sandbox, or `sandbox-exec`)
     // cannot take a second profile: macOS refuses to stack them.
     if nested::process_is_sandboxed() {

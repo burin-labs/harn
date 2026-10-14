@@ -27,6 +27,7 @@ use crate::orchestration::{CapabilityPolicy, ProcessSandboxPreset, SandboxProfil
 use crate::value::VmError;
 
 mod nested;
+mod parent_environment;
 mod self_confinement;
 pub(super) mod swiftpm;
 mod toolchain_roots;
@@ -122,6 +123,7 @@ fn wrap_with_sandbox_exec(
             profile,
         );
     }
+    parent_environment::protect()?;
     match nested::nesting(policy) {
         nested::Nesting::NotNested => {}
         // Already confined at least as strictly: macOS would refuse a second
@@ -651,3 +653,7 @@ mod child_write_nested_tests;
 #[cfg(test)]
 #[path = "macos/writable_denial_tests.rs"]
 mod writable_denial_tests;
+
+#[cfg(test)]
+#[path = "macos/parent_environment_tests.rs"]
+mod parent_environment_tests;
