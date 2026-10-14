@@ -103,6 +103,11 @@ cannot read the host's CLI credential. They use their configured secret store.
 Closed memory and environment-only stores also deny this source. The bound
 provider must explicitly allow local CLI reads; local keyring and file stores
 do so. A parent-supplied closed store never expands its credential authority.
+The reader uses the existing process sandbox and cleanup owner, selects an
+installed GitHub CLI without searching `PATH`, and emits the existing sanitized
+secret-access audit event. Unix installs under `/usr/bin`, `/usr/local`, or
+Homebrew and Windows' GitHub CLI installer directories are supported. Other
+installation locations refuse the read.
 
 Secret names in `namespace/name` or `harn-secret://namespace/name[@version]`
 form are treated as canonical secret ids and are not rewritten into the

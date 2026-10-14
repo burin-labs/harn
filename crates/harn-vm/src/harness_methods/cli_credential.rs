@@ -2,6 +2,7 @@
 //! source, never an arbitrary command surface or a command-output artifact.
 
 use super::{VmError, VmValue};
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::Duration;
 use tokio::io::AsyncReadExt;
@@ -95,20 +96,88 @@ impl Request {
         })
     }
 
-    fn command(&self) -> tokio::process::Command {
-        let mut command = tokio::process::Command::new("gh");
-        command.args(["auth", "token", "--hostname", &self.hostname]);
+    fn arguments(&self) -> Vec<String> {
+        let mut args = vec![
+            "auth".into(),
+            "token".into(),
+            "--hostname".into(),
+            self.hostname.clone(),
+        ];
         if let Some(user) = &self.user {
-            command.args(["--user", user]);
+            args.extend(["--user".into(), user.clone()]);
         }
+        args
+    }
+
+    fn command(&self) -> Result<tokio::process::Command, VmError> {
+        let program = trusted_github_cli().ok_or_else(unavailable)?;
+        let mut command = crate::process_sandbox::tokio_command_for(
+            program.to_str().ok_or_else(unavailable)?,
+            &self.arguments(),
+        )
+        .map_err(|_| unavailable())?;
+        let cwd = crate::stdlib::process::inherited_process_cwd().map_err(|_| unavailable())?;
+        crate::process_sandbox::enforce_process_cwd(&cwd).map_err(|_| unavailable())?;
+        command.current_dir(cwd);
         command.env_clear();
         for name in PRIVATE_ENVIRONMENT {
             if let Some(value) = std::env::var_os(name) {
                 command.env(name, value);
             }
         }
-        command
+        crate::process_sandbox::validate_command_environment(command.as_std_mut(), true)
+            .map_err(|_| unavailable())?;
+        Ok(command)
     }
+}
+
+/// This secret source never searches workspace-controlled PATH entries.
+/// Package-manager symlinks must resolve inside the corresponding installation.
+fn trusted_github_cli() -> Option<PathBuf> {
+    let mut installed = vec![
+        (PathBuf::from("/usr/bin/gh"), PathBuf::from("/usr/bin")),
+        (
+            PathBuf::from("/usr/local/bin/gh"),
+            PathBuf::from("/usr/local"),
+        ),
+        (
+            PathBuf::from("/opt/homebrew/bin/gh"),
+            PathBuf::from("/opt/homebrew"),
+        ),
+    ];
+    if cfg!(windows) {
+        installed.clear();
+        for key in ["ProgramFiles", "ProgramFiles(x86)"] {
+            if let Some(root) = std::env::var_os(key) {
+                let root = PathBuf::from(root).join("GitHub CLI");
+                installed.push((root.join("gh.exe"), root));
+            }
+        }
+    }
+    installed
+        .into_iter()
+        .find_map(|(path, root)| trusted_installed_binary(&path, &root))
+}
+
+fn trusted_installed_binary(path: &Path, root: &Path) -> Option<PathBuf> {
+    let root = root.canonicalize().ok()?;
+    let resolved = path.canonicalize().ok()?;
+    if !resolved.starts_with(root) {
+        return None;
+    }
+    let metadata = resolved.metadata().ok()?;
+    if !metadata.is_file() {
+        return None;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = metadata.permissions().mode();
+        if mode & 0o111 == 0 || mode & 0o022 != 0 {
+            return None;
+        }
+    }
+    Some(resolved)
 }
 
 pub(super) async fn read(args: &[VmValue]) -> Result<String, VmError> {
@@ -130,19 +199,55 @@ pub(super) async fn read(args: &[VmValue]) -> Result<String, VmError> {
     let id = super::secret_id_for_scope(&name, &super::secret_scope_arg(None)?)?;
     crate::secrets::ensure_scoped_secret_access_allowed("read", &id)
         .map_err(super::secret_error_to_vm)?;
-    capture(request.command(), DEADLINE).await
+    let value = capture(request.command()?, DEADLINE).await?;
+    crate::secrets::emit_secret_access_event("github_cli", &id);
+    Ok(value)
+}
+
+struct PrivateCaptureCleanup {
+    pid: Option<u32>,
+    token: String,
+}
+
+impl Drop for PrivateCaptureCleanup {
+    fn drop(&mut self) {
+        if let Some(pid) = self.pid {
+            let _ = crate::op_interrupt::signal_pid_tree_group_and_token_with_report(
+                pid,
+                Some(&self.token),
+                9,
+            );
+        }
+        crate::op_interrupt::remove_process_owner_group_journal(&self.token);
+    }
 }
 
 async fn capture(
     mut command: tokio::process::Command,
     deadline: Duration,
 ) -> Result<String, VmError> {
+    crate::op_interrupt::configure_tokio_kill_group(&mut command);
+    let cleanup_token = crate::op_interrupt::new_process_cleanup_token();
+    command.env(
+        crate::op_interrupt::PROCESS_CLEANUP_TOKEN_ENV,
+        &cleanup_token,
+    );
+    crate::op_interrupt::preserve_process_owner_token(command.as_std_mut());
     command
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .kill_on_drop(true);
     let mut child = command.spawn().map_err(|_| unavailable())?;
+    let _cleanup = PrivateCaptureCleanup {
+        pid: child.id(),
+        token: cleanup_token.clone(),
+    };
+    crate::op_interrupt::record_tokio_process_owner_group(&mut child, &cleanup_token)
+        .await
+        .map_err(|_| unavailable())?;
+    let _registration =
+        crate::op_interrupt::register_active_process_cleanup(child.id(), &cleanup_token, None);
     let mut stdout = child
         .stdout
         .take()
@@ -183,6 +288,79 @@ async fn capture(
 mod tests {
     use super::*;
 
+    #[test]
+    fn installed_identity_cannot_escape_into_a_workspace_or_writable_file() {
+        let temp = tempfile::tempdir().unwrap();
+        let install = temp.path().join("installed");
+        std::fs::create_dir(&install).unwrap();
+        let binary = install.join("gh");
+        std::fs::write(&binary, "synthetic executable").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        assert_eq!(
+            trusted_installed_binary(&binary, &install),
+            Some(binary.canonicalize().unwrap())
+        );
+        assert!(trusted_installed_binary(&binary, &temp.path().join("workspace")).is_none());
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::{symlink, PermissionsExt};
+            std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o777)).unwrap();
+            assert!(trusted_installed_binary(&binary, &install).is_none());
+            let outside = temp.path().join("shadow-gh");
+            std::fs::write(&outside, "synthetic executable").unwrap();
+            std::fs::set_permissions(&outside, std::fs::Permissions::from_mode(0o755)).unwrap();
+            std::fs::remove_file(&binary).unwrap();
+            symlink(&outside, &binary).unwrap();
+            assert!(trusted_installed_binary(&binary, &install).is_none());
+        }
+    }
+
+    #[tokio::test]
+    async fn private_capture_reaps_descendants_on_completion_and_timeout() {
+        let temp = tempfile::tempdir().unwrap();
+        let survivor = temp.path().join("survivor");
+        let ready = temp.path().join("ready");
+        let descendant = format!(
+            "import pathlib,time;time.sleep(2);pathlib.Path({:?}).write_text('alive')",
+            survivor.to_str().unwrap()
+        );
+        let parent = |linger: bool| {
+            format!(
+            "import pathlib,subprocess,sys,time;child=subprocess.Popen([sys.executable,'-c',{:?}],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL);pathlib.Path({:?}).write_text(str(child.pid));print('synthetic-cli-token',flush=True);{}",
+            descendant, ready.to_str().unwrap(), if linger { "time.sleep(20)" } else { "pass" }
+        )
+        };
+        let mut control = tokio::process::Command::new("python3");
+        control.args(["-c", &parent(false)]);
+        assert!(control.status().await.unwrap().success());
+        tokio::time::sleep(Duration::from_millis(2500)).await;
+        assert!(
+            survivor.exists(),
+            "the known unmanaged child must reach the same sentinel path"
+        );
+        for linger in [false, true] {
+            std::fs::remove_file(&survivor).ok();
+            std::fs::remove_file(&ready).ok();
+            let mut command = tokio::process::Command::new("python3");
+            command.args(["-c", &parent(linger)]);
+            let result = capture(command, Duration::from_millis(1000)).await;
+            assert_eq!(result.is_err(), linger);
+            assert!(
+                ready.exists(),
+                "the negative must have spawned its descendant"
+            );
+            tokio::time::sleep(Duration::from_millis(2500)).await;
+            assert!(
+                !survivor.exists(),
+                "no credential helper survives the private capture"
+            );
+        }
+    }
+
     #[tokio::test]
     async fn private_capture_accepts_only_one_complete_credential() {
         let mut success = tokio::process::Command::new("python3");
@@ -212,13 +390,8 @@ mod tests {
             hostname: "git.example.com".into(),
             user: Some("octo-bot".into()),
         };
-        let command = request.command();
-        let command = command.as_std();
         assert_eq!(
-            command
-                .get_args()
-                .map(|arg| arg.to_string_lossy().into_owned())
-                .collect::<Vec<_>>(),
+            request.arguments(),
             [
                 "auth",
                 "token",
@@ -228,9 +401,9 @@ mod tests {
                 "octo-bot"
             ]
         );
-        assert!(command
-            .get_envs()
-            .all(|(key, _)| PRIVATE_ENVIRONMENT.iter().any(|name| key == *name)));
+        assert!(!PRIVATE_ENVIRONMENT
+            .iter()
+            .any(|name| *name == "GH_TOKEN" || *name == "GITHUB_TOKEN"));
         assert!(Request::parse(&[super::super::vm_string("shell")]).is_err());
     }
 
