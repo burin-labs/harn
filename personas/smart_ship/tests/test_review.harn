@@ -1,0 +1,50 @@
+import { ReviewObservation, decode_review_observation } from "../lib/main"
+
+pipeline test_replay_requires_measured_complete_inventory_and_preserves_unknown_facts(
+  harness: Harness,
+) {
+  const observed: ReviewObservation = {
+    schema: "smart-ship.review-observation.v1",
+    repository: "example/project",
+    change: "17",
+    head: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    base: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    platform_decision: nil,
+    declared_reviews: 1,
+    declared_threads: 1,
+    reviews: [
+      {id: "r1", state: "approved", head: nil, actor: nil, updated_at: "2026-10-14T00:00:00Z"},
+    ],
+    threads: [{id: "t1", resolved: false, outdated: true}],
+  }
+  const read = decode_review_observation(observed)
+  assert_eq(read, observed)
+  const review = read.reviews[0]!
+  const thread = read.threads[0]!
+  assert_eq(review.head, nil)
+  assert_eq(review.actor, nil)
+  assert_eq(read.platform_decision, nil)
+  assert_eq(thread.resolved, false)
+  const empty = observed + {declared_reviews: 0, declared_threads: 0, reviews: [], threads: []}
+  assert_eq(decode_review_observation(empty), empty)
+  for bad in [
+    nil,
+    {schema: "smart-ship.review-observation.v1"},
+    observed + {reviews: []},
+    observed + {threads: []},
+    observed + {declared_reviews: 0},
+    observed + {declared_threads: -1},
+    observed + {head: "moving-main"},
+    observed + {declared_reviews: 2, reviews: observed.reviews + observed.reviews},
+    observed + {declared_threads: 2, threads: observed.threads + observed.threads},
+  ] {
+    assert(
+      is_err(
+        try {
+          decode_review_observation(bad)
+        },
+      ),
+      "missing or partial review facts cannot become a measured zero",
+    )
+  }
+}

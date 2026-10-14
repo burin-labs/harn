@@ -1,0 +1,76 @@
+import { Review, ReviewObservation, validate_review_observation } from "./review"
+import {
+  GithubPullRequestReviewCensus,
+  GithubPullRequestReviewCensusRequest,
+  GithubReviewDecision,
+  GithubReviewState,
+  github_pr_review_census,
+} from "harn-github-connector/default"
+
+fn review_state(
+  state: GithubReviewState,
+) -> "approved" | "changes_requested" | "commented" | "dismissed" | "pending" {
+  match state {
+    "APPROVED" -> { return "approved" }
+    "CHANGES_REQUESTED" -> { return "changes_requested" }
+    "COMMENTED" -> { return "commented" }
+    "DISMISSED" -> { return "dismissed" }
+    "PENDING" -> { return "pending" }
+  }
+}
+
+fn platform_decision(
+  state: GithubReviewDecision?,
+) -> "approved" | "changes_requested" | "review_required" | nil {
+  match state {
+    "APPROVED" -> { return "approved" }
+    "CHANGES_REQUESTED" -> { return "changes_requested" }
+    "REVIEW_REQUIRED" -> { return "review_required" }
+    nil -> { return nil }
+  }
+}
+
+/** Normalize the connector's complete exact-head census for live reads and deterministic replay. */
+pub fn github_review_observation(census: GithubPullRequestReviewCensus) -> ReviewObservation {
+  require census.number > 0 && census.pages_fetched >= 2,
+    "GitHub review observation requires a measured census for one pull request"
+  let reviews: list<Review> = []
+  for row in census.reviews {
+    const actor = row.author
+    const review: Review = {
+      id: row.id,
+      state: review_state(row.state),
+      head: row.commit_oid,
+      actor: if actor == nil {
+        nil
+      } else {
+        {id: actor.id, name: actor.login, kind: actor.type}
+      },
+      updated_at: row.updated_at,
+    }
+    reviews = reviews + [review]
+  }
+  return validate_review_observation(
+    {
+      schema: "smart-ship.review-observation.v1",
+      repository: census.repository,
+      change: to_string(census.number),
+      head: census.head_oid,
+      base: census.base_oid,
+      platform_decision: platform_decision(census.review_decision),
+      declared_reviews: census.total_reviews,
+      declared_threads: census.total_threads,
+      reviews: reviews,
+      threads: census.threads.map({ row -> pick(row, ["id", "resolved", "outdated"]) }),
+    },
+  )
+}
+
+/** Read-only initial forge adapter. Errors retain the connector's structured refusal. */
+pub fn read_github_reviews(harness: Harness, request: GithubPullRequestReviewCensusRequest) {
+  const census = github_pr_review_census(harness, request)
+  if is_err(census) {
+    return census
+  }
+  return Ok(github_review_observation(unwrap(census)))
+}

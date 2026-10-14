@@ -60,6 +60,26 @@ new qualified artifact digest. The new generation starts in shadow mode. Update
 the installation's controller digest before activating it. A rollback follows
 the same transfer procedure with the prior qualified artifact and a new generation.
 
+## Observe GitHub reviews
+
+Import `harn-smart-ship/github` to call `read_github_reviews`. Its request names
+the repository, pull request, exact expected head, and bounded page limits.
+Credentials enter through your host's secret store. The connector remains the
+owner of authenticated GitHub reads.
+
+For the read-only command, save a `GithubPullRequestReviewCensusRequest` in
+`review-request.json` and supply the secret reference name, never its value:
+
+```sh
+harn run --allow-process-network --read-only-root review-request.json .smart-ship-source/personas/smart_ship/github-cli.harn -- live review-request.json github/access-token > review-observation.json
+harn run --read-only-root review-observation.json .smart-ship-source/personas/smart_ship/github-cli.harn -- replay review-observation.json
+```
+
+Live reads refuse a changed head or incomplete inventory. Replay uses the same
+source and inventory validation. Both preserve unknown actors and review commits,
+platform approval, thread resolution, and outdated-source status separately.
+The observation supplies review evidence; it does not admit or merge the change.
+
 ## Uninstall
 
 Disable the installation's event triggers, drain admitted work, and reconcile

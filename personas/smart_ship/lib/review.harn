@@ -1,0 +1,62 @@
+import { is_git_id } from "./identity"
+
+/** Stable review identity is separate from a display name or an installation's trust policy. */
+pub type ReviewActor = {id: string, name: string, kind: string}
+
+/** Review state and its exact source are observations, not an admission decision. */
+pub type Review = {
+  id: string,
+  state: "approved" | "changes_requested" | "commented" | "dismissed" | "pending",
+  head: string?,
+  actor: ReviewActor?,
+  updated_at: string,
+}
+
+/** Thread resolution remains distinct from whether its source is outdated. */
+pub type ReviewThread = {id: string, resolved: bool, outdated: bool}
+
+/**
+ * A missing observation remains nil; a measured zero retains complete counts and source identity.
+ */
+pub type ReviewObservation = {
+  schema: "smart-ship.review-observation.v1",
+  repository: string,
+  change: string,
+  head: string,
+  base: string,
+  platform_decision: "approved" | "changes_requested" | "review_required" | nil,
+  declared_reviews: int,
+  declared_threads: int,
+  reviews: list<Review>,
+  threads: list<ReviewThread>,
+}
+
+/** Live adapters and replay readers enter through the same source and inventory contract. */
+pub fn validate_review_observation(value: ReviewObservation) -> ReviewObservation {
+  require value.repository != "" && value.change != ""
+    && is_git_id(value.head)
+    && is_git_id(value.base)
+    && value.declared_reviews >= 0
+    && value.declared_reviews == len(value.reviews)
+    && value.declared_threads >= 0
+    && value.declared_threads == len(value.threads),
+    "review observation requires a complete source-bound census"
+  const review_ids = value.reviews.map({ row -> row.id })
+  const thread_ids = value.threads.map({ row -> row.id })
+  require len(unique(review_ids)) == len(review_ids) && !review_ids.contains("")
+    && len(unique(thread_ids)) == len(thread_ids)
+    && !thread_ids.contains(""),
+    "review observation identities are incomplete or duplicated"
+  for row in value.reviews {
+    require row.head == nil || is_git_id(row.head), "review source identity is malformed"
+    require row.updated_at != "", "review update observation is missing"
+    require row.actor == nil || (row.actor.id != "" && row.actor.name != "" && row.actor.kind != ""),
+      "review actor identity is malformed"
+  }
+  return value
+}
+
+/** Decode an archived observation without fabricating absent actor, source, or platform facts. */
+pub fn decode_review_observation(value: unknown) -> ReviewObservation {
+  return validate_review_observation(schema_expect(value, schema_of(ReviewObservation)))
+}

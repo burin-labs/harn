@@ -71,6 +71,14 @@ pub import {
 } from "./release"
 pub import { RepairContext, RepairModel, RepairRun, run_repair } from "./repair"
 pub import {
+  Review,
+  ReviewActor,
+  ReviewObservation,
+  ReviewThread,
+  decode_review_observation,
+  validate_review_observation,
+} from "./review"
+pub import {
   Artifact,
   Authority,
   Change,

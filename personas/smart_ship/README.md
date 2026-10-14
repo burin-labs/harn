@@ -13,6 +13,12 @@ controller state, bounded repair claims, and a standard Harn repair agent. Live
 forge admission and fleet cutover are tracked in
 [harn#9857](https://github.com/burin-labs/harn/issues/9857).
 
+The `github` export reads complete reviews and threads for one exact pull-request
+head through the published GitHub connector. Live observations and archived
+replay enter the same source and inventory contract. Missing actors, review
+commits, and platform decisions remain unknown. This read-only interface does
+not derive review trust, admit a change, or perform a forge mutation.
+
 ## Verify the package
 
 ```sh
