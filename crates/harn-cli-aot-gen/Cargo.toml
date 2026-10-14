@@ -31,6 +31,7 @@ sha2 = "0.11"
 toml = "1.1"
 
 [dev-dependencies]
+harn-modules = { path = "../harn-modules", version = "=0.10.166", features = ["bundled-stdlib"] }
 tempfile = "3"
 
 [lints]

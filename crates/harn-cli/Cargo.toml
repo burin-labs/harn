@@ -82,8 +82,8 @@ harn-stdlib-artifacts = { path = "../harn-stdlib-artifacts", version = "=0.10.16
 # via argv[0] dispatch (when invoked as `harn-lsp` / `harn-dap`). This replaces
 # shipping two additional fully-linked binaries that each re-statically-linked
 # nearly the same dependency closure — collapsing 3 release binaries into 1.
-harn-lsp = { path = "../harn-lsp", version = "=0.10.166" }
-harn-dap = { path = "../harn-dap", version = "=0.10.166" }
+harn-lsp = { path = "../harn-lsp", version = "=0.10.166", default-features = false }
+harn-dap = { path = "../harn-dap", version = "=0.10.166", default-features = false }
 async-trait = "0.1"
 axum = { version = "0.8", features = ["ws"] }
 axum-server = { version = "0.8", features = ["tls-rustls"] }
@@ -213,6 +213,7 @@ testbench-wasi = ["harn-vm/testbench-wasi"]
 embedded-stdlib = ["harn-stdlib-artifacts/embed"]
 
 [dev-dependencies]
+harn-modules = { path = "../harn-modules", version = "=0.10.166", features = ["bundled-stdlib"] }
 harn-clock = { path = "../harn-clock", version = "=0.10.166", features = ["test-support"] }
 harn-mcp-compat = { path = "../harn-mcp-compat" }
 syn = { version = "3", features = ["full", "visit"] }

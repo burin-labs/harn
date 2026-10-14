@@ -3580,6 +3580,7 @@ dependencies = [
  "arcstr",
  "harn-modules",
  "harn-parser",
+ "harn-stdlib",
  "harn-vm",
  "serde",
  "serde_json",
@@ -3626,6 +3627,7 @@ dependencies = [
 name = "harn-guard"
 version = "0.10.166"
 dependencies = [
+ "harn-modules",
  "harn-vm",
  "ort",
  "serde",
@@ -3656,6 +3658,7 @@ dependencies = [
  "harn-flock",
  "harn-languages",
  "harn-lexer",
+ "harn-modules",
  "harn-parser",
  "harn-session-store",
  "harn-terminal",
@@ -3780,6 +3783,7 @@ version = "0.0.0"
 dependencies = [
  "arcstr",
  "criterion",
+ "harn-modules",
  "harn-vm",
 ]
 
@@ -3797,6 +3801,7 @@ dependencies = [
  "harn-modules",
  "harn-parser",
  "harn-rules",
+ "harn-stdlib",
  "harn-vm",
  "ignore",
  "line-index",
@@ -3813,6 +3818,7 @@ name = "harn-mcp-compat"
 version = "0.10.166"
 dependencies = [
  "axum",
+ "harn-modules",
  "harn-serve",
  "harn-vm",
  "jsonschema",
@@ -3833,6 +3839,7 @@ dependencies = [
  "harn-lexer",
  "harn-parser",
  "harn-stdlib",
+ "harn-stdlib-catalog",
  "serde",
  "serde_json",
  "sha2 0.11.0",
@@ -3856,6 +3863,7 @@ version = "0.0.0"
 dependencies = [
  "criterion",
  "futures",
+ "harn-modules",
  "harn-vm",
  "serde_json",
  "tokio",
@@ -3919,6 +3927,8 @@ dependencies = [
 name = "harn-postgres-perf"
 version = "0.0.0"
 dependencies = [
+ "harn-modules",
+ "harn-stdlib",
  "harn-vm",
  "tokio",
 ]
@@ -3940,6 +3950,7 @@ name = "harn-rules"
 version = "0.10.166"
 dependencies = [
  "harn-hostlib",
+ "harn-modules",
  "regex",
  "serde",
  "serde_json",
@@ -3958,6 +3969,7 @@ dependencies = [
  "harn-fmt",
  "harn-hostlib",
  "harn-lint",
+ "harn-modules",
  "harn-parser",
  "harn-rules",
  "harn-vm",
@@ -4063,13 +4075,21 @@ dependencies = [
 [[package]]
 name = "harn-stdlib"
 version = "0.10.166"
+dependencies = [
+ "harn-stdlib-catalog",
+]
 
 [[package]]
 name = "harn-stdlib-artifacts"
 version = "0.10.166"
 dependencies = [
+ "harn-stdlib",
  "harn-vm",
 ]
+
+[[package]]
+name = "harn-stdlib-catalog"
+version = "0.10.166"
 
 [[package]]
 name = "harn-terminal"
@@ -4143,6 +4163,7 @@ dependencies = [
  "harn-session-store",
  "harn-sqlite",
  "harn-stdlib",
+ "harn-stdlib-catalog",
  "hex",
  "hkdf 0.13.0",
  "hmac 0.13.0",
@@ -4243,6 +4264,7 @@ name = "harn-vm-perf"
 version = "0.0.0"
 dependencies = [
  "criterion",
+ "harn-modules",
  "harn-vm",
  "serde_json",
  "tokio",

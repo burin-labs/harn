@@ -18,14 +18,23 @@ croner = "4.0.0"
 harn-flock = { path = "../harn-flock", version = "=0.10.166" }
 harn-lexer = { path = "../harn-lexer", version = "=0.10.166" }
 harn-parser = { path = "../harn-parser", version = "=0.10.166" }
-harn-stdlib = { path = "../harn-stdlib", version = "=0.10.166" }
+harn-stdlib = { path = "../harn-stdlib", version = "=0.10.166", optional = true }
+harn-stdlib-catalog = { path = "../harn-stdlib-catalog", version = "=0.10.166" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.11"
 toml = "1.1"
 unicode-normalization = "0.1"
 
+[features]
+# Install the bundled stdlib on first read instead of requiring the host to
+# call `harn_stdlib::install()`. For test builds and standalone tools only: a
+# crate that enables it for a shipped binary makes every stdlib edit rebuild
+# this crate and everything compiled against it.
+bundled-stdlib = ["dep:harn-stdlib"]
+
 [dev-dependencies]
+harn-stdlib = { path = "../harn-stdlib", version = "=0.10.166" }
 tempfile = "3"
 
 [lints]

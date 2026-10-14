@@ -5,6 +5,7 @@
 //! for local development and as a standalone artifact.
 
 fn main() {
+    harn_stdlib::install().expect("install the bundled Harn stdlib");
     // The language server compiles and type-checks Harn programs, so it needs
     // the same stack the CLI gives the VM. `harn lsp` already gets that from
     // the multi-call binary's runtime thread; this standalone entry point would

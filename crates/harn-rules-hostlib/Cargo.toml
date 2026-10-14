@@ -30,6 +30,7 @@ harn-parser = { path = "../harn-parser", version = "=0.10.166" }
 serde_json = "1"
 
 [dev-dependencies]
+harn-modules = { path = "../harn-modules", version = "=0.10.166", features = ["bundled-stdlib"] }
 tempfile = "3"
 # Library stays lean (`ast` only); tests exercise multi-language rules and need
 # the grammar families those fixtures use. Cargo unifies these into the test

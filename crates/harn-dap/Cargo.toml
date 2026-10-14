@@ -11,8 +11,17 @@ description = "Debug Adapter Protocol implementation for Harn"
 [[bin]]
 name = "harn-dap"
 path = "src/main.rs"
+required-features = ["standalone"]
+
+[features]
+default = ["standalone"]
+# The standalone `harn-dap` shim links and installs the stdlib itself. The shipped
+# `harn-dap` is the multi-call `harn` binary, which depends on this crate without
+# default features so a stdlib edit does not rebuild it.
+standalone = ["dep:harn-stdlib"]
 
 [dependencies]
+harn-stdlib = { path = "../harn-stdlib", version = "=0.10.166", optional = true }
 arcstr = { version = "1", features = ["serde", "std"] }
 harn-modules = { path = "../harn-modules", version = "=0.10.166" }
 harn-parser = { path = "../harn-parser", version = "=0.10.166" }
@@ -23,6 +32,7 @@ tokio = { version = "1", features = ["rt", "sync", "time", "macros"] }
 url = "2"
 
 [dev-dependencies]
+harn-modules = { path = "../harn-modules", version = "=0.10.166", features = ["bundled-stdlib"] }
 serde_json = "1"
 tempfile = "3"
 

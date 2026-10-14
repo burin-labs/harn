@@ -1,8 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
-use crate::package_imports::acquire_package_snapshots;
-use crate::package_snapshot::PackageSnapshot;
+use crate::{package_imports::acquire_package_snapshots, package_snapshot::PackageSnapshot};
 use harn_lexer::Span;
 use harn_parser::{Parser, SNode};
 
@@ -23,6 +22,7 @@ pub mod project_config;
 mod references;
 mod standalone;
 mod stdlib;
+pub use stdlib::{stdlib_catalog, try_stdlib_catalog};
 mod symbol_reachability;
 mod type_dependencies;
 mod typecheck;

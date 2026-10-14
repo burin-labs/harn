@@ -220,6 +220,9 @@ pub enum RuntimeInitError {
     Environment(environment_registry::EnvironmentValidationError),
     /// A configured cache directory cannot be honored.
     CacheDir(bytecode_cache::CacheDirError),
+    /// No standard library is installed; the host never called
+    /// `harn_stdlib::install()`.
+    StdlibCatalog(harn_stdlib_catalog::CatalogNotInstalled),
 }
 
 impl std::fmt::Display for RuntimeInitError {
@@ -227,6 +230,7 @@ impl std::fmt::Display for RuntimeInitError {
         match self {
             Self::Environment(error) => error.fmt(formatter),
             Self::CacheDir(error) => error.fmt(formatter),
+            Self::StdlibCatalog(error) => error.fmt(formatter),
         }
     }
 }
@@ -234,7 +238,9 @@ impl std::fmt::Display for RuntimeInitError {
 impl std::error::Error for RuntimeInitError {}
 
 /// Validate the Harn-owned environment namespace and initialize process-wide
-/// runtime assets through the same bootstrap boundary used by the CLI.
+/// runtime assets through the same bootstrap boundary used by the CLI. The
+/// host must have installed the standard library (`harn_stdlib::install()`)
+/// first; without one this fails instead of running with no stdlib.
 ///
 /// Returns a warning the caller should print once when startup succeeded but
 /// something degraded — today, that caching is off because no cache directory
@@ -242,6 +248,7 @@ impl std::error::Error for RuntimeInitError {}
 /// an operator who set `HARN_CACHE_DIR` gets a hard failure rather than a
 /// silent downgrade to no caching.
 pub fn initialize_runtime() -> Result<Option<&'static str>, RuntimeInitError> {
+    harn_modules::try_stdlib_catalog().map_err(RuntimeInitError::StdlibCatalog)?;
     environment_registry::validate_startup_environment().map_err(RuntimeInitError::Environment)?;
     let warning = bytecode_cache::check_cache_config().map_err(RuntimeInitError::CacheDir)?;
     initialize_runtime_assets();

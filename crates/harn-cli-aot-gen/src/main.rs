@@ -58,6 +58,10 @@ struct WorkspacePackage {
 }
 
 fn main() -> ExitCode {
+    if let Err(error) = harn_stdlib::install() {
+        eprintln!("error: {error}");
+        return ExitCode::from(2);
+    }
     let args = std::env::args().skip(1).collect::<Vec<_>>();
     let options = match parse_options(&args) {
         Ok(options) => options,

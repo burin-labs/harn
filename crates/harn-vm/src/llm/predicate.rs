@@ -94,8 +94,9 @@ mod tests {
 
     #[test]
     fn predicate_stdlib_types_match_the_capability_contract_in_both_directions() {
-        let declarations =
-            harn_stdlib::get_stdlib_source("predicate").expect("embedded predicate types");
+        let declarations = harn_modules::stdlib_catalog()
+            .source("predicate")
+            .expect("embedded predicate types");
         for (name, contract) in [
             ("PredicateVerdict", harn_builtin_meta::predicate::VERDICT),
             ("EvaluationPolicy", harn_builtin_meta::predicate::POLICY),

@@ -243,6 +243,7 @@ windows-sys = { version = "0.61.2", features = [
 ] }
 
 [dev-dependencies]
+harn-modules = { path = "../harn-modules", version = "=0.10.166", features = ["bundled-stdlib"] }
 harn-clock = { path = "../harn-clock", version = "=0.10.166", features = ["test-support"] }
 serde_json = "1"
 jsonschema.workspace = true

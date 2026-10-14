@@ -289,7 +289,9 @@ mod tests {
     }
 
     fn stdlib(module: &str) -> &'static str {
-        harn_stdlib::get_stdlib_source(module).expect("stdlib module is embedded")
+        harn_modules::stdlib_catalog()
+            .source(module)
+            .expect("stdlib module is embedded")
     }
 
     /// The top-level keys of the dispatch options literal the loop builds.
