@@ -226,6 +226,11 @@ if [[ -z "$manifest_dev_debug" || "$manifest_dev_debug" != "$script_dev_debug" ]
   echo "rust_artifact.sh EXPECTED_DEV_DEBUG ('$script_dev_debug') does not match Cargo.toml [profile.dev] debug ('$manifest_dev_debug')" >&2
   exit 1
 fi
+workflow_dev_debug="$(awk '/^env:$/ { p = 1; next } /^jobs:$/ { p = 0 } p && $1 == "CARGO_PROFILE_DEV_DEBUG:" { print $2 }' "$repo_root/.github/workflows/ci.yml")"
+if [[ "$workflow_dev_debug" != "$manifest_dev_debug" ]]; then
+  echo "CI CARGO_PROFILE_DEV_DEBUG ('$workflow_dev_debug') does not match Cargo.toml [profile.dev] debug ('$manifest_dev_debug')" >&2
+  exit 1
+fi
 
 expect_failure "restore overwrote an existing destination" \
   run_artifact restore-tests "$bundle" "$tmpdir/restored" "$commit"
