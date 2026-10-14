@@ -533,6 +533,11 @@ impl TranscriptRecord {
     }
 
     fn store_kind(&self) -> SessionEventKind {
+        if self.harn_result_fact("kind").and_then(Value::as_str)
+            == Some(TranscriptKind::ToolResult.as_str())
+        {
+            return SessionEventKind::ToolResult;
+        }
         let event = &self.transcript_event;
         let message_path = self.raw_message.is_some();
         let kind = match &event.kind {
@@ -624,6 +629,7 @@ impl TranscriptRecord {
     pub(crate) fn tool_name(&self) -> Option<String> {
         nonblank(&self.metadata().tool_name)
             .or_else(|| self.raw_str("name"))
+            .or_else(|| self.harn_result_fact("tool_name").and_then(from_str))
             .or_else(|| {
                 self.first_provider_call()
                     .and_then(|call| call.get("name"))
@@ -653,6 +659,7 @@ impl TranscriptRecord {
             })
             .or_else(|| named(&self.transcript_event.metadata().rest))
             .or_else(|| self.raw_message.as_ref()?.as_object().and_then(named))
+            .or_else(|| self.harn_result_fact("tool_name").and_then(from_str))
     }
 
     /// The provider's own entry for `tool_call_id` in an assistant message's
@@ -696,7 +703,9 @@ impl TranscriptRecord {
 
     /// Whether the envelope or the provider-neutral result marks an error.
     pub(crate) fn is_error(&self) -> bool {
-        self.audit_is_error() || self.raw("is_error").and_then(Value::as_bool) == Some(true)
+        self.audit_is_error()
+            || self.raw("is_error").and_then(Value::as_bool) == Some(true)
+            || self.harn_result_fact("outcome").and_then(Value::as_str) == Some("error")
     }
 
     /// The call identity: the journal header, the envelope's metadata, or the
@@ -738,7 +747,9 @@ impl TranscriptRecord {
         if let Some(id) = from_value(&envelope) {
             return Some(id);
         }
-        metadata.and_then(from_value)
+        metadata
+            .and_then(from_value)
+            .or_else(|| self.harn_result_fact("tool_call_id").and_then(from_str))
     }
 
     /// The provider message's own id, which the journal files as `message_id`.

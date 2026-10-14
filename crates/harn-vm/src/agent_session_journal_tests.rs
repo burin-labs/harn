@@ -548,6 +548,15 @@ fn plan_document_event_uses_the_canonical_plan_kind() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn generic_agent_loop_projects_the_current_run_after_a_long_session_history() {
+    generic_agent_loop_projects_the_current_run_for_format("native").await;
+}
+
+#[tokio::test]
+async fn text_channel_agent_loop_keeps_tool_results_in_the_canonical_recap() {
+    generic_agent_loop_projects_the_current_run_for_format("text").await;
+}
+
+async fn generic_agent_loop_projects_the_current_run_for_format(tool_format: &str) {
     crate::agent_sessions::reset_session_store();
     crate::reset_thread_local_state();
     let root = tempfile::tempdir().expect("temp root");
@@ -626,7 +635,7 @@ pipeline main(harness: Harness, task: unknown) {{
       session_id: "live-journal-agent-loop",
       tools: tools,
       progress_tool: {{}},
-      tool_format: "native",
+      tool_format: "{tool_format}",
       loop_until_done: true,
       iteration_budget: {{
         mode: "adaptive", initial: 2, max: 6, extend_by: 2, expose_decisions: true,
@@ -642,6 +651,7 @@ pipeline main(harness: Harness, task: unknown) {{
   assert(result.adaptive_budget.extensions_used > 0)
   assert(result.adaptive_budget.decisions[0].action == "extend")
   harness.stdio.println("budget:" + json_stringify(result.adaptive_budget))
+  harness.stdio.println("recap:" + json_stringify(result.recap.snapshot))
 }}
 "###,
     );
@@ -688,6 +698,36 @@ pipeline main(harness: Harness, task: unknown) {{
         projection_hash.starts_with("sha256:"),
         "terminal AgentResult must expose the recap projection hash: {output}"
     );
+    let recap: crate::session_recap::SessionRecapSnapshot = serde_json::from_str(
+        output
+            .lines()
+            .find_map(|line| line.strip_prefix("recap:"))
+            .expect("returned recap"),
+    )
+    .expect("typed recap snapshot");
+    let tools = recap
+        .turns
+        .iter()
+        .flat_map(|turn| &turn.iterations)
+        .flat_map(|iteration| &iteration.tools)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        tools.len(),
+        3,
+        "every real dispatched tool must appear: {tools:?}"
+    );
+    assert!(
+        tools
+            .iter()
+            .all(|tool| tool.call_observed && tool.result_observed),
+        "every dispatched call must retain its actual result in {tool_format}: {tools:?}"
+    );
+    let known = tools
+        .iter()
+        .find(|tool| tool.tool_call_id == "known-result-one")
+        .expect("the known result must be reached");
+    let expected_output = "[result of noop]\nknown durable result: first\n[end of noop result]\n";
+    assert_eq!(known.output, Some(serde_json::json!(expected_output)));
 
     let store = session_store::open_canonical_agent_session(
         &session_store::SessionStoreDir::under_root(root.path()),
@@ -720,6 +760,10 @@ pipeline main(harness: Harness, task: unknown) {{
                 && event.payload["raw_message"]["role"] == "user"
         })
         .expect("user message must be durable");
+    assert_eq!(
+        user_message.payload["raw_message"]["content"],
+        "Use noop, then finish."
+    );
     let run_id = user_message
         .headers
         .get("run_id")
@@ -735,9 +779,16 @@ pipeline main(harness: Harness, task: unknown) {{
         .iter()
         .find(|event| {
             event.kind == SessionEventKind::ToolCall
-                && event.payload["raw_message"]["role"] == "assistant"
+                && event.payload["transcript_event"]["kind"] == "tool_call"
         })
-        .expect("assistant tool call must be durable");
+        .expect("the dispatched tool call must be durable on every channel");
+    assert!(
+        events.iter().any(|event| {
+            event.payload["raw_message"]["role"] == "assistant"
+                && event.payload["raw_message"]["_harn"]["tool_calls"][0]["id"] == "live-call"
+        }),
+        "the provider's assistant message must retain its parsed call facts"
+    );
     let tool_call_id = assistant_tool_call
         .headers
         .get("tool_call_id")
