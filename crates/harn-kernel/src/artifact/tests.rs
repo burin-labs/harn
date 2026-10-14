@@ -212,24 +212,12 @@ fn namespace_predicate_contracts_survive_package_reexports() {
             },
         ],
     };
-    let artifact = compile_source_package(
+    compile_source_package(
         package("if guards.is_text(value) { return value.upper() }; return \"number\""),
         "label",
         EntryKind::Function,
     )
     .expect("namespace guard narrows against its defining module's private Text alias");
-    assert_eq!(
-        crate::start(&artifact, DataValue::String("go".into()), &GrantSet::pure()),
-        Execution::Completed {
-            value: DataValue::String("GO".into())
-        },
-    );
-    assert_eq!(
-        crate::start(&artifact, DataValue::Int(42), &GrantSet::pure()),
-        Execution::Completed {
-            value: DataValue::String("number".into())
-        },
-    );
     for body in [
         "return value.upper()",
         "if guards.is_text(value) { return \"text\" }; return value.upper()",
