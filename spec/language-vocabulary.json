@@ -573,6 +573,7 @@
     "pair",
     "parallel_race",
     "parse_junit_xml",
+    "parse_junit_xml_result",
     "partition",
     "pascal_to_camel",
     "pascal_to_snake",

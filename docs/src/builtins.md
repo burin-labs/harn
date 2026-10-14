@@ -1093,7 +1093,8 @@ harness.stdio.log(text.source.sha256)
 
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
-| `parse_junit_xml(input)` | input: string or bytes | list of dict | Parse a JUnit XML test report into per-case dicts. Lenient: malformed input returns `[]` instead of throwing |
+| `parse_junit_xml(input)` | input: string or bytes | list of case records | Parse a complete JUnit report. Invalid input returns `[]`; a partial report never returns a passing prefix |
+| `parse_junit_xml_result(input)` | input: string or bytes | Result of case records or a report error | Distinguish a valid empty suite from malformed XML, inconsistent totals, or unsupported case outcomes |
 
 JUnit XML is the de facto interchange format for compiled-language test
 runners — GTest with `--gtest_output=xml`, Maven Surefire and Gradle for
@@ -1108,6 +1109,16 @@ cargo-nextest's JUnit dialect. Each returned dict has the shape:
 | `message` | string or nil | Concatenation of any `<failure>` / `<error>` `message` attribute and child text |
 | `stdout` | string or nil | Captured `<system-out>` content |
 | `stderr` | string or nil | Captured `<system-err>` content |
+| `path` | string or nil | Producer's `file` attribute |
+| `line` | int or nil | Producer's `line` attribute |
+
+Use `parse_junit_xml_result` for verification gates. Its error has `kind`
+(`invalid_xml`, `invalid_report`, or `resource_limit`) and `message`. A valid
+empty suite returns `Ok([])`; a test gate must still require a nonempty set of
+executed cases. A successful process exit alone does not establish that tests
+ran. Declared `tests`, `failures`, `errors`, and `skipped` totals must match the
+observed cases. DTDs are refused. The parser accepts at most 32 MiB, one million
+XML nodes, and 128 levels of nesting.
 
 ```harn
 pipeline summarize(harness: Harness) {
