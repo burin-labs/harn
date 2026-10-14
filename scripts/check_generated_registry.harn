@@ -50,7 +50,10 @@ const AUDIT_GATE_RUNNER = "scripts/audit_gates.sh"
  * True when `c` is a word character ([A-Za-z0-9_]) or a hyphen — the set
  * a whole-target suffix guard forbids immediately after a target name.
  */
-fn is_word_or_hyphen(c: string) -> bool {
+fn is_word_or_hyphen(c: string?) -> bool {
+  if c == nil {
+    return false
+  }
   return c == "-" || c == "_"
     || "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789".contains(c)
 }

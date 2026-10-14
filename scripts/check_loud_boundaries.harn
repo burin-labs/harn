@@ -64,8 +64,13 @@ pub fn boundary_wire_strings(funnel_source: string) -> dict<string, string> {
     if halves.count != 2 {
       continue
     }
-    const variant = halves[0].trim()[len("Self::"):].trim()
-    let wire = halves[1].trim()
+    const lhs = halves[0]
+    const rhs = halves[1]
+    if lhs == nil || rhs == nil {
+      throw "split lost a checked enum arm"
+    }
+    const variant = lhs.trim()[len("Self::"):].trim()
+    let wire = rhs.trim()
     if wire.ends_with(",") {
       wire = wire[:len(wire) - 1].trim()
     }

@@ -371,7 +371,7 @@ fn persistent_lane(
     "cache-workspace-crates": "true",
     save: "false",
   }
-  let lane = {
+  let lane: dict = {
     "runs-on": producer_runner_expression(owned_rung),
     needs: ["changes", "runner-availability", "rust-producer-capacity"],
     if: producer_admission_expression(),
@@ -871,7 +871,7 @@ pipeline test_rejects_unbounded_or_unconditional_cache_generation_save(
   const valid = workflow()
   const refresh = valid.jobs["rust-cache-refresh"]
   const invalid_steps = refresh.steps.map(
-    fn(step) {
+    fn(step: dict) -> dict {
       if step?.name == "Prepare Linux cache generation save" {
         return {...step, if: "", run: "echo unbounded"}
       }

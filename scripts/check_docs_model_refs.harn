@@ -81,6 +81,9 @@ pub fn stale_refs(text: string, sonnet_model: string) -> list {
       continue
     }
     const line = lines[m.line - 1]
+    if line == nil {
+      throw "model reference points beyond its source lines"
+    }
     if line.contains(ALLOW_STALE) {
       continue
     }

@@ -248,11 +248,7 @@ impl TypeChecker {
         row.signature
             .type_params
             .iter()
-            .filter(|name| {
-                bindings
-                    .get(**name)
-                    .is_none_or(Self::is_wildcard_type)
-            })
+            .filter(|name| bindings.get(**name).is_none_or(Self::is_wildcard_type))
             .map(|name| (*name).to_string())
             .collect()
     }

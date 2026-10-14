@@ -446,10 +446,18 @@ fn attributed_root(path: string) -> string {
     }
   }
   const parts = path.split("/")
-  if len(parts) <= 2 {
-    return parts[0]
+  const first = parts[0]
+  if first == nil {
+    throw "split returned no attributed path components"
   }
-  return parts[0] + "/" + parts[1]
+  if len(parts) <= 2 {
+    return first
+  }
+  const second = parts[1]
+  if second == nil {
+    throw "split lost a checked attributed path component"
+  }
+  return first + "/" + second
 }
 
 /** Add one to the tally for `name`, starting it at one when it is new. */

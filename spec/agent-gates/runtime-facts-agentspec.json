@@ -338,7 +338,7 @@
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
-    "expression": "omit(\n    opts,\n    [\n      \"tool_format\",\n      \"_tool_format_source\",\n      \"_tool_format_capability_gap\",\n      \"_tool_format_override\",\n    ],\n  )",
+    "expression": "omit(\n    opts,\n    [\"tool_format\", \"_tool_format_source\", \"_tool_format_capability_gap\", \"_tool_format_override\"],\n  )",
     "owner": "__clear_tool_format_resolution",
     "evidence": "Dictionary key removal into a new value, not an option read."
   },
