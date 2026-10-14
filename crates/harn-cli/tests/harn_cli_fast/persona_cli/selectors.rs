@@ -24,12 +24,11 @@ async fn scaffolded_connector_personas_select_opened_events_only() {
                 let entry = scaffold.root.join("src/event_captain.harn");
                 fs::write(&entry, "pub pipeline run(_harness: Harness, event) { return {executed: true, kind: event.kind} }\n").unwrap();
                 let extensions = harn_cli::package::try_load_runtime_extensions(&entry).unwrap();
-                let specs = harn_cli::package::collect_persona_trigger_binding_specs(&extensions).unwrap();
-                assert_eq!(specs.len(), 1);
                 let log = harn_vm::event_log::install_memory_for_current_thread(128);
-                harn_vm::install_manifest_triggers(specs).await.unwrap();
                 let mut vm = harn_vm::Vm::new();
                 harn_vm::register_vm_stdlib(&mut vm);
+                harn_cli::package::install_manifest_triggers(&mut vm, &extensions).await.unwrap();
+                assert_eq!(harn_vm::snapshot_trigger_bindings().len(), 1);
                 let dispatcher = harn_vm::Dispatcher::with_event_log(vm, log);
                 for action in ["opened", "closed"] {
                     let event = harn_vm::TriggerEvent::new(
