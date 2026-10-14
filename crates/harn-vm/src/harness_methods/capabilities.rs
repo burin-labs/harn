@@ -176,6 +176,15 @@ async fn call_harness_secrets_method(
             category: ErrorCategory::NotFound,
         })?;
     match method {
+        "read_cli" => {
+            if !provider.allows_local_cli_reads() {
+                return Err(VmError::CategorizedError {
+                    message: "The bound secret store does not allow host CLI credentials.".into(),
+                    category: ErrorCategory::Auth,
+                });
+            }
+            cli_credential::read(args).await.map(vm_string)
+        }
         "read" | "read_bytes" => {
             if args.len() > 2 {
                 return Err(VmError::TypeError(format!(

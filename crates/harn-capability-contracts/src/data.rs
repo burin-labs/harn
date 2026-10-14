@@ -376,6 +376,13 @@ capability_method!(
     "Read a binary secret."
 );
 capability_method!(
+    secrets_read_cli,
+    "harness.secrets.read_cli",
+    ["secret.read@arg0"],
+    "__cap_secrets_read_cli(provider: string, options?: dict) -> string",
+    "Read a supported CLI credential into private memory without command artifacts."
+);
+capability_method!(
     secrets_write,
     "harness.secrets.write",
     ["secret.write@arg0"],
