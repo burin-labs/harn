@@ -532,20 +532,19 @@ mod tests {
                 "api".into(),
                 crate::NamespaceImportBinding {
                     module_path: "api".into(),
-                    members: ["take".into()].into_iter().collect(),
-                    member_types: [(
+                    members: std::collections::BTreeSet::from(["take".into()]),
+                    member_types: std::collections::BTreeMap::from([(
                         "take".into(),
                         TypeExpr::FnType {
                             params: vec![TypeExpr::Named(accepts.into())],
                             return_type: Box::new(TypeExpr::Named("nil".into())),
                         },
-                    )]
-                    .into_iter()
-                    .collect(),
-                    member_param_names: [("take".into(), vec!["input".into()])]
-                        .into_iter()
-                        .collect(),
-                    member_required_params: [("take".into(), 1)].into_iter().collect(),
+                    )]),
+                    member_param_names: std::collections::BTreeMap::from([(
+                        "take".into(),
+                        vec!["input".into()],
+                    )]),
+                    member_required_params: std::collections::BTreeMap::from([("take".into(), 1)]),
                     member_type_predicates: Default::default(),
                 },
             )])
