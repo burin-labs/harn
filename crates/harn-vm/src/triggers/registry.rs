@@ -923,7 +923,7 @@ pub(crate) fn matching_bindings(event: &super::TriggerEvent) -> Vec<Arc<TriggerB
                     && !binding
                         .match_events
                         .iter()
-                        .any(|kind| trigger_event_kind_matches(event, kind))
+                        .any(|selector| selector::event_selector_matches(event, selector))
                 {
                     continue;
                 }
@@ -941,15 +941,7 @@ pub(crate) fn matching_bindings(event: &super::TriggerEvent) -> Vec<Arc<TriggerB
     })
 }
 
-fn trigger_event_kind_matches(event: &super::TriggerEvent, expected: &str) -> bool {
-    if expected == event.kind {
-        return true;
-    }
-    expected
-        .strip_prefix(event.provider.as_str())
-        .and_then(|rest| rest.strip_prefix('.'))
-        .is_some_and(|kind| kind == event.kind)
-}
+mod selector;
 
 pub async fn install_manifest_triggers(
     specs: Vec<TriggerBindingSpec>,

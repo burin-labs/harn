@@ -55,6 +55,23 @@ The manifest tier is the default. At dispatch time, Harn resolves the effective
 tier from the manifest plus the latest matching trust-graph control record for
 that agent.
 
+## Event selectors
+
+`match.events` accepts an event kind with an optional action and provider prefix:
+`pull_request`, `github.pull_request`, `pull_request.opened`, or
+`github.pull_request.opened`. An empty list matches every event from the binding's provider.
+
+Harn compares the kind to `TriggerEvent.kind` and the optional action to the
+connector payload's top-level string `action`, stored under `provider_payload.raw`.
+A kind without an action selects every action in that family. A selector with
+an action doesn't match a missing, null, or non-string action. Provider prefixes
+must match the binding's provider. Matching is exact and case-sensitive;
+selectors aren't wildcard patterns.
+
+Dotted event kinds such as `message.channels` still match as whole kinds.
+For GitHub, `github.pull_request.opened` is also the connector's event topic.
+The matcher reads the kind and action, not the topic or the original webhook body.
+
 ## Handler URI schemes
 
 Harn currently accepts these handler forms:

@@ -1,5 +1,5 @@
 {
-  "event": "github.pr_opened",
+  "event": "github.pull_request.opened",
   "repo": "burin-labs/harn",
   "number": 463,
   "title": "Persona template pack v0",

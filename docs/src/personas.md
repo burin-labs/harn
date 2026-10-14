@@ -31,7 +31,7 @@ tools = ["github", "ci", "linear", "slack"]
 capabilities = ["git.get_diff", "project.test_commands", "process.exec"]
 autonomy_tier = "act_with_approval"
 receipt_policy = "required"
-triggers = ["github.pr_opened", "github.check_failed"]
+triggers = ["github.pull_request.opened", "github.check_suite.completed"]
 schedules = ["*/30 * * * *"]
 handoffs = ["review_captain", "human_maintainer"]
 context_packs = ["repo_policy", "release_rules", "flaky_tests"]
@@ -62,7 +62,7 @@ Optional fields:
 
 | Field | Purpose |
 |---|---|
-| `triggers` | Event names such as `github.pr_opened`. |
+| `triggers` | Provider-qualified event selectors such as `github.pull_request.opened`. |
 | `schedules` | Cron expressions for recurring wakes. |
 | `model_policy` | Default/escalation/fallback model preferences. |
 | `budget` | Cost, token, escalation, and runtime ceilings. |
@@ -278,8 +278,8 @@ paths outside that content-pinned package graph are rejected.
 ## Trigger handlers
 
 Persona trigger names are first-class trigger registrations. A persona with
-`triggers = ["github.pr_opened"]` installs a manifest trigger binding for
-provider `github`, event kind `pr_opened`, and handler kind `persona`. Dispatch
+`triggers = ["github.pull_request.opened"]` installs a manifest trigger binding for
+provider `github`, event kind `pull_request`, action `opened`, and handler kind `persona`. Dispatch
 records a `persona.trigger.received` event plus the normal persona run receipt
 in `persona.runtime.events`.
 
@@ -290,9 +290,15 @@ Explicit trigger manifests can also target a persona:
 id = "merge-captain-pr-opened"
 kind = "webhook"
 provider = "github"
-match = { events = ["pr_opened"] }
+match = { events = ["pull_request.opened"] }
 handler = "persona://merge_captain" # or persona://agents/reviewer after activation
 ```
+
+Persona triggers use the same [event selectors](triggers/manifest.md#event-selectors)
+as explicit trigger manifests, with a required provider prefix. Use
+`github.pull_request` to receive every action in that event family. Check
+completion is `github.check_suite.completed`; inspect the payload's `conclusion`
+to distinguish a failed check from a successful one.
 
 ## Continuous runtime
 

@@ -106,7 +106,7 @@ pub fn installed_persona_project_fixture(
         let package_manifest = current_packages_dir(root).join("agents").join(MANIFEST);
         let mut body = fs::read_to_string(&package_manifest).unwrap();
         if with_persona_trigger {
-            body.push_str("triggers = [\"github.pr_opened\"]\n");
+            body.push_str("triggers = [\"github.pull_request.opened\"]\n");
         }
         body.push_str(root_triggers);
         fs::write(&package_manifest, body).unwrap();

@@ -779,7 +779,7 @@ tools = ["github"]
 capabilities = ["git.get_diff"]
 autonomy_tier = "act_with_approval"
 receipt_policy = "required"
-triggers = ["github.pr_opened"]
+triggers = ["github.pull_request.opened"]
 budget = { daily_usd = 1.0, run_usd = 1.0 }
 "#,
     )
