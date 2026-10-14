@@ -543,6 +543,32 @@ mod tests {
         Diagnostic, DiagnosticSeverity, NumberOrString, Position, Range, Url,
     };
 
+    #[test]
+    fn current_syntax_and_detached_analysis_share_one_parse() {
+        let uri = Url::parse("file:///syntax-reuse.harn").unwrap();
+        let mut state = DocumentState::new_for_language(
+            "pub fn first() -> int { return 1 }\n".into(),
+            "harn",
+            &uri,
+        );
+        let parsed = Arc::clone(state.cached_ast.as_ref().unwrap());
+        assert_eq!(state.analysis.stats().parse_runs, 1);
+        let mut job = state.begin_analysis().unwrap();
+        job.reparse_if_dirty();
+        assert!(Arc::ptr_eq(&parsed, job.cached_ast.as_ref().unwrap()));
+        assert_eq!(job.analysis.stats().parse_runs, 1);
+        assert!(state.finish_analysis(job, true));
+
+        state.update_source("pub fn next() -> int { return 2 }\n".into());
+        assert!(state.symbols.iter().any(|symbol| symbol.name == "next"));
+        let edited = Arc::clone(state.cached_ast.as_ref().unwrap());
+        assert!(!Arc::ptr_eq(&parsed, &edited));
+        let mut job = state.begin_analysis().unwrap();
+        job.reparse_if_dirty();
+        assert!(Arc::ptr_eq(&edited, job.cached_ast.as_ref().unwrap()));
+        assert_eq!(job.analysis.stats().parse_runs, 1);
+    }
+
     fn write(path: &Path, content: &str) {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(path, content).unwrap();

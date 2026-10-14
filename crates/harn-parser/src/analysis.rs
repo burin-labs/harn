@@ -553,6 +553,12 @@ mod tests {
             .unwrap()
             .diagnostics
             .is_empty());
+        db.typecheck(&id, config("string")).unwrap();
+        assert_eq!(
+            db.stats().typecheck_runs,
+            1,
+            "the unchanged contract must hit the cache"
+        );
         assert!(db
             .typecheck(&id, config("int"))
             .unwrap()

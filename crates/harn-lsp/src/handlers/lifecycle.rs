@@ -556,7 +556,7 @@ mod tests {
                     let state = &docs[&uri];
                     state.dirty
                         && state.cached_ast.is_some()
-                        && state.source.as_ref() == text
+                        && &*state.source == text
                         && state.type_diagnostics.is_empty()
                 };
                 // Release before asserting so a failed control cannot strand
