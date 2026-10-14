@@ -16,6 +16,9 @@ use harn_cli::commands::{persona, persona_doctor, persona_scaffold, persona_supe
 use harn_vm::event_log::EventLog as _;
 use tempfile::TempDir;
 
+#[path = "persona_cli/selectors.rs"]
+mod selectors;
+
 fn write_manifest(body: &str) -> TempDir {
     let temp = TempDir::new().unwrap();
     fs::create_dir_all(temp.path().join(".git")).unwrap();

@@ -21,8 +21,8 @@ receipt_policy = "required"
 triggers = [
   "github.pull_request.opened",
   "github.check_suite.completed",
-  "github.review_thread_stale",
-  "github.merge_conflict_detected",
+  "github.merge_group.checks_requested",
+  "github.pull_request.synchronize",
 ]
 schedules = ["*/30 * * * *"]
 handoffs = ["review_captain"]

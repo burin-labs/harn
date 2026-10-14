@@ -276,7 +276,7 @@ filter = "payload.draft == false"
 id = "observer-events"
 kind = "webhook"
 provider = "webhook"
-match = { events = ["issue_opened"] }
+match = { events = ["issues.opened"] }
 handler = "persona://observer"
 
 [[triggers]]
