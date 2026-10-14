@@ -199,7 +199,7 @@ pub(crate) struct TranscriptEvent {
     pub rest: Map<String, Value>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Default, Serialize, Deserialize)]
 struct TranscriptEventWire {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     id: Option<String>,
@@ -274,12 +274,16 @@ impl TranscriptEvent {
                 }
                 wire.into()
             }
-            Err(_) => Self {
-                rest: match value {
-                    Value::Object(map) => map,
-                    other => Map::from_iter([("value".to_string(), other)]),
+            Err(_) => match value {
+                Value::Object(map) => {
+                    let (mut wire, rest) = decode_valid_fields::<TranscriptEventWire>(map);
+                    wire.rest.extend(rest);
+                    wire.into()
+                }
+                other => Self {
+                    rest: Map::from_iter([("value".to_string(), other)]),
+                    ..Self::default()
                 },
-                ..Self::default()
             },
         }
     }
@@ -305,7 +309,7 @@ impl TranscriptEvent {
 /// Metadata the runtime reads from transcript events, typed once. Producers
 /// set only the fields their kind carries; [`Self::rest`] keeps every other
 /// field verbatim. A metadata object whose known fields have unexpected
-/// types decodes with all of it in `rest`, so no row is refused or altered.
+/// types keeps those fields in `rest` while retaining its valid typed facts.
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]
 pub(crate) struct TranscriptMetadata {
     #[serde(flatten)]
@@ -333,13 +337,41 @@ impl<'de> Deserialize<'de> for TranscriptMetadata {
                         rest: typed.rest,
                     }
                 }
-                Err(_) => Self {
-                    known: KnownMetadata::default(),
-                    rest: value,
-                },
+                Err(_) => {
+                    let (known, rest) = decode_valid_fields(value);
+                    Self { known, rest }
+                }
             },
         )
     }
+}
+
+/// Recover fields independently only after the normal typed decode fails.
+/// Serde's owning type decides which fields it understands; no second field
+/// registry is needed, and malformed values remain available for round trips.
+fn decode_valid_fields<T>(original: Map<String, Value>) -> (T, Map<String, Value>)
+where
+    T: serde::de::DeserializeOwned + Serialize,
+{
+    let mut valid = Map::new();
+    let mut rest = Map::new();
+    for (key, value) in original {
+        let field = Value::Object(Map::from_iter([(key.clone(), value.clone())]));
+        let decoded = serde_json::from_value::<T>(field)
+            .ok()
+            .and_then(|typed| serde_json::to_value(typed).ok());
+        match decoded {
+            Some(Value::Object(fields)) if fields.contains_key(&key) && !value.is_null() => {
+                valid.extend(fields);
+            }
+            _ => {
+                rest.insert(key, value);
+            }
+        }
+    }
+    let typed = serde_json::from_value(Value::Object(valid))
+        .expect("individually decoded fields form a valid record");
+    (typed, rest)
 }
 
 /// Every metadata field a runtime reader consumes. Numbers stay JSON numbers

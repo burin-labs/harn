@@ -96,13 +96,38 @@ fn explicit_nulls_survive_a_write() {
 fn metadata_whose_known_fields_are_mistyped_is_kept_rather_than_refused() {
     let event = serde_json::json!({
         "kind": "llm_call",
-        "metadata": {"model": 42, "input_tokens": "many", "extra": true}
+        "metadata": {
+            "model": 42, "input_tokens": "many", "extra": true,
+            "cost_usd": 0.25, "provider": "openai", "output_tokens": 12
+        }
     });
     let record = TranscriptRecord::new(event.clone(), None);
     assert_eq!(record.metadata().model, None);
     assert_eq!(integer(&record.metadata().input_tokens), None);
+    assert_eq!(float(&record.metadata().cost_usd), Some(0.25));
+    assert_eq!(
+        nonblank(&record.metadata().provider).as_deref(),
+        Some("openai")
+    );
+    assert_eq!(integer(&record.metadata().output_tokens), Some(12));
     let written = SessionEventPayload::Transcript(record).to_json();
     assert_eq!(written["transcript_event"], event);
+}
+
+#[test]
+fn a_mistyped_envelope_field_does_not_hide_valid_metadata() {
+    let event = serde_json::json!({
+        "kind": "llm_call", "role": 42, "text": "completed",
+        "metadata": {"cost_usd": 0.25}
+    });
+    let record = TranscriptRecord::new(event.clone(), None);
+    assert_eq!(record.kind(), Some(&TranscriptKind::LlmCall));
+    assert_eq!(record.text().as_deref(), Some("completed"));
+    assert_eq!(float(&record.metadata().cost_usd), Some(0.25));
+    assert_eq!(
+        SessionEventPayload::Transcript(record).to_json()["transcript_event"],
+        event
+    );
 }
 
 #[test]
