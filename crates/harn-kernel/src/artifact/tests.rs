@@ -213,7 +213,7 @@ fn namespace_predicate_contracts_survive_package_reexports() {
         ],
     };
     let artifact = compile_source_package(
-        package("if guards.is_text(value) { return value.upper() } return \"number\""),
+        package("if guards.is_text(value) { return value.upper() }; return \"number\""),
         "label",
         EntryKind::Function,
     )
@@ -232,7 +232,7 @@ fn namespace_predicate_contracts_survive_package_reexports() {
     );
     for body in [
         "return value.upper()",
-        "if guards.is_text(value) { return \"text\" } return value.upper()",
+        "if guards.is_text(value) { return \"text\" }; return value.upper()",
     ] {
         let diagnostics = compile_source_package(package(body), "label", EntryKind::Function)
             .expect_err("an absent or one-sided false guard cannot narrow the receiver");
