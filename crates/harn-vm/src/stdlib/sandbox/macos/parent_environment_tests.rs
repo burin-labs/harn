@@ -1,7 +1,7 @@
 use super::*;
 
-const HELPER_MODE: &str = "HARN_TEST_PARENT_ENVIRONMENT_HELPER";
-const CANARY_NAME: &str = "HARN_TEST_CONTROLLER_ENV_CANARY";
+const HELPER_MODE: &str = "PROCESS_SANDBOX_TEST_HELPER";
+const CANARY_NAME: &str = "PROCESS_SANDBOX_CONTROLLER_CANARY";
 const CANARY: &str = "public-nonsecret-controller-canary";
 
 // Only booleans and syscall status leave the reader. Never print the environment
@@ -18,8 +18,8 @@ for selector in [38, 49]:
         status = libc.sysctl(mib, 3, buf, ctypes.byref(size), None, 0)
         fields = buf.raw[:min(size.value, len(buf))].split(b'\0')
         result.append({'selector': selector, 'target': target, 'status': status,
-            'parent_canary': b'HARN_TEST_CONTROLLER_ENV_CANARY=public-nonsecret-controller-canary' in fields,
-            'self_canary': b'HARN_TEST_CHILD_ENV_CANARY=public-nonsecret-child-canary' in fields})
+            'parent_canary': b'PROCESS_SANDBOX_CONTROLLER_CANARY=public-nonsecret-controller-canary' in fields,
+            'self_canary': b'PROCESS_SANDBOX_CHILD_CANARY=public-nonsecret-child-canary' in fields})
 assert time.monotonic() > 0
 assert subprocess.check_output(['/bin/echo', 'child-command'], text=True).strip() == 'child-command'
 print(json.dumps(result))
@@ -54,7 +54,7 @@ fn confined_child_cannot_read_the_hosts_launch_environment() {
         .env_clear()
         .env("PATH", "/usr/bin:/bin")
         .env(
-            "HARN_TEST_CHILD_ENV_CANARY",
+            "PROCESS_SANDBOX_CHILD_CANARY",
             "public-nonsecret-child-canary",
         )
         .output()
@@ -82,7 +82,7 @@ fn confined_child_cannot_read_the_hosts_launch_environment() {
         env: vec![
             ("PATH".to_string(), "/usr/bin:/bin".to_string()),
             (
-                "HARN_TEST_CHILD_ENV_CANARY".to_string(),
+                "PROCESS_SANDBOX_CHILD_CANARY".to_string(),
                 "public-nonsecret-child-canary".to_string(),
             ),
         ],
