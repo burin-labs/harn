@@ -490,7 +490,7 @@ impl Hasher for StableHasher {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::DiagnosticSeverity;
+    use crate::{DiagnosticSeverity, TypeExpr};
 
     fn source_id() -> SourceId {
         SourceId::new("test.harn")
