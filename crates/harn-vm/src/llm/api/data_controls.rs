@@ -43,8 +43,8 @@ pub enum DataControlsOutcome {
     /// provider's server-side default applies. This is not a claim about what
     /// that default is.
     NotRequested,
-    /// The caller asked for the strictest available posture and at least one
-    /// declared control was written onto this request.
+    /// At least one declared control was written onto this request, either
+    /// explicitly requested or required by a governing inference boundary.
     Applied,
     /// The caller asked, the provider is researched, and it exposes no
     /// per-request control on this dialect. The posture was NOT achieved.
