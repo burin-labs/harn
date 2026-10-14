@@ -42,7 +42,7 @@ mod unit;
 
 use super::syntax::{
     find_opener_after, find_span_end, ident_length, match_block, parse_ts_call_from,
-    skip_heredoc_body, strip_thinking_tags, SpanEnd,
+    skip_heredoc_body, skip_string_span, strip_thinking_tags, SpanEnd,
 };
 use crate::text_index::TextIndex;
 
@@ -438,23 +438,19 @@ impl<'a> Scan<'a> {
     fn text_run_end(&self, start: usize) -> usize {
         let bytes = self.src.as_bytes();
         let mut probe = start;
-        let mut quoted = false;
-        let mut escaped = false;
         loop {
             while probe < bytes.len() && bytes[probe] != b'<' {
-                if escaped {
-                    escaped = false;
-                } else if bytes[probe] == b'\\' && quoted {
-                    escaped = true;
-                } else if bytes[probe] == b'"' {
-                    quoted = !quoted;
+                if self.index.markdown_fence_marker_at(probe) {
+                    probe += 3;
+                    continue;
+                }
+                if matches!(bytes[probe], b'"' | b'\'' | b'`') {
+                    if let Some(after) = skip_string_span(self.src, probe) {
+                        probe = after;
+                        continue;
+                    }
                 }
                 probe += 1;
-            }
-            if probe < bytes.len() && quoted {
-                escaped = false;
-                probe += 1;
-                continue;
             }
             if probe + 1 < bytes.len() && bytes[probe] == b'<' && bytes[probe + 1] == b'<' {
                 if let Some(after) = skip_heredoc_body(self.src, probe) {

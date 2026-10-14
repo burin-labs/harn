@@ -51,6 +51,10 @@ impl TextIndex {
         markers_before < self.fence_markers.len() && markers_before % 2 == 1
     }
 
+    pub(crate) fn markdown_fence_marker_at(&self, offset: usize) -> bool {
+        self.fence_markers.binary_search(&offset).is_ok()
+    }
+
     /// Is everything between the start of `offset`'s line and `offset` blank?
     ///
     /// `text` must be the same text the index was built from.

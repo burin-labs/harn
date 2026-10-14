@@ -927,7 +927,7 @@ pub(super) enum CloseScan {
 /// closing quote, honoring `\`-escapes, or `None` when the string is
 /// unterminated. Lets the close-tag scan treat a `<<TAG` or a `</tool_call>`
 /// *inside a quoted argument* as content, not structure.
-fn skip_string_span(src: &str, start: usize) -> Option<usize> {
+pub(super) fn skip_string_span(src: &str, start: usize) -> Option<usize> {
     let bytes = src.as_bytes();
     let quote = *bytes.get(start)?;
     if !matches!(quote, b'"' | b'\'' | b'`') {
