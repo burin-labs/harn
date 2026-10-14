@@ -45,6 +45,24 @@ fn spec() -> ScanSpec {
     }))
 }
 
+#[test]
+fn inline_angles_preserve_one_literal_text_span() {
+    for text in [
+        r#"{"verdict":"refuted","reason":"jobs.<job_id>.defaults.run"}"#,
+        r#"{"verdict":"refuted","reason":"size_of::<u64>() is available"}"#,
+        "The comparison is x < 0 and y > 1.",
+    ] {
+        let (source, units) = scan(text);
+        assert_eq!(units.len(), 1, "inline literal text is one span: {text}");
+        assert_eq!(source, text);
+        assert!(matches!(&units[0].payload, UnitPayload::Text { text: body } if body == text));
+    }
+    let (_, units) = scan("Literal x < 0.\n<tool_call>look({file: \"a.rs\"})</tool_call>");
+    assert!(units
+        .iter()
+        .any(|unit| matches!(&unit.payload, UnitPayload::Block { tag, .. } if tag == "tool_call")));
+}
+
 fn spec_from(value: serde_json::Value) -> ScanSpec {
     ScanSpec::from_json(&value).expect("spec")
 }

@@ -457,6 +457,13 @@ impl<'a> Scan<'a> {
                 probe = after;
                 continue;
             }
+            // Inline '<' is literal text, not a structural boundary. Splitting
+            // JSON strings or generic types here makes prose assembly insert
+            // protocol separators inside the provider's answer.
+            if probe < bytes.len() && !self.index.is_line_leading(self.src, probe) {
+                probe += 1;
+                continue;
+            }
             return probe;
         }
     }
