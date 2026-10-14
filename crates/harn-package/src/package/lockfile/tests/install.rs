@@ -6,6 +6,93 @@ use crate::package::test_support::*;
 use crate::package::*;
 
 #[test]
+fn install_refuses_unsupported_runtime_without_changing_the_generation() {
+    let project = tempfile::tempdir().unwrap();
+    let root = project.path();
+    let workspace = TestWorkspace::new(root);
+    write_publishable_package(root);
+    install_packages_in(workspace.env(), false, None, false).unwrap();
+    let pointer_path = root.join(".harn/package-current.toml");
+    let original_pointer = fs::read(&pointer_path).unwrap();
+    let original_lock = fs::read(root.join(LOCK_FILE)).unwrap();
+    let manifest_path = root.join(MANIFEST);
+    let manifest = fs::read_to_string(&manifest_path).unwrap();
+    fs::write(
+        &manifest_path,
+        manifest.replace(&current_harn_range_example(), ">=999.0.0"),
+    )
+    .unwrap();
+
+    for (frozen, offline) in [(false, false), (true, false), (true, true)] {
+        let error = install_packages_in(workspace.env(), frozen, None, offline).unwrap_err();
+        assert!(
+            error.to_string().contains("unsupported Harn version range"),
+            "{error}"
+        );
+        assert_eq!(fs::read(&pointer_path).unwrap(), original_pointer);
+        assert_eq!(fs::read(root.join(LOCK_FILE)).unwrap(), original_lock);
+    }
+    let cache_error =
+        ensure_cached_dependencies_materialized(&root.join("lib/main.harn"), &[], None)
+            .unwrap_err();
+    assert!(
+        cache_error
+            .to_string()
+            .contains("unsupported Harn version range"),
+        "{cache_error}"
+    );
+}
+
+#[test]
+fn installed_dependency_cannot_execute_with_an_unsupported_runtime() {
+    let project = tempfile::tempdir().unwrap();
+    let root = project.path();
+    let workspace = TestWorkspace::new(root);
+    let dependency = root.join("dependency");
+    write_publishable_package(&dependency);
+    fs::write(
+        root.join(MANIFEST),
+        "[package]\nname = \"consumer\"\n[dependencies]\nacme-lib = { path = \"./dependency\" }\n",
+    )
+    .unwrap();
+    let entry = root.join("main.harn");
+    fs::write(&entry, "import { greet } from \"acme-lib/lib\"\n").unwrap();
+    assert_eq!(
+        install_packages_in(workspace.env(), false, None, false).unwrap(),
+        1
+    );
+    ensure_dependency_alias_materialized_for_test(&entry, "acme-lib").unwrap();
+    let pointer_path = root.join(".harn/package-current.toml");
+    let original_pointer = fs::read(&pointer_path).unwrap();
+    let original_lock = fs::read(root.join(LOCK_FILE)).unwrap();
+    let manifest_path = dependency.join(MANIFEST);
+    let manifest = fs::read_to_string(&manifest_path).unwrap();
+    fs::write(
+        &manifest_path,
+        manifest.replace(&current_harn_range_example(), ">=999.0.0"),
+    )
+    .unwrap();
+
+    let execution_error =
+        ensure_dependency_alias_materialized_for_test(&entry, "acme-lib").unwrap_err();
+    assert!(
+        execution_error
+            .to_string()
+            .contains("unsupported Harn version range"),
+        "{execution_error}"
+    );
+    let install_error = install_packages_in(workspace.env(), false, None, false).unwrap_err();
+    assert!(
+        install_error
+            .to_string()
+            .contains("unsupported Harn version range"),
+        "{install_error}"
+    );
+    assert_eq!(fs::read(&pointer_path).unwrap(), original_pointer);
+    assert_eq!(fs::read(root.join(LOCK_FILE)).unwrap(), original_lock);
+}
+
+#[test]
 fn install_resolves_git_tag_dependency_and_records_tag() {
     let (_repo_tmp, repo, _branch) = create_git_package_repo();
     let project_tmp = tempfile::tempdir().unwrap();

@@ -124,6 +124,7 @@ pub fn ensure_reachable_dependencies_materialized(
     anchor: &Path,
     graph: &harn_modules::ModuleGraph,
 ) -> Result<bool, PackageError> {
+    validate_anchor_runtime_compatibility(anchor)?;
     let mut requested = Vec::new();
     for import in graph.package_imports() {
         let Some((manifest, manifest_dir)) =
@@ -177,6 +178,7 @@ pub fn ensure_cached_dependencies_materialized(
     package_aliases: &[String],
     recorded_lock_digest: Option<&str>,
 ) -> Result<bool, PackageError> {
+    validate_anchor_runtime_compatibility(anchor)?;
     if package_aliases.is_empty() {
         return Ok(true);
     }
@@ -238,6 +240,13 @@ fn undeclared_package_import(alias: &str, importer: &Path) -> PackageError {
     ))
 }
 
+fn validate_anchor_runtime_compatibility(anchor: &Path) -> Result<(), PackageError> {
+    if let Some((manifest, dir)) = load_nearest_manifest(anchor).into_result()? {
+        validate_runtime_compatibility(&manifest, &dir.join(MANIFEST))?;
+    }
+    Ok(())
+}
+
 fn governing_manifest_context(anchor: &Path) -> Result<Option<ManifestContext>, PackageError> {
     let project_root = harn_modules::package_snapshot::PackageSnapshot::acquire_nearest(anchor)
         .map_err(|error| PackageError::Lockfile(error.to_string()))?
@@ -264,6 +273,7 @@ fn ensure_dependency_requests_materialized_before_lock(
     let Some(ctx) = governing_manifest_context(anchor)? else {
         return Err("package imports require a governing harn.toml".into());
     };
+    validate_runtime_compatibility(&ctx.manifest, &ctx.manifest_path())?;
     // Lock authority and the generation pointer are one transaction. A full
     // install saves its replacement lock before publishing its generation, so
     // a demand initializer must not derive from the old lock and then publish

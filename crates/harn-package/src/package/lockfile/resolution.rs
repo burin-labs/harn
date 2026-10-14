@@ -117,7 +117,9 @@ pub(crate) fn read_package_manifest_from_dir(dir: &Path) -> Result<Option<Manife
     if !manifest_path.exists() {
         return Ok(None);
     }
-    read_manifest_from_path(&manifest_path).map(Some)
+    let manifest = read_manifest_from_path(&manifest_path)?;
+    validate_runtime_compatibility(&manifest, &manifest_path)?;
+    Ok(Some(manifest))
 }
 
 /// Provenance pulled from a resolved package's manifest. Used to enrich a

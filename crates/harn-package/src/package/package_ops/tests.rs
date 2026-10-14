@@ -223,6 +223,50 @@ manifest = "canon-packs.json"
 }
 
 #[test]
+fn package_check_enforces_full_runtime_version_bounds() {
+    let current = semver::Version::parse(env!("CARGO_PKG_VERSION")).unwrap();
+    let mut future = current.clone();
+    future.patch += 1;
+    let cases = [
+        (format!(">={current}"), true),
+        (format!("={current}"), true),
+        (format!(">={future}"), false),
+        (format!("^{future}"), false),
+        (format!("<{current}"), false),
+        ("not a version".to_string(), false),
+        (String::new(), false),
+    ];
+    for (range, supported) in cases {
+        let tmp = tempfile::tempdir().unwrap();
+        write_publishable_package(tmp.path());
+        let manifest_path = tmp.path().join(MANIFEST);
+        let manifest = fs::read_to_string(&manifest_path).unwrap();
+        fs::write(
+            &manifest_path,
+            manifest.replace(&current_harn_range_example(), &range),
+        )
+        .unwrap();
+        let report = check_package_impl(Some(tmp.path())).unwrap();
+        assert_eq!(
+            report.errors.is_empty(),
+            supported,
+            "{range}: {:?}",
+            report.errors
+        );
+        if !supported && !range.is_empty() {
+            assert!(
+                report.errors.iter().any(|error| {
+                    error.field == "[package].harn"
+                        && error.message.contains("unsupported Harn version range")
+                }),
+                "{range}: {:?}",
+                report.errors
+            );
+        }
+    }
+}
+
+#[test]
 fn package_check_rejects_path_dependencies_and_bad_harn_range() {
     let tmp = tempfile::tempdir().unwrap();
     write_publishable_package(tmp.path());
