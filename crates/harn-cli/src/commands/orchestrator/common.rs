@@ -141,7 +141,7 @@ pub(crate) async fn load_local_runtime(
     let collected_triggers = package::collect_manifest_triggers(&mut vm, &extensions)
         .await
         .map_err(|error| format!("failed to collect manifest triggers: {error}"))?;
-    package::install_collected_manifest_triggers(&collected_triggers).await?;
+    package::install_collected_manifest_triggers(&collected_triggers, &extensions).await?;
     apply_supervisor_state(&state_dir).await?;
 
     let event_log = harn_vm::event_log::active_event_log()

@@ -37,10 +37,33 @@ impl Dispatcher {
                 envelope.binding_version,
             )
             .map_err(|error| DispatchError::Registry(error.to_string()))?;
-            return Ok(vec![
-                self.dispatch_with_replay(&binding, envelope.event, None, None, parent_headers)
-                    .await?,
-            ]);
+            // Cron names a specific scheduled invocation, rather than a
+            // connector delivery that event subscriptions can consume.
+            if envelope.event.provider.as_str() == "cron" {
+                return Ok(vec![
+                    self.dispatch_with_replay(&binding, envelope.event, None, None, parent_headers)
+                        .await?,
+                ]);
+            }
+            let mut bindings = matching_bindings(&envelope.event)
+                .into_iter()
+                .filter(|candidate| candidate.ingress_subscription && candidate.id != binding.id)
+                .collect::<Vec<_>>();
+            if binding.matches_event(&envelope.event) {
+                bindings.insert(0, binding);
+            } else if let Some(metrics) = self.metrics.as_ref() {
+                metrics.clear_trigger_pending_event(
+                    envelope.event.id.0.as_str(),
+                    binding.id.as_str(),
+                    &binding.binding_key(),
+                    envelope.event.provider.as_str(),
+                    tenant_id(&envelope.event),
+                    current_unix_ms(),
+                );
+            }
+            return self
+                .dispatch_ingress_bindings(bindings, envelope.event, parent_headers)
+                .await;
         }
 
         let cron_target = match &envelope.event.provider_payload {
@@ -70,6 +93,76 @@ impl Dispatcher {
         event: TriggerEvent,
     ) -> Result<Vec<DispatchOutcome>, DispatchError> {
         self.dispatch_event_with_headers(event, None).await
+    }
+
+    async fn dispatch_ingress_bindings(
+        &self,
+        bindings: Vec<Arc<TriggerBinding>>,
+        event: TriggerEvent,
+        parent_headers: Option<&BTreeMap<String, String>>,
+    ) -> Result<Vec<DispatchOutcome>, DispatchError> {
+        let mut outcomes = Vec::new();
+        let mut first_error = None;
+        for binding in bindings {
+            let result = async {
+                if binding.ingress_subscription {
+                    let mut inboxes = self.ingress_inboxes.lock().await;
+                    let tenant_key = event.tenant_id.as_ref().map(|tenant| tenant.0.clone());
+                    if let std::collections::btree_map::Entry::Vacant(entry) =
+                        inboxes.entry(tenant_key.clone())
+                    {
+                        let metrics = self.metrics.clone().unwrap_or_default();
+                        let inbox = match event.tenant_id.as_ref() {
+                            Some(tenant) => {
+                                crate::triggers::InboxIndex::new_for_tenant(
+                                    self.event_log.clone(),
+                                    metrics,
+                                    tenant,
+                                )
+                                .await
+                            }
+                            None => {
+                                crate::triggers::InboxIndex::new(self.event_log.clone(), metrics)
+                                    .await
+                            }
+                        }
+                        .map_err(|error| DispatchError::EventLog(error.to_string()))?;
+                        entry.insert(inbox);
+                    }
+                    // A route's dedupe_claimed flag belongs to that route only.
+                    // Subscriptions claim independently, using the connector's
+                    // delivery key across routes and binding versions.
+                    let is_new = inboxes[&tenant_key]
+                        .insert_if_new(
+                            binding.id.as_str(),
+                            &event.dedupe_key,
+                            Duration::from_secs(
+                                u64::from(binding.dedupe_retention_days.max(1)) * 86400,
+                            ),
+                        )
+                        .await
+                        .map_err(|error| DispatchError::EventLog(error.to_string()))?;
+                    if !is_new {
+                        return Ok(None);
+                    }
+                }
+                self.dispatch_with_replay(&binding, event.clone(), None, None, parent_headers)
+                    .await
+                    .map(Some)
+            }
+            .await;
+            match result {
+                Ok(Some(outcome)) => outcomes.push(outcome),
+                Ok(None) => {}
+                Err(error) => {
+                    first_error.get_or_insert(error);
+                }
+            }
+        }
+        match first_error {
+            Some(error) => Err(error),
+            None => Ok(outcomes),
+        }
     }
 
     async fn dispatch_event_with_headers(

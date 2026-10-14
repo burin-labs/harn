@@ -31,6 +31,7 @@ fn manifest_binding_spec(id: &str, fingerprint: &str) -> TriggerBindingSpec {
     TriggerBindingSpec {
         id: id.to_string(),
         source: TriggerBindingSource::Manifest,
+        ingress_subscription: false,
         kind: "a2a-push".to_string(),
         provider: ProviderId::from("a2a-push"),
         autonomy_tier: harn_vm::AutonomyTier::ActAuto,

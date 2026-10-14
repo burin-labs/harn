@@ -75,10 +75,9 @@ scoped to `TriggerEvent.provider`.
 For GitHub, `github.pull_request.opened` is also the connector's event topic.
 The matcher reads the kind and action, not the topic or the original webhook body.
 
-These selectors apply to registry event fan-out. Targeted HTTP routes currently
-dispatch to their named binding directly without rechecking `match.events`.
-[Routed and polled ingress enforcement](https://github.com/burin-labs/harn/issues/9305)
-is tracked separately.
+These selectors apply to event fan-out and to the named binding on HTTP and
+poll ingress. A delivery that doesn't match the named binding can still reach
+matching [persona subscriptions](../personas.md#trigger-handlers).
 
 ## Handler URI schemes
 

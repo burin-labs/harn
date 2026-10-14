@@ -454,6 +454,7 @@ pub fn local_fn(harness: Harness, event: TriggerEvent) -> string {
             install_manifest_triggers(vec![TriggerBindingSpec {
                 id: "github-new-issue".to_string(),
                 source: TriggerBindingSource::Manifest,
+                ingress_subscription: false,
                 kind: "webhook".to_string(),
                 provider: ProviderId::from("github"),
                 autonomy_tier: crate::AutonomyTier::ActAuto,
@@ -650,6 +651,7 @@ pub fn slow_handler(harness: Harness, event: TriggerEvent) -> string {
             install_manifest_triggers(vec![TriggerBindingSpec {
                 id: "github-new-issue".to_string(),
                 source: TriggerBindingSource::Manifest,
+                ingress_subscription: false,
                 kind: "webhook".to_string(),
                 provider: ProviderId::from("github"),
                 autonomy_tier: crate::AutonomyTier::ActAuto,

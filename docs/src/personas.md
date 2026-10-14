@@ -283,6 +283,15 @@ provider `github`, event kind `pull_request`, action `opened`, and handler kind 
 records a `persona.trigger.received` event plus the normal persona run receipt
 in `persona.runtime.events`.
 
+These bindings subscribe to normalized connector events received through a
+configured webhook route or poll source. The ingress source supplies transport
+configuration and secrets; the persona declaration supplies the event selector.
+Each matching persona binding receives the delivery even if the source binding's
+selector doesn't match. Other routed handlers aren't selected by this fan-out.
+Each subscription deduplicates deliveries by tenant, binding id, and connector
+delivery key for seven days. A subscription requires a configured ingress source;
+declaring it doesn't create an HTTP route or start a poller.
+
 Explicit trigger manifests can also target a persona:
 
 ```toml
@@ -299,6 +308,10 @@ as explicit trigger manifests, with a required provider prefix. Use
 `github.pull_request` to receive every action in that event family. Check
 completion is `github.check_suite.completed`; inspect the payload's `conclusion`
 to distinguish a failed check from a successful one.
+
+An explicit `persona://` handler and a persona subscription are separate dispatch
+bindings. Both pass through persona work-item admission, which decides whether
+to start, queue, or skip a run.
 
 ## Continuous runtime
 

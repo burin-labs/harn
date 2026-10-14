@@ -43,6 +43,8 @@ pub struct Dispatcher {
     pub(super) state: Arc<DispatcherRuntimeState>,
     pub(super) metrics: Option<Arc<crate::MetricsRegistry>>,
     pub(super) a2a_client: Arc<dyn crate::a2a::A2aClient>,
+    pub(super) ingress_inboxes:
+        Arc<AsyncMutex<BTreeMap<Option<String>, crate::triggers::InboxIndex>>>,
 }
 
 #[derive(Debug)]
