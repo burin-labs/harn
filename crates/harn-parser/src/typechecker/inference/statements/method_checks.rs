@@ -22,13 +22,9 @@ impl TypeChecker {
             .and_then(|ty| Self::builtin_method_receiver(&ty).map(|(kind, _)| kind));
         let Some(kind) = receiver else {
             match resolved {
-                // Numbers and bools have no methods; reject only names that
-                // exist on no builtin at all, which catches typos without a
-                // closed candidate list.
-                TypeExpr::Named(name)
-                    if matches!(name.as_str(), "int" | "float" | "bool")
-                        && !methods::is_method_name(method) =>
-                {
+                // Numbers and bools expose no value methods, including names
+                // that belong to another builtin receiver.
+                TypeExpr::Named(name) if matches!(name.as_str(), "int" | "float" | "bool") => {
                     self.emit_unknown_method(method, &format!("`{name}`"), &[], false, span);
                 }
                 TypeExpr::Named(name) if is_gradual_type_name(name) => {
