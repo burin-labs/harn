@@ -199,8 +199,13 @@ impl TypeCheckConfig {
     }
 
     fn into_checker(self) -> TypeChecker {
-        let mut checker = TypeChecker::with_strict_types(self.strict_types);
-        checker = checker.with_privileged_wire_builtins(self.privileged_wire_builtins);
+        let checker = TypeChecker::with_strict_types(self.strict_types)
+            .with_privileged_wire_builtins(self.privileged_wire_builtins);
+        self.apply_imports_to(checker)
+    }
+
+    /// Apply resolved imports while preserving the checker's execution policy.
+    pub fn apply_imports_to(self, mut checker: TypeChecker) -> TypeChecker {
         if let Some(imported) = self.imported_names {
             checker = checker.with_imported_names(imported);
         }
