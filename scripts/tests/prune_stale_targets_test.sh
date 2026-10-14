@@ -330,7 +330,7 @@ run_protection_gc() {
     HARN_TARGET_GC_ROOTS="$protection_repos" \
     HARN_TARGET_GC_MIN_AGE_SECS=1 \
     HARN_TARGET_GC_PROTECT="$protection_storage/harn-target/protection-repos-legacy" \
-    HARN_TARGET_GC_MAX_BYTES=1048576 \
+    HARN_TARGET_GC_MAX_BYTES="${HARN_TARGET_GC_MAX_BYTES:-1048576}" \
     "$minimum_bash" "$repo_root/scripts/prune_stale_targets.sh" --measure-bytes "$@"
 }
 # Same census without explicit protections must select those idle lanes, so
@@ -361,12 +361,19 @@ done
 }
 grep -Fq "keep (live process:" "$tmp_root/protection-positive.txt"
 grep -Fq "removing over the size ceiling: protection-repos-cold " "$tmp_root/protection-positive.txt"
-grep -Eq 'status=partial .*scanned=6 .*reclaimed_bytes=[1-9][0-9]* retained_bytes=[1-9][0-9]* .*pending_candidates=0 .*ceiling_unproven_roots=1' \
+grep -Eq 'status=partial .*scanned=6 .*reclaimed_bytes=[1-9][0-9]* retained_bytes=[1-9][0-9]* .*pending_candidates=1 .*ceiling_unproven_roots=1' \
   "$tmp_root/protection-positive.txt"
 if grep -Fq -- '--remove-entry matched no entry' "$tmp_root/protection-positive.txt"; then
   echo "a reserved named entry was incorrectly reported as missing" >&2
   exit 1
 fi
+HARN_TARGET_GC_MAX_BYTES=1073741824 run_protection_gc \
+  --protect-entry 'protection-repos-keep a' --protect-entry protection-repos-keep-b \
+  --remove-entry protection-repos-keep-b --remove-entry protection-repos-busy \
+  > "$tmp_root/protection-pending.txt" 2>&1
+grep -Fq 'pending named removal: protection-repos-keep-b' "$tmp_root/protection-pending.txt"
+grep -Fq 'pending named removal: protection-repos-busy' "$tmp_root/protection-pending.txt"
+grep -Eq 'status=partial .*pending_candidates=2 .*ceiling_unproven_roots=0' "$tmp_root/protection-pending.txt"
 kill "$protection_busy_pid" 2>/dev/null || true
 wait "$protection_busy_pid" 2>/dev/null || true
 protection_busy_pid=""

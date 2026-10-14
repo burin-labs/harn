@@ -208,12 +208,21 @@ entry_protected() {
   return 1
 }
 
+report_pending_named_entry() {
+  local name="$1"
+  if entry_requested "$name"; then
+    blocked_named_entries=$((blocked_named_entries + 1))
+    echo "pending named removal: $name"
+  fi
+  return 0
+}
+
 # Names the caller asked for that no root turned out to hold. Reported at the
 # end: a removal request that silently matched nothing would read as success.
 matched_entries=()
 
 gc_policy_version="harn-target-gc/v2-$(cksum "$SCRIPT_DIR/prune_stale_targets.sh" | awk '{print $1 "-" $2}')"
-scanned=0; removed=0; kept=0; pending_candidates=0; ceiling_unproven_roots=0; summary_printed=0
+scanned=0; removed=0; kept=0; pending_candidates=0; blocked_named_entries=0; ceiling_unproven_roots=0; summary_printed=0
 reclaimed_bytes=0; retained_bytes=0; unmeasured_entries=0
 completed=0
 receipt_root="${HARN_DEV_SETUP_STORAGE_ROOT:-${XDG_CACHE_HOME:-$HOME/.cache}/harn/dev-setup}"
@@ -270,7 +279,7 @@ print_summary() {
     status="complete"
     if [ "$dry_run" -eq 1 ]; then
       status="dry-run"
-    elif [ "$ceiling_unproven_roots" -gt 0 ]; then
+    elif [ "$ceiling_unproven_roots" -gt 0 ] || [ "$blocked_named_entries" -gt 0 ]; then
       status="partial"
     fi
   fi
@@ -279,17 +288,21 @@ print_summary() {
     reported_retained="unmeasured"
     unmeasured_entries="$scanned"
   fi
+  local reported_pending=$((pending_candidates + blocked_named_entries))
   if [ "$dry_run" -eq 1 ]; then
-    pending_candidates=$((pending_candidates + removed))
+    reported_pending=$((reported_pending + removed))
   fi
   # scanned is reported alongside the verdict so a zero here is readable as
   # "walked these roots and found nothing" rather than "walked nothing".
-  echo "harn-target GC: policy=$gc_policy_version status=$status last_success=$last_success last_success_policy=$last_success_policy scanned=$scanned kept=$kept removed=$removed reclaimed_bytes=$reported_reclaimed retained_bytes=$reported_retained pending_candidates=$pending_candidates unmeasured_entries=$unmeasured_entries ceiling_unproven_roots=$ceiling_unproven_roots (roots=$roots)$suffix"
+  echo "harn-target GC: policy=$gc_policy_version status=$status last_success=$last_success last_success_policy=$last_success_policy scanned=$scanned kept=$kept removed=$removed reclaimed_bytes=$reported_reclaimed retained_bytes=$reported_retained pending_candidates=$reported_pending unmeasured_entries=$unmeasured_entries ceiling_unproven_roots=$ceiling_unproven_roots blocked_named_entries=$blocked_named_entries (roots=$roots)$suffix"
 }
 
 record_success() {
   [ "$dry_run" -eq 0 ] || return 0
   [ "$pending_candidates" -eq 0 ] || return 1
+  # A protected/live name is a measured policy refusal, not a failed deletion.
+  # Report a partial pass without advancing the last-success receipt.
+  [ "$blocked_named_entries" -eq 0 ] || return 0
   mkdir -p "$receipt_root"
   local receipt_tmp="${receipt_file}.$$" new_success
   new_success="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -646,6 +659,7 @@ prune_root() {
     # its tree without holding a lock or naming it on any command line.
     if entry_protected "$name"; then
       echo "keep (caller protected entry): $name"
+      report_pending_named_entry "$name"
       kept=$((kept + 1)); kept_paths+=("$d"); continue
     fi
 
@@ -663,6 +677,7 @@ prune_root() {
       pids="${pids% }"
       if [ -n "$pids" ]; then
         echo "keep (live process: $pids): $name"
+        report_pending_named_entry "$name"
         kept=$((kept + 1)); kept_paths+=("$d"); continue
       fi
     fi
