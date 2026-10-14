@@ -346,7 +346,14 @@ pub(super) fn normalize_acp_prompt_block(
         })),
         Some("image") => normalize_binary_prompt_block(block, "image"),
         Some("audio") => normalize_binary_prompt_block(block, "audio"),
-        Some("resource") => normalize_embedded_resource_block(block),
+        Some("resource") => {
+            let mut normalized = normalize_embedded_resource_block(block)?;
+            // The rendered text is a model projection, not the resource's
+            // durable input. Replay clients recover the original block without
+            // parsing that text or maintaining a second attachment store.
+            normalized["_harn"] = serde_json::json!({"source_content": block});
+            Ok(normalized)
+        }
         Some("resource_link") => normalize_resource_link_block(block),
         Some(other) => Err(format!(
             "session/prompt: unsupported content block type `{other}`"
@@ -582,6 +589,87 @@ pub(super) fn prompt_messages_for_content(
 
 #[cfg(test)]
 mod tests {
+    #[tokio::test(flavor = "current_thread")]
+    async fn prompt_resource_source_survives_canonical_persistence() {
+        use harn_session_store::{AppendEvent, CreateSession, SessionEventKind, SessionStore};
+        use harn_vm::session_timeline::{query_session_store_timeline, SessionTimelineQuery};
+
+        let root = tempfile::tempdir().unwrap();
+        let store = harn_vm::open_canonical_store(root.path()).unwrap();
+        store
+            .create(CreateSession {
+                id: Some("resource-source".into()),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let resource = serde_json::json!({
+            "type": "resource",
+            "resource": {
+                "uri": "burin-attachment://draft/target",
+                "mimeType": "application/vnd.burin.sketch+json",
+                "text": "{\n\"label\": \"MIME type: inside the drawing\"\n}",
+            },
+        });
+        let prompt = super::normalize_acp_prompt(&serde_json::json!({
+            "messageId": "authored-turn",
+            "prompt": [resource.clone(), {"type": "text", "text": "Preserve this through reopen."}],
+        }))
+        .unwrap();
+        assert!(prompt.content[0]["text"]
+            .as_str()
+            .unwrap()
+            .starts_with("Embedded resource:"));
+        assert_eq!(prompt.content[0]["_harn"]["source_content"], resource);
+        store
+            .append(
+                "resource-source",
+                AppendEvent::new(
+                    SessionEventKind::Message,
+                    serde_json::json!({"raw_message": prompt.messages[0]}),
+                ),
+            )
+            .await
+            .unwrap();
+        let timeline = query_session_store_timeline(
+            &store,
+            SessionTimelineQuery::for_session("resource-source"),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert_eq!(
+            timeline.nodes.len(),
+            1,
+            "one admitted message, not a shadow resource event"
+        );
+        let restored =
+            &timeline.nodes[0].attributes["raw_message"]["content"][0]["_harn"]["source_content"];
+        assert_eq!(restored, &resource);
+        let replay =
+            super::normalize_acp_prompt(&serde_json::json!({"prompt": [restored]})).unwrap();
+        assert_eq!(
+            replay.content[0], prompt.content[0],
+            "replay never parses or rewraps rendered prose"
+        );
+
+        let plain = super::normalize_acp_prompt_block(&serde_json::json!({
+            "type": "text", "text": "Embedded resource: authored plain text",
+        }))
+        .unwrap();
+        assert!(
+            plain.get("_harn").is_none(),
+            "similar prose cannot acquire resource identity"
+        );
+        assert!(
+            super::normalize_acp_prompt_block(&serde_json::json!({
+                "type": "resource", "resource": {"text": "missing URI"},
+            }))
+            .is_err(),
+            "preserving source never bypasses resource validation"
+        );
+    }
+
     #[test]
     fn caller_identity_survives_multimodal_prompt_retargeting() {
         let image = serde_json::json!({"type": "image", "mimeType": "image/png", "data": "AAAA"});
