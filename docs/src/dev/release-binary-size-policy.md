@@ -55,8 +55,9 @@ causal meaning.
 
 The baseline therefore carries a `build_identity`: profile, codegen units, LTO,
 strip, rustc, and whether the AOT payload is embedded. The check observes the
-same fields for the build in front of it (from `CARGO_PROFILE_RELEASE_*` and
-`rustc -vV`, falling back to `[profile.release]` in the workspace manifest). If
+same fields for the build in front of it (from `CARGO_PROFILE_DIST_*` and
+`rustc -vV`, falling back to `[profile.dist]` and the `[profile.release]` it
+inherits in the workspace manifest). If
 any diverge, the report says which, classifies the comparison as
 `not-comparable`, and draws no growth conclusion. The fuse still applies.
 

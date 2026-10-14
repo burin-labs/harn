@@ -1,0 +1,47 @@
+{
+  "candidate_sha": "51a7f1836991c6c58e53c43ffbbca71da0fbbd22",
+  "classifier_source_binding": "explicit owning source modules for both baseline and candidate",
+  "candidate_classifier_sha256": "baaac74bb344038a8a6ca9ba5ab91dc6fa38696442c2d9c7e2d6c462e925a824",
+  "candidate_intent_sha256": "3a5cee0b81e1aeac54dc3fba0aec8f8430cd8afade64e7a3132221feeaf9efb5",
+  "candidate_target_sha256": "b03ac3d1c4096aeba46b4a8a2481bd94495203ededb3ab3bde0223ec47b39da1",
+  "baseline_sha": "ae55458b682edba14ecf20c3b67f5f19c9ef05eb",
+  "baseline_classifier_sha256": "edc5a1dff7a21d6254cd899701296f6187913921141f708784d351dc5c190b1a",
+  "baseline_prompt_sha256": "9b8dbdafaa50e77089487d1d07a4aaeb598fcea0e6d19207c06e7b195b68e9bd",
+  "corpus_sha256": "3bfe12fd4c9481e289fc0b499614a01cdf60735471bb110c478eaa0d4f1c498c",
+  "replay_sha256": "ede2b349480f324a8ce3ccf86f931ce54c7cb83193dec7b76e1d6fdf1576aa9e",
+  "binary_sha256": "80ccd727fda211b42b71cb7aff9db363234dae6e46135dafc5f6dba0879b6b21",
+  "repetitions": 5,
+  "rows": 12,
+  "maximum_spend_usd": 1,
+  "arms": [
+    {
+      "id": "legacy_structured",
+      "config": {
+        "provider": "openai",
+        "model": "gpt-5.4-nano",
+        "effort": "none"
+      }
+    },
+    {
+      "id": "structured_decision",
+      "config": {
+        "provider": "openai",
+        "model": "gpt-5.4-nano",
+        "effort": "none"
+      }
+    },
+    {
+      "id": "native_decision",
+      "config": {
+        "evaluation": {
+          "backend": "native_decision",
+          "provider": "openrouter",
+          "model": "openrouter/typesafe/jev-1.13",
+          "threshold": 0,
+          "evaluation_cost_limit": 0.05,
+          "run_cost_limit": 0.5
+        }
+      }
+    }
+  ]
+}

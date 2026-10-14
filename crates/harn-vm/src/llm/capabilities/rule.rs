@@ -395,6 +395,16 @@ pub struct ProviderRule {
     /// but rejects while reasoning is enabled; `*_supported` remains route-wide.
     #[serde(default)]
     pub reasoning_excluded_portable_options: Option<Vec<super::PortableOption>>,
+    /// Options admitted only with an explicitly selected, supported effort.
+    /// This overrides route-wide support for the listed options; an unset
+    /// request never satisfies the condition, even when its default is off.
+    #[serde(default)]
+    pub portable_option_effort_support:
+        Option<std::collections::BTreeMap<super::PortableOption, Vec<super::ReasoningEffort>>>,
+    /// A changing pool admits options by routing to currently compatible
+    /// backends; one controlled refusal does not establish stable non-support.
+    #[serde(default)]
+    pub portable_option_qualification: Option<super::PortableOptionQualification>,
     #[serde(default)]
     pub seed_supported: Option<bool>,
     #[serde(default)]
@@ -418,10 +428,6 @@ pub struct ProviderRule {
     /// rejects forced/specified tool choices.
     #[serde(default)]
     pub allowed_tool_choice_modes: Option<Vec<String>>,
-    /// Whether an assistant `tool_calls` message must be followed immediately
-    /// by `role=tool` messages for every emitted `tool_call_id`.
-    #[serde(default)]
-    pub requires_tool_result_adjacency: Option<bool>,
     /// Whether a single assistant message may contain multiple tool calls.
     /// Some OpenAI-compatible providers reject replayed history with more than
     /// one `tool_calls[]` entry even when the calls were parsed from Harn's text
@@ -666,6 +672,8 @@ impl ProviderRule {
             reasoning_text_promotable,
             reasoning_wire_format,
             reasoning_excluded_portable_options,
+            portable_option_effort_support,
+            portable_option_qualification,
             seed_supported,
             top_k_supported,
             temperature_supported,
@@ -675,7 +683,6 @@ impl ProviderRule {
             stop_supported,
             advanced_generation_options,
             allowed_tool_choice_modes,
-            requires_tool_result_adjacency,
             supports_parallel_tool_calls,
             requires_parallel_tool_calls_false,
             tools_exclude_response_format,
@@ -821,8 +828,16 @@ impl ProviderRule {
             &mut self.reasoning_excluded_portable_options,
             reasoning_excluded_portable_options,
         );
+        fill_opt(
+            &mut self.portable_option_effort_support,
+            portable_option_effort_support,
+        );
         fill_opt(&mut self.seed_supported, seed_supported);
         fill_opt(&mut self.top_k_supported, top_k_supported);
+        fill_opt(
+            &mut self.portable_option_qualification,
+            portable_option_qualification,
+        );
         fill_opt(&mut self.temperature_supported, temperature_supported);
         fill_opt(&mut self.top_p_supported, top_p_supported);
         fill_opt(
@@ -841,10 +856,6 @@ impl ProviderRule {
         fill_opt(
             &mut self.allowed_tool_choice_modes,
             allowed_tool_choice_modes,
-        );
-        fill_opt(
-            &mut self.requires_tool_result_adjacency,
-            requires_tool_result_adjacency,
         );
         fill_opt(
             &mut self.supports_parallel_tool_calls,

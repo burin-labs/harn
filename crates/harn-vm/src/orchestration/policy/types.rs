@@ -4,14 +4,13 @@
 //! helper, `enforce_tool_arg_constraints`, that operates on it).
 
 mod process_sandbox;
-#[path = "read_deny_defaults_data.rs"]
-mod read_deny_defaults;
 
+/// The credential denylist: the credential home paths of the shared registry.
+pub use crate::known_paths::credential_home_paths as default_read_deny_home_paths;
 pub use process_sandbox::{
     LoopbackEnforcement, ProcessNetworkProxy, ProcessSandboxPolicy, ProcessSandboxPreset,
     UnixSocketEnforcement,
 };
-pub use read_deny_defaults::default_read_deny_home_paths;
 
 use std::collections::BTreeMap;
 use std::path::Path;

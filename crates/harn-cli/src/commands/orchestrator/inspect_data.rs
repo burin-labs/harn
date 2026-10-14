@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde::Serialize;
 use time::OffsetDateTime;
 
-use crate::package::{CollectedManifestTrigger, CollectedTriggerHandler, TriggerKind};
+use harn_vm::TriggerBindingSpec;
 
 use super::common::{
     read_topic, trigger_list, ConnectorActivationSnapshot, LoadedOrchestratorContext,
@@ -192,8 +192,7 @@ pub(crate) async fn collect_orchestrator_inspect_data(
     let snapshot = ctx.snapshot.clone();
     let snapshot_by_id = snapshot_trigger_map(snapshot.as_ref());
     let runtime_by_id = runtime_trigger_map(&runtime_bindings);
-    let current_binding_keys =
-        current_binding_keys(&ctx.collected_triggers, &snapshot_by_id, &runtime_by_id);
+    let current_binding_keys = current_binding_keys(&ctx.bindings, &snapshot_by_id, &runtime_by_id);
 
     let envelopes = read_topic(&ctx.event_log, TRIGGER_INBOX_ENVELOPES_TOPIC).await?;
     let legacy_inbox = read_topic(&ctx.event_log, TRIGGER_INBOX_LEGACY_TOPIC).await?;
@@ -218,7 +217,7 @@ pub(crate) async fn collect_orchestrator_inspect_data(
             serde_json::from_value(record.payload)
                 .map_err(|error| format!("failed to decode trigger inbox envelope: {error}"))?;
         let binding_keys =
-            binding_keys_for_envelope(&envelope, &ctx.collected_triggers, &current_binding_keys);
+            binding_keys_for_envelope(&envelope, &ctx.bindings, &current_binding_keys);
         for binding_key in binding_keys {
             ingested_by_binding_key
                 .entry(binding_key.clone())
@@ -260,13 +259,13 @@ pub(crate) async fn collect_orchestrator_inspect_data(
     }
 
     let mut triggers = Vec::new();
-    for trigger in ctx.collected_triggers.clone() {
-        let snapshot_state = snapshot_by_id.get(&trigger.config.id);
-        let runtime_state = runtime_by_id.get(&trigger.config.id);
+    for trigger in ctx.bindings.clone() {
+        let snapshot_state = snapshot_by_id.get(&trigger.id);
+        let runtime_state = runtime_by_id.get(&trigger.id);
         let version = snapshot_state
             .and_then(|state| state.version)
             .or_else(|| runtime_state.map(|binding| binding.version));
-        let binding_key = version.map(|version| format!("{}@v{}", trigger.config.id, version));
+        let binding_key = version.map(|version| format!("{}@v{}", trigger.id, version));
         let pending_events = binding_key
             .as_ref()
             .and_then(|binding_key| pending_by_binding_key.get(binding_key))
@@ -295,10 +294,10 @@ pub(crate) async fn collect_orchestrator_inspect_data(
         .await?;
 
         triggers.push(TriggerInspectRecord {
-            id: trigger.config.id.clone(),
-            provider: trigger.config.provider.as_str().to_string(),
-            kind: trigger_kind_name(trigger.config.kind).to_string(),
-            handler: handler_kind(&trigger.handler).to_string(),
+            id: trigger.id.clone(),
+            provider: trigger.provider.as_str().to_string(),
+            kind: trigger.kind.clone(),
+            handler: trigger.handler.kind().to_string(),
             version,
             state: snapshot_state
                 .and_then(|state| state.state.clone())
@@ -411,7 +410,7 @@ fn run_paths_by_trace_id(
 
 async fn build_flow_control_inspect(
     ctx: &mut LoadedOrchestratorContext,
-    trigger: &CollectedManifestTrigger,
+    trigger: &TriggerBindingSpec,
     binding_key: Option<&str>,
     pending_events: &[harn_vm::TriggerEvent],
     ingested_events: &[harn_vm::TriggerEvent],
@@ -487,18 +486,10 @@ async fn build_flow_control_inspect(
         });
     }
     if let Some(binding_key) = binding_key.filter(|_| {
-        trigger.config.budget.daily_cost_usd.is_some()
-            || trigger.config.budget.hourly_cost_usd.is_some()
-            || trigger
-                .config
-                .budget
-                .max_autonomous_decisions_per_hour
-                .is_some()
-            || trigger
-                .config
-                .budget
-                .max_autonomous_decisions_per_day
-                .is_some()
+        trigger.daily_cost_usd.is_some()
+            || trigger.hourly_cost_usd.is_some()
+            || trigger.max_autonomous_decisions_per_hour.is_some()
+            || trigger.max_autonomous_decisions_per_day.is_some()
     }) {
         let used_today = cost_by_binding_key
             .get(binding_key)
@@ -509,29 +500,19 @@ async fn build_flow_control_inspect(
             .copied()
             .unwrap_or_default();
         inspect.cost_budget = Some(CostBudgetInspect {
-            daily_limit_usd: trigger.config.budget.daily_cost_usd,
-            hourly_limit_usd: trigger.config.budget.hourly_cost_usd,
-            limit_usd: trigger.config.budget.daily_cost_usd.unwrap_or_default(),
+            daily_limit_usd: trigger.daily_cost_usd,
+            hourly_limit_usd: trigger.hourly_cost_usd,
+            limit_usd: trigger.daily_cost_usd.unwrap_or_default(),
             used_usd: used_today,
             used_hour_usd: used_hour,
             remaining_today_usd: trigger
-                .config
-                .budget
                 .daily_cost_usd
                 .map(|limit| (limit - used_today).max(0.0)),
             remaining_hour_usd: trigger
-                .config
-                .budget
                 .hourly_cost_usd
                 .map(|limit| (limit - used_hour).max(0.0)),
-            max_autonomous_decisions_per_hour: trigger
-                .config
-                .budget
-                .max_autonomous_decisions_per_hour,
-            max_autonomous_decisions_per_day: trigger
-                .config
-                .budget
-                .max_autonomous_decisions_per_day,
+            max_autonomous_decisions_per_hour: trigger.max_autonomous_decisions_per_hour,
+            max_autonomous_decisions_per_day: trigger.max_autonomous_decisions_per_day,
         });
     }
 
@@ -618,7 +599,7 @@ async fn evaluate_flow_key(
 }
 
 fn current_binding_keys(
-    triggers: &[CollectedManifestTrigger],
+    triggers: &[TriggerBindingSpec],
     snapshot_by_id: &BTreeMap<String, PersistedTriggerStateSnapshot>,
     runtime_by_id: &BTreeMap<String, harn_vm::TriggerBindingSnapshot>,
 ) -> BTreeMap<String, String> {
@@ -626,37 +607,33 @@ fn current_binding_keys(
         .iter()
         .filter_map(|trigger| {
             let version = snapshot_by_id
-                .get(&trigger.config.id)
+                .get(&trigger.id)
                 .and_then(|state| state.version)
                 .or_else(|| {
                     runtime_by_id
-                        .get(&trigger.config.id)
+                        .get(&trigger.id)
                         .map(|binding| binding.version)
                 })?;
-            Some((
-                trigger.config.id.clone(),
-                format!("{}@v{}", trigger.config.id, version),
-            ))
+            Some((trigger.id.clone(), format!("{}@v{}", trigger.id, version)))
         })
         .collect()
 }
 
 fn binding_keys_for_envelope(
     envelope: &harn_vm::triggers::dispatcher::InboxEnvelope,
-    triggers: &[CollectedManifestTrigger],
+    triggers: &[TriggerBindingSpec],
     current_binding_keys: &BTreeMap<String, String>,
 ) -> Vec<String> {
-    if let Some(trigger_id) = envelope.trigger_id.as_ref() {
-        if let Some(version) = envelope.binding_version {
-            return vec![format!("{trigger_id}@v{version}")];
+    if envelope.event.provider.as_str() == "cron" {
+        if let Some(trigger_id) = &envelope.trigger_id {
+            return envelope
+                .binding_version
+                .map(|version| format!("{trigger_id}@v{version}"))
+                .or_else(|| current_binding_keys.get(trigger_id).cloned())
+                .into_iter()
+                .collect();
         }
-        return current_binding_keys
-            .get(trigger_id)
-            .cloned()
-            .into_iter()
-            .collect();
     }
-
     if let harn_vm::ProviderPayload::Known(harn_vm::triggers::event::KnownProviderPayload::Cron(
         payload,
     )) = &envelope.event.provider_payload
@@ -673,15 +650,19 @@ fn binding_keys_for_envelope(
     triggers
         .iter()
         .filter(|trigger| {
-            trigger.config.provider == envelope.event.provider
-                && trigger
-                    .config
-                    .match_
-                    .events
-                    .iter()
-                    .any(|event| event == &envelope.event.kind)
+            trigger.matches_event(&envelope.event)
+                && (envelope.trigger_id.is_none()
+                    || trigger.ingress_subscription
+                    || envelope.trigger_id.as_ref() == Some(&trigger.id))
         })
-        .filter_map(|trigger| current_binding_keys.get(&trigger.config.id).cloned())
+        .filter_map(|trigger| {
+            if envelope.trigger_id.as_ref() == Some(&trigger.id) {
+                if let Some(version) = envelope.binding_version {
+                    return Some(format!("{}@v{version}", trigger.id));
+                }
+            }
+            current_binding_keys.get(&trigger.id).cloned()
+        })
         .collect()
 }
 
@@ -794,27 +775,6 @@ fn trigger_metrics_from_runtime(
         autonomous_decisions_total: binding.metrics.autonomous_decisions_total,
         autonomous_decisions_hour: binding.metrics.autonomous_decisions_hour,
         autonomous_decisions_today: binding.metrics.autonomous_decisions_today,
-    }
-}
-
-fn handler_kind(handler: &CollectedTriggerHandler) -> &'static str {
-    match handler {
-        CollectedTriggerHandler::Local { .. } => "local",
-        CollectedTriggerHandler::A2a { .. } => "a2a",
-        CollectedTriggerHandler::Worker { .. } => "worker",
-        CollectedTriggerHandler::Persona { .. } => "persona",
-        CollectedTriggerHandler::EvalPack { .. } => "eval_pack",
-    }
-}
-
-fn trigger_kind_name(kind: TriggerKind) -> &'static str {
-    match kind {
-        TriggerKind::Webhook => "webhook",
-        TriggerKind::Cron => "cron",
-        TriggerKind::Poll => "poll",
-        TriggerKind::Stream => "stream",
-        TriggerKind::Predicate => "predicate",
-        TriggerKind::A2aPush => "a2a-push",
     }
 }
 

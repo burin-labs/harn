@@ -6,7 +6,7 @@ const REGEX_CACHE_LIMIT: usize = 128;
 pub const MAX_REGEX_PATTERN_BYTES: usize = 64 * 1024;
 
 thread_local! {
-    static REGEX_CACHE: RefCell<HashMap<String, Rc<regex::Regex>>> = RefCell::new(HashMap::new());
+    static REGEX_CACHE: RefCell<HashMap<(String, String), Rc<regex::Regex>>> = RefCell::new(HashMap::new());
     static LAST_REGEX: RefCell<Option<(String, String, Rc<regex::Regex>)>> =
         const { RefCell::new(None) };
 }
@@ -39,7 +39,7 @@ fn compiled(pattern: &str, flags: &str) -> Result<Rc<regex::Regex>, String> {
     }
 
     let regex = REGEX_CACHE.with(|cache| -> Result<Rc<regex::Regex>, String> {
-        let key = format!("{flags}\0{pattern}");
+        let key = (flags.to_string(), pattern.to_string());
         let mut cache = cache.borrow_mut();
         if let Some(regex) = cache.get(&key) {
             return Ok(Rc::clone(regex));
@@ -196,5 +196,17 @@ mod tests {
         assert!(regex_matches("harn", "HARN", "i").unwrap().len() == 1);
         assert!(regex_matches("harn", "harn", "q").is_err());
         assert!(regex_matches(&"x".repeat(MAX_REGEX_PATTERN_BYTES + 1), "x", "").is_err());
+    }
+
+    #[test]
+    fn invalid_flags_cannot_alias_a_cached_pattern() {
+        let flags = "i\0a";
+        assert!(regex_matches("b", "b", flags).is_err());
+        assert_eq!(regex_matches("a\0b", "A\0b", "i").unwrap(), vec!["A\0b"]);
+        assert!(regex_matches("b", "b", flags).is_err());
+        assert!(regex_replace("b", "c", "b", flags).is_err());
+        assert!(regex_split("b", "b", flags).is_err());
+        assert!(regex_captures("b", "b", flags).is_err());
+        assert_eq!(regex_matches("b", "B", "i").unwrap(), vec!["B"]);
     }
 }

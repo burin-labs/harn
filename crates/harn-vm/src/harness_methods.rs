@@ -27,6 +27,7 @@ use crate::stdlib::io::{
 use crate::value::{ErrorCategory, VmError, VmValue};
 use crate::vm::{HarnessMethodFuture, HarnessMethods, Vm};
 
+mod cli_credential;
 mod verdict;
 
 use verdict::call_harness_verdict_method;

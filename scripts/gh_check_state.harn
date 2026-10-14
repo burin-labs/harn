@@ -30,6 +30,15 @@ pub type CheckExpectations = {
   path_required_names: list<string>,
 }
 
+/** Why a head's CI cannot start: GitHub runs no `pull_request` workflow on a conflicting PR. */
+pub type PrBlock = {pr: int, reason: "merge_conflict"}
+
+/**
+ * Outcome of the best-effort PR mergeability lookup. `not_run` means the
+ * verdict was not `missing`, so no extra API call was made.
+ */
+pub type BlockLookup = "not_run" | "ok" | "unavailable"
+
 pub type CheckCensus = {
   head_sha: string,
   total: int,
@@ -45,6 +54,8 @@ pub type CheckCensus = {
   expected_names: list<string>,
   path_required_names: list<string>,
   expectation_source: ExpectationSource,
+  blocked_by: list<PrBlock>,
+  blocked_lookup: BlockLookup,
   verdict: "green" | "bad" | "missing" | "pending",
   exit_code: int,
 }
@@ -153,7 +164,7 @@ pub fn latest_per_name(observations: list<CheckObservation>) -> list<CheckObserv
   }
   let out: list<CheckObservation> = []
   for name in keys(latest).sorted() {
-    out = out.appending(latest[name])
+    out.push(latest[name])
   }
   return out
 }
@@ -258,10 +269,10 @@ pub fn path_required_check_names(
     }
     let as_strings: list<string> = []
     for pattern in patterns {
-      as_strings = as_strings.appending(to_string(pattern))
+      as_strings.push(to_string(pattern))
     }
     if filter_matches_paths(as_strings, changed_paths) {
-      out = out.appending(to_string(row.check_prefix))
+      out.push(to_string(row.check_prefix))
     }
   }
   return out.sorted()
@@ -305,7 +316,7 @@ fn names_covering(observations: list<CheckObservation>, expected: string) -> lis
   let out: list<string> = []
   for observation in observations ?? [] {
     if observation_covers(observation.name, expected) {
-      out = out.appending(observation.name)
+      out.push(observation.name)
     }
   }
   return out
@@ -335,7 +346,7 @@ pub fn build_census(
   let pending_names: list<string> = []
   let bad_names: list<string> = []
   for observation in latest {
-    observed_names = observed_names.appending(observation.name)
+    observed_names.push(observation.name)
     let verdict = observation.verdict
     if verdict == "intentional_skip" {
       for required in (expected_names ?? []) + (path_required_names ?? []) {
@@ -350,16 +361,16 @@ pub fn build_census(
       intentional_skip = intentional_skip + 1
     } else if verdict == "pending" {
       pending = pending + 1
-      pending_names = pending_names.appending(observation.name)
+      pending_names.push(observation.name)
     } else {
       bad = bad + 1
-      bad_names = bad_names.appending(observation.name)
+      bad_names.push(observation.name)
     }
   }
   let missing_names: list<string> = []
   for expected in expected_names ?? [] {
     if len(names_covering(latest, expected)) == 0 {
-      missing_names = missing_names.appending(expected)
+      missing_names.push(expected)
     }
   }
   const missing = len(missing_names)
@@ -402,9 +413,46 @@ pub fn build_census(
     expected_names: (expected_names ?? []).sorted(),
     path_required_names: (path_required_names ?? []).sorted(),
     expectation_source: expectation_source,
+    blocked_by: [],
+    blocked_lookup: "not_run",
     verdict: verdict,
     exit_code: exit_code,
   }
+}
+
+/**
+ * Conflicting PRs among `/pulls/{n}` payloads. A PR whose mergeability GitHub
+ * has not computed yet (`mergeable_state` "unknown") is not reported, nor is
+ * one whose `head.sha` is no longer `head_sha`.
+ */
+pub fn classify_pr_blocks(head_sha: string, pulls: list<any>) -> list<PrBlock> {
+  let blocks: list<PrBlock> = []
+  for pull in pulls {
+    const number = to_int(pull?.number)
+    // `commits/{sha}/pulls` also lists PRs whose head has since moved on; a
+    // conflict on a newer head says nothing about why this sha has no CI.
+    if to_string(pull?.head?.sha ?? "").lower() != head_sha.lower() {
+      continue
+    }
+    if number != nil && to_string(pull?.mergeable_state ?? "") == "dirty" {
+      blocks.push({pr: number, reason: "merge_conflict"})
+    }
+  }
+  return blocks
+}
+
+/** Human lines naming why a head's CI never started. Empty when nothing blocks it. */
+pub fn render_block_lines(blocked_by: list<PrBlock>, lookup: BlockLookup) -> list<string> {
+  let lines: list<string> = []
+  for block in blocked_by {
+    lines.push(
+      "  blocked: PR #${to_string(block.pr)} conflicts with its base; GitHub runs no pull_request CI on a conflicting PR - rebase onto the base branch",
+    )
+  }
+  if lookup == "unavailable" {
+    lines.push("  blocked: could not check PR mergeability")
+  }
+  return lines
 }
 
 /** Turn one check-runs API page into observations. */
@@ -413,7 +461,7 @@ pub fn check_run_observations(page: any) -> list<CheckObservation> {
   for run in page?.check_runs ?? [] {
     const status = to_string(run?.status ?? "")
     const conclusion = to_string(run?.conclusion ?? "")
-    out = out.appending(
+    out.push(
       {
         name: to_string(run?.name ?? ""),
         verdict: classify_check_run(status, conclusion),
@@ -433,7 +481,7 @@ pub fn commit_status_observations(payload: any) -> list<CheckObservation> {
   let ordinal = len(payload?.statuses ?? [])
   for status in payload?.statuses ?? [] {
     const state = to_string(status?.state ?? "")
-    out = out.appending(
+    out.push(
       {
         name: to_string(status?.context ?? ""),
         verdict: classify_commit_status(state),
@@ -531,17 +579,71 @@ fn is_hex40(value: string) -> bool {
   return true
 }
 
-fn api_json(process: HarnessProcess, clock: HarnessClock, path: string) -> any {
+fn api_json(
+  process: HarnessProcess,
+  clock: HarnessClock,
+  stdio: HarnessStdio,
+  path: string,
+) -> any {
   const receipt = github_api_json_result(process, clock, path)
   if !receipt.ok {
+    stdio.eprintln(receipt.detail ?? "GitHub API request failed")
     return nil
   }
   return receipt.value
 }
 
+/**
+ * Whether a list endpoint returning `batch_len` rows for `page` may have a next page within the bound.
+ */
+pub fn more_pages(batch_len: int, page: int) -> bool {
+  return batch_len >= PAGE_SIZE && page < MAX_PAGES
+}
+
+/** Best-effort: open PRs headed at `sha` that conflict with their base. */
+fn lookup_blocks(
+  process: HarnessProcess,
+  clock: HarnessClock,
+  stdio: HarnessStdio,
+  repo: string,
+  sha: string,
+) -> {blocked_by: list<PrBlock>, blocked_lookup: BlockLookup} {
+  let listed: list<any> = []
+  let page = 1
+  while page <= MAX_PAGES {
+    const batch = api_json(
+      process,
+      clock,
+      stdio,
+      "/repos/${repo}/commits/${sha}/pulls?per_page=${to_string(PAGE_SIZE)}&page=${to_string(page)}",
+    )
+    if batch == nil {
+      return {blocked_by: [], blocked_lookup: "unavailable"}
+    }
+    listed = listed + batch
+    if !more_pages(len(batch), page) {
+      break
+    }
+    page = page + 1
+  }
+  let pulls: list<any> = []
+  for entry in listed {
+    if to_string(entry?.state ?? "") != "open" {
+      continue
+    }
+    const pull = api_json(process, clock, stdio, "/repos/${repo}/pulls/${to_string(entry?.number)}")
+    if pull == nil {
+      return {blocked_by: [], blocked_lookup: "unavailable"}
+    }
+    pulls.push(pull)
+  }
+  return {blocked_by: classify_pr_blocks(sha, pulls), blocked_lookup: "ok"}
+}
+
 fn collect_observations(
   process: HarnessProcess,
   clock: HarnessClock,
+  stdio: HarnessStdio,
   repo: string,
   sha: string,
 ) -> any {
@@ -554,6 +656,7 @@ fn collect_observations(
     const payload = api_json(
       process,
       clock,
+      stdio,
       "/repos/${repo}/commits/${sha}/check-runs?per_page=${to_string(PAGE_SIZE)}&page=${to_string(page)}",
     )
     if payload == nil {
@@ -572,6 +675,7 @@ fn collect_observations(
   const statuses = api_json(
     process,
     clock,
+    stdio,
     "/repos/${repo}/commits/${sha}/status?per_page=${to_string(PAGE_SIZE)}",
   )
   if statuses == nil {
@@ -584,6 +688,7 @@ fn collect_observations(
 fn changed_paths(
   process: HarnessProcess,
   clock: HarnessClock,
+  stdio: HarnessStdio,
   repo: string,
   base: string,
   sha: string,
@@ -591,6 +696,7 @@ fn changed_paths(
   const payload = api_json(
     process,
     clock,
+    stdio,
     "/repos/${repo}/compare/${base}...${sha}?per_page=${to_string(PAGE_SIZE)}",
   )
   if payload == nil || type_of(payload?.files) != "list" {
@@ -598,7 +704,7 @@ fn changed_paths(
   }
   let paths: list<string> = []
   for file in payload?.files ?? [] {
-    paths = paths.appending(to_string(file?.filename ?? ""))
+    paths.push(to_string(file?.filename ?? ""))
   }
   return {ok: true, paths: paths}
 }
@@ -657,19 +763,18 @@ fn render(census: CheckCensus) -> string {
     "missing (expected but never reported): ${to_string(census.missing)}",
   ]
   if len(census.bad_names) > 0 {
-    lines = lines.appending("  failing: " + join(census.bad_names, ", "))
+    lines.push("  failing: " + join(census.bad_names, ", "))
   }
   if len(census.pending_names) > 0 {
-    lines = lines.appending("  pending: " + join(census.pending_names, ", "))
+    lines.push("  pending: " + join(census.pending_names, ", "))
   }
   if len(census.missing_names) > 0 {
-    lines = lines.appending("  missing: " + join(census.missing_names, ", "))
+    lines.push("  missing: " + join(census.missing_names, ", "))
   }
   if len(census.path_required_names) > 0 {
-    lines = lines.appending(
-      "  required by changed paths: " + join(census.path_required_names, ", "),
-    )
+    lines.push("  required by changed paths: " + join(census.path_required_names, ", "))
   }
+  lines = lines + render_block_lines(census.blocked_by, census.blocked_lookup)
   return join(lines, "\n")
 }
 
@@ -698,7 +803,7 @@ fn main(harness: Harness) {
     harness.stdio.eprintln("gh_check_state: --sha must be a 40-character commit sha")
     harness.runtime.exit(EXIT_USAGE)
   }
-  const collected = collect_observations(harness.process, harness.clock, repo, sha)
+  const collected = collect_observations(harness.process, harness.clock, harness.stdio, repo, sha)
   if !collected.ok {
     harness.stdio.eprintln(
       "gh_check_state: could not read check state for ${sha}; treating it as unobservable",
@@ -723,7 +828,14 @@ fn main(harness: Harness) {
       workflow_owner = workflow_repository(harness.fs, harness.process, path)
       if (workflow_owner ?? "").lower() == WORKFLOW_REGISTRY_REPOSITORY {
         filters = workflow_surface_filters(workflow, "surface_filter")
-        const changed = changed_paths(harness.process, harness.clock, repo, base, sha)
+        const changed = changed_paths(
+          harness.process,
+          harness.clock,
+          harness.stdio,
+          repo,
+          base,
+          sha,
+        )
         diff = {ok: changed.ok, paths: changed.paths}
       }
     }
@@ -734,13 +846,16 @@ fn main(harness: Harness) {
       "gh_check_state: automatic expectations require Harn's own repository and workflow; supply --expect NAME",
     )
   }
-  const census = build_census(
+  let census = build_census(
     sha,
     collected.observations,
     expectations.expected_names,
     expectations.path_required_names,
     expectations.source,
   )
+  if census.verdict == "missing" {
+    census = census + lookup_blocks(harness.process, harness.clock, harness.stdio, repo, sha)
+  }
   harness.stdio.println(
     if parsed?.json ?? false {
       json_stringify_pretty(census)

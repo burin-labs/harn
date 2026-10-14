@@ -74,6 +74,25 @@ impl AcpOutput {
         Self::Callback(Arc::new(write_line))
     }
 
+    /// Capture the admitted task and prompt identity before any asynchronous producer
+    /// can outlive this turn. Session-global and replay outputs stay unwrapped.
+    pub(super) fn for_prompt(
+        &self,
+        correlation: AcpPromptCorrelation,
+        task: Option<TaskPromptTarget>,
+    ) -> Self {
+        if correlation.message_id.is_none() && task.is_none() {
+            return self.clone();
+        }
+        let output = self.clone();
+        Self::callback(move |line| {
+            match correlate_prompt_frame(line, &correlation, task.as_ref()) {
+                Ok(line) => output.write_line(&line),
+                Err(error) => tracing::warn!(%error, "Refused invalid prompt-owned ACP frame"),
+            }
+        })
+    }
+
     /// Write a serialized ACP JSON-RPC message to this sink.
     pub fn write_line(&self, line: &str) {
         match self {
@@ -90,6 +109,49 @@ impl AcpOutput {
             Self::Callback(write_line) => write_line(line),
         }
     }
+}
+
+fn correlate_prompt_frame(
+    line: &str,
+    correlation: &AcpPromptCorrelation,
+    task: Option<&TaskPromptTarget>,
+) -> Result<String, String> {
+    let mut frame: serde_json::Value =
+        serde_json::from_str(line).map_err(|_| "Malformed ACP frame".to_string())?;
+    let object = frame.as_object_mut().ok_or("ACP frame must be an object")?;
+    let Some(method) = object.get("method") else {
+        // Responses retain their JSON-RPC request identity and result shape.
+        return Ok(line.to_string());
+    };
+    if !method.is_string() {
+        return Err("ACP method must be a string".into());
+    }
+    let params = object
+        .get_mut("params")
+        .ok_or("Missing prompt-owned ACP params")?;
+    if let Some(task) = task {
+        task.project_into(params)
+            .map_err(|error| error.message().to_owned())?;
+    }
+    let params = params
+        .as_object_mut()
+        .ok_or("Prompt-owned ACP params must be an object")?;
+    if correlation.message_id.is_none() {
+        return serde_json::to_string(&frame).map_err(|_| "ACP frame encoding failed".to_string());
+    }
+    if let Some(supplied) = params.get("promptCorrelation") {
+        let supplied: AcpPromptCorrelation = serde_json::from_value(supplied.clone())
+            .map_err(|_| "Invalid ACP prompt correlation".to_string())?;
+        if supplied != *correlation {
+            return Err("ACP frame conflicts with its owning prompt".into());
+        }
+    }
+    params.insert(
+        "promptCorrelation".into(),
+        serde_json::to_value(correlation)
+            .map_err(|_| "ACP prompt correlation encoding failed".to_string())?,
+    );
+    serde_json::to_string(&frame).map_err(|_| "ACP frame encoding failed".to_string())
 }
 
 /// Shared state that bridge-style builtins use to communicate with the
@@ -360,3 +422,11 @@ pub(super) fn progress_update(
     events::merge_harn_meta(&mut update, harn_meta);
     update
 }
+
+#[cfg(test)]
+#[path = "bridge/prompt_correlation_tests.rs"]
+mod prompt_correlation_tests;
+
+#[cfg(test)]
+#[path = "bridge/event_transport_tests.rs"]
+mod event_transport_tests;

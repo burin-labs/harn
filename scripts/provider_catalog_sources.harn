@@ -58,7 +58,7 @@ fn __openrouter_token_bands(rows: list<dict>, base: dict) -> dict {
       }
     },
   )
-    .sort_by({ band -> band.minimum_input_tokens })
+    .sorted_by({ band -> band.minimum_input_tokens })
   return base + {input_token_bands: bands}
 }
 

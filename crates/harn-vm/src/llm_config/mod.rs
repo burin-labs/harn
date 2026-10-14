@@ -8,6 +8,7 @@
 //! [`resolution`], and complementary-[`reviewer`] selection.
 
 mod catalog;
+mod chat_wire;
 mod config;
 mod data_controls;
 mod loading;
@@ -38,6 +39,7 @@ mod tests;
 mod tool_format_fitness_tests;
 
 pub use catalog::*;
+pub use chat_wire::{ChatWireSources, ProviderChatWireContract, ProviderConfigLayer};
 pub use config::*;
 pub use data_controls::*;
 pub use harn_provider_catalog::model_def::*;

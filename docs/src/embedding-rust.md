@@ -4,6 +4,14 @@
 Rust API. Use it when a host application wants Harn in-process instead of
 spawning the CLI as a child process.
 
+File-backed served pipelines resolve imported types and option contracts before
+execution, including `AgentSpec` re-exported by `std/agent/options`. Hosts using
+the VM directly should call `harn_vm::compile_source_at_path(source, path,
+pipeline_name)` for a module anchored at a filesystem path. The supplied source
+is the root buffer; imports resolve through Harn's module graph. The inline
+`compile_source` and `compile_source_named` functions do not load filesystem
+import contracts, and none of these functions grants privileged host dispatch.
+
 ## Add the crate
 
 Until Harn is published on crates.io, depend on the repository tag you ship
@@ -11,7 +19,7 @@ against:
 
 ```toml
 [dependencies]
-harn-serve = { git = "https://github.com/burin-labs/harn", tag = "v0.10.158" }
+harn-serve = { git = "https://github.com/burin-labs/harn", tag = "v0.10.166" }
 serde_json = "1"
 tokio = { version = "1", features = ["rt", "sync"] }
 ```
@@ -56,10 +64,10 @@ start.
 
 ```toml
 # Parity-critical eval harness
-harn-serve = { git = "...", tag = "v0.10.158", features = ["full"] }
+harn-serve = { git = "...", tag = "v0.10.166", features = ["full"] }
 
 # Lean smoke-test harness
-harn-serve = { git = "...", tag = "v0.10.158", features = ["hostlib"] }
+harn-serve = { git = "...", tag = "v0.10.166", features = ["hostlib"] }
 ```
 
 When either hostlib feature is enabled, dispatch the private process guardian
@@ -106,6 +114,36 @@ depends on `harn-cli` (which enables the full set) gets the full surface
 regardless of what it requests from `harn-serve`. The lean configurations only
 take effect in builds that do **not** pull in the full CLI.
 
+## Resolve connector credentials
+
+Use `harn_serve::try_load_provider_connectors` with the project directory or
+source anchor before initializing package-backed connector clients. It uses
+the CLI's package resolver, including dependency materialization, root
+overrides, provider deduplication, and explicit dependency failures.
+
+```rust
+# fn main() -> Result<(), Box<dyn std::error::Error>> {
+let project_root = std::env::current_dir()?;
+let resolved = harn_serve::try_load_provider_connectors(&project_root)?;
+let outbound = resolved.outbound_secret_ids();
+
+// Resolve these typed ids from the host's selected secret provider.
+// Keep `resolved` alive while initializing its connector configurations.
+for id in outbound {
+    println!("{}/{}", id.namespace, id.name);
+}
+# Ok(())
+# }
+```
+
+Inbound verification secrets are excluded from outbound requirements. An
+empty set means the resolved declarations need no outbound credentials; a
+missing or malformed dependency returns an error. Use
+`try_load_root_provider_connectors` only when the caller deliberately needs
+root declarations without resolving package contributions. Keep the returned
+`ResolvedProviderConnectors` alive through initialization so concurrent
+package publication cannot collect its generation.
+
 ## Start an embedded agent
 
 `EmbeddedAgentClient` owns the required worker thread, current-thread Tokio
@@ -123,7 +161,7 @@ use harn_serve::{
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut agent = EmbeddedAgentClient::spawn(AcpServerConfig::new(None)).await?;
-    let session = agent.start_run(AcpSessionNewParams::harness.fs.cwd(".")).await?;
+    let session = agent.start_run(AcpSessionNewParams::isolated(".")).await?;
     let view = agent.session_view(session.session_id.clone()).await?;
     assert_eq!(view.schema, "harn.session_view.v1");
 
@@ -172,10 +210,17 @@ The ACP channel server is `!Send` because it owns a `LocalSet` and uses
 server future is built and driven entirely on the dedicated worker thread,
 while the host gets typed lifecycle calls, `harn.session_view.v1` /
 `harn.run_view.v1` helpers, and a single event stream. Use
-`EmbeddedAgentClient::load_run(...)` / `resume_run(...)` to reattach persisted
-sessions, `subscribe_session_events(...)` for live timeline updates, and
+`EmbeddedAgentClient::load_run(id, environment_policy)` to restore a saved session,
+`subscribe_session_events(...)` for live timeline updates, and
 `run_view_from_path(...)` to inspect a persisted run without reading private
 record internals.
+
+Pass the host's `AcpSessionEnvironmentConfig` to both `load_run` and
+`load_run_with_cwd(id, cwd, environment_policy)`. Cold restoration requires a
+fresh explicit declaration; saved history contains no credentials or launcher
+environment snapshot. A live load retains its established authority and refuses
+a declaration that would replace it. The typed JSON-RPC load constructor uses
+`AcpSessionLoadParams::new(id, environment_policy).with_cwd(cwd)`.
 
 ## Send typed ACP requests
 

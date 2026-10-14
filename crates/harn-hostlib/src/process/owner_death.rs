@@ -118,6 +118,8 @@ enum GuardianConfinement {
 #[cfg(unix)]
 #[derive(Deserialize, Serialize)]
 struct PreparedCommand {
+    #[serde(default)]
+    payload_stdin: bool,
     program: Vec<u8>,
     args: Vec<Vec<u8>>,
     cwd: Option<Vec<u8>>,
@@ -193,6 +195,7 @@ pub(crate) fn prepare_guardian(
         prepared.env_cleared,
         cleanup_token.clone(),
         confinement.as_ref().map(TransferredConfinement::request),
+        spec.use_stdin,
     );
     let request = serde_json::to_vec(&request)
         .map_err(|error| ProcessError::Spawn(format!("encode guardian request: {error}")))?;
@@ -383,8 +386,10 @@ impl PreparedCommand {
         env_clear: bool,
         cleanup_token: String,
         confinement: Option<GuardianConfinement>,
+        payload_stdin: bool,
     ) -> Self {
         Self {
+            payload_stdin,
             confinement,
             program: os_bytes(command.get_program()),
             args: command.get_args().map(os_bytes).collect(),
@@ -422,7 +427,11 @@ impl PreparedCommand {
         }
         command
             .env_remove(MODE_ENV)
-            .stdin(Stdio::null())
+            .stdin(if self.payload_stdin {
+                Stdio::piped()
+            } else {
+                Stdio::null()
+            })
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
         apply_confinement(&mut command, self.confinement)?;
@@ -627,7 +636,21 @@ pub fn run_guardian_from_pipe() -> io::Result<()> {
 
     let stdout = payload.stdout.take();
     let stderr = payload.stderr.take();
+    let payload_stdin = payload.stdin.take();
     let (event_tx, event_rx) = std::sync::mpsc::channel();
+
+    if payload_stdin.is_some() {
+        let event_tx = event_tx.clone();
+        harn_parser::runtime_stack::spawn(move || {
+            // Payload input may block while the child is not reading. Observe
+            // pipe hangup independently, without consuming its input bytes.
+            let event = match wait_for_owner_pipe_close() {
+                Ok(()) => GuardianEvent::OwnerClosed,
+                Err(error) => GuardianEvent::InputFailed(error),
+            };
+            let _ = event_tx.send(event);
+        });
+    }
 
     if let Some(mut stdout) = stdout {
         let event_tx = event_tx.clone();
@@ -654,14 +677,14 @@ pub fn run_guardian_from_pipe() -> io::Result<()> {
         let event_tx = event_tx.clone();
         harn_parser::runtime_stack::spawn(move || {
             let mut stdin = io::stdin();
-            let mut sink = [0_u8; 256];
-            loop {
-                match stdin.read(&mut sink) {
-                    Ok(0) | Err(_) => break,
-                    Ok(_) => {}
+            let event = match relay_payload_stdin(&mut stdin, payload_stdin) {
+                Ok(()) => GuardianEvent::OwnerClosed,
+                Err(error) if error.kind() == io::ErrorKind::UnexpectedEof => {
+                    GuardianEvent::OwnerClosed
                 }
-            }
-            let _ = event_tx.send(GuardianEvent::OwnerClosed);
+                Err(error) => GuardianEvent::InputFailed(error),
+            };
+            let _ = event_tx.send(event);
         });
     }
     drop(event_tx);
@@ -670,7 +693,10 @@ pub fn run_guardian_from_pipe() -> io::Result<()> {
     let mut open_outputs = 2_u8;
     while let Ok(event) = event_rx.recv() {
         match event {
-            GuardianEvent::OwnerClosed => {
+            event @ (GuardianEvent::OwnerClosed | GuardianEvent::InputFailed(_)) => {
+                if let GuardianEvent::InputFailed(error) = event {
+                    eprintln!("guardian input failed: {error}");
+                }
                 let _ =
                     harn_vm::op_interrupt::signal_pid_tree_and_token_preserving_group_with_report(
                         payload_pid,
@@ -749,6 +775,121 @@ pub fn run_guardian_from_env() -> io::Result<()> {
     run_guardian_from_pipe()
 }
 
+/// Payload input shares the private guardian channel, but closing payload
+/// stdin must never close the supervisor's liveness lease. Frames carry only
+/// a byte count; a zero count closes payload stdin and leaves owner monitoring
+/// active. Only this writer writes after the prepared command is delivered.
+#[cfg(unix)]
+const MAX_INPUT_FRAME_BYTES: usize = 64 * 1024;
+
+#[cfg(unix)]
+pub(crate) struct PayloadStdin(std::fs::File);
+
+#[cfg(unix)]
+pub(crate) fn payload_stdin(liveness: &ChildStdin) -> io::Result<PayloadStdin> {
+    use std::os::fd::AsFd;
+    Ok(PayloadStdin(std::fs::File::from(
+        liveness.as_fd().try_clone_to_owned()?,
+    )))
+}
+
+#[cfg(unix)]
+impl Write for PayloadStdin {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        let count = bytes.len().min(MAX_INPUT_FRAME_BYTES);
+        if count == 0 {
+            return Ok(0);
+        }
+        self.0.write_all(&(count as u32).to_be_bytes())?;
+        self.0.write_all(&bytes[..count])?;
+        Ok(count)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.0.flush()
+    }
+}
+
+#[cfg(unix)]
+impl Drop for PayloadStdin {
+    fn drop(&mut self) {
+        let _ = self.0.write_all(&0_u32.to_be_bytes());
+    }
+}
+
+#[cfg(unix)]
+fn relay_payload_stdin(owner: &mut impl Read, mut payload: Option<impl Write>) -> io::Result<()> {
+    let mut buffer = [0_u8; 4096];
+    if payload.is_none() {
+        // Existing no-stdin spawns use the channel only as a liveness lease.
+        while owner.read(&mut buffer)? != 0 {}
+        return Ok(());
+    }
+    let mut closed_by_owner = false;
+    loop {
+        let mut header = [0_u8; 4];
+        owner.read_exact(&mut header)?;
+        let count = u32::from_be_bytes(header) as usize;
+        if count == 0 {
+            drop(payload.take());
+            closed_by_owner = true;
+            continue;
+        }
+        if count > MAX_INPUT_FRAME_BYTES || closed_by_owner {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "invalid guardian payload input frame",
+            ));
+        }
+        let mut remaining = count;
+        while remaining != 0 {
+            let count = remaining.min(buffer.len());
+            let result = owner.read_exact(&mut buffer[..count]).and_then(|()| {
+                if let Some(payload) = payload.as_mut() {
+                    payload.write_all(&buffer[..count])
+                } else {
+                    Ok(())
+                }
+            });
+            buffer[..count].fill(0);
+            match result {
+                Err(error) if error.kind() == io::ErrorKind::BrokenPipe => {
+                    // The child may finish without accepting more input. Keep
+                    // draining the private frames so its live owner can finish
+                    // sending, while the independent hangup watcher remains
+                    // responsible for owner death under backpressure.
+                    drop(payload.take());
+                }
+                result => result?,
+            }
+            remaining -= count;
+        }
+    }
+}
+
+#[cfg(unix)]
+fn wait_for_owner_pipe_close() -> io::Result<()> {
+    loop {
+        let mut pipe = libc::pollfd {
+            fd: libc::STDIN_FILENO,
+            // Hangup/error are reported even when no readable event is
+            // requested. Unconsumed payload bytes must not make us spin.
+            events: 0,
+            revents: 0,
+        };
+        if unsafe { libc::poll(&raw mut pipe, 1, -1) } < 0 {
+            let error = io::Error::last_os_error();
+            if error.kind() == io::ErrorKind::Interrupted {
+                continue;
+            }
+            return Err(error);
+        }
+        if pipe.revents & (libc::POLLHUP | libc::POLLERR | libc::POLLNVAL) != 0 {
+            return Ok(());
+        }
+    }
+}
+
 #[cfg(unix)]
 fn read_request() -> io::Result<Vec<u8>> {
     let mut stdin = io::stdin();
@@ -824,6 +965,12 @@ fn run_guardian_reaper() -> ! {
 /// can hide and a reused pid cannot fake.
 #[cfg(unix)]
 fn relay_owner_liveness(owner: libc::pid_t, mut guardian: io::PipeWriter) {
+    use std::os::fd::AsRawFd;
+    let fd = guardian.as_raw_fd();
+    let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
+    if flags < 0 || unsafe { libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) } < 0 {
+        return;
+    }
     let mut buffer = [0_u8; 4096];
     while unsafe { libc::getppid() } == owner {
         let mut poll_fd = libc::pollfd {
@@ -846,7 +993,10 @@ fn relay_owner_liveness(owner: libc::pid_t, mut guardian: io::PipeWriter) {
         match read {
             0 => return,
             read if read > 0 => {
-                if guardian.write_all(&buffer[..read as usize]).is_err() {
+                let copied =
+                    write_relay_while_owner_alive(owner, &mut guardian, &buffer[..read as usize]);
+                buffer.fill(0);
+                if !matches!(copied, Ok(true)) {
                     return;
                 }
             }
@@ -858,6 +1008,61 @@ fn relay_owner_liveness(owner: libc::pid_t, mut guardian: io::PipeWriter) {
             }
         }
     }
+}
+
+/// Backpressure must not stop the reaper checking whether its parent died.
+/// This writer owns the relay's nonblocking descriptor; its drop delivers
+/// hangup to the guardian even while payload delivery is stalled.
+#[cfg(unix)]
+fn write_relay_while_owner_alive(
+    owner: libc::pid_t,
+    guardian: &mut io::PipeWriter,
+    mut bytes: &[u8],
+) -> io::Result<bool> {
+    use std::os::fd::AsRawFd;
+    while !bytes.is_empty() {
+        if unsafe { libc::getppid() } != owner {
+            return Ok(false);
+        }
+        let mut pipe = libc::pollfd {
+            fd: guardian.as_raw_fd(),
+            events: libc::POLLOUT,
+            revents: 0,
+        };
+        match unsafe { libc::poll(&raw mut pipe, 1, OWNER_POLL_INTERVAL_MS) } {
+            0 => continue,
+            ready if ready < 0 => {
+                let error = io::Error::last_os_error();
+                if error.kind() == io::ErrorKind::Interrupted {
+                    continue;
+                }
+                return Err(error);
+            }
+            _ => {}
+        }
+        if pipe.revents & (libc::POLLHUP | libc::POLLERR | libc::POLLNVAL) != 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::BrokenPipe,
+                "guardian relay closed",
+            ));
+        }
+        match guardian.write(bytes) {
+            Ok(0) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::WriteZero,
+                    "guardian relay stopped",
+                ))
+            }
+            Ok(written) => bytes = &bytes[written..],
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    io::ErrorKind::Interrupted | io::ErrorKind::WouldBlock
+                ) => {}
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(true)
 }
 
 #[cfg(target_os = "linux")]
@@ -907,7 +1112,11 @@ fn wait_for_payload_exit(
     while payload_status.is_none() {
         match events.recv() {
             Ok(GuardianEvent::PayloadExited(status)) => *payload_status = Some(status?),
-            Ok(GuardianEvent::OutputClosed | GuardianEvent::OwnerClosed) => {}
+            Ok(
+                GuardianEvent::OutputClosed
+                | GuardianEvent::OwnerClosed
+                | GuardianEvent::InputFailed(_),
+            ) => {}
             Err(_) => {
                 return Err(io::Error::other(
                     "guardian events closed before payload exit",
@@ -959,6 +1168,7 @@ impl Drop for OwnerJournalCleanup {
 #[cfg(unix)]
 enum GuardianEvent {
     OwnerClosed,
+    InputFailed(io::Error),
     PayloadExited(io::Result<ExitStatus>),
     OutputClosed,
 }

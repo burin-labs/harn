@@ -131,3 +131,41 @@ fn subtask_inherits_budget_session_and_event_log_across_threads() {
         "the parent's call budget did not see its subtasks' charges"
     );
 }
+
+/// harn#9816: a host scopes its session's secret provider onto the task that
+/// runs the VM. A `parallel` branch is a new task, and without inheriting that
+/// scope a `sub_agent_run` inside it resolved provider keys through the
+/// configured chain and failed to find one its creator held.
+#[test]
+fn subtask_inherits_the_active_secret_provider_across_threads() {
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(4)
+        .enable_all()
+        .build()
+        .expect("multi-thread runtime");
+    let provider: Arc<dyn crate::secrets::SecretProvider> = Arc::new(
+        crate::secrets::MemorySecretProvider::new("parent-session-secrets"),
+    );
+
+    let observed = runtime.block_on(scope_placement(
+        SubtaskPlacement::Worker,
+        crate::secrets::with_active_secret_provider(Some(provider), async {
+            assert!(crate::secrets::active_secret_provider().is_some());
+            let registry = Arc::new(PoolRegistry::default());
+            let mut set: tokio::task::JoinSet<Option<String>> = tokio::task::JoinSet::new();
+            spawn_into(
+                &mut set,
+                prepare(registry, async {
+                    crate::secrets::active_secret_provider()
+                        .map(|provider| provider.namespace().to_string())
+                }),
+            );
+            set.join_next()
+                .await
+                .expect("one branch")
+                .expect("branch joins")
+        }),
+    ));
+
+    assert_eq!(observed.as_deref(), Some("parent-session-secrets"));
+}

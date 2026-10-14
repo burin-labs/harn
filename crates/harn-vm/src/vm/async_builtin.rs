@@ -1,7 +1,5 @@
 use std::future::Future;
-use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
-use std::time::Instant;
 
 use super::Vm;
 
@@ -180,7 +178,7 @@ impl AsyncBuiltinCtx {
 
     /// Snapshot the cancellation and deadline sources for a host operation
     /// that must move its blocking work to Tokio's blocking pool.
-    pub fn interrupt_sources(&self) -> (Option<Arc<AtomicBool>>, Option<Instant>) {
+    pub fn interrupt_sources(&self) -> crate::op_interrupt::InterruptSources {
         self.child.lock().interrupt_sources()
     }
 

@@ -481,6 +481,12 @@ async fn run_acp_channel_server_inner(
                         continue;
                     }
                     if concurrent_controls
+                        .preempt_active_hitl_response(&msg, &routed_output)
+                        .await
+                    {
+                        continue;
+                    }
+                    if concurrent_controls
                         .preempt_active_live_client_operation(&msg, &routed_output)
                     {
                         continue;
@@ -620,6 +626,12 @@ pub async fn run_acp_server(config: AcpServerConfig) {
                     let preparation =
                         prepare_session_request(&cancellations, &concurrent_controls, &msg);
                     if preempt_session_interruption(&cancellations, &concurrent_controls, &msg) {
+                        continue;
+                    }
+                    if concurrent_controls
+                        .preempt_active_hitl_response(&msg, &routed_output)
+                        .await
+                    {
                         continue;
                     }
                     if concurrent_controls

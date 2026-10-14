@@ -43,28 +43,13 @@
       "shared_key": "workspace-macos"
     },
     {
-      "workflow": "ci.yml",
-      "job": "package-audit",
-      "shared_key": "package-audit"
-    },
-    {
-      "workflow": "ci.yml",
-      "job": "rust-cli",
-      "shared_key": "harn-ci-cli"
-    },
-    {
-      "workflow": "ci.yml",
-      "job": "rust-check-inputs",
-      "shared_key": "workspace-tests"
-    },
-    {
       "workflow": "rust-cache-refresh.yml",
       "job": "rust-cache-refresh",
       "shared_key": "workspace-tests"
     },
     {
       "workflow": "rust-cache-refresh.yml",
-      "job": "rust-cache-refresh",
+      "job": "rust-cache-refresh-cli",
       "shared_key": "harn-ci-cli"
     },
     {

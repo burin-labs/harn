@@ -338,18 +338,18 @@ impl HostlibRegistry {
                                         &[rewritten],
                                     )
                                     .map_err(VmError::from)?;
-                                    let (parent_cancel, deadline) = ctx.interrupt_sources();
-                                    let cancel = parent_cancel.unwrap_or_else(|| {
+                                    // Keep the scope deadline and the handler window
+                                    // apart so the worker reports the same interrupt
+                                    // kind the VM would.
+                                    let mut sources = ctx.interrupt_sources();
+                                    let cancel = Arc::clone(sources.cancel.get_or_insert_with(|| {
                                         Arc::new(AtomicBool::new(false))
-                                    });
-                                    let mut cancel_on_drop = CancelOnDrop(Some(Arc::clone(&cancel)));
+                                    }));
+                                    let mut cancel_on_drop = CancelOnDrop(Some(cancel));
                                     let handler_for_blocking = handler.clone();
                                     let completed = harn_vm::orchestration::run_blocking_with_ambient(
                                         move || {
-                                            let _interrupt = harn_vm::op_interrupt::install(
-                                                Some(cancel),
-                                                deadline,
-                                            );
+                                            let _interrupt = sources.install();
                                             handler_for_blocking(&[validated]).map_err(VmError::from)
                                         },
                                     )

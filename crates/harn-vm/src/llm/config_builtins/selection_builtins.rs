@@ -9,7 +9,7 @@ use crate::value::{VmDictExt, VmError, VmValue};
 use super::batch_projection::string_list_to_vm_value;
 use super::catalog_projection::toml_value_to_vm_value;
 use super::model_projection::{
-    model_def_to_vm_value, model_info_to_vm_value, resolved_model_to_vm_value,
+    model_def_to_vm_value, model_info_to_vm_value, resolved_model_to_vm_value, PricingView,
 };
 
 /// Infer the configured provider name for a model identifier.
@@ -404,7 +404,7 @@ fn llm_equivalent_models_builtin(args: &[VmValue], _out: &mut String) -> Result<
     }
     let entries = llm_config::equivalent_model_catalog_entries(selector.trim())
         .into_iter()
-        .map(|(id, model)| model_def_to_vm_value(&id, &model))
+        .map(|(id, model)| model_def_to_vm_value(&id, &model, PricingView::Effective))
         .collect();
     Ok(VmValue::List(std::sync::Arc::new(entries)))
 }

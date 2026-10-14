@@ -314,7 +314,7 @@ pub struct BundleTranscriptSection {
 #[serde(default)]
 pub struct BundleTools {
     pub schemas: Vec<BundleJsonEntry>,
-    pub calls: Vec<BundleToolCall>,
+    pub calls: Vec<ToolCallRecord>,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -323,34 +323,6 @@ pub struct BundleJsonEntry {
     pub source: String,
     pub index: usize,
     pub value: JsonValue,
-}
-
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(default)]
-pub struct BundleToolCall {
-    pub tool_name: String,
-    pub tool_use_id: String,
-    pub args_hash: String,
-    pub result: String,
-    pub is_rejected: bool,
-    pub duration_ms: Option<u64>,
-    pub iteration: usize,
-    pub timestamp: String,
-}
-
-impl From<&ToolCallRecord> for BundleToolCall {
-    fn from(record: &ToolCallRecord) -> Self {
-        Self {
-            tool_name: record.tool_name.clone(),
-            tool_use_id: record.tool_use_id.clone(),
-            args_hash: record.args_hash.clone(),
-            result: record.result.clone(),
-            is_rejected: record.is_rejected,
-            duration_ms: record.duration_ms,
-            iteration: record.iteration,
-            timestamp: record.timestamp.clone(),
-        }
-    }
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -1295,11 +1267,7 @@ fn raw_bundle_from_run(
         transcript: transcript_from_run(run),
         tools: BundleTools {
             schemas: tool_schema_entries(run),
-            calls: run
-                .tool_recordings
-                .iter()
-                .map(BundleToolCall::from)
-                .collect(),
+            calls: run.tool_recordings.clone(),
         },
         permissions: permissions_from_run(run),
         replay: BundleReplay {

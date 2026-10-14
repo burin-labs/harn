@@ -193,6 +193,32 @@ returns a [`ModuleArtifact`] (compiled init chunk + per-function
 chunks + import list); the loader then runs the init chunk and mints
 fresh closures bound to a per-process module env.
 
+### Embedded stdlib artifacts
+
+A stdlib module has no source file to sit beside, so without help a
+first run on a new machine compiles every stdlib module it imports and
+writes each one into the shared cache. An agent-stack script wrote 148
+module artifacts on a cold cache (harn#9652). A host that links the
+`harn-stdlib-artifacts` crate and calls `harn_stdlib_artifacts::register()`
+at startup answers those imports from its binary instead: in a release
+build that first run took 3.0 s without the table and 0.27 s with it,
+against a 0.18 s warm floor, and wrote no module artifact. That crate's
+build script compiles the stdlib catalog with the harn-vm source the host
+links, so the table carries the host's own Harn version and compiler
+fingerprint. It does so only with the crate's `embed` feature, because the
+build script links a second harn-vm: a cold 12-core build of `harn` went
+from 625 s to 664 s in release and from 337 s to 390 s in dev, with about
+40% more compiler CPU. The `harn` CLI exposes it as `embedded-stdlib`,
+which every distributed binary enables and the release smoke enforces;
+from source, `cargo install harn-cli --features embedded-stdlib`.
+
+The table is read before the shared cache, never written, and judged by
+the same header check as a file. A mismatched key (a different Harn
+version, compiler fingerprint, or `HARN_DISABLE_OPTIMIZATIONS` setting)
+is a miss, and the import falls back to the shared cache and then a
+compile. `HARN_BYTECODE_CACHE=0` turns it off with every other artifact
+read. Stdlib keys contain no path, so one table is valid on every OS.
+
 ### Skipping the module source read
 
 That per-import read exists for one reason: to derive the module's
@@ -234,7 +260,9 @@ contains both artifact files for every script the user might run.
 Directory precompile treats the walked tree as a relocatable artifact set:
 entry keys identify imported files by their path relative to each entrypoint,
 so moving an unchanged complete tree to another checkout or machine keeps its
-adjacent artifacts valid. A single-file precompile keeps the ordinary
+adjacent artifacts valid. Those relative paths are spelled with `/` on
+every host, so a tree precompiled on macOS or Linux stays valid on
+Windows. A single-file precompile keeps the ordinary
 host-path-anchored key because Harn cannot prove that an independently moved
 dependency graph is complete. Build tooling can query the exact compatibility
 token with `harn precompile --artifact-contract`; it must not infer artifact

@@ -1,7 +1,7 @@
 # Glossary
 
-One-line definitions for every term Harn uses to describe a conversation, its
-parts, and its containers. Where two terms in Harn mean the same thing, the
+One-line definitions for the terms Harn uses to describe conversations,
+executions, and trigger events. Where two terms in Harn mean the same thing, the
 preferred one is marked; the others are alias-only.
 
 For SOTA cross-references (what LangGraph or OpenAI or ACP calls the same idea),
@@ -196,6 +196,34 @@ stopping, and decision. Without the adapter, a mutating request returns
 **Promotion proposal.** A decision-bound request for a host-owned product
 change. Approval and application are separate events with separate receipts.
 
+## Triggers
+
+**Trigger event.** A normalized record of one inbound or synthetic delivery,
+with its source identity, timing, trace, and provider payload. It may be
+rejected before dispatch or delivered to several bindings. See the
+[trigger event schema](../triggers/event-schema.md).
+
+**Trigger binding.** A registered rule that selects trigger events and names
+the work to run for each accepted delivery. A webhook route can target a
+binding; the route is not the binding.
+
+**Trigger provider.** A named source of trigger events, such as `cron`,
+`webhook`, or a package connector. Use the qualifier to distinguish it from
+an LLM provider.
+
+**Provider registration.** The stable declaration of one trigger provider's
+identity, event kinds, and payload schema. Reloading the same declaration is
+idempotent; a conflicting declaration is an error.
+
+**Provider catalog.** The collection of provider registrations available to
+a runtime or package validation. Built-in and package registrations share the
+same lookup rules.
+
+**Provider payload.** The provider-tagged body of a trigger event. Built-in
+normalizers preserve their input JSON in `raw`; package ingress stores the
+structured JSON supplied to Harn there, and channel events carry the emitted
+payload directly.
+
 ## Delegation
 
 **Worker.** An agent running in its own execution context with its own
@@ -279,6 +307,7 @@ conversational-unit noun.
 | System reminders, inject modes | [System reminders](../system-reminders.md) |
 | Skills | [Skills](../skills.md) |
 | Model jobs, receipts, media assets | [Model-job reference](../stdlib/model-jobs.md) |
+| Trigger events, provider payloads, provider catalog | [Trigger event schema](../triggers/event-schema.md) |
 | Personas | [Personas](../personas.md) |
 | Daemon loops | [Daemon stdlib](../stdlib/daemon.md) |
 | Hypotheses, evidence policy, experiment plans, decisions | [ADR 0007](../adr/0007-hypothesis-compiler-ownership.md) |

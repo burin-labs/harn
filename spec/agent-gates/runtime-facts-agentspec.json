@@ -338,9 +338,9 @@
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
-    "expression": "opts.removing",
+    "expression": "omit(\n    opts,\n    [\"tool_format\", \"_tool_format_source\", \"_tool_format_capability_gap\", \"_tool_format_override\"],\n  )",
     "owner": "__clear_tool_format_resolution",
-    "evidence": "Dictionary removal intrinsic, not an option named removing."
+    "evidence": "Dictionary key removal into a new value, not an option read."
   },
   {
     "scope": "AgentSpec",
@@ -408,9 +408,9 @@
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/prefill.harn",
-    "expression": "base.removing",
+    "expression": "omit(base, [\"prefill\"])",
     "owner": "agent_take_one_shot_prefill",
-    "evidence": "Dictionary removal intrinsic, not an option named removing."
+    "evidence": "Dictionary key removal into a new value, not an option read."
   },
   {
     "scope": "AgentSpec",
@@ -506,13 +506,6 @@
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/stance.harn",
-    "expression": "allowed.appending",
-    "owner": "__stance_policy_patch",
-    "evidence": "Computed runtime state or a method on projected tool data, carried beside configuration in the legacy options record; not an independent caller setting."
-  },
-  {
-    "scope": "AgentSpec",
-    "file": "crates/harn-stdlib/src/stdlib/agent/stance.harn",
     "expression": "turn_opts?._read_only_stance_tools",
     "owner": "agent_stance_apply",
     "evidence": "Resolved tool names recorded by stance after applying the read-only tool policy."
@@ -536,13 +529,6 @@
     "file": "crates/harn-stdlib/src/stdlib/agent/tool_search.harn",
     "expression": "state.strategy_label",
     "owner": "agent_tool_search_emit_queries",
-    "evidence": "Computed runtime state or a method on projected tool data, carried beside configuration in the legacy options record; not an independent caller setting."
-  },
-  {
-    "scope": "AgentSpec",
-    "file": "crates/harn-stdlib/src/stdlib/agent/tool_surface.harn",
-    "expression": "names.appending",
-    "owner": "agent_apply_tool_surface_narrowing",
     "evidence": "Computed runtime state or a method on projected tool data, carried beside configuration in the legacy options record; not an independent caller setting."
   },
   {
@@ -611,13 +597,6 @@
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/llm/options.harn",
-    "expression": "base.removing",
-    "owner": "llm_clear_one_shot_prefill",
-    "evidence": "Dictionary removal intrinsic, not an option named removing."
-  },
-  {
-    "scope": "AgentSpec",
-    "file": "crates/harn-stdlib/src/stdlib/llm/options.harn",
     "expression": "base?._harn_one_shot_prefill",
     "owner": "llm_clear_one_shot_prefill",
     "evidence": "Internal lifecycle marker armed by llm_arm_one_shot_prefill and consumed by llm_clear_one_shot_prefill."
@@ -649,5 +628,12 @@
     "expression": "value[key]",
     "owner": "__collect_unread_keys",
     "evidence": "Recurses into each supplied value using its declared child schema; this is generic shape validation, not a selected behavior setting."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/llm/options.harn",
+    "expression": "omit(base, [\"prefill\", \"_harn_one_shot_prefill\"])",
+    "owner": "llm_clear_one_shot_prefill",
+    "evidence": "Dictionary key removal into a new value, not an option read."
   }
 ]

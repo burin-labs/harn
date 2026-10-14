@@ -34,6 +34,18 @@ route facts, never credentials, endpoint URLs, or request-control values.
 preview does not apply it or establish model readiness. Inference enforces its
 boundary again at dispatch.
 
+`data_posture` is the data posture inference will send on this route: the
+request's `data_controls` when given, otherwise the catalog's
+`[data_controls_policy] default_posture`, and `default` on a transport that
+cannot carry per-request controls. The per-request receipt reports the same
+value as `requested_posture`. `data_controls_outcome` is what that posture does
+on the route, and `data_controls_note` is the route's own handling note when its
+model row declares one, otherwise its provider's. A route the catalog records as
+training on API traffic with no control to stop it is `denied` under
+`strictest_available`, with governing rule `data_controls.training_refused`
+and the typed `data_controls_refusal: training_without_control`, because
+inference refuses it before sending. Hosts read the typed field.
+
 Embedders can call `harn_vm::llm::api::preview_inference_admission`. Request and
 snapshot schemas and host records are generated from those owning types in
 the published protocol artifacts.
@@ -358,6 +370,17 @@ container credentials, and EC2 instance profile credentials. Set `AWS_REGION`,
 `AWS_DEFAULT_REGION`, or `BEDROCK_REGION`. The model is a Bedrock model ID such
 as `anthropic.claude-3-5-sonnet-20240620-v1:0` or
 `meta.llama3-70b-instruct-v1:0`.
+
+The SDK reads the session's captured launcher environment, including profile
+selection, container authorization, region settings, and ordinary inputs needed
+by profile credential helpers. Concurrent sessions keep separate captures;
+changing process variables after launch does not change a session's SDK inputs.
+Embedders supply a `LauncherEnvironment` through
+`AcpServerConfig::with_launcher_environment` before starting the server. This
+capture is an in-memory host input, never a credential-bearing ACP JSON field.
+Granted sessions retain their static credential restriction and do not run SDK
+discovery. A nonempty `AWS_SESSION_TOKEN` takes precedence over the declared
+legacy `AWS_SECURITY_TOKEN`; empty tokens are absent.
 
 Azure OpenAI requires `AZURE_OPENAI_ENDPOINT`, for example
 `https://my-resource.openai.azure.com`. Harn routes the request to
@@ -755,6 +778,10 @@ See llama.cpp's [`/props` response](https://github.com/ggml-org/llama.cpp/blob/m
 and Ollama's [`/api/show` response](https://docs.ollama.com/api/show)
 for the upstream fields.
 
+The returned `reasoning_effort_levels` lists the route's declared effort
+ladder from lowest to highest. An empty list means unknown or unrestricted,
+so it does not prove that any particular effort is supported.
+
 First match wins. User rules for a given provider are consulted
 before the shipped rules — so the order inside the TOML file matters
 (place more specific patterns above wildcards).
@@ -882,8 +909,18 @@ sampling options it cannot carry. `/v1` does not carry `num_ctx` or
 when those runtime controls are needed. These fields follow
 [Ollama 0.34's compatibility handler](https://github.com/ollama/ollama/blob/v0.34.0/openai/openai.go).
 
-Set `chat_api_adapter = "model_default"` with `/api/chat` to override an
-inherited compatible adapter and restore native Ollama request and response handling.
+An overlay declaring `chat_endpoint` replaces the endpoint and its adapter
+together. Omitting `chat_api_adapter` restores the provider/model's default
+request and response handling. For Ollama, an endpoint-only `/api/chat`
+override therefore restores native Ollama handling. Declare
+`chat_api_adapter = "ollama_openai_compat"` whenever selecting `/v1/chat/completions`.
+
+An adapter-only overlay changes the adapter while retaining the endpoint.
+`chat_api_adapter = "model_default"` explicitly selects the default handling.
+Overlays declaring neither field preserve both values.
+
+[`harn provider dispatch-explain`](../cli-reference.md#harn-provider-dispatch-explain)
+reports the effective endpoint, adapter, and source layer for each field.
 
 ### Managed provider supply
 
@@ -897,7 +934,7 @@ base_url = "https://gateway.example.com/v1"
 chat_endpoint = "/chat/completions"
 auth_style = "bearer"
 auth_env = "PRODUCT_INFERENCE_GRANT"
-managed_supply = { version = 1 }
+managed_supply = { version = 2 }
 ```
 
 Callers still select an ordinary Harn catalog model. Harn uses that model's
@@ -908,11 +945,15 @@ egress Harn adds this versioned request extension:
 ```json
 {
   "harn_managed_supply": {
-    "version": 1,
+    "version": 2,
     "logical_route": {
       "provider": "openai",
       "model": "gpt-5.4-mini",
       "capability_fingerprint": "<64 hex characters>"
+    },
+    "inference_boundary": {
+      "reach": "any_hosted",
+      "allow_training_discounts": false
     }
   }
 }
@@ -924,11 +965,28 @@ pinned to the same Harn release verifies it before selecting a physical route
 with the same fingerprint; this makes Harn's catalog the contract instead of
 requiring products to copy capability tables.
 
+Version 2 requires the caller's resolved inference boundary. Harn captures the
+trusted host ceiling and any tighter call scope once, and retains that same
+request for terminal receipt validation. Missing, malformed, and version 1
+authority are refused; there is no implicit hosted grant. Managed supply uses
+the OpenAI chat-completions transport; ACP, Responses and other wire adapters
+are refused before dispatch. Every declared managed provider enters the same
+request and receipt wrapper. Provider wire overrides cannot replace the
+captured `harn_managed_supply` authority. The managed relay
+must also declare its own researched data policy. A model's physical provider
+policy does not establish how the relay handles prompts.
+
+Before provider egress, `compatible_served_route` checks the physical model
+against that boundary through Harn's shared admission decision. Equal
+capability fingerprints do not establish equal weight class or training policy.
+The hosted wire adapter sends no opt-out controls, so a planned control cannot
+justify admission. A gateway may enforce a stricter no-training floor.
+
 Every successful JSON response, or the terminal SSE frame of a streaming
 response, must contain a `harn_managed_supply` receipt with `version`,
 `request_id`, `served_route`, non-negative `input_tokens` and `output_tokens`,
 decimal-string `cost_usd`, `cost_basis`, `capability_mode`, and typed
-`routing_attempts`. Managed supply v1 requires `capability_mode = "exact"`;
+`routing_attempts`. Managed supply v2 requires `capability_mode = "exact"`;
 each attempt reports only its route, typed outcome, elapsed time, optional HTTP
 status, and a safe gateway detail code. Provider payloads and credential names
 do not cross this audit boundary. The served route carries its own capability
@@ -1133,6 +1191,16 @@ permissions.
 - Endpoint: `https://openrouter.ai/api/v1/chat/completions`
 - Auth: `Authorization: Bearer <key>`
 - Same message format as OpenAI
+
+### Cerebras
+
+- Endpoint: `https://api.cerebras.ai/v1/chat/completions`
+- Auth: `Authorization: Bearer <CEREBRAS_API_KEY>`
+- Qwen 3.8 27B accepts `effort: "none"`, `"low"`, `"medium"`, and `"high"`.
+  `"none"` disables reasoning. GPT-OSS 120B accepts only `"low"`, `"medium"`, and `"high"`.
+- Streamed responses report input and output usage. See the
+  [Cerebras reasoning guide](https://inference-docs.cerebras.ai/capabilities/reasoning)
+  for provider defaults and response formats.
 
 ### Vercel AI Gateway
 

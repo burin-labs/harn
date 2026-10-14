@@ -127,6 +127,13 @@
   },
   {
     "scope": "runner-model-environment",
+    "file": "crates/harn-vm/src/llm/rate_limit/tests.rs",
+    "expression": "key",
+    "owner": "environment reader / declared environment constant",
+    "evidence": "Dynamic helper argument or named constant. Literal call sites and *_ENV declarations are independently scanned; the existing environment registry owns startup name and value validation."
+  },
+  {
+    "scope": "runner-model-environment",
     "file": "crates/harn-vm/src/llm/stream.rs",
     "expression": "crate::llm::LLM_CALLS_DISABLED_ENV",
     "owner": "environment reader / declared environment constant",

@@ -546,7 +546,7 @@ fn __recommend(
     scores = scores + [__nonconformity(row)]
   }
   const ordered = scores.sorted()
-  const rank = to_int(ceil(to_float(split + 1) * (1.0 - target_error))) ?? (split + 1)
+  const rank = to_int(ceil(to_float(split + 1) * (1.0 - target_error))) ?? split + 1
   if rank > split {
     return __no_threshold(
       "target_unreachable",

@@ -82,6 +82,10 @@ impl SessionStore for CanonicalStore {
         self.store.hooks()
     }
 
+    fn task_store(&self) -> Option<&dyn harn_session_store::task::TaskStore> {
+        self.store.task_store()
+    }
+
     async fn create(
         &self,
         request: CreateSession,
@@ -130,10 +134,10 @@ impl SessionStore for CanonicalStore {
     async fn fork(
         &self,
         session_id: &str,
-        at_event_id: EventId,
+        boundary: harn_session_store::CanonicalSessionBoundary,
         child_id: Option<harn_session_store::SessionId>,
     ) -> harn_session_store::StoreResult<harn_session_store::ForkResult> {
-        self.store.fork(session_id, at_event_id, child_id).await
+        self.store.fork(session_id, boundary, child_id).await
     }
 
     async fn truncate(

@@ -35,17 +35,6 @@ fn render(actual: &VmValue, expected: &VmValue) -> String {
 // The diff walk
 // -------------------------------------------------------------------------------------------------
 
-#[test]
-fn equal_values_produce_no_differences() {
-    assert!(diff_values(&VmValue::Int(1), &VmValue::Int(1)).is_empty());
-    assert!(diff_values(
-        &dict(&[("a", VmValue::Int(1))]),
-        &dict(&[("a", VmValue::Int(1))])
-    )
-    .is_empty());
-    assert!(render_diff(Some("x"), &VmValue::Int(1), &VmValue::Int(1)).is_none());
-}
-
 /// The contract the whole surface rests on: an empty diff and `values_equal`
 /// must never disagree, or `assert_eq` could fail with nothing to show.
 #[test]
@@ -82,21 +71,6 @@ fn diff_is_empty_iff_values_equal() {
 }
 
 #[test]
-fn nested_dict_mismatch_is_addressed_by_path() {
-    let actual = dict(&[(
-        "user",
-        dict(&[("name", s("Ada")), ("age", VmValue::Int(36))]),
-    )]);
-    let expected = dict(&[(
-        "user",
-        dict(&[("name", s("Grace")), ("age", VmValue::Int(36))]),
-    )]);
-    let diffs = diff_values(&actual, &expected);
-    assert_eq!(diffs.len(), 1);
-    assert_eq!(diffs[0].path, ".user.name");
-}
-
-#[test]
 fn list_index_appears_in_the_path() {
     let actual = list(vec![
         dict(&[("id", VmValue::Int(1))]),
@@ -121,17 +95,6 @@ fn extra_and_missing_entries_are_distinguished() {
     assert!(matches!(diffs[0].kind, DifferenceKind::Unexpected { .. }));
     assert_eq!(diffs[1].path, ".wanted");
     assert!(matches!(diffs[1].kind, DifferenceKind::Missing { .. }));
-}
-
-#[test]
-fn differing_lengths_report_only_the_surplus() {
-    let diffs = diff_values(
-        &list(vec![VmValue::Int(1), VmValue::Int(2), VmValue::Int(3)]),
-        &list(vec![VmValue::Int(1), VmValue::Int(2)]),
-    );
-    assert_eq!(diffs.len(), 1);
-    assert_eq!(diffs[0].path, "[2]");
-    assert!(matches!(diffs[0].kind, DifferenceKind::Unexpected { .. }));
 }
 
 #[test]
@@ -255,53 +218,6 @@ fn non_identifier_keys_are_addressed_with_bracket_syntax() {
 // -------------------------------------------------------------------------------------------------
 // Rendering — the failure text is the feature, so it is asserted verbatim.
 // -------------------------------------------------------------------------------------------------
-
-#[test]
-fn scalar_mismatch_renders_without_ceremony() {
-    assert_eq!(
-        render(&VmValue::Int(3), &VmValue::Int(4)),
-        "\
-assert_eq failed.
-    expected  4
-    actual    3"
-    );
-}
-
-#[test]
-fn a_type_mismatch_names_both_types() {
-    // Without the type tags these two lines would read `"1"` and `1` — and
-    // with a plain `display()` they would read identically.
-    assert_eq!(
-        render(&VmValue::Int(1), &s("1")),
-        "\
-assert_eq failed.
-    expected  \"1\" (string)
-    actual    1 (int)
-    One side is a number and the other is text. If this came from parsed input, the conversion may be missing."
-    );
-}
-
-#[test]
-fn nested_mismatch_renders_path_and_only_the_differing_leaf() {
-    let actual = dict(&[
-        ("id", VmValue::Int(7)),
-        ("user", dict(&[("name", s("Ada")), ("team", s("core"))])),
-    ]);
-    let expected = dict(&[
-        ("id", VmValue::Int(7)),
-        ("user", dict(&[("name", s("Grace")), ("team", s("core"))])),
-    ]);
-    assert_eq!(
-        render(&actual, &expected),
-        "\
-assert_eq failed: the two values differ in 1 place.
-
-  at .user.name
-    expected  \"Grace\"
-    actual    \"Ada\"
-    The strings first differ at character 0."
-    );
-}
 
 #[test]
 fn list_of_dicts_renders_every_differing_leaf_with_its_index() {

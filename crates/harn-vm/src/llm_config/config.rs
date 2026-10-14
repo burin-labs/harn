@@ -75,6 +75,10 @@ pub struct ProviderDefaultModels {
     pub runtime: Option<String>,
     #[serde(default)]
     pub portal: Option<String>,
+    /// Reasoning effort the setup UI selects with `portal`, from that model's
+    /// own `effort_levels`. `None` leaves the model's default.
+    #[serde(default)]
+    pub portal_reasoning_effort: Option<String>,
 }
 
 /// Field-wise catalog patches applied on top of merged model rows.
@@ -244,6 +248,7 @@ impl ProvidersConfig {
             }
             if defaults.portal.is_some() {
                 current.portal = defaults.portal.clone();
+                current.portal_reasoning_effort = defaults.portal_reasoning_effort.clone();
             }
         }
 

@@ -98,7 +98,7 @@ top-level keys before `v0.8`).
 | `turn_end_condition` | dict | Present when `turn_end_condition` is configured. `{invocations, vetoes, max_invocations, cap_reached}` — the per-session turn-end-judge call/veto counts, the resolved top-level cap (`nil` when disabled or not configured), and whether that cap was hit. This is separate from `turn_end_condition.cadence.max_invocations`, which only gates when the judge is due |
 
 `judge_decision` agent events carry `{verdict, confirm, reason, reasoning,
-next_step, trigger, escalation_recommended?, escalation_target?}`.
+next_step, trigger, escalation_recommended?, escalation_target?, requirement_report?}`.
 `verify_completion` closures, `verify_completion_judge`,
 and `turn_end_condition` all use this event, so harnesses can measure completion-gate
 class fire rates from structured fields instead of parsing feedback prose.
@@ -124,6 +124,43 @@ turn for repair, its `feedback_injected` event includes
 missing-tool-call claim also includes `tool_name`. The ACP extension projection
 uses `turnClaimedForRepair` and `toolName`. Event-log, replay, and evaluation
 consumers can use these fields without matching the injected feedback text.
+
+### Missing tool-call recovery
+
+`missing_tool_call_recovery` defaults to enabled for provider-backed loops.
+It classifies assistant text when the parser found no call and recovery remains
+eligible. A successful native tool call or an active completion judge owns the
+terminal turn, so recovery doesn't classify that turn again.
+
+The classifier asks one boolean intent question and one choice over candidate
+tools through `harness.llm.evaluate_request`. Without `evaluation`, it uses
+`structured_llm` on the loop's provider and model, including any classifier
+`provider` or `model` override. A route declaring a native decision protocol
+selects `native_decision`. An explicit `evaluation: EvaluationPolicy`
+selects the route and backend, including `native_decision`. Native evaluation
+requires conservative run budget authority from the start of the run.
+
+On the inherited chat route, classifier `max_tokens` defaults to `192`,
+`temperature` to `0.0`, and `effort` to `none`. Optional `top_p`, `seed`, and
+`timeout_ms` retain their transport meanings. An explicit `evaluation` supplies
+its own chat settings. Automatically selected native policies omit chat defaults;
+explicit chat settings remain in the evaluation policy and native evaluation
+refuses them without a recovery nudge.
+
+`confidence_threshold` defaults to `0.65`. Recovery requires both intent and
+target confidence to meet that floor. A confident negative intent doesn't need
+a confident target. The evaluator policy threshold is set to zero so the
+consumer can apply those rules to both answers. Refused or unavailable answers
+produce `ambiguous`; cancellation propagates. Each live verdict includes the
+closed `decision` outcome and its evaluation receipt reference.
+
+`classifier` accepts a typed `MissingToolCallClassifier` for deterministic
+consumer fixtures. Fixture verdicts are explicit records; assistant wording
+doesn't manufacture their labels. Fixture success doesn't measure model quality.
+See [Decision evaluation](../predicates.md#runtime-vocabulary-and-routes) for
+the policy, request limits, telemetry, and backend confidence meanings.
+
+### LLM result counters
 
 Nested `llm` fields:
 
@@ -357,7 +394,7 @@ Same as `harness.llm.call`, plus additional options:
 | `prompts` / `prompt_overrides` | dict | nil | Override validated logical agent prompt ids such as `agent.loop_contract`, `agent.tool_contract_text`, and `agent.completion_judge_system` with a prompt asset path, `{text}`, `{path}`, or render closure. Unknown ids are rejected. For typo-resistant authoring, pass the typed override shape through `agent_prompt_overrides(...)` from `std/agent/prompts` |
 | `post_turn_callback` | closure | nil | Hook called after each turn. Receives turn metadata and may inject a message, request an immediate stage stop, claim one exact next tool with `next_tool_claim: {tool_name}`, or merge next-turn options such as `llm_options: {tool_choice: "none"}`. Rich verdicts may include `feedback_kind: string` to give injected feedback a stable semantic identity |
 | `deadline_ms` | int | nil | Monotonic duration from `agent_loop` entry. The earliest of this value and `iteration_budget.wall_clock_ms` is the enclosing terminal deadline used for completion-judge admission. It is a duration, never a cross-process absolute timestamp. |
-| `verify_completion` | closure | nil | Hook called when the loop is about to stop naturally. Return `nil`/`true` to accept the stop or feedback text to veto and continue |
+| `verify_completion` | closure | nil | Hook called when the loop is about to stop naturally. Return `nil`/`true` to accept, feedback text or `{confirm: false}` to veto and continue, or `{confirm: false, action: "stop_unverified", reason: "host_check_failed"}` to end as `completion_unverified` and withhold the unverified reply. A final refusal requires a nonempty reason; contradictory or unknown actions are refused as invalid results. |
 | `verify_completion_judge` | bool/dict | nil | Structured judge for a proposed stop. `true` uses defaults. A dict may set `provider`, `model`, `system`, `feedback_fallback`, `operation_timeout_ms` (default `60000`), `deadline_reserve_ms` (default `5000`), and `max_invocations` (default `5`; `0` disables the cap). The loop ends as `completion_unverified` when the judge cannot fit before the loop deadline, times out, or reaches its cap. |
 | `turn_end_condition` | bool/dict | nil | Structured judge for natural completion or a done sentinel. The model returns `{verdict, detail}` where `verdict` is `done` or `continue`; `detail` is supporting evidence for `done`, or the single gap and next action for `continue`. Harn produces `stop_unverified` when a deadline or policy limit prevents a verdict. It shares the timeout fields above and supports `max_invocations` plus `cadence: {every?, when?, max_invocations?, min_iterations_before_first?}`. |
 | `step_judge` | dict | nil | Per-turn structured judge that runs after an assistant turn and before tool dispatch. Dict configs may include `provider`, `model`, `on_veto` (`"replace"` or `"retain"`), `max_attempts`, `skip_when_empty`, `skip_when_stalled`, and `skip_when_iterations_remaining` (default `1`, skips when no regeneration turn remains). Skips emit `step_judge_decision` with `skipped: true` |
@@ -980,7 +1017,7 @@ Preset roles, defaults summarized:
 | `verify` | `verifier` | unset | false | 0 | adaptive `{initial: 1, max: 5, extend_by: 1}` | unset | `turn_end_condition: true` |
 | `merge_captain` | `tool_using` | `native` | true | 3 | adaptive `{initial: 8, max: 60, extend_by: 4}` | enabled, threshold 3 | both `nil`; default consent denies writes |
 | `review_captain` | `tool_using` | `native` | true | 3 | adaptive `{initial: 6, max: 30, extend_by: 3}` | enabled, threshold 3 | both `nil` |
-| `oncall_captain` | `tool_using` | `native` | true | 3 | adaptive `{initial: 6, max: 24, extend_by: 3}` | enabled, threshold 3 | both `nil`; default `with_rate_limit(harness.runtime, {max_calls: 50})` |
+| `oncall_captain` | `tool_using` | `native` | true | 3 | adaptive `{initial: 6, max: 24, extend_by: 3}` | enabled, threshold 3 | both `nil`; default `tool_middleware.with_rate_limit(harness.runtime, {max_calls: 50})` |
 | `release_captain` | `tool_using` | `native` | true | 3 | adaptive `{initial: 8, max: 40, extend_by: 4}` | enabled, threshold 3 | both `nil`; opt-in `with_dry_run` shadow runs |
 
 ### Captain presets
@@ -1301,6 +1338,13 @@ when it reaches its next terminal decision.
 A callback that throws is attempted once. If it also fails while recording a
 thrown loop error, the propagated error retains both causes.
 
+`std/agent/failure_types` names the loop's structured errors. The
+`AgentLoopTerminalCallbackFailure` record carries `cause.terminal_error` and
+`cause.callback_error`. `AgentLoopProtocolFailure` identifies an empty provider
+request refused before dispatch. `AgentLoopFailure` combines those records
+with `AgentLoopCancelledFailure` and the loop's string errors. Misspelled or
+missing record fields fail checking.
+
 ### Example with retry
 
 ```harn
@@ -1617,7 +1661,11 @@ default, and declared host-absolute paths outside the workspace require an
 explicit `external_roots` allowance. Each root carries an `access` mode,
 `read` (the default, and the meaning of a bare path string) or `read_write`;
 a call that is not read-only is refused under a `read` root with
-`external_root_read_only`. Ask decisions call
+`external_root_read_only`. The one exception is a command-running call
+(`process_exec`) whose child provably cannot write the declared path: the
+active policy is `os_hardened`, the platform is macOS or Linux, and the
+backend's installed rules refuse every write to that path. Unmeasured is
+refused, never admitted. Ask decisions call
 `session/request_permission`; the host request and the transcript event both
 carry a `policyDecision` receipt with matched rule and rationale.
 

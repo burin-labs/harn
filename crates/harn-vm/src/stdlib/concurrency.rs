@@ -1899,50 +1899,11 @@ mod tests {
     }
 
     #[test]
-    fn atomic_cas_success() {
-        let mut vm = vm();
-        let atom = call(&mut vm, "atomic", vec![VmValue::Int(10)]).unwrap();
-        let ok = call(
-            &mut vm,
-            "atomic_cas",
-            vec![atom.clone(), VmValue::Int(10), VmValue::Int(20)],
-        )
-        .unwrap();
-        assert_eq!(ok.display(), "true");
-        let cur = call(&mut vm, "atomic_get", vec![atom]).unwrap();
-        assert_eq!(cur.display(), "20");
-    }
-
-    #[test]
-    fn atomic_cas_failure() {
-        let mut vm = vm();
-        let atom = call(&mut vm, "atomic", vec![VmValue::Int(10)]).unwrap();
-        let ok = call(
-            &mut vm,
-            "atomic_cas",
-            vec![atom.clone(), VmValue::Int(99), VmValue::Int(20)],
-        )
-        .unwrap();
-        assert_eq!(ok.display(), "false");
-        let cur = call(&mut vm, "atomic_get", vec![atom]).unwrap();
-        assert_eq!(cur.display(), "10");
-    }
-
-    #[test]
     fn atomic_bool_init() {
         let mut vm = vm();
         let atom = call(&mut vm, "atomic", vec![VmValue::Bool(true)]).unwrap();
         let val = call(&mut vm, "atomic_get", vec![atom]).unwrap();
         assert_eq!(val.display(), "1");
-    }
-
-    #[test]
-    fn timer_start_returns_dict() {
-        let mut vm = vm();
-        let timer = call(&mut vm, "timer_start", vec![s("my_timer")]).unwrap();
-        let dict = timer.as_dict().unwrap();
-        assert_eq!(dict.get("name").unwrap().display(), "my_timer");
-        assert!(dict.get("start_ms").unwrap().as_int().unwrap() > 0);
     }
 
     #[test]

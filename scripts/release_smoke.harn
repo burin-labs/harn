@@ -21,6 +21,7 @@ pub type ReleaseSmokeConfig = {
   step_timeout_ms: int,
   watch_timeout_ms: int,
   watch_target?: string,
+  cold_cache_dir: string?,
 }
 
 pub type ReleaseSmokeReport = {platform: string, steps: list, failed: list, success: bool}
@@ -45,13 +46,19 @@ fn arg_spec() {
           parse: "int",
           default: DEFAULT_WATCH_TIMEOUT_MS,
         },
+        {
+          kind: "switch",
+          name: "require_embedded_stdlib",
+          long: "--require-embedded-stdlib",
+          default: false,
+        },
       ],
     },
   )
 }
 
 fn usage() -> string {
-  return "usage: harn run scripts/release_smoke.harn -- --candidate PATH [--step-timeout-ms MS] [--watch-timeout-ms MS]"
+  return "usage: harn run scripts/release_smoke.harn -- --candidate PATH [--step-timeout-ms MS] [--watch-timeout-ms MS] [--require-embedded-stdlib]"
 }
 
 fn display_platform(value: string) -> string {
@@ -195,8 +202,64 @@ fn watch_step(config: ReleaseSmokeConfig, adapters: any) {
     }
 }
 
+const COLD_FIRST_RUN_STEP = "harn run tests/smoke/agent_loop.harn on a cold cache"
+
+/**
+ * A distributed binary carries the stdlib precompiled, so its first run on a
+ * new machine compiles no stdlib module (harn#9652). The agent loop imports
+ * the agent stack; on an empty `HARN_CACHE_DIR` it may leave its own entry
+ * chunk there, but no `.harnmod`. A binary built without `embedded-stdlib`
+ * leaves about 150.
+ */
+fn cold_first_run_step(
+  fs: HarnessFs,
+  tools: HarnessTools,
+  clock: HarnessClock,
+  config: ReleaseSmokeConfig,
+  adapters: any,
+) {
+  const cache = config.cold_cache_dir ?? ""
+  if cache == "" {
+    return command_result_fail(2, "release-smoke: cold_cache_dir is required")
+      + {name: COLD_FIRST_RUN_STEP, timed_out: false}
+  }
+  const result = command_step(
+    tools,
+    clock,
+    COLD_FIRST_RUN_STEP,
+    [config.candidate, "run", "tests/smoke/agent_loop.harn"],
+    command_options(config, adapters.run)
+      + {env: {HARN_LLM_CALLS_DISABLED: "1", HARN_CACHE_DIR: cache}},
+  )
+  if !(result?.success ?? false) {
+    return result
+  }
+  // The run must leave its entry chunk in the cache it was pointed at.
+  // scan-refused: an empty walk fails the step below.
+  const files = fs.walk(cache).filter({ entry -> entry.is_file }).to_list()
+  if files.count == 0 {
+    return command_result_fail(
+      1,
+      "the run wrote nothing under HARN_CACHE_DIR=" + cache
+        + ", so this step cannot tell which cache it used",
+    )
+      + {name: COLD_FIRST_RUN_STEP, timed_out: false}
+  }
+  const compiled = files.filter({ entry -> entry.path.ends_with(".harnmod") }).count
+  if compiled > 0 {
+    return command_result_fail(
+      1,
+      to_string(compiled)
+        + " stdlib module artifact(s) compiled on a cold first run; build the binary with `--features embedded-stdlib`",
+    )
+      + {name: COLD_FIRST_RUN_STEP, timed_out: false}
+  }
+  return result
+}
+
 /** Execute every release capability and retain an attributable result for each one. */
 pub fn run_release_smoke(
+  fs: HarnessFs,
   tools: HarnessTools,
   clock: HarnessClock,
   config: ReleaseSmokeConfig,
@@ -213,6 +276,9 @@ pub fn run_release_smoke(
       command_options(config, resolved_adapters.run),
     )
     steps = steps + [result]
+  }
+  if config.cold_cache_dir != nil {
+    steps = steps + [cold_first_run_step(fs, tools, clock, config, resolved_adapters)]
   }
   steps = steps + [watch_step(config, resolved_adapters)]
   const failed = steps.filter({ step -> !(step?.success ?? false) })
@@ -277,8 +343,16 @@ fn main(harness: Harness) -> int {
     watch_target,
     "fn main(harness: Harness) {\n  harness.stdio.println(\"watch boot\")\n}\n",
   )
+  // Only a distributed binary carries the precompiled stdlib; the debug
+  // binary the residual audit smokes does not.
+  let cold_cache_dir: string? = nil
+  if options.require_embedded_stdlib ?? false {
+    cold_cache_dir = path_join(temp, "cold-cache")
+    harness.fs.mkdir(cold_cache_dir)
+  }
   const report = try {
     run_release_smoke(
+      harness.fs,
       harness.tools,
       harness.clock,
       {
@@ -288,6 +362,7 @@ fn main(harness: Harness) -> int {
         step_timeout_ms: step_timeout_ms,
         watch_timeout_ms: watch_timeout_ms,
         watch_target: watch_target,
+        cold_cache_dir: cold_cache_dir,
       },
     )
   } finally {

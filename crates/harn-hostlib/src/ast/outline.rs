@@ -51,13 +51,7 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     })?;
 
     let source = read_source(&path_str, 0)?;
-    let tree = parse_source(&source, language)?;
-    let symbols = extract(&tree, &source, language);
-    let mut items = build_outline(symbols);
-    if max_depth > 0 {
-        truncate_depth(&mut items, max_depth as usize, 1);
-    }
-
+    let items = outline_source(&source, language, max_depth as usize)?;
     let items_list: Vec<VmValue> = items.iter().map(OutlineItem::to_vm_value).collect();
 
     Ok(build_dict([
@@ -65,6 +59,21 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
         ("language", str_value(language.name())),
         ("items", VmValue::List(Arc::new(items_list))),
     ]))
+}
+
+/// Parse `source` and fold its symbols into an outline that keeps at most
+/// `max_depth` levels (`0` keeps all).
+pub(super) fn outline_source(
+    source: &str,
+    language: Language,
+    max_depth: usize,
+) -> Result<Vec<OutlineItem>, HostlibError> {
+    let tree = parse_source(source, language)?;
+    let mut items = build_outline(extract(&tree, source, language));
+    if max_depth > 0 {
+        truncate_depth(&mut items, max_depth, 1);
+    }
+    Ok(items)
 }
 
 /// Fold a flat, document-ordered symbol list into a tree using each

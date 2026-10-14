@@ -1,0 +1,358 @@
+import { agent_input_guardrail_check } from "std/agent/guardrails"
+import { MissingToolCallRecoveryOptions } from "std/agent/options_types"
+import { agent_scratchpad_reorganize } from "std/agent/scratchpad"
+import { agent_stance_default_consent_check } from "std/agent/stance"
+import { self_consistency } from "std/llm/ensemble"
+import { with_repair, with_result_schema } from "std/llm/handlers"
+import { missing_tool_call_classifier } from "std/llm/missing_tool_call"
+import { refine_prompt } from "std/llm/refine"
+import { pairwise_rerank } from "std/llm/rerank"
+import { llm_text, with_llm_script } from "std/testing"
+
+fn run_case(harness: Harness, provider: string, model: string) {
+  const session = harness.agent.open("current-defaults-" + harness.random.uuid())
+  harness.agent.set_scratchpad(
+    session,
+    {
+      schema: "harn.agent_scratchpad.v1",
+      goals: [{text: "Inspect a file", source_ref: "user:initial"}],
+      open_items: [],
+      facts: [],
+      refs: [{id: "user:initial", kind: "user_input", label: "Inspect a file"}],
+    },
+  )
+  const request = {
+    session_id: session,
+    iteration: 1,
+    text: "I will inspect the file now.",
+    visible_text: nil,
+    tools: [{name: "inspect", description: "Inspect a file"}],
+    tool_names: ["inspect"],
+  }
+  with_llm_script(
+    harness.llm,
+    [
+      llm_text("Write a concise welcome.\nDIFF: shortened.")
+        + {provider: provider, model: model},
+      llm_text(
+        json_stringify(
+          {
+            schema: "harn.agent_scratchpad.v1",
+            goals: [{text: "Inspect a file", source_ref: "user:initial"}],
+            open_items: [],
+            facts: [],
+            refs: [{id: "user:initial", kind: "user_input", label: "Inspect a file"}],
+          },
+        ),
+      )
+        + {provider: provider, model: model},
+      llm_text(
+        json_stringify(
+          {
+            answers: {
+              intended: {verdict: true, confidence: 0.95, evidence: "explicit inspection intent"},
+              tool: {choice: "inspect", confidence: 0.95, evidence: "inspection tool"},
+            },
+          },
+        ),
+      )
+        + {provider: provider, model: model},
+    ],
+    { ->
+      const refined = refine_prompt(
+        harness.llm,
+        {provider: provider, user_prompt: "Write a concise welcome message."},
+      )
+      assert(refined.ok, "refinement must reach the current provider default")
+      assert_eq(refined.model, model)
+      const reorganized = agent_scratchpad_reorganize(
+        harness.agent,
+        harness.llm,
+        {session_id: session, task: "Inspect a file"},
+        {provider: provider, scratchpad: {enabled: true}},
+        1,
+      )
+      assert(reorganized.ok, "scratchpad reorganization must reach the provider")
+      const classified = missing_tool_call_classifier(harness, {provider: provider})(request)
+      assert(classified != nil)
+      assert_eq(classified.action, "tool_call_intended")
+      assert_eq(classified.tool_name, "inspect")
+      assert_eq(classified.decision?.kind, "answered")
+      assert_eq(len(harness.llm.mock_calls()), 3, "all three public callers must dispatch")
+    },
+  )
+  with_llm_script(
+    harness.llm,
+    [],
+    { ->
+      const explicit_refine = try {
+        refine_prompt(harness.llm, "Write a welcome.", {provider: provider, temperature: 0.0})
+      }
+      assert(is_err(explicit_refine), "explicit unsupported sampling must refuse")
+      const explicit_scratchpad = agent_scratchpad_reorganize(
+        harness.agent,
+        harness.llm,
+        {session_id: session, task: "Inspect a file"},
+        {provider: provider, scratchpad: {enabled: true, reorganizer: {temperature: 0.0}}},
+        2,
+      )
+      assert_eq(explicit_scratchpad.status, "llm_error")
+      const explicit_classified = missing_tool_call_classifier(
+        harness,
+        {provider: provider, temperature: 0.0},
+      )(
+        request,
+      )
+      assert(explicit_classified != nil)
+      const decision = explicit_classified.decision
+      if decision != nil && decision.kind == "unavailable" {
+        assert_eq(decision.reason, "unsupported_options")
+      } else {
+        throw "explicit classifier sampling must refuse before dispatch"
+      }
+      assert_eq(len(harness.llm.mock_calls()), 0, "explicit refusals precede dispatch")
+    },
+  )
+}
+
+fn unknown_effort_case(harness: Harness, effort: string?) {
+  const model = "deepseek-ai/DeepSeek-V4-Pro-0813"
+  const capabilities = harness.llm.provider_capabilities("together", model)
+  assert_eq(capabilities.reasoning_effort_levels, [])
+  let config: MissingToolCallRecoveryOptions = {provider: "together", model: model}
+  if effort != nil {
+    config = config + {effort: effort}
+  }
+  with_llm_script(
+    harness.llm,
+    [
+      llm_text(
+        json_stringify(
+          {
+            answers: {
+              intended: {verdict: true, confidence: 0.95, evidence: "explicit inspection intent"},
+              tool: {choice: "inspect", confidence: 0.95, evidence: "inspection tool"},
+            },
+          },
+        ),
+      )
+        + {provider: "together", model: model},
+    ],
+    { ->
+      const result = missing_tool_call_classifier(harness, config)(
+        {
+          session_id: "unknown-effort-" + harness.random.uuid(),
+          iteration: 1,
+          text: "I will inspect the file now.",
+          visible_text: nil,
+          tools: [{name: "inspect", description: "Inspect a file"}],
+          tool_names: ["inspect"],
+        },
+      )
+      assert_eq(result?.decision?.kind, "answered")
+      assert_eq(result?.tool_name, "inspect")
+      const calls = harness.llm.mock_calls()
+      assert_eq(len(calls), 1, "unknown effort still dispatches")
+      assert_eq(
+        calls[0].thinking,
+        if effort == nil {
+          {mode: "disabled"}
+        } else {
+          {mode: "effort", level: effort}
+        },
+        "unknown ladder preserves omitted or explicit effort",
+      )
+      assert_eq(calls[0].max_tokens, 192)
+    },
+  )
+}
+
+fn internal_defaults_case(harness: Harness, provider: string, model: string) {
+  const scripted = { text -> llm_text(text) + {provider: provider, model: model} }
+  with_llm_script(
+    harness.llm,
+    [
+      scripted(
+        json_stringify({tripwire: true, reason: "block", label: "unsafe", confidence: 0.99}),
+      ),
+      scripted(json_stringify({consent: "express", reasoning: "explicit permission"})),
+      scripted(json_stringify({winner: "A", confidence: 0.9, reasoning: "stronger answer"})),
+      scripted("YES"),
+      scripted("YES"),
+      scripted("first"),
+      scripted("repaired"),
+      scripted("invalid"),
+      scripted(json_stringify({answer: "fixed"})),
+    ],
+    { ->
+      const guardrail = agent_input_guardrail_check(
+        harness.agent,
+        harness.llm,
+        "Block this request.",
+        nil,
+        {provider: provider},
+      )
+      assert(guardrail.typed_checkpoint.ok, "guardrail must reach classification")
+      assert(guardrail.tripwire, "reached classifier must block")
+      const consent = agent_stance_default_consent_check(
+        harness.agent,
+        harness.llm,
+        "Inspect the requested file.",
+        "default-consent",
+        {provider: provider},
+      )
+      assert_eq(consent.verdict, "grant")
+      const ranking = pairwise_rerank(harness, ["strong", "weak"], {provider: provider})
+      assert_eq(ranking.ranked[0], "strong")
+      const vote = self_consistency(
+        harness.agent,
+        harness.llm,
+        "Answer YES.",
+        nil,
+        {n: 2, parallel: false, call_opts: {provider: provider}, extract: { text -> text }},
+      )
+      assert(vote.ok)
+      assert_eq(vote.answer_count, 2)
+      const attempts = harness.runtime.atomic(0)
+      const repair = with_repair(
+        harness,
+        { call ->
+          const response = harness.llm.call(call.prompt, call.system, call.opts)
+          const prior = harness.runtime.atomic_add(attempts, 1)
+          return if prior == 0 {
+            {ok: false, status: "schema_validation", error: {message: "retry"}}
+          } else {
+            {ok: true, value: response}
+          }
+        },
+        {},
+      )
+      const repaired = repair({prompt: "Repair.", system: nil, opts: {provider: provider}})
+      assert(repaired.ok && repaired.repair_attempted)
+      assert_eq(repaired.value.text, "repaired")
+      const schema = {type: "object", required: ["answer"], properties: {answer: {type: "string"}}}
+      const validate = with_result_schema(
+        harness,
+        { call -> {ok: true, value: harness.llm.call(call.prompt, call.system, call.opts)} },
+        schema,
+        {max_attempts: 2},
+      )
+      const validated = validate({prompt: "Return JSON.", system: nil, opts: {provider: provider}})
+      assert(validated.result_schema.valid)
+      assert_eq(validated.result_schema.attempts, 2)
+      assert_eq(validated.value.data.answer, "fixed")
+      const calls = harness.llm.mock_calls()
+      assert_eq(len(calls), 9, "every helper and both repair attempts must dispatch")
+      for call in calls {
+        assert_eq(call.temperature, nil, "unsupported defaults must remain omitted")
+      }
+    },
+  )
+  with_llm_script(
+    harness.llm,
+    [],
+    { ->
+      const refused = try {
+        agent_input_guardrail_check(
+          harness.agent,
+          harness.llm,
+          "Block this request.",
+          nil,
+          {provider: provider, temperature: 0.0, fail_open: false},
+        )
+      }
+      if is_err(refused) {
+        const message = to_string(unwrap_err(refused))
+        assert(contains(message, "temperature") && contains(message, "not supported"))
+      } else {
+        const checkpoint = unwrap(refused).typed_checkpoint
+        assert(!checkpoint.ok)
+        assert_eq(checkpoint.error_category, "invalid_request")
+      }
+      assert_eq(len(harness.llm.mock_calls()), 0, "explicit unsupported setting must refuse")
+    },
+  )
+}
+
+fn declared_sampling_case(harness: Harness) {
+  with_llm_script(
+    harness.llm,
+    [
+      llm_text(json_stringify({tripwire: false, reason: "safe"}))
+        + {provider: "anthropic", model: "claude-haiku-4-5"},
+      llm_text(json_stringify({tripwire: false, reason: "safe"}))
+        + {provider: "anthropic", model: "claude-haiku-4-5"},
+    ],
+    { ->
+      const result = agent_input_guardrail_check(
+        harness.agent,
+        harness.llm,
+        "Inspect a file.",
+        nil,
+        {provider: "anthropic", model: "claude-haiku-4-5"},
+      )
+      assert(result.typed_checkpoint.ok)
+      const explicit = agent_input_guardrail_check(
+        harness.agent,
+        harness.llm,
+        "Inspect a file.",
+        nil,
+        {provider: "anthropic", model: "claude-haiku-4-5", temperature: 0.25},
+      )
+      assert(explicit.typed_checkpoint.ok)
+      const calls = harness.llm.mock_calls()
+      assert_eq(len(calls), 2)
+      assert_eq(calls[0].temperature, 0.0, "known supported default proves the measured field")
+      assert_eq(calls[1].temperature, 0.25, "explicit setting must survive the shared boundary")
+    },
+  )
+}
+
+fn haiku_classifier_case(harness: Harness) {
+  with_llm_script(
+    harness.llm,
+    [
+      llm_text(
+        json_stringify(
+          {
+            answers: {
+              intended: {verdict: true, confidence: 0.95, evidence: "inspection intent"},
+              tool: {choice: "inspect", confidence: 0.95, evidence: "inspection tool"},
+            },
+          },
+        ),
+      )
+        + {provider: "anthropic", model: "claude-haiku-5-5"},
+    ],
+    { ->
+      const result = missing_tool_call_classifier(
+        harness,
+        {provider: "anthropic", model: "claude-haiku-5-5"},
+      )(
+        {
+          session_id: "haiku-classifier-" + harness.random.uuid(),
+          iteration: 1,
+          text: "I will inspect the file now.",
+          visible_text: nil,
+          tools: [{name: "inspect", description: "Inspect a file"}],
+          tool_names: ["inspect"],
+        },
+      )
+      assert_eq(result?.decision?.kind, "answered")
+      assert_eq(result?.tool_name, "inspect")
+      assert_eq(len(harness.llm.mock_calls()), 1)
+    },
+  )
+}
+
+pipeline test(harness: Harness) {
+  run_case(harness, "openai", "gpt-6-luna")
+  run_case(harness, "anthropic", "claude-sonnet-5-5")
+  unknown_effort_case(harness, "low")
+  unknown_effort_case(harness, nil)
+  internal_defaults_case(harness, "openai", "gpt-6-luna")
+  internal_defaults_case(harness, "anthropic", "claude-sonnet-5-5")
+  declared_sampling_case(harness)
+  haiku_classifier_case(harness)
+  harness.stdio.println("current defaults dispatch; explicit unsupported sampling refuses")
+}

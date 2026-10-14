@@ -215,7 +215,7 @@ impl Linter<'_> {
     }
 
     fn expr_has_background_flag(node: &SNode) -> bool {
-        matches!(&node.node, Node::DictLiteral(entries) if entries.iter().any(|entry| Self::dict_key_name(&entry.key).as_deref() == Some("background") && matches!(entry.value.node, Node::BoolLiteral(true))))
+        matches!(&node.node, Node::DictLiteral(entries) if entries.iter().any(|entry| crate::rules::dict_keys::key_name(&entry.key).as_deref() == Some("background") && matches!(entry.value.node, Node::BoolLiteral(true))))
     }
 
     fn body_has_long_running_cleanup(&self, body: &[SNode]) -> bool {
@@ -291,14 +291,5 @@ impl Linter<'_> {
         harn_parser::visit::immediate_children(node)
             .into_iter()
             .any(|child| self.node_calls_cancel_handle(child))
-    }
-
-    pub(super) fn dict_key_name(node: &SNode) -> Option<String> {
-        match &node.node {
-            Node::Identifier(value)
-            | Node::StringLiteral(value)
-            | Node::RawStringLiteral(value) => Some(value.clone()),
-            _ => None,
-        }
     }
 }

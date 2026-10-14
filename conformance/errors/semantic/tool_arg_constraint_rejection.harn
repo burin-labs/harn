@@ -16,6 +16,9 @@ fn list_tools() {
 }
 
 pipeline test(harness: Harness, task: unknown) {
+  harness.llm.mock_enqueue({
+    tool_calls: [{id: "outside-argument-scope", name: "list_directory", arguments: {path: "."}}],
+  })
   const result = agent_loop(
     harness,
     "Inspect the workspace",

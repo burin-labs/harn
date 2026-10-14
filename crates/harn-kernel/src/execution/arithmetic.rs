@@ -85,7 +85,28 @@ pub(super) fn sub(a: RuntimeValue, b: RuntimeValue) -> Result<RuntimeValue, Diag
 }
 
 pub(super) fn mul(a: RuntimeValue, b: RuntimeValue) -> Result<RuntimeValue, Diagnostic> {
-    numeric(a, b, i64::checked_mul, |a, b| a * b)
+    match (a, b) {
+        (RuntimeValue::String(text), RuntimeValue::Int(count))
+        | (RuntimeValue::Int(count), RuntimeValue::String(text)) => {
+            if text.is_empty() || count <= 0 {
+                return Ok(RuntimeValue::String(Arc::from("")));
+            }
+            let count = usize::try_from(count).map_err(|_| {
+                diagnostic("value_byte_limit", "string repetition count is too large")
+            })?;
+            let length = text.len().checked_mul(count).ok_or_else(|| {
+                diagnostic("value_byte_limit", "string repetition length overflow")
+            })?;
+            if length > MAX_VALUE_BYTES {
+                return Err(diagnostic(
+                    "value_byte_limit",
+                    "string repetition exceeds the portable value byte limit",
+                ));
+            }
+            Ok(RuntimeValue::String(Arc::from(text.repeat(count))))
+        }
+        (a, b) => numeric(a, b, i64::checked_mul, |a, b| a * b),
+    }
 }
 
 pub(super) fn div(a: RuntimeValue, b: RuntimeValue) -> Result<RuntimeValue, Diagnostic> {
@@ -96,18 +117,22 @@ pub(super) fn div(a: RuntimeValue, b: RuntimeValue) -> Result<RuntimeValue, Diag
 }
 
 pub(super) fn modulo(a: RuntimeValue, b: RuntimeValue) -> Result<RuntimeValue, Diagnostic> {
-    if matches!((&a, &b), (RuntimeValue::Int(_), RuntimeValue::Int(0))) {
-        return Err(diagnostic("division_by_zero", "integer modulo by zero"));
+    if matches!(&a, RuntimeValue::Int(_) | RuntimeValue::Float(_))
+        && match &b {
+            RuntimeValue::Int(value) => *value == 0,
+            RuntimeValue::Float(value) => *value == 0.0,
+            _ => false,
+        }
+    {
+        return Err(diagnostic("division_by_zero", "modulo by zero"));
     }
     numeric(a, b, |a, b| Some(a.wrapping_rem(b)), |a, b| a % b)
 }
 
 pub(super) fn pow(a: RuntimeValue, b: RuntimeValue) -> Result<RuntimeValue, Diagnostic> {
     match (a, b) {
-        (RuntimeValue::Int(a), RuntimeValue::Int(b)) if b >= 0 => {
-            let exponent = u32::try_from(b).map_err(|_| {
-                diagnostic("numeric_range", "integer exponent is outside the u32 range")
-            })?;
+        (RuntimeValue::Int(a), RuntimeValue::Int(b)) if u32::try_from(b).is_ok() => {
+            let exponent = b as u32;
             Ok(a.checked_pow(exponent).map_or_else(
                 || RuntimeValue::Float((a as f64).powf(exponent as f64)),
                 RuntimeValue::Int,
@@ -115,6 +140,9 @@ pub(super) fn pow(a: RuntimeValue, b: RuntimeValue) -> Result<RuntimeValue, Diag
         }
         (RuntimeValue::Int(a), RuntimeValue::Int(b)) => {
             Ok(RuntimeValue::Float((a as f64).powf(b as f64)))
+        }
+        (RuntimeValue::Float(a), RuntimeValue::Int(b)) if i32::try_from(b).is_ok() => {
+            Ok(RuntimeValue::Float(a.powi(b as i32)))
         }
         (a, b) => numeric(a, b, |_, _| None, f64::powf),
     }

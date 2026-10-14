@@ -63,6 +63,7 @@ wait_for() {
 }
 
 warm_runs() { grep -c '^profile=full ' "$record" || true; }
+warm_recorded() { [[ "$(warm_runs)" -ge 1 ]]; }
 
 # --- Session start returns without waiting on the expensive phases ----------
 
@@ -90,7 +91,13 @@ if [[ "$parsed_message" != "Worktree configured in "* ]]; then
 fi
 
 # The hook returned; the full profile is still gated open in the background.
-wait_for "the background warm to start" test -d "$lock_dir"
+# The hook takes the lock before it detaches the warm, so the lock proves
+# nothing about the child. The child's own record line is the start signal.
+wait_for "the background warm to start" warm_recorded
+if [[ ! -d "$lock_dir" ]]; then
+  echo "the background warm is running without holding the warm lock" >&2
+  exit 1
+fi
 if [[ "$(warm_runs)" != "1" ]]; then
   echo "expected exactly one background warm run, got $(warm_runs)" >&2
   cat "$record" >&2

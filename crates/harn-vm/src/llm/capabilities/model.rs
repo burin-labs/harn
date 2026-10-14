@@ -13,6 +13,16 @@ use serde::Deserialize;
 use super::decision::{DecisionLimits, DecisionProtocol, DecisionQuestionKind};
 use super::rule::ProviderRule;
 
+/// Whether a generation-option observation applies to a stable endpoint or
+/// only to the compatible backends available in a changing routing pool.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PortableOptionQualification {
+    #[default]
+    StableEndpoint,
+    ChangingPool,
+}
+
 /// Why a self-hosted row chose native vs text tools.
 ///
 /// A capability row is a decision about how every request on that route is
@@ -497,6 +507,8 @@ pub enum ComputerUseStyle {
     Grounded,
     /// The plain function-schema `computer` tool (the universal default).
     Function,
+    /// Anthropic `computer_toolset_20260801` with namespaced member calls.
+    NativeAnthropicToolset,
 }
 
 /// Screenshot downscaling policy applied before an image reaches the model (the
@@ -862,6 +874,11 @@ pub struct Capabilities {
     /// Portable generation options that this route permits normally but fixes
     /// to provider-owned values while reasoning is enabled.
     pub reasoning_excluded_portable_options: Vec<super::PortableOption>,
+    /// See [`ProviderRule::portable_option_effort_support`].
+    pub portable_option_effort_support:
+        BTreeMap<super::PortableOption, Vec<super::ReasoningEffort>>,
+    /// Scope of the portable option declarations and their empirical probes.
+    pub portable_option_qualification: PortableOptionQualification,
     pub seed_supported: bool,
     pub top_k_supported: bool,
     pub temperature_supported: bool,
@@ -871,7 +888,6 @@ pub struct Capabilities {
     pub stop_supported: bool,
     pub advanced_generation_options: Vec<super::PortableOption>,
     pub allowed_tool_choice_modes: Vec<String>,
-    pub requires_tool_result_adjacency: bool,
     pub supports_parallel_tool_calls: bool,
     /// Whether the request must explicitly suppress parallel calls on the wire.
     pub requires_parallel_tool_calls_false: bool,
@@ -1006,6 +1022,8 @@ impl Default for Capabilities {
             reasoning_text_promotable: false,
             reasoning_wire_format: None,
             reasoning_excluded_portable_options: Vec::new(),
+            portable_option_effort_support: BTreeMap::new(),
+            portable_option_qualification: PortableOptionQualification::default(),
             seed_supported: true,
             top_k_supported: true,
             temperature_supported: true,
@@ -1015,7 +1033,6 @@ impl Default for Capabilities {
             stop_supported: true,
             advanced_generation_options: Vec::new(),
             allowed_tool_choice_modes: Vec::new(),
-            requires_tool_result_adjacency: false,
             supports_parallel_tool_calls: true,
             requires_parallel_tool_calls_false: false,
             tools_exclude_response_format: false,

@@ -28,6 +28,8 @@ pub mod a2a;
 pub mod actor_chain;
 pub mod agent_events;
 mod agent_lifecycle_cleanup;
+#[cfg(test)]
+mod agent_session_auxiliary_usage_tests;
 pub(crate) mod agent_session_journal;
 pub mod agent_session_restore;
 pub mod agent_session_spend;
@@ -83,6 +85,9 @@ pub mod harness_system;
 pub mod harness_tenant;
 pub mod host_attachments;
 pub mod host_stdio;
+mod source_compile;
+pub mod task_retry;
+pub(crate) mod tool_call_mutations;
 
 /// Placement policy for child-interpreter subtasks.
 ///
@@ -132,6 +137,8 @@ pub use runtime_content::{
     runtime_content_fingerprint, RuntimeBuildFeatures, RuntimeCompatibilityFingerprint,
     RuntimeContentFingerprint,
 };
+pub mod known_paths;
+pub mod package_scripts;
 mod persistent_state;
 pub mod personas;
 pub mod portable;
@@ -155,6 +162,7 @@ pub(crate) mod secret_patterns;
 pub mod secrets;
 pub mod security;
 pub mod session_bundle;
+pub mod session_publication;
 pub mod session_recap;
 pub mod session_timeline;
 pub mod sessions;
@@ -212,6 +220,9 @@ pub enum RuntimeInitError {
     Environment(environment_registry::EnvironmentValidationError),
     /// A configured cache directory cannot be honored.
     CacheDir(bytecode_cache::CacheDirError),
+    /// No standard library is installed; the host never called
+    /// `harn_stdlib::install()`.
+    StdlibCatalog(harn_stdlib_catalog::CatalogNotInstalled),
 }
 
 impl std::fmt::Display for RuntimeInitError {
@@ -219,6 +230,7 @@ impl std::fmt::Display for RuntimeInitError {
         match self {
             Self::Environment(error) => error.fmt(formatter),
             Self::CacheDir(error) => error.fmt(formatter),
+            Self::StdlibCatalog(error) => error.fmt(formatter),
         }
     }
 }
@@ -226,7 +238,9 @@ impl std::fmt::Display for RuntimeInitError {
 impl std::error::Error for RuntimeInitError {}
 
 /// Validate the Harn-owned environment namespace and initialize process-wide
-/// runtime assets through the same bootstrap boundary used by the CLI.
+/// runtime assets through the same bootstrap boundary used by the CLI. The
+/// host must have installed the standard library (`harn_stdlib::install()`)
+/// first; without one this fails instead of running with no stdlib.
 ///
 /// Returns a warning the caller should print once when startup succeeded but
 /// something degraded — today, that caching is off because no cache directory
@@ -234,6 +248,7 @@ impl std::error::Error for RuntimeInitError {}
 /// an operator who set `HARN_CACHE_DIR` gets a hard failure rather than a
 /// silent downgrade to no caching.
 pub fn initialize_runtime() -> Result<Option<&'static str>, RuntimeInitError> {
+    harn_modules::try_stdlib_catalog().map_err(RuntimeInitError::StdlibCatalog)?;
     environment_registry::validate_startup_environment().map_err(RuntimeInitError::Environment)?;
     let warning = bytecode_cache::check_cache_config().map_err(RuntimeInitError::CacheDir)?;
     initialize_runtime_assets();
@@ -275,10 +290,11 @@ pub mod waitpoints;
 pub mod windows_path;
 pub mod workspace_anchor;
 pub mod workspace_path;
+pub mod yaml;
 
 pub use persistent_state::{
     register_persistent_state_builtins_at_root, scope_persistent_state_root, PersistentStateRoot,
-    ScopedPersistentStateRoot,
+    ScopedPersistentStateRoot, SessionStoreScope,
 };
 pub use prepared_module::{
     PreparedModuleCache, PreparedModuleCacheStats, PreparedModuleGenerationStats,
@@ -374,7 +390,7 @@ pub use mcp_server::{
     reset_mcp_serve_publication, take_mcp_serve_metadata, take_mcp_serve_prompts,
     take_mcp_serve_registry, take_mcp_serve_rejection, take_mcp_serve_resource_templates,
     take_mcp_serve_resources, tool_registry_to_mcp_tools, McpPromptDef, McpResourceDef,
-    McpResourceTemplateDef, McpServer, McpServerMetadata, McpServerReload, McpToolSet,
+    McpResourceTemplateDef, McpScriptRegistry, McpScriptSurface, McpServerMetadata, McpToolSet,
 };
 pub use metadata::register_metadata_builtins;
 pub use observability::audit::{audit_events as audit_obs_events, AuditFinding, AuditFindingKind};
@@ -434,6 +450,7 @@ pub use sessions::{
     CreateSession, ExpireSession, Session, SessionAttributes, SessionError, SessionStore,
     TouchSession, SESSIONS_TOPIC,
 };
+pub use source_compile::{compile_source, compile_source_at_path, compile_source_named};
 /// The single owner of ignore policy for every Harn filesystem walk.
 ///
 /// Re-exported so embedders that enumerate files on behalf of Harn scripts
@@ -443,8 +460,8 @@ pub use stdlib::fs::ignore_policy;
 #[doc(hidden)]
 pub use stdlib::fs::invalidate_cached_file_text;
 pub use stdlib::hitl::{
-    append_hitl_response, ApprovalRequest, HitlHostResponse, HITL_APPROVALS_TOPIC,
-    HITL_DUAL_CONTROL_TOPIC, HITL_ESCALATIONS_TOPIC, HITL_QUESTIONS_TOPIC,
+    append_hitl_response, append_hitl_response_on, ApprovalRequest, HitlHostResponse,
+    HITL_APPROVALS_TOPIC, HITL_DUAL_CONTROL_TOPIC, HITL_ESCALATIONS_TOPIC, HITL_QUESTIONS_TOPIC,
 };
 /// Per-turn memo for turn-stable host reads. See [`stdlib::host::turn_cache`].
 pub use stdlib::host::turn_cache as host_turn_cache;
@@ -494,27 +511,27 @@ pub use tenant::{
 pub use triggers::{
     append_dispatch_cancel_request, begin_in_flight, binding_autonomy_budget_would_exceed,
     binding_budget_would_exceed, binding_version_as_of, classify_trigger_dlq_error,
-    clear_dispatcher_state, clear_orchestrator_budget, clear_trigger_registry, drain,
-    dynamic_deregister, dynamic_register, expected_predicate_cost_usd_micros, finish_in_flight,
-    install_manifest_triggers, install_orchestrator_budget, micros_to_usd,
-    note_autonomous_decision, note_orchestrator_budget_cost, orchestrator_budget_would_exceed,
-    parse_flow_control_duration, pause, pin_trigger_binding, provider_metadata,
-    record_predicate_cost_sample, redact_headers, register_provider_schemas,
-    registered_provider_metadata, registered_provider_schema_names, reset_binding_budget_windows,
-    reset_provider_catalog, resolve_live_or_as_of, resolve_live_trigger_binding,
-    resolve_trigger_binding_as_of, resume, run_trigger_harness_fixture, scheduler_in_flight_by_key,
-    scheduler_ready_stats_by_key, snapshot_dispatcher_stats, snapshot_orchestrator_budget,
-    snapshot_trigger_bindings, unpin_trigger_binding, usd_to_micros, worker_claims_topic_name,
-    worker_job_topic_name, worker_response_topic_name, ClaimedWorkerJob, DispatchCancelRequest,
-    DispatchError, DispatchOutcome, DispatchStatus, Dispatcher, DispatcherDrainReport,
-    DispatcherStatsSnapshot, ExtensionProviderPayload, FairnessKey, HeaderRedactionPolicy,
-    InboxIndex, OrchestratorBudgetConfig, OrchestratorBudgetSnapshot, ProviderCatalog,
-    ProviderCatalogError, ProviderId, ProviderMetadata, ProviderOutboundMethod, ProviderPayload,
-    ProviderRuntimeMetadata, ProviderSchema, ProviderSecretRequirement, ReadyKeyStats,
-    RecordedTriggerBinding, RetryPolicy, SchedulableJob, SchedulerKeyStat, SchedulerPolicy,
-    SchedulerSnapshot, SchedulerState, SchedulerStrategy, SignatureStatus,
-    SignatureVerificationMetadata, StreamEventPayload, TenantId, TraceId, TriggerBatchConfig,
-    TriggerBindingSnapshot, TriggerBindingSource, TriggerBindingSpec,
+    clear_dispatcher_state, clear_orchestrator_budget, clear_trigger_registry,
+    current_trigger_binding_snapshots, drain, dynamic_deregister, dynamic_register,
+    expected_predicate_cost_usd_micros, finish_in_flight, install_manifest_triggers,
+    install_orchestrator_budget, micros_to_usd, note_autonomous_decision,
+    note_orchestrator_budget_cost, orchestrator_budget_would_exceed, parse_flow_control_duration,
+    pause, pin_trigger_binding, provider_metadata, record_predicate_cost_sample, redact_headers,
+    register_provider_metadata, registered_provider_metadata, registered_provider_schema_names,
+    reset_binding_budget_windows, reset_provider_catalog, resolve_live_or_as_of,
+    resolve_live_trigger_binding, resolve_trigger_binding_as_of, resume,
+    run_trigger_harness_fixture, scheduler_in_flight_by_key, scheduler_ready_stats_by_key,
+    snapshot_dispatcher_stats, snapshot_orchestrator_budget, snapshot_trigger_bindings,
+    unpin_trigger_binding, usd_to_micros, worker_claims_topic_name, worker_job_topic_name,
+    worker_response_topic_name, ClaimedWorkerJob, DispatchCancelRequest, DispatchError,
+    DispatchOutcome, DispatchStatus, Dispatcher, DispatcherDrainReport, DispatcherStatsSnapshot,
+    ExtensionProviderPayload, FairnessKey, HeaderRedactionPolicy, InboxIndex,
+    OrchestratorBudgetConfig, OrchestratorBudgetSnapshot, ProviderCatalog, ProviderCatalogError,
+    ProviderId, ProviderMetadata, ProviderOutboundMethod, ProviderPayload, ProviderRuntimeMetadata,
+    ProviderSecretRequirement, ReadyKeyStats, RecordedTriggerBinding, RetryPolicy, SchedulableJob,
+    SchedulerKeyStat, SchedulerPolicy, SchedulerSnapshot, SchedulerState, SchedulerStrategy,
+    SignatureStatus, SignatureVerificationMetadata, StreamEventPayload, TenantId, TraceId,
+    TriggerBatchConfig, TriggerBindingSnapshot, TriggerBindingSource, TriggerBindingSpec,
     TriggerBudgetExhaustionStrategy, TriggerConcurrencyConfig, TriggerDebounceConfig,
     TriggerDispatchOutcome, TriggerEvent, TriggerEventId, TriggerExpressionSpec,
     TriggerFlowControlConfig, TriggerHandlerSpec, TriggerHarnessResult, TriggerId,
@@ -550,33 +567,6 @@ pub use vm::*;
 #[cfg(feature = "vm-bench-internals")]
 #[doc(hidden)]
 pub mod bench_internals;
-
-/// Lex, parse, type-check, and compile source to bytecode in one call.
-/// Bails on the first type error. For callers that need diagnostics
-/// rather than early exit, use `harn_parser::check_source` directly
-/// and then call `Compiler::new().compile(&program)`.
-pub fn compile_source(source: &str) -> Result<Chunk, String> {
-    let program = harn_parser::check_source_strict(source).map_err(|e| e.to_string())?;
-    Compiler::new().compile(&program).map_err(|e| e.to_string())
-}
-
-/// Same as [`compile_source`] but compiles a specific named pipeline as
-/// the program entry point instead of the default-pipeline-or-first
-/// selection rule. Returns a runtime error when no pipeline with
-/// `pipeline_name` exists in the source.
-pub fn compile_source_named(source: &str, pipeline_name: &str) -> Result<Chunk, String> {
-    let program = harn_parser::check_source_strict(source).map_err(|e| e.to_string())?;
-    let has_pipeline = program.iter().any(|sn| {
-        let (_, inner) = harn_parser::peel_attributes(sn);
-        matches!(&inner.node, harn_parser::Node::Pipeline { name, .. } if name == pipeline_name)
-    });
-    if !has_pipeline {
-        return Err(format!("no pipeline named `{pipeline_name}` in source"));
-    }
-    Compiler::new()
-        .compile_named(&program, pipeline_name)
-        .map_err(|e| e.to_string())
-}
 
 /// Lowers resolved Harn declarations to JSON Schema for public host boundaries.
 ///

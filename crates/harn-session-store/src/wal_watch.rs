@@ -1,15 +1,16 @@
-//! Read-only helpers for watching a file-backed session store from another
+//! Query-only helpers for watching a file-backed session store from another
 //! process.
 //!
 //! The writer connection is mutexed and already publishes in-process. A
 //! second process cannot hear that hook, so a watcher keeps its own reader
 //! and asks SQLite whether the file changed (`PRAGMA data_version`) before
-//! re-reading titles. Nothing here takes the store mutex or writes.
+//! re-reading titles. These helpers never modify session data or create a
+//! database; SQLite retains authority to checkpoint and clean up its WAL.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use rusqlite::Connection;
+use rusqlite::{Connection, OpenFlags};
 
 use super::sqlite::{read_session_meta, sqlite_sidecar_path};
 use super::store::{SessionMeta, StoreError, StoreResult};
@@ -29,10 +30,12 @@ pub fn wal_sidecar_path(database: &Path) -> PathBuf {
     sqlite_sidecar_path(database, "-wal")
 }
 
-/// Open a reader that will never write and can see WAL commits from others.
+/// Open a query-only reader that never creates a database.
 pub fn open_watch_reader(database: &Path) -> StoreResult<Connection> {
-    let conn =
-        Connection::open(database).map_err(|error| StoreError::Backend(error.to_string()))?;
+    // SQLite still needs writable connection authority for its final WAL
+    // checkpoint and cleanup. Omit CREATE; query_only blocks caller writes.
+    let conn = Connection::open_with_flags(database, OpenFlags::SQLITE_OPEN_READ_WRITE)
+        .map_err(|error| StoreError::Backend(error.to_string()))?;
     conn.busy_timeout(READER_BUSY_TIMEOUT)
         .map_err(|error| StoreError::Backend(error.to_string()))?;
     conn.pragma_update(None, "query_only", true)
@@ -80,6 +83,19 @@ mod tests {
     use crate::{CreateSession, SessionStore, SqliteSessionStore, UpdateSession};
     use tempfile::TempDir;
 
+    #[test]
+    fn a_watch_reader_does_not_create_a_missing_database() {
+        let directory = TempDir::new().unwrap();
+        let missing = directory.path().join("missing.sqlite");
+        assert!(!missing.exists());
+        let opened = open_watch_reader(&missing);
+        assert_eq!(
+            (opened.is_err(), missing.exists()),
+            (true, false),
+            "a watch reader must refuse a missing database without creating one"
+        );
+    }
+
     #[tokio::test]
     async fn reader_data_version_moves_when_another_connection_commits() {
         let dir = TempDir::new().expect("tempdir");
@@ -95,6 +111,19 @@ mod tests {
             .expect("create");
 
         let reader = open_watch_reader(&path).expect("open reader");
+        assert!(
+            reader
+                .execute(
+                    "UPDATE sessions SET title = 'reader mutation' WHERE id = 's1'",
+                    []
+                )
+                .is_err(),
+            "query_only rejects application writes"
+        );
+        assert_eq!(
+            describe_session(&reader, "s1").unwrap().title.as_deref(),
+            Some("before")
+        );
         let before = data_version(&reader).expect("version before");
         store
             .update(

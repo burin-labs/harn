@@ -1352,3 +1352,31 @@ fn omitting_the_importer_from_the_index_is_a_visible_gap_not_a_pass() {
         "a use whose AST was never walked must not appear: {files:?}"
     );
 }
+
+#[test]
+fn virtual_stdlib_paths_are_canonical_without_touching_disk() {
+    assert_eq!(canonical_path(Path::new("<std>")), PathBuf::from("<std>"));
+    assert_eq!(
+        canonical_path(Path::new("<stdlib>/agent/loop.harn")),
+        PathBuf::from("<stdlib>/agent/loop.harn")
+    );
+    assert_eq!(
+        canonical_path(Path::new("<stdlib>/agent")),
+        PathBuf::from("<stdlib>/agent")
+    );
+    assert!(!stdlib::is_embedded_stdlib_spelling(Path::new(
+        "<stdlibrary>/x"
+    )));
+    assert!(visibility::sibling_module_access(
+        Path::new("<stdlib>/agent/loop.harn"),
+        Path::new("<stdlib>/agent/options_types.harn")
+    ));
+    assert!(visibility::sibling_module_access(
+        Path::new("<std>/testing"),
+        Path::new("<std>/schema")
+    ));
+    assert!(!visibility::sibling_module_access(
+        Path::new("<std>/agent/loop"),
+        Path::new("<std>/schema")
+    ));
+}

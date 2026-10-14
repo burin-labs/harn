@@ -32,7 +32,7 @@ impl TypeChecker {
                 self.unused_predicate_error(stmt.span);
             }
             if idx + 1 == stmts.len() && !matches!(stmt.node, Node::ReturnStmt { .. }) {
-                self.check_node_with_expected(stmt, expected_tail, scope);
+                self.check_node_with_expected_inner(stmt, expected_tail, scope);
             } else {
                 self.check_node(stmt, scope);
             }
@@ -43,6 +43,18 @@ impl TypeChecker {
     }
 
     pub(in crate::typechecker) fn check_node_with_expected(
+        &mut self,
+        snode: &SNode,
+        expected: Option<&TypeExpr>,
+        scope: &mut TypeScope,
+    ) -> bool {
+        self.check_mutating_call_used_as_value(snode, scope);
+        self.check_node_with_expected_inner(snode, expected, scope)
+    }
+
+    /// `check_node_with_expected` for a block's tail, which is the block's
+    /// value only when a caller consumes it.
+    fn check_node_with_expected_inner(
         &mut self,
         snode: &SNode,
         expected: Option<&TypeExpr>,

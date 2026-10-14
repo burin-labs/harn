@@ -1,4 +1,5 @@
 use super::*;
+use crate::llm::helpers::message_view::{displays_as, MessageView};
 use crate::value::VmDictExt;
 
 pub(super) const DIRECTIVE_ENVELOPE_INSTRUCTIONS_ASSET: &str =
@@ -8,12 +9,11 @@ pub(super) const DIRECTIVE_NONCE_AUTHORITY_ASSET: &str =
 pub(crate) const DIRECTIVE_IDS_KEY: &str = "_harn_directive_ids";
 pub(crate) const DIRECTIVE_NONCE_KEY: &str = "_harn_directive_nonce";
 
-fn recorded_directive_nonce(messages: &[serde_json::Value]) -> Option<String> {
+fn recorded_directive_nonce<M: MessageView>(messages: &[M]) -> Option<String> {
     messages.iter().find_map(|message| {
         has_directive_commit_metadata(message)
-            .then(|| message.get(DIRECTIVE_NONCE_KEY))
+            .then(|| message.str_field(DIRECTIVE_NONCE_KEY))
             .flatten()
-            .and_then(serde_json::Value::as_str)
             .filter(|nonce| !nonce.is_empty())
             .map(str::to_string)
     })
@@ -35,15 +35,9 @@ pub(crate) fn directive_nonce_for_session(session_id: &str) -> String {
             .and_then(|transcript| transcript.as_dict())
             .and_then(|transcript| transcript.get("messages"))
             .and_then(|messages| match messages {
-                VmValue::List(messages) => Some(
-                    messages
-                        .iter()
-                        .map(crate::llm::vm_value_to_json)
-                        .collect::<Vec<_>>(),
-                ),
+                VmValue::List(messages) => recorded_directive_nonce(messages.as_slice()),
                 _ => None,
             })
-            .and_then(|messages| recorded_directive_nonce(&messages))
     });
 
     if let Some(recorded) = recorded {
@@ -70,23 +64,76 @@ pub(crate) fn directive_nonce_for_session(session_id: &str) -> String {
         .clone()
 }
 
+/// The session's directive contract for the system prompt: which nonce is
+/// authoritative, then how to read an envelope. A request whose system prompt
+/// states it sends its envelopes without restating it
+/// ([`elide_envelope_contract_stated_in_system`]).
 pub(super) fn directive_nonce_instructions(nonce: &str) -> String {
     let mut bindings = crate::value::DictMap::new();
     bindings.put_str("nonce", nonce);
-    crate::stdlib::template::render_stdlib_prompt_asset(
+    let authority = crate::llm::helpers::render_stdlib_prompt_asset(
         DIRECTIVE_NONCE_AUTHORITY_ASSET,
         Some(&bindings),
     )
-    .expect("directive nonce authority prompt asset is embedded and must render")
-    .trim_end()
-    .to_string()
+    .expect("directive nonce authority prompt asset is embedded and must render");
+    format!(
+        "{}\n{}",
+        authority.trim_end(),
+        directive_envelope_instructions()
+    )
+}
+
+/// Drop the envelope contract from each directive envelope in a request whose
+/// system prompt already states the session's complete directive contract.
+///
+/// Envelopes are rendered and persisted with the contract inline, so a
+/// transcript read anywhere stays self-describing. Every envelope a session
+/// accumulates used to restate it to the provider on every call; when this
+/// request's system prompt carries the contract, the copies are redundant.
+/// Decided per request from the two texts actually being sent, so a preview,
+/// a re-entered session, or a prompt that predates the contract can never
+/// leave an envelope without it.
+///
+/// The system prompt must carry the whole [`directive_nonce_instructions`]
+/// for `nonce`, not just the envelope text: a caller system string that quotes
+/// the envelope instructions without naming the authoritative nonce would
+/// otherwise strip the only contract the model sees. Only envelopes stamped
+/// with that same nonce are elided; an envelope under any other nonce keeps
+/// its inline contract.
+pub(crate) fn elide_envelope_contract_stated_in_system(
+    messages: &mut [serde_json::Value],
+    system: Option<&str>,
+    nonce: &str,
+) {
+    if !system.is_some_and(|system| system.contains(&directive_nonce_instructions(nonce))) {
+        return;
+    }
+    let inline = format!("\n{}\n", directive_envelope_instructions());
+    let nonce_attr = format!(" nonce=\"{nonce}\"");
+    for message in messages.iter_mut() {
+        let Some(content) = message.get("content").and_then(serde_json::Value::as_str) else {
+            continue;
+        };
+        if !content.starts_with("<context-directives ") {
+            continue;
+        }
+        let Some((open_tag, rest)) = content.split_once('>') else {
+            continue;
+        };
+        if !open_tag.ends_with(nonce_attr.as_str()) {
+            continue;
+        }
+        if let Some(directives) = rest.strip_prefix(inline.as_str()) {
+            message["content"] = serde_json::Value::String(format!("{open_tag}>\n{directives}"));
+        }
+    }
 }
 
 pub(super) fn directive_envelope_instructions() -> &'static str {
     static RENDERED: std::sync::OnceLock<String> = std::sync::OnceLock::new();
     RENDERED
         .get_or_init(|| {
-            crate::stdlib::template::render_stdlib_prompt_asset(
+            crate::llm::helpers::render_stdlib_prompt_asset(
                 DIRECTIVE_ENVELOPE_INSTRUCTIONS_ASSET,
                 None,
             )
@@ -274,11 +321,10 @@ pub(crate) fn strip_internal_message_metadata(messages: &mut [serde_json::Value]
     }
 }
 
-pub(crate) fn has_directive_commit_metadata(message: &serde_json::Value) -> bool {
+pub(crate) fn has_directive_commit_metadata<M: MessageView>(message: &M) -> bool {
     message
-        .get(DIRECTIVE_IDS_KEY)
-        .and_then(serde_json::Value::as_array)
-        .is_some_and(|ids| !ids.is_empty())
+        .list_len_field(DIRECTIVE_IDS_KEY)
+        .is_some_and(|len| len > 0)
 }
 
 pub(super) fn reminder_directive_text(reminder: &SystemReminder) -> String {
@@ -389,7 +435,10 @@ pub(crate) fn pending_reminders_from_session(session_id: Option<&str>) -> Vec<Sy
         let Some(dict) = event.as_dict() else {
             continue;
         };
-        if dict.get("kind").map(VmValue::display).as_deref() != Some(SYSTEM_REMINDER_EVENT_KIND) {
+        if !dict
+            .get("kind")
+            .is_some_and(|kind| displays_as(kind, SYSTEM_REMINDER_EVENT_KIND))
+        {
             continue;
         }
         invalid_count += 1;

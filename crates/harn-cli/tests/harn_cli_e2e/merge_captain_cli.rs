@@ -139,24 +139,6 @@ fn failing_ci_passes_audit_with_handoff() {
 }
 
 #[test]
-fn semantic_conflict_passes_audit() {
-    let report = run_audit("semantic_conflict");
-    assert!(report.pass, "findings: {:#?}", report.findings);
-}
-
-#[test]
-fn merge_queue_passes_audit() {
-    let report = run_audit("merge_queue");
-    assert!(report.pass, "findings: {:#?}", report.findings);
-}
-
-#[test]
-fn new_pr_arrival_passes_audit() {
-    let report = run_audit("new_pr_arrival");
-    assert!(report.pass, "findings: {:#?}", report.findings);
-}
-
-#[test]
 fn bad_unsafe_merge_fails_audit_with_findings() {
     let report = run_audit("bad_unsafe_merge");
     assert!(

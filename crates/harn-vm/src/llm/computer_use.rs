@@ -16,6 +16,8 @@
 //! There is exactly one host-facing `computer` tool. Per provider, this module
 //! lowers it to:
 //! - `native_anthropic` → the Anthropic `computer_20251124` tool,
+//! - `native_anthropic_toolset` → `computer_toolset_20260801`, whose members
+//!   retain the `computer` namespace through dispatch and result replay,
 //! - `native_openai` → the OpenAI Responses `computer` tool,
 //! - `function` / `grounded` / unset → left as the plain function-schema tool
 //!   (the generic fallback), untouched.
@@ -171,7 +173,11 @@ fn project_computer_tools_with(
         return;
     }
     let style = match caps.computer_use_style {
-        Some(style @ (ComputerUseStyle::NativeAnthropic | ComputerUseStyle::NativeOpenai)) => style,
+        Some(
+            style @ (ComputerUseStyle::NativeAnthropic
+            | ComputerUseStyle::NativeAnthropicToolset
+            | ComputerUseStyle::NativeOpenai),
+        ) => style,
         // Function / Grounded / none: leave the function-schema tool as-is.
         _ => return,
     };
@@ -187,6 +193,7 @@ fn project_computer_tools_with(
     let (width, height) = (DEFAULT_DISPLAY_WIDTH, DEFAULT_DISPLAY_HEIGHT);
     let native = match style {
         ComputerUseStyle::NativeAnthropic => anthropic_computer_tool(width, height),
+        ComputerUseStyle::NativeAnthropicToolset => json!({"type": "computer_toolset_20260801"}),
         // NativeOpenai (the only other arm that reaches here).
         _ => openai_computer_tool(width, height, environment_for_os()),
     };
@@ -435,6 +442,20 @@ mod tests {
         assert_eq!(provider.len(), 1);
         assert_eq!(provider[0]["type"], "computer_20251124");
         assert_eq!(provider[0]["display_width_px"], 1024);
+    }
+
+    #[test]
+    fn projects_anthropic_toolset_only_when_native_projection_is_enabled() {
+        let caps = caps_with_style(ComputerUseStyle::NativeAnthropicToolset);
+        let mut native = Some(vec![function_tool("computer")]);
+        let mut provider = Vec::new();
+        project_computer_tools_with(&caps, &mut native, &mut provider, false);
+        assert_eq!(native.as_ref().unwrap().len(), 1);
+        assert!(provider.is_empty());
+        project_computer_tools_with(&caps, &mut native, &mut provider, true);
+        project_computer_tools_with(&caps, &mut native, &mut provider, true);
+        assert!(native.unwrap().is_empty());
+        assert_eq!(provider, vec![json!({"type": "computer_toolset_20260801"})]);
     }
 
     #[test]

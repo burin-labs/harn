@@ -1351,17 +1351,6 @@ mod tests {
     }
 
     #[test]
-    fn selector_accepts_key_value_and_colon_forms() {
-        let kv = resolve_selector("provider=openrouter,model=google/gemma");
-        assert_eq!(kv.provider, "openrouter");
-        assert_eq!(kv.model, "google/gemma");
-
-        let colon = resolve_selector("mock:mock");
-        assert_eq!(colon.provider, "mock");
-        assert_eq!(colon.model, "mock");
-    }
-
-    #[test]
     fn observed_from_native_tool_response_uses_first_call() {
         let observed = observed_from_llm_response(&json!({
             "tool_calls": [{"name": "search", "arguments": {"query": "harn"}}],

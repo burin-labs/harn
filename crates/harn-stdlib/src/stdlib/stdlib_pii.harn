@@ -145,7 +145,7 @@ fn __pii_resolve_overlaps(entities: list) -> list {
   let last_end = -1
   for entity in sorted {
     if entity.start >= last_end {
-      result = result.appending(entity)
+      result.push(entity)
       last_end = entity.end
     }
   }
@@ -181,9 +181,7 @@ pub fn pii_detect(text: string, options: dict? = nil) -> list {
           pattern.validate(value) ? true : false
         }
         if accepted {
-          found = found.appending(
-            {type: pattern.type, value: value, start: capture.start, end: capture.end},
-          )
+          found.push({type: pattern.type, value: value, start: capture.start, end: capture.end})
         }
       }
     }
@@ -240,7 +238,7 @@ pub fn pii_redact(text: any, options: dict? = nil) -> dict {
     }
     clean = clean + token
     cursor = entity.end
-    annotated = annotated.appending(entity + {token: token})
+    annotated.push(entity + {token: token})
   }
   clean = clean + substring(source, cursor, len(source))
   return {clean: clean, restore: restore, entities: annotated}

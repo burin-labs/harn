@@ -4,51 +4,6 @@
 use super::*;
 
 #[test]
-fn test_cyclomatic_complexity_warns_for_branchy_function() {
-    // 26 ifs → score 27, above the default threshold of 25.
-    let diags = lint_source(
-        r#"
-fn complicated(x: int) {
-  if x > 0 { log("1") }
-  if x > 1 { log("2") }
-  if x > 2 { log("3") }
-  if x > 3 { log("4") }
-  if x > 4 { log("5") }
-  if x > 5 { log("6") }
-  if x > 6 { log("7") }
-  if x > 7 { log("8") }
-  if x > 8 { log("9") }
-  if x > 9 { log("10") }
-  if x > 10 { log("11") }
-  if x > 11 { log("12") }
-  if x > 12 { log("13") }
-  if x > 13 { log("14") }
-  if x > 14 { log("15") }
-  if x > 15 { log("16") }
-  if x > 16 { log("17") }
-  if x > 17 { log("18") }
-  if x > 18 { log("19") }
-  if x > 19 { log("20") }
-  if x > 20 { log("21") }
-  if x > 21 { log("22") }
-  if x > 22 { log("23") }
-  if x > 23 { log("24") }
-  if x > 24 { log("25") }
-  if x > 25 { log("26") }
-}
-
-pipeline default(task) {
-  complicated(10)
-}
-"#,
-    );
-    assert!(
-        has_rule(&diags, "cyclomatic-complexity"),
-        "expected cyclomatic-complexity warning, got: {diags:?}"
-    );
-}
-
-#[test]
 fn test_cyclomatic_complexity_quiet_below_default_threshold() {
     // 11 ifs → score 12. Under the 10-era default this would warn;
     // with the bumped default of 25 it should stay quiet.

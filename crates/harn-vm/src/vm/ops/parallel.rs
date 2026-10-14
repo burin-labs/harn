@@ -641,7 +641,7 @@ impl super::super::Vm {
                 let result = child.call_closure_args(&closure, CallArgs::Empty).await?;
                 Ok((result, std::mem::take(&mut child.output)))
             });
-            self.spawned_tasks.insert(
+            self.register_spawned_task(
                 task_id.clone(),
                 VmTaskHandle {
                     handle,
@@ -688,28 +688,21 @@ impl super::super::Vm {
             if first_error.is_some() {
                 // A sibling already failed: stop and durably terminalize every
                 // remaining task before the nursery exits.
-                let runtime_task_id = task.wait_task_id.clone();
-                if let Err(error) =
-                    super::call_support::abort_task_and_wait(task, self.execution_id()).await
-                {
+                let pending = task.pending_cleanup();
+                if let Err(error) = super::call_support::abort_task_and_wait(task).await {
                     crate::events::log_warn(
                         "task_scope.cancel_cleanup",
                         &format!("durable sibling cleanup remains pending: {error}"),
                     );
                     super::call_support::schedule_task_cleanup(
-                        runtime_task_id,
-                        self.agent_cleanup_runtimes(),
+                        pending.task_id,
+                        pending.runtimes.as_ref().clone(),
                     );
                     cleanup_error.get_or_insert(error);
                 }
                 continue;
             }
-            let task_id = task.wait_task_id.clone();
-            let joined = super::call_support::finish_task_join(
-                task.handle.await,
-                task_id,
-                self.agent_cleanup_runtimes(),
-            );
+            let joined = super::call_support::AwaitingTask::new(task).join().await;
             match joined {
                 Ok(Ok((_result, output))) => {
                     self.output.push_str(&output);

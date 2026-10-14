@@ -519,16 +519,16 @@ impl TypeChecker {
         &mut self,
         object: &SNode,
         method: &str,
+        args: &[SNode],
         scope: &TypeScope,
         span: Span,
     ) {
-        use crate::typechecker::method_registry as reg;
-
         if self.check_namespace_member(object, method, span, Code::UnknownMethod) {
             return;
         }
 
         let Some(raw) = self.infer_type(object, scope) else {
+            self.check_removed_method_on_unknown_receiver(object, method, args, span);
             return;
         };
         // Unlike the field-typo check, this deliberately skips
@@ -565,40 +565,14 @@ impl TypeChecker {
             return;
         }
 
-        // Concrete builtin receivers with a closed method set.
-        let closed: Option<(&str, &[&str])> = match &resolved {
-            TypeExpr::List(_) | TypeExpr::Tuple(_) => Some(("list", reg::LIST_METHODS)),
-            TypeExpr::Named(name) => match name.as_str() {
-                "string" => Some(("string", reg::STRING_METHODS)),
-                "list" => Some(("list", reg::LIST_METHODS)),
-                "set" => Some(("set", reg::SET_METHODS)),
-                // Permissive tier: numbers dispatch to `nil` for every name and
-                // bool has no methods, so there is no closed set. Reject only
-                // names unknown on every builtin — enough to catch typos.
-                "int" | "float" | "bool" => {
-                    if !reg::is_any_known_builtin_method(method) {
-                        self.emit_unknown_method(method, &format!("`{name}`"), &[], false, span);
-                    }
-                    return;
-                }
-                _ => None,
-            },
-            TypeExpr::Applied { name, .. } if name == "set" => Some(("set", reg::SET_METHODS)),
-            _ => None,
-        };
-        if let Some((label, valid)) = closed {
-            if !valid.contains(&method) {
-                self.emit_unknown_method(method, &format!("`{label}`"), valid, true, span);
-            }
-        }
+        self.check_builtin_method_call(object, method, args, scope, span, &resolved);
     }
 
     /// Emit a HARN-NAM-005 with the same "did you mean" + "available"
     /// affordances as the field-typo diagnostic. `list_available` controls
     /// whether the help enumerates the candidate set (omitted for the
-    /// permissive number/bool tier, whose candidate set is the whole builtin
-    /// universe).
-    fn emit_unknown_method(
+    /// number/bool receivers, which have no method candidates).
+    pub(super) fn emit_unknown_method(
         &mut self,
         method: &str,
         receiver_desc: &str,

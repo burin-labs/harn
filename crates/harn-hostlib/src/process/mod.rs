@@ -11,9 +11,10 @@ pub mod mock;
 pub mod owner_death;
 mod program_lookup;
 pub mod real;
+mod secret_handoff;
 
 #[cfg(target_os = "windows")]
-mod windows;
+pub(crate) use harn_vm::op_interrupt::windows;
 
 pub use handle::{
     current_spawner, install_spawner, spawn_process, EnvMode, ExitStatus, OutputCapture,
@@ -24,6 +25,9 @@ pub use mock::{MockHandleController, MockProcess, MockProcessConfig, MockSpawner
 pub use real::default_spawner;
 #[cfg(unix)]
 pub use real::replace_current_process;
+pub use secret_handoff::{
+    spawn_harn_with_parent_secrets, SecretHandoffSpawnError, SecretHandoffWriterState,
+};
 #[cfg(target_os = "windows")]
 pub use windows::KillOnCloseJob;
 

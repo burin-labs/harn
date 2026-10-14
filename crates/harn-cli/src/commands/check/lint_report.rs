@@ -199,6 +199,10 @@ pub(crate) fn lint_file_report(
         &native_rule_paths,
         super::config::LintSurface::Lint,
     );
+    let options = harn_lint::LintOptions {
+        binding_types: Some(&output.binding_types),
+        ..options
+    };
     let lint_diagnostics = harn_lint::lint_with_module_graph(
         &program,
         &config.disable_rules,

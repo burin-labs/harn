@@ -28,6 +28,7 @@ mod implicit_any_compatibility;
 #[path = "fix/lint_context.rs"]
 mod lint_context;
 mod manifest_host_entries;
+mod operator_syntax;
 mod repair_classes;
 #[path = "fix/reporting.rs"]
 mod reporting;
@@ -336,6 +337,25 @@ fn require_complete_implicit_any_migration(
 
 pub(crate) fn run(args: &FixArgs) -> Result<(), FixRunError> {
     let targets = resolve_targets(args)?;
+    if args.migrate_operator_syntax {
+        let report = operator_syntax::migrate(&targets, args.dry_run)?;
+        if args.json {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&report)
+                    .map_err(|error| format!("failed to serialize migration report: {error}"))?
+            );
+        } else {
+            operator_syntax::print_report(&report);
+        }
+        if report.failed_file_count > 0 {
+            return Err(FixRunError::PartialFailure(format!(
+                "{} file(s) could not be migrated",
+                report.failed_file_count
+            )));
+        }
+        return Ok(());
+    }
     if args.preserve_implicit_any {
         let safety = args.safety.ok_or_else(|| {
             "`harn fix --preserve-implicit-any` requires `--safety behavior-preserving`".to_string()
@@ -789,7 +809,7 @@ fn collect_file_candidates(
         BTreeSet::new()
     };
 
-    for diag in &output.diagnostics {
+    for diag in output.diagnostics.iter() {
         if harn_lint::type_diagnostic_lint_disabled(diag, &config.disable_rules) {
             continue;
         }
@@ -965,7 +985,10 @@ fn collect_file_candidates(
     }
 
     let lint_context = FixLintContext::load(file);
-    let lint_options = lint_context.options(file);
+    let lint_options = harn_lint::LintOptions {
+        binding_types: Some(&output.binding_types),
+        ..lint_context.options(file)
+    };
     let lint_diagnostics = harn_lint::lint_with_module_graph(
         &program,
         &config.disable_rules,

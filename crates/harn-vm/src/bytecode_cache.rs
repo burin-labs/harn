@@ -25,7 +25,8 @@
 //! fp_len       : u32
 //! codegen_fp   : [u8; fp_len]   CODEGEN_FINGERPRINT of the producing build
 //! compiler_tag : u8        bitmask of active CompilerOptions
-//! kind         : u8        1 = entry chunk, 2 = module artifact
+//! kind         : u8        1 = entry chunk, 2 = module artifact,
+//!                           3 = module interface
 //! provenance   : u8        authority the artifact was compiled under
 //! source_hash  : [u8; 32]
 //! context_hash : [u8; 32]
@@ -44,7 +45,7 @@
 
 use std::borrow::Cow;
 use std::fs;
-use std::io::{self, Read as _};
+use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -54,16 +55,27 @@ use sha2::{Digest, Sha256};
 use crate::chunk::{CachedChunk, Chunk};
 use crate::compiler::CompilerOptions;
 use crate::context_manifest::{
-    ContextManifest, GraphLinkTable, ManifestCheck, ManifestFile, ManifestUnreadable,
-    ManifestUnresolved,
+    ContextManifest, GraphLinkTable, ManifestCheck, ManifestFile, ManifestPackageLink,
+    ManifestUnreadable, ManifestUnresolved,
 };
 use crate::module_artifact::{ModuleArtifact, ModuleCompilationContext, ModuleProvenance};
 use crate::module_source::{self, ModuleSource};
 
+mod embedded_stdlib;
 mod graph;
+mod header;
+mod interface;
+pub(crate) use embedded_stdlib::load_embedded_stdlib_module;
+pub use embedded_stdlib::{
+    register_embedded_stdlib_artifacts, EmbeddedStdlibArtifact, EmbeddedStdlibRegistrationError,
+};
 pub(crate) use graph::derive_interface as module_compilation_context_with_manifest;
 pub use graph::prepare_entry_store;
-use graph::relocatable_graph_hash;
+use graph::{
+    hash_import_node, is_bare_import, relocatable_graph_hash, seed_entry_context_hasher, ImportNode,
+};
+use header::{read_header_from, ParsedHeader};
+pub(crate) use interface::InterfaceSlot;
 
 /// Header magic for all bytecode-cache artifact families.
 pub const MAGIC: &[u8; 8] = b"HARNBC\0\0";
@@ -94,7 +106,10 @@ pub const MAGIC: &[u8; 8] = b"HARNBC\0\0";
 /// and legacy-ambient bits only, never `privileged_wire_authority`.
 /// v14: entry manifests retain raw reachable package aliases so a cache hit can
 /// revalidate current manifest/lock authority without rebuilding the graph.
-pub const SCHEMA_VERSION: u32 = 14;
+/// v15: manifests record what each bare (package-shaped) import resolved to,
+/// so a reinstalled package generation invalidates them; module interfaces are
+/// persisted beside their manifest (kind 3).
+pub const SCHEMA_VERSION: u32 = 15;
 
 /// Compile-time Harn release. Cache files written by a different release
 /// are rejected on load.
@@ -129,6 +144,14 @@ pub const MODULE_CACHE_EXTENSION: &str = "harnmod";
 const KIND_ENTRY_CHUNK: u8 = 1;
 /// On-disk discriminant for a [`ModuleArtifact`] payload.
 const KIND_MODULE_ARTIFACT: u8 = 2;
+/// On-disk discriminant for a module's derived imported interface plus the
+/// manifest that keeps it reusable. See [`InterfaceSlot`].
+const KIND_MODULE_INTERFACE: u8 = 3;
+
+/// Extension for persisted module interfaces. They are a function of a
+/// module's place in a host tree, not of its bytes alone, so they live only in
+/// the shared cache and are never shipped adjacent to source.
+pub const INTERFACE_CACHE_EXTENSION: &str = "harnifc";
 
 /// Environment override for the cache directory. When set, takes
 /// precedence over the XDG and home-directory fallbacks.
@@ -338,6 +361,10 @@ impl CacheKey {
     /// source paths are rebound at load time, so identical source and compiler
     /// inputs share one relocatable artifact across paths.
     pub fn module_filename(&self) -> String {
+        self.identity_filename(MODULE_CACHE_EXTENSION)
+    }
+
+    fn identity_filename(&self, extension: &str) -> String {
         let mut hasher = Sha256::new();
         hasher.update(self.source_hash);
         hasher.update(self.context_hash);
@@ -348,7 +375,7 @@ impl CacheKey {
         // path and overwrite each other.
         hasher.update([provenance_tag(self.provenance)]);
         let identity: [u8; 32] = hasher.finalize().into();
-        format!("{}.{}", hex(&identity), MODULE_CACHE_EXTENSION)
+        format!("{}.{}", hex(&identity), extension)
     }
 }
 
@@ -507,14 +534,20 @@ pub fn packs_cache_dir() -> Option<PathBuf> {
 /// That is the state a missing cache root degrades into, so every read and
 /// write path already routes around it through the checks they had.
 pub fn cache_enabled() -> bool {
-    let switched_on = match std::env::var(CACHE_ENABLED_ENV).ok().as_deref() {
+    artifact_reads_switched_on() && matches!(cache_root(), Ok(Some(_)))
+}
+
+/// False only when `HARN_BYTECODE_CACHE` turns artifacts off. Artifacts that
+/// need no cache directory, such as those embedded in the binary, read this
+/// rather than [`cache_enabled`], so a host with no cache root still uses them.
+fn artifact_reads_switched_on() -> bool {
+    match std::env::var(CACHE_ENABLED_ENV).ok().as_deref() {
         Some(value) => !matches!(
             value.to_ascii_lowercase().as_str(),
             "0" | "false" | "no" | "off"
         ),
         None => true,
-    };
-    switched_on && matches!(cache_root(), Ok(Some(_)))
+    }
 }
 
 /// Try to load a cached chunk for `source_path` whose contents are
@@ -666,7 +699,7 @@ impl<'a> GraphWalk<'a> {
                 self.source_path,
                 self.source,
                 CODEGEN_FINGERPRINT,
-                false,
+                GraphOutputs::Manifest,
             )
         })
     }
@@ -951,27 +984,6 @@ fn provenance_tag(provenance: ModuleProvenance) -> u8 {
     }
 }
 
-/// Reads `len` bytes and reports whether they equal `expected`.
-///
-/// `len` comes off disk, so it is bounded before it becomes an allocation: a
-/// corrupted or hostile file must not be able to ask for an unbounded read.
-/// A length that cannot match `expected` is rejected without reading at all.
-fn read_length_prefixed_match(file: &mut fs::File, len: usize, expected: &[u8]) -> bool {
-    if len > 256 || len != expected.len() {
-        return false;
-    }
-    let mut buf = vec![0u8; len];
-    file.read_exact(&mut buf).is_ok() && buf == expected
-}
-
-/// Parsed cache header. Read by both the chunk and module loaders so the
-/// header-validation logic stays in one place.
-struct ParsedHeader {
-    kind: u8,
-    context_hash: [u8; 32],
-    payload: Vec<u8>,
-}
-
 /// True when the artifact at `path` was written for exactly `key` and carries
 /// `expected_kind`.
 ///
@@ -1010,78 +1022,12 @@ fn read_header_if_matches(
     key: &CacheKey,
     expected_context: Option<&[u8; 32]>,
 ) -> io::Result<Option<ParsedHeader>> {
-    let mut file = match fs::File::open(path) {
+    let file = match fs::File::open(path) {
         Ok(f) => f,
         Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(None),
         Err(err) => return Err(err),
     };
-    let mut header = [0u8; 8 + 4 + 4];
-    if file.read_exact(&mut header).is_err() {
-        return Ok(None);
-    }
-    if &header[..8] != MAGIC {
-        return Ok(None);
-    }
-    let schema = u32::from_le_bytes(header[8..12].try_into().unwrap());
-    if schema != SCHEMA_VERSION {
-        return Ok(None);
-    }
-    let version_len = u32::from_le_bytes(header[12..16].try_into().unwrap()) as usize;
-    if !read_length_prefixed_match(&mut file, version_len, key.harn_version.as_bytes()) {
-        return Ok(None);
-    }
-    // Which build produced this artifact, checkable without computing anything.
-    // The entry fast path proves its graph unchanged from a manifest and never
-    // recomputes the context hash, so a fingerprint carried only inside that
-    // hash would go unexamined and a chunk from a previous build of the same
-    // release would be replayed. See #5610.
-    let mut fingerprint_len_bytes = [0u8; 4];
-    if file.read_exact(&mut fingerprint_len_bytes).is_err() {
-        return Ok(None);
-    }
-    let fingerprint_len = u32::from_le_bytes(fingerprint_len_bytes) as usize;
-    if !read_length_prefixed_match(&mut file, fingerprint_len, CODEGEN_FINGERPRINT.as_bytes()) {
-        return Ok(None);
-    }
-    let mut compiler_kind_provenance = [0u8; 3];
-    if file.read_exact(&mut compiler_kind_provenance).is_err() {
-        return Ok(None);
-    }
-    if compiler_kind_provenance[0] != key.compiler_tag {
-        return Ok(None);
-    }
-    let kind = compiler_kind_provenance[1];
-    // The authority assertion, and the reason it is a header field rather than
-    // only a key field. Shared-cache entries are found by a key-derived
-    // filename, so the key alone separates them. An ADJACENT artifact is found
-    // by path: `dep.harnmod` beside `dep.harn` is offered to whoever imports
-    // that file. Without this comparison an ordinary import accepts an
-    // artifact compiled under a privileged authority, because every other
-    // header field is identical for the same source and context.
-    if compiler_kind_provenance[2] != provenance_tag(key.provenance) {
-        return Ok(None);
-    }
-    let mut hashes = [0u8; 64];
-    if file.read_exact(&mut hashes).is_err() {
-        return Ok(None);
-    }
-    if hashes[..32] != key.source_hash {
-        return Ok(None);
-    }
-    let mut context_hash = [0u8; 32];
-    context_hash.copy_from_slice(&hashes[32..]);
-    if expected_context.is_some_and(|expected| *expected != context_hash) {
-        return Ok(None);
-    }
-    let mut payload = Vec::new();
-    if file.read_to_end(&mut payload).is_err() {
-        return Ok(None);
-    }
-    Ok(Some(ParsedHeader {
-        kind,
-        context_hash,
-        payload,
-    }))
+    Ok(read_header_from(file, key, expected_context))
 }
 
 /// A candidate entry artifact whose header matches everything except the
@@ -1115,19 +1061,17 @@ fn read_module_if_matches(
     key: &CacheKey,
     source_path: &Path,
 ) -> io::Result<Option<ModuleArtifact>> {
-    let Some(header) = read_header_if_matches(path, key, Some(&key.context_hash))? else {
-        return Ok(None);
-    };
+    Ok(read_header_if_matches(path, key, Some(&key.context_hash))?
+        .and_then(|header| module_from_header(header, source_path)))
+}
+
+fn module_from_header(header: ParsedHeader, source_path: &Path) -> Option<ModuleArtifact> {
     if header.kind != KIND_MODULE_ARTIFACT {
-        return Ok(None);
+        return None;
     }
-    match deserialize_cache_payload::<ModuleArtifact>(&header.payload) {
-        Ok(mut artifact) => {
-            artifact.bind_source_file(source_path);
-            Ok(Some(artifact))
-        }
-        Err(_) => Ok(None),
-    }
+    let mut artifact = deserialize_cache_payload::<ModuleArtifact>(&header.payload).ok()?;
+    artifact.bind_source_file(source_path);
+    Some(artifact)
 }
 
 /// Compact representation of [`CompilerOptions`] for the cache header.
@@ -1228,13 +1172,25 @@ thread_local! {
 /// disk files), so without this fold a stdlib edit between development
 /// builds would leave user-file caches pinned to a stale stdlib snapshot.
 fn hash_transitive_user_imports(source_path: &Path, source: &str) -> [u8; 32] {
-    hash_transitive_user_imports_fingerprinted(source_path, source, CODEGEN_FINGERPRINT).0
+    walk_import_graph_fingerprinted(
+        source_path,
+        source,
+        CODEGEN_FINGERPRINT,
+        GraphOutputs::Hashes,
+    )
+    .canonical
 }
 
 /// Root-relative companion to [`hash_transitive_user_imports`]. Only closed,
 /// packaged source trees use this identity; shared host caches stay canonical.
 fn hash_relocatable_user_imports(source_path: &Path, source: &str) -> [u8; 32] {
-    walk_import_graph_fingerprinted(source_path, source, CODEGEN_FINGERPRINT, false).relocatable
+    walk_import_graph_fingerprinted(
+        source_path,
+        source,
+        CODEGEN_FINGERPRINT,
+        GraphOutputs::Hashes,
+    )
+    .relocatable
 }
 
 /// As [`hash_transitive_user_imports`], but also returns the manifest that
@@ -1250,13 +1206,32 @@ fn hash_transitive_user_imports_with_manifest(
 /// Inner form of [`hash_transitive_user_imports`] parameterized on the compiler
 /// fingerprint so tests can vary it; production always passes
 /// [`CODEGEN_FINGERPRINT`].
+#[cfg(test)]
 fn hash_transitive_user_imports_fingerprinted(
     source_path: &Path,
     source: &str,
     codegen_fingerprint: &str,
 ) -> ([u8; 32], Option<ContextManifest>) {
-    let result = walk_import_graph_fingerprinted(source_path, source, codegen_fingerprint, false);
+    let result = walk_import_graph_fingerprinted(
+        source_path,
+        source,
+        codegen_fingerprint,
+        GraphOutputs::Manifest,
+    );
     (result.canonical, result.manifest)
+}
+
+/// What a graph walk must produce beyond its content hashes.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum GraphOutputs {
+    /// Only the canonical and relocatable hashes. Building the manifest parses
+    /// every module in the closure to derive its compilation context, so a
+    /// caller that only needs a key must not pay for it.
+    Hashes,
+    /// The hashes plus a manifest a later process can re-check with stats.
+    Manifest,
+    /// As [`Self::Manifest`], plus the entry module's compilation context.
+    ManifestAndEntryContext,
 }
 
 struct GraphHashes {
@@ -1270,7 +1245,7 @@ fn walk_import_graph_fingerprinted(
     source_path: &Path,
     source: &str,
     codegen_fingerprint: &str,
-    capture_entry_compilation_context: bool,
+    outputs: GraphOutputs,
 ) -> GraphHashes {
     #[cfg(test)]
     WALKS_PERFORMED.with(|c| c.set(c.get() + 1));
@@ -1288,10 +1263,10 @@ fn walk_import_graph_fingerprinted(
     // at the entry, because that is what the observations are relative to, and
     // stamped before the first file is stat'ed, so entries observed inside a
     // timestamp tick are recognizable as such later. Set to `None` the moment
-    // the graph contains something stats cannot describe.
-    let mut manifest = Some(ContextManifest::begin(module_source::canonical_identity(
-        source_path,
-    )));
+    // the graph contains something stats cannot describe, and never started
+    // when the caller asked only for hashes.
+    let mut manifest = (outputs != GraphOutputs::Hashes)
+        .then(|| ContextManifest::begin(module_source::canonical_identity(source_path)));
 
     while let Some((anchor, import)) = frontier.pop() {
         let Some(resolved) = harn_modules::resolve_import_path(&anchor, &import) else {
@@ -1317,6 +1292,19 @@ fn walk_import_graph_fingerprinted(
             }
             continue;
         };
+        // A package-shaped import resolves through the installed generation,
+        // which a reinstall swaps while the old generation's files stay on
+        // disk unchanged. Stats on those files cannot see the swap, so the
+        // resolution itself is recorded and re-asked.
+        if is_bare_import(&import) {
+            if let Some(m) = manifest.as_mut() {
+                m.package_links.push(ManifestPackageLink {
+                    anchor: anchor.clone(),
+                    import: import.to_string(),
+                    resolved: resolved.clone(),
+                });
+            }
+        }
         let canonical = module_source::canonical_identity(&resolved);
         if visited.contains_key(&canonical) {
             continue;
@@ -1383,7 +1371,7 @@ fn walk_import_graph_fingerprinted(
             .as_mut()
             .expect("manifest presence checked")
             .package_import_aliases = graph.package_import_aliases();
-        if capture_entry_compilation_context {
+        if outputs == GraphOutputs::ManifestAndEntryContext {
             entry_compilation_context =
                 ModuleCompilationContext::for_source_in_graph(&graph, source_path, source).ok();
         }
@@ -1440,6 +1428,9 @@ fn walk_import_graph_fingerprinted(
         m.unresolved
             .sort_by(|a, b| (&a.anchor, &a.import).cmp(&(&b.anchor, &b.import)));
         m.unreadable.sort_by(|a, b| a.path.cmp(&b.path));
+        m.package_links
+            .sort_by(|a, b| (&a.anchor, &a.import).cmp(&(&b.anchor, &b.import)));
+        m.package_links.dedup();
     }
     GraphHashes {
         canonical: canonical_hasher.finalize().into(),
@@ -1449,52 +1440,10 @@ fn walk_import_graph_fingerprinted(
     }
 }
 
-fn seed_entry_context_hasher(hasher: &mut Sha256, codegen_fingerprint: &str) {
-    hasher.update(b"stdlib-digest\0");
-    hasher.update(crate::runtime_content::embedded_stdlib_digest_bytes());
-    hasher.update(b"\0");
-    // Fold in the compiler's code-generation fingerprint so a compiler change
-    // that alters emitted bytecode for unchanged source busts stale cache
-    // entries within a single version — the gap that masked the #2610 fix until
-    // the cache was cleared by hand. See `build.rs` and `CODEGEN_FINGERPRINT`.
-    hasher.update(b"codegen-fingerprint\0");
-    hasher.update(codegen_fingerprint.as_bytes());
-    hasher.update(b"\0");
-}
-
-fn hash_import_node(hasher: &mut Sha256, node: &ImportNode) {
-    match node {
-        ImportNode::Resolved { content } => {
-            hasher.update(b"resolved\0");
-            hasher.update(content.as_bytes());
-        }
-        ImportNode::Unresolved { import, .. } => {
-            hasher.update(b"unresolved\0");
-            hasher.update(import.as_bytes());
-        }
-        ImportNode::IoError { kind } => {
-            hasher.update(b"ioerror\0");
-            hasher.update(kind.as_bytes());
-        }
-    }
-}
-
-enum ImportNode {
-    Resolved {
-        content: Arc<str>,
-    },
-    /// `anchor` is the canonical importing file. It is not hashed here: the
-    /// canonical key carries it in the sentinel path, the relocatable key in
-    /// the node's label.
-    Unresolved {
-        anchor: PathBuf,
-        import: Arc<str>,
-    },
-    IoError {
-        kind: String,
-    },
-}
-
 #[cfg(test)]
 #[path = "bytecode_cache_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "bytecode_cache_walk_tests.rs"]
+mod walk_tests;

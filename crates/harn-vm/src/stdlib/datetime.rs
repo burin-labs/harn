@@ -72,17 +72,17 @@ fn date_format_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
     let dt = datetime_from_arg(args.first(), "date_format")?;
     let fmt = args
         .get(1)
-        .map(|a| a.display())
-        .unwrap_or_else(|| DEFAULT_FORMAT.to_string());
-    if let Some(tz_arg) = args.get(2) {
-        let tz = parse_timezone(&tz_arg.display(), "date_format")?;
-        return Ok(VmValue::String(arcstr::ArcStr::from(
-            dt.with_timezone(&tz).format(&fmt).to_string(),
-        )));
+        .map_or_else(|| DEFAULT_FORMAT.to_string(), VmValue::display);
+    let mut formatted = String::new();
+    match args.get(2) {
+        Some(VmValue::Nil) | None => dt.format(&fmt).write_to(&mut formatted),
+        Some(tz_arg) => dt
+            .with_timezone(&parse_timezone(&tz_arg.display(), "date_format")?)
+            .format(&fmt)
+            .write_to(&mut formatted),
     }
-    Ok(VmValue::String(arcstr::ArcStr::from(
-        dt.format(&fmt).to_string(),
-    )))
+    .map_err(|_| vm_error("date_format: invalid format"))?;
+    Ok(VmValue::String(arcstr::ArcStr::from(formatted)))
 }
 
 #[harn_builtin(
@@ -418,18 +418,13 @@ pub(crate) fn parse_timezone(raw: &str, builtin: &str) -> Result<Tz, VmError> {
 
 fn parse_datetime_auto(input: &str) -> Result<DateTime<Utc>, VmError> {
     let trimmed = input.trim();
-    if trimmed.is_empty() {
-        return Err(vm_error("Cannot parse date: "));
-    }
 
     if let Ok(dt) = DateTime::parse_from_rfc3339(trimmed) {
         return Ok(dt.with_timezone(&Utc));
     }
 
-    // RFC 3339 requires seconds; ISO 8601 lets a minute-precision time carry
-    // an offset too. Without these the digit fallback below would read the
-    // offset hour as seconds and drop the offset.
-    for fmt in ["%Y-%m-%dT%H:%M%:z", "%Y-%m-%d %H:%M%:z", "%Y-%m-%dT%H:%M%z"] {
+    // RFC 3339 requires seconds; ISO 8601 also permits minute precision.
+    for fmt in ["%Y-%m-%dT%H:%M%:z", "%Y-%m-%d %H:%M%:z"] {
         if let Ok(dt) = DateTime::parse_from_str(trimmed, fmt) {
             return Ok(dt.with_timezone(&Utc));
         }
@@ -440,6 +435,8 @@ fn parse_datetime_auto(input: &str) -> Result<DateTime<Utc>, VmError> {
         "%Y-%m-%dT%H:%M:%S%.f",
         "%Y-%m-%d %H:%M",
         "%Y-%m-%dT%H:%M",
+        "%Y-%m-%d %H:%MZ",
+        "%Y-%m-%dT%H:%MZ",
     ] {
         if let Ok(dt) = NaiveDateTime::parse_from_str(trimmed, fmt) {
             return Ok(Utc.from_utc_datetime(&dt));
@@ -453,33 +450,7 @@ fn parse_datetime_auto(input: &str) -> Result<DateTime<Utc>, VmError> {
         return Ok(Utc.from_utc_datetime(&dt));
     }
 
-    parse_datetime_digits_fallback(trimmed)
-}
-
-fn parse_datetime_digits_fallback(input: &str) -> Result<DateTime<Utc>, VmError> {
-    let parts: Vec<i64> = input
-        .split(|c: char| !c.is_ascii_digit())
-        .filter_map(|p| if p.is_empty() { None } else { p.parse().ok() })
-        .collect();
-    if parts.len() < 3 {
-        return Err(vm_error(format!("Cannot parse date: {input}")));
-    }
-
-    let year =
-        i32::try_from(parts[0]).map_err(|_| vm_error(format!("Invalid year: {}", parts[0])))?;
-    let month = u32::try_from(parts[1]).unwrap_or(0);
-    let day = u32::try_from(parts[2]).unwrap_or(0);
-    let hour = u32::try_from(parts.get(3).copied().unwrap_or(0)).unwrap_or(u32::MAX);
-    let minute = u32::try_from(parts.get(4).copied().unwrap_or(0)).unwrap_or(u32::MAX);
-    let second = u32::try_from(parts.get(5).copied().unwrap_or(0)).unwrap_or(u32::MAX);
-
-    validate_component_ranges(month, day, hour, minute, second)?;
-    let date = NaiveDate::from_ymd_opt(year, month, day)
-        .ok_or_else(|| vm_error(format!("Invalid date: {year:04}-{month:02}-{day:02}")))?;
-    let dt = date
-        .and_hms_opt(hour, minute, second)
-        .ok_or_else(|| vm_error(format!("Invalid time: {hour:02}:{minute:02}:{second:02}")))?;
-    Ok(Utc.from_utc_datetime(&dt))
+    Err(vm_error(format!("Cannot parse date: {input}")))
 }
 
 fn validate_component_ranges(

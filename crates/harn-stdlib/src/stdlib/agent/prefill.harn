@@ -1,4 +1,5 @@
 import { agent_merge_llm_options, agent_route_capabilities } from "std/agent/options"
+import { omit } from "std/json"
 import { llm_equivalent_failover_enabled, llm_has_explicit_routing_owner } from "std/llm/options"
 
 /**
@@ -45,9 +46,9 @@ pub fn agent_take_one_shot_prefill(options: any = nil) -> AgentOneShotPrefill {
   if value != nil && type_of(value) != "string" {
     throw "agent_loop: prefill must be a string or nil; got " + type_of(value)
   }
-  let cleaned = base.removing("prefill")
+  let cleaned = omit(base, ["prefill"])
   if type_of(base?.llm_options) == "dict" {
-    cleaned = cleaned + {llm_options: nested.removing("prefill")}
+    cleaned = cleaned + {llm_options: omit(nested, ["prefill"])}
   }
   return {options: cleaned, prefill: value ?? ""}
 }

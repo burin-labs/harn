@@ -238,18 +238,23 @@ fn openrouter_qwen_coder_defaults_to_text_tools() {
 }
 
 #[test]
-fn cerebras_qwen_38_is_multimodal_without_an_effort_knob() {
-    // Cerebras retired its GLM 4.7 preview and its Gemma 4 route; Qwen 3.8 is
-    // the multimodal serverless slot. Its public model record reports vision,
-    // native tools and reasoning but documents no reasoning-effort parameter,
-    // so the row must not claim one. Without an explicit rule the `qwen-*`
-    // family default would strip vision and thinking from this route.
+fn cerebras_qwen_38_preserves_vision_and_its_measured_effort_ladder() {
     reset();
     let caps = lookup("cerebras", "qwen-3.8-27b");
     assert!(caps.native_tools);
     assert!(caps.vision_supported);
-    assert_eq!(caps.thinking_modes, vec!["enabled"]);
-    assert!(!caps.reasoning_effort_supported);
+    assert_eq!(caps.thinking_modes, vec!["enabled", "effort"]);
+    assert!(caps.reasoning_effort_supported);
+    assert!(caps.reasoning_none_supported);
+    assert!(!caps.reasoning_disable_supported);
+    assert_eq!(
+        caps.reasoning_effort_levels,
+        vec!["none", "low", "medium", "high"]
+    );
+    let oss = lookup("cerebras", "gpt-oss-120b");
+    assert!(!oss.reasoning_none_supported);
+    assert_eq!(oss.reasoning_effort_levels, vec!["low", "medium", "high"]);
+    assert!(!lookup("cerebras", "qwen-unserved").reasoning_effort_supported);
 }
 
 #[test]

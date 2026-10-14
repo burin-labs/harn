@@ -6,8 +6,6 @@
     "AgentSpec._input_guardrail": "AgentSpec.input_guardrail",
     "AgentSpec._pre_turn_scope_classifier": "AgentSpec.pre_turn_scope_classifier",
     "AgentSpec._done_sentinel": "AgentSpec.done_sentinel",
-    "AgentSpec.max_retries": "RateLimitOptions.max_retries",
-    "AgentSpec.backoff_ms": "RateLimitOptions.backoff_ms",
     "AgentSpec._structural_validator": "AgentSpec.structural_validator",
     "AgentSpec.agent_await_resumption_enabled": "AgentLifecycleToolsOptions.agent_await_resumption_enabled",
     "AgentSpec._tool_caller": "AgentSpec.tool_caller",
@@ -222,15 +220,6 @@
       "language": "rust",
       "query": "((call_expression function: (field_expression value: (identifier) @receiver field: (field_identifier) @method) arguments: (arguments . (_) @key)) (#eq? @receiver \"reminders\") (#eq? @method \"get\"))",
       "prefix": "AgentSpec.reminders.",
-      "key_form": "literal"
-    },
-    {
-      "id": "missing-tool-recovery-key-domain",
-      "kind": "option",
-      "glob": "crates/harn-stdlib/src/stdlib/llm/missing_tool_call.harn",
-      "language": "harn",
-      "query": "((for_statement variable: (identifier) @variable iterable: (list_literal (string_literal) @key)) (#eq? @variable \"key\"))",
-      "prefix": "MissingToolCallRecoveryOptions.",
       "key_form": "literal"
     },
     {

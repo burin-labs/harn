@@ -220,24 +220,6 @@ fn for_item_reassigned_via_any_matches_unoptimized() {
     );
 }
 
-/// The monomorphic loop counter / accumulator idiom keeps producing the right
-/// result with the typed fast path engaged (guards against the gate
-/// over-demoting and silently changing arithmetic results).
-#[test]
-fn monomorphic_counter_loop_result_is_correct() {
-    let source = r#"pipeline default(harness: Harness, task: unknown) {
-  let i = 0
-  let total = 0
-  while i < 10 {
-    total = total + (i + 3) * 2 - 1
-    i = i + 1
-  }
-  harness.stdio.log("${total}")
-}"#;
-    let (out, _) = run_harn(source);
-    assert_eq!(out.trim_end(), "[harn] 140");
-}
-
 #[test]
 fn inplace_concat_untyped_accumulator_builds_correctly() {
     // An accumulator whose static type is unknown (`any`-returning seed) goes
@@ -260,19 +242,48 @@ pipeline t(harness: Harness, task: unknown) {
 }
 
 #[test]
-fn list_appending_assign_preserves_alias_immutability() {
-    // The compiler lowers `x = x.appending(v)` through the same fused concat opcode
-    // as `x = x + [v]`. Rebinding `x` must still leave an existing alias `y`
+fn list_push_preserves_alias_immutability() {
+    // The compiler lowers `x.push(v)` through the same fused concat opcode
+    // as `x = x + [v]`. Pushing onto `x` must still leave an existing alias `y`
     // pointing at the original immutable list.
     let source = r#"
 pipeline t(harness: Harness, task: unknown) {
   let x = []
-  x = x.appending(1)
+  x.push(1)
   const y = x
-  x = x.appending(2)
+  x.push(2)
   harness.stdio.log("${x} ${y}")
 }"#;
     assert_eq!(run_output(source), "[harn] [1, 2] [1]");
+}
+
+#[test]
+fn list_push_multiple_sites_matches_unoptimized() {
+    let source = r#"
+pipeline t(harness: Harness) {
+  let x = [1]
+  const before = x
+  for i in [2, 3] {
+    if i == 2 { x.push(i) } else { x.push(i) }
+  }
+  const middle = x
+  x.push("four")
+  x.push(x)
+  harness.stdio.println(before)
+  harness.stdio.println(middle)
+  harness.stdio.println(x)
+  for item in x { harness.stdio.println(item == 1) }
+}"#;
+    let optimized =
+        run_harn_result_display_with_options(source, CompilerOptions::optimized()).unwrap();
+    let baseline =
+        run_harn_result_display_with_options(source, CompilerOptions::without_optimizations())
+            .unwrap();
+    assert_eq!(optimized, baseline);
+    assert_eq!(
+        optimized.0.trim_end(),
+        "[1]\n[1, 2, 3]\n[1, 2, 3, four, [1, 2, 3, four]]\ntrue\nfalse\nfalse\nfalse\nfalse"
+    );
 }
 
 #[test]

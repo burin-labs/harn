@@ -137,9 +137,10 @@ async fn openai_sse_merges_adjacent_reasoning_and_content_fragments() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn openai_sse_starts_a_new_block_on_type_transition() {
-    // First content must be longer than the `<think>` hold so a visible
-    // block is committed before the reasoning delta arrives.
+async fn openai_sse_keeps_one_block_per_channel_across_interleaving() {
+    // Chat Completions has one reasoning channel and one content channel, so an
+    // interleaved stream yields the same two blocks its unstreamed body would.
+    // Live deltas still arrive per fragment.
     let body = openai_sse_body(&[
         openai_delta("content", "0123456789ABCDEF"),
         openai_delta("reasoning", "hidden"),
@@ -156,9 +157,8 @@ async fn openai_sse_starts_a_new_block_on_type_transition() {
     assert_eq!(
         result.blocks,
         vec![
-            text_block("output_text", "0123456789", "public"),
             text_block("reasoning", "hidden", "private"),
-            text_block("output_text", "ABCDEFxyz", "public"),
+            text_block("output_text", "0123456789ABCDEFxyz", "public"),
         ]
     );
 }

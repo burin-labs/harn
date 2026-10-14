@@ -1,0 +1,142 @@
+import { LintDiagnostic, LintFileReport, decode_lint_json } from "std/cli/envelope"
+import { baseline_delta } from "./text_baseline.harn"
+
+pub const STDLIB_ROOT = "crates/harn-stdlib/src/stdlib"
+
+pub type DiagnosticFile = {path: string, status: string, diagnostics: list<LintDiagnostic>}
+
+/** Own checker execution, decode, census, and path normalization for stdlib guards. */
+pub fn collect_stdlib_diagnostics(
+  capabilities: {fs: HarnessFs, process: HarnessProcess},
+  binary: string,
+  command: "check" | "lint",
+) -> list<DiagnosticFile> {
+  const args = if command == "check" {
+    ["check", "--json", "--strict-types", STDLIB_ROOT]
+  } else {
+    ["lint", "--json", STDLIB_ROOT]
+  }
+  const result = capabilities.process.run({program: binary, args: args, timeout: 300000})
+  const files = if command == "check" {
+    check_files(result.stdout, result.exit_code)
+  } else {
+    lint_files(result.stdout, result.exit_code)
+  }
+  return require_complete(capabilities, files)
+}
+
+type CheckEnvelope = {
+  schemaVersion: int,
+  ok: bool,
+  data: {
+    files: list<DiagnosticFile>,
+    summary: {ok: int, warnings: int, errors: int, diagnostics: int},
+  }?,
+  error: {code: string, message: string, details?: unknown}?,
+  warnings: list<{code: string, message: string}>,
+}
+
+/** Adapt check's diagnostic report to the shared CLI envelope validator. */
+pub fn check_files(text: string, exit_code: int) -> list<DiagnosticFile> {
+  const envelope = match json_decode(text, schema_of(CheckEnvelope)) {
+    Ok(value) -> { value }
+    Err(failure) -> {
+      throw "invalid check report: ${failure.message}"
+    }
+  }
+  if envelope.data == nil {
+    throw "check report unavailable"
+  }
+  if !envelope.ok && envelope.error?.code != "check_failed" {
+    throw "checker failed before producing file results"
+  }
+  const report = envelope.data
+  if (envelope.ok && report.summary.errors > 0)
+    || (!envelope.ok && report.summary.errors + report.summary.warnings == 0) {
+    throw "check outcome disagrees with findings"
+  }
+  let files: list<LintFileReport> = []
+  for file in report.files {
+    files = files + [pick(file, ["path", "status", "diagnostics"]) + {fixable: 0, fixed: 0}]
+  }
+  // Check and lint use the same diagnostic/status/summary contract; check has
+  // no fixing operation. The canonical decoder owns their common invariants.
+  return lint_files(
+    json_stringify(
+      envelope + {data: {files: files, summary: report.summary + {fixable: 0, fixed: 0}}},
+    ),
+    exit_code,
+  )
+}
+
+/** Decode once, then require a nonempty, unique measurement. */
+pub fn lint_files(text: string, exit_code: int) -> list<DiagnosticFile> {
+  if exit_code != 0 && exit_code != 1 {
+    throw "checker did not finish normally: ${exit_code}"
+  }
+  const envelope = match decode_lint_json(text, {exit_status: exit_code}) {
+    Ok(value) -> { value }
+    Err(failure) -> {
+      throw "invalid diagnostic report: ${failure.message}"
+    }
+  }
+  if envelope.data == nil || envelope.data.files.count == 0 {
+    throw "diagnostic report contains no files"
+  }
+  let files: list<DiagnosticFile> = []
+  let paths: list<string> = []
+  for file in envelope.data.files {
+    if paths.contains(file.path) {
+      throw "duplicate diagnostic report path: ${file.path}"
+    }
+    paths = paths + [file.path]
+    files = files + [pick(file, ["path", "status", "diagnostics"])]
+  }
+  return files
+}
+
+/** Match every committed source against Git's independent census, then normalize paths. */
+pub fn require_complete(
+  capabilities: {fs: HarnessFs, process: HarnessProcess},
+  files: list<DiagnosticFile>,
+) -> list<DiagnosticFile> {
+  const fs = capabilities.fs
+  const root_result = capabilities.process.run(
+    {program: "git", args: ["rev-parse", "--show-toplevel"]},
+  )
+  if root_result.exit_code != 0 || root_result.stdout.trim() == "" {
+    throw "stdlib repository root unavailable"
+  }
+  const root = root_result.stdout.trim()
+  const listing = capabilities.process.run(
+    {program: "git", args: ["-C", root, "ls-files", "-z", "--", STDLIB_ROOT]},
+  )
+  if listing.exit_code != 0 {
+    throw "stdlib source census failed: ${listing.stderr}"
+  }
+  let expected: list<string> = []
+  for path in listing.stdout.split("\0") {
+    if path.ends_with(".harn") || path.ends_with(".harn.txt") {
+      const canonical = fs.workspace_canonicalize_existing(path_join(root, path), root)
+      if canonical == nil {
+        throw "committed stdlib source unavailable: ${path}"
+      }
+      expected = expected + [canonical]
+    }
+  }
+  let actual: list<string> = []
+  let normalized: list<DiagnosticFile> = []
+  for file in files {
+    const canonical = fs.workspace_canonicalize_existing(path_join(root, file.path), root)
+    if canonical == nil {
+      throw "reported stdlib source unavailable: ${file.path}"
+    }
+    actual = actual + [canonical]
+    normalized = normalized + [file + {path: canonical}]
+  }
+  const delta = baseline_delta(expected, actual)
+  if expected.count == 0 || delta.added.count + delta.removed.count > 0 {
+    throw "stdlib diagnostic collection incomplete: ${actual.count} reported, ${expected.count} expected; pending ${delta.removed.count}: ${delta.removed.join(", ")}; unexpected ${delta.added.count}: ${delta.added.join(", ")}"
+  }
+  return normalized
+}

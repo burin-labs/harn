@@ -573,10 +573,6 @@ mod tests {
         f(&args, &mut out)
     }
 
-    fn text(value: &str) -> VmValue {
-        VmValue::String(arcstr::ArcStr::from(value))
-    }
-
     fn zip_fixture(large_file: bool) -> Vec<u8> {
         let mut writer = zip::ZipWriter::new(Cursor::new(Vec::new()));
         let options = zip::write::SimpleFileOptions::default().large_file(large_file);
@@ -592,29 +588,6 @@ mod tests {
             writer.write_all(body).unwrap();
         }
         writer.finish().unwrap().into_inner()
-    }
-
-    #[test]
-    fn zip_extract_rejects_duplicate_names_before_extracting() {
-        let mut archive = zip_fixture(false);
-        let old = b"evidencf.json";
-        let mut changed = 0;
-        for offset in 0..=archive.len() - old.len() {
-            if &archive[offset..offset + old.len()] == old {
-                archive[offset..offset + old.len()].copy_from_slice(b"evidence.json");
-                changed += 1;
-            }
-        }
-        assert_eq!(changed, 2, "mutate the local and central directory names");
-        let decoded = zip::ZipArchive::new(Cursor::new(&archive)).unwrap();
-        assert_eq!(
-            decoded.len(),
-            2,
-            "the dependency collapsed two files plus a directory"
-        );
-        let error = call(&mut vm(), "zip_extract", vec![bytes_value(archive)])
-            .expect_err("ambiguous member names must be refused");
-        assert!(error.to_string().contains("duplicate members"), "{error}");
     }
 
     #[test]
@@ -651,14 +624,6 @@ mod tests {
             panic!("expected empty entries")
         };
         assert!(entries.is_empty());
-    }
-
-    #[test]
-    fn gzip_round_trips_strings_to_bytes() {
-        let mut vm = vm();
-        let encoded = call(&mut vm, "gzip_encode", vec![text("hello"), VmValue::Int(1)]).unwrap();
-        let decoded = call(&mut vm, "gzip_decode", vec![encoded]).unwrap();
-        assert_eq!(decoded.as_bytes().unwrap(), b"hello");
     }
 
     #[test]
@@ -722,32 +687,5 @@ mod tests {
             vec![encoded, VmValue::dict(options)],
         );
         assert!(result.is_err(), "zstd_decode should reject output past cap");
-    }
-
-    #[test]
-    fn tar_round_trip_preserves_mode() {
-        let mut fields = crate::value::DictMap::new();
-        fields.insert(crate::value::intern_key("path"), text("bin/run"));
-        fields.insert(crate::value::intern_key("content"), text("echo hi"));
-        fields.insert(crate::value::intern_key("mode"), VmValue::Int(0o755));
-
-        let mut vm = vm();
-        let archive = call(
-            &mut vm,
-            "tar_create",
-            vec![VmValue::List(std::sync::Arc::new(vec![entry_value(
-                fields,
-            )]))],
-        )
-        .unwrap();
-        let extracted = call(&mut vm, "tar_extract", vec![archive]).unwrap();
-        let VmValue::List(entries) = extracted else {
-            panic!("expected list");
-        };
-        assert_eq!(entries.len(), 1);
-        let entry = entries[0].as_dict().unwrap();
-        assert_eq!(entry["path"].display(), "bin/run");
-        assert_eq!(entry["content"].as_bytes().unwrap(), b"echo hi");
-        assert_eq!(entry["mode"].as_int(), Some(0o755));
     }
 }

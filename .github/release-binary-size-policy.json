@@ -15,7 +15,7 @@
         "bytes": 256452104,
         "observed_at": "2026-09-22T20:28:05Z",
         "build_identity": {
-          "profile": "release",
+          "profile": "dist",
           "codegen_units": 8,
           "lto": "thin",
           "strip": "symbols",

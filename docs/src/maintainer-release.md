@@ -14,8 +14,9 @@ gh workflow run bump-release.yml --repo burin-labs/harn --ref main
 
 The opener takes no version or candidate-build inputs. It strips the declared
 `-dev` suffix, folds the fragments, regenerates derived files, and opens
-`Release vX.Y.Z`. It publishes one GitHub-signed commit and arms squash
-auto-merge through the merge queue. Required checks and review still apply.
+`Release vX.Y.Z`. It publishes one GitHub-signed commit and adds `ship` so
+Smart Ship owns delivery through the merge queue. Required checks and review
+still apply. Repeated openers leave an existing PR's delivery grant unchanged.
 
 The daily schedule runs the same decision. A stable workspace version or no
 unreleased fragments produces `action=none`, with a notice explaining why.
@@ -44,9 +45,15 @@ gh workflow run open-development-bump.yml --repo burin-labs/harn --ref main -f p
 Omit `published_tag` to use the latest published stable release. The workflow
 verifies publication before minting the release App token, derives the next
 development identity, opens or reuses its pull request, validates its grammar
-receipt, and arms the normal merge queue. A repeated repair after the cutover
-lands is a no-op. Draft, prerelease, unreadable, and incomplete publication
+receipt, and enrolls a newly opened PR in Smart Ship. An existing PR retains
+its owner's delivery grant, including an explicit stop. Resume a stopped PR
+only after reading its label history and resolving the reason for the stop.
+A repeated repair after the cutover lands is a no-op. Draft, prerelease, unreadable, and incomplete publication
 records refuse the repair.
+
+The development monitor reports success only when main declares the expected
+development version. An open update is pending, not successful convergence;
+an unreadable, incomplete, or ambiguous PR census fails the measurement.
 
 The five-minute repository-state controller automatically dispatches the same
 opener once for an owed development version when no open cutover PR exists.
@@ -60,6 +67,30 @@ repair command above. The reservation deliberately prevents another automatic
 attempt, including after a crash. Missing or incomplete reservation history
 refuses automatic repair. Do not change the fixed anchor or seed to clear a
 reservation, and do not infer completed integration from a reserved attempt.
+
+## Retire an unpublished candidate with failed source CI
+
+Read the failed producer and the main-push CI run at its exact source. If both
+are terminal failures and the version was never published, request retirement
+through the existing development bump workflow:
+
+```bash
+gh workflow run open-development-bump.yml --repo burin-labs/harn --ref main \
+  -f published_tag=vPREDECESSOR \
+  -f retire_source_sha=FULL_SHA -f retire_release_pr=PR_NUMBER \
+  -f retire_producer_run=PRODUCER_RUN -f retire_source_ci_run=CI_RUN
+```
+
+Replace the placeholders with the published predecessor and the owning release
+records. Omit every consumer-retirement input: mixing the two evidence paths
+is refused. The planner requires complete terminal job censuses with actual
+failed checks, exact source identity, main ancestry and the merged release PR.
+It also proves that the version has no tag or release and that neither
+publication workflow is active, with known positive reads on those paths.
+The opener repeats those checks after preparation before opening its normal
+development-version PR. Follow that PR through the merge queue, then use the
+release opener for the next version. This retires an unpublished identity; it
+does not publish files from a failed candidate.
 
 ## Follow certification and publication
 
@@ -81,15 +112,18 @@ Follow the runs for that commit in
    digests, and publication metadata. Keep its exact run ID with the release.
 3. `promote-release.yml` starts after the successful main push run. It finds
    the successful candidate run at that commit and verifies the manifest,
-   digests, and attestations. It creates the tag and GitHub release using those
-   files. Promotion doesn't rebuild them.
-4. The tag starts `publish-release.yml`, which publishes crates from the tag.
+   digests, and attestations. It also requires successful full-suite main-push
+   CI at the release commit, including every deferred test family. It waits
+   for an active run; missing or failed proof blocks publication. It creates
+   the tag and GitHub release using those files. Promotion doesn't rebuild them.
+4. The tag starts `publish-release.yml`, which checks the same full-suite proof
+   before publishing crates from the tag.
    Promotion also packages the published Linux archives into the container
    and opens the next patch's development-version pull request.
 
 Publication is complete only after you verify all of these:
 
-- The release pull request merged, and the signed tag selects its main commit.
+- The release pull request merged, and the immutable tag selects its certified source.
 - The exact candidate and promotion runs succeeded.
 - The GitHub release has all five archives, `SHA256SUMS`, and
   `release-assets.json`, with digests matching the candidate manifest.
@@ -97,6 +131,18 @@ Publication is complete only after you verify all of these:
   anonymously pullable.
 - The post-publication development bump reached main or reported a proved
   no-op because main had already advanced.
+
+Main ancestry and exact-source certification bind a tag to its release source.
+A tag outside main also needs a trusted SSH signature naming its candidate commit.
+Corrected stable sources also prove the original version transition in their
+first-parent history, a verified source signature, and durable publication
+evidence. The published manifest and signed archive index must bind all five
+archive digests to that exact source and the owning producer's workflow, main
+ref, run, and attempt. This read does not depend on temporary build artifacts
+or retained workflow-run records. The signed index proves provenance; the
+public release supplies publication authority. Its author and the required
+manifest, index, and archive uploaders must be the owning release app's GitHub
+bot identity; additional SDK assets can come from their own publisher.
 
 Read [Release assets manifest](./dev/release-assets-manifest.md) for the
 download contract. A visible tag or release page alone doesn't prove complete
@@ -111,11 +157,46 @@ candidate manifest attached to the release record.
   `bump-release.yml` again. Its admission checks run again.
 - Candidate failed because of infrastructure: rerun the failed jobs in that
   exact candidate run. A source defect needs a corrected pull request and
-  certification of the resulting commit.
+  certification of the resulting commit. For an unpublished stable version,
+  keep that version, build a signed source candidate on corrected main with
+  `source_candidate=true`, then use manual promotion recovery. Recovery proves
+  the stable version transition in the source's first-parent history and still
+  requires exact-source CI, consumer rehearsal, and candidate certification.
 - Promotion failed: rerun the failed jobs in the exact promotion run. It
   checks the existing tag's commit and refuses a conflicting tag.
+- Candidate succeeded but no main-push event started promotion: dispatch the
+  existing promoter on main with that certified candidate's run ID and source:
+  `gh workflow run promote-release.yml --repo burin-labs/harn --ref main -f candidate_run_id=RUN_ID -f candidate_sha=FULL_SHA`.
+  It refuses an unsuccessful or foreign producer and a source not contained
+  in main, then applies the normal version, manifest, digest and attestation
+  checks. If the producer never ran a consumer rehearsal, recovery runs the
+  existing rehearsal workflow at that exact source and requires its measured
+  pass before publication. Missing, failed, cancelled or mismatched results
+  refuse publication. A producer's existing failed rehearsal is not replaced.
+  Recovery publishes the existing files without rebuilding them.
+  When the consumer needs a prepared repair before it can land against the
+  published tag, add `-f consumer_pull_request=PR_NUMBER`. Recovery selects
+  that open pull request in the registered consumer repository through the
+  existing pairing checks; a fork, closed pull, malformed number, or conflicting
+  source pairing refuses. Consumer observation and publication checks still
+  run. This selection cannot reuse an earlier default-branch rehearsal.
+- The consumer observer reached its deadline, but its exact dispatched child
+  later succeeded: after the completed-child recovery policy is on main,
+  dispatch the normal promoter with the same producer and source plus
+  `-f completed_consumer_run_id=CHILD_RUN_ID`. The authorization job verifies
+  the original dispatch and deadline, every producer build/smoke/audit result,
+  the child's complete successful census and product receipts, then rechecks
+  both latest attempts. Only the observer deadline and its derived final
+  verdict may have failed. Cancelled, failed, partial, replaced or mismatched
+  children refuse. The shared publisher authenticates the attempt-bound
+  authorization artifact before applying all normal archive and publication
+  checks. The original deadline remains unmeasured; no result is rewritten
+  and no equal-tree source substitution is accepted.
 - Crate publication failed after the tag exists: rerun the failed jobs in the
   tag's `publish-release.yml` run. Its publisher resumes remaining crates.
+  If publication policy needed a repair on main, dispatch `publish-release.yml`
+  with the immutable `tag`, its `expected_source_sha`, and the landed
+  `expected_policy_sha`. Recovery uses that policy without changing the tag's source.
 - Container or development bump failed: rerun those failed promotion jobs.
 
 Don't retag a published version or start a local publisher or watcher as a

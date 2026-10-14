@@ -163,6 +163,55 @@ fn template_probe_invalidates_when_file_appears() {
     );
 }
 
+/// One check run scans a shared module once and replays its result for every
+/// other file that imports it. The replay must carry the module's template
+/// probes into each dependent's cache entry; otherwise only the file that
+/// happened to scan the module would notice the template change.
+#[test]
+fn template_probe_in_shared_import_invalidates_every_dependent() {
+    let temp = tempfile::TempDir::new().expect("tempdir");
+    let cache = tempfile::TempDir::new().expect("cache dir");
+    let root = temp.path();
+    std::fs::write(root.join("prompt.md"), "hello {{name}}\n").expect("template");
+    std::fs::write(
+        root.join("shared.harn"),
+        "pub fn greet(harness: Harness) {\n  return harness.fs.render_prompt(\"prompt.md\", {name: \"x\"})\n}\n",
+    )
+    .expect("shared");
+    let dependents = ["a.harn", "b.harn", "c.harn"];
+    for name in dependents {
+        std::fs::write(
+            root.join(name),
+            "import { greet } from \"./shared\"\n\npipeline main(harness: Harness, task: unknown) {\n  return greet(harness)\n}\n",
+        )
+        .expect("dependent");
+    }
+    // One worker checks the files in order, so the first scans shared.harn
+    // and the other two are served from the run's memo.
+    let serial = [("HARN_CHECK_JOBS", "1")];
+
+    let cold = run_check(cache.path(), root, &dependents, &serial);
+    assert!(
+        cold.status.success(),
+        "valid template should pass;\nstderr:\n{}",
+        String::from_utf8_lossy(&cold.stderr)
+    );
+    assert_eq!(cache_artifacts(cache.path()), dependents.len());
+
+    std::fs::write(root.join("prompt.md"), "hello {{name\n").expect("break template");
+    let after_edit = run_check(cache.path(), root, &dependents, &serial);
+    let stderr = String::from_utf8_lossy(&after_edit.stderr);
+    assert!(!after_edit.status.success(), "stderr:\n{stderr}");
+    let reports = stderr
+        .matches("template 'prompt.md' has a syntax error")
+        .count();
+    assert_eq!(
+        reports,
+        dependents.len(),
+        "every dependent's cached ok result must be invalidated by the shared module's template probe;\nstderr:\n{stderr}"
+    );
+}
+
 #[test]
 fn kill_switches_disable_the_cache() {
     let temp = tempfile::TempDir::new().expect("tempdir");

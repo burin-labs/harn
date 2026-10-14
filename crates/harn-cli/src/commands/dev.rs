@@ -442,16 +442,8 @@ fn typecheck_file(graph: &ModuleGraph, path: &Path) -> Vec<TypeDiagnostic> {
         Ok(p) => p,
         Err(e) => return vec![lex_diagnostic(format!("{e}"))],
     };
-    let mut checker = TypeChecker::new();
-    if let Some(imported) = graph.imported_names_for_file(path) {
-        checker = checker.with_imported_names(imported);
-    }
-    if let Some(imported) = graph.imported_type_declarations_for_file(path) {
-        checker = checker.with_imported_type_decls(imported);
-    }
-    if let Some(imported) = graph.imported_callable_declarations_for_file(path) {
-        checker = checker.with_imported_callable_decls(imported);
-    }
+    let checker =
+        crate::typecheck_imports::checker_with_resolved_graph(TypeChecker::new(), path, graph);
     checker.check_with_source(&program, &source)
 }
 

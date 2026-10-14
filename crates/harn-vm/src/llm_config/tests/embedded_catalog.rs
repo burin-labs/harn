@@ -1,72 +1,8 @@
-//! Invariants the embedded provider catalog must hold: every model,
-//! alias and QC default resolves, pricing is sane, deprecations are annotated,
-//! and dedicated routes stay out of the tier aliases.
+//! Runtime catalog behaviors and QC defaults. Structural validity belongs to
+//! provider_catalog::validate_artifact and its positive/negative tests.
 
 use super::super::*;
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
-
-// ── Embedded providers.toml invariants ───────────────────────────────────
-// These tests pin properties of the *system* — TOML parses, every
-// alias resolves, every deprecated model has a note — without
-// pinning specific catalog values. They survive future catalog
-// churn and surface real schema breakage.
-
-#[test]
-fn embedded_catalog_every_deprecated_model_has_a_note() {
-    let config = default_config();
-    let offenders: Vec<&str> = config
-        .models
-        .iter()
-        .filter(|(_, model)| {
-            model.deprecated
-                && model
-                    .deprecation_note
-                    .as_deref()
-                    .unwrap_or("")
-                    .trim()
-                    .is_empty()
-        })
-        .map(|(id, _)| id.as_str())
-        .collect();
-    assert!(
-        offenders.is_empty(),
-        "deprecated models missing a deprecation_note: {offenders:?}"
-    );
-}
-
-#[test]
-fn embedded_catalog_every_model_targets_a_registered_provider() {
-    let config = default_config();
-    let known: std::collections::BTreeSet<&str> =
-        config.providers.keys().map(String::as_str).collect();
-    let orphans: Vec<(&str, &str)> = config
-        .models
-        .iter()
-        .filter(|(_, model)| !known.contains(model.provider.as_str()))
-        .map(|(id, model)| (id.as_str(), model.provider.as_str()))
-        .collect();
-    assert!(
-        orphans.is_empty(),
-        "models reference unknown providers: {orphans:?}"
-    );
-}
-
-#[test]
-fn embedded_catalog_every_alias_targets_a_registered_provider() {
-    let config = default_config();
-    let known: std::collections::BTreeSet<&str> =
-        config.providers.keys().map(String::as_str).collect();
-    let orphans: Vec<(&str, &str)> = config
-        .aliases
-        .iter()
-        .filter(|(_, alias)| !known.contains(alias.provider.as_str()))
-        .map(|(name, alias)| (name.as_str(), alias.provider.as_str()))
-        .collect();
-    assert!(
-        orphans.is_empty(),
-        "aliases reference unknown providers: {orphans:?}"
-    );
-}
 
 #[test]
 fn embedded_catalog_every_qc_default_targets_a_known_model() {
@@ -81,28 +17,6 @@ fn embedded_catalog_every_qc_default_targets_a_known_model() {
         orphans.is_empty(),
         "qc_defaults reference unknown models: {orphans:?}"
     );
-}
-
-#[test]
-fn embedded_catalog_pricing_rates_are_non_negative() {
-    let config = default_config();
-    for (id, model) in &config.models {
-        let Some(pricing) = &model.pricing else {
-            continue;
-        };
-        assert!(
-            pricing.input_per_mtok >= 0.0 && pricing.output_per_mtok >= 0.0,
-            "{id}: negative pricing — in={} out={}",
-            pricing.input_per_mtok,
-            pricing.output_per_mtok
-        );
-        if let Some(rate) = pricing.cache_read_per_mtok {
-            assert!(rate >= 0.0, "{id}: negative cache_read rate {rate}");
-        }
-        if let Some(rate) = pricing.cache_write_per_mtok {
-            assert!(rate >= 0.0, "{id}: negative cache_write rate {rate}");
-        }
-    }
 }
 
 #[test]

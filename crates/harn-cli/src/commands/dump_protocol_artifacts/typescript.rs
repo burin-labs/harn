@@ -548,11 +548,13 @@ export interface ACPToolCallUpdate {
 export interface ACPMessageChunkUpdate {
   sessionUpdate: "agent_message_chunk" | "agent_thought_chunk" | "user_message_chunk"
   content: ACPContentBlock
+  historySourceEventId?: string | null
 }
 
 export interface ACPUserMessageUpdate {
   sessionUpdate: "user_message"
   messageId: string
+  historySourceEventId?: string | null
   content: ACPContentBlock[]
 }
 
@@ -955,6 +957,8 @@ export interface HarnSessionTimelineUpdate {
     append_typescript_session_recap_types(&mut out);
     super::plan_records::append(&mut out, super::records::Target::Typescript);
     super::inference_admission::append(&mut out, super::records::Target::Typescript);
+    super::canonical_history::append(&mut out, super::records::Target::Typescript);
+    super::prompt_correlation::append(&mut out, super::records::Target::Typescript);
     out
 }
 

@@ -43,7 +43,7 @@ fn noise_names(spec: dict) -> list {
       const rest = text.slice(start + 1, len(text))
       const stop = rest.index_of("'")
       if stop > 0 {
-        out = out.appending(rest.slice(0, stop))
+        out.push(rest.slice(0, stop))
       }
     }
   }
@@ -184,7 +184,7 @@ pipeline default(harness: Harness) {
     } else {
       set()
     }
-    touched = touched.adding(path)
+    touched.add(path)
     const current = collect(harness.ast, after, language, path)
     return novel(current, prior, shown)
   }
@@ -197,9 +197,9 @@ pipeline default(harness: Harness) {
     let held: list = []
     for diag in pending {
       if tier_filter == "all" || to_string(diag.tier) == tier_filter {
-        taken = taken.appending(diag)
+        taken.push(diag)
       } else {
-        held = held.appending(diag)
+        held.push(diag)
       }
     }
     pending = held
@@ -363,10 +363,10 @@ pipeline default(harness: Harness) {
               to_string(item?.new_text ?? ""),
             )
             if applied.ok {
-              notes = notes.appending("edited ${item?.path}")
+              notes.push("edited ${item?.path}")
               pending = pending + introduced(applied.path, applied.before, applied.after)
             } else {
-              notes = notes.appending("failed ${item?.path}: ${applied.message}")
+              notes.push("failed ${item?.path}: ${applied.message}")
             }
           }
           let body = join(notes, "\n")

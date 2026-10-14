@@ -79,7 +79,9 @@ function toInputDateTime(value: string | null) {
   if (!value) {
     return ""
   }
-  return value.replace("Z", "").slice(0, 16)
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) {return ""}
+  return new Date(date.getTime() - date.getTimezoneOffset() * 60_000).toISOString().slice(0, 16)
 }
 
 function fromInputDateTime(value: string) {
@@ -152,7 +154,7 @@ export function DlqPage() {
   function updateParams(next: Record<string, string | null>) {
     const updated = new URLSearchParams(searchParams)
     for (const [key, value] of Object.entries(next)) {
-      if (!value || value === "pending") {
+      if (!value || (key === "state" && value === "pending")) {
         updated.delete(key)
       } else {
         updated.set(key, value)
@@ -164,6 +166,16 @@ export function DlqPage() {
   async function runReplay(entry: PortalDlqEntry, driftAccept = false) {
     const job = await replayDlqEntry(entry.id, driftAccept)
     handleJob(job)
+  }
+
+  async function runAction(action: () => Promise<void>) {
+    setLastError(null)
+    setNotice(null)
+    try {
+      await action()
+    } catch (error) {
+      setLastError(error instanceof Error ? error.message : String(error))
+    }
   }
 
   function handleJob(job: PortalLaunchJob) {
@@ -373,10 +385,10 @@ export function DlqPage() {
         </div>
 
         <div className="dlq-bulk-bar">
-          <button className="action-button" disabled={!data?.entries.length} onClick={() => void runBulkReplay()} type="button">
+          <button className="action-button" disabled={!data?.entries.length} onClick={() => void runAction(runBulkReplay)} type="button">
             {intl.formatMessage(messages.replayAll)}
           </button>
-          <button className="action-button" onClick={() => void runBulkPurgeOldUnknown()} type="button">
+          <button className="action-button" onClick={() => void runAction(runBulkPurgeOldUnknown)} type="button">
             {intl.formatMessage(messages.purgeOld)}
           </button>
         </div>
@@ -433,16 +445,16 @@ export function DlqPage() {
                   <p className="mono">{selected.id}</p>
                 </div>
                 <div className="dlq-action-grid">
-                  <button className="action-button" onClick={() => void runReplay(selected)} type="button">
+                  <button className="action-button" onClick={() => void runAction(() => runReplay(selected))} type="button">
                     {intl.formatMessage(messages.replay)}
                   </button>
-                  <button className="action-button" onClick={() => void runReplay(selected, true)} type="button">
+                  <button className="action-button" onClick={() => void runAction(() => runReplay(selected, true))} type="button">
                     {intl.formatMessage(messages.replayDrift)}
                   </button>
-                  <button className="action-button" onClick={() => void runExport(selected)} type="button">
+                  <button className="action-button" onClick={() => void runAction(() => runExport(selected))} type="button">
                     {intl.formatMessage(messages.exportFixture)}
                   </button>
-                  <button className="action-button danger-button" onClick={() => void runPurge(selected)} type="button">
+                  <button className="action-button danger-button" onClick={() => void runAction(() => runPurge(selected))} type="button">
                     {intl.formatMessage(messages.purge)}
                   </button>
                 </div>

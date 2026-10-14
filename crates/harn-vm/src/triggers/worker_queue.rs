@@ -209,13 +209,26 @@ impl WorkerQueue {
     }
 
     pub async fn queue_state(&self, queue: &str) -> Result<WorkerQueueState, LogError> {
+        self.queue_state_at(queue, now_ms()).await
+    }
+
+    /// Fold the queue's durable records into its state as of `as_of_ms`.
+    /// Claims whose lease ends at or before that instant read as expired.
+    /// A caller that just renewed a lease passes the instant it captured
+    /// before renewing, so the snapshot cannot drop that claim because the
+    /// event-log reads ran past a short TTL.
+    pub async fn queue_state_at(
+        &self,
+        queue: &str,
+        as_of_ms: i64,
+    ) -> Result<WorkerQueueState, LogError> {
         let queue_name = queue.trim();
         if queue_name.is_empty() {
             return Err(LogError::Config(
                 "worker queue name cannot be empty".to_string(),
             ));
         }
-        let now_ms = now_ms();
+        let now_ms = as_of_ms;
         let job_events = self
             .event_log
             .read_range(&job_topic(queue_name)?, None, usize::MAX)
@@ -284,8 +297,12 @@ impl WorkerQueue {
                         continue;
                     };
                     if let Some(active) = job.active_claim.as_mut() {
+                        // A renewal only extends its lease. Concurrent renewals
+                        // of one claim (a background heartbeat and a final
+                        // renewal) can append out of order, and a late,
+                        // older renewal must not shorten the newer lease.
                         if active.claim_id == renewal.claim_id {
-                            active.expires_at_ms = renewal.expires_at_ms;
+                            active.expires_at_ms = active.expires_at_ms.max(renewal.expires_at_ms);
                         }
                     }
                 }
@@ -476,7 +493,7 @@ impl WorkerQueue {
         let policy = self.policy();
         for _ in 0..8 {
             let now_ms = now_ms();
-            let state = self.queue_state(queue_name).await?;
+            let state = self.queue_state_at(queue_name, now_ms).await?;
             let (job, selection) = {
                 let mut states = self
                     .scheduler_states
@@ -521,7 +538,9 @@ impl WorkerQueue {
                     ),
                 )
                 .await?;
-            let refreshed = self.queue_state(queue_name).await?;
+            // Confirm the claim as of the instant it was made, so a log read
+            // slower than a short TTL cannot reject the claim this call won.
+            let refreshed = self.queue_state_at(queue_name, now_ms).await?;
             if refreshed
                 .active_claim_for(job.job_event_id)
                 .is_some_and(|active| active.claim_id == claim.claim_id)
@@ -646,7 +665,9 @@ impl WorkerQueue {
                 ),
             )
             .await?;
-        let refreshed = self.queue_state(&handle.queue).await?;
+        // Judge ownership at the renewal instant. Reading the log can outlast a
+        // short TTL, and a later clock would report this fresh lease as lost.
+        let refreshed = self.queue_state_at(&handle.queue, now_ms).await?;
         Ok(refreshed
             .active_claim_for(handle.job_event_id)
             .is_some_and(|active| active.claim_id == handle.claim_id))

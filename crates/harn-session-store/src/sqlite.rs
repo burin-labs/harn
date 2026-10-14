@@ -47,14 +47,15 @@ use super::store::{
     SweepReport, TruncateResult, UpdateSession, VerifyReport, MAX_READ_BATCH,
 };
 
-// v5 adds `sessions.title_pinned`. Adding a column has to move this number:
+// v6 adds durable task admission, execution descriptors, and control events.
+// Adding a table or column has to move this number:
 // the shared initializer fast-paths out of schema setup entirely when the
 // recorded version already matches, so an unbumped column never reaches an
 // existing database.
-const SCHEMA_VERSION: i64 = 5;
 const SCHEMA_NAME: &str = "session_store";
 const DEFAULT_BUSY_TIMEOUT: Duration = Duration::from_secs(5);
-const SQLITE_SCHEMA: SchemaVersion = SchemaVersion::new(SCHEMA_NAME, SCHEMA_VERSION);
+const SQLITE_SCHEMA: SchemaVersion =
+    SchemaVersion::new(SCHEMA_NAME, SqliteSessionStore::SCHEMA_VERSION);
 
 #[derive(Clone)]
 pub struct SqliteSessionStore {
@@ -70,6 +71,9 @@ struct StoreInner {
     path: PathBuf,
     mutation_admission: MutationAdmission,
     _snapshot: Option<tempfile::TempDir>,
+    task_claims: Arc<Mutex<std::collections::BTreeSet<String>>>,
+    /// Committed event-append transactions, for batching diagnostics.
+    append_commits: std::sync::atomic::AtomicU64,
 }
 
 #[derive(Debug)]
@@ -100,6 +104,9 @@ impl DerefMut for MutationConnection<'_> {
 }
 
 impl SqliteSessionStore {
+    /// Current schema version supported by the session store initializer.
+    pub const SCHEMA_VERSION: i64 = 6;
+
     pub fn open(path: impl AsRef<Path>) -> StoreResult<Self> {
         Self::open_with_hooks(path, StoreHooks::default())
     }
@@ -152,6 +159,8 @@ impl SqliteSessionStore {
                 path,
                 mutation_admission: MutationAdmission::ReadOnly,
                 _snapshot: Some(snapshot),
+                task_claims: Arc::default(),
+                append_commits: std::sync::atomic::AtomicU64::new(0),
             }),
         })
     }
@@ -232,6 +241,8 @@ impl SqliteSessionStore {
                 path,
                 mutation_admission,
                 _snapshot: None,
+                task_claims: Arc::default(),
+                append_commits: std::sync::atomic::AtomicU64::new(0),
             }),
         })
     }
@@ -243,6 +254,45 @@ impl SqliteSessionStore {
     /// domain away from the already-open SQLite database.
     pub fn path(&self) -> &Path {
         &self.inner.path
+    }
+
+    /// Append `events` to one session, in order, as a single transaction.
+    ///
+    /// Every event is redacted, chained, hashed, signed, and indexed exactly
+    /// as [`SessionStore::append`] would do it one at a time, so the stored
+    /// rows are the same. The difference is atomicity and cost: the batch
+    /// commits once, and on any error nothing in it is persisted, so a
+    /// caller that keeps its queue until this returns can retry the whole
+    /// batch without duplicating a prefix.
+    pub async fn append_batch(
+        &self,
+        session_id: &str,
+        events: Vec<AppendEvent>,
+    ) -> StoreResult<Vec<StoredEvent>> {
+        if events.is_empty() {
+            return Ok(Vec::new());
+        }
+        let mut conn = self.lock_for_mutation()?;
+        let tx = write_transaction(&mut conn)?;
+        let stored = append_events_in_tx(&tx, self.hooks(), session_id, events)?;
+        tx.commit().map_err(map_sql)?;
+        self.record_append_commit();
+        Ok(stored)
+    }
+
+    /// Event-append transactions this store has committed since it opened,
+    /// counted across clones of the handle. A diagnostic for callers that
+    /// batch appends: one flush of N events should cost one transaction.
+    pub fn append_transactions(&self) -> u64 {
+        self.inner
+            .append_commits
+            .load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    fn record_append_commit(&self) {
+        self.inner
+            .append_commits
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, Connection> {
@@ -390,11 +440,11 @@ fn initialize_session_schema(transaction: &Transaction<'_>) -> StoreResult<()> {
     } else {
         0
     };
-    if previous_schema_version > SCHEMA_VERSION {
+    if previous_schema_version > SqliteSessionStore::SCHEMA_VERSION {
         return Err(StoreError::SchemaIncompatible {
             schema: SCHEMA_NAME.to_string(),
             stored: previous_schema_version,
-            supported: SCHEMA_VERSION,
+            supported: SqliteSessionStore::SCHEMA_VERSION,
         });
     }
 
@@ -480,6 +530,45 @@ fn initialize_session_schema(transaction: &Transaction<'_>) -> StoreResult<()> {
                 session_id      TEXT NOT NULL,
                 event_count     INTEGER NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS agent_task_sessions (
+                id TEXT PRIMARY KEY,
+                record_json TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS agent_control_event_sequence (
+                singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+                next_id INTEGER NOT NULL
+            );
+            INSERT OR IGNORE INTO agent_control_event_sequence (singleton, next_id) VALUES (1, 1);
+            CREATE TABLE IF NOT EXISTS agent_tasks (
+                id TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                workspace_id TEXT NOT NULL,
+                status TEXT NOT NULL,
+                record_json TEXT NOT NULL,
+                FOREIGN KEY (session_id) REFERENCES agent_task_sessions(id)
+            );
+            CREATE INDEX IF NOT EXISTS agent_tasks_session ON agent_tasks(session_id);
+            CREATE INDEX IF NOT EXISTS agent_tasks_workspace ON agent_tasks(workspace_id);
+            CREATE TABLE IF NOT EXISTS task_retry_bindings (
+                binding_digest TEXT PRIMARY KEY,
+                request_fingerprint TEXT NOT NULL,
+                task_id TEXT NOT NULL,
+                expires_at_ms INTEGER NOT NULL,
+                FOREIGN KEY (task_id) REFERENCES agent_tasks(id)
+            );
+            CREATE TABLE IF NOT EXISTS agent_task_events (
+                id TEXT PRIMARY KEY,
+                task_id TEXT NOT NULL,
+                session_id TEXT NOT NULL,
+                record_json TEXT NOT NULL,
+                FOREIGN KEY (task_id) REFERENCES agent_tasks(id)
+            );
+            CREATE INDEX IF NOT EXISTS agent_task_events_task ON agent_task_events(task_id, id);
+            CREATE INDEX IF NOT EXISTS agent_task_events_session ON agent_task_events(session_id, id);
+            CREATE TABLE IF NOT EXISTS agent_task_message_projections (
+                session_id TEXT PRIMARY KEY,
+                record_json TEXT NOT NULL
+            );
             CREATE TABLE IF NOT EXISTS session_tags (
                 session_id  TEXT NOT NULL,
                 tag         TEXT NOT NULL,
@@ -519,7 +608,7 @@ fn initialize_session_schema(transaction: &Transaction<'_>) -> StoreResult<()> {
                 ON sessions(project_scope, updated_at_ms);",
         )
         .map_err(map_sql)?;
-    if previous_schema_version < SCHEMA_VERSION {
+    if previous_schema_version < SqliteSessionStore::SCHEMA_VERSION {
         // Foreign-key enforcement is connection-local and does not repair
         // child rows orphaned by v1. This guarded cleanup runs once while
         // upgrading from a pre-foreign-key schema.
@@ -761,7 +850,7 @@ pub(crate) fn read_session_meta(
     session_id: &str,
 ) -> StoreResult<(SessionMeta, EventId)> {
     let row = conn
-        .query_row(
+        .prepare_cached(
             "SELECT tenant_id, persona, parent_session_id, title, cwd, model,
                     session_type, project_scope, usage_input, usage_output,
                     usage_cost_usd_micros, created_at_ms, created_at,
@@ -770,39 +859,39 @@ pub(crate) fn read_session_meta(
                     ttl_seconds, tags_json, attributes_json, next_event_id,
                     title_pinned
              FROM sessions WHERE id = ?1",
-            params![session_id],
-            |row| {
-                Ok((
-                    row.get::<_, Option<String>>(0)?,
-                    row.get::<_, Option<String>>(1)?,
-                    row.get::<_, Option<String>>(2)?,
-                    row.get::<_, Option<String>>(3)?,
-                    row.get::<_, Option<String>>(4)?,
-                    row.get::<_, Option<String>>(5)?,
-                    row.get::<_, Option<String>>(6)?,
-                    row.get::<_, Option<String>>(7)?,
-                    row.get::<_, i64>(8)?,
-                    row.get::<_, i64>(9)?,
-                    row.get::<_, i64>(10)?,
-                    row.get::<_, i64>(11)?,
-                    row.get::<_, String>(12)?,
-                    row.get::<_, i64>(13)?,
-                    row.get::<_, String>(14)?,
-                    row.get::<_, String>(15)?,
-                    row.get::<_, i64>(16)?,
-                    row.get::<_, Option<i64>>(17)?,
-                    row.get::<_, Option<String>>(18)?,
-                    row.get::<_, Option<i64>>(19)?,
-                    row.get::<_, Option<String>>(20)?,
-                    row.get::<_, Option<i64>>(21)?,
-                    row.get::<_, Option<i64>>(22)?,
-                    row.get::<_, String>(23)?,
-                    row.get::<_, String>(24)?,
-                    row.get::<_, i64>(25)?,
-                    row.get::<_, bool>(26)?,
-                ))
-            },
         )
+        .map_err(map_sql)?
+        .query_row(params![session_id], |row| {
+            Ok((
+                row.get::<_, Option<String>>(0)?,
+                row.get::<_, Option<String>>(1)?,
+                row.get::<_, Option<String>>(2)?,
+                row.get::<_, Option<String>>(3)?,
+                row.get::<_, Option<String>>(4)?,
+                row.get::<_, Option<String>>(5)?,
+                row.get::<_, Option<String>>(6)?,
+                row.get::<_, Option<String>>(7)?,
+                row.get::<_, i64>(8)?,
+                row.get::<_, i64>(9)?,
+                row.get::<_, i64>(10)?,
+                row.get::<_, i64>(11)?,
+                row.get::<_, String>(12)?,
+                row.get::<_, i64>(13)?,
+                row.get::<_, String>(14)?,
+                row.get::<_, String>(15)?,
+                row.get::<_, i64>(16)?,
+                row.get::<_, Option<i64>>(17)?,
+                row.get::<_, Option<String>>(18)?,
+                row.get::<_, Option<i64>>(19)?,
+                row.get::<_, Option<String>>(20)?,
+                row.get::<_, Option<i64>>(21)?,
+                row.get::<_, Option<i64>>(22)?,
+                row.get::<_, String>(23)?,
+                row.get::<_, String>(24)?,
+                row.get::<_, i64>(25)?,
+                row.get::<_, bool>(26)?,
+            ))
+        })
         .optional()
         .map_err(map_sql)?
         .ok_or_else(|| StoreError::NotFound(session_id.to_string()))?;
@@ -882,30 +971,31 @@ fn insert_event(conn: &Connection, event: &StoredEvent) -> StoreResult<()> {
         .signed_by
         .as_ref()
         .map(|sig| serde_json::to_string(sig).unwrap_or_else(|_| "null".into()));
-    conn.execute(
+    conn.prepare_cached(
         "INSERT INTO session_events (
             session_id, event_id, tenant_id, parent_event_id, actor, kind, custom_kind,
             payload_json, tags_json, headers_json, ts_ms, ts, record_hash, prev_hash,
             signature_json
         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
-        params![
-            event.session_id,
-            event.event_id as i64,
-            event.tenant_id,
-            event.parent_event_id.map(|value| value as i64),
-            event.actor,
-            kind,
-            custom_kind,
-            payload_json,
-            tags_json,
-            headers_json,
-            event.ts_ms,
-            event.ts,
-            event.record_hash,
-            event.prev_hash,
-            signature_json,
-        ],
     )
+    .map_err(map_sql)?
+    .execute(params![
+        event.session_id,
+        event.event_id as i64,
+        event.tenant_id,
+        event.parent_event_id.map(|value| value as i64),
+        event.actor,
+        kind,
+        custom_kind,
+        payload_json,
+        tags_json,
+        headers_json,
+        event.ts_ms,
+        event.ts,
+        event.record_hash,
+        event.prev_hash,
+        signature_json,
+    ])
     .map_err(map_sql)?;
     Ok(())
 }
@@ -917,18 +1007,19 @@ fn insert_search_rows(
     event: &StoredEvent,
 ) -> StoreResult<()> {
     let document = redacted_search_document(hooks.redaction.as_ref(), meta, event);
-    conn.execute(
+    conn.prepare_cached(
         "INSERT INTO session_events_fts (
             session_id, event_id, tenant_id, project_scope, text
          ) VALUES (?1, ?2, ?3, ?4, ?5)",
-        params![
-            event.session_id,
-            event.event_id as i64,
-            event.tenant_id,
-            meta.project_scope,
-            document,
-        ],
     )
+    .map_err(map_sql)?
+    .execute(params![
+        event.session_id,
+        event.event_id as i64,
+        event.tenant_id,
+        meta.project_scope,
+        document,
+    ])
     .map_err(map_sql)?;
     let vector = hooks.embedder.embed(&document);
     if vector.len() != hooks.embedder.dim() {
@@ -939,18 +1030,19 @@ fn insert_search_rows(
             hooks.embedder.dim()
         )));
     }
-    conn.execute(
+    conn.prepare_cached(
         "INSERT OR REPLACE INTO session_event_vectors (
             session_id, event_id, backend, dim, embedding
          ) VALUES (?1, ?2, ?3, ?4, ?5)",
-        params![
-            event.session_id,
-            event.event_id as i64,
-            hooks.embedder.name(),
-            hooks.embedder.dim() as i64,
-            vector_blob(&vector),
-        ],
     )
+    .map_err(map_sql)?
+    .execute(params![
+        event.session_id,
+        event.event_id as i64,
+        hooks.embedder.name(),
+        hooks.embedder.dim() as i64,
+        vector_blob(&vector),
+    ])
     .map_err(map_sql)?;
     Ok(())
 }
@@ -1105,86 +1197,121 @@ fn append_in_tx(
     conn: &Connection,
     hooks: &StoreHooks,
     session_id: &str,
-    mut event: AppendEvent,
+    event: AppendEvent,
 ) -> StoreResult<StoredEvent> {
-    prepare_append_event(hooks, &mut event)?;
-    let (mut meta, next_event_id) = read_session_meta(conn, session_id)?;
-    super::memory_helpers::validate_open(&meta)?;
-    if let Some(parent_event_id) = event.parent_event_id {
-        let exists: bool = conn
-            .query_row(
-                "SELECT 1 FROM session_events WHERE session_id = ?1 AND event_id = ?2",
-                params![session_id, parent_event_id as i64],
-                |_| Ok(true),
-            )
-            .optional()
-            .map_err(map_sql)?
-            .unwrap_or(false);
-        if !exists {
-            return Err(StoreError::InvalidInput(format!(
-                "parent_event_id {parent_event_id} not present in session"
-            )));
-        }
+    let mut stored = append_events_in_tx(conn, hooks, session_id, vec![event])?;
+    Ok(stored
+        .pop()
+        .expect("appending one event stores exactly one event"))
+}
+
+/// Append `events` in order inside the caller's transaction.
+///
+/// Each event is redacted, chained to its predecessor, hashed, signed, and
+/// indexed exactly as a lone append would do it. The session row and chain
+/// tip are read once and written once, because every event in the batch is
+/// appended by this one writer inside one transaction.
+fn append_events_in_tx(
+    conn: &Connection,
+    hooks: &StoreHooks,
+    session_id: &str,
+    mut events: Vec<AppendEvent>,
+) -> StoreResult<Vec<StoredEvent>> {
+    for event in &mut events {
+        prepare_append_event(hooks, event)?;
     }
-    let prev_hash: Option<String> = conn
-        .query_row(
+    let (mut meta, mut next_event_id) = read_session_meta(conn, session_id)?;
+    super::memory_helpers::validate_open(&meta)?;
+    if events.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut prev_hash: Option<String> = conn
+        .prepare_cached(
             "SELECT record_hash FROM session_events
              WHERE session_id = ?1 ORDER BY event_id DESC LIMIT 1",
-            params![session_id],
-            |row| row.get(0),
         )
-        .optional()
+        .and_then(|mut stmt| {
+            stmt.query_row(params![session_id], |row| row.get(0))
+                .optional()
+        })
         .map_err(map_sql)?;
-    let (ts_ms, ts) = now_ms_and_rfc3339();
-    let mut stored = StoredEvent {
-        event_id: next_event_id,
-        session_id: session_id.to_string(),
-        tenant_id: meta.tenant_id.clone(),
-        parent_event_id: event.parent_event_id,
-        actor: event.actor,
-        kind: event.kind,
-        payload: event.payload,
-        tags: event.tags,
-        headers: event.headers,
-        ts_ms,
-        ts: ts.clone(),
-        record_hash: String::new(),
-        prev_hash,
-        signed_by: None,
-    };
-    stored.record_hash = compute_record_hash(&stored);
-    if let Some(signer) = hooks.event_signer.as_ref() {
-        stored.signed_by = Some(signer.sign_event(&stored));
+    let mut chain_root = meta.chain_root_hash.clone().unwrap_or_else(chain_root_init);
+    let mut stored_events = Vec::with_capacity(events.len());
+    for event in events {
+        if let Some(parent_event_id) = event.parent_event_id {
+            let exists: bool = conn
+                .prepare_cached(
+                    "SELECT 1 FROM session_events WHERE session_id = ?1 AND event_id = ?2",
+                )
+                .and_then(|mut stmt| {
+                    stmt.query_row(params![session_id, parent_event_id as i64], |_| Ok(true))
+                        .optional()
+                })
+                .map_err(map_sql)?
+                .unwrap_or(false);
+            if !exists {
+                return Err(StoreError::InvalidInput(format!(
+                    "parent_event_id {parent_event_id} not present in session"
+                )));
+            }
+        }
+        let (ts_ms, ts) = now_ms_and_rfc3339();
+        let mut stored = StoredEvent {
+            event_id: next_event_id,
+            session_id: session_id.to_string(),
+            tenant_id: meta.tenant_id.clone(),
+            parent_event_id: event.parent_event_id,
+            actor: event.actor,
+            kind: event.kind,
+            payload: event.payload,
+            tags: event.tags,
+            headers: event.headers,
+            ts_ms,
+            ts: ts.clone(),
+            record_hash: String::new(),
+            prev_hash: prev_hash.take(),
+            signed_by: None,
+        };
+        stored.bind_canonical_origin(session_id);
+        stored.record_hash = compute_record_hash(&stored);
+        if let Some(signer) = hooks.event_signer.as_ref() {
+            stored.signed_by = Some(signer.sign_event(&stored));
+        }
+        insert_event(conn, &stored)?;
+        insert_search_rows(conn, hooks, &meta, &stored)?;
+        chain_root = chain_root_fold(&chain_root, &stored.record_hash);
+        meta.event_count = meta.event_count.saturating_add(1);
+        meta.last_event_id = Some(next_event_id);
+        meta.updated_at_ms = ts_ms;
+        meta.updated_at = ts;
+        prev_hash = Some(stored.record_hash.clone());
+        next_event_id += 1;
+        stored_events.push(stored);
     }
-    insert_event(conn, &stored)?;
-    insert_search_rows(conn, hooks, &meta, &stored)?;
-    let prev_root = meta.chain_root_hash.clone().unwrap_or_else(chain_root_init);
-    let chain_root = chain_root_fold(&prev_root, &stored.record_hash);
-    meta.event_count = meta.event_count.saturating_add(1);
-    meta.last_event_id = Some(next_event_id);
     meta.chain_root_hash = Some(chain_root);
-    meta.updated_at_ms = ts_ms;
-    meta.updated_at = ts;
-    conn.execute(
+    conn.prepare_cached(
         "UPDATE sessions SET event_count = ?1, last_event_id = ?2,
                               chain_root_hash = ?3, updated_at_ms = ?4,
                               updated_at = ?5, next_event_id = ?6 WHERE id = ?7",
-        params![
+    )
+    .and_then(|mut stmt| {
+        stmt.execute(params![
             meta.event_count as i64,
             meta.last_event_id.map(|value| value as i64),
             meta.chain_root_hash,
             meta.updated_at_ms,
             meta.updated_at,
-            (next_event_id + 1) as i64,
+            next_event_id as i64,
             session_id,
-        ],
-    )
+        ])
+    })
     .map_err(map_sql)?;
-    Ok(stored)
+    Ok(stored_events)
 }
 
 #[path = "sqlite/operations.rs"]
 mod operations;
+mod tasks;
 
 #[cfg(test)]
 #[path = "sqlite_tests.rs"]

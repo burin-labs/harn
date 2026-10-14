@@ -14,13 +14,6 @@ fn test_hello_world() {
 }
 
 #[test]
-fn test_arithmetic_new() {
-    let out =
-        run_vm("pipeline default(harness: Harness, task: unknown) { harness.stdio.log(2 + 3) }");
-    assert_eq!(out, "[harn] 5\n");
-}
-
-#[test]
 fn test_string_concat_new() {
     let out = run_vm(
         r#"pipeline default(harness: Harness, task: unknown) { harness.stdio.log("a" + "b") }"#,
@@ -35,14 +28,6 @@ fn test_if_else_new() {
 }
 
 #[test]
-fn test_for_loop_new() {
-    let out = run_vm(
-        "pipeline default(harness: Harness, task: unknown) { for i in [1, 2, 3] { harness.stdio.log(i) } }",
-    );
-    assert_eq!(out, "[harn] 1\n[harn] 2\n[harn] 3\n");
-}
-
-#[test]
 fn test_while_loop_new() {
     let out = run_vm("pipeline default(harness: Harness, task: unknown) { let i = 0\nwhile i < 3 { harness.stdio.log(i)\ni = i + 1 } }");
     assert_eq!(out, "[harn] 0\n[harn] 1\n[harn] 2\n");
@@ -52,13 +37,6 @@ fn test_while_loop_new() {
 fn test_function_call_new() {
     let out = run_vm("pipeline default(harness: Harness, task: unknown) { fn add(a, b) { return a + b }\nharness.stdio.log(add(2, 3)) }");
     assert_eq!(out, "[harn] 5\n");
-}
-
-#[test]
-fn test_closure_new() {
-    let out =
-        run_vm("pipeline default(harness: Harness, task: unknown) { const f = { x -> x * 2 }\nharness.stdio.log(f(5)) }");
-    assert_eq!(out, "[harn] 10\n");
 }
 
 #[test]

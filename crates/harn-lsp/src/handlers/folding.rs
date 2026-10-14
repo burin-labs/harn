@@ -25,7 +25,7 @@ impl HarnLsp {
         drop(docs);
 
         let ranges = match kind {
-            DocumentKind::Harn => build_folding_ranges(&source, ast.as_deref()),
+            DocumentKind::Harn => build_folding_ranges(&source, ast.as_deref().map(Vec::as_slice)),
             DocumentKind::Prompt => build_prompt_folding_ranges(&source, &outline),
             // Harn's lexer has nothing true to say about a document in
             // another language.

@@ -93,7 +93,7 @@ mod tests {
             id: path.to_string(),
             relative_path: path.to_string(),
             file_name: path.to_string(),
-            language: "rs".to_string(),
+            language: "rust".to_string(),
             line_count: 1,
             size_bytes: 1,
             last_modified_unix_ms: 0,

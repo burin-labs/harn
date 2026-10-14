@@ -552,17 +552,18 @@ text[:5]
 ### `BinaryOp`
 
 ```rust
-BinaryOp { op: String, left: Box<SNode>, right: Box<SNode> }
+BinaryOp { op: BinaryOperator, left: Box<SNode>, right: Box<SNode> }
 ```
 
-Binary operation. Operators:
-`+`, `-`, `*`, `/`, `%`, `**`, `==`, `!=`, `<`, `>`, `<=`, `>=`,
-`&&`, `||`, `??`, `|>`, `in`, `not_in`.
+Binary operation. `BinaryOperator` (in `harn_parser::operators`) owns each
+operator's spelling and precedence: `+`, `-`, `*`, `/`, `%`, `**`, `==`, `!=`,
+`<`, `>`, `<=`, `>=`, `&&`, `||`, `??`, `|>`, `in`, `not in`. JSON projections
+spell `not in` as `not_in`.
 
 ### `UnaryOp`
 
 ```rust
-UnaryOp { op: String, operand: Box<SNode> }
+UnaryOp { op: UnaryOperator, operand: Box<SNode> }
 ```
 
 Unary prefix operation: `!` (logical not) or `-` (negation).
@@ -582,11 +583,11 @@ x > 0 ? "positive" : "non-positive"
 ### `Assignment`
 
 ```rust
-Assignment { target: Box<SNode>, value: Box<SNode>, op: Option<String> }
+Assignment { target: Box<SNode>, value: Box<SNode>, op: Option<BinaryOperator> }
 ```
 
 Assigns a value to a mutable variable. `op` is `None` for plain `=`,
-or `Some("+")` for `+=`, etc.
+or `Some(BinaryOperator::Add)` for `+=`, etc.
 
 ### `RangeExpr`
 
@@ -594,11 +595,11 @@ or `Some("+")` for `+=`, etc.
 RangeExpr { start: Box<SNode>, end: Box<SNode>, inclusive: bool }
 ```
 
-Range expression. `inclusive: true` is the default (`a to b`); add a trailing `exclusive` modifier for the half-open form.
+Range expression. `a..b` has `inclusive: false`; `a..=b` has `inclusive: true`.
 
 ```harn
-0 to 10 exclusive   // [0, 10)
-0 to 9              // [0, 9] inclusive
+0..10   // [0, 10)
+0..=9   // [0, 9] inclusive
 ```
 
 ### `DeferStmt`

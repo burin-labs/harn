@@ -8,6 +8,106 @@ pub struct PureCase {
 
 pub const PURE_CASES: &[PureCase] = &[
     PureCase {
+        id: "truthiness-empty-bytes",
+        source: r"
+            fn truth(input: bytes) {
+              if input { return [!input, input ? true : false] }
+              return [!input, false]
+            }
+        ",
+        entry: "truth",
+        input_json: r#"{"$bytes":[]}"#,
+        expected_json: "[true,false]",
+    },
+    PureCase {
+        id: "truthiness-nonempty-bytes-with-zero-byte",
+        source: r"
+            fn truth(input: bytes) {
+              if input { return [!input, input ? true : false] }
+              return [!input, false]
+            }
+        ",
+        entry: "truth",
+        input_json: r#"{"$bytes":[0]}"#,
+        expected_json: "[false,true]",
+    },
+    PureCase {
+        id: "truthiness-nan-folding-and-runtime-branches",
+        source: r"
+            fn truth(input: float) {
+              let nan = input / input
+              let branch = false
+              if nan { branch = true }
+              return [!(0.0 / 0.0), !nan, (0.0 / 0.0) ? true : false,
+                nan ? true : false, (0.0 / 0.0) && true, nan && true,
+                (0.0 / 0.0) || false, nan || false, branch, !input]
+            }
+        ",
+        entry: "truth",
+        input_json: "0.0",
+        expected_json: "[false,false,true,true,true,true,true,true,true,true]",
+    },
+    PureCase {
+        id: "truthiness-duration-and-empty-values",
+        source: r"
+            fn truth(input: {zero: int, one: int, text: string, items: list<int>, record: dict<string, int>}) {
+              return [!0ms, !1ms, !input.zero, !input.one, !input.text, !input.items, !input.record,
+                !nil, !false, !true, ![], !({}), !0.0, !1.0]
+            }
+        ",
+        entry: "truth",
+        input_json: r#"{"zero":0,"one":1,"text":"","items":[],"record":{}}"#,
+        expected_json:
+            "[true,false,true,false,true,true,true,true,true,false,true,true,true,false]",
+    },
+    PureCase {
+        id: "runtime-string-repetition",
+        source: r#"
+            fn repeat(input: {text: string, count: int}) {
+              return [input.text * input.count, input.count * input.text, input.text * 0, input.text * -1, "" * input.count]
+            }
+        "#,
+        entry: "repeat",
+        input_json: r#"{"text":"λx","count":3}"#,
+        expected_json: r#"["λxλxλx","λxλxλx","","",""]"#,
+    },
+    PureCase {
+        id: "runtime-empty-string-repetition-with-huge-count",
+        source: r"fn repeat(input: {text: string, count: int}) { return input.text * input.count }",
+        entry: "repeat",
+        input_json: r#"{"text":"","count":9223372036854775807}"#,
+        expected_json: r#""""#,
+    },
+    PureCase {
+        id: "runtime-integer-exponent-promotes-beyond-u32",
+        source: r"fn power(input: int) { return [1 ** input, (-1) ** input, 2 ** -input] }",
+        entry: "power",
+        input_json: "4294967296",
+        expected_json: "[1.0,1.0,0.0]",
+    },
+    PureCase {
+        id: "runtime-float-integer-exponent-matches-folded-result",
+        source: r"
+            fn power(input: {base: float, exponent: int}) {
+              return [input.base ** input.exponent == 1.1 ** 7, input.base ** -input.exponent == 1.1 ** -7]
+            }
+        ",
+        entry: "power",
+        input_json: r#"{"base":1.1,"exponent":7}"#,
+        expected_json: "[true,true]",
+    },
+    PureCase {
+        id: "runtime-numeric-modulo-with-nonzero-divisors",
+        source: r"
+            fn modulo(input: {integer: int, floating: float}) {
+              return [input.integer % 3, input.integer % 2.5, input.floating % 3, input.floating % 2.5]
+            }
+        ",
+        entry: "modulo",
+        input_json: r#"{"integer":7,"floating":7.5}"#,
+        expected_json: "[1,2.0,1.5,0.0]",
+    },
+    PureCase {
         id: "typed-record-pick-preserves-nil-and-copies-values",
         source: r#"
             type Input = {name: string, age: int, absent: nil, nested: {count: int}}
@@ -113,6 +213,35 @@ pub const PURE_CASES: &[PureCase] = &[
         expected_json: "[7,2]",
     },
     PureCase {
+        id: "mutating-methods-rewrite-their-place",
+        source: r#"
+            type MutateInput = {items: list<int>, meta: dict<string, int>}
+            fn mutate(input: MutateInput) {
+              let items = input.items
+              const alias = items
+              items.push(4)
+              const last = items.pop()
+              items.insert(0, 0)
+              items.extend([9])
+              items.reverse()
+              let state = {stack: [1, 2], meta: input.meta}
+              const top = state.stack.pop()
+              const removed = state.meta.remove("a")
+              return {
+                items: items,
+                alias: alias,
+                last: last,
+                top: top,
+                removed: removed,
+                state: state,
+              }
+            }
+        "#,
+        entry: "mutate",
+        input_json: r#"{"items":[1,2,3],"meta":{"a":1,"b":2}}"#,
+        expected_json: r#"{"alias":[1,2,3],"items":[9,3,2,1,0],"last":4,"removed":1,"state":{"meta":{"b":2},"stack":[1]},"top":2}"#,
+    },
+    PureCase {
         id: "list-string-and-record-operations",
         source: r"
             type SummaryInput = {
@@ -128,7 +257,7 @@ pub const PURE_CASES: &[PureCase] = &[
                 items: input.left + input.right,
                 title: input.prefix + input.name,
                 found: input.left.contains(input.needle),
-                fields: input.meta.count(),
+                fields: input.meta.len(),
               }
             }
         ",
@@ -239,7 +368,7 @@ pub const PURE_CASES: &[PureCase] = &[
         source: r#"
             type RenderInput = {name: string, validation?: dict<string, bool>}
             fn reduce(input: RenderInput) {
-              const options = {allow_network: false}.merging(input.validation ?? {})
+              const options = {allow_network: false}.merge(input.validation ?? {})
               const name = trim(input.name)
               return {
                 encoded: replace(json_stringify(name), "<", "\\u003c"),
@@ -403,6 +532,48 @@ pub struct RuntimeFailureCase {
 
 pub const RUNTIME_FAILURE_CASES: &[RuntimeFailureCase] = &[
     RuntimeFailureCase {
+        id: "string-repetition-rejects-output-over-byte-limit",
+        source: r"fn repeat(input: {text: string, count: int}) { return input.text * input.count }",
+        entry: "repeat",
+        input_json: r#"{"text":"ab","count":524289}"#,
+        expected_code: "value_byte_limit",
+    },
+    RuntimeFailureCase {
+        id: "string-repetition-rejects-overflowing-output-length",
+        source: r"fn repeat(input: {text: string, count: int}) { return input.count * input.text }",
+        entry: "repeat",
+        input_json: r#"{"text":"abc","count":9223372036854775807}"#,
+        expected_code: "value_byte_limit",
+    },
+    RuntimeFailureCase {
+        id: "integer-modulo-by-integer-zero",
+        source: r"fn modulo(input: {left: int, right: int}) { return input.left % input.right }",
+        entry: "modulo",
+        input_json: r#"{"left":7,"right":0}"#,
+        expected_code: "division_by_zero",
+    },
+    RuntimeFailureCase {
+        id: "float-modulo-by-integer-zero",
+        source: r"fn modulo(input: {left: float, right: int}) { return input.left % input.right }",
+        entry: "modulo",
+        input_json: r#"{"left":7.5,"right":0}"#,
+        expected_code: "division_by_zero",
+    },
+    RuntimeFailureCase {
+        id: "integer-modulo-by-float-zero",
+        source: r"fn modulo(input: {left: int, right: float}) { return input.left % input.right }",
+        entry: "modulo",
+        input_json: r#"{"left":7,"right":0.0}"#,
+        expected_code: "division_by_zero",
+    },
+    RuntimeFailureCase {
+        id: "float-modulo-by-negative-float-zero",
+        source: r"fn modulo(input: {left: float, right: float}) { return input.left % input.right }",
+        entry: "modulo",
+        input_json: r#"{"left":7.5,"right":-0.0}"#,
+        expected_code: "division_by_zero",
+    },
+    RuntimeFailureCase {
         id: "declared-error-survives-transparent-rethrows",
         source: r"
             fn fail(input: int) -> any throws int { throw input }
@@ -500,5 +671,78 @@ pub const INVALID_CASES: &[InvalidCase] = &[
         ",
         entry: "reduce",
         expected_code: "compile_frontend",
+    },
+];
+
+#[derive(Clone, Copy)]
+pub struct PackageCompilationCase {
+    pub id: &'static str,
+    pub source: &'static str,
+    pub entry: &'static str,
+    pub expected_ok: bool,
+}
+
+impl PackageCompilationCase {
+    pub fn package(&self) -> harn_kernel::PortableSourcePackage {
+        harn_kernel::PortableSourcePackage {
+            root_source: self.source.to_string(),
+            root_imports: Vec::new(),
+            modules: Vec::new(),
+        }
+    }
+
+    pub fn compile(&self) -> Result<harn_kernel::ProgramArtifact, Vec<harn_kernel::Diagnostic>> {
+        let result = harn_kernel::compile_source_package(
+            self.package(),
+            self.entry,
+            harn_kernel::EntryKind::Function,
+        );
+        assert_eq!(
+            result.is_ok(),
+            self.expected_ok,
+            "{} compilation decision drifted",
+            self.id
+        );
+        if let Err(diagnostics) = &result {
+            assert!(
+                !diagnostics.is_empty(),
+                "{} has no failure diagnostic",
+                self.id
+            );
+        }
+        result
+    }
+}
+
+pub fn package_compilation_cases() -> impl Iterator<Item = PackageCompilationCase> {
+    INVALID_CASES
+        .iter()
+        .map(|case| PackageCompilationCase {
+            id: case.id,
+            source: case.source,
+            entry: case.entry,
+            expected_ok: false,
+        })
+        .chain(PACKAGE_COMPILATION_CASES.iter().copied())
+}
+
+pub const PACKAGE_COMPILATION_CASES: &[PackageCompilationCase] = &[
+    PackageCompilationCase {
+        id: "removed-provider-wrapper-alias",
+        source: "fn reduce(input: string) { return with_rate_limit(input) }",
+        entry: "reduce",
+        expected_ok: false,
+    },
+    PackageCompilationCase {
+        id: "retained-provider-call-alias",
+        source: "fn reduce(input: string) { return llm_call(input) }",
+        entry: "reduce",
+        expected_ok: true,
+    },
+    PackageCompilationCase {
+        id: "retained-provider-call-method",
+        source: "fn reduce(harness: Harness, input: string) { return harness.llm.call(input) }",
+        entry: "reduce",
+        expected_ok: true,
     },
 ];

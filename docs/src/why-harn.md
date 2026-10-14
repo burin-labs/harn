@@ -159,10 +159,9 @@ If all three attempts fail, the last error propagates rather than returning
 `nil`, so a `retry` block is not a way to make failure quiet. Wrap it in
 `try`/`catch` if you want to handle exhaustion.
 
-When you do want the error-aware version, that lives in the standard library
-rather than the language:
-[`harness.llm.with_rate_limit`](builtins.md#llm) retries with exponential
-backoff only on `rate_limit`, `overloaded`, `transient_network`, and `timeout`.
+For LLM calls, [`llm_caller(harness, opts?)`](stdlib/llm-handlers.md#provider-admission-and-retries)
+classifies errors and retries transient failures with bounded backoff.
+Each provider request acquires its own rate-limit permit automatically.
 
 See [Error handling](error-handling.md#retry) for the full contract.
 

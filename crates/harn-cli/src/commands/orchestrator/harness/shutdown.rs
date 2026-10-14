@@ -24,7 +24,6 @@ use super::pumps::{
 use super::routing::{trigger_state_snapshots, ConnectorRuntime};
 use super::CRON_TICK_TOPIC;
 use super::STATE_SNAPSHOT_FILE;
-use crate::package::CollectedManifestTrigger;
 
 pub(super) struct GracefulShutdownCtx<'a> {
     pub(super) role: OrchestratorRole,
@@ -36,7 +35,7 @@ pub(super) struct GracefulShutdownCtx<'a> {
     pub(super) event_log: &'a Arc<AnyEventLog>,
     pub(super) event_log_description: &'a harn_vm::event_log::EventLogDescription,
     pub(super) secret_chain_display: &'a str,
-    pub(super) triggers: &'a [CollectedManifestTrigger],
+    pub(super) triggers: &'a [harn_vm::TriggerBindingSpec],
     pub(super) connectors: &'a ConnectorRuntime,
     pub(super) shutdown_timeout: Duration,
     pub(super) drain_config: DrainConfig,

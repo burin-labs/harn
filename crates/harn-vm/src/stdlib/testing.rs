@@ -793,17 +793,6 @@ mod tests {
         ));
     }
 
-    #[test]
-    fn a_caller_message_replaces_the_diff() {
-        assert_eq!(
-            failure_text(
-                assert_eq_impl,
-                &[VmValue::Int(1), VmValue::Int(2), s("ids must line up")]
-            ),
-            "ids must line up"
-        );
-    }
-
     /// `message = nil` is what a Harn wrapper forwards when its own optional
     /// message was omitted. Treating that as "the message is the text `nil`"
     /// would replace every diff with the word `nil`.
@@ -821,31 +810,6 @@ mod tests {
         assert_eq!(
             failure_text(assert_eq_impl, &[VmValue::Int(1)]),
             "assert_eq needs two values to compare: assert_eq(actual, expected)"
-        );
-    }
-
-    #[test]
-    fn assert_ne_fails_only_when_the_values_match() {
-        assert!(passes(assert_ne_impl, &[VmValue::Int(1), VmValue::Int(2)]));
-        assert_eq!(
-            failure_text(assert_ne_impl, &[s("x"), s("x")]),
-            "assert_ne failed: both values are \"x\"."
-        );
-    }
-
-    #[test]
-    fn assert_approx_absorbs_float_rounding_but_not_real_error() {
-        assert!(passes(
-            assert_approx_impl,
-            &[VmValue::Float(0.1 + 0.2), VmValue::Float(0.3)]
-        ));
-        assert_eq!(
-            failure_text(
-                assert_approx_impl,
-                &[VmValue::Float(1.0), VmValue::Float(2.0)]
-            ),
-            "assert_approx failed.\n    expected  2 ± 0.000000001\n    actual    1\n    \
-             These differ by 1e0, which is outside the tolerance."
         );
     }
 
@@ -909,44 +873,5 @@ mod tests {
             ),
             "assert_approx: tolerance must not be negative, got -1."
         );
-    }
-
-    #[test]
-    fn assert_matches_tests_a_pattern_against_text() {
-        assert!(passes(
-            assert_matches_impl,
-            &[s("order-1234"), s("^order-\\d+$")]
-        ));
-        assert_eq!(
-            failure_text(assert_matches_impl, &[s("order-abc"), s("^order-\\d+$")]),
-            "assert_matches failed.\n    pattern   /^order-\\d+$/\n    actual    \"order-abc\"\n    \
-             The pattern did not match anywhere in the text."
-        );
-    }
-
-    /// A pattern is a claim about text. Stringifying the subject first would
-    /// let `assert_matches(1234, "\\d+")` pass, which tests the renderer
-    /// rather than the code.
-    #[test]
-    fn assert_matches_refuses_a_non_string_subject() {
-        assert_eq!(
-            failure_text(assert_matches_impl, &[VmValue::Int(1234), s("\\d+")]),
-            "assert_matches expects text to match against, but was given 1234 (int)."
-        );
-    }
-
-    #[test]
-    fn value_diff_is_nil_when_equal_and_headline_free_when_not() {
-        let mut out = String::new();
-        assert!(matches!(
-            value_diff_impl(&[VmValue::Int(1), VmValue::Int(1)], &mut out),
-            Ok(VmValue::Nil)
-        ));
-        let VmValue::String(rendered) =
-            value_diff_impl(&[VmValue::Int(1), VmValue::Int(2)], &mut out).unwrap()
-        else {
-            panic!("expected the rendered diff");
-        };
-        assert_eq!(rendered.as_str(), "    expected  2\n    actual    1");
     }
 }

@@ -3,29 +3,23 @@
 
 use super::*;
 
-pub(super) async fn list_workspaces(
-    State(state): State<ApiState>,
-    OriginalUri(uri): OriginalUri,
-    headers: HeaderMap,
-) -> Response {
-    if let Err(response) = authorize(&state, Method::GET, &uri, &headers, Bytes::new()).await {
-        return response;
-    }
+pub(super) async fn list_workspaces(State(state): State<ApiState>) -> Response {
     let inner = state.inner.lock().expect("api state poisoned");
     Json(list_response(inner.workspaces.values().cloned().collect())).into_response()
 }
 
-pub(super) async fn create_workspace(
-    State(state): State<ApiState>,
-    OriginalUri(uri): OriginalUri,
-    headers: HeaderMap,
-    body: Bytes,
-) -> Response {
-    if let Err(response) = authorize(&state, Method::POST, &uri, &headers, body.clone()).await {
-        return response;
-    }
+pub(super) async fn create_workspace(State(state): State<ApiState>, body: Bytes) -> Response {
     let Ok(input) = parse_json_body(&body) else {
         return invalid_json_response();
+    };
+    let server_root = state
+        .inner
+        .lock()
+        .expect("api state poisoned")
+        .root_workspace_path
+        .clone();
+    let Some(root) = registered_workspace_root(&server_root, input.get("root")) else {
+        return api_error(StatusCode::BAD_REQUEST, "invalid_workspace_root", "workspace root must name an existing directory inside the server workspace without parent components");
     };
     let now = now_rfc3339();
     let id = format!("workspace_{}", Uuid::now_v7());
@@ -36,7 +30,7 @@ pub(super) async fn create_workspace(
         "updated_at": now,
         "metadata": input.get("metadata").cloned().unwrap_or_else(|| json!({})),
         "name": input.get("name").and_then(Value::as_str).unwrap_or("Workspace"),
-        "root": input.get("root").and_then(Value::as_str).unwrap_or("."),
+        "root": root.to_string_lossy(),
         "default_branch_id": null,
         "host": "local",
         "repository": null,
@@ -57,15 +51,27 @@ pub(super) async fn create_workspace(
     (StatusCode::CREATED, Json(workspace)).into_response()
 }
 
+fn registered_workspace_root(server_root: &Path, requested: Option<&Value>) -> Option<PathBuf> {
+    let requested = match requested {
+        None => ".",
+        Some(value) => value.as_str().filter(|value| !value.trim().is_empty())?,
+    };
+    let requested = Path::new(requested);
+    if requested
+        .components()
+        .any(|component| matches!(component, Component::ParentDir))
+    {
+        return None;
+    }
+    let root = server_root.canonicalize().ok()?;
+    let registered = root.join(requested).canonicalize().ok()?;
+    (root.is_dir() && registered.is_dir() && registered.starts_with(&root)).then_some(registered)
+}
+
 pub(super) async fn get_workspace(
     State(state): State<ApiState>,
     AxumPath(workspace_id): AxumPath<String>,
-    OriginalUri(uri): OriginalUri,
-    headers: HeaderMap,
 ) -> Response {
-    if let Err(response) = authorize(&state, Method::GET, &uri, &headers, Bytes::new()).await {
-        return response;
-    }
     let inner = state.inner.lock().expect("api state poisoned");
     match inner.workspaces.get(&workspace_id).cloned() {
         Some(workspace) => Json(workspace).into_response(),
@@ -76,13 +82,8 @@ pub(super) async fn get_workspace(
 pub(super) async fn update_workspace(
     State(state): State<ApiState>,
     AxumPath(workspace_id): AxumPath<String>,
-    OriginalUri(uri): OriginalUri,
-    headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    if let Err(response) = authorize(&state, Method::PATCH, &uri, &headers, body.clone()).await {
-        return response;
-    }
     let Ok(input) = parse_json_body(&body) else {
         return invalid_json_response();
     };
@@ -99,12 +100,7 @@ pub(super) async fn read_workspace_file(
     State(state): State<ApiState>,
     AxumPath(workspace_id): AxumPath<String>,
     Query(query): Query<ListQuery>,
-    OriginalUri(uri): OriginalUri,
-    headers: HeaderMap,
 ) -> Response {
-    if let Err(response) = authorize(&state, Method::GET, &uri, &headers, Bytes::new()).await {
-        return response;
-    }
     let root = match workspace_root(&state, &workspace_id) {
         Some(root) => root,
         None => return api_error(StatusCode::NOT_FOUND, "not_found", "workspace not found"),
@@ -172,13 +168,8 @@ pub(super) async fn write_workspace_file(
     State(state): State<ApiState>,
     AxumPath(workspace_id): AxumPath<String>,
     Query(query): Query<ListQuery>,
-    OriginalUri(uri): OriginalUri,
-    headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    if let Err(response) = authorize(&state, Method::PUT, &uri, &headers, body.clone()).await {
-        return response;
-    }
     let root = match workspace_root(&state, &workspace_id) {
         Some(root) => root,
         None => return api_error(StatusCode::NOT_FOUND, "not_found", "workspace not found"),

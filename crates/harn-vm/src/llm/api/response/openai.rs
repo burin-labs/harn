@@ -81,8 +81,22 @@ fn extract_openai_reasoning_summary(
     summary
 }
 
-fn parse_openai_tool_argument_values(tool_name: &str, args_str: &str) -> Vec<serde_json::Value> {
+/// Arguments of one native call. Empty arguments are a no-args call. When the
+/// turn was cut off at the token cap, unparseable arguments are the truncated
+/// prefix of a call the model never finished; they become `{}` so the agent
+/// loop's truncation recovery sees an empty call instead of invalid input.
+fn parse_openai_tool_argument_values(
+    tool_name: &str,
+    args_str: &str,
+    finish_reason: Option<&str>,
+) -> Vec<serde_json::Value> {
+    if args_str.trim().is_empty() {
+        return vec![serde_json::json!({})];
+    }
     parse_openai_tool_argument_json_values(args_str).unwrap_or_else(|json_error| {
+        if crate::llm::agent_session_host::is_length_truncation(finish_reason) {
+            return vec![serde_json::json!({})];
+        }
         vec![
             crate::llm::tools::parse_text_tool_argument_payload(args_str, tool_name)
                 .unwrap_or_else(|text_error| {
@@ -636,9 +650,10 @@ pub(super) fn parse_chat_completions_response(
                     crate::llm::tools::NativeToolNameTextCall::NotCall => {}
                 }
             }
-            for (arg_index, arguments) in parse_openai_tool_argument_values(&raw_name, args_str)
-                .into_iter()
-                .enumerate()
+            for (arg_index, arguments) in
+                parse_openai_tool_argument_values(&raw_name, args_str, finish_reason)
+                    .into_iter()
+                    .enumerate()
             {
                 let (name, arguments) =
                     crate::llm::tools::normalize_tool_call_shape(&raw_name, arguments);
@@ -664,6 +679,7 @@ pub(super) fn parse_chat_completions_response(
         telemetry.provider_cost_usd,
         served_fast,
     )
+    .with_reported_total(telemetry.server_total_tokens)
     .with_billing(telemetry.billing.clone())
     .with_cache(
         cache_read_tokens,

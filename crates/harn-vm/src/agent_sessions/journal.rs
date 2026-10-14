@@ -31,6 +31,7 @@ pub(crate) fn journal_flush_lock(id: &str) -> Option<std::sync::Arc<tokio::sync:
     })
 }
 
+#[cfg(test)]
 pub(crate) fn next_journal_event(
     id: &str,
 ) -> Result<
@@ -51,14 +52,29 @@ pub(crate) fn next_journal_event(
     })
 }
 
-pub(crate) fn record_persisted_journal_event(id: &str, event_id: u64) {
+/// Every queued journal mutation as the events one flush appends, or `None`
+/// when the session has no journal.
+pub(crate) fn pending_journal_events(
+    id: &str,
+) -> Result<Option<crate::agent_session_journal::PendingJournalBatch>, VmError> {
+    super::SESSIONS.with(|sessions| {
+        sessions
+            .borrow()
+            .get(id)
+            .and_then(|state| state.transcript_journal.as_ref())
+            .map(crate::agent_session_journal::JournalState::pending_events)
+            .transpose()
+    })
+}
+
+pub(crate) fn record_persisted_journal_events(id: &str, event_ids: &[u64]) {
     super::SESSIONS.with(|sessions| {
         if let Some(journal) = sessions
             .borrow_mut()
             .get_mut(id)
             .and_then(|state| state.transcript_journal.as_mut())
         {
-            journal.record_persisted_event(event_id);
+            journal.record_persisted_events(event_ids);
         }
     });
 }

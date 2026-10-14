@@ -26,10 +26,12 @@ pub fn schema_value() -> Value {
             "variants": {"type": "array", "items": {"$ref": "#/$defs/variant"}},
             "families": {"type": "array", "items": {"$ref": "#/$defs/model_family"}},
             "routing_routes": {"type": "array", "items": {"$ref": "#/$defs/routing_route"}},
-            "qc_defaults": {"type": "object", "additionalProperties": {"type": "string"}}
+            "qc_defaults": {"type": "object", "additionalProperties": {"type": "string"}},
+            "portal_defaults": portal_defaults_property()
         },
         "additionalProperties": false,
         "$defs": {
+            "portal_default": portal_default_schema(),
             "provider": {
                 "type": "object",
                 "required": ["id", "display_name", "classification", "endpoint", "auth", "protocols", "features", "caveats"],
@@ -755,6 +757,24 @@ pub fn schema_value() -> Value {
 
 // Keep the model contract in its own frame: expanding the complete catalog in
 // one json! expression keeps every definition's temporaries on the same stack.
+// Kept out of `schema_value`: every literal in that one `json!` grows its stack
+// frame, which the stack-frame budget caps.
+fn portal_defaults_property() -> Value {
+    json!({"type": "object", "additionalProperties": {"$ref": "#/$defs/portal_default"}})
+}
+
+fn portal_default_schema() -> Value {
+    json!({
+        "type": "object",
+        "required": ["model_id"],
+        "properties": {
+            "model_id": {"type": "string", "minLength": 1},
+            "reasoning_effort": {"type": "string", "minLength": 1}
+        },
+        "additionalProperties": false
+    })
+}
+
 fn model_schema() -> Value {
     json!({
         "type": "object",

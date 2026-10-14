@@ -362,5 +362,7 @@ pub(super) fn write_source(
     std::fs::write(path, contents).map_err(|err| HostlibError::Backend {
         builtin,
         message: format!("write `{}`: {err}", path.display()),
-    })
+    })?;
+    crate::fs_snapshot::record_completed_write(path);
+    Ok(())
 }

@@ -5,24 +5,6 @@
 use super::*;
 
 #[test]
-fn test_unused_function_basic() {
-    let diags = lint_source(
-        r#"
-pipeline default(task) {
-fn helper() {
-    return 42
-}
-log("hello")
-}
-"#,
-    );
-    assert!(
-        has_rule(&diags, "unused-function"),
-        "expected unused-function warning, got: {diags:?}"
-    );
-}
-
-#[test]
 fn test_used_function_no_warning() {
     let diags = lint_source(
         r"

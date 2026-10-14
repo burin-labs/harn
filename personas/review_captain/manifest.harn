@@ -9,7 +9,7 @@
 import { default_policy, load_policy_json } from "lib/policy"
 import { review_pr } from "lib/review"
 
-@persona(name: "review_captain", description: "Harn-native review captain. Runs deterministic secret/risk checks plus optional self_review LLM rounds and emits a structured review receipt.", tools: [github, mcp], autonomy: suggest, receipts: required, triggers: [github.review_requested, github.pull_request_synchronized, github.pull_request_opened])
+@persona(name: "review_captain", description: "Harn-native review captain. Runs deterministic secret/risk checks plus optional self_review LLM rounds and emits a structured review receipt.", tools: [github, mcp], autonomy: suggest, receipts: required, triggers: [github.pull_request.review_requested, github.pull_request.synchronize, github.pull_request.opened])
 /** Static persona graph used by `harn persona inspect` to expose Review Captain's durable steps. */
 pub fn review_captain_persona(ctx: any) {
   const input = resolve_review_input_step(ctx)

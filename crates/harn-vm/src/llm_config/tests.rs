@@ -91,28 +91,20 @@ fn suppress_routes_parse_and_merge_dedupe() {
 }
 
 #[test]
-fn test_glob_match_prefix() {
-    assert!(glob_match("claude-*", "claude-sonnet-4-20250514"));
-    assert!(glob_match("gpt-*", "gpt-4o"));
-    assert!(!glob_match("claude-*", "gpt-4o"));
-}
-
-#[test]
-fn test_glob_match_suffix() {
-    assert!(glob_match("*-latest", "llama3.2-latest"));
-    assert!(!glob_match("*-latest", "llama3.2"));
-}
-
-#[test]
-fn test_glob_match_middle() {
-    assert!(glob_match("claude-*-latest", "claude-sonnet-latest"));
-    assert!(!glob_match("claude-*-latest", "claude-sonnet-beta"));
-}
-
-#[test]
-fn test_glob_match_exact() {
-    assert!(glob_match("gpt-4o", "gpt-4o"));
-    assert!(!glob_match("gpt-4o", "gpt-4o-mini"));
+fn glob_matches_prefix_suffix_middle_and_exact_routes() {
+    for (pattern, model, expected) in [
+        ("claude-*", "claude-sonnet-4-20250514", true),
+        ("gpt-*", "gpt-4o", true),
+        ("claude-*", "gpt-4o", false),
+        ("*-latest", "llama3.2-latest", true),
+        ("*-latest", "llama3.2", false),
+        ("claude-*-latest", "claude-sonnet-latest", true),
+        ("claude-*-latest", "claude-sonnet-beta", false),
+        ("gpt-4o", "gpt-4o", true),
+        ("gpt-4o", "gpt-4o-mini", false),
+    ] {
+        assert_eq!(glob_match(pattern, model), expected, "{pattern}: {model}");
+    }
 }
 
 #[test]
@@ -491,6 +483,7 @@ fn cerebras_qwen_38_catalog_row_preserves_public_route_metadata() {
             "tools".to_string(),
             "vision".to_string(),
             "thinking".to_string(),
+            "extended_thinking".to_string(),
             "structured_output".to_string(),
         ]
     );
@@ -508,7 +501,7 @@ fn cerebras_qwen_38_catalog_row_preserves_public_route_metadata() {
         capabilities.preferred_tool_format.as_deref(),
         Some("native")
     );
-    assert_eq!(capabilities.thinking_modes, vec!["enabled"]);
+    assert_eq!(capabilities.thinking_modes, vec!["enabled", "effort"]);
 }
 
 #[test]
@@ -888,7 +881,7 @@ fn provider_default_does_not_depend_on_the_default_provider() {
         set_user_overrides(Some(overlay));
         assert_eq!(
             default_model_for_provider("anthropic").as_deref(),
-            Ok("claude-sonnet-4-6"),
+            Ok("claude-sonnet-5-5"),
             "default_provider = {default_provider}"
         );
         assert!(

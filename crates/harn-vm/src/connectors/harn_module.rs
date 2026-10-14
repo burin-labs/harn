@@ -784,11 +784,11 @@ fn parse_harn_normalized_event(
         &normalized.headers.unwrap_or_else(|| raw.headers.clone()),
         &HeaderRedactionPolicy::default(),
     );
-    let provider_payload = ProviderPayload::Extension(crate::ExtensionProviderPayload {
-        provider: provider_id.as_str().to_string(),
-        schema_name: payload_schema.harn_schema_name.clone(),
-        raw: normalized.payload,
-    });
+    let provider_payload = ProviderPayload::extension(
+        provider_id.as_str(),
+        &payload_schema.harn_schema_name,
+        normalized.payload,
+    );
     Ok(TriggerEvent {
         id: TriggerEventId::new(),
         provider: provider_id.clone(),
@@ -1341,11 +1341,11 @@ fn trigger_event_from_normalized(
     let tenant_id = normalized.tenant_id.map(TenantId::new);
     let source_headers = normalized.headers.unwrap_or_default();
     let headers = redact_headers(&source_headers, &HeaderRedactionPolicy::default());
-    let provider_payload = ProviderPayload::Extension(crate::ExtensionProviderPayload {
-        provider: provider_id.as_str().to_string(),
-        schema_name: payload_schema.harn_schema_name.clone(),
-        raw: normalized.payload,
-    });
+    let provider_payload = ProviderPayload::extension(
+        provider_id.as_str(),
+        &payload_schema.harn_schema_name,
+        normalized.payload,
+    );
     Ok(TriggerEvent {
         id: TriggerEventId::new(),
         provider: provider_id.clone(),

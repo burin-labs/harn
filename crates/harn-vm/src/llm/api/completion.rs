@@ -14,10 +14,16 @@ use super::response::{extract_cache_read_tokens, extract_cache_write_tokens};
 use super::result::{mock_completion_response, LlmResult};
 use super::telemetry::{source as telemetry_source, ProviderTelemetry};
 
-async fn completion_json_response(
-    provider: &str,
-    response: reqwest::Response,
+async fn send_completion_request(
+    opts: &LlmCallOptions,
+    request: reqwest::RequestBuilder,
 ) -> Result<serde_json::Value, VmError> {
+    let _permit = crate::llm::rate_limit::acquire_permit_for_llm_call(opts).await?;
+    let provider = &opts.provider;
+    let response = request
+        .send()
+        .await
+        .map_err(|error| super::reqwest_send_error(provider, "completion", error))?;
     if !response.status().is_success() {
         let status = response.status();
         let headers = response.headers().clone();
@@ -184,12 +190,7 @@ async fn vm_call_completion_openai_style(
         .json(&body);
     let req = apply_auth_headers(req, &opts.api_key, pdef.as_ref());
 
-    let response = req
-        .send()
-        .await
-        .map_err(|e| crate::llm::api::reqwest_send_error(&opts.provider, "completion", e))?;
-
-    let json = completion_json_response(&opts.provider, response).await?;
+    let json = send_completion_request(opts, req).await?;
 
     if let Some(err) = json["error"]["message"].as_str() {
         return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
@@ -317,11 +318,7 @@ async fn vm_call_completion_ollama(
         .json(&body);
     let req = apply_auth_headers(req, &opts.api_key, pdef.as_ref());
 
-    let response = req
-        .send()
-        .await
-        .map_err(|e| crate::llm::api::reqwest_send_error(&opts.provider, "completion", e))?;
-    let json = completion_json_response(&opts.provider, response).await?;
+    let json = send_completion_request(opts, req).await?;
     if let Some(err) = json["error"].as_str() {
         return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
             format!("{} completion API error: {err}", opts.provider),
@@ -373,11 +370,11 @@ async fn vm_call_completion_fallback(
         VmValue::Bool(has_suffix),
     );
     bindings.put_str("suffix", suffix.unwrap_or_default());
-    let instruction = crate::stdlib::template::render_stdlib_prompt_asset(
+    let instruction = crate::llm::helpers::render_stdlib_prompt_asset(
         "llm/prompts/completion_fallback_system.harn.prompt",
         Some(&bindings),
     )?;
-    let user_prompt = crate::stdlib::template::render_stdlib_prompt_asset(
+    let user_prompt = crate::llm::helpers::render_stdlib_prompt_asset(
         "llm/prompts/completion_fallback_user.harn.prompt",
         Some(&bindings),
     )?;

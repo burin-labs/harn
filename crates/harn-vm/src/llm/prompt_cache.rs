@@ -338,12 +338,17 @@ mod tests {
     #[test]
     fn caller_markers_in_every_provider_position_defer() {
         let caps = caps(CacheBreakpointStyle::LastBlock);
-        let tool_result_block = request(vec![serde_json::json!({
-            "role": "user",
-            "content": [{"type": "tool_result", "tool_use_id": "t1", "content": [
-                {"type": "text", "text": "out", "cache_control": marker()},
-            ]}],
-        })]);
+        let tool_result_block = request(vec![
+            serde_json::json!({"role": "assistant", "content": [
+                {"type": "tool_use", "id": "t1", "name": "run", "input": {}},
+            ]}),
+            serde_json::json!({
+                "role": "user",
+                "content": [{"type": "tool_result", "tool_use_id": "t1", "content": [
+                    {"type": "text", "text": "out", "cache_control": marker()},
+                ]}],
+            }),
+        ]);
         let mut tool_definition = ordinary();
         tool_definition.native_tools = Some(vec![serde_json::json!({
             "name": "lookup",

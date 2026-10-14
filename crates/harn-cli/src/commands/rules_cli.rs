@@ -124,30 +124,9 @@ fn installed_package_dir(
     std::path::PathBuf,
 )> {
     let cwd = std::env::current_dir().ok()?;
-    let project_dir = crate::package::find_nearest_manifest_dir(&cwd)?;
-    let snapshot = harn_modules::package_snapshot::PackageSnapshot::acquire(&project_dir)
+    crate::package::try_resolve_installed_package(&cwd, name)
         .ok()
-        .flatten()?;
-    let packages_dir = snapshot.packages_root().to_path_buf();
-    if crate::package::validate_package_alias(name).is_ok() {
-        let dir = packages_dir.join(name);
-        if dir.is_dir() {
-            return Some((snapshot, dir));
-        }
-    }
-
-    let (registry_name, requested_version) = crate::package::parse_registry_package_spec(name)?;
-    let lock = crate::package::LockFile::load(snapshot.lock_path())
-        .ok()
-        .flatten()?;
-    let entry = lock.packages.iter().find(|entry| {
-        entry.registry.as_ref().is_some_and(|registry| {
-            registry.name == registry_name
-                && requested_version.is_none_or(|version| registry.version == version)
-        })
-    })?;
-    let dir = packages_dir.join(&entry.name);
-    dir.is_dir().then_some((snapshot, dir))
+        .flatten()
 }
 
 /// Load a rule pack's rules: from the pack's own `[rules] ruleDirs` when it

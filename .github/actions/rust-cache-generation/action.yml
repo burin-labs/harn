@@ -1,0 +1,19 @@
+name: Qualify the Rust cache generation
+description: Resolve the pinned cache identity and retire superseded generations only after provider commit.
+inputs:
+  shared-key: {required: true, description: Canonical cache action input}
+  cache-on-failure: {required: false, description: Canonical cache action input}
+  cache-bin: {required: false, description: Canonical cache action input}
+  cache-workspace-crates: {required: false, description: Canonical cache action input}
+  cache-targets: {required: false, description: Canonical cache action input}
+  cache-directories: {required: false, description: Canonical cache action input}
+  workspaces: {required: false, description: Canonical cache action input}
+  save-if: {required: false, description: Canonical cache action input}
+outputs:
+  observation-file: {description: Private temporary restore observation}
+  cache-key: {description: Exact identity resolved by the pinned configuration owner}
+runs:
+  using: node24
+  main: main.cjs
+  post: post.cjs
+  post-if: success()

@@ -115,7 +115,15 @@ async fn serve_api_honors_manifest_authority_on_a_submitted_task() {
     let (rx, stderr) =
         test_util::stdio_jsonrpc::spawn_line_reader(child.0.stderr.take().expect("stderr pipe"));
     let url = wait_for_listener(&mut child.0, &rx);
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder()
+        .default_headers(reqwest::header::HeaderMap::from_iter([(
+            reqwest::header::HeaderName::from_static("harn-agents-protocol-version"),
+            reqwest::header::HeaderValue::from_static(
+                harn_serve::adapters::api::API_PROTOCOL_VERSION,
+            ),
+        )]))
+        .build()
+        .expect("protocol-aware API client");
 
     let session: Value = client
         .post(format!("{url}/v1/sessions"))

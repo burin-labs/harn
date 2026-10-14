@@ -62,7 +62,7 @@ struct InvocationExecution {
 pub(super) async fn execute_case(
     case: &TestCase,
     execution_cwd: &Path,
-    timeout_ms: u64,
+    options: &super::RunOptions,
     loaded_skills: &crate::skill_loader::LoadedSkills,
     prepared_module_cache: &harn_vm::PreparedModuleCache,
     stdio_available: bool,
@@ -108,7 +108,7 @@ pub(super) async fn execute_case(
         entry,
         &args,
         execution_cwd,
-        timeout_ms,
+        options,
         loaded_skills,
         prepared_module_cache,
         stdio_available,
@@ -124,7 +124,7 @@ pub(super) async fn execute_file_fixture(
     case: &TestCase,
     fixture: &super::TestFixture,
     execution_cwd: &Path,
-    timeout_ms: u64,
+    options: &super::RunOptions,
     loaded_skills: &crate::skill_loader::LoadedSkills,
     prepared_module_cache: &harn_vm::PreparedModuleCache,
     stdio_available: bool,
@@ -179,7 +179,7 @@ pub(super) async fn execute_file_fixture(
         entry,
         &[],
         execution_cwd,
-        timeout_ms,
+        options,
         loaded_skills,
         prepared_module_cache,
         stdio_available,
@@ -209,7 +209,7 @@ async fn execute_compiled(
     entry: &harn_vm::CompiledCallableEntry,
     args: &[harn_vm::VmValue],
     execution_cwd: &Path,
-    timeout_ms: u64,
+    options: &super::RunOptions,
     loaded_skills: &crate::skill_loader::LoadedSkills,
     prepared_module_cache: &harn_vm::PreparedModuleCache,
     stdio_available: bool,
@@ -217,6 +217,7 @@ async fn execute_compiled(
     compile_ms: u64,
     total_start: Instant,
 ) -> InvocationExecution {
+    let timeout_ms = options.timeout_ms;
     let _egress_scope = harn_vm::egress::scope_egress_policy_for_current_thread();
     harn_vm::reset_thread_local_state();
     let _operator_approval_guard = operator_approval_grant
@@ -253,6 +254,7 @@ async fn execute_compiled(
     let work_recorder = vm.enable_work_recording();
     let result = local
         .run_until(async {
+            let _llm_mode = options.llm_policy.scope();
             let _environment = harn_vm::stdlib::process::declare_session_environment_if_absent(
                 harn_vm::security::SessionEnvironment::inherited(),
             );
@@ -327,17 +329,12 @@ async fn execute_compiled(
             crate::package::install_manifest_triggers(&mut vm, &extensions)
                 .await
                 .map_err(|error| format!("failed to install manifest triggers: {error}"))?;
-            // Runtime handlers stay lazy in production. User-test timeouts,
-            // however, begin after fixture setup, so initialize them here to
-            // keep compiler work out of the execution safety rail while each
-            // fresh test VM still owns isolated handler state.
-            crate::package::install_manifest_hooks_with_initialization(
-                &mut vm,
-                &extensions,
-                crate::package::ManifestHandlerInitialization::Eager,
-            )
-            .await
-            .map_err(|error| format!("failed to install manifest hooks: {error}"))?;
+            // Use the same event-driven initialization as normal execution.
+            // An unrelated test must not execute every project hook module's
+            // initializer, and handlers reached by a test retain its VM state.
+            crate::package::install_manifest_hooks(&mut vm, &extensions)
+                .await
+                .map_err(|error| format!("failed to install manifest hooks: {error}"))?;
             vm.set_harness(harn_vm::Harness::real());
             let setup_ms = setup_start.elapsed().as_millis() as u64;
             let exec_start = Instant::now();

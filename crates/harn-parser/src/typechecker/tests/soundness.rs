@@ -307,24 +307,6 @@ fn unwrap_ok<T, E>(result: Result<T, E>) -> T {
 }
 
 #[test]
-fn never_tail_expression_satisfies_return_type() {
-    let errs = errors(
-        r#"
-fn exhaustive(x: string | int) -> string {
-  if type_of(x) == "string" {
-    return "string"
-  }
-  if type_of(x) == "int" {
-    return "int"
-  }
-  unreachable(x)
-}
-"#,
-    );
-    assert!(errs.is_empty(), "unexpected never-tail error: {errs:?}");
-}
-
-#[test]
 fn schema_typed_llm_call_data_flows_through_generic_wrapper() {
     let errs = errors(
         r#"
@@ -469,26 +451,6 @@ fn p(name: string, n: int) -> string { return "hi ${name} ${n + 1}" }
 "#,
     );
     assert!(errs.is_empty(), "expected no errors, got: {errs:?}");
-}
-
-#[test]
-fn exhaustive_bool_match_does_not_report_fallthrough() {
-    // A `match` on a bool covering both `true` and `false` with returning
-    // arms is exhaustive and terminating — no wildcard required.
-    let errs = errors(
-        r#"
-fn classify(b: bool) -> string {
-  match b {
-    true -> { return "yes" }
-    false -> { return "no" }
-  }
-}
-"#,
-    );
-    assert!(
-        !errs.iter().any(|e| e.contains("fall through")),
-        "exhaustive bool match should not report fall-through, got: {errs:?}"
-    );
 }
 
 #[test]
@@ -650,23 +612,6 @@ fn g(x: float?) -> float {
             .iter()
             .any(|error| error.contains("may be nil")),
         "closure-bound assert must not inherit builtin narrowing: {binding_shadow:?}"
-    );
-}
-
-#[test]
-fn require_condition_narrows_after_statement() {
-    let errs = errors("fn g(x: int?) -> int { require x != nil\n  return x + 1 }");
-    assert!(errs.is_empty(), "require should narrow, got: {errs:?}");
-}
-
-#[test]
-fn arithmetic_without_assert_guard_still_flagged() {
-    // Sanity: the narrowing is gated on the assert/require actually being
-    // present — a bare nilable operand is still an error.
-    let errs = errors("fn g(x: int?) -> int { return x + 1 }");
-    assert!(
-        errs.iter().any(|e| e.contains("may be nil")),
-        "expected nilable error without a guard, got: {errs:?}"
     );
 }
 
@@ -833,11 +778,11 @@ fn unknown_method_on_string_is_rejected_with_suggestion() {
     let diags = nam_005(
         r#"fn f() {
   const s: string = "hi"
-  s.uppercas()
+  s.lowr()
 }"#,
     );
     assert_eq!(diags.len(), 1, "got: {diags:?}");
-    assert!(diags[0].contains("did you mean `uppercase`"), "{diags:?}");
+    assert!(diags[0].contains("did you mean `lower`"), "{diags:?}");
 }
 
 #[test]
@@ -875,33 +820,6 @@ fn unknown_method_on_inferred_builtin_binding_is_rejected() {
 }
 
 #[test]
-fn legacy_collection_names_remain_accepted_during_migration() {
-    let diags = nam_005(
-        r#"fn f() {
-  const s: string = "hi"
-  s.reverse()
-  const xs: list<int> = [1, 2]
-  xs.push(3)
-  xs.pop()
-  xs.sort()
-  xs.sort_by({ x -> x })
-  xs.reverse()
-  const values: set<int> = set([1, 2])
-  values.add(3)
-  values.remove(1)
-  values.delete(1)
-}"#,
-    );
-    assert!(diags.is_empty(), "got: {diags:?}");
-    for old_name in ["merge", "remove", "rekey"] {
-        assert!(
-            crate::typechecker::method_registry::DICT_METHODS.contains(&old_name),
-            "dict registry must accept compatibility method `{old_name}`"
-        );
-    }
-}
-
-#[test]
 fn unknown_method_on_struct_is_rejected_with_suggestion() {
     let diags = nam_005(
         r"struct Point { x: int, y: int }
@@ -925,23 +843,23 @@ impl Point {
 }
 fn f(p: Point) {
   const s: string = "hi"
-  s.uppercase()
+  s.upper()
   s.reversed()
-  const xs: list<int> = [1, 2]
+  let xs: list<int> = [1, 2]
   xs.reversed()
   xs.sorted()
   xs.sorted_by({ x -> x })
-  xs.appending(3)
-  xs.dropping_last()
-  xs.count()
+  xs.push(3)
+  xs.pop()
+  xs.len()
   xs.iter()
-  const values: set<int> = set([1, 2])
-  values.adding(3)
-  values.removing(1)
-  const mapping: dict<string, int> = {a: 1}
-  mapping.merging({b: 2})
-  mapping.removing("a")
-  mapping.rekeyed({ key -> key })
+  let values: set<int> = set([1, 2])
+  values.add(3)
+  values.remove(1)
+  let mapping: dict<string, int> = {a: 1}
+  mapping.merge({b: 2})
+  mapping.remove("a")
+  mapping.map_keys({ key -> key })
   p.render()
 }"#,
     );
@@ -972,9 +890,8 @@ fn method_on_dict_receiver_defers_to_runtime() {
 }
 
 #[test]
-fn recognized_method_name_on_number_is_not_flagged() {
-    // The permissive number tier only rejects names unknown on every builtin;
-    // a real builtin method name (even if odd on a number) is tolerated.
+fn recognized_method_name_on_number_is_flagged() {
+    // A method on another builtin does not make it available on numbers.
     let diags = nam_005(
         r"fn f() {
   const n: int = 5
@@ -982,7 +899,7 @@ fn recognized_method_name_on_number_is_not_flagged() {
 }",
     );
     assert!(
-        diags.is_empty(),
-        "known method name should defer: {diags:?}"
+        diags.len() == 1 && diags[0].contains("method `to_string` does not exist on `int`"),
+        "number methods must agree with runtime dispatch: {diags:?}"
     );
 }

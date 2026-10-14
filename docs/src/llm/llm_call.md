@@ -529,6 +529,11 @@ wire boundary. Blank reasons do not bypass the catalog gates.
 | `stream` | bool | Enable streaming transport. |
 | `speed` | string | Serving intent: `standard` or `fast`. |
 
+A streaming call emits nonempty replayed text as one delta, without another
+provider request. Cached predicate results follow the same rule. Recorded
+responses don't preserve token timing or chunk boundaries. Mock fixtures
+preserve their scripted chunk order.
+
 `speed: "fast"` is admitted only when the selected route advertises a usable
 fast tier. Premium pricing applies only when provider telemetry confirms that
 tier. Explicit `cache: true` and `prompt_cache_ttl` require authored capability

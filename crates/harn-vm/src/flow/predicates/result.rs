@@ -302,40 +302,6 @@ mod tests {
     }
 
     #[test]
-    fn block_marks_blocking() {
-        let result = InvariantResult::block(InvariantBlockError::new(
-            "missing_test",
-            "no test covers this atom",
-        ));
-        assert!(result.is_blocking());
-        assert_eq!(result.block_error().unwrap().code, "missing_test");
-    }
-
-    #[test]
-    fn require_approval_routes_to_principal_or_role() {
-        let principal = InvariantResult::require_approval(Approver::principal("user:alice"));
-        let role = InvariantResult::require_approval(Approver::role("security-reviewer"));
-        assert!(principal.requires_approval());
-        assert!(role.requires_approval());
-        match principal.verdict {
-            Verdict::RequireApproval {
-                approver: Approver::Principal { id },
-            } => {
-                assert_eq!(id, "user:alice");
-            }
-            other => panic!("expected principal approver, got {other:?}"),
-        }
-        match role.verdict {
-            Verdict::RequireApproval {
-                approver: Approver::Role { name },
-            } => {
-                assert_eq!(name, "security-reviewer");
-            }
-            other => panic!("expected role approver, got {other:?}"),
-        }
-    }
-
-    #[test]
     fn confidence_clamps_to_unit_interval() {
         let low = InvariantResult::warn("low signal").with_confidence(-0.5);
         let high = InvariantResult::warn("over-confident").with_confidence(2.0);

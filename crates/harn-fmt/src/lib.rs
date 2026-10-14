@@ -13,7 +13,8 @@ use harn_parser::{DiagnosticCode as Code, Parser, Repair};
 
 pub(crate) use formatter::{Comment, Formatter};
 pub use trailing_comma::{
-    apply_trailing_comma_fixes, trailing_comma_issues, TrailingCommaIssue, TrailingCommaKind,
+    apply_trailing_comma_fixes, trailing_comma_issues, trailing_comma_issues_in,
+    TrailingCommaIssue, TrailingCommaKind,
 };
 pub use width::{line_width_violations, LineWidthViolation};
 

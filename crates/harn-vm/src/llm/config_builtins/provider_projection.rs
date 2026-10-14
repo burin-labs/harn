@@ -6,7 +6,7 @@ use crate::stdlib::json_to_vm_value;
 use crate::value::{VmDictExt, VmValue};
 
 use super::batch_projection::string_list_to_vm_value;
-use super::model_projection::model_def_to_vm_value;
+use super::model_projection::{model_def_to_vm_value, PricingView};
 
 /// Region-introspection block for multi-region providers, so a
 /// region-aware `.harn` gateway can discover which knobs to set and what
@@ -217,7 +217,7 @@ pub(super) fn provider_catalog_to_vm_value() -> VmValue {
     );
     let models = llm_config::model_catalog_entries()
         .into_iter()
-        .map(|(id, model)| model_def_to_vm_value(&id, &model))
+        .map(|(id, model)| model_def_to_vm_value(&id, &model, PricingView::Stored))
         .collect();
     dict.insert(
         crate::value::intern_key("models"),

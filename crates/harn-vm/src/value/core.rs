@@ -326,7 +326,7 @@ pub enum VmValue {
     Dict(Shared<DictMap>),
     Closure(Shared<VmClosure>),
     /// Reference to a registered builtin function, used when a builtin name is
-    /// referenced as a value (e.g. `snake_dict.rekeyed(snake_to_camel)`). The
+    /// referenced as a value (e.g. `snake_dict.map_keys(snake_to_camel)`). The
     /// contained string is the builtin's registered name.
     BuiltinRef(HarnStr),
     /// Compact builtin reference for callback positions. The boxed
@@ -541,41 +541,21 @@ impl VmValue {
     }
 
     pub fn is_truthy(&self) -> bool {
+        use harn_kernel::value::Truthiness as T;
         match self {
-            VmValue::Bool(b) => *b,
-            VmValue::Nil => false,
-            VmValue::Int(n) => *n != 0,
-            VmValue::Float(n) => *n != 0.0,
-            VmValue::Decimal(d) => **d != rust_decimal::Decimal::ZERO,
-            VmValue::String(s) => !s.is_empty(),
-            VmValue::Bytes(bytes) => !bytes.is_empty(),
-            VmValue::List(l) => !l.is_empty(),
-            VmValue::Dict(d) => !d.is_empty(),
-            VmValue::Closure(_) => true,
-            VmValue::BuiltinRef(_) => true,
-            VmValue::BuiltinRefId(_) => true,
-            VmValue::Duration(ms) => *ms != 0,
-            VmValue::EnumVariant(_) => true,
-            VmValue::StructInstance(_) => true,
-            VmValue::TaskHandle(_) => true,
-            VmValue::Channel(_) => true,
-            VmValue::Atomic(_) => true,
-            VmValue::Rng(_) => true,
-            VmValue::SyncPermit(_) => true,
-            VmValue::Resource(_) => true,
-            VmValue::ResourceGuard(_) => true,
-            VmValue::McpClient(_) => true,
-            VmValue::VerdictReceipt(_) => true,
-            VmValue::Set(s) => !s.is_empty(),
-            VmValue::Generator(_) => true,
-            VmValue::Stream(_) => true,
-            // Match Python semantics: range objects are always truthy,
-            // even the empty range (analogous to generators / iterators).
-            VmValue::Range(_) => true,
-            VmValue::Iter(_) => true,
-            VmValue::Pair(_) => true,
-            VmValue::Harness(_) => true,
+            VmValue::Bool(b) => T::Bool(*b),
+            VmValue::Nil => T::Nil,
+            VmValue::Int(n) | VmValue::Duration(n) => T::Int(*n),
+            VmValue::Float(n) => T::Float(*n),
+            VmValue::Decimal(d) => T::ExactZero(**d == rust_decimal::Decimal::ZERO),
+            VmValue::String(s) => T::Length(s.len()),
+            VmValue::Bytes(bytes) => T::Length(bytes.len()),
+            VmValue::List(l) => T::Length(l.len()),
+            VmValue::Dict(d) => T::Length(d.len()),
+            VmValue::Set(s) => T::Length(s.len()),
+            _ => T::Opaque,
         }
+        .is_truthy()
     }
 
     /// Every tag [`VmValue::type_name`] can return, excluding harness-object
@@ -943,13 +923,15 @@ impl VmValue {
                     out.push_str("<stream>");
                 }
             }
-            // Print form mirrors source syntax: `1 to 5` / `0 to 3 exclusive`.
+            // Print form mirrors source syntax: `1..=5` / `0..3`.
             // `.to_list()` is the explicit path to materialize for display.
             VmValue::Range(r) => {
-                let _ = write!(out, "{} to {}", r.start, r.end);
-                if !r.inclusive {
-                    out.push_str(" exclusive");
-                }
+                let operator = if r.inclusive {
+                    harn_parser::operators::RANGE_INCLUSIVE
+                } else {
+                    harn_parser::operators::RANGE_EXCLUSIVE
+                };
+                let _ = write!(out, "{}{operator}{}", r.start, r.end);
             }
             VmValue::Iter(h) => {
                 if matches!(&*h.lock(), crate::vm::iter::VmIter::Exhausted) {

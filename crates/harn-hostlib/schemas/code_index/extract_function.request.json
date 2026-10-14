@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/code_index/extract_function.request.json",
+  "title": "code_index.extract_function request",
+  "description": "Lift one expression, a run of whole statements, or a closure body out of a function into a new function `new_name`, and replace it (and, with `all_occurrences`, every same-file copy with an equal token sequence and the same bindings) with a call. Inputs are the region's free names bound in the enclosing function; outputs are names the region assigns that are read after it. Name the region by `start_line`/`end_line` or by its exact text in `region`. Rust, TypeScript/TSX, JavaScript/JSX, Python. All-or-nothing: every refusal leaves the file byte-identical.",
+  "type": "object",
+  "properties": {
+    "path": {
+      "type": "string",
+      "minLength": 1,
+      "description": "File holding the region, relative to the indexed workspace root (or absolute)."
+    },
+    "start_line": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "First line of the region, 1-based. Leading and trailing whitespace on the selected lines is ignored."
+    },
+    "end_line": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Last line of the region, 1-based and inclusive. Defaults to `start_line`."
+    },
+    "region": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Exact text of the region, used instead of line numbers. Text that occurs more than once is `ambiguous_symbol` unless `all_occurrences` is set, in which case every match is a copy."
+    },
+    "new_name": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Name of the new function. Refused with `name_conflict` when it already appears in the file."
+    },
+    "signature": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Typed header of the new function, e.g. `fn parse(line: &str) -> Option<Job>` or `function parse(line: string): Job[]`. Its name must equal `new_name` and its parameter names must equal the computed inputs, in any order; the call passes arguments in signature order. Required for Rust and for strict TypeScript whenever the function takes or returns values."
+    },
+    "helper": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Escape hatch: the complete helper function, inserted verbatim after the enclosing item. Its name and parameter names are checked like `signature`; every copy of the region becomes a call to it."
+    },
+    "all_occurrences": {
+      "type": "boolean",
+      "description": "Also replace same-file copies with an equal token sequence and the same inputs and outputs. Defaults to true."
+    },
+    "dry_run": {
+      "type": "boolean",
+      "description": "Plan and validate without writing; the result is `applied` with `dry_run: true` and `applied: false`. Defaults to false."
+    },
+    "session_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Optional staged-fs session id; reads and writes go through the session overlay."
+    }
+  },
+  "required": ["path", "new_name"],
+  "anyOf": [{ "required": ["start_line"] }, { "required": ["region"] }],
+  "additionalProperties": false
+}

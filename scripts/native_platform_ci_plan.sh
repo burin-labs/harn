@@ -205,6 +205,11 @@ path_matches_platform() {
   # Keep native source/workflow path policy here, not in ci.yml. The ci.yml file
   # itself is handled separately through hunk/range inspection so unrelated
   # workflow edits do not pay hosted native macOS compiles.
+  # The manifest owner moved out of the CLI. Keep its native-platform contract
+  # routed after extraction, including the provider schema it now consumes.
+  if [[ "$path" =~ ^crates/(harn-package/src/package/manifest(\.rs|/.*)|harn-vm/src/connectors/manifest/.*)$ ]]; then
+    return 0
+  fi
   [[ "$path" =~ ^(Cargo\.lock|Cargo\.toml|rust-toolchain\.toml|\.config/nextest\.toml|crates/harn-modules/src/package_execution(/.*|\.rs)|crates/harn-vm/src/(shells\.rs|stdlib/(process\.rs|sandbox(/.*|\.rs))|vm/tests_runtime(/.*|\.rs))|crates/harn-vm/tests/harn_vm/sandbox_hardened\.rs|crates/harn-hostlib/(src/(secret_store(/.*|\.rs)|tools/proc\.rs)|tests/harn_hostlib/(secret_store_os_native|sandbox_npm_offline_install)\.rs)|crates/harn-terminal/.*|crates/harn-cli/src/(commands/(test|upgrade|doctor|quickstart|hardware|models/install)\.rs|commands/dump_protocol_artifacts/.*|package/manifest\.rs)|spec/protocol-artifacts/HarnProtocol\.swift|\.github/workflows/macos-nightly\.yml)$ ]]
 }
 

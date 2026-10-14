@@ -6,13 +6,20 @@ import {
   check_run_observations,
   classify_check_run,
   classify_commit_status,
+  classify_pr_blocks,
   commit_status_observations,
   filter_matches_paths,
   glob_match,
   latest_per_name,
+  more_pages,
   path_required_check_names,
+  render_block_lines,
   workflow_surface_filters,
 } from "../gh_check_state.harn"
+
+const HEAD = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+
+const NEWER = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 
 const CI_WORKFLOW = "../../.github/workflows/ci.yml"
 
@@ -336,7 +343,7 @@ pipeline test_every_path_gated_job_has_a_registry_row(harness: Harness, task: un
   const workflow = ci_workflow(harness.fs)
   let mapped: list<string> = []
   for row in PATH_GATED_CHECKS {
-    mapped = mapped.appending(to_string(row.filter))
+    mapped.push(to_string(row.filter))
   }
   // Only the outputs the `changes` job forwards straight from the paths
   // filter are pure path gates. An output routed through a resolver step can
@@ -345,7 +352,7 @@ pipeline test_every_path_gated_job_has_a_registry_row(harness: Harness, task: un
   for output_key in keys(workflow?.jobs?.changes?.outputs ?? {}) {
     const expression = to_string(workflow?.jobs?.changes?.outputs?.[output_key] ?? "")
     if expression.contains("steps.surface_filter.outputs.") {
-      direct_keys = direct_keys.appending(to_string(output_key))
+      direct_keys.push(to_string(output_key))
     }
   }
   assert(len(direct_keys) > 0)
@@ -356,7 +363,7 @@ pipeline test_every_path_gated_job_has_a_registry_row(harness: Harness, task: un
     for filter_key in direct_keys {
       if condition == "needs.changes.outputs.${filter_key} == 'true'"
         && !mapped.contains(filter_key) {
-        unmapped = unmapped.appending("${to_string(job_key)} (${filter_key})")
+        unmapped.push("${to_string(job_key)} (${filter_key})")
       }
     }
   }
@@ -429,4 +436,60 @@ pipeline test_an_in_flight_run_reads_pending_not_missing(harness: Harness, task:
   )
   assert_eq(settled.verdict, "missing")
   assert_eq(settled.exit_code, 3)
+}
+
+pipeline test_conflicting_pr_is_named_as_the_reason_ci_never_started(task: unknown) {
+  const blocks = classify_pr_blocks(
+    HEAD,
+    [
+      {number: 9807, mergeable_state: "dirty", head: {sha: HEAD}},
+      {number: 9808, mergeable_state: "clean", head: {sha: HEAD}},
+    ],
+  )
+  assert_eq(blocks, [{pr: 9807, reason: "merge_conflict"}])
+  const lines = render_block_lines(blocks, "ok")
+  assert_eq(len(lines), 1)
+  assert((lines[0] ?? "").contains("PR #9807 conflicts with its base"))
+  assert((lines[0] ?? "").contains("rebase"))
+}
+
+pipeline test_clean_or_unknown_mergeability_names_no_block(task: unknown) {
+  assert_eq(
+    classify_pr_blocks(HEAD, [{number: 1, mergeable_state: "clean", head: {sha: HEAD}}]),
+    [],
+  )
+  assert_eq(
+    classify_pr_blocks(HEAD, [{number: 2, mergeable_state: "unknown", head: {sha: HEAD}}]),
+    [],
+  )
+  assert_eq(classify_pr_blocks(HEAD, []), [])
+  assert_eq(render_block_lines([], "ok"), [])
+  assert_eq(render_block_lines([], "not_run"), [])
+}
+
+pipeline test_conflict_on_a_newer_head_is_not_blamed_for_this_sha(task: unknown) {
+  const moved = [{number: 7, mergeable_state: "dirty", head: {sha: NEWER}}]
+  assert_eq(classify_pr_blocks(HEAD, moved), [])
+  // Control: the same PR is reported once its head is the queried sha.
+  assert_eq(classify_pr_blocks(NEWER, moved), [{pr: 7, reason: "merge_conflict"}])
+}
+
+pipeline test_pull_listing_pages_until_a_short_page_within_the_bound(task: unknown) {
+  assert(more_pages(100, 1))
+  assert(!more_pages(99, 1))
+  assert(!more_pages(0, 1))
+  assert(!more_pages(100, 10))
+}
+
+pipeline test_failed_mergeability_lookup_is_said_not_silent(task: unknown) {
+  const lines = render_block_lines([], "unavailable")
+  assert_eq(lines, ["  blocked: could not check PR mergeability"])
+}
+
+pipeline test_block_fields_default_to_not_run_and_leave_the_verdict(task: unknown) {
+  const census = build_census("a".repeat(40), [], ["CI status"], [], "explicit")
+  assert_eq(census.verdict, "missing")
+  assert_eq(census.exit_code, 3)
+  assert_eq(census.blocked_by, [])
+  assert_eq(census.blocked_lookup, "not_run")
 }

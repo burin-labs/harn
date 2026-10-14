@@ -31,6 +31,7 @@ fn manifest_binding_spec(id: &str, fingerprint: &str) -> TriggerBindingSpec {
     TriggerBindingSpec {
         id: id.to_string(),
         source: TriggerBindingSource::Manifest,
+        ingress_subscription: false,
         kind: "a2a-push".to_string(),
         provider: ProviderId::from("a2a-push"),
         autonomy_tier: harn_vm::AutonomyTier::ActAuto,
@@ -1166,7 +1167,7 @@ async fn reload_swaps_routes_without_losing_inflight_request() {
         .collect();
     assert_eq!(versions, vec![1, 2]);
     assert_eq!(task_ids, vec!["task-1".to_string(), "task-2".to_string()]);
-    assert_eq!(kinds, vec!["push".to_string(), "push".to_string()]);
+    assert_eq!(kinds, ["a2a.task.update", "a2a.task.update"]);
     assert_eq!(
         dedupe_keys,
         vec!["delivery-1".to_string(), "delivery-2".to_string()]
@@ -1248,6 +1249,9 @@ async fn webhook_first_delivery_is_appended() {
             .and_then(JsonValue::as_str),
         Some("delivery-1")
     );
+    let normalized = &events[0].1.payload["event"]["provider_payload"];
+    assert_eq!(normalized["provider"], "webhook");
+    assert_eq!(normalized["raw"]["action"], "opened");
 
     listener
         .shutdown(Duration::from_secs(5))

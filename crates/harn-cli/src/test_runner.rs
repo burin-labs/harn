@@ -7,12 +7,15 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Instant;
 
+#[cfg(test)]
 use crate::env_guard::ScopedEnvVar;
 use crate::package;
 use crate::test_timing::DurationSummary;
 use harn_vm::IsolateValue;
 
 mod execution;
+mod llm_policy;
+pub use llm_policy::TestLlmPolicy;
 #[cfg(test)]
 mod fixture_tests;
 mod skill_context;
@@ -65,6 +68,7 @@ const RESERVED_SYSTEM_MEMORY_MB: u64 = 1024;
 /// keyword-argument explosion at the call sites.
 #[derive(Clone, Default)]
 pub struct RunOptions {
+    pub llm_policy: TestLlmPolicy,
     pub filter: Option<String>,
     pub timeout_ms: u64,
     /// Optional hard budget for a passing test's total wall-clock duration.
@@ -183,6 +187,7 @@ pub async fn run_tests(
     cli_skill_dirs: &[PathBuf],
 ) -> TestSummary {
     let options = RunOptions {
+        llm_policy: TestLlmPolicy::Hermetic,
         filter: filter.map(str::to_owned),
         timeout_ms,
         max_test_ms: test_budget_ms_via_env(HARN_TEST_MAX_MS_ENV),
@@ -211,6 +216,7 @@ pub async fn run_tests_with_progress(
     progress: Option<TestRunProgress>,
 ) -> TestSummary {
     let options = RunOptions {
+        llm_policy: TestLlmPolicy::Hermetic,
         filter: filter.map(str::to_owned),
         timeout_ms,
         max_test_ms: test_budget_ms_via_env(HARN_TEST_MAX_MS_ENV),
@@ -306,9 +312,7 @@ async fn run_tests_with_session_impl(
     session: &TestRunSession,
     operator_approval_grant: Option<&harn_vm::orchestration::OperatorApprovalGrant>,
 ) -> TestSummary {
-    // Default LLM provider to "mock" in test mode unless caller overrides.
-    let _default_llm_provider = ScopedEnvVar::set_if_unset("HARN_LLM_PROVIDER", "mock");
-    let _disable_llm_calls = ScopedEnvVar::set(harn_vm::llm::LLM_CALLS_DISABLED_ENV, "1");
+    let _llm_environment = options.llm_policy.suite_environment();
 
     let start = Instant::now();
 
@@ -574,6 +578,7 @@ async fn run_test_file_with_session_impl(
     let prepared_module_cache = session.prepared_module_cache(0);
     let fixture_options = RunOptions {
         timeout_ms,
+        llm_policy: TestLlmPolicy::Live,
         ..RunOptions::default()
     };
     let prepared =
@@ -585,7 +590,7 @@ async fn run_test_file_with_session_impl(
             execute_case(
                 &case,
                 &execution_cwd,
-                timeout_ms,
+                &fixture_options,
                 loaded_skills,
                 &prepared_module_cache,
                 session.stdio_available(),
@@ -1096,7 +1101,7 @@ async fn prepare_file_fixtures(
                 &case,
                 &fixture,
                 &cwd,
-                options.timeout_ms,
+                options,
                 skill_contexts.for_case(&case),
                 &prepared_module_cache,
                 session.stdio_available(),
@@ -1159,7 +1164,7 @@ async fn execute_cases(
             let result = execute_case(
                 &case,
                 &cwd,
-                options.timeout_ms,
+                options,
                 loaded_skills,
                 &prepared_module_cache,
                 session.stdio_available(),
@@ -1195,10 +1200,7 @@ async fn execute_cases(
         .collect::<Vec<_>>();
     let stdio_available = session.stdio_available();
     let operator_approval_grant = operator_approval_grant.cloned();
-    let timeout_ms = options.timeout_ms;
-    let max_test_ms = options.max_test_ms;
-    let max_execute_ms = options.max_execute_ms;
-    let diagnose = options.diagnose;
+    let options = options.clone();
     // Process-backed tests share one typed host lane, including read-only
     // compilers and formatters. Waiting for that lane is admission time, not
     // user-code execution time. `@heavy` separately reserves CPU capacity for
@@ -1232,15 +1234,15 @@ async fn execute_cases(
             let result = worker.0.block_on(execute_case(
                 case,
                 &cwd,
-                timeout_ms,
+                &options,
                 loaded_skills,
                 &worker.1,
                 stdio_available,
                 operator_approval_grant.as_ref(),
             ));
             let result = attribute_admission_wait(result, admission_scope.waited_ms());
-            let result = enforce_case_budgets(result, max_test_ms, max_execute_ms);
-            if diagnose {
+            let result = enforce_case_budgets(result, options.max_test_ms, options.max_execute_ms);
+            if options.diagnose {
                 result.emit_diagnose();
             }
             result

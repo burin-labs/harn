@@ -13,6 +13,15 @@ pub type ProviderOptionProbeVerdict = "accepted" \
   | "gated_locally" \
   | "excluded_by_account_policy"
 
+pub type ProviderOptionQualification = "stable_endpoint" | "changing_pool"
+
+pub type ProviderOptionProbeContext = {
+  endpoint: {provider: string, model: string, route: string},
+  option: ProviderPortableProbeOption,
+  catalog: {field: string, claimed_supported: bool, qualification: ProviderOptionQualification},
+  ungated: bool,
+}
+
 pub type ProviderOptionProbeAttempt = {
   verdict: ProviderOptionProbeVerdict,
   measured: bool,
@@ -29,13 +38,15 @@ pub type ProviderOptionProbeAttempt = {
   observed_cost_count?: int,
   observed_usage_count?: int,
   control_error?: string,
+  response_model?: string,
+  control_response_model?: string,
 }
 
 pub type ProviderOptionProbeReport = {
-  schema_version: "harn.provider_option_probe.v1",
+  schema_version: "harn.provider_option_probe.v2",
   endpoint: {provider: string, model: string, route: string},
   option: ProviderPortableProbeOption,
-  catalog: {field: string, claimed_supported: bool},
+  catalog: {field: string, claimed_supported: bool, qualification: ProviderOptionQualification},
   probe: {
     ungated: bool,
     request_count: int,
@@ -44,7 +55,7 @@ pub type ProviderOptionProbeReport = {
     attempt: ProviderOptionProbeAttempt,
   },
   diff: {
-    status: "match" | "drift" | "unmeasured",
+    status: "match" | "drift" | "unavailable" | "unmeasured",
     claimed_supported: bool,
     observed_supported: bool?,
   },

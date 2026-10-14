@@ -21,6 +21,7 @@ mod test_util;
 #[path = "../support/required_pr_e2e.rs"]
 mod required_pr_e2e;
 
+mod analysis_once_cli;
 mod batch_download_cli;
 mod boundary_decoding;
 mod burin_mini_playground;

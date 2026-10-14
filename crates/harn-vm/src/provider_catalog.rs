@@ -15,9 +15,9 @@ use crate::llm_config::{
 use chrono::{NaiveDate, Utc};
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 
-pub const PROVIDER_CATALOG_SCHEMA_VERSION: u32 = 12;
+pub const PROVIDER_CATALOG_SCHEMA_VERSION: u32 = 13;
 pub const PROVIDER_CATALOG_SCHEMA_ID: &str =
-    "https://harnlang.com/schemas/provider-catalog.v12.json";
+    "https://harnlang.com/schemas/provider-catalog.v13.json";
 pub const PROVIDER_CATALOG_GENERATOR: &str = "harn provider catalog generate";
 pub const HARN_DISABLE_CATALOG_REFRESH_ENV: &str = "HARN_DISABLE_CATALOG_REFRESH";
 pub const HARN_PROVIDER_CATALOG_URL_ENV: &str = "HARN_PROVIDER_CATALOG_URL";
@@ -54,6 +54,8 @@ mod local_runtime;
 mod local_runtime_tests;
 #[cfg(test)]
 mod operation_tests;
+#[cfg(test)]
+mod portal_default_tests;
 #[cfg(test)]
 mod pricing_tests;
 #[cfg(test)]
@@ -181,6 +183,21 @@ fn artifact_from_config(
         families,
         routing_routes,
         qc_defaults: config.qc_defaults.clone(),
+        portal_defaults: config
+            .provider_defaults
+            .iter()
+            .filter_map(|(provider, defaults)| {
+                defaults.portal.clone().map(|model_id| {
+                    (
+                        provider.clone(),
+                        CatalogPortalDefault {
+                            model_id,
+                            reasoning_effort: defaults.portal_reasoning_effort.clone(),
+                        },
+                    )
+                })
+            })
+            .collect(),
     }
 }
 

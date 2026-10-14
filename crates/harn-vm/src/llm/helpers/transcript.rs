@@ -1035,7 +1035,9 @@ pub(crate) fn reminder_from_vm_value(value: &VmValue) -> SystemReminder {
 
 pub(crate) fn reminder_from_event(event: &VmValue) -> Option<SystemReminder> {
     let dict = event.as_dict()?;
-    if dict.get("kind").map(|value| value.display()).as_deref() != Some(SYSTEM_REMINDER_EVENT_KIND)
+    if !dict
+        .get("kind")
+        .is_some_and(|kind| super::displays_as(kind, SYSTEM_REMINDER_EVENT_KIND))
     {
         return None;
     }

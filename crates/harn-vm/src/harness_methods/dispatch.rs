@@ -36,6 +36,10 @@ async fn call_harness_method_in_scope(
 ) -> Result<VmValue, VmError> {
     if let Some(capability) = handle.kind().capability_id() {
         let declared = crate::stdlib::capability_method_manifest_entry(capability, method);
+        crate::tool_registry::preparation_scope::enforce_contract(
+            method,
+            declared.map(|entry| &entry.contract),
+        )?;
         let host_method =
             harn_builtin_meta::host_capabilities::is_host_capability_method(capability, method);
         if declared.is_none() && !host_method {
@@ -219,8 +223,14 @@ async fn call_harness_method_in_scope(
     }
     if let Some(capability) = handle.kind().capability_id() {
         if harn_builtin_meta::host_capabilities::is_host_capability_method(capability, method) {
-            return call_dict_host_capability_method(vm, handle, capability.field_name(), method, args)
-                .await;
+            return call_dict_host_capability_method(
+                vm,
+                handle,
+                capability.field_name(),
+                method,
+                args,
+            )
+            .await;
         }
     }
     match handle.kind() {
@@ -542,7 +552,7 @@ fn call_harness_env_method_sync_fast(
                 Ok(name) => name,
                 Err(err) => return Some(Err(err)),
             };
-            Some(Ok(crate::stdlib::process::read_env_value(name)
+            Some(Ok(crate::stdlib::process::read_script_env_value(name)
                 .map(vm_string)
                 .unwrap_or(VmValue::Nil)))
         }
@@ -552,7 +562,7 @@ fn call_harness_env_method_sync_fast(
                 Err(err) => return Some(Err(err)),
             };
             let default = args.get(1).cloned().unwrap_or(VmValue::Nil);
-            Some(Ok(crate::stdlib::process::read_env_value(name)
+            Some(Ok(crate::stdlib::process::read_script_env_value(name)
                 .map(vm_string)
                 .unwrap_or(default)))
         }

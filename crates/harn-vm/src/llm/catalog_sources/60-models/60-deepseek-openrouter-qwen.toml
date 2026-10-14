@@ -48,6 +48,14 @@ superseded_by = "deepseek-flash"
 tier = "mid"
 open_weight = true
 strengths = ["speed", "cheap", "tool_use", "reasoning", "long_context", "vision"]
+# `deepseek-v4-pro` still serves V4-Pro-0813 at its own rate card. DeepSeek's
+# 2026-09-10 news post said the id would route to V4.1 Flash at Flash rates
+# from 2026-09-14, but its changelog entry for the same date says the id
+# "continues to be offered after September 14, with billing unchanged", and
+# the live pricing page (read 2026-10-09) lists it as DeepSeek-V4-Pro-0813 at
+# $1.32 / $3.96 / $0.044 cached at peak, half off-peak, without vision.
+# The row follows the pricing page; no direct DeepSeek key was available to
+# call-verify the routing.
 [models."deepseek-v4-pro"]
 name = "DeepSeek V4 Pro 0813"
 provider = "deepseek"
@@ -151,7 +159,8 @@ tier = "mid"
 open_weight = true
 strengths = ["speed", "cheap", "tool_use", "reasoning", "long_context", "vision"]
 
-# Open-router Qwen3.5 9B (kept for the `small` tier alias).
+# OpenRouter Qwen3.5 9B. Stays catalogued through its OpenRouter retirement
+# so in-flight callers still resolve pricing; no Harn default names it.
 [models."Qwen/Qwen3.5-9B"]
 name = "Qwen3.5 9B"
 provider = "openrouter"
@@ -162,6 +171,10 @@ capabilities = ["tools", "streaming"]
 # $0.15 out per MTok and no cache rate for it
 # (https://openrouter.ai/api/v1/models, read 2026-09-20).
 pricing = { input_per_mtok = 0.10, output_per_mtok = 0.15 }
+deprecated = true
+deprecation_note = "OpenRouter retires this route 2026-10-21 (typed expiration_date on https://openrouter.ai/api/v1/models, read 2026-10-09). No provider notice explains it; Together still serves Qwen/Qwen3.5-9B directly. Use qwen/qwen3.6-35b-a3b."
+sunset_date = "2026-10-21"
+superseded_by = "qwen/qwen3.6-35b-a3b"
 # Inline metadata keeps this row independent of fragment-order defaults.
 tier = "small"
 open_weight = true

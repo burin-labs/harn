@@ -157,6 +157,45 @@ fn wrap_with_sandbox_exec(
     })
 }
 
+/// Whether a child spawned under `policy` could write `target`, measured on
+/// the confinement the spawn path will really apply (harn#9622).
+///
+/// An unsandboxed process wraps the child in the rendered profile, so that
+/// profile is read. An already-sandboxed one runs the child under its own
+/// inherited profile instead, so that profile is asked directly about the
+/// target, and only a denial of every write operation there counts. A refused
+/// spawn measures nothing.
+pub(super) fn child_write_disposition(
+    policy: &CapabilityPolicy,
+    target: &Path,
+) -> super::child_write::ChildWriteDisposition {
+    use super::child_write::ChildWriteDisposition;
+    match nested::nesting(policy) {
+        nested::Nesting::NotNested => super::child_write::seatbelt_write_disposition(
+            &render_profile_for_program(policy, "/bin/sh"),
+            target,
+        ),
+        nested::Nesting::Inherit => {
+            // `sandbox_check` cannot be trusted on a path that does not exist:
+            // measured, it reports a denial the profile does not make. An
+            // ancestor is no substitute, since a rule may name the target
+            // alone, so a missing target measures nothing.
+            if !target.exists() {
+                return ChildWriteDisposition::Unknown;
+            }
+            let denied = ["file-write-data", "file-write-create", "file-write-unlink"]
+                .iter()
+                .all(|operation| nested::outer_denies(operation, Some(target)));
+            if denied {
+                ChildWriteDisposition::EnforcedReadOnly
+            } else {
+                ChildWriteDisposition::Unknown
+            }
+        }
+        nested::Nesting::Unenforceable(_) => ChildWriteDisposition::Unknown,
+    }
+}
+
 fn render_profile_for_program(policy: &CapabilityPolicy, program: &str) -> String {
     let mut developer_toolchain_read_roots = process_sandbox_developer_toolchain_read_roots(policy);
     developer_toolchain_read_roots.extend(toolchain_roots::go_read_root(policy, program));
@@ -427,13 +466,34 @@ fn render_profile_with_extra_read_roots(
     // global `(allow file-read-metadata)` at the top of the profile. Without
     // that, a denied path's existence and size would still leak to a child that
     // cannot open it.
+    //
+    // A read deny alone does not hold inside a writable root: the child could
+    // rename the denied path, or any directory above it, and read it under the
+    // new name (harn#9788). `file-write-unlink` covers rename, so denying it on
+    // the denied subtree and on each directory above holds the denial while
+    // every other entry in those directories stays writable.
+    let mut pinned_ancestors = std::collections::BTreeSet::new();
     for root in read_deny_roots {
         for path in sandbox_profile_path_aliases(&root.display().to_string()) {
+            let escaped = sandbox_profile_escape(&path);
             profile.push_str(&format!(
-                "(deny file-read* (subpath \"{}\"))\n",
-                sandbox_profile_escape(&path)
+                "(deny file-read* (subpath \"{escaped}\"))\n\
+                 (deny file-write-unlink (subpath \"{escaped}\"))\n"
             ));
+            pinned_ancestors.extend(
+                std::path::Path::new(&path)
+                    .ancestors()
+                    .skip(1)
+                    .filter(|ancestor| ancestor.parent().is_some())
+                    .map(|ancestor| ancestor.display().to_string()),
+            );
         }
+    }
+    for ancestor in pinned_ancestors {
+        profile.push_str(&format!(
+            "(deny file-write-unlink (literal \"{}\"))\n",
+            sandbox_profile_escape(&ancestor)
+        ));
     }
     profile
 }
@@ -583,3 +643,11 @@ mod write_roots_tests;
 #[cfg(test)]
 #[path = "macos/external_root_tests.rs"]
 mod external_root_tests;
+
+#[cfg(test)]
+#[path = "macos/child_write_nested_tests.rs"]
+mod child_write_nested_tests;
+
+#[cfg(test)]
+#[path = "macos/writable_denial_tests.rs"]
+mod writable_denial_tests;

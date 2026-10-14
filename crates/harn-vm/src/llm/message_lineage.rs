@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 pub(crate) const MESSAGE_LINEAGE_KEY: &str = "_harn_message_lineage";
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
-pub(crate) struct ProjectionLineage {
+pub struct ProjectionLineage {
     pub policy: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub event_ref: Option<String>,
@@ -20,7 +20,7 @@ pub(crate) struct ProjectionLineage {
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub(crate) enum MessageSemanticKind {
+pub enum MessageSemanticKind {
     User,
     Assistant,
     AssistantToolCall,

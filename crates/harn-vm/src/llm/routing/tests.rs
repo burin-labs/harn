@@ -15,7 +15,7 @@ fn equivalent_failover_excludes_internal_simulators() {
         "model",
         3,
         true,
-        crate::llm_config::EquivalentModelRequirements::default(),
+        crate::llm_config::EquivalentModelRequirements::default,
     );
     assert!(policy.is_none());
 }
@@ -44,7 +44,7 @@ fn equivalent_failover_does_not_substitute_unprobed_local_models() {
         "gemma4:12b-mlx",
         3,
         true,
-        crate::llm_config::EquivalentModelRequirements::default(),
+        crate::llm_config::EquivalentModelRequirements::default,
     );
     crate::llm_config::swap_user_overrides(previous);
 

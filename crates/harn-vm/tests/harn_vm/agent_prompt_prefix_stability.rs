@@ -127,7 +127,7 @@ pipeline main(harness: Harness, task: unknown) {{
     harness.runtime.shared_cas(iteration_state, snap, n + 1)
     let captured = []
     for message in (call?.opts?.messages ?? []) {{
-      captured = captured.appending(
+      captured.push(
         {{role: to_string(message?.role ?? ""), content: to_string(message?.content ?? "")}},
       )
     }}
@@ -225,7 +225,7 @@ pipeline main(harness: Harness, task: unknown) {{
     harness.runtime.shared_cas(iteration_state, snap, n + 1)
     let captured = []
     for message in (call?.opts?.messages ?? []) {{
-      captured = captured.appending(
+      captured.push(
         {{role: to_string(message?.role ?? ""), content: to_string(message?.content ?? "")}},
       )
     }}

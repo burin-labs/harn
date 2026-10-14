@@ -143,7 +143,7 @@ agent_loop(
 default `strip: true`; the middleware still rejects calls that omit the
 reason before the tool handler runs.
 
-### `with_audit_log(sink_or_options) -> caller`
+### `with_audit_log(clock, fs, sink_or_options) -> caller`
 
 Builds one typed `ToolCallReceipt` per tool call after the call
 completes. Receipts include the required-reason summary, status,
@@ -174,23 +174,27 @@ failed local write therefore cannot return a successful result that
 claims a nonexistent `receipt_uri`.
 
 ```harn,ignore
-const caller = compose_tool_callers([
-  with_audit_log({sink: "both", redact: ["token", "content"]}),
+const caller = compose_tool_callers(harness.clock, [
+  with_audit_log(harness.clock, harness.fs, {
+    sink: "both", redact: ["token", "content"],
+  }),
   with_required_reason({schema_required: false}).caller,
 ])
 ```
 
-For explicit file routing, `local_receipt_sink(session_id)` returns the
+For explicit file routing, `local_receipt_sink(fs, session_id)` returns the
 same append-only JSONL sink used by `sink: "local"`.
 
-### `with_consent(prompt_fn) -> caller`
+### `with_consent(clock, prompt_fn) -> caller`
 
 `prompt_fn(call) -> bool | dict` is consulted before each tool call.
 Denied calls short-circuit with `consent_denied`; approved calls
 proceed and record the decision in `audit.consent`. Pair with the host
 UX (e.g. an IDE host's approval modal) for destructive tools.
+The callback adapts that host's approval decision. A persona's autonomy-policy
+record is configuration for the host, not a callable approval prompt.
 
-### `with_scoped_executor(opts) -> caller`
+### `with_scoped_executor(runtime, opts) -> caller`
 
 Narrows the active `CapabilityPolicy` for the duration of one tool
 dispatch. Wraps the downstream chain in
@@ -207,12 +211,12 @@ Compose this **outside** binder / consent layers so it can reject
 before either does expensive work:
 
 ```harn,ignore
-const caller = compose_tool_callers([
-  with_audit_log({...}),
-  with_scoped_executor({
+const caller = compose_tool_callers(harness.clock, [
+  with_audit_log(harness.clock, harness.fs, {sink: "both"}),
+  with_scoped_executor(harness.runtime, {
     stage: "research", allowed_tools: ["search_files", "read_file"],
   }),
-  with_consent(prompt),
+  with_consent(harness.clock, prompt),
   default_tool_caller(),
 ])
 ```
@@ -257,18 +261,18 @@ Applied twice: once on inbound args, once on outbound result.
 {args?, result?, redacted_fields?}`. Records redacted-field names in
 `audit.metadata`.
 
-### `with_idempotency(key_fn, opts?) -> caller`
+### `with_idempotency(llm, key_fn, opts?) -> caller`
 
 Caches successful tool results keyed by `key_fn(call) -> string`,
 backed by `std/cache` so the cache outlives the caller closure. Repeat
 queries within the TTL reuse cached results.
 
-### `with_rate_limit(harness.runtime, opts) -> caller`
+### `tool_middleware.with_rate_limit(harness.runtime, opts) -> caller`
 
 Caps the total number of tool calls processed by this caller. Once
 `max_calls` is hit, further calls short-circuit with `rate_limited`.
 
-### `with_telemetry(sink_or_opts) -> caller`
+### `with_telemetry(harness, sink_or_opts) -> caller`
 
 Emits a standardized tool-call span for every dispatch and fans it out
 to one or more sinks. Accepts a callable `fn(span)`, a built-in name
@@ -300,7 +304,7 @@ Options: `sink` (callback), `detect` (custom locator),
 `source` (override `source_persona` if the tool didn't set one),
 `strict` (throw on malformed payloads, default `false`).
 
-### `with_timeout(opts) -> caller`
+### `with_timeout(clock, opts) -> caller`
 
 Caps wall-clock time per tool call. Calls inside the budget pass
 through with `audit.layers[…].status == "ok"`. Calls that breach the
@@ -314,14 +318,16 @@ Options: `max_ms` (required, non-negative int), `per_tool`
 
 ## Composing
 
-`compose_tool_callers([outer, ..., inner])` returns one caller that
+`compose_tool_callers(clock, [outer, ..., inner])` returns one caller that
 runs the wrappers right-to-left: the leftmost wrapper is the
 outermost. This mirrors `compose` in `std/llm/handlers`.
 
 ```harn,ignore
-const caller = compose_tool_callers([
-  with_audit_log({sink: "both", redact: ["token", "content"]}),
-  with_consent(prompt),
+const caller = compose_tool_callers(harness.clock, [
+  with_audit_log(harness.clock, harness.fs, {
+    sink: "both", redact: ["token", "content"],
+  }),
+  with_consent(harness.clock, prompt),
   with_redaction(redactor),
   with_required_reason({schema_required: false}).caller,
 ])
@@ -329,54 +335,33 @@ const caller = compose_tool_callers([
 
 ## Captain recipe — full governance stack
 
-The persona platform's captains (`merge_captain`, `review_captain`,
-`oncall_captain`) all want the same substrate: every tool call yields
-a structured audit record, destructive ops gate on consent, the loop
-caps at a tool budget, and handoff payloads surface as typed records
-on the receipts ledger. One stack covers all of it.
+This stack comes from the executable captain conformance scenario. Its three
+tool calls exercise audit, telemetry, summary, consent, required reasons,
+redaction, handoff records, idempotency, a tool budget, and an edit preview.
+The fixture asserts that every call reaches consent and idempotency, both
+redaction phases fire, and a token is removed before real tool dispatch.
 
 ```harn,ignore
-import {
-  compose_tool_callers,
-  with_audit_log,
-  with_consent,
-  with_dry_run,
-  with_handoff_artifact,
-  with_idempotency,
-  with_rate_limit,
-  with_redaction,
-  with_required_reason,
-  with_summary,
-  with_telemetry,
-} from "std/llm/tool_middleware"
+{{#include
+../../../conformance/tests/scenarios/tool_middleware_captain_recipe.harn
+:captain_import
+}}
 
-const reason_mw = with_required_reason({schema_required: false})
-
-const captain_tool_caller = compose_tool_callers([
-  // typed tool receipts
-  with_audit_log({sink: "both", redact: ["token", "content"]}),
-  // tool-call spans
-  with_telemetry({sink: "langfuse", project: "harn-dev"}),
-  with_summary({ call, _r -> describe(call) }), // user-facing one-liner
-  with_consent(persona.autonomy_policy),       // act_with_approval gate
-  reason_mw.caller,                            // require `reason` arg
-  with_redaction(unified_redaction_policy),    // strip secrets
-  with_handoff_artifact({sink: handoff_emitter}), // typed handoff records
-  with_idempotency(per_tool_idempotency_keyer),
-  with_rate_limit(harness.runtime, {max_calls: persona.tool_budget}),
-  // crystallization shadow runs
-  with_dry_run({only: persona.shadow_tools}),
-])
-
-const registry = tools_use_middleware(
-  my_registry, reason_mw.schema_transform,
-)
-
-agent_loop(harness, task, system, {
-  tools: registry,
-  tool_caller: captain_tool_caller,
-})
+{{#include
+../../../conformance/tests/scenarios/tool_middleware_captain_recipe.harn
+:captain_stack
+}}
 ```
+
+The surrounding scenario supplies `audit_sink`, `telemetry_sink`,
+`consent_prompt`, `redactor`, `handoff_sink`, `idempotency_key`, and
+`summary_formatter`. Its approval
+callback returns fixture decisions; replace it with the host's real approval UI
+and policy adapter. The example previews `edit` rather than executing it, and
+uses local mock tools and callable sinks rather than a live cloud service.
+Apply `reason_mw.schema_transform` to the registry and pass `stack` as
+`agent_loop`'s `tool_caller`. The complete runnable setup lives in
+[`tool_middleware_captain_recipe.harn`](https://github.com/burin-labs/harn/blob/main/conformance/tests/scenarios/tool_middleware_captain_recipe.harn).
 
 Order matters: the leftmost (outermost) wrappers see every call,
 including those short-circuited by inner layers, so put audit and

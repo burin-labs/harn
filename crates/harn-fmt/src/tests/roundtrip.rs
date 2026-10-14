@@ -61,18 +61,53 @@ fn batched_evaluation_questions_and_answer_match_round_trip() {
 
 #[test]
 fn range_subexpressions_keep_required_parentheses() {
-    assert_roundtrip("pipeline default(task) { let x = c ? (a to b) : d }");
-    assert_roundtrip("pipeline default(task) { let x = (a to b) to c }");
-
-    for source in [
-        "pipeline default(task) { let x = (a to b) ? c : d }",
-        "pipeline default(task) { let x = c ? d : (a to b) }",
-        "pipeline default(task) { let x = (a to b) < c }",
+    // Range formation binds tighter than `??`, comparison, and `?:`, so those
+    // operands need parentheses to stay a bound; ranges themselves do not chain.
+    for (source, expected) in [
+        ("pipeline default(task) { let x = (a..b)..c }", "(a..b)..c"),
+        (
+            "pipeline default(task) { let x = (a ?? b)..c }",
+            "(a ?? b)..c",
+        ),
+        (
+            "pipeline default(task) { let x = a..=(b ?? c) }",
+            "a..=(b ?? c)",
+        ),
+        (
+            "pipeline default(task) { let x = (c ? 1 : 2)..3 }",
+            "(c ? 1 : 2)..3",
+        ),
+        (
+            "pipeline default(task) { let x = (a < b)..c }",
+            "(a < b)..c",
+        ),
     ] {
         let formatted = format_source(source).unwrap();
         assert!(
-            formatted.contains("(a to b)"),
-            "range subexpression must stay parenthesized:\n{formatted}"
+            formatted.contains(expected),
+            "range bound must stay parenthesized as {expected}:\n{formatted}"
+        );
+        assert_roundtrip(source);
+    }
+}
+
+#[test]
+fn ranges_drop_parentheses_the_grammar_does_not_need() {
+    for (source, expected) in [
+        (
+            "pipeline default(task) { let x = c ? (a..b) : d }",
+            "c ? a..b : d",
+        ),
+        ("pipeline default(task) { let x = (a..b) < c }", "a..b < c"),
+        (
+            "pipeline default(task) { let x = (0)..(n - 1) }",
+            "0..n - 1",
+        ),
+    ] {
+        let formatted = format_source(source).unwrap();
+        assert!(
+            formatted.contains(expected),
+            "expected {expected}:\n{formatted}"
         );
         assert_roundtrip(source);
     }

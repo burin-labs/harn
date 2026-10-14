@@ -5,7 +5,7 @@ impl TypeChecker {
         &mut self,
         target: &SNode,
         value: &SNode,
-        op: &Option<String>,
+        op: &Option<BinaryOperator>,
         span: Span,
         scope: &mut TypeScope,
     ) {
@@ -59,7 +59,7 @@ impl TypeChecker {
                 let value_type = self.infer_type(value, scope);
                 let assigned = if let Some(op) = op {
                     let var_inferred = scope.get_var(name).cloned().flatten();
-                    infer_binary_op_type(op, &var_inferred, &value_type)
+                    infer_binary_op_type(*op, &var_inferred, &value_type)
                 } else {
                     value_type
                 };
@@ -122,7 +122,7 @@ impl TypeChecker {
                 let value_type = self.infer_type(value, scope);
                 let assigned = if let Some(op) = op {
                     let slot_read = self.infer_type(target, scope);
-                    infer_binary_op_type(op, &slot_read, &value_type)
+                    infer_binary_op_type(*op, &slot_read, &value_type)
                 } else {
                     value_type
                 };

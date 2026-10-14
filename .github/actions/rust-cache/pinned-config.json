@@ -1,0 +1,20 @@
+{
+  "schema": "harn.pinned_rust_cache_config.v1",
+  "commit": "c19371144df3bb44fab255c43d04cbc2ab54d1c4",
+  "bundle_git_blob": "aeb1b47e07e916589ce718002c92080722378442",
+  "bundle_sha256": "5426fc3c5230927fefb02daeaa637a6a3b037b5f3e732be2bd4709819c975141",
+  "bundle_size": 9406682,
+  "defaults": {
+    "prefix-key": "v0-rust",
+    "add-job-id-key": "true",
+    "add-rust-environment-hash-key": "true",
+    "cache-targets": "true",
+    "cache-all-crates": "false",
+    "cache-workspace-crates": "false",
+    "save-if": "true",
+    "cache-provider": "github",
+    "cache-bin": "true",
+    "lookup-only": "false",
+    "cmd-format": "{0}"
+  }
+}

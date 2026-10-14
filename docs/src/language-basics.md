@@ -95,16 +95,18 @@ const frozen = {}
 frozen["alice"] = 1    // error: `const` means this value never changes
 ```
 
-Methods never modify the receiver — `appending` returns a *new* list — so they are
-fine on a `const`, and you build a collection by assigning the result back:
+Mutating methods such as `push`, `pop`, and `sort` change the receiver the same
+way, so they also need `let`. Copy-returning methods such as `sorted` leave the
+receiver alone and return a new value, so they are fine on a `const`:
 
 ```harn
 let items = []
-items = items.appending("a")   // `items` is now ["a"]
+items.push("a")   // `items` is now ["a"]
 
-const base = []
-// error[HARN-LNT-066]: no effect — `base` is still []
-base.appending("a")
+const base = [2, 1]
+const ordered = base.sorted()   // `base` is still [2, 1]
+// error[HARN-OWN-001]: `push` would change `base`, which is `const`
+base.push(3)
 ```
 
 See [Binding mutability](./spec/language/04-scope-rules.md#binding-mutability)
@@ -349,9 +351,9 @@ const greeting = """
 "  hello  ".trim()              // "hello"
 "hello".starts_with("he")       // true
 "hello".ends_with("lo")         // true
-"hello hello".rfind("lo")       // 9
-"hello".uppercase()             // "HELLO"
-"hello".lowercase()             // "hello"
+"hello hello".last_index_of("lo")       // 9
+"hello".upper()             // "HELLO"
+"hello".lower()             // "hello"
 "hello world".substring(0, 5)   // "hello"
 ```
 
@@ -359,20 +361,23 @@ const greeting = """
 
 Ordered by precedence (lowest to highest):
 
-| Precedence | Operators | Description |
-|---|---|---|
-| 1 | `\|>` | Pipe |
-| 2 | `? :` | Ternary conditional |
-| 3 | `\|\|` | Logical OR (short-circuit) |
-| 4 | `&&` | Logical AND (short-circuit) |
-| 5 | `==` `!=` | Equality |
-| 6 | `<` `>` `<=` `>=` `in` `not in` | Comparison, membership |
-| 7 | `+` `-` | Add, subtract, string/list concat |
-| 8 | `??` | Nil coalescing |
-| 9 | `*` `/` `%` | Multiply, divide, modulo |
-| 10 | `!` `-` | Unary not, negate |
-| 11 | `**` | Exponentiation |
-| 12 | `.` `?.` `[]` `?.[]` `[:]` `()` `?` | Member access, optional chaining, subscript, optional subscript, slice, call, try |
+<!-- operator-precedence:begin -->
+| Precedence | Operators | Associativity | Description |
+|---|---|---|---|
+| 1 | `\|>` | Left | Pipe |
+| 2 | `? :` | Right | Ternary conditional |
+| 3 | `\|\|` | Left | Logical OR |
+| 4 | `&&` | Left | Logical AND |
+| 5 | `==` `!=` | Left | Equality |
+| 6 | `<` `>` `<=` `>=` `in` `not in` | Left | Comparison / membership |
+| 7 | `??` | Left | Nil coalescing |
+| 8 | `..` `..=` | None | Range formation |
+| 9 | `+` `-` | Left | Additive |
+| 10 | `*` `/` `%` | Left | Multiplicative |
+| 11 | `!` `-` | Right | Unary prefix |
+| 12 | `**` | Right | Exponentiation |
+| 13 | `.` `?.` `[]` `?.[]` `[:]` `()` `?` `!` | Left | Postfix |
+<!-- operator-precedence:end -->
 
 Integer division truncates toward zero. Integer division (and any modulo) by
 zero raises a catchable runtime error, while float division by zero follows
@@ -381,10 +386,10 @@ Arithmetic operators are strictly typed — mismatched operands (e.g.
 `"hello" + 5`) produce a `TypeError`. Use `to_string()` or string
 interpolation (`"value=${x}"`) for explicit conversion.
 
-`??` binds tighter than comparisons and logical operators but looser than
-multiplication, so `xs?.count ?? 0 > 0` means `(xs?.count ?? 0) > 0`.
-`harn fmt` adds clarifying parentheses when `??` is mixed with looser binary
-operators.
+`??` follows Swift: it binds looser than arithmetic and ranges and tighter
+than comparisons, so `count ?? 0 + 1` means `count ?? (0 + 1)` and
+`xs?.count ?? 0 > 0` means `(xs?.count ?? 0) > 0`. `harn fmt` still adds
+clarifying parentheses when `??` is an operand of another operator.
 
 ### Optional chaining (`?.`)
 
@@ -543,23 +548,24 @@ guard x > 0 else {
 
 ### Ranges
 
-Harn has a single range keyword: `to`. Ranges are **inclusive by default** —
-`1 to 5` is `[1, 2, 3, 4, 5]` — because that matches how the expression reads
-aloud. Add the trailing `exclusive` modifier when you want the half-open form.
+Ranges use Rust's spelling. `a..b` stops before `b`; `a..=b` includes `b`.
 
 ```harn
-for i in 1 to 5 {              // inclusive: 1, 2, 3, 4, 5
+for i in 1..=5 {  // inclusive: 1, 2, 3, 4, 5
   harness.stdio.log(i)
 }
 
-for i in 0 to 3 exclusive {    // half-open: 0, 1, 2
+for i in 0..3 {  // half-open: 0, 1, 2
   harness.stdio.log(i)
 }
 ```
 
+A range binds looser than arithmetic, so `0..len(xs) - 1` needs no
+parentheses.
+
 For Python-compatible 0-indexed iteration there is also a `range()` stdlib
-builtin. `range(n)` is equivalent to `0 to n exclusive`; `range(a, b)` is
-`a to b exclusive`. Both forms always produce half-open integer ranges.
+builtin. `range(n)` is equivalent to `0..n`; `range(a, b)` is `a..b`. Both
+forms always produce half-open integer ranges.
 
 ```harn
 for i in range(5) { harness.stdio.log(i) }        // 0, 1, 2, 3, 4
@@ -794,10 +800,10 @@ exhausted. Iteration takes a **snapshot** of the backing collection,
 so mutating the source after `.iter()` does not affect the iter.
 Printing an iter renders `<iter>` without draining it.
 
-Numeric ranges (`a to b`, `range(n)`) participate in the lazy iter
+Numeric ranges (`a..b`, `a..=b`, `range(n)`) participate in the lazy iter
 protocol directly: `.map / .filter / .take / .zip / .enumerate / ...`
 on a Range return a lazy iter with no upfront allocation, so
-`(1 to 10000000).map(fn(x) { return x * 2 }).take(5).to_list()`
+`(1..=10000000).map(fn(x) { return x * 2 }).take(5).to_list()`
 finishes instantly. Range still keeps its O(1) fast paths for
 `.len / .first / .last / .contains(x)` and `r[k]` subscript — those
 don't round-trip through iter.
@@ -850,7 +856,7 @@ const same = 1
 ```
 
 Note: `-` does not continue across lines because it doubles as unary
-negation. Keyword operators `in`, `not in`, and `to` also require an explicit
+negation. Keyword operators `in` and `not in` also require an explicit
 backslash continuation.
 
 A backslash at the end of a line forces the next line to continue the
@@ -974,7 +980,7 @@ user.has("email")   // false
 user.keys()         // ["age", "name"] (sorted)
 user.values()       // [30, "Alice"]
 user.entries()      // [{key: "age", value: 30}, ...]
-user.merging({role: "admin"})  // new dict with merged keys
+user.merge({role: "admin"})  // new dict with merged keys
 user.map_values({ v -> to_string(v) })
 user.filter({ v -> type_of(v) == "int" })
 ```

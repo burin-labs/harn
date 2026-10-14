@@ -2,6 +2,198 @@
 
 use super::super::*;
 
+struct OriginClobberingRedactor;
+
+impl EventRedactor for OriginClobberingRedactor {
+    fn redact_json_in_place(&self, _value: &mut serde_json::Value) {}
+
+    fn redact_headers(
+        &self,
+        headers: &std::collections::BTreeMap<String, String>,
+    ) -> std::collections::BTreeMap<String, String> {
+        let mut result = headers.clone();
+        result.insert(
+            "harn.canonical_origin_session_id".into(),
+            "redactor-spoofed-origin".into(),
+        );
+        result
+    }
+}
+
+#[tokio::test]
+async fn acknowledged_source_origin_survives_forks_and_rejects_caller_spoofing() {
+    run_with_hooks(
+        StoreHooks {
+            redaction: Some(Arc::new(OriginClobberingRedactor)),
+            ..Default::default()
+        },
+        |store| async move {
+            let parent = store
+                .create(CreateSession::default())
+                .await
+                .expect("parent");
+            let mut authored =
+                AppendEvent::new(SessionEventKind::Message, json!({"text": "original"}));
+            authored
+                .headers
+                .insert("source_event_id".into(), "shared-opaque-source".into());
+            authored
+                .headers
+                .insert("message_id".into(), "shared-caller".into());
+            authored.headers.insert(
+                "harn.canonical_origin_session_id".into(),
+                "spoofed-origin".into(),
+            );
+            let original = store
+                .append(&parent.id, authored.clone())
+                .await
+                .expect("append original");
+            assert_eq!(original.canonical_origin_session_id(), parent.id);
+            let parent_history = store
+                .history_boundaries(&parent.id)
+                .await
+                .expect("parent acknowledgement");
+            assert_eq!(parent_history.positions[0].origin_session_id, parent.id);
+            let child = store
+                .fork(&parent.id, parent_history.tip, None)
+                .await
+                .expect("child fork");
+            let mut child_turn =
+                AppendEvent::new(SessionEventKind::Message, json!({"text": "child turn"}));
+            child_turn
+                .headers
+                .insert("source_event_id".into(), "child-source".into());
+            store
+                .append(&child.child_session_id, child_turn)
+                .await
+                .expect("child append");
+            let child_history = store
+                .history_boundaries(&child.child_session_id)
+                .await
+                .expect("child acknowledgement");
+            assert_eq!(child_history.positions[0].origin_session_id, parent.id);
+            assert_eq!(
+                child_history.positions[1].origin_session_id,
+                child.child_session_id
+            );
+            assert_eq!(
+                child_history.positions[0].boundary.session_id,
+                child.child_session_id
+            );
+            let grandchild = store
+                .fork(&child.child_session_id, child_history.tip, None)
+                .await
+                .expect("grandchild");
+            let grandchild_history = store
+                .history_boundaries(&grandchild.child_session_id)
+                .await
+                .expect("grandchild acknowledgement");
+            assert_eq!(grandchild_history.positions[0].origin_session_id, parent.id);
+            assert_eq!(
+                grandchild_history.positions[1].origin_session_id,
+                child.child_session_id
+            );
+            let other = store
+                .create(CreateSession::default())
+                .await
+                .expect("unrelated session");
+            authored
+                .headers
+                .insert("harn.canonical_origin_session_id".into(), parent.id.clone());
+            store
+                .append(&other.id, authored)
+                .await
+                .expect("unrelated same caller/source");
+            let other_history = store
+                .history_boundaries(&other.id)
+                .await
+                .expect("unrelated acknowledgement");
+            assert_eq!(
+                other_history.positions[0].source_event_id,
+                parent_history.positions[0].source_event_id
+            );
+            assert_eq!(other_history.positions[0].origin_session_id, other.id);
+            assert_ne!(other_history.positions[0].origin_session_id, parent.id);
+            assert_eq!(
+                store
+                    .describe(&grandchild.child_session_id)
+                    .await
+                    .unwrap()
+                    .event_count,
+                2
+            );
+        },
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn source_position_before_boundary_keeps_interleaved_unlinked_record() {
+    run_with_hooks(StoreHooks::default(), |store| async move {
+        let parent = store
+            .create(CreateSession::default())
+            .await
+            .expect("create");
+        let mut first = AppendEvent::new(SessionEventKind::Message, json!({"text": "first"}));
+        first
+            .headers
+            .insert("source_event_id".into(), "opaque-first".into());
+        let first = store.append(&parent.id, first).await.expect("first");
+        let intervening = store
+            .append(
+                &parent.id,
+                AppendEvent::new(
+                    SessionEventKind::Message,
+                    json!({"text": "unlinked control"}),
+                ),
+            )
+            .await
+            .expect("interleaved unlinked record");
+        let mut selected = AppendEvent::new(SessionEventKind::Message, json!({"text": "selected"}));
+        selected
+            .headers
+            .insert("source_event_id".into(), "opaque-selected".into());
+        let selected = store.append(&parent.id, selected).await.expect("selected");
+        let history = store
+            .history_boundaries(&parent.id)
+            .await
+            .expect("acknowledged positions");
+        assert_eq!(
+            history.positions.len(),
+            2,
+            "unlinked record is not a source position"
+        );
+        assert_eq!(
+            history.positions[0].before_boundary,
+            harn_session_store::CanonicalSessionBoundary::empty(&parent.id)
+        );
+        let position = &history.positions[1];
+        assert_eq!(position.source_event_id, "opaque-selected");
+        assert_eq!(position.boundary.event_id, Some(selected.event_id));
+        assert_eq!(
+            position.before_boundary.event_id,
+            Some(intervening.event_id)
+        );
+        assert_ne!(position.before_boundary.event_id, Some(first.event_id));
+        let child = store
+            .fork(&parent.id, position.before_boundary.clone(), None)
+            .await
+            .expect("fork actual preceding prefix");
+        assert_eq!(child.copied_event_count, 2);
+        let copied = store
+            .read_all(&child.child_session_id)
+            .await
+            .expect("child history");
+        assert!(copied
+            .iter()
+            .any(|event| event.payload["text"] == "unlinked control"));
+        assert!(!copied
+            .iter()
+            .any(|event| event.payload["text"] == "selected"));
+    })
+    .await;
+}
+
 #[tokio::test]
 async fn append_assigns_monotonic_ids_and_chain_hashes() {
     run_with_hooks(StoreHooks::default(), |store| async move {

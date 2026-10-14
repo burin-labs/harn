@@ -1,21 +1,19 @@
 //! One normalized, opened grant set for both Linux filesystem renderers.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use super::{
     developer_toolchain_system_read_roots, network_name_service_read_roots,
     proc_runtime_reads_are_contained, push_rule, read_only_access, standard_device_rules,
-    system_read_roots, workspace_access, FilesystemProfile, ProcessFilesystemScope,
-    LANDLOCK_ACCESS_FS_EXECUTE, LANDLOCK_ACCESS_FS_MAKE_DIR, LANDLOCK_ACCESS_FS_MAKE_SOCK,
-    LANDLOCK_ACCESS_FS_READ_DIR, LANDLOCK_ACCESS_FS_READ_FILE, LANDLOCK_ACCESS_FS_REMOVE_FILE,
-    LANDLOCK_ACCESS_FS_WRITE_FILE,
+    system_read_roots, workspace_access, AccessFs, FilesystemProfile, FsAccess,
+    ProcessFilesystemScope,
 };
-use crate::orchestration::CapabilityPolicy;
+use crate::orchestration::{CapabilityPolicy, SandboxProfile};
 use crate::stdlib::sandbox::{
     policy_allows_child_writes, process_sandbox_developer_toolchain_read_roots,
     process_sandbox_package_manager_config_read_roots, process_sandbox_policy_read_roots,
     process_sandbox_policy_write_roots, process_sandbox_readonly_roots, process_sandbox_roots,
-    sandbox_rejection,
+    sandbox_rejection, warn_once,
 };
 use crate::VmError;
 
@@ -23,7 +21,7 @@ use crate::VmError;
 pub(super) fn filesystem_profile(
     program: &str,
     policy: &CapabilityPolicy,
-    handled_access_fs: u64,
+    handled_access_fs: FsAccess,
     process_scope: ProcessFilesystemScope,
 ) -> Result<FilesystemProfile, VmError> {
     let mut profile = FilesystemProfile {
@@ -31,24 +29,20 @@ pub(super) fn filesystem_profile(
         symlinks: std::collections::BTreeMap::new(),
         handled_access_fs,
         read_deny_roots: super::super::process_sandbox_read_deny_roots(policy),
+        unheld_read_denials: Vec::new(),
     };
     for (path, access) in standard_device_rules() {
         push_rule(&mut profile, path, access, true)?;
     }
     for path in system_read_roots() {
-        push_rule(
-            &mut profile,
-            path,
-            LANDLOCK_ACCESS_FS_READ_FILE | LANDLOCK_ACCESS_FS_READ_DIR | LANDLOCK_ACCESS_FS_EXECUTE,
-            true,
-        )?;
+        push_rule(&mut profile, path, read_only_access(), true)?;
     }
     for path in network_name_service_read_roots(policy) {
         // `/etc/resolv.conf` is commonly a symlink into `/run` on hosted
         // Linux. Landlock checks the resolved inode, so the broad `/etc` rule
         // above does not cover that target. Open each exact host file before
         // confinement and grant its canonical inode without exposing `/run`.
-        push_rule(&mut profile, path, LANDLOCK_ACCESS_FS_READ_FILE, true)?;
+        push_rule(&mut profile, path, AccessFs::ReadFile.into(), true)?;
     }
     if policy.process_sandbox.allow_process_self_introspection {
         // A host procfs grant needs kernel containment; a private PID
@@ -67,7 +61,7 @@ pub(super) fn filesystem_profile(
         push_rule(
             &mut profile,
             PathBuf::from("/proc"),
-            LANDLOCK_ACCESS_FS_READ_FILE | LANDLOCK_ACCESS_FS_READ_DIR,
+            AccessFs::ReadFile | AccessFs::ReadDir,
             true,
         )?;
     } else if proc_runtime_reads_are_contained()
@@ -78,7 +72,7 @@ pub(super) fn filesystem_profile(
         push_rule(
             &mut profile,
             PathBuf::from("/proc"),
-            LANDLOCK_ACCESS_FS_READ_FILE,
+            AccessFs::ReadFile.into(),
             true,
         )?;
     }
@@ -88,7 +82,7 @@ pub(super) fn filesystem_profile(
         push_rule(
             &mut profile,
             program_path.to_path_buf(),
-            LANDLOCK_ACCESS_FS_READ_FILE | LANDLOCK_ACCESS_FS_EXECUTE,
+            AccessFs::ReadFile | AccessFs::Execute,
             true,
         )?;
     }
@@ -137,15 +131,145 @@ pub(super) fn filesystem_profile(
             push_rule(
                 &mut profile,
                 root,
-                LANDLOCK_ACCESS_FS_MAKE_SOCK
-                    | LANDLOCK_ACCESS_FS_READ_FILE
-                    | LANDLOCK_ACCESS_FS_READ_DIR
-                    | LANDLOCK_ACCESS_FS_WRITE_FILE
-                    | LANDLOCK_ACCESS_FS_MAKE_DIR
-                    | LANDLOCK_ACCESS_FS_REMOVE_FILE,
+                AccessFs::MakeSock
+                    | AccessFs::ReadFile
+                    | AccessFs::ReadDir
+                    | AccessFs::WriteFile
+                    | AccessFs::MakeDir
+                    | AccessFs::RemoveFile,
                 true,
             )?;
         }
     }
+    report_unheld_read_denials(policy, &profile.unheld_read_denials)?;
     Ok(profile)
 }
+
+/// A read denial inside a writable grant, which that grant cannot hold.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct UnheldReadDenial {
+    pub(super) denied: PathBuf,
+    pub(super) writable_grant: PathBuf,
+}
+
+/// Whether to issue the writable `grant`, recording each denial inside it.
+///
+/// A read-only grant is subtracted around a denial (see
+/// [`super::expand_around_denied`]). A writable one is not. Landlock could hold
+/// the denial only by withholding every directory on the path to it, and a
+/// child refused those directories cannot create a file anywhere along that
+/// path (harn#9028). The grant keeps its whole root, so the denial is not
+/// enforced inside it, and that is reported rather than silent. A grant that
+/// sits inside a denial is still withheld.
+pub(super) fn keep_writable_grant(profile: &mut FilesystemProfile, grant: &Path) -> bool {
+    if profile
+        .read_deny_roots
+        .iter()
+        .any(|denied| grant.starts_with(denied))
+    {
+        return false;
+    }
+    for denied in &profile.read_deny_roots {
+        let unheld = UnheldReadDenial {
+            denied: denied.clone(),
+            writable_grant: grant.to_path_buf(),
+        };
+        if denied.starts_with(grant) && !profile.unheld_read_denials.contains(&unheld) {
+            profile.unheld_read_denials.push(unheld);
+        }
+    }
+    true
+}
+
+/// An unheld denial refuses an `os_hardened` spawn, as every other requirement
+/// a backend cannot hold does. Other profiles run, and the warning names each
+/// denial and the writable root that contains it.
+fn report_unheld_read_denials(
+    policy: &CapabilityPolicy,
+    unheld: &[UnheldReadDenial],
+) -> Result<(), VmError> {
+    if unheld.is_empty() {
+        return Ok(());
+    }
+    let pairs = unheld
+        .iter()
+        .map(|entry| {
+            format!(
+                "'{}' inside writable root '{}'",
+                entry.denied.display(),
+                entry.writable_grant.display()
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    let fact = format!(
+        "credential read denials are not enforced for {pairs}: the writable root is granted \
+         whole, so a child can read the denied path"
+    );
+    if policy.sandbox_profile == SandboxProfile::OsHardened {
+        return Err(sandbox_rejection(format!(
+            "{fact}; the requested sandbox profile requires every denial to hold. Move the \
+             denied path out of the writable root, or grant that root read-only."
+        )));
+    }
+    warn_once(
+        &format!("sandbox_unheld_read_denial:{pairs}"),
+        &format!("{fact}. The writable roots keep their full access."),
+    );
+    Ok(())
+}
+
+/// The write side of the grant set a confined child would run under, for
+/// [`super::super::child_write::child_write_disposition`]. Built by the same
+/// `filesystem_profile` both Linux renderers install, so it cannot claim a
+/// rule the kernel does not get. `None` when Landlock is unavailable here.
+pub(crate) fn installed_write_grants(
+    policy: &CapabilityPolicy,
+) -> Option<super::super::child_write::LandlockWriteGrants> {
+    let support = super::landlock_support::host_support()?;
+    let profile = filesystem_profile(
+        "/bin/sh",
+        policy,
+        support.handled_access(),
+        ProcessFilesystemScope::Host,
+    )
+    .ok()?;
+    // Two write rights an older ABI leaves unhandled are still refused
+    // outside the grants: below ABI 2 the kernel refuses every reparenting
+    // rename or link, and below ABI 3 the seccomp filter refuses truncation
+    // by path.
+    let refused_outside_grants = support.handled_access() | AccessFs::Refer | AccessFs::Truncate;
+    Some(super::super::child_write::LandlockWriteGrants {
+        rules: profile
+            .filesystem_rules()
+            .map(|(path, access)| (path.to_path_buf(), access.bits()))
+            .collect(),
+        handled_access: refused_outside_grants.bits(),
+        write_access: LANDLOCK_WRITE_ACCESS.bits(),
+    })
+}
+
+impl FilesystemProfile {
+    fn filesystem_rules(&self) -> impl Iterator<Item = (&std::path::Path, FsAccess)> + '_ {
+        self.rules
+            .iter()
+            .map(|rule| (rule.path.as_path(), rule.allowed_access))
+    }
+}
+
+/// Every Landlock right that changes the filesystem, through truncation.
+/// `IOCTL_DEV` is left out: no write grant needs to drive a device.
+pub(super) const LANDLOCK_WRITE_ACCESS: FsAccess = super::landlock_support::make_bitflags!(AccessFs::{
+    WriteFile
+        | RemoveDir
+        | RemoveFile
+        | MakeChar
+        | MakeDir
+        | MakeReg
+        | MakeSock
+        | MakeFifo
+        | MakeBlock
+        | MakeSym
+        | Refer
+        | Truncate
+});

@@ -306,16 +306,6 @@ mod tests {
     }
 
     #[test]
-    fn strict_openai_compat_rows_require_tool_result_adjacency() {
-        reset();
-        assert!(lookup("moonshot", "moonshot/kimi-k2.6").requires_tool_result_adjacency);
-        assert!(lookup("moonshot", "moonshot/kimi-k2.7-code").requires_tool_result_adjacency);
-        assert!(lookup("minimax", "MiniMax-M2").requires_tool_result_adjacency);
-        assert!(lookup("minimax", "MiniMax-M2.7").requires_tool_result_adjacency);
-        assert!(!lookup("openai", "gpt-4o").requires_tool_result_adjacency);
-    }
-
-    #[test]
     fn moonshot_kimi_gates_temperature_and_top_p_but_other_hosts_do_not() {
         reset();
         // Moonshot's API pins temperature/top_p to one value and 400s on any
@@ -552,6 +542,18 @@ mod tests {
     #[test]
     fn computer_use_style_projects_per_provider() {
         reset();
+        for model in ["claude-haiku-5-5", "claude-sonnet-5-5", "claude-opus-5-5"] {
+            assert_eq!(
+                lookup("anthropic", model).computer_use_style,
+                Some(super::super::ComputerUseStyle::NativeAnthropicToolset),
+                "{model}"
+            );
+        }
+        assert_ne!(
+            lookup("anthropic", "claude-haiku-5-6").computer_use_style,
+            Some(super::super::ComputerUseStyle::NativeAnthropicToolset),
+            "unprobed generations do not inherit the toolset claim"
+        );
         // Anthropic vision models get the native-Anthropic projection style,
         // XGA screenshot scaling, and advertise the `computer_use` hosted tool.
         for model in [

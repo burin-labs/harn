@@ -12,13 +12,16 @@
 //! We close that gap by hashing the source of every crate that determines the
 //! bytecode emitted for a given program — the lexer, parser, and IR
 //! (source → typed AST), the canonical `harn-kernel` compiler, and this
-//! crate's native bytecode/`Chunk` adapters — and baking the digest into the
+//! crate's native bytecode/`Chunk` adapters, import resolver, derived-interface
+//! cache, and cache validation — and baking the digest into the
 //! binary as `HARN_CODEGEN_FINGERPRINT`.
 //! The `cargo:rerun-if-changed` lines recompute it whenever any of those files
 //! change, so the cache invalidates itself with no manual wipe and no
 //! hand-maintained version constant. Over-inclusion only costs an occasional
 //! recompile; omitting a code-generation input would reintroduce the bug, so
-//! the set is deliberately drawn wide around the front-end.
+//! the set is deliberately drawn wide around the front-end. Derived interfaces
+//! share this identity: same-version resolver or validation changes must not
+//! recall an interface computed by an older build.
 
 use std::path::PathBuf;
 

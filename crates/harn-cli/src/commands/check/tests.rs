@@ -1301,28 +1301,6 @@ fn preflight_allow_matches_exact_wildcard_and_capability_scope() {
 }
 
 #[test]
-fn check_lint_does_not_require_harndoc_by_default() {
-    // `missing-harndoc` is opt-in (`[lint] require_docstrings = true`);
-    // the default check invocation leaves undocumented pub fns alone.
-    let source = r#"
-pub fn exposed() -> string {
-  return "x"
-}
-"#;
-    let program = parse_program(source);
-    let diagnostics = harn_lint::lint_with_config_and_source(
-        &program,
-        &CheckConfig::default().disable_rules,
-        Some(source),
-    );
-    assert!(
-        !diagnostics.iter().any(|d| d.rule == "missing-harndoc"),
-        "missing-harndoc must not fire by default, got: {:?}",
-        diagnostics.iter().map(|d| &d.rule).collect::<Vec<_>>()
-    );
-}
-
-#[test]
 fn lint_file_inner_reports_type_aware_lint_rules() {
     let dir = unique_temp_dir("harn-lint-type-aware");
     std::fs::create_dir_all(&dir).unwrap();

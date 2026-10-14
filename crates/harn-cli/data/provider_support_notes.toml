@@ -6,7 +6,7 @@ id = "anthropic"
 catalog_provider = "anthropic"
 display_name = "Anthropic"
 endpoint_style = "Anthropic Messages API"
-recommended_model = "claude-haiku-4-5-20251001"
+recommended_model = "claude-haiku-5-5"
 recommended_selector = "haiku"
 recommended_tool_format = "native"
 usage_confidence = "high"
@@ -19,6 +19,7 @@ recommended_options = [
 notes = [
   "Native tools, prompt caching, file upload, and XML-oriented scaffolding are first-class in Harn capability data.",
   "Claude 4.7 rows use adaptive thinking; older Claude 4 rows use explicit thinking controls where supported.",
+  "Claude Haiku 5.5 (the `haiku` selector) rejects temperature, top_p, top_k and assistant prefill; pin `haiku45` for workflows that need them.",
 ]
 caveats = [
   "Strict JSON output is modeled as tool-use or XML-tagged output rather than OpenAI-style response_json_schema.",

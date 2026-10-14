@@ -123,6 +123,29 @@
       ],
       "strategy": "relative"
     },
+    "jsx": {
+      "candidateExtensions": [
+        "js",
+        "jsx",
+        "mjs",
+        "cjs",
+        "ts",
+        "tsx"
+      ],
+      "indexFallbacks": [
+        "index.js",
+        "index.jsx",
+        "index.mjs",
+        "index.cjs"
+      ],
+      "kind": "import",
+      "requirePrefixes": [
+        "./",
+        "../",
+        "/"
+      ],
+      "strategy": "relative"
+    },
     "kotlin": {
       "allowSuffixMatch": true,
       "candidateSuffixes": [
@@ -229,6 +252,31 @@
     "swift": {
       "kind": "import",
       "strategy": "swift-target"
+    },
+    "tsx": {
+      "candidateExtensions": [
+        "ts",
+        "tsx",
+        "js",
+        "jsx",
+        "mjs",
+        "cjs"
+      ],
+      "indexFallbacks": [
+        "index.ts",
+        "index.tsx",
+        "index.js",
+        "index.jsx",
+        "index.mjs",
+        "index.cjs"
+      ],
+      "kind": "import",
+      "requirePrefixes": [
+        "./",
+        "../",
+        "/"
+      ],
+      "strategy": "relative"
     },
     "typescript": {
       "candidateExtensions": [

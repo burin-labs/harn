@@ -7,10 +7,12 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::{Arc, OnceLock, RwLock};
 
+use super::chat_wire::{apply_chat_wire_sources, ProviderChatWireSources};
 use super::*;
 
 static CONFIG: OnceLock<Arc<ProvidersConfig>> = OnceLock::new();
 static CONFIG_PATHS: OnceLock<Vec<PathBuf>> = OnceLock::new();
+static CONFIG_CHAT_WIRE_SOURCES: OnceLock<ProviderChatWireSources> = OnceLock::new();
 static RUNTIME_CATALOG_OVERLAY: OnceLock<RwLock<Option<ProvidersConfig>>> = OnceLock::new();
 
 /// Lowest-precedence external provider overlay supplied by an embedding host.
@@ -111,7 +113,7 @@ fn load_config_snapshot() -> &'static Arc<ProvidersConfig> {
         let user_path = std::env::var("HARN_PROVIDERS_CONFIG").ok();
         let home_path =
             user_providers_config_path().map(|path| path.to_string_lossy().into_owned());
-        let (config, paths) = load_external_config_layers(
+        let (config, paths, sources) = load_external_config_layers_with_sources(
             default_config(),
             host_path.as_deref(),
             user_path.as_deref(),
@@ -119,31 +121,69 @@ fn load_config_snapshot() -> &'static Arc<ProvidersConfig> {
             verbose_config_logging,
         );
         let _ = CONFIG_PATHS.set(paths);
+        let _ = CONFIG_CHAT_WIRE_SOURCES.set(sources);
         Arc::new(config)
     })
 }
 
 /// Merge the host layer and then the user-global layer. An explicit user path
 /// keeps the established fallback to the home file when it cannot be loaded.
+#[cfg(test)]
 pub(super) fn load_external_config_layers(
-    mut config: ProvidersConfig,
+    config: ProvidersConfig,
     host_path: Option<&str>,
     user_path: Option<&str>,
     home_path: Option<&str>,
     verbose: bool,
 ) -> (ProvidersConfig, Vec<PathBuf>) {
+    let (config, paths, _) =
+        load_external_config_layers_with_sources(config, host_path, user_path, home_path, verbose);
+    (config, paths)
+}
+
+fn load_external_config_layers_with_sources(
+    mut config: ProvidersConfig,
+    host_path: Option<&str>,
+    user_path: Option<&str>,
+    home_path: Option<&str>,
+    verbose: bool,
+) -> (ProvidersConfig, Vec<PathBuf>, ProviderChatWireSources) {
     let mut loaded_paths = Vec::new();
+    let mut sources = ProviderChatWireSources::new();
+    apply_chat_wire_sources(&mut sources, &config, ProviderConfigLayer::Embedded);
     if let Some(path) = host_path {
-        merge_external_config(&mut config, path, verbose, &mut loaded_paths);
+        merge_external_config(
+            &mut config,
+            path,
+            verbose,
+            &mut loaded_paths,
+            &mut sources,
+            ProviderConfigLayer::HostConfig { path: path.into() },
+        );
     }
-    let user_loaded = user_path
-        .is_some_and(|path| merge_external_config(&mut config, path, verbose, &mut loaded_paths));
+    let user_loaded = user_path.is_some_and(|path| {
+        merge_external_config(
+            &mut config,
+            path,
+            verbose,
+            &mut loaded_paths,
+            &mut sources,
+            ProviderConfigLayer::UserConfig { path: path.into() },
+        )
+    });
     if !user_loaded {
         if let Some(path) = home_path {
-            merge_external_config(&mut config, path, false, &mut loaded_paths);
+            merge_external_config(
+                &mut config,
+                path,
+                false,
+                &mut loaded_paths,
+                &mut sources,
+                ProviderConfigLayer::UserConfig { path: path.into() },
+            );
         }
     }
-    (config, loaded_paths)
+    (config, loaded_paths, sources)
 }
 
 fn merge_external_config(
@@ -151,11 +191,14 @@ fn merge_external_config(
     path: &str,
     verbose: bool,
     loaded_paths: &mut Vec<PathBuf>,
+    sources: &mut ProviderChatWireSources,
+    layer: ProviderConfigLayer,
 ) -> bool {
     let Some(overlay) = read_external_config(path, verbose) else {
         return false;
     };
     config.merge_from(&overlay);
+    apply_chat_wire_sources(sources, &overlay, layer);
     loaded_paths.push(PathBuf::from(path));
     true
 }
@@ -486,6 +529,36 @@ pub fn loaded_config_paths() -> &'static [PathBuf] {
     CONFIG_PATHS.get().map(Vec::as_slice).unwrap_or_default()
 }
 
+/// Inspect the effective chat wire contract and the layers that selected it.
+/// Uses the already-loaded files, followed by the active runtime and execution
+/// overlays; no diagnostic reread can disagree with the cached serving config.
+pub fn provider_chat_wire_contract(provider: &str) -> Option<ProviderChatWireContract> {
+    let _ = load_config();
+    LLM_CONFIG_OVERRIDES_CONTEXT.with(|cell| {
+        let user = cell.borrow();
+        let runtime = runtime_catalog_overlay()
+            .read()
+            .expect("runtime catalog overlay poisoned");
+        let config =
+            effective_config_snapshot(load_config_snapshot(), runtime.as_ref(), user.as_ref());
+        let definition = config.providers.get(provider)?;
+        let mut sources = CONFIG_CHAT_WIRE_SOURCES
+            .get()
+            .and_then(|sources| sources.get(provider))
+            .cloned()
+            .unwrap_or_default();
+        for (overlay, layer) in [
+            (runtime.as_ref(), ProviderConfigLayer::RuntimeCatalog),
+            (user.as_ref(), ProviderConfigLayer::ExecutionOverride),
+        ] {
+            if let Some(definition) = overlay.and_then(|config| config.providers.get(provider)) {
+                sources.apply(definition, &layer);
+            }
+        }
+        Some(sources.contract(definition))
+    })
+}
+
 /// Install per-run provider config overlays. The overlay uses the same shape as
 /// `providers.toml`, but lives under `[llm]` in `harn.toml` and package
 /// manifests. Passing `None` clears the overlay.
@@ -666,6 +739,55 @@ pub(crate) fn merge_global_config(overlay: ProvidersConfig) -> ProvidersConfig {
 #[cfg(test)]
 mod snapshot_tests {
     use super::*;
+
+    #[test]
+    fn endpoint_only_user_layer_resets_host_adapter_and_its_source() {
+        let directory = tempfile::tempdir().unwrap();
+        let host = directory.path().join("host.toml");
+        let home = directory.path().join("home.toml");
+        std::fs::write(&host, "[providers.ollama]\nchat_endpoint = '/v1/chat/completions'\nchat_api_adapter = 'ollama_openai_compat'\n").unwrap();
+        std::fs::write(&home, "[providers.ollama]\nchat_endpoint = '/api/chat'\n").unwrap();
+        let (config, paths, sources) = load_external_config_layers_with_sources(
+            default_config(),
+            host.to_str(),
+            None,
+            home.to_str(),
+            false,
+        );
+        assert_eq!(paths, vec![host, home.clone()]);
+        let contract = sources["ollama"]
+            .clone()
+            .contract(&config.providers["ollama"]);
+        assert_eq!(contract.chat_endpoint, "/api/chat");
+        assert_eq!(contract.chat_api_adapter, ChatApiAdapter::ModelDefault);
+        let source = Some(ProviderConfigLayer::UserConfig {
+            path: home.to_string_lossy().into_owned(),
+        });
+        assert_eq!(contract.sources.chat_endpoint, source);
+        assert_eq!(contract.sources.chat_api_adapter, source);
+
+        // An unrelated later layer must preserve the measured wire contract.
+        std::fs::write(
+            &home,
+            "[providers.ollama]\nbase_url = 'http://localhost:11435'\n",
+        )
+        .unwrap();
+        let (config, _, sources) = load_external_config_layers_with_sources(
+            default_config(),
+            paths[0].to_str(),
+            None,
+            home.to_str(),
+            false,
+        );
+        assert_eq!(
+            config.providers["ollama"].chat_api_adapter,
+            Some(ChatApiAdapter::OllamaOpenAiCompat)
+        );
+        assert!(matches!(
+            sources["ollama"].chat_api_adapter,
+            Some(ProviderConfigLayer::HostConfig { .. })
+        ));
+    }
 
     fn config(default_provider: &str, qc_defaults: &[(&str, &str)]) -> ProvidersConfig {
         ProvidersConfig {

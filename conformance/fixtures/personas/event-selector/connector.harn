@@ -1,0 +1,23 @@
+pub fn provider_id() -> string {
+  return "github"
+}
+
+pub fn kinds() -> list<string> {
+  return ["webhook"]
+}
+
+pub fn payload_schema() -> dict {
+  return {harn_schema_name: "GitHubEventPayload"}
+}
+
+pub fn normalize_inbound(_harness: Harness, raw: dict) -> dict {
+  return {
+    type: "event",
+    event: {
+      kind: raw.headers["X-GitHub-Event"],
+      dedupe_key: raw.headers["X-GitHub-Delivery"],
+      payload: raw.body_json,
+      signature_status: {state: "verified"},
+    },
+  }
+}

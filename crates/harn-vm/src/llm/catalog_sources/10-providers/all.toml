@@ -97,10 +97,11 @@ sources = [
 
 [[usage_accounting_audit.verified]]
 provider = "cerebras"
-checked_on = "2026-08-25"
-fields = ["cache"]
+checked_on = "2026-10-11"
+fields = ["cache", "stream"]
 sources = [
   "https://inference-docs.cerebras.ai/api-reference/chat-completions",
+  "https://inference-docs.cerebras.ai/capabilities/streaming",
 ]
 
 [[usage_accounting_audit.verified]]
@@ -167,10 +168,11 @@ sources = [
 
 [[usage_accounting_audit.verified]]
 provider = "together"
-checked_on = "2026-08-26"
-fields = ["stream"]
+checked_on = "2026-10-11"
+fields = ["cache", "stream"]
 sources = [
   "https://docs.together.ai/reference/chat-completions-1",
+  "https://docs.together.ai/docs/inference/chat/prompt-caching",
   "https://github.com/burin-labs/harn/pull/7394",
 ]
 
@@ -343,6 +345,9 @@ method = "GET"
 path = "/models"
 
 [providers.together]
+# Verified 2026-10-11 on Kimi K3: cold/warm/changed-prefix calls reported
+# 0/1792/0 cached tokens in usage.prompt_tokens_details.cached_tokens.
+cache_usage_accounting = true
 # Verified 2026-08-26 against api.together.xyz: streamed completions append an
 # empty-choices accounting frame after the finish-reason frame. The frame
 # carries prompt, completion, cached-input, and reasoning-token counters.
@@ -392,6 +397,10 @@ path = "/models"
 # from Cerebras's public model discovery endpoint.
 [providers.cerebras]
 cache_usage_accounting = true
+# Verified 2026-10-11 on Qwen 3.8 27B: both default streaming and authored
+# stream_options.include_usage returned 18 prompt and 2 completion tokens
+# in the finish-reason frame, followed by [DONE].
+stream_usage_accounting = true
 base_url = "https://api.cerebras.ai/v1"
 base_url_env = "CEREBRAS_BASE_URL"
 auth_style = "bearer"

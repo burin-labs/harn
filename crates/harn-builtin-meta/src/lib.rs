@@ -16,6 +16,7 @@
 pub mod contracts;
 pub mod host_capabilities;
 pub mod llm_options;
+pub mod methods;
 pub mod predicate;
 pub mod runtime_type_tags;
 pub mod shapes;
@@ -25,6 +26,7 @@ pub use contracts::{
     wire_identifier_key, BuiltinContract, BuiltinExposure, CapabilityId, EffectAccess,
     EffectAuthorization, EffectKind, EffectSpec, ResourceSelector,
 };
+pub use methods::{MethodDescriptor, MethodEffect, MethodMigration, MethodReceiver, RemovedMethod};
 
 /// A complete, static description of one builtin: identifier, arity range,
 /// per-parameter types, generic type parameters, return type, and any

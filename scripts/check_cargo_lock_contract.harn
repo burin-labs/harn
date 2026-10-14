@@ -228,7 +228,7 @@ pub fn workflow_violations(workflow: string, document: dict) -> list<LockViolati
 
 fn workflow_name(path: string) -> string {
   const parts = path.split("/")
-  return parts[len(parts) - 1]
+  return parts[len(parts) - 1] ?? path
 }
 
 pub fn main(harness: Harness) {

@@ -26,6 +26,15 @@ const WRITE_FIELDS: &[&str] = &[
     "/cacheWriteInputTokens",
 ];
 
+/// Top-level members the alias registry reads. A caller holding a large value,
+/// such as a whole LLM result, can convert only these members to JSON.
+pub(crate) fn cache_field_roots() -> impl Iterator<Item = &'static str> {
+    READ_FIELDS.iter().chain(WRITE_FIELDS).filter_map(|path| {
+        path.strip_prefix('/')
+            .and_then(|path| path.split('/').next())
+    })
+}
+
 pub(crate) fn reported_cache_read_tokens(
     value: &serde_json::Value,
 ) -> Result<Option<i64>, &'static str> {

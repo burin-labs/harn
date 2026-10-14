@@ -7,17 +7,23 @@ use std::io::{Seek, Write};
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
 use std::os::unix::fs::{FileTypeExt, PermissionsExt};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+#[cfg(test)]
+use std::process::Command;
 
 use super::{
     compile_seccomp_program, filesystem_profile, policy_allows_network, read_only_access,
-    sandbox_rejection, workspace_access, DescriptorTransfer, FilesystemProfile,
-    ProcessFilesystemScope, TransferableConfinement, LANDLOCK_ACCESS_FS_EXECUTE,
-    LANDLOCK_ACCESS_FS_READ_DIR, LANDLOCK_ACCESS_FS_READ_FILE, LANDLOCK_ACCESS_FS_WRITE_FILE,
+    sandbox_rejection, workspace_access, AccessFs, DescriptorTransfer, FilesystemProfile, FsAccess,
+    ProcessFilesystemScope, TransferableConfinement,
 };
 use crate::orchestration::{CapabilityPolicy, SandboxProfile};
 use crate::stdlib::sandbox::{PrepareOutcome, SandboxMechanism, SandboxMechanismAvailability};
 use crate::VmError;
+
+#[path = "linux_bwrap_probe.rs"]
+mod probe;
+use probe::probe;
+#[cfg(test)]
+use probe::probe_output_is_available;
 
 fn executable() -> Option<PathBuf> {
     ["/usr/bin/bwrap", "/bin/bwrap"]
@@ -29,59 +35,29 @@ fn executable() -> Option<PathBuf> {
 /// A known nonempty host file must disappear through the same real wrapper
 /// path. A binary that merely exists, or a probe that observes nothing, fails.
 pub(super) fn available() -> bool {
-    static AVAILABLE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *AVAILABLE.get_or_init(probe)
+    static AVAILABLE: std::sync::Mutex<Option<bool>> = std::sync::Mutex::new(None);
+    cached_availability(&AVAILABLE, probe)
 }
 
-fn probe() -> bool {
-    if !std::fs::read("/etc/passwd").is_ok_and(|bytes| !bytes.is_empty()) {
-        return false;
+fn cached_availability(
+    cache: &std::sync::Mutex<Option<bool>>,
+    probe: impl FnOnce() -> probe::ProbeOutcome,
+) -> bool {
+    // Keep one setup probe in flight, as the original once initializer did.
+    // Interrupted attempts leave the environment observation uninitialized.
+    let mut cached = cache
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let Some(available) = *cached {
+        return available;
     }
-    let Some(executable) = executable() else {
-        return false;
-    };
-    let mut command = Command::new(executable);
-    // This setup-only probe uses absolute programs and no payload grants.
-    // Ambient loader controls must not run before namespace setup.
-    command.env_clear();
-    command.args([
-        "--unshare-user",
-        "--unshare-pid",
-        "--unshare-ipc",
-        "--unshare-net",
-    ]);
-    let mut descriptors = Vec::new();
-    for path in ["/usr", "/lib", "/lib64", "/bin"] {
-        if Path::new(path).exists() {
-            let Ok(file) = std::fs::File::open(path) else {
-                return false;
-            };
-            command.args(["--ro-bind-fd", &file.as_raw_fd().to_string(), path]);
-            descriptors.push(file.into());
+    match probe() {
+        probe::ProbeOutcome::Completed(available) => {
+            *cached = Some(available);
+            available
         }
+        probe::ProbeOutcome::Interrupted | probe::ProbeOutcome::Incomplete => false,
     }
-    // Probe the same fd-based mounts and filter installation the launch
-    // needs. An older wrapper with only path-based mounts isn't adequate.
-    let Ok(filter) = sealed_filter(&[0x06, 0, 0, 0, 0, 0, 0xff, 0x7f]) else {
-        return false;
-    };
-    command.args(["--seccomp", &filter.as_raw_fd().to_string()]);
-    descriptors.push(filter);
-    DescriptorTransfer::new(descriptors).attach(&mut command);
-    command.args([
-        "--",
-        "/usr/bin/sh",
-        "-c",
-        "test ! -e /etc/passwd && printf harn-bwrap-boundary",
-    ]);
-    command
-        .stdin(Stdio::null())
-        .output()
-        .is_ok_and(|output| probe_output_is_available(&output))
-}
-
-fn probe_output_is_available(output: &std::process::Output) -> bool {
-    output.status.success() && output.stdout == b"harn-bwrap-boundary"
 }
 
 pub(in crate::stdlib::sandbox) fn prepare(
@@ -90,7 +66,14 @@ pub(in crate::stdlib::sandbox) fn prepare(
     policy: &CapabilityPolicy,
     profile: SandboxProfile,
 ) -> Result<PrepareOutcome, VmError> {
-    if !available() {
+    let available = available();
+    // A caller's cancellation or deadline is control flow, not a missing host
+    // mechanism. The probe's own setup budget is never reported here: an
+    // incomplete probe falls through to the typed refusal below.
+    if let Some(error) = crate::op_interrupt::requested_error() {
+        return Err(error);
+    }
+    if !available {
         let mut refusal = super::super::SandboxMechanismUnavailable::new(
             SandboxMechanism::LinuxBubblewrap,
             SandboxMechanismAvailability::AbsentOnHost,
@@ -110,7 +93,7 @@ pub(in crate::stdlib::sandbox) fn prepare(
     let filesystem = filesystem_profile(
         program,
         policy,
-        u64::MAX,
+        FsAccess::all(),
         ProcessFilesystemScope::PrivatePidNamespace,
     )?;
     let mut helper_grant = FilesystemProfile {
@@ -118,10 +101,13 @@ pub(in crate::stdlib::sandbox) fn prepare(
         symlinks: Default::default(),
         handled_access_fs: filesystem.handled_access_fs,
         read_deny_roots: filesystem.read_deny_roots.clone(),
+        unheld_read_denials: Vec::new(),
     };
     let seccomp = TransferableConfinement {
         ruleset: None,
-        seccomp: compile_seccomp_program(policy)?,
+        // Mounts bound truncation: an ungranted path does not exist in the
+        // namespace, and a read-only bind refuses it.
+        seccomp: compile_seccomp_program(policy, true)?,
     };
     let filter = sealed_filter(&seccomp.seccomp_bytes()).map_err(|error| {
         sandbox_rejection(format!(
@@ -244,12 +230,13 @@ fn mounts(filesystem: FilesystemProfile) -> Result<MountPlan, VmError> {
             ))
         })?;
         if rule.path == Path::new("/proc") {
-            // A fresh procfs in the PID namespace cannot expose host siblings.
-            // A files-only grant cannot be widened to directory enumeration.
-            if rule.allowed_access & LANDLOCK_ACCESS_FS_READ_DIR == 0 {
-                return Err(sandbox_rejection(
-                    "bubblewrap cannot express the files-only process introspection grant".into(),
-                ));
+            // A mount cannot grant file reads without directory listing, so
+            // the files-only grant mounts no procfs at all: narrower than the
+            // grant, never wider, and the same answer Landlock gives on a host
+            // that cannot contain procfs reads. Only the explicit
+            // self-introspection grant mounts the sandbox's private procfs.
+            if !rule.allowed_access.contains(AccessFs::ReadDir) {
+                continue;
             }
             argv.extend([
                 "--proc".into(),
@@ -259,8 +246,8 @@ fn mounts(filesystem: FilesystemProfile) -> Result<MountPlan, VmError> {
             ]);
             continue;
         }
-        let reads = LANDLOCK_ACCESS_FS_READ_FILE | LANDLOCK_ACCESS_FS_READ_DIR;
-        let writable = rule.allowed_access & LANDLOCK_ACCESS_FS_WRITE_FILE != 0;
+        let reads = AccessFs::ReadFile | AccessFs::ReadDir;
+        let writable = rule.allowed_access.contains(AccessFs::WriteFile);
         if metadata.is_dir()
             && rule.allowed_access != read_only_access()
             && rule.allowed_access != workspace_access(&CapabilityPolicy::default())
@@ -270,8 +257,8 @@ fn mounts(filesystem: FilesystemProfile) -> Result<MountPlan, VmError> {
                 rule.path.display(),
             )));
         }
-        if rule.allowed_access & reads == 0
-            || (rule.allowed_access & LANDLOCK_ACCESS_FS_EXECUTE == 0
+        if !rule.allowed_access.intersects(reads)
+            || (!rule.allowed_access.contains(AccessFs::Execute)
                 && metadata.permissions().mode() & 0o111 != 0
                 && !metadata.file_type().is_char_device())
         {
@@ -377,9 +364,61 @@ mod tests {
         available
     }
 
+    fn proc_argv(policy: &CapabilityPolicy) -> Vec<String> {
+        let filesystem = filesystem_profile(
+            "/usr/bin/sh",
+            policy,
+            FsAccess::all(),
+            ProcessFilesystemScope::PrivatePidNamespace,
+        )
+        .unwrap();
+        mounts(filesystem).unwrap().argv
+    }
+
+    /// The default files-only `/proc` grant mounts no procfs, because a mount
+    /// cannot withhold directory listing; the explicit self-introspection
+    /// grant mounts the sandbox's private procfs.
+    #[test]
+    fn only_the_self_introspection_grant_mounts_a_private_procfs() {
+        let root = tempfile::tempdir().unwrap();
+        let mut policy = policy(root.path());
+        let mounts_proc = |argv: &[String]| argv.windows(2).any(|pair| pair == ["--proc", "/proc"]);
+        assert!(
+            mounts_proc(&proc_argv(&policy)),
+            "the explicit grant mounts it"
+        );
+        policy.process_sandbox.allow_process_self_introspection = false;
+        let default = proc_argv(&policy);
+        assert!(!mounts_proc(&default), "{default:?}");
+        assert!(!default.iter().any(|arg| arg == "/proc"), "{default:?}");
+    }
+
+    /// The same live enumeration through bubblewrap: refused without the
+    /// grant, admitted with it.
+    #[test]
+    fn procfs_enumeration_follows_the_self_introspection_grant() {
+        if !live() {
+            return;
+        }
+        let root = tempfile::tempdir().unwrap();
+        let mut policy = policy(root.path());
+        let list = vec!["-c".into(), "ls /proc/self/task".into()];
+        let granted = launch(
+            prepare("/usr/bin/sh", &list, &policy, policy.sandbox_profile).unwrap(),
+            root.path(),
+        );
+        assert!(granted.status.success(), "{granted:?}");
+        policy.process_sandbox.allow_process_self_introspection = false;
+        let withheld = launch(
+            prepare("/usr/bin/sh", &list, &policy, policy.sandbox_profile).unwrap(),
+            root.path(),
+        );
+        assert!(!withheld.status.success(), "{withheld:?}");
+    }
+
     #[test]
     fn functional_probe_requires_the_confinement_marker_not_loader_exit_zero() {
-        if !probe() {
+        if !matches!(probe(), probe::ProbeOutcome::Completed(true)) {
             eprintln!("[linux-bwrap] exercised=0: functional namespace/mount probe unavailable");
             assert_ne!(std::env::var("BWRAP_REQUIRE_TESTS").as_deref(), Ok("1"));
             return;
@@ -689,7 +728,7 @@ mod tests {
         let filesystem = filesystem_profile(
             "/usr/bin/sh",
             &policy,
-            u64::MAX,
+            FsAccess::all(),
             ProcessFilesystemScope::PrivatePidNamespace,
         )
         .unwrap();

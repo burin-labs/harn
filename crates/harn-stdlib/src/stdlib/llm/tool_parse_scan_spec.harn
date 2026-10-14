@@ -39,12 +39,12 @@ pub fn tool_parse_scan_spec(tools: any) -> dict {
   let block_tags: list<string> = []
   for canonical in ["assistant_prose", "user_response", "done"] {
     for spelling in __tool_parse_tag_spellings(canonical) {
-      block_tags = block_tags.appending(spelling)
+      block_tags.push(spelling)
     }
   }
   let markup_openers: list<dict> = []
   for dialect in MARKUP_DIALECTS {
-    markup_openers = markup_openers.appending({opener: dialect.opener, close: dialect.close})
+    markup_openers.push({opener: dialect.opener, close: dialect.close})
   }
   return {
     call_tags: __tool_parse_tag_spellings("tool_call"),

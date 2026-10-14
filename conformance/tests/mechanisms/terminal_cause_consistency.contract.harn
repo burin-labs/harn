@@ -68,7 +68,7 @@ fn main(harness: Harness) {
   harness.stdio.println("genuine budget stop: policy_budget")
   const natural = with_llm_script(
     harness.llm,
-    [llm_text("<done>##DONE##</done>")],
+    [llm_text("<user_response>The task is finished.</user_response><done>##DONE##</done>")],
     { ->
       return agent_loop(
         harness,

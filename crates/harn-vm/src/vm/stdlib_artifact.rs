@@ -31,7 +31,7 @@ fn stdlib_module_artifact_cache() -> &'static Cache<String, Arc<PreparedModuleAr
         // The key set is embedded in this exact binary and therefore bounded.
         // Sizing to its authoritative catalog keeps every immutable artifact
         // resident without a second capacity constant to drift.
-        Cache::new(harn_stdlib::STDLIB_SOURCES.len().max(1))
+        Cache::new(harn_modules::stdlib_catalog().sources.len().max(1))
     })
 }
 
@@ -89,13 +89,20 @@ pub(super) fn stdlib_module_artifact(
         // purpose is to skip exactly that work.
         let lookup = {
             let _load_span = recorder.map(super::ModulePhaseRecorder::load_span);
-            bytecode_cache::load_module_for_key(
-                synthetic,
-                bytecode_cache::CacheKey::from_embedded_stdlib_module_content_hash(
-                    embedded.sha256(),
-                    ModuleProvenance::EmbeddedStdlib,
-                ),
-            )
+            let key = bytecode_cache::CacheKey::from_embedded_stdlib_module_content_hash(
+                embedded.sha256(),
+                ModuleProvenance::EmbeddedStdlib,
+            );
+            // Artifacts compiled into the host binary win over the shared
+            // cache, so a first run on a new machine compiles and writes
+            // nothing for the stdlib (harn#9652).
+            match bytecode_cache::load_embedded_stdlib_module(&key, synthetic) {
+                Some(artifact) => bytecode_cache::ModuleLookupOutcome {
+                    key,
+                    artifact: Some(artifact),
+                },
+                None => bytecode_cache::load_module_for_key(synthetic, key),
+            }
         };
         let artifact = if let Some(artifact) = lookup.artifact {
             artifact
@@ -212,7 +219,7 @@ pub struct StdlibWarmReport {
 /// first process compiles and the rest load what it stored.
 pub fn warm_embedded_stdlib(threads: usize) -> StdlibWarmReport {
     let _warm_lock = acquire_stdlib_warm_lock(STDLIB_WARM_LOCK_DEADLINE);
-    let sources = harn_stdlib::STDLIB_SOURCES;
+    let sources = harn_modules::stdlib_catalog().sources;
     let next = std::sync::atomic::AtomicUsize::new(0);
     let warmed = std::sync::atomic::AtomicUsize::new(0);
     let failed = std::sync::Mutex::new(Vec::new());

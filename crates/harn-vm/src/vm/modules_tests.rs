@@ -5,10 +5,14 @@ use super::*;
 
 #[path = "modules_tests/lifecycle.rs"]
 mod lifecycle;
+#[path = "modules_tests/shared_instances.rs"]
+mod shared_instances;
 #[path = "modules_tests/stdlib_warm.rs"]
 mod stdlib_warm;
 #[path = "modules_tests/tool_registry.rs"]
 mod tool_registry;
+#[path = "modules_tests/user_interface_warm.rs"]
+mod user_interface_warm;
 
 static CACHE_TEST_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
@@ -20,7 +24,9 @@ fn cache_test_guard() -> MutexGuard<'static, ()> {
 }
 
 fn cached_stdlib_module_ptr(module: &str) -> Option<usize> {
-    let source = harn_stdlib::get_stdlib_source(module).expect("stdlib module source exists");
+    let source = harn_modules::stdlib_catalog()
+        .source(module)
+        .expect("stdlib module source exists");
     stdlib_module_artifact_cache_ptr(module, source)
 }
 

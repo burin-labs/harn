@@ -35,6 +35,7 @@ mod fs_snapshot;
 mod fs_staging;
 mod fs_watch;
 mod host_conditions;
+mod operator_precedence_agreement;
 mod parser_agreement_corpus;
 mod process_artifact_retention;
 mod process_owner_death_e2e;

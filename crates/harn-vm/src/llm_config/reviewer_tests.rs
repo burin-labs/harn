@@ -210,10 +210,13 @@ fn luna_with_anthropic_key_gets_independent_reviewer_with_bounded_floor() {
         },
         available,
     );
-    assert_eq!(
-        old_policy.fallback_code.as_deref(),
-        Some("no_diff_family_within_price")
-    );
+    // Until Claude Haiku 5.5 (2026-10-07) no different-family model fit
+    // within 3x of Luna's $0.10 / $0.50, and this pure-multiplier policy fell
+    // back with `no_diff_family_within_price`. Haiku 5.5 is priced the same as
+    // Luna, so the multiplier alone now finds it.
+    assert!(!old_policy.fallback, "{old_policy:?}");
+    assert_eq!(old_policy.reviewer.provider, "anthropic");
+    assert_eq!(old_policy.reviewer.id, "claude-haiku-5-5");
 
     let selection = pick_complementary_reviewer_with_availability(
         ComplementaryReviewerOptions {

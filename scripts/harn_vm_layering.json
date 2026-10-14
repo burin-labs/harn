@@ -28,7 +28,9 @@
   },
   "layers": [
     [
-      "value"
+      "value",
+      "tool_call_mutations",
+      "package_scripts"
     ],
     [
       "vm"

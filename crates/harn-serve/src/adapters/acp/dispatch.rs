@@ -93,13 +93,19 @@ impl AcpServer {
                 if self.reject_unauthenticated(&id) {
                     return;
                 }
-                self.handle_session_fork(&id, &params);
+                self.handle_session_fork(&id, &params).await;
+            }
+            harn_vm::agent_sessions::CANONICAL_HISTORY_BOUNDARIES_METHOD => {
+                if self.reject_unauthenticated(&id) {
+                    return;
+                }
+                self.handle_canonical_history_boundaries(&id, &params).await;
             }
             "session/truncate" => {
                 if self.reject_unauthenticated(&id) {
                     return;
                 }
-                self.handle_session_truncate(&id, &params);
+                self.handle_session_truncate(&id, &params).await;
             }
             "session/set_mode" => {
                 if self.reject_unauthenticated(&id) {
@@ -173,7 +179,7 @@ impl AcpServer {
                     return;
                 }
                 let cancelled = match preparation {
-                    PreparedSessionRequest::Cancel { newly_cancelled } => Some(newly_cancelled),
+                    PreparedSessionRequest::Cancel { result } => Some(result),
                     _ => None,
                 };
                 self.handle_session_cancel(&id, &params, cancelled);

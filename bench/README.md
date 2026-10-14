@@ -25,18 +25,22 @@ the perf work for that migration:
   splits. `bench/vm/` pins those wins.
 - **The risk surface is the `harn_entry` boundary**
   (`crates/harn-vm/src/stdlib/harn_entry.rs`): every Rust→`.harn` call
-  pays a child-VM clone plus a module-cache lookup, and — when the
-  parent VM's cache misses the target module — a full module
-  re-instantiation that is thrown away on return
-  (`modules.rs` `instantiate_module`). Typed crossings additionally pay
-  a JSON double-marshal + serde deserialize. The migration multiplies
-  crossing counts (per tool call, per turn, per stage attempt).
+  pays a child-VM clone plus a module-cache lookup. When the parent VM's
+  cache misses the target module, an immutable stdlib module is
+  instantiated once per execution tree and then reused from the tree's
+  shared instance store (`vm/modules/shared_instances.rs`); a module with
+  mutable top-level state (for example `std/llm/handlers`, and so
+  `std/agent/loop`) is still re-instantiated per crossing and thrown away
+  on return. Typed crossings additionally pay a JSON double-marshal +
+  serde deserialize. The migration multiplies crossing counts (per tool
+  call, per turn, per stage attempt).
 
 These suites are the **regression gates for the stage-loop inversion
 wave** (phase H-W2). Run them before/after each inversion PR:
 
 - `bench/orchestration/bench_harn_entry_crossing.rs` — typed vs by-name
-  crossing cost, warm vs cold parent module cache.
+  crossing cost, warm vs cold parent module cache, and the production
+  text-tool parse seam (`tool_parse_cold`).
 - `bench/orchestration/bench_transcript_projection.rs` — per-turn
   projection cost at ~10k/50k/100k-token transcripts.
 - `bench/orchestration/bench_hook_dispatch.rs` — 1/8/32/128 hook fan-out
@@ -51,8 +55,7 @@ cargo bench -p harn-orchestration-perf --bench bench_transcript_projection
 ./scripts/bench_cli_cold_start.sh --no-build
 ```
 
-The optimization levers themselves (parent-cache pre-warm or a
-process-global instantiated-module cache, `VmValue`-direct hot seams,
-stdlib AOT extension) intentionally land *with* the migration waves they
+The remaining optimization levers (`VmValue`-direct hot seams, stdlib
+AOT extension) intentionally land *with* the migration waves they
 protect, not here — this directory only carries the measurement
 infrastructure and the pre-migration numbers.

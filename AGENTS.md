@@ -206,7 +206,9 @@ live in [Engineering principles](docs/src/dev/engineering-principles.md):
 - Read one head's CI check state with
   `./scripts/gh_check_state.sh --repo OWNER/NAME --sha <40-hex>`: it reports the
   latest verdict per check name, counts queued work as pending, and exits 3 when
-  an expected check never reported. Do not hand-roll a `gh pr checks` parse.
+  an expected check never reported. When the verdict is missing it also names
+  any open PR that conflicts with its base, since GitHub runs no `pull_request`
+  CI on one. Do not hand-roll a `gh pr checks` parse.
 - Do not add real-time sleeps, wall-clock polling, `SystemTime::now()`, or short
   `recv_timeout` calls to tests. Use paused Tokio time, `EventLog::subscribe()`,
   or `OrchestratorHarness`; see `docs/src/dev/testing.md`.
@@ -245,8 +247,8 @@ live in [Engineering principles](docs/src/dev/engineering-principles.md):
   terms, why, the one risk or blind spot, and how you verified the claim at the
   level of the claim. Do not restate the Files or Checks tabs.
 - Use a closing keyword only when the pull request resolves the whole issue:
-  `Closes #N items: 1, 2, ...` for every enumerated sub-ask, or `Single-ask:
-  #N` when the issue is not enumerated. For partial work, use `Partial: #N
+  `Closes #N items: 1, 2, ...` for every enumerated sub-ask, or `Closes #N`
+  when the issue is not enumerated. For partial work, use `Partial: #N
   items: 1, 3` or `Refs #N`; never use a closing keyword. GitHub builds the
   closing link from the keyword and ignores the text after it, so a keyword on
   partial work closes the whole issue on merge however the line is worded.
@@ -271,7 +273,9 @@ live in [Engineering principles](docs/src/dev/engineering-principles.md):
   admin permission and refuses fork PRs. See
   [Merge overrides](docs/src/dev/merge-overrides.md) and the
   [`burin-labs/.github` README](https://github.com/burin-labs/.github#merge-overrides).
-- Land with `gh pr merge --squash --auto`, which enqueues. Never use
+- Ship a ready PR by adding the `ship` label (Smart Ship arms it, lands it, and
+  reports on the PR; removing the label stops it). Without Smart Ship, land with
+  `gh pr merge --squash --auto`, which enqueues. Never use
   `gh pr merge --admin`. The labels are the only supported way to skip the
   queue, and the `merge queue` ruleset allows no admin bypass. GitHub ignores
   `-merge` in `.gitattributes`, so the queue's generated-file check on the

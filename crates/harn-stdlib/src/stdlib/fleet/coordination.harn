@@ -405,7 +405,7 @@ pub fn fleet_claim(harness: Harness, scope: any, room: any, work_key: string, op
     fleet_claim_schema(),
     "claim",
   )
-  return __fleet_post(harness, scope, room, "claim", opts?.subject ?? ("Claim " + key), data, opts)
+  return __fleet_post(harness, scope, room, "claim", opts?.subject ?? "Claim " + key, data, opts)
 }
 
 /**
@@ -435,7 +435,7 @@ pub fn fleet_ack(
     scope,
     room,
     "ack",
-    opts?.subject ?? ("Acknowledge " + target),
+    opts?.subject ?? "Acknowledge " + target,
     data,
     opts + {reply_to: target},
   )
@@ -478,7 +478,7 @@ pub fn fleet_done(
     scope,
     room,
     "done",
-    opts?.subject ?? ("Complete " + key),
+    opts?.subject ?? "Complete " + key,
     data,
     opts + {reply_to: claim},
   )
@@ -518,7 +518,7 @@ pub fn fleet_finding(harness: Harness, scope: any, room: any, premise: string, o
     scope,
     room,
     "finding",
-    opts?.subject ?? ("Premise " + normalized),
+    opts?.subject ?? "Premise " + normalized,
     data,
     opts,
   )
@@ -560,7 +560,7 @@ pub fn fleet_heartbeat(
     scope,
     room,
     "heartbeat",
-    opts?.subject ?? ("Heartbeat " + data.state),
+    opts?.subject ?? "Heartbeat " + data.state,
     data,
     opts,
   )

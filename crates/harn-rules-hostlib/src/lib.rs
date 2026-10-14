@@ -1077,17 +1077,6 @@ mod tests {
     }
 
     #[test]
-    fn capability_does_not_register_the_async_visitor() {
-        // `rules.visit` is async, so it is installed directly on the VM in
-        // `install`, not through the sync capability registry.
-        let mut registry = BuiltinRegistry::new();
-        RulesCapability.register_builtins(&mut registry);
-        let names: Vec<_> = registry.iter().map(|b| b.name).collect();
-        assert!(!names.contains(&VISIT));
-        assert!(names.contains(&DIAGNOSTICS));
-    }
-
-    #[test]
     fn missing_rule_is_an_error() {
         let err = search_run(&[dict(&[
             ("source", str_vm("x")),

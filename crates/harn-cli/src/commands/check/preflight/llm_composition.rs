@@ -128,11 +128,25 @@ fn check_literal_composition(
         None => alias_provider.unwrap_or_else(|| harn_vm::llm_config::infer_provider(&raw_model)),
     };
 
+    let effort_node = dict_literal_field(options, "effort");
+    let effort = effort_node.and_then(literal_string).and_then(|value| {
+        serde_json::from_value::<harn_vm::llm::capabilities::ReasoningEffort>(
+            serde_json::Value::String(value),
+        )
+        .ok()
+    });
+    let dynamic_effort = effort_node.is_some_and(|node| {
+        literal_string(node).is_none() && !matches!(node.node, Node::NilLiteral)
+    });
+    let caps = harn_vm::llm::capabilities::lookup(&provider, &resolved_model);
     for option in harn_vm::llm::capabilities::PortableOption::ALL {
         let Some(value) = dict_literal_field(options, option.name()) else {
             continue;
         };
         if !portable_option_intent_is_static(option, value) {
+            continue;
+        }
+        if dynamic_effort && caps.portable_option_effort_support.contains_key(&option) {
             continue;
         }
         let admission = if option == harn_vm::llm::capabilities::PortableOption::PromptCacheTtl {
@@ -142,7 +156,12 @@ fn check_literal_composition(
                 &literal_string(value).expect("static TTL intent is a string literal"),
             )
         } else {
-            harn_vm::llm::capabilities::admit_portable_option(&provider, &resolved_model, option)
+            harn_vm::llm::capabilities::admit_portable_option_with_effort(
+                &provider,
+                &resolved_model,
+                option,
+                effort,
+            )
         };
         let Err(reason) = admission else {
             continue;

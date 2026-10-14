@@ -8,6 +8,8 @@
 import { mkdirSync, writeFileSync, readFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
+import { verifyOAuthClientDocument } from "./oauth-client-document.mjs"
+import { publishDocAssets } from "./vite-plugins/doc-assets.mjs"
 import {
   LLMS_FULL_TXT_PATH,
   LLMS_TXT_PATH,
@@ -261,11 +263,18 @@ export async function prerenderSite() {
       `\n</urlset>\n`,
   )
 
+  // Publish source assets only after generated and public output exists, so a
+  // source file can never replace a page, content JSON, redirect, or site asset.
+  publishDocAssets(DIST, docs.assets)
+
   console.log(
     `prerender: ${docs.pages.size} doc pages + landing + 404, ${docs.pages.size} content JSON, ` +
       `${docs.pages.size} agent markdown pages, ${LLMS_TXT_PATH}, ${LLMS_FULL_TXT_PATH}, ` +
-      `${Object.keys(REDIRECTS).length} redirects, sitemap.xml (${sitemapUrls.length} urls) → docs/dist`,
+      `${Object.keys(REDIRECTS).length} redirects, ${docs.assets.length} source assets, ` +
+      `sitemap.xml (${sitemapUrls.length} urls) → docs/dist`,
   )
+  const identity = verifyOAuthClientDocument(REPO_ROOT, DIST)
+  console.log(`prerender: verified published MCP client identity ${identity.clientId}`)
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {

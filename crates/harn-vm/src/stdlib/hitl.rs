@@ -20,16 +20,17 @@ use crate::schema::schema_expect_value;
 use crate::stdlib::args::{ArgError, Args, ErrorKind};
 use crate::stdlib::macros::{harn_builtin, BuiltinSignature, Param, VmBuiltinDef, TY_ANY, TY_DICT};
 use crate::stdlib::waitpoint::{
-    cancel_waitpoint_on, complete_waitpoint_on, create_waitpoint_on, inspect_waitpoint_on,
-    wait_on_waitpoints, WaitpointRecord, WaitpointStatus, WaitpointWaitFailure,
-    WaitpointWaitOptions,
+    create_waitpoint_on, inspect_waitpoint_on, wait_on_waitpoints, WaitpointRecord,
+    WaitpointStatus, WaitpointWaitFailure, WaitpointWaitOptions,
 };
 use crate::triggers::dispatcher::current_dispatch_context;
 use crate::value::{categorized_error, ErrorCategory, VmError, VmValue};
 use crate::vm::{AsyncBuiltinCtx, Vm};
 
 mod fixtures;
+mod response;
 use fixtures::{maybe_apply_mock_response, maybe_apply_mock_response_with_harness};
+pub use response::{append_hitl_response, append_hitl_response_on};
 
 const HITL_EVENT_LOG_QUEUE_DEPTH: usize = RuntimeLimits::DEFAULT.default_event_log_queue_depth;
 const HITL_APPROVAL_TIMEOUT_MS: u64 = 24 * 60 * 60 * 1000;
@@ -356,36 +357,6 @@ pub(crate) fn restore_hitl_state(state: RequestSequenceState) {
     REQUEST_SEQUENCE.with(|slot| {
         *slot.borrow_mut() = state;
     });
-}
-
-pub async fn append_hitl_response(
-    base_dir: Option<&Path>,
-    mut response: HitlHostResponse,
-) -> Result<u64, String> {
-    let kind = HitlRequestKind::from_request_id(&response.request_id)
-        .ok_or_else(|| format!("unknown HITL request id '{}'", response.request_id))?;
-    if response.responded_at.is_none() {
-        response.responded_at = Some(now_rfc3339());
-    }
-    let log = ensure_hitl_event_log_for(base_dir)?;
-    let headers = response_headers(&response.request_id);
-    let topic = Topic::new(kind.topic()).map_err(|error| error.to_string())?;
-    let event_id = log
-        .append(
-            &topic,
-            LogEvent::new(
-                match kind {
-                    HitlRequestKind::Escalation => "hitl.escalation_accepted",
-                    _ => "hitl.response_received",
-                },
-                serde_json::to_value(&response).map_err(|error| error.to_string())?,
-            )
-            .with_headers(headers),
-        )
-        .await
-        .map_err(|error| error.to_string())?;
-    finalize_hitl_response(&log, kind, &response).await?;
-    Ok(event_id)
 }
 
 pub async fn append_approval_request_on(
@@ -978,128 +949,6 @@ fn waitpoint_outcome_from_vm_error(error: &VmError) -> Option<WaitpointOutcome> 
         }),
         _ => None,
     }
-}
-
-async fn finalize_hitl_response(
-    log: &Arc<AnyEventLog>,
-    kind: HitlRequestKind,
-    response: &HitlHostResponse,
-) -> Result<(), String> {
-    match kind {
-        HitlRequestKind::Question => {
-            if waitpoint_is_terminal(log, &response.request_id).await? {
-                return Ok(());
-            }
-            complete_waitpoint_on(
-                log,
-                &response.request_id,
-                response.answer.clone(),
-                response.reviewer.clone(),
-                response.reason.clone(),
-                response.metadata.clone(),
-            )
-            .await
-            .map(|_| ())
-            .map_err(|error| error.to_string())
-        }
-        HitlRequestKind::Escalation => {
-            if !response.accepted.unwrap_or(false)
-                || waitpoint_is_terminal(log, &response.request_id).await?
-            {
-                return Ok(());
-            }
-            complete_waitpoint_on(
-                log,
-                &response.request_id,
-                Some(json!({
-                    "accepted": true,
-                    "reviewer": response.reviewer,
-                    "reason": response.reason,
-                    "responded_at": response.responded_at,
-                })),
-                response.reviewer.clone(),
-                response.reason.clone(),
-                response.metadata.clone(),
-            )
-            .await
-            .map(|_| ())
-            .map_err(|error| error.to_string())
-        }
-        HitlRequestKind::Approval | HitlRequestKind::DualControl => {
-            if waitpoint_is_terminal(log, &response.request_id).await? {
-                return Ok(());
-            }
-            let request = load_request_envelope(log, kind, &response.request_id)
-                .await
-                .map_err(|error| error.to_string())?;
-            match resolve_approval_state(log, kind, &request)
-                .await
-                .map_err(|error| error.to_string())?
-            {
-                ApprovalResolution::Pending => Ok(()),
-                ApprovalResolution::Approved(progress) => {
-                    let record = approval_record_json(&progress);
-                    append_named_event(
-                        log,
-                        kind,
-                        approved_event_kind(kind),
-                        &request.request_id,
-                        &request.trace_id,
-                        json!({
-                            "request_id": request.request_id.clone(),
-                            "record": record.clone(),
-                        }),
-                    )
-                    .await
-                    .map_err(|error| error.to_string())?;
-                    complete_waitpoint_on(
-                        log,
-                        &request.request_id,
-                        Some(record),
-                        response.reviewer.clone(),
-                        progress.reason.clone(),
-                        response.metadata.clone(),
-                    )
-                    .await
-                    .map(|_| ())
-                    .map_err(|error| error.to_string())
-                }
-                ApprovalResolution::Denied(denied) => {
-                    append_named_event(
-                        log,
-                        kind,
-                        denied_event_kind(kind),
-                        &request.request_id,
-                        &request.trace_id,
-                        json!({
-                            "request_id": request.request_id.clone(),
-                            "reviewer": denied.reviewer.clone(),
-                            "reason": denied.reason.clone(),
-                        }),
-                    )
-                    .await
-                    .map_err(|error| error.to_string())?;
-                    cancel_waitpoint_on(
-                        log,
-                        &request.request_id,
-                        denied.reviewer.clone(),
-                        denied.reason.clone(),
-                        denied.metadata.clone(),
-                    )
-                    .await
-                    .map(|_| ())
-                    .map_err(|error| error.to_string())
-                }
-            }
-        }
-    }
-}
-
-async fn waitpoint_is_terminal(log: &Arc<AnyEventLog>, request_id: &str) -> Result<bool, String> {
-    Ok(inspect_waitpoint_on(log, request_id)
-        .await
-        .map_err(|error| error.to_string())?
-        .is_some_and(|record| record.status != WaitpointStatus::Open))
 }
 
 async fn load_request_envelope(

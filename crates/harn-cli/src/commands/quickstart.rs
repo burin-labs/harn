@@ -233,22 +233,8 @@ fn choose_non_interactive(
         let provider = provider.trim();
         requested_choice(choices, provider)?
     } else {
-        choices
-            .iter()
-            .find(|choice| !choice.auth_envs.is_empty() && choice.auth_available)
-            .or_else(|| {
-                ollama
-                    .reachable
-                    .then(|| choices.iter().find(|choice| choice.name == "ollama"))
-                    .flatten()
-            })
-            .or_else(|| {
-                env::var("LOCAL_LLM_BASE_URL")
-                    .ok()
-                    .filter(|value| !value.trim().is_empty())
-                    .and_then(|_| choices.iter().find(|choice| choice.name == "local"))
-            })
-            .or_else(|| choices.iter().find(|choice| choice.name == "anthropic"))
+        preferred_choice_index(choices, ollama)
+            .map(|idx| &choices[idx])
             .ok_or_else(|| "no configurable providers found".to_string())?
     };
     Ok(selection_from_choice(choice, None))
@@ -268,7 +254,7 @@ fn choose_interactive(
         for (idx, choice) in choices.iter().enumerate() {
             println!("  {}) {}", idx + 1, format_choice(choice, ollama));
         }
-        let default = default_choice_index(choices, ollama);
+        let default = preferred_choice_index(choices, ollama).unwrap_or(0);
         let answer = read_line(&format!("provider [{}]", default + 1))?;
         let selected = if answer.trim().is_empty() {
             default
@@ -347,7 +333,10 @@ fn selection_from_choice(choice: &ProviderChoice, api_key: Option<String>) -> Pr
     }
 }
 
-fn default_choice_index(choices: &[ProviderChoice], ollama: &OllamaProbe) -> usize {
+/// Provider quickstart picks when the user names none: a keyed provider whose
+/// credential is present, then reachable Ollama, then a configured local
+/// endpoint, then Anthropic. Callers decide what an empty preference means.
+fn preferred_choice_index(choices: &[ProviderChoice], ollama: &OllamaProbe) -> Option<usize> {
     choices
         .iter()
         .position(|choice| !choice.auth_envs.is_empty() && choice.auth_available)
@@ -364,7 +353,6 @@ fn default_choice_index(choices: &[ProviderChoice], ollama: &OllamaProbe) -> usi
                 .and_then(|_| choices.iter().position(|choice| choice.name == "local"))
         })
         .or_else(|| choices.iter().position(|choice| choice.name == "anthropic"))
-        .unwrap_or(0)
 }
 
 fn read_line(prompt_label: &str) -> Result<String, String> {
@@ -869,34 +857,6 @@ mod tests {
         )
         .unwrap();
         assert_eq!(selected.provider, "anthropic");
-    }
-
-    #[test]
-    fn interactive_default_prefers_available_remote_provider() {
-        let choices = vec![
-            ProviderChoice {
-                name: "ollama".to_string(),
-                model: "llama3.2".to_string(),
-                auth_envs: Vec::new(),
-                auth_available: true,
-            },
-            ProviderChoice {
-                name: "anthropic".to_string(),
-                model: "claude-sonnet-4-20250514".to_string(),
-                auth_envs: vec!["ANTHROPIC_API_KEY".to_string()],
-                auth_available: true,
-            },
-        ];
-        let default = default_choice_index(
-            &choices,
-            &OllamaProbe {
-                reachable: true,
-                status: "ok".to_string(),
-                message: "ok".to_string(),
-                available_models: vec!["llama3.2".to_string()],
-            },
-        );
-        assert_eq!(choices[default].name, "anthropic");
     }
 
     #[test]

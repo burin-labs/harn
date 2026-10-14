@@ -68,9 +68,9 @@ case "$1 $2" in
     done
     jq -r "$jq_program" <<< "$prs"
     ;;
-  "pr merge")
-    if [[ "${FAKE_GH_MERGE_FAIL:-0}" == 1 ]]; then
-      echo "GraphQL: Auto merge is not allowed for this repository" >&2
+  "pr edit")
+    if [[ "${FAKE_GH_SHIP_FAIL:-0}" == 1 ]]; then
+      echo "Smart Ship enrollment refused" >&2
       exit 1
     fi
     ;;
@@ -349,14 +349,14 @@ grep -Fxq "M  CHANGELOG.md" "$case_state/status-at-publish.txt" \
   || fail "published tree does not carry the folded CHANGELOG.md"
 [[ -e "$opens/changelog.d/README.md" ]] || fail "fold deleted a non-fragment file"
 grep -Fq "folds 2 changelog fragment(s)" "$case_state/body.md" || fail "pull request body does not count the folded fragments"
-# Auto-merge is armed by the same run that opens the pull request, right after
+# Smart Ship is enrolled by the same run that opens the pull request, right after
 # it opens and before its checks can settle, and it is the run's last GitHub
 # call.
 create_line=$(grep -n -m1 '^gh pr create ' "$case_record" | cut -d: -f1)
-merge_line=$(grep -n -Fx 'gh pr merge https://github.com/example/harn/pull/9001 --auto --squash' "$case_record" | cut -d: -f1 || true)
-[[ -n "$merge_line" ]] || { cat "$case_record" >&2; fail "opened pull request was not armed for auto-merge"; }
-[[ "$merge_line" -gt "$create_line" ]] || fail "auto-merge was armed before the pull request existed"
-[[ "$(grep '^gh ' "$case_record" | tail -n 1)" == "gh pr merge https://github.com/example/harn/pull/9001 --auto --squash" ]] \
+merge_line=$(grep -n -Fx 'gh pr edit https://github.com/example/harn/pull/9001 --add-label ship' "$case_record" | cut -d: -f1 || true)
+[[ -n "$merge_line" ]] || { cat "$case_record" >&2; fail "opened pull request was not enrolled in Smart Ship"; }
+[[ "$merge_line" -gt "$create_line" ]] || fail "Ship was granted before the pull request existed"
+[[ "$(grep '^gh ' "$case_record" | tail -n 1)" == "gh pr edit https://github.com/example/harn/pull/9001 --add-label ship" ]] \
   || { cat "$case_record" >&2; fail "arming is not the opening run's last GitHub call"; }
 
 # Follow the opener's actual published receipt through remote acquisition and
@@ -442,11 +442,11 @@ done
 # --- A failed arm fails the run loudly and names the unarmed pull request ----
 unarmed=$(new_fixture unarmed 1.2.4-dev)
 add_fragments "$unarmed"
-FAKE_GH_MERGE_FAIL=1 run_opener "$unarmed"
-[[ "$case_status" -ne 0 ]] || fail "opener succeeded although arming auto-merge failed"
-grep -Fq "could not arm auto-merge on https://github.com/example/harn/pull/9001" "$case_output" \
+FAKE_GH_SHIP_FAIL=1 run_opener "$unarmed"
+[[ "$case_status" -ne 0 ]] || fail "opener succeeded although Ship enrollment failed"
+grep -Fq "could not enroll Smart Ship on https://github.com/example/harn/pull/9001" "$case_output" \
   || { cat "$case_output" >&2; fail "arming failure did not name the unarmed pull request"; }
-grep -Fq 'gh pr merge https://github.com/example/harn/pull/9001 --auto --squash' "$case_record" \
+grep -Fq 'gh pr edit https://github.com/example/harn/pull/9001 --add-label ship' "$case_record" \
   || fail "arming failure case never attempted to arm"
 grep -Fxq "pr_url=https://github.com/example/harn/pull/9001" "$case_outputs" \
   || fail "arming failure did not report the opened pull request"

@@ -110,7 +110,9 @@ mod tests {
         use harn_parser::builtin_signatures::TyExt;
         use harn_parser::{Node, TypeExpr};
         let declarations = harn_parser::parse_source(
-            harn_stdlib::get_stdlib_source("llm/envelope").expect("embedded envelope"),
+            harn_modules::stdlib_catalog()
+                .source("llm/envelope")
+                .expect("embedded envelope"),
         )
         .expect("envelope parses");
         let alias = |name: &str| {

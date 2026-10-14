@@ -235,6 +235,7 @@ async fn eval_pack_handler_runs_from_cron_tick_and_sheds_after_budget() {
             install_manifest_triggers(vec![TriggerBindingSpec {
                 id: "nightly-eval".to_string(),
                 source: TriggerBindingSource::Manifest,
+                ingress_subscription: false,
                 kind: "cron".to_string(),
                 provider: ProviderId::from("cron"),
                 autonomy_tier: crate::AutonomyTier::Suggest,

@@ -171,6 +171,61 @@ fn openrouter_sonnet_55_keeps_reasoning_on_and_tool_choice_unforced() {
     assert!(sonnet5.allowed_tool_choice_modes.is_empty());
 }
 
+/// Haiku 5.5 takes the generation-5 surface (live probes, 2026-10-09): effort
+/// low..max, a 512-token cache floor, native mid-conversation system messages,
+/// no sampling and no prefill. Unlike Sonnet 5.5 and Opus 5.5 it still accepts
+/// a forced tool choice and the `disabled` off switch. Haiku 4.5 is the
+/// control: the same `claude-haiku-*` globs match it, so each 5.5 value must
+/// come from the new row rather than an inherited one.
+#[test]
+fn anthropic_haiku_55_gets_generation_five_surface() {
+    reset();
+    for model in ["claude-haiku-5-5", "anthropic/claude-haiku-5.5"] {
+        let caps = lookup("anthropic", model);
+        assert_eq!(caps.thinking_modes, vec!["adaptive", "effort"], "{model}");
+        assert!(caps.reasoning_effort_supported, "{model}");
+        assert_eq!(
+            caps.reasoning_effort_levels,
+            vec!["low", "medium", "high", "xhigh", "max"],
+            "{model}"
+        );
+        assert!(caps.reasoning_disable_supported, "{model}");
+        assert_eq!(caps.thinking_off_type, ThinkingOffType::Disabled, "{model}");
+        assert!(caps.allowed_tool_choice_modes.is_empty(), "{model}");
+        assert_eq!(caps.prompt_cache_min_prefix_tokens, Some(512), "{model}");
+        assert!(!caps.supports_assistant_prefill, "{model}");
+        assert!(!caps.temperature_supported, "{model}");
+        assert!(!caps.top_p_supported, "{model}");
+        assert!(!caps.top_k_supported, "{model}");
+        assert!(caps.native_tools, "{model}");
+    }
+    for model in ["claude-haiku-4-5", "anthropic/claude-haiku-4-5"] {
+        let caps = lookup("anthropic", model);
+        assert_eq!(caps.thinking_modes, vec!["enabled"], "{model}");
+        assert!(!caps.reasoning_effort_supported, "{model}");
+        assert_eq!(caps.prompt_cache_min_prefix_tokens, Some(4096), "{model}");
+        assert!(caps.supports_assistant_prefill, "{model}");
+    }
+}
+
+/// Through OpenRouter no Haiku 5.5 endpoint forwards temperature (a
+/// `require_parameters` request returned 404 on 2026-10-09); Haiku 4.5's did.
+#[test]
+fn openrouter_haiku_55_declines_sampling_that_haiku_45_honors() {
+    reset();
+    let caps = lookup("openrouter", "anthropic/claude-haiku-5.5");
+    assert!(!caps.temperature_supported);
+    assert!(!caps.top_p_supported);
+    assert!(!caps.supports_assistant_prefill);
+    assert!(caps.reasoning_disable_supported);
+    assert!(caps.allowed_tool_choice_modes.is_empty());
+    assert!(caps.native_tools);
+
+    let haiku45 = lookup("openrouter", "anthropic/claude-haiku-4.5");
+    assert!(haiku45.temperature_supported);
+    assert!(haiku45.supports_assistant_prefill);
+}
+
 #[test]
 fn anthropic_fable_effort_cannot_be_disabled() {
     reset();
@@ -294,6 +349,8 @@ fn anthropic_47_and_newer_sampling_is_denied_by_the_catalog() {
         "anthropic/claude-opus-5.5",
         "claude-sonnet-5",
         "anthropic/claude-sonnet-5",
+        "claude-haiku-5-5",
+        "anthropic/claude-haiku-5.5",
     ] {
         let caps = lookup("anthropic", model);
         assert!(!caps.temperature_supported, "{model}: temperature");
@@ -374,6 +431,7 @@ fn openrouter_claude_rows_track_direct_anthropic_runtime_quirks() {
         "anthropic/claude-mythos-5-0",
         "anthropic/claude-haiku-4-5",
         "anthropic/claude-haiku-4-7",
+        "anthropic/claude-haiku-5.5",
         "anthropic/claude-sonnet-4-6",
         "anthropic/claude-sonnet-4-7",
         "anthropic/claude-sonnet-5",

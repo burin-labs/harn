@@ -17,6 +17,7 @@ use crate::orchestration::{
 use crate::stdlib::json_to_vm_value;
 use crate::tool_annotations::SideEffectLevel;
 
+mod malformed_paths;
 mod tool_call_intent;
 
 struct HostBridgeGuard {

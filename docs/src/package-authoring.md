@@ -151,7 +151,28 @@ contract fixtures, package-local fixture tests, install/import smoke tests, and
 standalone Harn doc examples. Use `harn connector check .` when you only need
 the lower-level pure-Harn connector contract check.
 
-`harn package test-inventory .` parses every `tests/**/*.harn` file through the
+Declare package-relative test directories or individual `.harn` files in `harn.toml`:
+
+```toml
+[tests]
+roots = ["nested/tests", "scripts/tests/contract.harn"]
+```
+
+Omitting `roots` selects `tests/`. Directories include nested `.harn` files;
+overlapping roots select each file once. Paths must name package files or subdirectories,
+without parent traversal or symlinks. Package-generated directories are excluded.
+An explicit root that is missing, unreadable, or empty fails selection.
+Use `{ path = "scripts/tests", recursive = false }` instead of a string to
+select only a directory's immediate `.harn` files, excluding nested fixture directories.
+Add `pattern = "test_*.harn"` to that record to exclude helper modules.
+Patterns match filenames, without directory separators; the default is `*.harn`.
+Use `exclude = ["test_fixtures.harn"]` for helpers that otherwise match the pattern.
+Exclusions use the same filename glob syntax.
+
+Run `harn test package` from the package to execute this selection.
+`harn package verify .` uses the same files and fails if a selected test fails.
+
+`harn package test-inventory .` parses each selected file through the
 same test discovery engine as `harn test` and reports what it found, without
 running anything or changing a file. Each file should contain at least one
 pipeline whose name starts with `test_` or that carries `@test`; an ordinary
@@ -167,8 +188,8 @@ allow_empty = true
 reason = "schema-only package with no executable behavior"
 ```
 
-The exception applies only when the package has no selected test files. It does
-not hide a test file that contains no discoverable test pipeline.
+The exception permits an absent conventional `tests/` directory. It doesn't
+hide a broken explicit root or a file with no discoverable test pipeline.
 
 Use `harn package verify . --strict` for warning-free release admission. It
 makes check and lint warnings fatal, enables strict boundary typing, and records

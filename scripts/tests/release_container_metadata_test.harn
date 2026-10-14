@@ -1,0 +1,26 @@
+import { read_yaml } from "std/fs"
+
+@test
+pipeline container_revision_tracks_the_certified_archive_source(harness: Harness, task: unknown) {
+  const workflow = read_yaml(harness.fs, "../../.github/workflows/promote-release.yml", nil)
+  const container = workflow.jobs.container
+  const metadata = container.steps.find({ step -> step?.id == "meta" })
+  const build = container.steps.find(
+    { step -> to_string(step?.uses ?? "").starts_with("docker/build-push-action@") },
+  )
+  const checkout = container.steps.find(
+    { step -> to_string(step?.uses ?? "").starts_with("actions/checkout@") },
+  )
+  assert(metadata != nil)
+  assert(build != nil)
+  assert(checkout != nil)
+  assert(to_string(metadata.uses).starts_with("docker/metadata-action@"))
+  assert_eq(
+    trim(to_string(metadata["with"]?.labels ?? "")),
+    r"org.opencontainers.image.revision=${{ needs.plan.outputs.source_sha }}",
+  )
+  assert_eq(checkout["with"].ref, r"${{ needs.plan.outputs.source_sha }}")
+  assert_eq(build["with"].labels, r"${{ steps.meta.outputs.labels }}")
+  assert_eq(build["with"].file, "./Dockerfile.release")
+  assert_eq(workflow.jobs.plan.outputs.source_sha, r"${{ needs.resolve.outputs.source_sha }}")
+}

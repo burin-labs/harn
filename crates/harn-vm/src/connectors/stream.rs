@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
 use async_trait::async_trait;
@@ -6,6 +6,7 @@ use serde_json::{json, Value as JsonValue};
 use sha2::{Digest, Sha256};
 use time::OffsetDateTime;
 
+use crate::connectors::shared::header_value;
 use crate::connectors::{
     ActivationHandle, ClientError, Connector, ConnectorClient, ConnectorCtx, ConnectorError,
     ProviderPayloadSchema, RawInbound, TriggerBinding, TriggerKind,
@@ -314,13 +315,6 @@ fn stringish(raw: &JsonValue, fields: &[&str]) -> Option<String> {
     })
 }
 
-fn header_value<'a>(headers: &'a BTreeMap<String, String>, name: &str) -> Option<&'a str> {
-    headers
-        .iter()
-        .find(|(key, _)| key.eq_ignore_ascii_case(name))
-        .map(|(_, value)| value.as_str())
-}
-
 fn fallback_body_digest(body: &[u8]) -> String {
     let digest = Sha256::digest(body);
     let mut encoded = String::with_capacity(digest.len() * 2);
@@ -332,6 +326,8 @@ fn fallback_body_digest(body: &[u8]) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
     use super::*;
     use crate::connectors::{RateLimiterFactory, TriggerBinding};
     use crate::event_log::{install_memory_for_current_thread, reset_active_event_log};

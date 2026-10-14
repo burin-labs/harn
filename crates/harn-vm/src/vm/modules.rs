@@ -19,8 +19,10 @@ use crate::value::{ModuleFunctionRegistry, VmClosure, VmEnv, VmError, VmValue};
 use super::stdlib_artifact::stdlib_module_artifact;
 use super::{ScopeSpan, Vm};
 
+mod shared_instances;
 mod transaction;
 mod visibility;
+pub(crate) use shared_instances::SharedModuleInstanceStore;
 pub use visibility::resolve_module_import_path;
 // Reached by `modules_tests` through this module's bindings.
 #[cfg(test)]
@@ -488,7 +490,7 @@ impl Vm {
     }
 
     /// Widen a stdlib module's export surface with the builtins it re-exports
-    /// (see [`harn_stdlib::builtin_reexports`]), so a Rust-implemented member of
+    /// (see [`harn_stdlib_catalog::builtin_reexports`]), so a Rust-implemented member of
     /// the module imports exactly like a Harn-implemented one.
     ///
     /// The name binds to a [`VmValue::BuiltinRef`], which is what a bare mention
@@ -496,7 +498,7 @@ impl Vm {
     /// global `assert_eq` are the same function reached two ways, not two
     /// implementations that can drift.
     fn add_builtin_reexports(module: &str, loaded: &mut LoadedModule) {
-        for name in harn_stdlib::builtin_reexports(module) {
+        for name in harn_stdlib_catalog::builtin_reexports(module) {
             // A `pub fn` in the module's Harn source wins: it is the more
             // specific declaration, and silently shadowing it here would make
             // the source of an export unguessable from reading the module.
@@ -522,6 +524,10 @@ impl Vm {
         if let Some(loaded) = self.module_cache.get(&synthetic).cloned() {
             return Ok(loaded);
         }
+        if let Some(loaded) = self.shared_module_instance(&synthetic, source) {
+            Arc::make_mut(&mut self.module_cache).insert(synthetic, Arc::clone(&loaded));
+            return Ok(loaded);
+        }
         Arc::make_mut(&mut self.source_cache).insert(synthetic.clone(), Arc::from(source));
 
         let artifact =
@@ -534,8 +540,9 @@ impl Vm {
         let loaded = Arc::new(loaded);
         {
             let _load_span = self.module_load_span();
-            Arc::make_mut(&mut self.module_cache).insert(synthetic, Arc::clone(&loaded));
+            Arc::make_mut(&mut self.module_cache).insert(synthetic.clone(), Arc::clone(&loaded));
         }
+        self.publish_shared_module_instance(&synthetic, source, &artifact, &loaded);
         self.record_module_loaded();
         Ok(loaded)
     }

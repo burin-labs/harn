@@ -1361,7 +1361,7 @@ fn acp_agent_capabilities_use_canonical_initialize_shape() {
         capabilities["promptCapabilities"],
         serde_json::json!({
             "image": true,
-            "audio": true,
+            "audio": false,
             "embeddedContext": false,
         })
     );
@@ -1475,11 +1475,13 @@ fn every_session_dispatch_arm_checks_authentication() {
 }
 
 mod caching;
+mod canonical_fork;
 mod commands;
 mod conservative_admission;
 mod emit_response;
 mod event_log_barrier;
 mod host_call_turn_cache;
+mod injection_admission;
 mod modes;
 mod oauth_redirect;
 mod prompt_errors;

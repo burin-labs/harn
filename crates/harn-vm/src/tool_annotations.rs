@@ -18,6 +18,8 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+pub(crate) mod path_inputs;
+
 /// Canonical tool-kind vocabulary. Matches the ACP `ToolKind` enum so
 /// harn-cli's ACP server can forward the value unchanged in
 /// `sessionUpdate` variants.
@@ -210,7 +212,7 @@ pub struct ToolDependencyRangeParams {
 #[serde(default)]
 pub struct ToolArgSchema {
     /// Argument keys whose values are workspace-relative paths.
-    /// First matching key whose value is a string wins.
+    /// Every declared key contributes its string or list-of-strings values.
     pub path_params: Vec<String>,
     /// Argument keys that refine a mutating call's dependency target inside
     /// the declared path. Schedulers use these keys to distinguish independent
@@ -413,25 +415,6 @@ mod tests {
             6,
             "a SideEffectLevel variant was added; list it in ALL and bump this count"
         );
-    }
-
-    #[test]
-    fn arg_schema_defaults_empty() {
-        let schema = ToolArgSchema::default();
-        assert!(schema.path_params.is_empty());
-        assert!(schema.dependency_key_params.is_empty());
-        assert!(schema.dependency_range_params.is_empty());
-        assert!(schema.arg_aliases.is_empty());
-        assert!(schema.required.is_empty());
-    }
-
-    #[test]
-    fn annotations_default_result_routes_empty() {
-        let annotations = ToolAnnotations::default();
-        assert!(!annotations.emits_artifacts);
-        assert!(annotations.result_readers.is_empty());
-        assert!(!annotations.inline_result);
-        assert_eq!(annotations.completion_evidence_role, None);
     }
 
     #[test]

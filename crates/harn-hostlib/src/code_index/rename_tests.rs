@@ -570,28 +570,6 @@ fn replace_mode_ignores_shadow_conflicts() {
 }
 
 #[test]
-fn replace_mode_aborts_when_result_does_not_parse() {
-    // Replacing the identifier with a syntactically broken token must abort
-    // with no write — the same syntax-validation safety net as rename mode.
-    let dir = tempdir().unwrap();
-    let root = dir.path();
-    fs::create_dir_all(root.join("src")).unwrap();
-    let original = "fn thing() {}\nfn caller() {\n    let _ = thing();\n}\n";
-    fs::write(root.join("src/lib.rs"), original).unwrap();
-    let capability = build_index(root);
-    let symbol_ref = dict(&[
-        ("name", vm_string("thing")),
-        ("path", vm_string("src/lib.rs")),
-        ("kind", vm_string("Function")),
-    ]);
-    // `@@@` is not valid Rust; the spliced file fails to re-parse.
-    let result = replace(&capability, symbol_ref, "@@@", "file");
-    assert_eq!(s(field(&result, "result")), "syntax_error");
-    let on_disk = fs::read_to_string(root.join("src/lib.rs")).unwrap();
-    assert_eq!(on_disk, original, "syntax_error must not write");
-}
-
-#[test]
 fn replace_mode_rejects_empty_replacement_text() {
     let dir = tempdir().unwrap();
     let root = dir.path();
@@ -644,4 +622,38 @@ fn replace_mode_dry_run_does_not_write() {
     }
     let on_disk = fs::read_to_string(root.join("src/lib.rs")).unwrap();
     assert_eq!(on_disk, original, "dry_run must leave disk untouched");
+}
+
+#[test]
+fn rename_refuses_a_file_that_does_not_parse_and_writes_nothing() {
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+    let util = "def fetch(url):\n    got = url +\n    print(got)\n";
+    let app = "from util import fetch\n\nfetch(\"a\")\n";
+    // Mentions the name only in a comment, so it is never rewritten and its
+    // own syntax error must not block the rename.
+    let notes = "# fetch is documented elsewhere\nbroken = (\n";
+    fs::write(root.join("util.py"), util).unwrap();
+    fs::write(root.join("app.py"), app).unwrap();
+    fs::write(root.join("notes.py"), notes).unwrap();
+    let capability = build_index(root);
+    let symbol_ref = dict(&[
+        ("name", vm_string("fetch")),
+        ("path", vm_string("util.py")),
+        ("kind", vm_string("Function")),
+    ]);
+    let result = rename(&capability, symbol_ref.clone(), "load", "workspace");
+    assert_eq!(s(field(&result, "result")), "syntax_error");
+    assert!(s(field(&result, "details")).contains("`util.py` does not parse before the edit"));
+    assert_eq!(fs::read_to_string(root.join("util.py")).unwrap(), util);
+    assert_eq!(fs::read_to_string(root.join("app.py")).unwrap(), app);
+
+    fs::write(root.join("util.py"), "def fetch(url):\n    return url\n").unwrap();
+    let capability = build_index(root);
+    let result = rename(&capability, symbol_ref, "load", "workspace");
+    assert_eq!(s(field(&result, "result")), "applied");
+    assert!(fs::read_to_string(root.join("app.py"))
+        .unwrap()
+        .contains("load(\"a\")"));
+    assert_eq!(fs::read_to_string(root.join("notes.py")).unwrap(), notes);
 }

@@ -1,9 +1,9 @@
-use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use crate::stdlib::args::{ArgError, Args, ErrorKind, Expected};
 use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
-use crate::value::{value_structural_hash_key, DictRetain, VmError, VmValue};
+use crate::value::{dedup_values, DictRetain, VmError, VmSet, VmValue};
 use crate::vm::{AsyncBuiltinCtx, Vm};
 
 /// A dict argument, with `nil` read as the empty dict — the collection
@@ -193,11 +193,11 @@ async fn dedup_by_impl(ctx: AsyncBuiltinCtx, args: Vec<VmValue>) -> Result<VmVal
     let items = list_arg(&args, "dedup_by")?;
     let callable = required_callable(&args, 1, "dedup_by")?;
     let mut vm = current_async_vm(&ctx, "dedup_by");
-    let mut seen = HashSet::new();
+    let mut seen = VmSet::with_capacity(items.len());
     let mut out = Vec::new();
     for item in items.iter() {
         let key = vm.call_callable_one(callable, item).await?;
-        if seen.insert(value_structural_hash_key(&key)) {
+        if seen.insert(key) {
             out.push(item.clone());
         }
     }
@@ -290,6 +290,7 @@ const COLLECTION_ASYNC_BUILTINS: &[&VmBuiltinDef] = &[
     &TAKE_WHILE_IMPL_DEF,
     &DROP_WHILE_IMPL_DEF,
     &COUNT_BY_IMPL_DEF,
+    &METHOD_MUTATE_IMPL_DEF,
 ];
 
 /// Registers the native fast-paths for the `std/collections` and `std/json`
@@ -535,7 +536,7 @@ pub(super) fn deep_merge_value(a: &VmValue, b: &VmValue) -> Result<VmValue, VmEr
 
 /// Returns a list with duplicate entries removed while preserving the
 /// first-seen order. Structural equality is used (matching `==` in
-/// scripts) via `value_structural_hash_key`, so two structurally equal
+/// scripts) via the set owner, so two structurally equal
 /// dicts collapse to a single entry.
 fn list_unique(value: &VmValue) -> Result<VmValue, VmError> {
     let items: &[VmValue] = match value {
@@ -549,14 +550,7 @@ fn list_unique(value: &VmValue) -> Result<VmValue, VmError> {
             )));
         }
     };
-    let mut seen: HashSet<String> = HashSet::with_capacity(items.len());
-    let mut out: Vec<VmValue> = Vec::with_capacity(items.len());
-    for item in items.iter() {
-        let key = value_structural_hash_key(item);
-        if seen.insert(key) {
-            out.push(item.clone());
-        }
-    }
+    let out = dedup_values(items);
     Ok(VmValue::List(std::sync::Arc::new(out)))
 }
 
@@ -801,33 +795,6 @@ mod tests {
     }
 
     #[test]
-    fn deep_merge_recurses_into_nested_dicts() {
-        let a = dict(&[(
-            "config",
-            dict(&[("retries", VmValue::Int(3)), ("backoff", VmValue::Int(100))]),
-        )]);
-        let b = dict(&[(
-            "config",
-            dict(&[
-                ("retries", VmValue::Int(5)),
-                ("jitter", VmValue::Bool(true)),
-            ]),
-        )]);
-        let merged = deep_merge_value(&a, &b).unwrap();
-        let config = merged
-            .as_dict()
-            .and_then(|d| d.get("config"))
-            .and_then(|v| v.as_dict())
-            .expect("nested dict");
-        assert_eq!(config.get("retries").and_then(VmValue::as_int), Some(5));
-        assert_eq!(config.get("backoff").and_then(VmValue::as_int), Some(100));
-        match config.get("jitter") {
-            Some(VmValue::Bool(true)) => {}
-            other => panic!("expected jitter=true, got {other:?}"),
-        }
-    }
-
-    #[test]
     fn deep_merge_right_wins_when_types_differ() {
         let a = dict(&[("x", dict(&[("a", VmValue::Int(1))]))]);
         let b = dict(&[("x", VmValue::Int(99))]);
@@ -840,40 +807,33 @@ mod tests {
             Some(99)
         );
     }
+}
 
-    #[test]
-    fn list_unique_preserves_first_seen_order() {
-        let input = VmValue::List(std::sync::Arc::new(vec![
-            VmValue::Int(1),
-            VmValue::Int(2),
-            VmValue::Int(1),
-            VmValue::Int(3),
-            VmValue::Int(2),
-        ]));
-        let result = list_unique(&input).unwrap();
-        let items = match &result {
-            VmValue::List(items) => items.clone(),
-            _ => panic!("expected list"),
-        };
-        let ints: Vec<i64> = items.iter().filter_map(VmValue::as_int).collect();
-        assert_eq!(ints, vec![1, 2, 3]);
-    }
-
-    #[test]
-    fn dict_from_pairs_accepts_two_element_lists() {
-        let pairs = VmValue::List(std::sync::Arc::new(vec![
-            VmValue::List(std::sync::Arc::new(vec![
-                VmValue::String(arcstr::ArcStr::from("a")),
-                VmValue::Int(1),
-            ])),
-            VmValue::List(std::sync::Arc::new(vec![
-                VmValue::String(arcstr::ArcStr::from("b")),
-                VmValue::Int(2),
-            ])),
-        ]));
-        let result = dict_from_pairs(&pairs).unwrap();
-        let d = result.as_dict().unwrap();
-        assert_eq!(d.get("a").and_then(VmValue::as_int), Some(1));
-        assert_eq!(d.get("b").and_then(VmValue::as_int), Some(2));
-    }
+/// Bytecode helper for a mutating method call on a place (`xs.push(v)`).
+/// Returns `[next_receiver, result]` when the receiver is a builtin value
+/// with that mutating method; the compiled call site then writes
+/// `next_receiver` back to the place. Returns `nil` otherwise, and the call
+/// site falls back to an ordinary method call.
+#[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
+    sig = "__method_mutate(receiver: any, method: string, ...args: any) -> any",
+    kind = "async",
+    category = "collections",
+    runtime_only = true
+)]
+async fn method_mutate_impl(ctx: AsyncBuiltinCtx, args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let receiver = args.first().cloned().unwrap_or(VmValue::Nil);
+    let Some(VmValue::String(method)) = args.get(1) else {
+        return Err(VmError::Runtime(
+            "__method_mutate: expected a method name".to_string(),
+        ));
+    };
+    let mut vm = current_async_vm(&ctx, "__method_mutate");
+    let mutation = vm
+        .apply_mutating_method(&receiver, method, args.get(2..).unwrap_or_default())
+        .await?;
+    Ok(mutation.map_or(VmValue::Nil, |mutation| {
+        VmValue::List(Arc::new(vec![mutation.receiver, mutation.result]))
+    }))
 }

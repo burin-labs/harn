@@ -1,20 +1,20 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Instant;
 
 use crate::chunk::{Chunk, ChunkRef, Constant};
 use crate::runtime_limits::RuntimeLimits;
 use crate::value::{
     ModuleFunctionRegistry, VmAsyncBuiltinFn, VmBuiltinFn, VmClosure, VmEnv, VmError, VmMutex,
-    VmTaskHandle, VmValue,
+    VmValue,
 };
 use crate::BuiltinId;
 
 use super::debug::DebugHook;
 pub(crate) use super::execution_deadline::{ExecutionDeadlinePauseGuard, ExecutionDeadlineState};
 use super::modules::ModuleCache;
+use super::process_exit::ProcessExitRequest;
 use super::VmBuiltinMetadata;
 
 /// A lazy callable's resolved export set together with the module graph that
@@ -176,44 +176,6 @@ pub(crate) struct TaskScope {
     pub(crate) env_scope_depth: usize,
 }
 
-/// Terminal exit requested by any VM in one execution tree. A process exit is
-/// global control flow, so child VMs share this latch with their parent rather
-/// than relying on a task being explicitly awaited.
-pub(crate) struct ProcessExitRequest {
-    code: Mutex<Option<i32>>,
-    requested: AtomicBool,
-}
-
-impl ProcessExitRequest {
-    fn new() -> Self {
-        Self {
-            code: Mutex::new(None),
-            requested: AtomicBool::new(false),
-        }
-    }
-
-    fn request(&self, code: i32) {
-        let mut recorded = self
-            .code
-            .lock()
-            .expect("process exit request lock poisoned");
-        if recorded.is_none() {
-            *recorded = Some(code);
-            self.requested.store(true, Ordering::Release);
-        }
-    }
-
-    fn code(&self) -> Option<i32> {
-        if !self.requested.load(Ordering::Acquire) {
-            return None;
-        }
-        *self
-            .code
-            .lock()
-            .expect("process exit request lock poisoned")
-    }
-}
-
 /// Iterator state for for-in loops.
 pub(crate) enum IterState {
     Vec {
@@ -291,7 +253,7 @@ pub struct Vm {
     /// Exception handler stack.
     pub(crate) exception_handlers: Vec<super::ExceptionHandler>,
     /// Spawned async task handles.
-    pub(crate) spawned_tasks: BTreeMap<String, VmTaskHandle>,
+    pub(crate) spawned_tasks: BTreeMap<String, super::SpawnedTask>,
     /// Force-cancelled tasks whose durable agent terminalization failed.
     /// The public handle remains a retry key even though its join handle has
     /// already stopped.
@@ -313,6 +275,9 @@ pub struct Vm {
     pub(crate) trigger_registry: Arc<crate::triggers::registry::TriggerRegistryRuntime>,
     /// Agent transcripts and subscribers owned by this VM tree.
     pub(crate) session_runtime: Arc<crate::agent_sessions::AgentSessionRuntime>,
+    /// Shared immutable cleanup snapshot survives ambient unwind without
+    /// expanding every inline VM or cloning its resources for each child.
+    pub(crate) cleanup_runtimes: Option<Arc<crate::agent_lifecycle_cleanup::CleanupRuntimes>>,
     /// Structured spans owned by this VM tree.
     pub(crate) tracing_runtime: Arc<crate::tracing::TracingRuntime>,
     /// Durable identity shared by every VM in this execution tree.
@@ -426,6 +391,8 @@ pub struct Vm {
     /// The complete export set is retained so handlers and predicates from the
     /// same module share one module state across repeated child invocations.
     pub(crate) lazy_callable_modules: LazyCallableModuleCache,
+    /// Immutable stdlib module instances shared by this execution tree.
+    pub(crate) shared_module_instances: Arc<super::modules::SharedModuleInstanceStore>,
     /// Source text keyed by canonical or synthetic module path for debugger
     /// retrieval. Entries share the bytes owned by
     /// [`crate::module_source`] rather than copying them.
@@ -578,6 +545,7 @@ impl VmBaseline {
             daemon_registry: crate::stdlib::agents_daemon::active_daemon_registry(),
             trigger_registry: crate::triggers::registry::active_trigger_registry(),
             session_runtime: crate::agent_sessions::active_session_runtime(),
+            cleanup_runtimes: None,
             tracing_runtime: crate::tracing::active_tracing_runtime(),
             execution_id: crate::observability::execution_scope::mint_execution_scope(),
             owns_execution: true,
@@ -616,6 +584,7 @@ impl VmBaseline {
             recorders: None,
             staged_module_load_count: None,
             lazy_callable_modules: Arc::new(crate::value::VmMutex::new(BTreeMap::new())),
+            shared_module_instances: Arc::default(),
             source_cache: Arc::clone(&self.source_cache),
             graph_link_table: self.graph_link_table.clone(),
             linked_program_repository: self.linked_program_repository.clone(),
@@ -856,6 +825,7 @@ impl Vm {
             daemon_registry: crate::stdlib::agents_daemon::active_daemon_registry(),
             trigger_registry: crate::triggers::registry::active_trigger_registry(),
             session_runtime: crate::agent_sessions::active_session_runtime(),
+            cleanup_runtimes: None,
             tracing_runtime: crate::tracing::active_tracing_runtime(),
             execution_id: crate::observability::execution_scope::mint_execution_scope(),
             owns_execution: true,
@@ -894,6 +864,7 @@ impl Vm {
             recorders: None,
             staged_module_load_count: None,
             lazy_callable_modules: Arc::new(crate::value::VmMutex::new(BTreeMap::new())),
+            shared_module_instances: Arc::default(),
             source_cache: Arc::new(BTreeMap::new()),
             graph_link_table: None,
             linked_program_repository: None,
@@ -1145,6 +1116,7 @@ impl Vm {
             daemon_registry: self.daemon_registry.clone(),
             trigger_registry: self.trigger_registry.clone(),
             session_runtime: self.session_runtime.clone(),
+            cleanup_runtimes: self.cleanup_runtimes.clone(),
             tracing_runtime: self.tracing_runtime.clone(),
             execution_id: self.execution_id.clone(),
             owns_execution: false,
@@ -1182,6 +1154,7 @@ impl Vm {
             recorders: self.recorders.clone(),
             staged_module_load_count: None,
             lazy_callable_modules: Arc::clone(&self.lazy_callable_modules),
+            shared_module_instances: Arc::clone(&self.shared_module_instances),
             source_cache: Arc::clone(&self.source_cache),
             graph_link_table: self.graph_link_table.clone(),
             linked_program_repository: self.linked_program_repository.clone(),
@@ -1226,26 +1199,14 @@ impl Vm {
     /// host adapter must install on its worker thread. The values are cloned
     /// once at the async-boundary; the token remains shared with the owning VM
     /// so `parallel` aborts and host cancellation reach an in-flight wait.
-    pub(crate) fn interrupt_sources(
-        &self,
-    ) -> (
-        Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
-        Option<std::time::Instant>,
-    ) {
-        let scope_deadline = self.deadlines.last().map(|(deadline, _)| *deadline);
-        let deadline = match (scope_deadline, self.interrupt_handler_deadline) {
-            (Some(scope), Some(interrupt)) => Some(scope.min(interrupt)),
-            (scope, interrupt) => scope.or(interrupt),
-        };
-        (self.cancel_token.clone(), deadline)
-    }
-
-    pub(crate) fn request_process_exit(&self, code: i32) {
-        self.process_exit_request.request(code);
-    }
-
-    pub(crate) fn requested_process_exit(&self) -> Option<i32> {
-        self.process_exit_request.code()
+    /// The scope deadline and the handler window stay separate so the worker
+    /// reports the same interrupt kind the VM would.
+    pub(crate) fn interrupt_sources(&self) -> crate::op_interrupt::InterruptSources {
+        crate::op_interrupt::InterruptSources {
+            cancel: self.cancel_token.clone(),
+            scope_deadline: self.deadlines.last().map(|(deadline, _)| *deadline),
+            handler_deadline: self.interrupt_handler_deadline,
+        }
     }
 
     /// Set the source directory for import resolution and introspection.
@@ -1416,7 +1377,7 @@ impl Vm {
                 let scope = self.task_scopes.remove(i);
                 for id in &scope.task_ids {
                     if let Some(task) = self.spawned_tasks.remove(id) {
-                        super::ops::abort_task_detached(task, self.agent_cleanup_runtimes());
+                        super::ops::abort_task_detached(task);
                     }
                 }
             } else {
@@ -1469,6 +1430,10 @@ impl Vm {
         let mut child = self.child_vm();
         child.inherited_held_keys = Arc::new(self.combined_held_keys());
         child.execution_deadline = Arc::clone(&self.execution_deadline);
+        // Inline work runs inside the caller's `on_interrupt` window, like the
+        // scope deadlines `child_vm` already carries; host adapters read both
+        // through `interrupt_sources`.
+        child.interrupt_handler_deadline = self.interrupt_handler_deadline;
         child
     }
 }

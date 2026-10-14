@@ -1,8 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
-use crate::package_imports::acquire_package_snapshots;
-use crate::package_snapshot::PackageSnapshot;
+use crate::{package_imports::acquire_package_snapshots, package_snapshot::PackageSnapshot};
 use harn_lexer::Span;
 use harn_parser::{Parser, SNode};
 
@@ -20,9 +19,14 @@ mod package_imports;
 pub mod package_snapshot;
 pub mod personas;
 pub mod project_config;
+mod source_reads;
+pub use source_reads::{
+    build_with_source, build_with_sources, module_source_disk_reads, read_module_source,
+};
 mod references;
 mod standalone;
 mod stdlib;
+pub use stdlib::{stdlib_catalog, try_stdlib_catalog};
 mod symbol_reachability;
 mod type_dependencies;
 mod typecheck;
@@ -199,18 +203,6 @@ pub struct ModuleImport {
     pub is_pub: bool,
 }
 
-/// Return the source for a resolved module path.
-///
-/// Real paths are read from disk. `<std>/<module>` virtual paths are backed by
-/// the embedded stdlib source table, so callers can parse resolved stdlib
-/// modules without knowing about the stdlib mirror layout.
-pub fn read_module_source(path: &Path) -> Option<String> {
-    if let Some(stdlib_module) = stdlib_module_name(path) {
-        return stdlib::get_stdlib_source(stdlib_module).map(ToString::to_string);
-    }
-    std::fs::read_to_string(path).ok()
-}
-
 /// Build a module graph from a set of files.
 ///
 /// Files referenced via `import` statements are loaded recursively so the
@@ -221,23 +213,6 @@ pub fn build(files: &[PathBuf]) -> ModuleGraph {
         files,
         ParsedSourceRetention::None,
         None,
-        PackageContext::Project,
-    )
-    .graph
-}
-
-/// Build a module graph using caller-owned source for one root file.
-///
-/// Imported modules still resolve from their normal filesystem or embedded
-/// stdlib locations. This keeps editor diagnostics aligned with unsaved root
-/// buffers without creating a second module resolver.
-pub fn build_with_source(file: &Path, source: &str) -> ModuleGraph {
-    let file = normalize_path(file);
-    let source_overrides = HashMap::from([(file.clone(), source.to_string())]);
-    build_inner(
-        &[file],
-        ParsedSourceRetention::None,
-        Some(&source_overrides),
         PackageContext::Project,
     )
     .graph
@@ -1467,13 +1442,15 @@ fn normalize_path(path: &Path) -> PathBuf {
 /// `<std>/` virtual paths pass through untouched.
 pub fn canonical_path(path: &Path) -> PathBuf {
     use std::sync::OnceLock;
-    if stdlib_module_name(path).is_some() {
-        return path.to_path_buf();
+    if let Some(virtual_path) = stdlib::canonical_virtual_path(path) {
+        return virtual_path;
     }
-    static MEMO: OnceLock<std::sync::Mutex<HashMap<PathBuf, PathBuf>>> = OnceLock::new();
-    let memo = MEMO.get_or_init(|| std::sync::Mutex::new(HashMap::new()));
+    // Read-mostly: every scan over every checked file's import closure asks
+    // for the same paths, so readers must not serialize on one another.
+    static MEMO: OnceLock<std::sync::RwLock<HashMap<PathBuf, PathBuf>>> = OnceLock::new();
+    let memo = MEMO.get_or_init(|| std::sync::RwLock::new(HashMap::new()));
     if let Some(hit) = memo
-        .lock()
+        .read()
         .expect("canonical path memo lock poisoned")
         .get(path)
         .cloned()
@@ -1482,7 +1459,7 @@ pub fn canonical_path(path: &Path) -> PathBuf {
     }
     match path.canonicalize() {
         Ok(canonical) => {
-            memo.lock()
+            memo.write()
                 .expect("canonical path memo lock poisoned")
                 .insert(path.to_path_buf(), canonical.clone());
             canonical

@@ -17,7 +17,7 @@ fn __feedback_contents(captured: dict, kind: string) -> list<string> {
   let contents: list<string> = []
   for event in captured.events {
     if event.type == "feedback_injected" && event.kind == kind {
-      contents = contents.appending(to_string(event.content ?? ""))
+      contents.push(to_string(event.content ?? ""))
     }
   }
   return contents
@@ -1245,7 +1245,7 @@ pipeline test_a_polled_background_verifier_reaches_the_judge_as_verification(
           let verification_names: list<string> = []
           for selected in projection[0].checkpoint.selected_actions {
             if selected.evidence_role == "verification" {
-              verification_names = verification_names.appending(to_string(selected.name))
+              verification_names.push(to_string(selected.name))
             }
           }
           assert_eq(

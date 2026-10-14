@@ -34,8 +34,8 @@ fn serial_source() -> String {
 
 pipeline default() {{
   let results = []
-  for i in 0 to {TASKS} exclusive {{
-    results = results.appending(crunch(i))
+  for i in 0..{TASKS} {{
+    results.push(crunch(i))
   }}
   return len(results)
 }}
@@ -54,9 +54,9 @@ import {{ pool_create, pool_wait }} from "std/lifecycle/pool"
 pipeline default(harness: Harness) {{
   let pool = pool_create(harness.agent, {{name: "pool-parallel-bench", max_concurrent: {max_concurrent}}})
   let handles = []
-  for i in 0 to {TASKS} exclusive {{
+  for i in 0..{TASKS} {{
     let seed = i
-    handles = handles.appending(pool.submit({{ -> crunch(seed) }}))
+    handles.push(pool.submit({{ -> crunch(seed) }}))
   }}
   let results = pool_wait(harness.agent, handles)
   return len(results)

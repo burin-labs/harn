@@ -24,8 +24,8 @@ fn __tool_surface_current_entries(opts: dict) {
   for entry in entries {
     const name = __tool_surface_name(entry)
     if name != "" && !contains(names, name) {
-      names = names.appending(name)
-      selected = selected.appending(entry)
+      names.push(name)
+      selected.push(entry)
     }
   }
   return selected
@@ -42,7 +42,7 @@ fn __tool_surface_current_entries(opts: dict) {
 pub fn __tool_surface_current_names(opts: any) -> list {
   let names = []
   for entry in __tool_surface_current_entries(opts) {
-    names = names.appending(__tool_surface_name(entry))
+    names.push(__tool_surface_name(entry))
   }
   return names
 }
@@ -104,7 +104,7 @@ pub fn __tool_surface_claimable_names(opts: any) -> list {
   let names = []
   for name in __tool_surface_current_names({tools: authority?.tools}) {
     if __tool_surface_tool_allowed(authority?.tools, authority?.policy, name) {
-      names = names.appending(name)
+      names.push(name)
     }
   }
   return names
@@ -127,20 +127,20 @@ pub fn __tool_surface_attempted_names(llm_result: dict, dispatch_results: list) 
   for call in llm_result?.tool_calls ?? [] {
     const name = __tool_surface_call_name(call)
     if name != "" && !contains(names, name) {
-      names = names.appending(name)
+      names.push(name)
     }
   }
   for result in dispatch_results {
     const name = __tool_result_name(result)
     if name != "" && !contains(names, name) {
-      names = names.appending(name)
+      names.push(name)
     }
   }
   return names
 }
 
 fn __tool_surface_append_history(history: list, attempted: any, window_turns: int) {
-  let next = history.appending(attempted)
+  let next = history + [attempted]
   while len(next) > window_turns {
     next = next[1:]
   }
@@ -152,7 +152,7 @@ fn __tool_surface_window_used(history: list) {
   for turn in history {
     for name in turn {
       if name != "" && !contains(used, name) {
-        used = used.appending(name)
+        used.push(name)
       }
     }
   }
@@ -287,9 +287,7 @@ fn __tool_surface_removed(candidates: list, used: string | list, config: dict) {
     }
     const class = __tool_surface_entry_class(entry)
     if __tool_surface_entry_prunable(entry, config) {
-      removed = removed.appending(
-        __tool_surface_entry_detail(entry, class, "unused_prunable_class"),
-      )
+      removed.push(__tool_surface_entry_detail(entry, class, "unused_prunable_class"))
     }
   }
   return removed
@@ -300,7 +298,7 @@ fn __tool_surface_removed_names(details: list) {
   for detail in details {
     const name = detail?.name ?? ""
     if name != "" && !contains(names, name) {
-      names = names.appending(name)
+      names.push(name)
     }
   }
   return names
@@ -326,7 +324,7 @@ fn __tool_surface_keep_details(
     } else {
       "class_kept"
     }
-    details = details.appending(__tool_surface_entry_detail(entry, class, reason))
+    details.push(__tool_surface_entry_detail(entry, class, reason))
   }
   return details
 }
@@ -335,7 +333,7 @@ fn __tool_surface_remaining(candidates: list, removed: string | list) {
   let remaining = []
   for name in candidates {
     if !contains(removed, name) {
-      remaining = remaining.appending(name)
+      remaining.push(name)
     }
   }
   return remaining
@@ -437,7 +435,7 @@ pub fn __tool_surface_filter_registry(
     let kept = []
     for entry in registry?.tools ?? [] {
       if __tool_surface_keep_entry(entry, names) {
-        kept = kept.appending(entry)
+        kept.push(entry)
       }
     }
     return registry + {tools: kept}
@@ -446,7 +444,7 @@ pub fn __tool_surface_filter_registry(
     let kept = []
     for entry in registry {
       if __tool_surface_keep_entry(entry, names) {
-        kept = kept.appending(entry)
+        kept.push(entry)
       }
     }
     return kept
@@ -484,7 +482,7 @@ pub fn __tool_surface_policy_tools(policy: dict?, names: string | list) {
     let intersected = []
     for name in existing {
       if contains(resolved_names, name) {
-        intersected = intersected.appending(name)
+        intersected.push(name)
       }
     }
     return base + {tools: __tool_surface_policy_allowlist(intersected)}
@@ -508,7 +506,7 @@ pub fn agent_apply_tool_surface_narrowing(opts: dict) {
   }
   const claimed_tool = trim(to_string(opts?._next_tool_claim?.tool_name ?? ""))
   const effective_names = if claimed_tool != "" && !contains(names, claimed_tool) {
-    names.appending(claimed_tool)
+    names + [claimed_tool]
   } else {
     names
   }

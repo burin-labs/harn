@@ -17,7 +17,7 @@ capabilities = [
 ]
 autonomy_tier = "suggest"
 receipt_policy = "required"
-triggers = ["github.review_requested", "github.pull_request_synchronized", "github.pull_request_opened"]
+triggers = ["github.pull_request.review_requested", "github.pull_request.synchronize", "github.pull_request.opened"]
 schedules = ["0 */2 * * *"]
 handoffs = []
 context_packs = ["repo_policy", "review_policy"]

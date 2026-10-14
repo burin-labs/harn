@@ -1071,6 +1071,7 @@ impl TriggerTestHarness {
         install_manifest_triggers(vec![TriggerBindingSpec {
             id: "nightly-eval".to_string(),
             source: TriggerBindingSource::Manifest,
+            ingress_subscription: false,
             kind: "cron".to_string(),
             provider: ProviderId::from("cron"),
             autonomy_tier: crate::AutonomyTier::Suggest,
@@ -1809,6 +1810,7 @@ fn manifest_spec(id: &str, fingerprint: &str) -> TriggerBindingSpec {
     TriggerBindingSpec {
         id: id.to_string(),
         source: TriggerBindingSource::Manifest,
+        ingress_subscription: false,
         kind: "webhook".to_string(),
         provider: ProviderId::from("github"),
         autonomy_tier: crate::AutonomyTier::ActAuto,
@@ -2039,16 +2041,4 @@ fn signature_state_label(value: &SignatureStatus) -> &'static str {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::{run_trigger_harness_fixture, TRIGGER_TEST_FIXTURES};
-
-    #[tokio::test(flavor = "current_thread")]
-    async fn every_trigger_harness_fixture_reports_success() {
-        for fixture in TRIGGER_TEST_FIXTURES {
-            let result = run_trigger_harness_fixture(fixture)
-                .await
-                .unwrap_or_else(|error| panic!("{fixture} should run: {error}"));
-            assert!(result.ok, "{fixture} should report success: {result:?}");
-        }
-    }
-}
+mod tests;

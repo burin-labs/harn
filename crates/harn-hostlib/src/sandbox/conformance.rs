@@ -27,6 +27,22 @@ use serde::Serialize;
 use crate::tools::ToolsCapability;
 use crate::{BuiltinRegistry, HostlibCapability};
 
+#[path = "conformance/daemon.rs"]
+mod daemon;
+use daemon::DaemonProbe;
+
+#[cfg(test)]
+#[path = "conformance/progress_tests.rs"]
+mod progress_tests;
+
+#[cfg(test)]
+#[path = "conformance/report_tests.rs"]
+mod report_tests;
+
+#[cfg(all(test, unix))]
+#[path = "conformance/probe_tool_tests.rs"]
+mod probe_tool_tests;
+
 /// Written into the outside file so a read is judged by content, not by an
 /// exit code a missing tool would also produce.
 const OUTSIDE_CONTENT: &str = "harn-conformance-outside-content";
@@ -66,6 +82,24 @@ pub struct CaseReport {
 }
 
 impl ConformanceReport {
+    /// Whether the complete contract was measured and holds. Missing or
+    /// duplicated cases and a run with no conforming cases cannot pass.
+    pub fn holds(&self) -> bool {
+        self.cases.len() == ConformanceCase::ALL.len()
+            && self
+                .cases
+                .iter()
+                .zip(ConformanceCase::ALL)
+                .all(|(report, case)| report.case == case.id())
+            && self.conforming() > 0
+            && self.cases.iter().all(|case| {
+                matches!(
+                    case.verdict,
+                    Verdict::Conforms | Verdict::NotApplicable { .. }
+                )
+            })
+    }
+
     /// Cases whose verdict fails the contract.
     pub fn failing(&self) -> Vec<&CaseReport> {
         self.cases
@@ -139,12 +173,56 @@ impl CaseReport {
 /// guardian, which re-executes the current binary; an embedder whose binary
 /// does not own `main` must point the re-exec at its fixture first.
 pub fn run_conformance() -> ConformanceReport {
+    run_conformance_with_progress(|_| {})
+}
+
+/// A synchronous notification around one case's execution. A start is emitted
+/// before setup or spawning, and a finish before the next case starts, so an
+/// interrupted run still identifies its unfinished case.
+#[derive(Debug)]
+pub enum ConformanceProgress<'a> {
+    /// The case is about to execute, including its fixture setup.
+    Started {
+        /// The contract case that has not returned yet.
+        case: ConformanceCase,
+        /// Cases that have already returned a verdict.
+        completed: usize,
+        /// Cases without a verdict, including this one.
+        pending: usize,
+    },
+    /// The case returned its verdict, before another case starts.
+    Finished(&'a CaseReport),
+}
+
+impl ConformanceProgress<'_> {
+    /// One line describing the start or the completed case's verdict.
+    pub fn receipt_line(&self) -> String {
+        match self {
+            Self::Started {
+                case,
+                completed,
+                pending,
+            } => format!(
+                "harn.sandbox_conformance_start case={} completed={completed} pending={pending}",
+                case.id(),
+            ),
+            Self::Finished(report) => report.receipt_line(),
+        }
+    }
+}
+
+/// Run the same contract as [`run_conformance`], reporting progress as it
+/// happens. Callers writing buffered output must flush it in the observer.
+pub fn run_conformance_with_progress(
+    mut observer: impl FnMut(ConformanceProgress<'_>),
+) -> ConformanceReport {
     let backend = harn_vm::process_sandbox::active_backend_name().to_string();
     let enforcing = harn_vm::process_sandbox::active_backend_filesystem_available();
-    let cases = ConformanceCase::ALL
-        .iter()
-        .map(|&case| run_case(case, enforcing))
-        .collect();
+    let cases = run_cases(
+        ConformanceCase::ALL,
+        |case| run_case(case, enforcing),
+        &mut observer,
+    );
     ConformanceReport {
         backend,
         filesystem_mechanism: harn_vm::process_sandbox::active_backend_filesystem_mechanism()
@@ -152,6 +230,25 @@ pub fn run_conformance() -> ConformanceReport {
         enforcing,
         cases,
     }
+}
+
+fn run_cases(
+    cases: &[ConformanceCase],
+    mut execute: impl FnMut(ConformanceCase) -> CaseReport,
+    observer: &mut impl FnMut(ConformanceProgress<'_>),
+) -> Vec<CaseReport> {
+    let mut reports = Vec::with_capacity(cases.len());
+    for &case in cases {
+        observer(ConformanceProgress::Started {
+            case,
+            completed: reports.len(),
+            pending: cases.len() - reports.len(),
+        });
+        let report = execute(case);
+        observer(ConformanceProgress::Finished(&report));
+        reports.push(report);
+    }
+    reports
 }
 
 fn run_case(case: ConformanceCase, enforcing: bool) -> CaseReport {
@@ -180,12 +277,30 @@ fn run_case(case: ConformanceCase, enforcing: bool) -> CaseReport {
         let verdict = judge(case, expectation, enforcing, Observation::Refused, &target);
         return report(None, verdict, String::new());
     }
-    if is_wrapper_case(case) {
-        if !cargo_on_path() {
-            let reason = "cargo is not installed, so no Rust build could be measured".to_string();
-            return report(None, Verdict::NotMeasured { reason }, String::new());
+    // A probe whose own tool is missing measures nothing. Spawning it would
+    // fail before any sandbox decision and read as an over-refusal.
+    if let Some(tool) = missing_probe_tool(&argv, std::env::var_os("PATH").as_deref()) {
+        let reason = format!("{tool} is not installed, so this case could not be measured");
+        return report(None, Verdict::NotMeasured { reason }, String::new());
+    }
+    let daemon = if case == ConformanceCase::RustcWrapperThatDaemonizesIsSwitchedOff {
+        match DaemonProbe::create(&layout.workspace) {
+            Ok(probe) => Some(probe),
+            Err(error) => {
+                return report(
+                    None,
+                    Verdict::ProbeBroken {
+                        reason: format!("could not create the daemon fixture: {error}"),
+                    },
+                    String::new(),
+                );
+            }
         }
-        if let Err(error) = write_wrapper_crate(case, &layout) {
+    } else {
+        None
+    };
+    if is_wrapper_case(case) {
+        if let Err(error) = write_wrapper_crate(case, &layout, daemon.as_ref()) {
             let reason = format!("could not write the wrapper crate: {error}");
             return report(None, Verdict::ProbeBroken { reason }, String::new());
         }
@@ -206,7 +321,7 @@ fn run_case(case: ConformanceCase, enforcing: bool) -> CaseReport {
             "{} decision={:?} wrapper={:?} reason={:?}",
             child.detail, decision.disposition, decision.wrapper, decision.reason
         );
-        observe_wrapper(case, &child, &target, &decision)
+        observe_wrapper(case, &child, &target, &decision, daemon.as_ref())
     } else {
         observe(case, &layout, &child, &target)
     };
@@ -255,8 +370,10 @@ struct Layout {
     /// A root the read-only role cases grant read-only, holding a file.
     read_only: PathBuf,
     socket_root: PathBuf,
-    /// A directory under the workspace that the credential case puts on the
-    /// denylist. The workspace grant covers it, so only the denial can refuse.
+    /// A directory under the read-only root that the credential case puts on
+    /// the denylist. The read-only grant covers it, so only the denial can
+    /// refuse. A denial under a writable root is reported as not enforced
+    /// rather than held (harn#9028), so it cannot measure the denylist.
     credentials: PathBuf,
     /// A loopback listener the network cases connect to. Nonblocking, so a
     /// connection that never came reads as `WouldBlock` rather than a hang.
@@ -286,7 +403,7 @@ impl Layout {
         let outside = base.join("outside");
         let read_only = base.join("read-only");
         let socket_root = base.join("sockets");
-        let credentials = workspace.join(".harn-conformance-credentials");
+        let credentials = read_only.join(".harn-conformance-credentials");
         for dir in [&workspace, &outside, &read_only, &socket_root, &credentials] {
             std::fs::create_dir_all(dir)?;
         }
@@ -340,6 +457,7 @@ fn case_policy(case: ConformanceCase, layout: &Layout) -> CapabilityPolicy {
             });
         }
         ConformanceCase::DeniedCredentialReadRefused => {
+            policy.read_only_roots = vec![layout.read_only.display().to_string()];
             policy.process_sandbox = Box::new(ProcessSandboxPolicy {
                 read_deny_roots: vec![layout.credentials.display().to_string()],
                 ..ProcessSandboxPolicy::default()
@@ -762,30 +880,20 @@ fn is_wrapper_case(case: ConformanceCase) -> bool {
     )
 }
 
-/// The detached process the daemonizing wrapper leaves, told apart from
-/// anything else on the host by an argument no one else passes.
-const DAEMON_MARKER_SECONDS: &str = "30713";
-
-/// Whether a process the daemonizing wrapper left is still running.
-fn daemon_marker_alive() -> bool {
-    use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
-    let mut system = System::new();
-    system.refresh_processes_specifics(
-        ProcessesToUpdate::All,
-        true,
-        ProcessRefreshKind::nothing().with_cmd(UpdateKind::Always),
-    );
-    system.processes().values().any(|process| {
-        let cmd = process.cmd();
-        cmd.first()
-            .is_some_and(|arg| arg.to_string_lossy().ends_with("sleep"))
-            && cmd.iter().any(|arg| arg == DAEMON_MARKER_SECONDS)
-    })
-}
-
-fn cargo_on_path() -> bool {
-    std::env::var_os("PATH")
-        .is_some_and(|path| std::env::split_paths(&path).any(|dir| dir.join("cargo").is_file()))
+/// The probe's program when it names a tool `path` does not provide. Windows
+/// probes run shell builtins and system binaries resolved with extensions, so
+/// only Unix probes are checked.
+fn missing_probe_tool(argv: &[String], path: Option<&std::ffi::OsStr>) -> Option<String> {
+    if cfg!(windows) {
+        return None;
+    }
+    let program = argv.first()?;
+    let found = if Path::new(program).is_absolute() {
+        Path::new(program).is_file()
+    } else {
+        path.is_some_and(|path| std::env::split_paths(path).any(|dir| dir.join(program).is_file()))
+    };
+    (!found).then(|| program.clone())
 }
 
 /// Where the wrapper logs. Outside every writable root for the wrapper that
@@ -805,7 +913,11 @@ fn wrapper_log(case: ConformanceCase, layout: &Layout) -> PathBuf {
 /// wrapper that logs each call and then runs the compiler. It needs no
 /// network and no daemon, so whether it runs is decided by the filesystem
 /// alone.
-fn write_wrapper_crate(case: ConformanceCase, layout: &Layout) -> std::io::Result<()> {
+fn write_wrapper_crate(
+    case: ConformanceCase,
+    layout: &Layout,
+    daemon: Option<&DaemonProbe>,
+) -> std::io::Result<()> {
     let workspace = &layout.workspace;
     std::fs::create_dir_all(workspace.join("src"))?;
     std::fs::create_dir_all(workspace.join(".cargo"))?;
@@ -821,16 +933,12 @@ fn write_wrapper_crate(case: ConformanceCase, layout: &Layout) -> std::io::Resul
     // subshell that exits at once, with its descriptors closed, which is how
     // a helper detaches. One that kept the build's output pipes open would
     // hang every build it served, which is a different defect.
-    let detach = if case == ConformanceCase::RustcWrapperThatDaemonizesIsSwitchedOff {
-        format!("( sleep {DAEMON_MARKER_SECONDS} </dev/null >/dev/null 2>&1 & )\n")
-    } else {
-        String::new()
-    };
+    let detach = daemon.map(DaemonProbe::detach_command).unwrap_or_default();
     std::fs::write(
         &wrapper,
         format!(
-            "#!/bin/sh\n{detach}echo \"$*\" >> '{}' || exit 1\nexec \"$@\"\n",
-            log.display()
+            "#!/bin/sh\n{detach}echo \"$*\" >> {} || exit 1\nexec \"$@\"\n",
+            daemon::shell_path(&log)
         ),
     )?;
     #[cfg(unix)]
@@ -852,6 +960,7 @@ fn observe_wrapper(
     child: &Child,
     log: &str,
     decision: &harn_vm::process_sandbox::rustc_wrapper::RustcWrapperDecision,
+    daemon: Option<&DaemonProbe>,
 ) -> Result<Observed, Unmeasured> {
     use harn_vm::process_sandbox::rustc_wrapper::RustcWrapperDisposition;
     if child.spawn_refused {
@@ -861,13 +970,20 @@ fn observe_wrapper(
     let wrapped_the_crate = std::fs::read_to_string(log)
         .map(|text| text.contains("--crate-name seeded"))
         .unwrap_or(false);
+    if daemon.is_some_and(|probe| !probe.started()) {
+        return Err(Unmeasured::Broken(
+            "the daemon fixture did not reach its blocking read".to_string(),
+        ));
+    }
+    let daemon_helpers = daemon.map(DaemonProbe::helper_states);
+    let daemon_alive = daemon_helpers.as_ref().map(|helpers| !helpers.is_empty());
     let (behaved, receipt) = match case {
         ConformanceCase::RustcWrapperThatRunsIsKept => (
             built && wrapped_the_crate,
             decision.disposition == RustcWrapperDisposition::Kept,
         ),
         ConformanceCase::RustcWrapperThatDaemonizesIsSwitchedOff => (
-            built && !wrapped_the_crate && !daemon_marker_alive(),
+            built && !wrapped_the_crate && daemon_alive == Some(false),
             decision.disposition == RustcWrapperDisposition::Disabled,
         ),
         _ => (
@@ -878,7 +994,8 @@ fn observe_wrapper(
     if behaved != receipt {
         return Err(Unmeasured::Broken(format!(
             "the recorded decision ({:?}: {}) disagrees with the build: completed={built} \
-             wrapper_ran_on_the_crate={wrapped_the_crate}",
+             wrapper_ran_on_the_crate={wrapped_the_crate} daemon_alive={daemon_alive:?} \
+             daemon_helpers={daemon_helpers:?}",
             decision.disposition, decision.reason
         )));
     }

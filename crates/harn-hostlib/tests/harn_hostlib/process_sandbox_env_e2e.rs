@@ -130,6 +130,159 @@ fn real_run_command_neutralizes_rustc_wrappers_inside_sandbox() {
     caller_request.insert("env_mode".into(), value("patch"));
     let caller_response = call(caller_request);
 
+    let canonical_workspace = workspace.path().canonicalize().unwrap();
+    let workspace_decisions = || {
+        harn_vm::process_sandbox::rustc_wrapper::rustc_wrapper_decisions()
+            .into_iter()
+            .filter(|decision| {
+                std::path::Path::new(&decision.cwd)
+                    .canonicalize()
+                    .ok()
+                    .as_ref()
+                    == Some(&canonical_workspace)
+            })
+            .collect::<Vec<_>>()
+    };
+    assert!(
+        workspace_decisions().is_empty(),
+        "shell launches must disable wrappers without measuring a compiler build"
+    );
+
+    std::fs::create_dir(workspace.path().join("src")).unwrap();
+    std::fs::write(workspace.path().join("Cargo.toml"), "[package]\nname = \"replacement-env\"\nversion = \"0.0.0\"\nedition = \"2021\"\n[workspace]\n").unwrap();
+    std::fs::write(workspace.path().join("src/main.rs"), "fn main() {}\n").unwrap();
+    let mut replacement = command_request(&cwd);
+    replacement.insert(
+        "argv".into(),
+        VmValue::List(Arc::new(
+            ["cargo", "build", "--offline"]
+                .into_iter()
+                .map(value)
+                .collect(),
+        )),
+    );
+    replacement.insert("env_mode".into(), value("replace"));
+    let mut replacement_env = harn_vm::value::DictMap::new();
+    for key in ["PATH", "HOME", "RUSTUP_HOME"] {
+        if let Ok(entry) = std::env::var(key) {
+            replacement_env.insert(key.into(), value(&entry));
+        }
+    }
+    replacement_env.insert("CARGO_HOME".into(), value(&cwd));
+    replacement_env.insert(
+        "CARGO_TARGET_DIR".into(),
+        value(&workspace.path().join("target").to_string_lossy()),
+    );
+    replacement.insert("env".into(), VmValue::dict(replacement_env.clone()));
+    let replacement_response = call(replacement.clone());
+    assert!(replacement_response.is_ok(), "{replacement_response:?}");
+    assert!(
+        workspace
+            .path()
+            .join("target/debug/replacement-env")
+            .is_file(),
+        "the real replacement-environment build must finish"
+    );
+    let decisions = workspace_decisions();
+    assert_eq!(decisions.len(), 1);
+    assert_eq!(
+        decisions[0].disposition,
+        harn_vm::process_sandbox::rustc_wrapper::RustcWrapperDisposition::NotConfigured,
+        "replacement launches must not probe any of the four inherited non-null wrappers: {:?}",
+        decisions[0]
+    );
+
+    use std::os::unix::fs::PermissionsExt;
+    let wrapper = workspace.path().join("count-wrapper");
+    let count = workspace.path().join("wrapper-count");
+    std::fs::write(
+        &wrapper,
+        format!("#!/bin/sh\nprintf x >> '{}'\nexit 1\n", count.display()),
+    )
+    .unwrap();
+    std::fs::set_permissions(&wrapper, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let cargo_config = workspace.path().join(".cargo/config.toml");
+    std::fs::create_dir(cargo_config.parent().unwrap()).unwrap();
+    std::fs::write(
+        &cargo_config,
+        format!("[build]\nrustc-wrapper = \"{}\"\n", wrapper.display()),
+    )
+    .unwrap();
+    let VmValue::Dict(response) = call(replacement.clone()).unwrap() else {
+        panic!("expected configured-wrapper build result");
+    };
+    assert!(
+        matches!(response.get("exit_code"), Some(VmValue::Int(0))),
+        "{response:?}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&count).unwrap_or_default(),
+        "x",
+        "a new Cargo config must invalidate NotConfigured"
+    );
+    std::fs::write(
+        &wrapper,
+        format!(
+            "#!/bin/sh\n# replacement executable\nprintf x >> '{}'\nexit 1\n",
+            count.display()
+        ),
+    )
+    .unwrap();
+    let VmValue::Dict(response) = call(replacement.clone()).unwrap() else {
+        panic!("expected replacement-wrapper build result");
+    };
+    assert!(
+        matches!(response.get("exit_code"), Some(VmValue::Int(0))),
+        "{response:?}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&count).unwrap(),
+        "xx",
+        "a replaced wrapper must be measured again"
+    );
+    std::fs::remove_file(&cargo_config).unwrap();
+    std::fs::write(&count, "").unwrap();
+    replacement_env.insert("RUSTC_WRAPPER".into(), value(&wrapper.to_string_lossy()));
+    replacement.insert("env".into(), VmValue::dict(replacement_env));
+    let mut indirect = replacement.clone();
+    for response in [call(replacement.clone()), call(replacement)] {
+        let VmValue::Dict(response) = response.unwrap() else {
+            panic!("expected process result");
+        };
+        assert!(
+            matches!(response.get("exit_code"), Some(VmValue::Int(0))),
+            "{response:?}"
+        );
+    }
+    assert_eq!(
+        std::fs::read_to_string(&count).unwrap(),
+        "x",
+        "per-spawn cleanup tokens must not repeat the real compiler probe"
+    );
+
+    let decisions_before_shell = workspace_decisions().len();
+    indirect.insert(
+        "argv".into(),
+        VmValue::List(Arc::new(vec![
+            value("sh"),
+            value("-c"),
+            value(
+                "export RUSTC_WRAPPER=\"$1\"; exec cargo build --offline --target-dir shell-target",
+            ),
+            value("shell-wrapper-control"),
+            value(&wrapper.to_string_lossy()),
+        ])),
+    );
+    let VmValue::Dict(response) = call(indirect).unwrap() else {
+        panic!("expected shell process result");
+    };
+    assert!(
+        matches!(response.get("exit_code"), Some(VmValue::Int(code)) if *code != 0),
+        "the explicitly reset failing wrapper must reach nested Cargo: {response:?}"
+    );
+    assert_eq!(std::fs::read_to_string(&count).unwrap(), "xx");
+    assert_eq!(workspace_decisions().len(), decisions_before_shell);
+
     pop_execution_policy();
     unsafe {
         match old_handler_sandbox {

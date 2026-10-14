@@ -14,7 +14,6 @@ use super::result::{
 use super::transform::{
     merge_schema_dicts, schema_omit_dict, schema_partial_dict, schema_pick_dict,
 };
-use super::type_check::schema_is_object_like;
 use super::validate::{first_param_validation_error, validate_schema_value, ValidationOptions};
 
 const PARAM_SCHEMA_CACHE_LIMIT: usize = RuntimeLimits::DEFAULT.max_schema_guard_cache_entries;
@@ -27,7 +26,6 @@ thread_local! {
 #[derive(Debug, Clone)]
 pub(crate) struct CanonicalParamSchema {
     schema: Arc<crate::value::DictMap>,
-    object_like: bool,
 }
 
 /// The first machine-readable schema failure projected for incremental
@@ -45,11 +43,7 @@ pub(crate) fn canonical_param_schema(schema: &VmValue) -> Result<CanonicalParamS
     let VmValue::Dict(schema) = normalized else {
         return Err("schema must be a dict".to_string());
     };
-    let object_like = schema_is_object_like(&schema);
-    Ok(CanonicalParamSchema {
-        schema,
-        object_like,
-    })
+    Ok(CanonicalParamSchema { schema })
 }
 
 fn cached_canonical_param_schema(schema: &VmValue) -> Result<CanonicalParamSchema, String> {
@@ -227,11 +221,7 @@ pub(crate) fn schema_assert_canonical_param(
     if let Some(error) =
         first_param_validation_error(value, schema_dict, schema_dict, param_name, options)
     {
-        return if schema.object_like {
-            Err(VmError::TypeError(error))
-        } else {
-            Err(VmError::Runtime(format!("TypeError: {error}")))
-        };
+        return Err(VmError::TypeError(error));
     }
     Ok(())
 }

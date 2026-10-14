@@ -11,6 +11,7 @@
 import { parse, parser } from "std/cli/argparse"
 pub import {
   ProviderOptionProbeAttempt,
+  ProviderOptionProbeContext,
   ProviderOptionProbeReport,
   ProviderOptionProbeVerdict,
   ProviderPortableProbeOption,
@@ -18,6 +19,16 @@ pub import {
   provider_option_probe_route,
 } from "std/cli/providers/contracts"
 import { provider_portable_option_catalog_field } from "std/cli/providers/contracts"
+import { get_typed_value } from "std/schema"
+
+type ProbeSuccess = {
+  usage?: {
+    input_tokens?: int?,
+    output_tokens?: int?,
+    cost_usd?: float?,
+    provider_telemetry?: {response_model?: string}?,
+  }?,
+}
 
 const __OPTIONS = [
   "temperature",
@@ -174,14 +185,20 @@ fn __failure_class(error: unknown) -> string {
  */
 pub fn provider_option_probe_classify(outcome: unknown) -> ProviderOptionProbeAttempt {
   if !is_err(outcome) {
-    const usage = unwrap(outcome)?.usage
-    return {
+    const usage = get_typed_value(unwrap(outcome), schema_of(ProbeSuccess)).usage
+    const response_model = usage?.provider_telemetry?.response_model
+    const accepted: ProviderOptionProbeAttempt = {
       verdict: __probe_verdict("accepted"),
       measured: true,
       request_count: 1,
       input_tokens: to_int(usage?.input_tokens),
       output_tokens: to_int(usage?.output_tokens),
       cost_usd: to_float(usage?.cost_usd),
+    }
+    return if type_of(response_model) == "string" && trim(response_model) != "" {
+      accepted + {response_model: response_model}
+    } else {
+      accepted
     }
   }
   const raw = unwrap_err(outcome)
@@ -360,6 +377,7 @@ pub fn provider_option_probe_confirm_rejection(
   control: ProviderOptionProbeAttempt,
 ) -> ProviderOptionProbeAttempt {
   const combined = __append_accounting(attempt, control)
+    + {control_response_model: control.response_model}
   if control.verdict == "accepted" && control.measured && control.request_count > 0 {
     return combined
   }
@@ -381,15 +399,20 @@ pub fn provider_option_probe_confirm_rejection(
  * @errors: []
  */
 pub fn provider_option_probe_report(
-  provider: string,
-  model: string,
-  route: string,
-  option: ProviderPortableProbeOption,
-  claimed: bool,
-  ungated: bool,
+  context: ProviderOptionProbeContext,
   attempt: ProviderOptionProbeAttempt,
 ) -> ProviderOptionProbeReport {
+  const changing_pool = context.catalog.qualification == "changing_pool"
+  const selected = (attempt.response_model ?? "") != ""
+    && attempt.response_model != context.endpoint.model
+  const control_selected = (attempt.control_response_model ?? "") != ""
+    && attempt.control_response_model != context.endpoint.model
+  const unavailable = changing_pool && attempt.measured && attempt.request_count > 0
+    && attempt.verdict == "rejected"
+    && control_selected
   const observed = if !attempt.measured || attempt.request_count == 0 {
+    nil
+  } else if changing_pool && (attempt.verdict != "accepted" || !selected) {
     nil
   } else if attempt.verdict == "accepted" {
     true
@@ -398,20 +421,23 @@ pub fn provider_option_probe_report(
   } else {
     nil
   }
-  const status: "match" | "drift" | "unmeasured" = if observed == nil {
+  const status: "match" | "drift" | "unavailable" | "unmeasured" = if unavailable {
+    "unavailable"
+  } else if observed == nil {
     "unmeasured"
-  } else if observed == claimed {
+  } else if observed
+    == context.catalog.claimed_supported {
     "match"
   } else {
     "drift"
   }
   return {
-    schema_version: "harn.provider_option_probe.v1",
-    endpoint: {provider: provider, model: model, route: route},
-    option: option,
-    catalog: {field: provider_portable_option_catalog_field(option), claimed_supported: claimed},
+    schema_version: "harn.provider_option_probe.v2",
+    endpoint: context.endpoint,
+    option: context.option,
+    catalog: context.catalog,
     probe: {
-      ungated: ungated,
+      ungated: context.ungated,
       request_count: attempt.request_count,
       measured_count: if observed != nil {
         1
@@ -421,7 +447,11 @@ pub fn provider_option_probe_report(
       verdict: attempt.verdict,
       attempt: attempt,
     },
-    diff: {status: status, claimed_supported: claimed, observed_supported: observed},
+    diff: {
+      status: status,
+      claimed_supported: context.catalog.claimed_supported,
+      observed_supported: observed,
+    },
   }
 }
 
@@ -467,12 +497,22 @@ fn main(harness: Harness) {
   const route = provider_option_probe_route(caps)
   const claimed = provider_option_probe_catalog_claim(caps, option)
   const ungated = args.ungated ?? false
+  const context: ProviderOptionProbeContext = {
+    endpoint: {provider: provider, model: model, route: route},
+    option: option,
+    catalog: {
+      field: provider_portable_option_catalog_field(option),
+      claimed_supported: claimed,
+      qualification: caps.portable_option_qualification,
+    },
+    ungated: ungated,
+  }
   if args.plan {
     const plan = {
       schema_version: "harn.provider_option_probe_plan.v1",
       endpoint: {provider: provider, model: model, route: route},
       option: option,
-      catalog: {field: provider_portable_option_catalog_field(option), claimed_supported: claimed},
+      catalog: context.catalog,
       request_count: 1,
       ungated: ungated,
     }
@@ -500,15 +540,7 @@ fn main(harness: Harness) {
       provider_option_probe_classify(__control(harness.llm, provider, model, args.max_tokens)),
     )
   }
-  const report = provider_option_probe_report(
-    provider,
-    model,
-    route,
-    option,
-    claimed,
-    ungated,
-    attempt,
-  )
+  const report = provider_option_probe_report(context, attempt)
   if harness.env.get_or("HARN_OUTPUT_JSON", "0") == "1" {
     harness.stdio.println(json_stringify_pretty(report))
   } else {
@@ -518,7 +550,7 @@ fn main(harness: Harness) {
     if report.diff.status == "drift" {
       harness.runtime.exit(1)
     }
-    if report.diff.status == "unmeasured" {
+    if report.diff.status == "unmeasured" || report.diff.status == "unavailable" {
       harness.runtime.exit(2)
     }
   }

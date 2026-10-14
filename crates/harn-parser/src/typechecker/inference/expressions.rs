@@ -17,7 +17,7 @@ use crate::builtin_signatures::BuiltinSignatureExt;
 use crate::diagnostic_codes::Code;
 use harn_lexer::{FixEdit, Span};
 
-use super::super::binary_ops::{infer_binary_op_type, merge_shape_fields};
+use super::super::binary_ops::infer_binary_op_type;
 use super::super::format::format_type;
 use super::super::scope::{builtin_return_type, InferredType, PathNarrowing, TypeScope};
 use super::super::union::{
@@ -53,7 +53,14 @@ impl TypeChecker {
         for stmt in stmts {
             match &stmt.node {
                 Node::ThrowStmt { value } => {
-                    if let Some(ty) = self.infer_type(value, scope) {
+                    // Error tags must retain their literal values so a malformed
+                    // record cannot match a different arm of the error union.
+                    let ty = if let Node::DictLiteral(entries) = &value.node {
+                        self.infer_record_type(entries, scope, true)
+                    } else {
+                        self.infer_type(value, scope)
+                    };
+                    if let Some(ty) = ty {
                         inferred.push(ty);
                     }
                 }
@@ -290,52 +297,11 @@ impl TypeChecker {
             Node::BoolLiteral(_) => Some(TypeExpr::Named("bool".into())),
             Node::NilLiteral => Some(TypeExpr::Named("nil".into())),
             Node::ListLiteral(items) => Some(self.infer_list_literal_type(items, scope)),
-            // `a to b` (and `a to b exclusive`) produce a lazy Range value.
+            // `a..=b` (and `a..b`) produce a lazy Range value.
             // Expose it as a named `range` type; for-in and method resolution
             // special-case this type where needed.
             Node::RangeExpr { .. } => Some(TypeExpr::Named("range".into())),
-            Node::DictLiteral(entries) => {
-                // Build the shape by folding entries left-to-right with the
-                // right-biased shape merge, so `{...base, k: v}` and
-                // `{...a, ...b}` infer the precise merged record instead of a
-                // bare `dict`. A spread of anything that isn't a statically
-                // closed shape (a `dict`, `dict<K,V>`, union, or unknown) means
-                // an unknown tail, so the result degrades to `dict` — we can't
-                // name the merged fields without open-record types.
-                let mut fields: Vec<ShapeField> = Vec::new();
-                for entry in entries {
-                    if matches!(&entry.value.node, Node::Spread(inner) if matches!(&inner.node, Node::Identifier(_) | Node::DictLiteral(_) | Node::PropertyAccess { .. } | Node::SubscriptAccess { .. } | Node::OptionalPropertyAccess { .. } | Node::FunctionCall { .. } | Node::MethodCall { .. }))
-                    {
-                        let Node::Spread(inner) = &entry.value.node else {
-                            unreachable!()
-                        };
-                        match self.infer_type(inner, scope) {
-                            Some(TypeExpr::Shape(spread_fields)) => {
-                                fields = merge_shape_fields(&fields, &spread_fields);
-                            }
-                            _ => return Some(TypeExpr::Named("dict".into())),
-                        }
-                        continue;
-                    }
-                    let key = match &entry.key.node {
-                        Node::StringLiteral(key) | Node::Identifier(key) => key.clone(),
-                        _ => return Some(TypeExpr::Named("dict".into())),
-                    };
-                    let val_type = self
-                        .infer_type(&entry.value, scope)
-                        .unwrap_or_else(Self::wildcard_type);
-                    fields =
-                        merge_shape_fields(&fields, &[ShapeField::synthetic(key, val_type, false)]);
-                }
-                // A dict literal has statically known fields, so it is a
-                // precise closed record — the empty literal `{}` is the empty
-                // record `Shape([])`, not the opaque `dict`. This is how TS/Flow
-                // type object literals: `{}` is the top object type (it satisfies
-                // an all-optional shape and accepts any later value), while a
-                // *bare* `dict` value from `json_parse` stays opaque and must be
-                // narrowed before it can flow into a specific shape.
-                Some(TypeExpr::Shape(fields))
-            }
+            Node::DictLiteral(entries) => self.infer_record_type(entries, scope, false),
             Node::Closure {
                 params,
                 return_type,
@@ -524,12 +490,12 @@ impl TypeChecker {
             }
 
             Node::BinaryOp { op, left, right } => {
-                if op == "|>" {
+                if matches!(op, BinaryOperator::Pipe) {
                     return self.infer_pipe_type(left, right, scope);
                 }
                 let lt = self.infer_type(left, scope);
                 let rt = self.infer_type(right, scope);
-                if op == "??" {
+                if matches!(op, BinaryOperator::NilCoalesce) {
                     // `??` strips the nil arm from its left operand, but the
                     // structural `without_nil`/`contains_nil` helpers can't see
                     // through a named alias — so `type T = {..}?; x: T; x ?? d`
@@ -537,17 +503,16 @@ impl TypeChecker {
                     // aliases first so the coalesce drops nil for aliased
                     // nilable types exactly as it does for inline unions.
                     let lt = lt.map(|t| self.resolve_alias(&t, scope));
-                    return infer_binary_op_type(op, &lt, &rt);
+                    return infer_binary_op_type(*op, &lt, &rt);
                 }
-                infer_binary_op_type(op, &lt, &rt)
+                infer_binary_op_type(*op, &lt, &rt)
             }
 
             Node::UnaryOp { op, operand } => {
                 let t = self.infer_type(operand, scope);
-                match op.as_str() {
-                    "!" => Some(TypeExpr::Named("bool".into())),
-                    "-" => t, // negation preserves type
-                    _ => None,
+                match op {
+                    UnaryOperator::Not => Some(TypeExpr::Named("bool".into())),
+                    UnaryOperator::Neg => t, // negation preserves type
                 }
             }
 
@@ -681,284 +646,28 @@ impl TypeChecker {
                 }) {
                     return Some(result(method_type));
                 }
-                // Iter<T> receiver: combinators preserve or transform T; sinks
-                // materialize. This must come before the shared-method match
-                // below so `.map` / `.filter` / etc. on an iter return Iter,
-                // not list.
-                let iter_elem_type: Option<TypeExpr> = match &resolved_recv {
-                    Some(TypeExpr::Iter(inner)) => Some((**inner).clone()),
-                    Some(TypeExpr::Named(n)) if n == "iter" => Some(TypeExpr::Named("any".into())),
-                    _ => None,
+                // Builtin receivers take their result type from the method
+                // registry; an unknown receiver gets the type every builtin
+                // receiver's method of that name agrees on.
+                let receiver = resolved_recv
+                    .as_ref()
+                    .map(|ty| Self::builtin_method_receiver_type(ty, method));
+                let method_type = match receiver {
+                    Some(Some(receiver)) => {
+                        self.builtin_method_return_type(&receiver, method, args, scope)
+                    }
+                    Some(None) => match &resolved_recv {
+                        Some(TypeExpr::Named(name)) if is_gradual_type_name(name) => {
+                            Self::gradual_builtin_method_return_type(method)
+                        }
+                        Some(TypeExpr::Union(_)) => {
+                            Self::gradual_builtin_method_return_type(method)
+                        }
+                        _ => None,
+                    },
+                    None => Self::gradual_builtin_method_return_type(method),
                 };
-                if let Some(t) = iter_elem_type {
-                    let pair = |k: TypeExpr, v: TypeExpr| TypeExpr::Applied {
-                        name: "Pair".into(),
-                        args: vec![k, v],
-                    };
-                    let iter_of = |ty: TypeExpr| TypeExpr::Iter(Box::new(ty));
-                    match method.as_str() {
-                        "iter" => return Some(result(iter_of(t))),
-                        "map" => {
-                            let r = args
-                                .first()
-                                .and_then(|a| {
-                                    self.infer_callable_return(a, std::slice::from_ref(&t), scope)
-                                })
-                                .unwrap_or_else(Self::wildcard_type);
-                            return Some(result(iter_of(r)));
-                        }
-                        "flat_map" => {
-                            let r = args
-                                .first()
-                                .and_then(|a| {
-                                    self.infer_callable_return(a, std::slice::from_ref(&t), scope)
-                                })
-                                .map(Self::flatten_one_level)
-                                .unwrap_or_else(Self::wildcard_type);
-                            return Some(result(iter_of(r)));
-                        }
-                        "filter" | "take" | "skip" | "take_while" | "skip_while" => {
-                            return Some(result(iter_of(t)));
-                        }
-                        "zip" => {
-                            return Some(result(iter_of(pair(t, TypeExpr::Named("any".into())))));
-                        }
-                        "enumerate" => {
-                            return Some(result(iter_of(pair(TypeExpr::Named("int".into()), t))));
-                        }
-                        "chain" => return Some(result(iter_of(t))),
-                        "chunks" | "windows" => {
-                            return Some(result(iter_of(TypeExpr::List(Box::new(t)))));
-                        }
-                        // Sinks
-                        "to_list" => return Some(result(TypeExpr::List(Box::new(t)))),
-                        "to_set" => {
-                            return Some(result(TypeExpr::Applied {
-                                name: "set".into(),
-                                args: vec![t],
-                            }))
-                        }
-                        "to_dict" => return Some(result(TypeExpr::Named("dict".into()))),
-                        "count" => return Some(result(TypeExpr::Named("int".into()))),
-                        "sum" => {
-                            return Some(result(TypeExpr::Union(vec![
-                                TypeExpr::Named("int".into()),
-                                TypeExpr::Named("float".into()),
-                            ])))
-                        }
-                        "min" | "max" | "first" | "last" | "find" => {
-                            return Some(result(TypeExpr::Union(vec![
-                                t,
-                                TypeExpr::Named("nil".into()),
-                            ])));
-                        }
-                        "any" | "all" => return Some(result(TypeExpr::Named("bool".into()))),
-                        "for_each" => return Some(result(TypeExpr::Named("nil".into()))),
-                        "reduce" => return None,
-                        _ => {}
-                    }
-                }
-                // list<T> / dict / set / string .iter() → iter<T>. Other
-                // combinator methods on list/dict/set/string keep their
-                // existing eager typings (the runtime still materializes
-                // them). Only the explicit .iter() bridge returns Iter.
-                if method == "iter" {
-                    match &resolved_recv {
-                        Some(TypeExpr::List(inner)) => {
-                            return Some(result(TypeExpr::Iter(Box::new((**inner).clone()))));
-                        }
-                        Some(TypeExpr::Tuple(elements)) => {
-                            return Some(result(TypeExpr::Iter(Box::new(
-                                Self::tuple_element_type(elements),
-                            ))));
-                        }
-                        Some(TypeExpr::Generator(inner)) | Some(TypeExpr::Stream(inner)) => {
-                            return Some(result(TypeExpr::Iter(Box::new((**inner).clone()))));
-                        }
-                        Some(TypeExpr::DictType(k, v)) => {
-                            return Some(result(TypeExpr::Iter(Box::new(TypeExpr::Applied {
-                                name: "Pair".into(),
-                                args: vec![(**k).clone(), (**v).clone()],
-                            }))));
-                        }
-                        Some(TypeExpr::Named(n))
-                            if n == "list" || n == "dict" || n == "set" || n == "string" =>
-                        {
-                            return Some(result(TypeExpr::Named("iter".into())));
-                        }
-                        _ => {}
-                    }
-                }
-                let is_dict = matches!(&resolved_recv, Some(TypeExpr::Named(n)) if n == "dict")
-                    || matches!(&resolved_recv, Some(TypeExpr::DictType(..)))
-                    || matches!(&resolved_recv, Some(TypeExpr::Shape(_)));
-                // Element / key / value types of the (eager) collection receiver,
-                // when parameterized. Eager list/dict combinators materialize a
-                // new collection, so they return `List<…>` / `dict<…>` rather than
-                // an `Iter`, but they preserve or transform the element type the
-                // same way the lazy `Iter` combinators above do. `None` falls back
-                // to the opaque `list`/`dict` type for unparameterized receivers.
-                let list_elem: Option<TypeExpr> = match &resolved_recv {
-                    Some(TypeExpr::List(inner)) => Some((**inner).clone()),
-                    Some(TypeExpr::Tuple(elements)) => Some(Self::tuple_element_type(elements)),
-                    _ => None,
-                };
-                let (dict_key, dict_val): (Option<TypeExpr>, Option<TypeExpr>) =
-                    match &resolved_recv {
-                        Some(TypeExpr::DictType(k, v)) => {
-                            (Some((**k).clone()), Some((**v).clone()))
-                        }
-                        _ => (None, None),
-                    };
-                let list_of = |t: TypeExpr| TypeExpr::List(Box::new(t));
-                let pair_of = |k: TypeExpr, v: TypeExpr| TypeExpr::Applied {
-                    name: "Pair".into(),
-                    args: vec![k, v],
-                };
-                if let Some(sequence_type) = Self::sequence_method_return_type(
-                    resolved_recv.as_ref(),
-                    method,
-                    args.len(),
-                    list_elem.as_ref(),
-                ) {
-                    return Some(result(sequence_type));
-                }
-                match method.as_str() {
-                    // Shared: bool-returning methods
-                    "contains" | "starts_with" | "ends_with" | "empty" | "has" | "any" | "all" => {
-                        Some(result(TypeExpr::Named("bool".into())))
-                    }
-                    // Shared: int-returning methods
-                    "count" | "index_of" | "last_index_of" | "rfind" => {
-                        Some(result(TypeExpr::Named("int".into())))
-                    }
-                    // String methods
-                    "trim" | "lowercase" | "uppercase" | "replace" | "substring" | "pad_left"
-                    | "pad_right" | "repeat" | "join" => {
-                        Some(result(TypeExpr::Named("string".into())))
-                    }
-                    // `reversed` works on both strings and lists, returning the
-                    // receiver's own type. Reversing a list yields a list with the
-                    // same element type; reversing a string yields a string. A
-                    // gradual/unknown receiver (`any`/`_`, or an unannotated value
-                    // whose type we couldn't pin down) could be either at runtime,
-                    // so it stays gradual rather than being forced to `string` —
-                    // forcing `string` mis-typed list reversals through untyped
-                    // bindings (e.g. `list + value.reversed()`).
-                    "reversed" | "reverse" => {
-                        let is_list = list_elem.is_some()
-                            || matches!(&resolved_recv, Some(TypeExpr::Named(n)) if n == "list");
-                        let is_string =
-                            matches!(&resolved_recv, Some(TypeExpr::Named(n)) if n == "string");
-                        if is_list {
-                            match &list_elem {
-                                Some(e) => Some(result(list_of(e.clone()))),
-                                None => Some(result(TypeExpr::Named("list".into()))),
-                            }
-                        } else if is_string {
-                            Some(result(TypeExpr::Named("string".into())))
-                        } else {
-                            // Gradual receiver: defer to `any` so neither the
-                            // string nor the list interpretation is rejected.
-                            Some(result(TypeExpr::Named("any".into())))
-                        }
-                    }
-                    "split" | "chars" => Some(result(TypeExpr::Named("list".into()))),
-                    // filter returns dict for dicts, list for lists; the element
-                    // type is unchanged (filter only drops elements).
-                    "filter" => {
-                        if is_dict {
-                            match (&dict_key, &dict_val) {
-                                (Some(k), Some(v)) => Some(result(TypeExpr::DictType(
-                                    Box::new(k.clone()),
-                                    Box::new(v.clone()),
-                                ))),
-                                _ => Some(result(TypeExpr::Named("dict".into()))),
-                            }
-                        } else {
-                            match &list_elem {
-                                Some(e) => Some(result(list_of(e.clone()))),
-                                None => Some(result(TypeExpr::Named("list".into()))),
-                            }
-                        }
-                    }
-                    // List methods. `map`/`flat_map` produce the closure's return
-                    // type per element (flat_map flattens one level); `sorted` keeps
-                    // the element type.
-                    "map" => {
-                        let param = list_elem.unwrap_or_else(Self::wildcard_type);
-                        match args.first().and_then(|a| {
-                            self.infer_callable_return(a, std::slice::from_ref(&param), scope)
-                        }) {
-                            Some(r) => Some(result(list_of(r))),
-                            None => Some(result(TypeExpr::Named("list".into()))),
-                        }
-                    }
-                    "flat_map" => {
-                        let param = list_elem.unwrap_or_else(Self::wildcard_type);
-                        match args.first().and_then(|a| {
-                            self.infer_callable_return(a, std::slice::from_ref(&param), scope)
-                        }) {
-                            Some(r) => Some(result(list_of(Self::flatten_one_level(r)))),
-                            None => Some(result(TypeExpr::Named("list".into()))),
-                        }
-                    }
-                    "sorted" | "sort" => match &list_elem {
-                        Some(e) => Some(result(list_of(e.clone()))),
-                        None => Some(result(TypeExpr::Named("list".into()))),
-                    },
-                    "appending" => {
-                        let Some(TypeExpr::Tuple(elements)) = &resolved_recv else {
-                            return None;
-                        };
-                        let appended = args
-                            .first()
-                            .and_then(|arg| self.infer_type(arg, scope))
-                            .unwrap_or_else(Self::wildcard_type);
-                        Some(result(list_of(simplify_union(vec![
-                            Self::tuple_element_type(elements),
-                            appended,
-                        ]))))
-                    }
-                    "window" | "each_cons" | "sliding_window" => match &list_elem {
-                        Some(e) => Some(result(TypeExpr::List(Box::new(TypeExpr::List(
-                            Box::new(e.clone()),
-                        ))))),
-                        None => Some(result(TypeExpr::Named("list".into()))),
-                    },
-                    "reduce" | "find" | "first" | "last" => None,
-                    // Dict methods — project the key/value type parameters.
-                    "keys" => match &dict_key {
-                        Some(k) => Some(result(list_of(k.clone()))),
-                        None => Some(result(TypeExpr::Named("list".into()))),
-                    },
-                    "values" => match &dict_val {
-                        Some(v) => Some(result(list_of(v.clone()))),
-                        None => Some(result(TypeExpr::Named("list".into()))),
-                    },
-                    "entries" => match (&dict_key, &dict_val) {
-                        (Some(k), Some(v)) => Some(result(list_of(pair_of(k.clone(), v.clone())))),
-                        _ => Some(result(TypeExpr::Named("list".into()))),
-                    },
-                    "merging" | "merge" | "map_values" | "rekeyed" | "rekey" | "map_keys" => {
-                        // rekeyed/map_keys transform keys; resulting dict still keys-by-string.
-                        // Preserve the value-type parameter when known so downstream code can
-                        // still rely on dict<string, V> typing after a key-rename.
-                        if let Some(v) = &dict_val {
-                            Some(result(TypeExpr::DictType(
-                                Box::new(TypeExpr::Named("string".into())),
-                                Box::new(v.clone()),
-                            )))
-                        } else {
-                            Some(result(TypeExpr::Named("dict".into())))
-                        }
-                    }
-                    // Conversions
-                    "to_string" => Some(result(TypeExpr::Named("string".into()))),
-                    "to_int" => Some(result(TypeExpr::Named("int".into()))),
-                    "to_float" => Some(result(TypeExpr::Named("float".into()))),
-                    _ => None,
-                }
+                method_type.map(result)
             }
 
             // TryOperator on Result<T, E> produces T
@@ -1670,16 +1379,6 @@ impl TypeChecker {
             Node::ReturnStmt { value: Some(v) } => self.infer_type(v, scope),
             Node::ReturnStmt { value: None } => Some(TypeExpr::Named("nil".into())),
             _ => self.infer_type(last, scope),
-        }
-    }
-
-    /// Unwrap one level of list/iter nesting — `flat_map`'s closure returns a
-    /// collection per element, which `flat_map` flattens by one level.
-    fn flatten_one_level(ty: TypeExpr) -> TypeExpr {
-        match ty {
-            TypeExpr::List(inner) | TypeExpr::Iter(inner) => *inner,
-            TypeExpr::Tuple(elements) => Self::tuple_element_type(&elements),
-            other => other,
         }
     }
 

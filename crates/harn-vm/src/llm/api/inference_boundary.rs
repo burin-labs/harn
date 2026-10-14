@@ -11,11 +11,12 @@ use super::errors::{LlmErrorKind, LlmErrorReason};
 
 mod admission;
 pub use admission::{
-    inference_admission_schemas, preview_inference_admission, InferenceAdmissionRequest,
-    InferenceAdmissionSnapshot, InferenceAdmissionStatus,
+    inference_admission_schemas, preview_inference_admission, DataControlsRefusal,
+    InferenceAdmissionRequest, InferenceAdmissionSnapshot, InferenceAdmissionStatus,
+    DATA_CONTROLS_TRAINING_REFUSED_RULE,
 };
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 enum DenialRule {
     LocalOnly,
     HostedOpenWeight,
@@ -45,9 +46,16 @@ impl DenialRule {
     }
 }
 
+#[derive(Clone, PartialEq, Eq)]
 pub(crate) struct BoundaryDenial {
     rule: DenialRule,
     message: String,
+}
+
+impl BoundaryDenial {
+    pub(crate) fn code(&self) -> &'static str {
+        self.rule.as_str()
+    }
 }
 
 impl std::fmt::Display for BoundaryDenial {
@@ -174,7 +182,7 @@ pub(crate) fn effective(requested: Option<InferenceBoundary>) -> Option<Inferenc
     }))
 }
 
-fn effective_result(
+pub(crate) fn effective_result(
     requested: Option<InferenceBoundary>,
 ) -> Result<Option<InferenceBoundary>, String> {
     let host = host_boundary()?;
@@ -235,8 +243,12 @@ pub(crate) fn catalog_evidence(
     }
     Ok(InferenceCatalogEvidence {
         local_runtime: provider_def.local_runtime.is_some(),
-        open_weight: crate::llm_config::model_catalog_entry_for_route(provider, model)
-            .and_then(|row| row.open_weight),
+        open_weight: {
+            let (owner, identity) = crate::llm::managed_supply::logical_route(provider, model)
+                .map_err(|_| DenialRule::UnknownProvider.refuse(provider.to_string()))?;
+            crate::llm_config::model_catalog_entry_for_route(&owner, &identity)
+                .and_then(|row| row.open_weight)
+        },
     })
 }
 

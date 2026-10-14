@@ -16,6 +16,122 @@ use super::process_tools_e2e::{declare_inherited, lock_env};
 const OWNER_DEATH_SUPERVISOR_ENV: &str = "HARN_TEST_OWNER_DEATH_SUPERVISOR";
 const OWNER_DEATH_REPORT_FD_ENV: &str = "HARN_TEST_OWNER_DEATH_REPORT_FD";
 const OWNER_DEATH_LEAK_LIVENESS_ENV: &str = "HARN_TEST_OWNER_DEATH_LEAK_LIVENESS";
+const OWNER_DEATH_STALLED_STDIN_ENV: &str = "HARN_TEST_OWNER_DEATH_STALLED_STDIN";
+const CLOSED_INPUT_WORK_ENV: &str = "HARN_TEST_CLOSED_INPUT_WORK";
+
+#[test]
+fn closed_input_payload_fixture() {
+    let Some(work) = std::env::var_os(CLOSED_INPUT_WORK_ENV) else {
+        return;
+    };
+    assert_eq!(unsafe { libc::close(libc::STDIN_FILENO) }, 0);
+    println!("payload-input-closed");
+    std::io::stdout().flush().unwrap();
+    let work = std::path::PathBuf::from(work);
+    tokio::runtime::Builder::new_current_thread()
+        .build()
+        .unwrap()
+        .block_on(harn_clock::test_support::within(
+            "live owner releases child work after writing to closed input",
+            async {
+                while !work.join("release").exists() {
+                    tokio::task::yield_now().await;
+                }
+            },
+        ));
+    std::fs::write(
+        work.join("completed"),
+        b"child completed after closing input",
+    )
+    .unwrap();
+}
+
+#[test]
+fn contained_child_can_close_input_and_finish_while_owner_remains_alive() {
+    use harn_hostlib::process::{
+        spawn_process, EnvMode, OutputCapture, OwnerDeathPolicy, SpawnSpec,
+    };
+    let _environment = declare_inherited();
+    let _guardian_args = harn_hostlib::process::owner_death::install_guardian_reexec_args([
+        "--exact",
+        "process_tools_e2e::owner_death_guardian_fixture",
+        "--nocapture",
+    ]);
+    let work = tempfile::tempdir().unwrap();
+    let mut child = spawn_process(SpawnSpec {
+        builtin: "closed_input_live_owner_fixture",
+        program: std::env::current_exe()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned(),
+        args: vec![
+            "--exact".into(),
+            "process_owner_death_e2e::closed_input_payload_fixture".into(),
+            "--nocapture".into(),
+        ],
+        cwd: None,
+        env: [(
+            CLOSED_INPUT_WORK_ENV.into(),
+            work.path().to_string_lossy().into_owned(),
+        )]
+        .into(),
+        env_remove: Vec::new(),
+        env_mode: EnvMode::Patch,
+        use_stdin: true,
+        configure_process_group: true,
+        owner_death: OwnerDeathPolicy::KillContainment,
+        output_capture: OutputCapture::Pipe,
+    })
+    .unwrap();
+    let _cleanup = ProcessGroupCleanup {
+        groups: vec![child.process_group_id().unwrap() as i32],
+    };
+    let mut stdout = std::io::BufReader::new(child.take_stdout().unwrap());
+    let (ready_tx, ready_rx) = std::sync::mpsc::channel();
+    harn_parser::runtime_stack::spawn(move || {
+        let mut ready_tx = Some(ready_tx);
+        for line in stdout.by_ref().lines() {
+            if line.unwrap() == "payload-input-closed" {
+                ready_tx
+                    .take()
+                    .expect("one readiness marker")
+                    .send(true)
+                    .unwrap();
+            }
+        }
+        if let Some(ready_tx) = ready_tx {
+            let _ = ready_tx.send(false);
+        }
+    });
+    assert!(harn_clock::test_support::recv_within(
+        "actual child closed stdin",
+        &ready_rx
+    ));
+    let mut input = child.take_stdin().unwrap();
+    let (written_tx, written_rx) = std::sync::mpsc::channel();
+    harn_parser::runtime_stack::spawn(move || {
+        let result = input.write_all(&vec![0x53; 128 * 1024]);
+        drop(input);
+        let _ = written_tx.send(result);
+    });
+    harn_clock::test_support::recv_within(
+        "guardian drains input after child closes it",
+        &written_rx,
+    )
+    .expect("child input closure must not kill its live owner containment");
+    std::fs::write(work.path().join("release"), b"finish").unwrap();
+    assert_eq!(
+        child
+            .wait_with_timeout(Some(harn_clock::test_support::HANG_CEILING), &|| false)
+            .unwrap(),
+        harn_hostlib::process::WaitOutcome::Exited(harn_hostlib::process::ExitStatus::from_code(0)),
+        "child finishes with its owner alive"
+    );
+    assert_eq!(
+        std::fs::read(work.path().join("completed")).unwrap(),
+        b"child completed after closing input"
+    );
+}
 
 #[test]
 fn owner_death_grandchild_fixture() {
@@ -78,22 +194,59 @@ fn owner_death_supervisor_fixture() {
         "process_tools_e2e::owner_death_guardian_fixture",
         "--nocapture",
     ]);
-    let info = harn_hostlib::tools::long_running::spawn_long_running(
-        "owner_death_supervisor_fixture",
-        std::env::current_exe()
-            .expect("resolve process-tools test executable")
-            .to_string_lossy()
-            .into_owned(),
-        vec![
-            "--exact".to_string(),
-            "process_owner_death_e2e::owner_death_payload_fixture".to_string(),
-            "--nocapture".to_string(),
-        ],
-        None,
-        std::collections::BTreeMap::new(),
-        format!("owner-death-supervisor-{}", std::process::id()),
-    )
-    .expect("spawn managed background payload");
+    let mut input_owner = None;
+    let (worker_pid, worker_pgid) = if std::env::var_os(OWNER_DEATH_STALLED_STDIN_ENV).is_some() {
+        use harn_hostlib::process::{
+            spawn_process, EnvMode, OutputCapture, OwnerDeathPolicy, SpawnSpec,
+        };
+        let mut child = spawn_process(SpawnSpec {
+            builtin: "owner_death_stalled_input_fixture",
+            program: std::env::current_exe()
+                .unwrap()
+                .to_string_lossy()
+                .into_owned(),
+            args: vec![
+                "--exact".into(),
+                "process_owner_death_e2e::owner_death_payload_fixture".into(),
+                "--nocapture".into(),
+            ],
+            cwd: None,
+            env: std::collections::BTreeMap::new(),
+            env_remove: Vec::new(),
+            env_mode: EnvMode::Patch,
+            use_stdin: true,
+            configure_process_group: true,
+            owner_death: OwnerDeathPolicy::KillContainment,
+            output_capture: OutputCapture::Pipe,
+        })
+        .expect("spawn actual contained child with application stdin");
+        let pid = child.pid().expect("payload pid");
+        let pgid = child.process_group_id().expect("payload group");
+        wait_for_stalled_input(child.take_stdin().expect("payload input"));
+        input_owner = Some(child);
+        (pid, pgid)
+    } else {
+        let info = harn_hostlib::tools::long_running::spawn_long_running(
+            "owner_death_supervisor_fixture",
+            std::env::current_exe()
+                .expect("resolve process-tools test executable")
+                .to_string_lossy()
+                .into_owned(),
+            vec![
+                "--exact".to_string(),
+                "process_owner_death_e2e::owner_death_payload_fixture".to_string(),
+                "--nocapture".to_string(),
+            ],
+            None,
+            std::collections::BTreeMap::new(),
+            format!("owner-death-supervisor-{}", std::process::id()),
+        )
+        .expect("spawn managed background payload");
+        (
+            info.pid,
+            info.process_group_id.expect("worker process group"),
+        )
+    };
     // A sibling forked without exec keeps every descriptor this process holds,
     // including the write end of the guardian's liveness pipe. It stands in
     // for a process another thread spawned while that pipe was still
@@ -130,11 +283,13 @@ fn owner_death_supervisor_fixture() {
         "supervisor={} supervisor_pgid={} worker={} worker_pgid={} holder={}",
         std::process::id(),
         unsafe { libc::getpgrp() },
-        info.pid,
-        info.process_group_id.expect("worker process group"),
+        worker_pid,
+        worker_pgid,
         leaked_liveness_holder,
     );
     std::io::stdout().flush().expect("flush supervisor report");
+    // Retain the real process handle, including its owner-liveness writer.
+    std::hint::black_box(&input_owner);
     loop {
         unsafe {
             libc::pause();
@@ -161,7 +316,78 @@ impl Drop for ProcessGroupCleanup {
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 #[test]
 fn managed_background_group_dies_when_its_supervisor_is_sigkilled() {
-    assert_managed_background_group_dies_with_supervisor(false);
+    assert_managed_background_group_dies_with_supervisor(false, false);
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn contained_group_dies_when_payload_stdin_is_stalled_and_owner_is_sigkilled() {
+    assert_managed_background_group_dies_with_supervisor(false, true);
+    assert_managed_background_group_dies_with_supervisor(true, true);
+}
+
+/// Observe a sleeping write syscall on the actual pipe, rather than assuming
+/// that a quiet period means the forwarding stages have filled. The payload
+/// never reads stdin, so backpressure persists until the supervisor is killed.
+/// Linux exposes the necessary thread and descriptor state through procfs.
+#[cfg(target_os = "linux")]
+fn wait_for_stalled_input(mut input: Box<dyn Write + Send>) {
+    let (started_tx, started_rx) = std::sync::mpsc::channel();
+    let (done_tx, done_rx) = std::sync::mpsc::channel();
+    harn_parser::runtime_stack::spawn(move || {
+        let bytes = [0_u8; 4096];
+        input.write_all(&bytes).expect("first actual input write");
+        started_tx
+            .send(unsafe { libc::syscall(libc::SYS_gettid) })
+            .unwrap();
+        let result = (0..16_384).try_for_each(|_| input.write_all(&bytes));
+        let _ = done_tx.send(result.is_ok());
+    });
+    let tid = harn_clock::test_support::recv_within("writer reached the actual pipe", &started_rx);
+    tokio::runtime::Builder::new_current_thread()
+        .build()
+        .unwrap()
+        .block_on(harn_clock::test_support::within(
+            "application input writer sleeps in a kernel pipe write",
+            async {
+                loop {
+                    assert!(
+                        matches!(
+                            done_rx.try_recv(),
+                            Err(std::sync::mpsc::TryRecvError::Empty)
+                        ),
+                        "input writer finished before owner death"
+                    );
+                    let state = std::fs::read_to_string(format!("/proc/self/task/{tid}/stat"))
+                        .expect("read actual writer thread state");
+                    let syscall = std::fs::read_to_string(format!("/proc/self/task/{tid}/syscall"))
+                        .expect("read actual writer syscall");
+                    let mut fields = syscall.split_whitespace();
+                    if state
+                        .rsplit_once(") ")
+                        .is_some_and(|(_, tail)| tail.starts_with("S "))
+                        && fields
+                            .next()
+                            .and_then(|value| value.parse::<libc::c_long>().ok())
+                            == Some(libc::SYS_write)
+                    {
+                        let fd = fields.next().expect("write syscall descriptor");
+                        let fd = u32::from_str_radix(fd.trim_start_matches("0x"), 16)
+                            .expect("parse write syscall descriptor");
+                        let pipe = std::fs::read_link(format!("/proc/self/fd/{fd}"))
+                            .expect("resolve actual writer descriptor");
+                        assert!(pipe.to_string_lossy().starts_with("pipe:["));
+                        break;
+                    }
+                    tokio::task::yield_now().await;
+                }
+            },
+        ));
+}
+
+#[cfg(not(target_os = "linux"))]
+fn wait_for_stalled_input(_input: Box<dyn Write + Send>) {
+    panic!("stalled-input qualification requires Linux kernel pipe-write evidence");
 }
 
 /// The liveness pipe's EOF is not the only owner-death signal: a leaked copy
@@ -173,14 +399,17 @@ fn managed_background_group_dies_when_its_supervisor_is_sigkilled() {
 #[test]
 fn managed_background_group_dies_when_a_sibling_holds_the_liveness_pipe() {
     for _ in 0..OWNER_EXIT_STRESS_TRIALS {
-        assert_managed_background_group_dies_with_supervisor(true);
+        assert_managed_background_group_dies_with_supervisor(true, false);
     }
 }
 
 const OWNER_EXIT_STRESS_TRIALS: usize = 20;
 
 #[cfg(any(target_os = "macos", target_os = "linux"))]
-fn assert_managed_background_group_dies_with_supervisor(leak_liveness_pipe: bool) {
+fn assert_managed_background_group_dies_with_supervisor(
+    leak_liveness_pipe: bool,
+    stalled_stdin: bool,
+) {
     // Held for the whole trial. Each trial's report pipe is inheritable on
     // purpose, so a concurrent trial's supervisor would hold a copy of it, and
     // a test that rewrites TMPDIR while the supervisor spawns hands it a
@@ -213,6 +442,9 @@ fn assert_managed_background_group_dies_with_supervisor(leak_liveness_pipe: bool
         .process_group(0);
     if leak_liveness_pipe {
         supervisor.env(OWNER_DEATH_LEAK_LIVENESS_ENV, "1");
+    }
+    if stalled_stdin {
+        supervisor.env(OWNER_DEATH_STALLED_STDIN_ENV, "1");
     }
     let mut supervisor = supervisor.spawn().expect("spawn isolated supervisor");
     unsafe {

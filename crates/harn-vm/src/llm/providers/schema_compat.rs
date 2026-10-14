@@ -484,13 +484,26 @@ impl SchemaSanitizer<'_> {
             return;
         }
 
+        // Strict mode has no way to leave a property out. For tool parameters,
+        // optionality moves into the value: an originally optional property
+        // also accepts `null`, and tool dispatch reads that `null` back as
+        // absent (`llm::tools::compat::drop_unused_optional_args`). Without
+        // this the model must invent a value (`""`, `0`, `false`) that the
+        // tool then executes as if it were meant. Structured output keeps the
+        // plain note: completed responses are validated against the caller's
+        // original schema, which has no inverse step to turn `null` back into
+        // absence.
         if let Some(Value::Object(properties)) = object.get_mut("properties") {
             for name in &missing {
-                if let Some(Value::Object(property_schema)) = properties.get_mut(name) {
-                    append_description_note(
+                match properties.get_mut(name) {
+                    Some(property_schema) if self.surface == SchemaSurface::ToolParameters => {
+                        admit_null_for_unused_optional(property_schema);
+                    }
+                    Some(Value::Object(property_schema)) => append_description_note(
                         property_schema,
                         "Originally optional in Harn; included in `required` because this provider's strict schema subset requires every object property to be present.".to_string(),
-                    );
+                    ),
+                    _ => {}
                 }
             }
         }
@@ -573,6 +586,77 @@ fn append_description_note(object: &mut Map<String, Value>, note: String) {
             object.insert("description".to_string(), Value::String(note));
         }
     }
+}
+
+const UNUSED_OPTIONAL_NOTE: &str = "Optional in Harn: send null when not used. Listed in `required` only because this provider's strict schema subset requires every object property to be present.";
+
+/// Let an originally optional property accept `null` so a strict-mode model
+/// can say "not used" without inventing a value.
+///
+/// A plain scalar or array `type` widens in place (`"string"` →
+/// `["string", "null"]`), the spelling models follow most reliably. An object,
+/// or anything carrying a value set or a combinator, is wrapped as
+/// `anyOf: [original, {"type": "null"}]` instead, so the object is still
+/// closed in its own branch and later rewrites of that schema (`const` →
+/// `enum`) cannot silently drop the `null` again.
+fn admit_null_for_unused_optional(schema: &mut Value) {
+    let Value::Object(object) = schema else {
+        return;
+    };
+    if schema_admits_null(object) {
+        append_description_note(object, UNUSED_OPTIONAL_NOTE.to_string());
+        return;
+    }
+    let has_value_set_or_combinator = ["enum", "const", "anyOf", "oneOf", "allOf", "$ref"]
+        .iter()
+        .any(|keyword| object.contains_key(*keyword))
+        || schema_is_object_like(object);
+    match object.get_mut("type") {
+        Some(Value::String(kind)) if !has_value_set_or_combinator => {
+            let kind = std::mem::take(kind);
+            object.insert(
+                "type".to_string(),
+                Value::Array(vec![Value::String(kind), Value::String("null".to_string())]),
+            );
+            append_description_note(object, UNUSED_OPTIONAL_NOTE.to_string());
+        }
+        Some(Value::Array(kinds)) if !has_value_set_or_combinator => {
+            kinds.push(Value::String("null".to_string()));
+            append_description_note(object, UNUSED_OPTIONAL_NOTE.to_string());
+        }
+        _ => {
+            let description = object.remove("description");
+            let original = Value::Object(std::mem::take(object));
+            object.insert(
+                "anyOf".to_string(),
+                Value::Array(vec![original, serde_json::json!({"type": "null"})]),
+            );
+            if let Some(description) = description {
+                object.insert("description".to_string(), description);
+            }
+            append_description_note(object, UNUSED_OPTIONAL_NOTE.to_string());
+        }
+    }
+}
+
+fn schema_admits_null(object: &Map<String, Value>) -> bool {
+    let type_admits_null = match object.get("type") {
+        Some(Value::String(kind)) => kind == "null",
+        Some(Value::Array(kinds)) => kinds.iter().any(|kind| kind.as_str() == Some("null")),
+        _ => false,
+    };
+    // Only `anyOf` survives the strict subset; a `null` branch under `oneOf`
+    // is removed along with the keyword, so it cannot count here.
+    let union_admits_null = object
+        .get("anyOf")
+        .and_then(Value::as_array)
+        .is_some_and(|branches| {
+            branches
+                .iter()
+                .filter_map(Value::as_object)
+                .any(schema_admits_null)
+        });
+    type_admits_null || union_admits_null
 }
 
 fn schema_is_object_like(object: &Map<String, Value>) -> bool {

@@ -8,9 +8,8 @@ use super::streaming::{
     vm_sse_server_response, vm_sse_server_send,
 };
 use super::{
-    handle_from_value, http_mock_calls_snapshot, mock_call_headers_value, push_http_mock,
-    redact_mock_call_url, register_harness_http_mock, reset_http_state, HttpMockRegistry,
-    HttpMockResponse,
+    handle_from_value, http_mock_calls_snapshot, push_http_mock, redact_mock_call_url,
+    register_harness_http_mock, reset_http_state, HttpMockRegistry, HttpMockResponse,
 };
 use crate::connectors::test_util::{FakeHttpResponse, FakeHttpServer};
 use crate::value::VmValue;
@@ -183,31 +182,6 @@ async fn http_mock_records_normalized_headers_and_final_query_url() {
         Some("trace-1")
     );
     reset_http_state();
-}
-
-#[test]
-fn mock_call_headers_redact_sensitive_values() {
-    let headers = crate::value::DictMap::from_iter([
-        (
-            "authorization".to_string(),
-            VmValue::String(arcstr::ArcStr::from("Bearer secret")),
-        ),
-        (
-            "accept".to_string(),
-            VmValue::String(arcstr::ArcStr::from("application/json")),
-        ),
-        (
-            "x-api-key".to_string(),
-            VmValue::String(arcstr::ArcStr::from("secret")),
-        ),
-    ]);
-    let redacted = mock_call_headers_value(&headers, true);
-    assert_eq!(redacted["authorization"].display(), "[redacted]");
-    assert_eq!(redacted["x-api-key"].display(), "[redacted]");
-    assert_eq!(redacted["accept"].display(), "application/json");
-
-    let raw = mock_call_headers_value(&headers, false);
-    assert_eq!(raw["authorization"].display(), "Bearer secret");
 }
 
 #[test]

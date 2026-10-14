@@ -634,6 +634,12 @@ harn_resolve_binary() (
     current_freshness="$(harn_build_freshness_id "$bin" 1)" || return $?
     embedded_freshness="$(harn_embedded_build_freshness_id "$bin")" || return $?
     if [[ "$embedded_freshness" != "$current_freshness" ]]; then
+      if [[ "$current_freshness" != "$HARN_BUILD_FRESHNESS_ID" ]]; then
+        # The identity covers every worktree file, so an edit made while
+        # Cargo ran moves it; that is not a dependency-graph fault.
+        echo "error: worktree files changed while Harn was building; rerun once edits stop" >&2
+        return 1
+      fi
       echo "error: Harn build freshness identity did not converge after Cargo rebuilt the authoritative dependency graph" >&2
       return 1
     fi

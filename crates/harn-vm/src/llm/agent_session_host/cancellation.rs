@@ -247,7 +247,7 @@ pub(crate) async fn abandon_agent_session(session_id: &str) -> Result<(), VmErro
     // so the durable transcript a resume loads is already well formed.
     super::message_history::pair_orphaned_tool_use(
         session_id,
-        super::message_history::UNANSWERED_TOOL_CALL_OBSERVATION,
+        crate::llm::tool_call_history::UNANSWERED_TOOL_CALL_OBSERVATION,
     );
     if crate::agent_sessions::has_journal(session_id) {
         let provider_call_count = super::AGENT_HOST_SESSIONS.with(|sessions| {

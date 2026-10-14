@@ -458,6 +458,16 @@ fn main(harness: Harness) {
     }
 
     #[test]
+    fn closed_secret_store_cannot_expand_to_host_cli_credentials() {
+        let harness = Harness::real().with_secret_provider(Arc::new(crate::secrets::MemorySecretProvider::empty()));
+        let error = run_harness_source(
+            r#"fn main(harness: Harness) { harness.secrets.read_cli("github", {hostname: "github.com"}) }"#,
+            harness,
+        ).expect_err("closed credential authority must remain closed");
+        assert!(error.contains("bound secret store does not allow host CLI credentials"), "unexpected refusal: {error}");
+    }
+
+    #[test]
     fn auth_sub_handle_reads_bound_principal() {
         use crate::harness_auth::{enter_auth_principal, AuthPrincipal};
         let _principal = enter_auth_principal(AuthPrincipal {

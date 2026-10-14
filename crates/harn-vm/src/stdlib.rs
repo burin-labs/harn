@@ -69,7 +69,7 @@ mod json_query;
 pub(crate) mod json_repair;
 pub(crate) mod json_stream;
 mod jsonrpc;
-mod junit;
+pub mod junit;
 mod lifecycle_receipts;
 mod logging;
 pub mod long_running;
@@ -280,6 +280,7 @@ pub fn register_agent_stdlib(vm: &mut Vm) {
 /// installs the macro-emitted signature slice into the parser registry
 /// (idempotent under repeat calls with the same slice pointer).
 pub fn register_vm_stdlib(vm: &mut Vm) {
+    sandbox::child_write::install_child_write_probe();
     if !vm.install_shared_stdlib_registration() {
         register_stdlib_bindings(vm);
     }
@@ -553,6 +554,8 @@ pub fn all_builtin_manifest() -> &'static [&'static harn_builtin_registry::Built
 /// linearly rescan the full registry. The nested capability map also accepts a
 /// borrowed `&str`, so a method call does not allocate an owned lookup key.
 struct BuiltinManifestIndex {
+    runtime_only_contracts:
+        std::collections::HashMap<&'static str, &'static harn_builtin_meta::BuiltinContract>,
     by_name: std::collections::HashMap<
         &'static str,
         &'static harn_builtin_registry::BuiltinManifestEntry,
@@ -617,7 +620,18 @@ fn builtin_manifest_index() -> &'static BuiltinManifestIndex {
                 recorded_effects_by_name.insert(entry.name, *entry);
             }
         }
+        let mut runtime_only_contracts = std::collections::HashMap::new();
+        for def in all_builtin_defs().iter().filter(|def| def.runtime_only) {
+            for name in std::iter::once(def.sig.name).chain(def.aliases.iter().copied()) {
+                assert!(
+                    !by_name.contains_key(name)
+                        && runtime_only_contracts.insert(name, &def.contract).is_none(),
+                    "duplicate runtime builtin contract `{name}`"
+                );
+            }
+        }
         BuiltinManifestIndex {
+            runtime_only_contracts,
             by_name,
             by_capability,
             recorded_effects_by_name,
@@ -654,6 +668,21 @@ pub fn builtin_manifest_entry(
     name: &str,
 ) -> Option<&'static harn_builtin_registry::BuiltinManifestEntry> {
     builtin_manifest_index().by_name.get(name).copied()
+}
+
+/// Runtime-only constructors have contracts but are not source manifest entries.
+pub(crate) fn builtin_policy_metadata(
+    name: &str,
+) -> (
+    Option<&'static harn_builtin_registry::BuiltinManifestEntry>,
+    Option<&'static harn_builtin_meta::BuiltinContract>,
+) {
+    let index = builtin_manifest_index();
+    let entry = index.by_name.get(name).copied();
+    let contract = entry
+        .map(|entry| &entry.contract)
+        .or_else(|| index.runtime_only_contracts.get(name).copied());
+    (entry, contract)
 }
 
 /// Resolve the contract for one typed Harness method without allocation.
@@ -701,14 +730,23 @@ pub fn register_all_macro_builtins(vm: &mut Vm) {
 /// Return the canonical list of all stdlib builtin names. Used by
 /// harn-lint and harn-lsp to avoid hardcoded duplicate lists.
 pub fn stdlib_builtin_names() -> Vec<String> {
-    let vm = stdlib_probe_vm();
-    let mut names = vm.builtin_names();
-    // Special opcodes/keywords, not registered builtins, but linter
-    // should recognize them as valid function calls.
-    for extra in harn_parser::builtin_signatures::LANGUAGE_INTRINSICS {
-        names.push(extra.to_string());
-    }
-    names
+    // Building the probe VM registers the whole stdlib, and the linter asks
+    // for these names for every file it lints. Registration varies only with
+    // the legacy ambient-capability bridge, so keep one answer per setting.
+    static NAMES: [std::sync::OnceLock<Vec<String>>; 2] =
+        [std::sync::OnceLock::new(), std::sync::OnceLock::new()];
+    NAMES[usize::from(harn_parser::legacy_ambient_capabilities_enabled())]
+        .get_or_init(|| {
+            let vm = stdlib_probe_vm();
+            let mut names = vm.builtin_names();
+            // Special opcodes/keywords, not registered builtins, but linter
+            // should recognize them as valid function calls.
+            for extra in harn_parser::builtin_signatures::LANGUAGE_INTRINSICS {
+                names.push(extra.to_string());
+            }
+            names
+        })
+        .clone()
 }
 
 /// Return discoverable metadata for registered stdlib builtins.
@@ -993,7 +1031,7 @@ fn main(harness: Harness) {
         assert!(matches!(result, crate::value::VmValue::Bool(true)));
     }
 
-    /// `harn_stdlib::builtin_reexports` names builtins from a crate that
+    /// `harn_stdlib_catalog::builtin_reexports` names builtins from a crate that
     /// cannot see the builtin registry, so nothing there can catch a typo or a
     /// rename. This is that check: every re-exported name must resolve to a
     /// real builtin, or `import { … } from "std/…"` binds a reference to
@@ -1006,8 +1044,8 @@ fn main(harness: Harness) {
             .collect();
 
         let mut checked = 0;
-        for entry in harn_stdlib::STDLIB_SOURCES {
-            for name in harn_stdlib::builtin_reexports(entry.module) {
+        for entry in harn_modules::stdlib_catalog().sources {
+            for name in harn_stdlib_catalog::builtin_reexports(entry.module) {
                 assert!(
                     registered.contains(name),
                     "std/{} re-exports '{name}', which is not a registered builtin",

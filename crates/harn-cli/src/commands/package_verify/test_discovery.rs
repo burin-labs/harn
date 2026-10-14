@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use serde::Serialize;
@@ -10,6 +10,8 @@ use crate::package;
 
 #[derive(Debug, Clone, Default, Serialize)]
 pub(crate) struct PackageTestDiscovery {
+    #[serde(skip)]
+    pub selected_files: Vec<PathBuf>,
     pub selected_file_count: usize,
     pub discovered_test_count: usize,
     pub files_without_tests: Vec<PackageTestFileIdentity>,
@@ -40,15 +42,13 @@ pub(crate) struct PackageTestFileError {
     pub error: String,
 }
 
-pub(super) fn package_test_discovery(package_dir: &Path) -> PackageTestDiscovery {
-    let tests_dir = package_dir.join("tests");
-    let mut files = Vec::new();
-    super::collect_package_harn_files(package_dir, &tests_dir, &mut files);
-    files.sort();
-
+fn discover_selection(package_dir: &Path, files: Vec<PathBuf>) -> PackageTestDiscovery {
+    let package_dir = package_dir
+        .canonicalize()
+        .unwrap_or_else(|_| package_dir.to_owned());
     let discovered = files
-        .into_iter()
-        .map(|path| discover_file(package_dir, &path))
+        .iter()
+        .map(|path| discover_file(&package_dir, path))
         .collect::<Vec<_>>();
     let files_without_tests = discovered
         .iter()
@@ -69,6 +69,7 @@ pub(super) fn package_test_discovery(package_dir: &Path) -> PackageTestDiscovery
         })
         .collect();
     PackageTestDiscovery {
+        selected_files: files,
         selected_file_count: discovered.len(),
         discovered_test_count: discovered.iter().map(|file| file.tests.len()).sum(),
         files_without_tests,
@@ -125,7 +126,7 @@ fn discover_file(package_dir: &Path, path: &Path) -> PackageTestFileDiscovery {
     }
 }
 
-pub(super) fn inspect_package_test_discovery(
+pub(crate) fn inspect_package_test_discovery(
     package_dir: &Path,
 ) -> (PackageTestDiscovery, Vec<String>) {
     let (config, manifest_error) =
@@ -133,14 +134,15 @@ pub(super) fn inspect_package_test_discovery(
             Ok(context) => (context.manifest.tests, None),
             Err(error) => (Default::default(), Some(error.to_string())),
         };
-    let mut inventory = package_test_discovery(package_dir);
+    let selection = config.select_files(package_dir);
+    let mut inventory = discover_selection(package_dir, selection.files);
     inventory.allow_empty = config.allow_empty;
     inventory.allow_empty_reason = config
         .reason
         .map(|reason| reason.trim().to_string())
         .filter(|reason| !reason.is_empty());
 
-    let mut problems = Vec::new();
+    let mut problems = selection.problems;
     if let Some(error) = manifest_error {
         problems.push(format!("harn.toml could not be read: {error}"));
     }
@@ -156,7 +158,7 @@ pub(super) fn inspect_package_test_discovery(
         _ => {}
     }
     if inventory.selected_file_count == 0 && !inventory.allow_empty {
-        problems.push("package has no selected tests/*.harn files; declare [tests].allow_empty = true with a reason only when the package intentionally ships without tests".to_string());
+        problems.push("package has no selected test .harn files; declare [tests].allow_empty = true with a reason only when the package intentionally ships without tests".to_string());
     }
     problems.extend(inventory.files_without_tests.iter().map(|file| {
         format!(
@@ -171,4 +173,9 @@ pub(super) fn inspect_package_test_discovery(
             .map(|file| format!("{} ({}): {}", file.path, file.sha256, file.error)),
     );
     (inventory, problems)
+}
+
+#[cfg(test)]
+pub(super) fn package_test_discovery(package_dir: &Path) -> PackageTestDiscovery {
+    inspect_package_test_discovery(package_dir).0
 }

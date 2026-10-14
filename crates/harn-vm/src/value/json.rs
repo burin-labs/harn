@@ -5,6 +5,29 @@
 //! core reaches them without depending upward (#9112).
 use super::VmValue;
 
+impl From<harn_kernel::DataValue> for VmValue {
+    fn from(value: harn_kernel::DataValue) -> Self {
+        use harn_kernel::DataValue;
+        use std::sync::Arc;
+        match value {
+            DataValue::Nil => Self::Nil,
+            DataValue::Bool(value) => Self::Bool(value),
+            DataValue::Int(value) => Self::Int(value),
+            DataValue::Float(value) => Self::Float(value),
+            DataValue::String(value) => Self::String(value.into()),
+            DataValue::Bytes(value) => Self::Bytes(Arc::new(value)),
+            DataValue::List(values) => {
+                Self::List(Arc::new(values.into_iter().map(Self::from).collect()))
+            }
+            DataValue::Record(entries) => Self::dict(
+                entries
+                    .into_iter()
+                    .map(|(key, value)| (key, Self::from(value))),
+            ),
+        }
+    }
+}
+
 pub(crate) const BYTES_B64_TAG: &str = "$bytes_b64";
 
 pub(crate) fn tagged_bytes_json(bytes: &[u8]) -> serde_json::Value {

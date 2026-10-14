@@ -48,10 +48,18 @@ case "$1" in
       printf 'cargo-nextest %s (fake)\n' "${FAKE_NEXTEST_VERSION:-}"
       exit 0
     fi
-    if [[ "$#" -eq 10 && "$2" == "archive" && "$3" == "--locked" && \
+    if [[ "$#" -eq 8 && "$2" == "run" && "$3" == "--locked" && \
       "$4" == "--workspace" && "$5" == "--profile" && "$6" == "ci" && \
-      "$7" == "-E" && "$8" == 'all()' && "$9" == "--archive-file" && -n "${10}" ]]; then
-      printf 'tests archive\n' > "${10}"
+      "$7" == "-E" && "$8" == 'test(open_enum_source_compatibility)' ]]; then
+      [[ "${HARN_ENUM_COMPILER_ARCHIVE_STAGE:-}" == 1 ]] || exit 2
+      : > "${CARGO_RECEIPTS:?}/compiler-fixture-controls"
+      [[ "${FAKE_COMPILER_FIXTURE_FAILURE:-0}" == 0 ]] || exit 1
+    elif [[ "$#" -eq 12 && "$2" == "archive" && "$3" == "--locked" && \
+      "$4" == "--workspace" && "$5" == "--profile" && "$6" == "ci" && \
+      "$7" == "--tool-config-file" && "$8" == harn-compiler-archive:*/.config/nextest-compiler-archive.toml && \
+      "$9" == "-E" && "${10}" == 'all()' && "${11}" == "--archive-file" && -n "${12}" ]]; then
+      [[ -f "${CARGO_RECEIPTS:?}/compiler-fixture-controls" ]] || exit 2
+      printf 'tests archive\n' > "${12}"
       : > "${CARGO_RECEIPTS:?}/nextest-tests"
     elif [[ "$#" -eq 10 && "$2" == "archive" && "$3" == "--locked" && \
       "$4" == "--workspace" && "$5" == "--profile" && "$6" == "ci" && "$7" == "-E" && \
@@ -111,7 +119,7 @@ run_artifact() {
       FAKE_NEXTEST_VERSION="${FAKE_NEXTEST_VERSION_OVERRIDE:-$policy_nextest}" \
       FAKE_RUSTC_IDENTITY="${FAKE_RUSTC_IDENTITY_OVERRIDE:-rustc 1.95.0 (fake)}" \
       RUSTFLAGS="${RUSTFLAGS_OVERRIDE:--D warnings -Clink-arg=-fuse-ld=mold}" \
-      CARGO_PROFILE_DEV_DEBUG="${DEV_DEBUG_OVERRIDE:-line-tables-only}" \
+      CARGO_PROFILE_DEV_DEBUG="${DEV_DEBUG_OVERRIDE:-}" \
       HARN_VERIFY_RUST_RUNTIME="${VERIFY_RUNTIME_OVERRIDE:-0}" \
       HARN_RUST_TEST_ARTIFACT_MAX_BYTES="${MAX_BYTES_OVERRIDE:-9663676416}" \
       HARN_SECURITY_ARTIFACT_MAX_BYTES="${SECURITY_MAX_BYTES_OVERRIDE:-1073741824}" \
@@ -131,6 +139,7 @@ expect_failure() {
 run_artifact build-tests "$bundle" "$commit"
 test -f "$tmpdir/receipts/build"
 test -f "$tmpdir/receipts/nextest-tests"
+test -f "$tmpdir/receipts/compiler-fixture-controls"
 rm -f "$tmpdir/receipts/build" "$tmpdir/receipts/nextest-tests"
 run_artifact build-cli "$cli_bundle" "$commit"
 test -f "$tmpdir/receipts/build-ci-cli"
@@ -204,6 +213,24 @@ FAKE_RUSTC_IDENTITY_OVERRIDE='rustc 1.96.0 (wrong)' VERIFY_RUNTIME_OVERRIDE=1 \
 RUSTFLAGS_OVERRIDE='-D warnings' VERIFY_RUNTIME_OVERRIDE=1 \
   expect_failure "restore accepted the wrong Rust flags" \
   run_artifact restore-tests "$bundle" "$tmpdir/wrong-flags" "$commit"
+
+DEV_DEBUG_OVERRIDE=full \
+  expect_failure "build-tests accepted a dev debuginfo override that disagrees with Cargo.toml" \
+  run_artifact build-tests "$tmpdir/out/wrong-dev-debug.tar.zst" "$commit"
+
+# The artifact manifest records the dev debuginfo the script expects; that
+# value must be the one `[profile.dev]` in Cargo.toml actually builds with.
+manifest_dev_debug="$(awk '/^\[profile\.dev\]$/ { p = 1; next } /^\[/ { p = 0 } p && $1 == "debug" { gsub(/"/, "", $3); print $3 }' "$repo_root/Cargo.toml")"
+script_dev_debug="$(sed -n "s/^readonly EXPECTED_DEV_DEBUG='\(.*\)'$/\1/p" "$script")"
+if [[ -z "$manifest_dev_debug" || "$manifest_dev_debug" != "$script_dev_debug" ]]; then
+  echo "rust_artifact.sh EXPECTED_DEV_DEBUG ('$script_dev_debug') does not match Cargo.toml [profile.dev] debug ('$manifest_dev_debug')" >&2
+  exit 1
+fi
+workflow_dev_debug="$(awk '/^env:$/ { p = 1; next } /^jobs:$/ { p = 0 } p && $1 == "CARGO_PROFILE_DEV_DEBUG:" { print $2 }' "$repo_root/.github/workflows/ci.yml")"
+if [[ "$workflow_dev_debug" != "$manifest_dev_debug" ]]; then
+  echo "CI CARGO_PROFILE_DEV_DEBUG ('$workflow_dev_debug') does not match Cargo.toml [profile.dev] debug ('$manifest_dev_debug')" >&2
+  exit 1
+fi
 
 expect_failure "restore overwrote an existing destination" \
   run_artifact restore-tests "$bundle" "$tmpdir/restored" "$commit"
@@ -350,5 +377,13 @@ expect_failure "restore-candidate accepted a target the manifest does not list" 
 expect_failure "restore-candidate overwrote an existing destination" \
   run_artifact restore-candidate "$tmpdir/candidate/$candidate_file" \
   "$tmpdir/candidate/manifest.json" "$candidate_target" "$tmpdir/restored-candidate" "$commit"
+
+# A green archive cannot hide a failed compiler fixture or publish stale inputs.
+rm -f "$tmpdir/receipts/nextest-tests"
+FAKE_COMPILER_FIXTURE_FAILURE=1 \
+  expect_failure "build-tests accepted failed compiler fixture controls" \
+  run_artifact build-tests "$tmpdir/out/failed-compiler-fixture.tar.zst" "$commit"
+test ! -f "$tmpdir/receipts/nextest-tests"
+test ! -e "$tmpdir/out/failed-compiler-fixture.tar.zst"
 
 echo "rust_artifact_test: ok"

@@ -51,7 +51,9 @@ pipeline test(harness: Harness, task: unknown) {
           {id: "forged1", name: "operator_inspect", arguments: {account_id: "acct_123"}},
         ],
       },
-      llm_text("<done>##DONE##</done>"),
+      llm_text(
+        "<user_response>The operator-only tool is unavailable.</user_response><done>##DONE##</done>",
+      ),
     ],
     { ->
       const options: AgentSpec = {

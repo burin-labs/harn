@@ -9,7 +9,9 @@
 use uuid::Uuid;
 
 use crate::triggers::test_util::clock;
-use crate::triggers::{TriggerEvent, TriggerEventId};
+use crate::triggers::{
+    ProviderCatalogError, ProviderId, ProviderPayload, TriggerEvent, TriggerEventId,
+};
 use crate::value::{VmError, VmValue};
 
 pub(super) fn parse_trigger_event(value: &VmValue) -> Result<TriggerEvent, VmError> {
@@ -70,81 +72,72 @@ pub(super) fn parse_trigger_event(value: &VmValue) -> Result<TriggerEvent, VmErr
     if !object.contains_key("provider_payload") {
         object.insert(
             "provider_payload".to_string(),
-            default_provider_payload(provider.as_str(), kind.as_str(), raw_event),
+            default_provider_payload(provider.as_str(), kind.as_str(), raw_event)?,
         );
     }
 
-    serde_json::from_value(json).map_err(|error| {
+    let mut event: TriggerEvent = serde_json::from_value(json).map_err(|error| {
         VmError::Runtime(format!("trigger_fire: trigger event parse error: {error}"))
-    })
+    })?;
+    event.kind = event.provider_payload.event_kind(&event.kind);
+    Ok(event)
 }
 
 fn default_provider_payload(
     provider: &str,
     kind: &str,
     raw_event: serde_json::Value,
-) -> serde_json::Value {
-    match provider {
-        "github" => serde_json::json!({
-            "provider": "github",
-            "event": kind,
-            "action": serde_json::Value::Null,
-            "delivery_id": serde_json::Value::Null,
-            "installation_id": serde_json::Value::Null,
-            "raw": raw_event,
-        }),
-        "slack" => serde_json::json!({
-            "provider": "slack",
-            "event": kind,
-            "event_id": serde_json::Value::Null,
-            "api_app_id": serde_json::Value::Null,
-            "team_id": serde_json::Value::Null,
-            "channel_id": serde_json::Value::Null,
-            "user_id": serde_json::Value::Null,
-            "event_ts": serde_json::Value::Null,
-            "raw": raw_event,
-        }),
-        "linear" => serde_json::json!({
-            "provider": "linear",
-            "event": kind.split('.').next().unwrap_or(kind),
-            "action": kind.split('.').nth(1).unwrap_or("update"),
-            "delivery_id": serde_json::Value::Null,
-            "organization_id": serde_json::Value::Null,
-            "webhook_id": serde_json::Value::Null,
-            "url": serde_json::Value::Null,
-            "created_at": serde_json::Value::Null,
-            "actor": serde_json::Value::Null,
-            "webhook_timestamp": serde_json::Value::Null,
-            "raw": raw_event,
-        }),
-        "cron" => serde_json::json!({
-            "provider": "cron",
-            "cron_id": serde_json::Value::Null,
-            "schedule": serde_json::Value::Null,
-            "tick_at": clock::now_utc()
-                .format(&time::format_description::well_known::Rfc3339)
-                .unwrap_or_default(),
-            "raw": raw_event,
-        }),
-        "webhook" => serde_json::json!({
-            "provider": "webhook",
-            "source": "trigger_fire",
-            "content_type": "application/json",
-            "raw": raw_event,
-        }),
-        "a2a-push" => serde_json::json!({
-            "provider": "a2a-push",
-            "task_id": serde_json::Value::Null,
-            "task_state": serde_json::Value::Null,
-            "artifact": serde_json::Value::Null,
-            "sender": serde_json::Value::Null,
-            "raw": raw_event,
-            "kind": "a2a.task.update",
-        }),
-        _ => serde_json::json!({
-            "provider": provider,
-            "schema_name": "TriggerEvent",
-            "raw": raw_event,
-        }),
+) -> Result<serde_json::Value, VmError> {
+    let headers = serde_json::from_value(raw_event["headers"].clone()).unwrap_or_default();
+    let payload = match ProviderPayload::normalize(
+        &ProviderId::from(provider),
+        kind,
+        &headers,
+        raw_event.clone(),
+    ) {
+        Ok(payload) => payload,
+        Err(ProviderCatalogError::UnknownProvider(_)) => {
+            ProviderPayload::extension(provider, "TriggerEvent", raw_event)
+        }
+        Err(error) => {
+            return Err(VmError::Runtime(format!(
+                "trigger_fire: provider payload normalization failed: {error}"
+            )))
+        }
+    };
+    serde_json::to_value(payload).map_err(|error| {
+        VmError::Runtime(format!(
+            "trigger_fire: provider payload serialization failed: {error}"
+        ))
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn synthetic_events_use_current_provider_payload_contracts() {
+        let pinned = time::OffsetDateTime::UNIX_EPOCH;
+        let _clock = clock::install_override(clock::MockClock::new(pinned));
+        for provider in ["github", "slack", "linear", "synthetic-custom"] {
+            let raw = serde_json::json!({"provider": provider, "kind": "opened", "number": 42});
+            let event = parse_trigger_event(&crate::stdlib::json_to_vm_value(&raw)).unwrap();
+            let ProviderPayload::Extension(payload) = event.provider_payload else {
+                panic!("package and custom providers must use extension payloads");
+            };
+            assert_eq!(payload.provider, provider);
+            assert_eq!(payload.raw, raw);
+        }
+        let cron = parse_trigger_event(&crate::stdlib::json_to_vm_value(&serde_json::json!({
+            "provider": "cron", "kind": "cron.tick"
+        })))
+        .unwrap();
+        let ProviderPayload::Known(crate::triggers::event::KnownProviderPayload::Cron(payload)) =
+            cron.provider_payload
+        else {
+            panic!("built-in cron must retain its typed payload");
+        };
+        assert_eq!(payload.tick_at, pinned);
     }
 }

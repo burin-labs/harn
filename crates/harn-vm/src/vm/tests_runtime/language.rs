@@ -5,19 +5,6 @@
 //! nil coalescing, subscripting, and the guards on oversized string operations.
 
 use super::harness::*;
-#[test]
-fn test_arithmetic() {
-    let out = run_output("pipeline t(harness: Harness, task: unknown) { harness.stdio.log(2 + 3)\nharness.stdio.log(10 - 4)\nharness.stdio.log(3 * 5)\nharness.stdio.log(10 / 3) }");
-    assert_eq!(out, "[harn] 5\n[harn] 6\n[harn] 15\n[harn] 3");
-}
-
-#[test]
-fn test_mixed_arithmetic() {
-    let out = run_output(
-        "pipeline t(harness: Harness, task: unknown) { harness.stdio.log(3 + 1.5)\nharness.stdio.log(10 - 2.5) }",
-    );
-    assert_eq!(out, "[harn] 4.5\n[harn] 7.5");
-}
 
 #[test]
 fn test_typed_opcode_drift_falls_back_to_generic() {
@@ -57,14 +44,6 @@ fn typed_annotation_is_enforced_at_the_binding_site() {
 }
 
 #[test]
-fn test_exponentiation() {
-    let out = run_output(
-        "pipeline t(harness: Harness, task: unknown) { harness.stdio.log(2 ** 8)\nharness.stdio.log(2 * 3 ** 2)\nharness.stdio.log(2 ** 3 ** 2)\nharness.stdio.log(2 ** -1) }",
-    );
-    assert_eq!(out, "[harn] 256\n[harn] 18\n[harn] 512\n[harn] 0.5");
-}
-
-#[test]
 fn test_unary_minus_binds_looser_than_exponent() {
     // `-2 ** 2` is `-(2 ** 2) = -4`, matching Python/Ruby/math notation rather
     // than the spreadsheet `(-2) ** 2 = 4` reading. The exponent operand still
@@ -81,58 +60,6 @@ fn test_comparisons() {
 }
 
 #[test]
-fn test_let_var() {
-    let out = run_output(
-        "pipeline t(harness: Harness, task: unknown) { const x = 42\nharness.stdio.log(x)\nlet y = 1\ny = 2\nharness.stdio.log(y) }",
-    );
-    assert_eq!(out, "[harn] 42\n[harn] 2");
-}
-
-#[test]
-fn test_if_else() {
-    let out = run_output(
-        r#"pipeline t(harness: Harness, task: unknown) { if true { harness.stdio.log("yes") }
-if false { harness.stdio.log("wrong") } else { harness.stdio.log("no") } }"#,
-    );
-    assert_eq!(out, "[harn] yes\n[harn] no");
-}
-
-#[test]
-fn test_while_loop() {
-    let out = run_output("pipeline t(harness: Harness, task: unknown) { let i = 0\n while i < 5 { i = i + 1 }\n harness.stdio.log(i) }");
-    assert_eq!(out, "[harn] 5");
-}
-
-#[test]
-fn test_for_in() {
-    let out = run_output(
-        "pipeline t(harness: Harness, task: unknown) { for item in [1, 2, 3] { harness.stdio.log(item) } }",
-    );
-    assert_eq!(out, "[harn] 1\n[harn] 2\n[harn] 3");
-}
-
-#[test]
-fn test_inner_for_return_does_not_leak_iterator_into_caller() {
-    let out = run_output(
-        r#"pipeline t(harness: Harness, task: unknown) {
-  fn first_match() {
-    for pattern in ["a", "b"] {
-      return pattern
-    }
-    return ""
-  }
-
-  let seen = []
-  for path in ["outer"] {
-    seen = seen + [path + ":" + first_match()]
-  }
-  harness.stdio.log(join(seen, ","))
-}"#,
-    );
-    assert_eq!(out, "[harn] outer:a");
-}
-
-#[test]
 fn test_fn_decl_and_call() {
     let out = run_output(
         "pipeline t(harness: Harness, task: unknown) { fn add(a, b) { return a + b }\nharness.stdio.log(add(3, 4)) }",
@@ -141,77 +68,11 @@ fn test_fn_decl_and_call() {
 }
 
 #[test]
-fn test_closure() {
-    let out = run_output(
-        "pipeline t(harness: Harness, task: unknown) { const double = { x -> x * 2 }\nharness.stdio.log(double(5)) }",
-    );
-    assert_eq!(out, "[harn] 10");
-}
-
-#[test]
 fn test_closure_capture() {
     let out = run_output(
         "pipeline t(harness: Harness, task: unknown) { const base = 10\nfn offset(x) { return x + base }\nharness.stdio.log(offset(5)) }",
     );
     assert_eq!(out, "[harn] 15");
-}
-
-#[test]
-fn test_string_concat() {
-    let out = run_output(
-        r#"pipeline t(harness: Harness, task: unknown) { const a = "hello" + " " + "world"
-harness.stdio.log(a) }"#,
-    );
-    assert_eq!(out, "[harn] hello world");
-}
-
-#[test]
-fn test_list_map() {
-    let out = run_output(
-        "pipeline t(harness: Harness, task: unknown) { const doubled = [1, 2, 3].map({ x -> x * 2 })\nharness.stdio.log(doubled) }",
-    );
-    assert_eq!(out, "[harn] [2, 4, 6]");
-}
-
-#[test]
-fn test_list_filter() {
-    let out = run_output(
-        "pipeline t(harness: Harness, task: unknown) { const big = [1, 2, 3, 4, 5].filter({ x -> x > 3 })\nharness.stdio.log(big) }",
-    );
-    assert_eq!(out, "[harn] [4, 5]");
-}
-
-#[test]
-fn test_list_reduce() {
-    let out = run_output(
-        "pipeline t(harness: Harness, task: unknown) { const sum = [1, 2, 3, 4].reduce(0, { acc, x -> acc + x })\nharness.stdio.log(sum) }",
-    );
-    assert_eq!(out, "[harn] 10");
-}
-
-#[test]
-fn test_dict_access() {
-    let out = run_output(
-        r#"pipeline t(harness: Harness, task: unknown) { const d = {name: "test", value: 42}
-harness.stdio.log(d.name)
-harness.stdio.log(d.value) }"#,
-    );
-    assert_eq!(out, "[harn] test\n[harn] 42");
-}
-
-#[test]
-fn test_dict_methods() {
-    let out = run_output(
-        r#"pipeline t(harness: Harness, task: unknown) { const d = {a: 1, b: 2}
-harness.stdio.log(d.keys())
-harness.stdio.log(d.values())
-harness.stdio.log(d.has("a"))
-harness.stdio.log(d.has("z")) }"#,
-    );
-    assert_eq!(
-        out,
-        "[harn] [a, b]\n[harn] [1, 2]\n[harn] true\n[harn] false"
-    );
 }
 
 #[test]
@@ -240,14 +101,6 @@ fn test_str_pad_rejects_oversized_width() {
     );
     let err = result.unwrap_err().to_string();
     assert!(err.contains("repeat") && err.contains("limit"), "{err}");
-}
-
-#[test]
-fn test_string_repeat_operator_small_count_ok() {
-    let out = run_output(
-        r#"pipeline t(harness: Harness, task: unknown) { harness.stdio.log("ab" * 3) }"#,
-    );
-    assert_eq!(out, "[harn] ababab");
 }
 
 #[test]
@@ -321,26 +174,6 @@ fn test_pipe_operator() {
 }
 
 #[test]
-fn test_pipe_with_closure() {
-    let out = run_output(
-        r#"pipeline t(harness: Harness, task: unknown) { const r = "hello world" |> { s -> s.split(" ") }
-harness.stdio.log(r) }"#,
-    );
-    assert_eq!(out, "[harn] [hello, world]");
-}
-
-#[test]
-fn test_nil_coalescing() {
-    let out = run_output(
-        r#"pipeline t(harness: Harness, task: unknown) { const a = nil ?? "fallback"
-harness.stdio.log(a)
-const b = "present" ?? "fallback"
-harness.stdio.log(b) }"#,
-    );
-    assert_eq!(out, "[harn] fallback\n[harn] present");
-}
-
-#[test]
 fn positive_assert_false_fallback_matches_native_truthiness() {
     let out = run_output(
         r"
@@ -407,15 +240,6 @@ fn test_logical_operators() {
 }
 
 #[test]
-fn test_match() {
-    let out = run_output(
-        r#"pipeline t(harness: Harness, task: unknown) { const x = "b"
-match x { "a" -> { harness.stdio.log("first") } "b" -> { harness.stdio.log("second") } "c" -> { harness.stdio.log("third") } } }"#,
-    );
-    assert_eq!(out, "[harn] second");
-}
-
-#[test]
 fn test_subscript() {
     let out = run_output(
         r#"pipeline t(harness: Harness, task: unknown) {
@@ -431,29 +255,13 @@ harness.stdio.log("éx"[-1])
 }
 
 #[test]
-fn test_string_methods() {
-    let out = run_output(
-        r#"pipeline t(harness: Harness, task: unknown) { harness.stdio.log("hello world".replace("world", "harn"))
-harness.stdio.log("a,b,c".split(","))
-harness.stdio.log("  hello  ".trim())
-harness.stdio.log("hello".starts_with("hel"))
-harness.stdio.log("hello".ends_with("lo"))
-harness.stdio.log("hello".substring(1, 3)) }"#,
-    );
-    assert_eq!(
-        out,
-        "[harn] hello harn\n[harn] [a, b, c]\n[harn] hello\n[harn] true\n[harn] true\n[harn] el"
-    );
-}
-
-#[test]
-fn test_includes_aliases_membership_methods() {
+fn test_contains_is_the_membership_method_on_every_collection() {
     let out = run_output(
         r#"pipeline t(harness: Harness, task: unknown) {
-harness.stdio.log("hello world".includes("world"))
-harness.stdio.log(["alpha", "beta"].includes("beta"))
-harness.stdio.log(set("read", "write").includes("write"))
-harness.stdio.log((1 to 4).includes(3))
+harness.stdio.log("hello world".contains("world"))
+harness.stdio.log(["alpha", "beta"].contains("beta"))
+harness.stdio.log(set("read", "write").contains("write"))
+harness.stdio.log((1..=4).contains(3))
 }"#,
     );
     assert_eq!(out, "[harn] true\n[harn] true\n[harn] true\n[harn] true");
@@ -466,19 +274,10 @@ fn test_string_length_fast_paths_keep_unicode_scalar_semantics() {
 harness.stdio.log(len("abcd"))
 harness.stdio.log(len("é🙂"))
 harness.stdio.log("é🙂".count)
-harness.stdio.log("é🙂".count())
 harness.stdio.log("é🙂".len())
 }"#,
     );
-    assert_eq!(out, "[harn] 4\n[harn] 2\n[harn] 2\n[harn] 2\n[harn] 2");
-}
-
-#[test]
-fn test_list_properties() {
-    let out = run_output(
-        "pipeline t(harness: Harness, task: unknown) { const list = [1, 2, 3]\nharness.stdio.log(list.count)\nharness.stdio.log(list.empty)\nharness.stdio.log(list.first)\nharness.stdio.log(list.last) }",
-    );
-    assert_eq!(out, "[harn] 3\n[harn] false\n[harn] 1\n[harn] 3");
+    assert_eq!(out, "[harn] 4\n[harn] 2\n[harn] 2\n[harn] 2");
 }
 
 #[test]
@@ -497,20 +296,4 @@ const r = x > 0 ? "positive" : "non-positive"
 harness.stdio.log(r) }"#,
     );
     assert_eq!(out, "[harn] positive");
-}
-
-#[test]
-fn test_for_in_dict() {
-    let out = run_output(
-        "pipeline t(harness: Harness, task: unknown) { const d = {a: 1, b: 2}\nfor entry in d { harness.stdio.log(entry.key) } }",
-    );
-    assert_eq!(out, "[harn] a\n[harn] b");
-}
-
-#[test]
-fn test_list_any_all() {
-    let out = run_output(
-        "pipeline t(harness: Harness, task: unknown) { const nums = [2, 4, 6]\nharness.stdio.log(nums.any({ x -> x > 5 }))\nharness.stdio.log(nums.all({ x -> x > 0 }))\nharness.stdio.log(nums.all({ x -> x > 3 })) }",
-    );
-    assert_eq!(out, "[harn] true\n[harn] true\n[harn] false");
 }

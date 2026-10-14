@@ -163,7 +163,7 @@ pub(crate) struct TestArgs {
     /// conformance fixtures so bundled `skills/` dirs are picked up.
     #[arg(long = "skill-dir", value_name = "PATH")]
     pub skill_dir: Vec<String>,
-    /// User-test files or directories, or a special suite and its selection.
+    /// User-test files or directories, `package` for [tests].roots, or a special suite and its selection.
     #[arg(value_name = "PATH", num_args = 0..)]
     pub paths: Vec<String>,
     /// First positional, classified once by the test command boundary.

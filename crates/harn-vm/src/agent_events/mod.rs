@@ -31,12 +31,16 @@ mod from_host;
 mod host_injection;
 mod lifecycle;
 mod registry;
+pub(crate) use registry::{
+    clear_session_parent_routes, link_session_sinks, retire_session_observer_lineage,
+};
 pub mod session_health;
 pub(crate) use crate::agent_sessions::observe_event;
 mod sinks;
 mod terminal;
 mod terminal_suspension;
 mod tool;
+pub(crate) mod transport;
 mod turn_phase;
 mod worker;
 
@@ -81,6 +85,7 @@ pub use tool::{
     DenialGate, SideEffectCeilingDetails, SideEffectCeilingRemedy, StagedWriteSummary,
     ToolCallErrorCategory, ToolCallStatus, ToolDenial, ToolExecutor, ToolMutationStatus,
 };
+pub use transport::AgentEventTransport;
 pub use turn_phase::AgentTurnPhase;
 pub use worker::{
     AgentRunRef, DelegatedJoinBoundaries, DelegatedRunLineage, FsWatchEvent,

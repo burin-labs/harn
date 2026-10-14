@@ -31,7 +31,8 @@ pub use error::{
     categorized_error, classify_error_message, error_to_category, ArgTypeMismatchError,
     ArityExpect, ArityMismatchError, BindingTypeMismatchError, DeadlockError, ErrorCategory,
     ProviderStreamDeadline, ProviderStreamFailure, ProviderStreamFailureReason,
-    ProviderStreamPhase, SchemaStreamAbort, SchemaValidationReasonKind, VmError,
+    ProviderStreamPhase, SchemaStreamAbort, SchemaValidationReasonKind, ValueByteLimitError,
+    VmError,
 };
 pub use handles::{
     VmAtomicHandle, VmChannelCloseState, VmChannelHandle, VmGenerator, VmJoinHandle, VmRange,
@@ -45,7 +46,7 @@ pub use isolate::IsolateValue;
 pub use set::VmSet;
 pub(crate) use storage_json::vm_to_storage_json;
 pub use structural::{
-    compare_values, dedup_values, try_compare_values, value_identity_key,
+    compare_values, dedup_values, try_compare_values, value_equality_hash_key, value_identity_key,
     value_structural_hash_key, values_equal, values_identical,
 };
 

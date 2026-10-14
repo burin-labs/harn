@@ -18,7 +18,7 @@ capabilities = [
 ]
 autonomy_tier = "act_with_approval"
 receipt_policy = "required"
-triggers = ["pagerduty.incident_triggered", "slack.oncall_message"]
+triggers = ["pagerduty.incident.triggered", "slack.message"]
 schedules = ["*/15 * * * *"]
 handoffs = []
 context_packs = ["oncall_runbook", "service_ownership", "release_policy"]

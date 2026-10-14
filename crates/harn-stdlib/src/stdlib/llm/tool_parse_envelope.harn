@@ -112,7 +112,7 @@ fn __tool_parse_envelope_json_list(
     if !(normalized?.ok ?? false) {
       return __tool_parse_envelope_error("tool_calls", to_string(normalized.error), prose)
     }
-    calls = calls.appending(normalized.call)
+    calls.push(normalized.call)
   }
   let after = trim(source.slice(stream.end, len(source)))
   if starts_with(after, close) {
@@ -204,7 +204,7 @@ fn __tool_parse_envelope_markers(body: string, prose: string) -> dict {
     if !(normalized?.ok ?? false) {
       return __tool_parse_envelope_error("tool_calls", to_string(normalized.error), prose)
     }
-    calls = calls.appending(normalized.call)
+    calls.push(normalized.call)
     marker_active = false
     marker_completed = true
     rest = trim(rest.slice(object_len, len(rest)))
@@ -304,7 +304,7 @@ fn __tool_parse_envelope_xml(body: string, prose: string) -> dict {
         prose,
       )
     }
-    calls = calls.appending({id: "tc_envelope_xml", name: name, arguments: arguments})
+    calls.push({id: "tc_envelope_xml", name: name, arguments: arguments})
     rest = trim(after_open.slice(close_at + len(close), len(after_open)))
   }
   if len(calls) == 0 {

@@ -9,7 +9,7 @@ pipeline default(harness: Harness) {
   const chunks = ["{\"name\":\"A", "da\",\"age\"", ":30,\"tags\":[\"x", "\",\"y\"]}"]
   let partials = []
   for obj in stream_object(harness.runtime, chunks) {
-    partials = partials.appending(obj)
+    partials.push(obj)
   }
   // More than one partial was emitted as the object filled in.
   harness.stdio.println(len(partials) >= 2)

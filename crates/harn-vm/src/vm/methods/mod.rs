@@ -3,6 +3,7 @@ mod dispatch;
 mod generator;
 mod iter;
 mod list;
+mod mutating;
 mod number;
 mod range;
 mod set;

@@ -74,35 +74,16 @@ commit controls.
 
 ### `ast/` languages
 
-Tree-sitter grammars are pinned in [`Cargo.toml`](Cargo.toml). Adding or
-dropping a language requires a coordinated change to the language table,
-schemas, fixtures, and any host bridge that relies on the canonical
-language names.
-
-| Language       | Grammar crate                 | Extensions      |
-|----------------|-------------------------------|-----------------|
-| TypeScript     | `tree-sitter-typescript`      | `.ts`           |
-| TSX            | `tree-sitter-typescript`      | `.tsx`          |
-| JavaScript     | `tree-sitter-javascript`      | `.js .mjs .cjs` |
-| JSX            | `tree-sitter-javascript`      | `.jsx`          |
-| Python         | `tree-sitter-python`          | `.py`           |
-| Go             | `tree-sitter-go`              | `.go`           |
-| Rust           | `tree-sitter-rust`            | `.rs`           |
-| Java           | `tree-sitter-java`            | `.java`         |
-| C              | `tree-sitter-c`               | `.c .h`         |
-| C++            | `tree-sitter-cpp`             | `.cpp .cc .hpp` |
-| C#             | `tree-sitter-c-sharp`         | `.cs`           |
-| Ruby           | `tree-sitter-ruby`            | `.rb`           |
-| Kotlin         | `tree-sitter-kotlin-ng`       | `.kt .kts`      |
-| PHP            | `tree-sitter-php`             | `.php`          |
-| Scala          | `tree-sitter-scala`           | `.scala .sc`    |
-| Bash / shell   | `tree-sitter-bash`            | `.sh .bash .zsh`|
-| Swift          | `tree-sitter-swift`           | `.swift`        |
-| Zig            | `tree-sitter-zig`             | `.zig`          |
-| Elixir         | `tree-sitter-elixir`          | `.ex .exs`      |
-| Lua            | `tree-sitter-lua`             | `.lua`          |
-| Haskell        | `tree-sitter-haskell`         | `.hs .lhs`      |
-| R              | `tree-sitter-r`               | `.r`            |
+Tree-sitter grammars are pinned in [`Cargo.toml`](Cargo.toml). Language
+names, aliases, extensions, exact file names (`Dockerfile`, `Makefile`), and
+structural capability columns live in one table, `LANGUAGES` in the
+[`harn-languages`](../harn-languages/src/lib.rs) crate. The code index,
+scanner, `get_file_outline`, `ast.*`, the project fingerprint, and the edit
+compass all detect languages through it, and a sweep test asserts they agree.
+`src/ast/language.rs` binds a grammar to every registry row marked
+structural. `get_file_outline` returns `status: "unsupported"` with a typed
+`reason` for files the registry does not know, languages without a grammar,
+and data or markup formats.
 
 The `ast::*` builtins emit row/column coordinates as **0-based** values
 (matching tree-sitter native `Point`s). Symbol kinds are normalized to

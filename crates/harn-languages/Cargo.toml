@@ -1,0 +1,16 @@
+[package]
+name = "harn-languages"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Canonical file-language registry (names, extensions, file names, structural support) shared by the Harn runtime and host library."
+
+# Intentionally zero-dependency: this crate is pure `&'static` table data so
+# both `harn-vm` and `harn-hostlib` (which binds the tree-sitter grammars on
+# top) can answer "what language is this path" from one owner.
+
+[lints]
+workspace = true

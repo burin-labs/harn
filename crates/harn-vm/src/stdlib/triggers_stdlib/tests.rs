@@ -38,6 +38,7 @@ fn manifest_binding(
     TriggerBindingSpec {
         id: id.to_string(),
         source: TriggerBindingSource::Manifest,
+        ingress_subscription: false,
         kind: "cron".to_string(),
         provider: ProviderId::from("cron"),
         autonomy_tier: crate::AutonomyTier::ActAuto,

@@ -59,8 +59,9 @@
     "ApprovalDecision": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["batch_fingerprint", "approved", "decider"],
+      "required": ["request_id", "batch_fingerprint", "approved", "decider"],
       "properties": {
+        "request_id": { "type": "string", "format": "uuid" },
         "batch_fingerprint": { "type": "string", "minLength": 1 },
         "approved": { "type": "boolean" },
         "decider": { "type": "string", "minLength": 1 }

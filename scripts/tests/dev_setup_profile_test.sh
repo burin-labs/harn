@@ -57,6 +57,7 @@ make_fixture_repo() {
   cp "$repo_root/scripts/sccache_rustc_wrapper.rs" "$repo/scripts/sccache_rustc_wrapper.rs"
   cp "$repo_root/scripts/cargo_target_seed.sh" "$repo/scripts/cargo_target_seed.sh"
   cp "$repo_root/scripts/lib/file_time.sh" "$repo/scripts/lib/file_time.sh"
+  cp "$repo_root/scripts/lib/cargo_env.sh" "$repo/scripts/lib/cargo_env.sh"
   chmod +x "$repo/scripts/dev_setup.sh" "$repo/scripts/cargo_target_seed.sh"
   printf '[package]\nname = "setup-fixture"\nversion = "0.1.0"\n' > "$repo/Cargo.toml"
   printf '#!/usr/bin/env bash\nset -euo pipefail\n' > "$repo/scripts/sign_local_macos.sh"
@@ -73,6 +74,8 @@ if [[ "${1:-}" == "--record-receipt" ]]; then
 fi
 target_dir=$(sed -n 's/^[[:space:]]*target-dir = "\([^"]*\)".*/\1/p' .cargo/config.toml)
 if [[ "${1:-}" == "--print" ]]; then
+  printf '%s\n' "${HARN_BIN_CARGO_TIMEOUT_SECONDS-__unset__}" \
+    >> "${DEV_SETUP_TEST_TIMEOUT_RECORD:-/dev/null}"
   mkdir -p "$target_dir/debug"
   printf '#!/usr/bin/env bash\n' > "$target_dir/debug/harn"
   chmod +x "$target_dir/debug/harn"
@@ -169,12 +172,14 @@ run_setup() {
     TMPDIR="$tmp_root/tmp-$profile" \
     HARN_DEV_SETUP_PROFILE="$profile" \
     HARN_DEV_SETUP_FORCE=1 \
+    HARN_BIN_CARGO_TIMEOUT_SECONDS="${SETUP_TEST_CARGO_TIMEOUT_SECONDS:-}" \
     HARN_CARGO_TARGET_SEED_KEY='' \
     HARN_CARGO_TARGET_SEED_TEST_COPY=1 \
     HARN_DEV_SETUP_STATE_DIR="$tmp_root/state-$profile" \
     HARN_DEV_TARGET_WORKTREE_PATH="${SETUP_TEST_WORKTREE_PATH:-$repo}" \
     DEV_SETUP_TEST_CARGO_RECORD="$cargo_record" \
     DEV_SETUP_TEST_RESOLVER_RECORD="$tmp_root/resolver-$profile.txt" \
+    DEV_SETUP_TEST_TIMEOUT_RECORD="$tmp_root/timeout-$profile.txt" \
     DEV_SETUP_TEST_PRUNE_RECORD="$tmp_root/prune-$profile.txt" \
     "$repo/scripts/dev_setup.sh" > "$output" 2>&1
 }
@@ -279,6 +284,17 @@ if grep -Fq 'install ' "$rust_cargo"; then
 fi
 if [[ -e "$rust_repo/node_modules" || -e "$rust_repo/crates/harn-cli/portal/node_modules" ]]; then
   echo "rust setup installed frontend dependencies" >&2
+  exit 1
+fi
+
+if [[ "$(cat "$tmp_root/timeout-rust.txt")" != "3600" ]]; then
+  echo "cold setup did not give the canonical build its one-hour budget" >&2
+  exit 1
+fi
+SETUP_TEST_CARGO_TIMEOUT_SECONDS=42 \
+  run_setup "$rust_repo" rust "$tmp_root/rust-explicit-budget-output.txt" "$rust_cargo"
+if [[ "$(tail -n 1 "$tmp_root/timeout-rust.txt")" != "42" ]]; then
+  echo "setup replaced an explicit canonical build budget" >&2
   exit 1
 fi
 
@@ -859,7 +875,7 @@ guard_output="$(
     HARN_TARGET_GC_PROTECT="/some/worktree/path/projects-caller" \
     "$repo_root/scripts/prune_stale_targets.sh"
 )"
-if ! grep -Fq "keep (caller's own entry): projects-caller" <<< "$guard_output"; then
+if ! grep -Fq "keep (caller protected entry): projects-caller" <<< "$guard_output"; then
   echo "the sweep did not report keeping the caller's own entry" >&2
   printf '%s\n' "$guard_output" >&2
   exit 1

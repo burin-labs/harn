@@ -106,6 +106,10 @@ pub enum AgentEvent {
     AgentMessageChunk {
         session_id: String,
         content: String,
+        /// Canonical journal source that made this text visible. For admitted
+        /// actor output this names the publication receipt, not its private draft.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        history_source_event_id: Option<String>,
     },
     AgentThoughtChunk {
         session_id: String,
@@ -115,6 +119,8 @@ pub enum AgentEvent {
         session_id: String,
         message_id: String,
         content: Vec<serde_json::Value>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        history_source_event_id: Option<String>,
     },
     ToolCall {
         session_id: String,
@@ -408,6 +414,10 @@ pub enum AgentEvent {
         /// both the value and the fact that it had been recorded.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         terminal_evidence_preserved: Option<bool>,
+        /// The report validated by the Harn completion boundary, preserved
+        /// unchanged for hosts and replay. Absence is not a successful report.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        requirement_report: Option<serde_json::Value>,
     },
     /// Per-step critique decision emitted by `agent_step_judge`.
     /// Sibling of [`JudgeDecision`] but fired BEFORE tool dispatch on

@@ -16,6 +16,7 @@ pub struct McpToolDef {
     /// and generated clients.
     pub catalog: crate::tool_registry::ToolCatalogEntry,
     pub handler: VmClosure,
+    pub invocation_requirement: crate::tool_registry::ToolInvocationRequirement,
 }
 
 /// A static resource to serve over MCP.

@@ -31,7 +31,13 @@ type LayeringPolicy = {layers: list<list<string>>, baseline: dict<string, int>}
 pub fn top_module(rel: string) -> string {
   const inside = rel.split(SOURCE_ROOT + "/")
   const tail = inside[len(inside) - 1]
+  if tail == nil {
+    throw "split returned no path components"
+  }
   const first = tail.split("/")[0]
+  if first == nil {
+    throw "split returned no module components"
+  }
   if first.ends_with(".rs") {
     return first.substring(0, len(first) - 3)
   }

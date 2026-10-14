@@ -165,10 +165,10 @@ pub fn release_binary_workflow() {
     concurrency: {
       group: "build-release-binaries-"
         + gha_expression(
-          "(github.event_name == 'workflow_dispatch' && inputs.benchmark_source_sha != '' && format('benchmark-{0}-{1}', inputs.benchmark_source_sha, github.sha)) || (github.event_name == 'schedule' && 'source-main') || (github.event_name == 'workflow_dispatch' && inputs.warm_cache_only && 'warm-main') || (github.event_name == 'push' && format('branch-{0}', github.run_id)) || github.ref_name",
+          "(github.event_name == 'workflow_dispatch' && inputs.benchmark_only && format('benchmark-{0}-{1}', inputs.benchmark_source_sha || github.sha, github.sha)) || ((github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.source_candidate)) && 'source-main') || (github.event_name == 'workflow_dispatch' && inputs.warm_cache_only && 'warm-main') || (github.event_name == 'push' && format('branch-{0}', github.run_id)) || github.ref_name",
         ),
       "cancel-in-progress": gha_expression(
-        "github.event_name == 'workflow_dispatch' && inputs.warm_cache_only",
+        "github.event_name == 'workflow_dispatch' && inputs.warm_cache_only && !inputs.source_candidate && !inputs.benchmark_only",
       ),
     },
     jobs: {
@@ -402,6 +402,25 @@ pub fn workflows() {
           ],
         },
         macos: {
+          name: "Rust on macOS (deny-warnings build + lint)",
+          needs: ["changes", "macos-lint"],
+          permissions: {contents: "read", actions: "read"},
+          steps: [
+            {
+              run: "./scripts/ci/require_macos_lint.sh",
+              env: {MATRIX_RESULT: gha_expression("needs.macos-lint.result")},
+            },
+          ],
+        },
+        "macos-lint": {
+          name: "Rust on macOS strict lint (" + gha_expression("matrix.kind") + ")",
+          "runs-on": "macos-latest",
+          strategy: {
+            "fail-fast": false,
+            matrix: {
+              include: [{kind: "workspace"}, {kind: "lean-lsp"}, {kind: "freshness-checker"}],
+            },
+          },
           env: {RUSTFLAGS: "-D warnings"},
           steps: [
             {uses: "actions/checkout@exact-pin"},
@@ -417,7 +436,11 @@ pub fn workflows() {
               uses: "./.github/actions/rust-cache",
               with: {"shared-key": "workspace-macos", "source-key": native_source_key()},
             },
-            {name: "Clippy all targets (deny warnings)", run: "./scripts/ci/run_rust_lint_lane.sh"},
+            {
+              name: "Clippy all targets (deny warnings)",
+              run: "./scripts/ci/run_rust_lint_lane.sh --leg \"" + gha_expression("matrix.kind")
+                + "\"",
+            },
           ],
         },
       },

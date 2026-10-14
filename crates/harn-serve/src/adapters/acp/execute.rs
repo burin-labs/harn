@@ -13,7 +13,7 @@ use super::{
 };
 
 #[derive(Debug)]
-pub(super) struct PromptExecutionError {
+pub struct PromptExecutionError {
     pub message: String,
     pub terminal_class: harn_vm::llm::AgentTerminalClass,
     /// Machine facts projected from the thrown error dict (provider/model of the
@@ -183,7 +183,7 @@ async fn configure_stable_vm(
 
 pub(super) async fn prepare_vm_baseline(
     source: &str,
-    source_path: &Path,
+    source_path: Option<&Path>,
     cwd: &Path,
     project_root: Option<&Path>,
     runtime_configurator: Arc<dyn AcpRuntimeConfigurator>,
@@ -192,7 +192,7 @@ pub(super) async fn prepare_vm_baseline(
     configure_stable_vm(
         &mut vm,
         source,
-        Some(source_path),
+        source_path,
         cwd,
         project_root,
         runtime_configurator,

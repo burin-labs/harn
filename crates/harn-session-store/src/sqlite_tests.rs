@@ -104,3 +104,129 @@ fn write_transactions_acquire_ownership_before_reading() {
         2
     );
 }
+
+mod append_batch {
+    use crate::{
+        AppendEvent, CreateSession, ReadRange, SessionEventKind, SessionStore, SqliteSessionStore,
+    };
+
+    fn message(text: &str) -> AppendEvent {
+        AppendEvent::new(
+            SessionEventKind::Message,
+            serde_json::json!({"role": "user", "content": text}),
+        )
+    }
+
+    /// A batch stores the rows a run of single appends stores, chained in
+    /// order, in one transaction.
+    #[tokio::test]
+    async fn batch_matches_single_appends_in_one_transaction() {
+        let single = SqliteSessionStore::open_in_memory().expect("store");
+        let batched = SqliteSessionStore::open_in_memory().expect("store");
+        let request = CreateSession {
+            id: Some("session".to_string()),
+            ..CreateSession::default()
+        };
+        single.create(request.clone()).await.expect("create");
+        batched.create(request).await.expect("create");
+        for text in ["one", "two", "three"] {
+            single
+                .append("session", message(text))
+                .await
+                .expect("append");
+        }
+        let before = batched.append_transactions();
+        let stored = batched
+            .append_batch(
+                "session",
+                vec![message("one"), message("two"), message("three")],
+            )
+            .await
+            .expect("append batch");
+        assert_eq!(batched.append_transactions() - before, 1);
+        assert_eq!(single.append_transactions(), 3);
+
+        let single_events = single
+            .read("session", ReadRange::default())
+            .await
+            .expect("read")
+            .events;
+        assert_eq!(
+            stored,
+            batched
+                .read("session", ReadRange::default())
+                .await
+                .expect("read")
+                .events
+        );
+        assert_eq!(stored.len(), single_events.len());
+        for (left, right) in stored.iter().zip(&single_events) {
+            assert_eq!(left.event_id, right.event_id);
+            assert_eq!(left.payload, right.payload);
+            assert_eq!(left.headers, right.headers);
+        }
+        assert_eq!(stored[0].prev_hash, None);
+        assert_eq!(
+            stored[1].prev_hash.as_deref(),
+            Some(stored[0].record_hash.as_str())
+        );
+        assert_eq!(
+            stored[2].prev_hash.as_deref(),
+            Some(stored[1].record_hash.as_str())
+        );
+        let meta = batched.describe("session").await.expect("describe");
+        assert_eq!(meta.event_count, 3);
+        assert_eq!(meta.last_event_id, Some(3));
+        assert!(batched
+            .verify("session")
+            .await
+            .expect("verify")
+            .failures
+            .is_empty());
+        let next = batched
+            .append("session", message("four"))
+            .await
+            .expect("append after batch");
+        assert_eq!(next.event_id, 4);
+        assert_eq!(
+            next.prev_hash.as_deref(),
+            Some(stored[2].record_hash.as_str())
+        );
+    }
+
+    /// A failure anywhere in the batch persists none of it, so a caller that
+    /// keeps its queue until the batch commits can retry without duplicates.
+    #[tokio::test]
+    async fn a_failing_event_rolls_back_the_whole_batch() {
+        let store = SqliteSessionStore::open_in_memory().expect("store");
+        store
+            .create(CreateSession {
+                id: Some("session".to_string()),
+                ..CreateSession::default()
+            })
+            .await
+            .expect("create");
+        let mut orphan = message("orphan");
+        orphan.parent_event_id = Some(99);
+        let before = store.append_transactions();
+        store
+            .append_batch("session", vec![message("kept?"), orphan])
+            .await
+            .expect_err("a missing parent must fail the batch");
+        assert_eq!(store.append_transactions(), before);
+        assert!(store
+            .read("session", ReadRange::default())
+            .await
+            .expect("read")
+            .events
+            .is_empty());
+        assert_eq!(
+            store
+                .describe("session")
+                .await
+                .expect("describe")
+                .event_count,
+            0
+        );
+    }
+}

@@ -115,6 +115,10 @@
         "reader": "std::env::var"
       },
       {
+        "file": "crates/harn-vm/src/llm/api/transport_stub_tests/ollama_openai_compat.rs",
+        "reader": "std::env::var"
+      },
+      {
         "file": "crates/harn-vm/src/llm/api/ollama.rs",
         "reader": "OLLAMA_HOST_ENV"
       }

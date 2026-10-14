@@ -30,8 +30,7 @@ use crate::llm::providers::schema_compat::{
 use crate::value::VmError;
 
 use self::messages::{
-    drop_orphan_tool_result_messages, enforce_single_tool_call_history,
-    enforce_tool_result_adjacency, maybe_remap_tool_call_text,
+    enforce_single_tool_call_history, maybe_remap_tool_call_text,
     relocate_tool_message_images_to_user, sanitize_openai_message_for_request,
 };
 use self::reasoning::{
@@ -147,7 +146,7 @@ impl LlmProviderChat for OpenAiCompatibleProvider {
         &'a self,
         request: &'a LlmRequestPayload,
         delta_tx: Option<DeltaSender>,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<LlmResult, VmError>> + 'a>> {
+    ) -> crate::llm::provider::ProviderChatFuture<'a> {
         Box::pin(self.chat_impl(request, delta_tx))
     }
 }
@@ -198,12 +197,6 @@ impl OpenAiCompatibleProvider {
             }));
         }
         msgs = crate::llm::api::normalize_openai_style_messages(msgs, false);
-        if has_native_tools {
-            msgs = drop_orphan_tool_result_messages(msgs);
-        }
-        if caps.requires_tool_result_adjacency {
-            msgs = enforce_tool_result_adjacency(msgs);
-        }
         if !caps.supports_parallel_tool_calls {
             msgs = enforce_single_tool_call_history(msgs, has_native_tools);
         }

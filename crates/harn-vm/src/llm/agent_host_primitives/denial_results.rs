@@ -1,5 +1,38 @@
 use crate::agent_events::{ToolCallErrorCategory, ToolDenial, ToolMutationStatus};
 
+pub(super) fn schema_validation_tool_result(
+    tool_name: &str,
+    tool_id: &str,
+    tool_args: &serde_json::Value,
+    message: String,
+    raw_args: &serde_json::Value,
+    stop_reason: Option<&str>,
+) -> serde_json::Value {
+    let (message, cause) =
+        match super::arg_delivery_fault_feedback(tool_name, raw_args, stop_reason) {
+            Some((message, cause)) => (message, Some(cause)),
+            None => (message, None),
+        };
+    // Model arguments can be corrected and retried, so this result carries no
+    // terminal ToolDenial. Delivery causes remain on both transcript surfaces.
+    let mut result = agent_primitive_denied_tool(
+        tool_name,
+        tool_id,
+        tool_args,
+        message,
+        crate::agent_events::ToolCallErrorCategory::SchemaValidation,
+        None,
+        None,
+    );
+    if let Some(cause) = cause {
+        result["cause"] = serde_json::json!(cause);
+        if let Some(inner) = result.get_mut("result") {
+            inner["cause"] = serde_json::json!(cause);
+        }
+    }
+    result
+}
+
 pub(super) struct DenialEvidence {
     pub(super) policy_decision: Option<serde_json::Value>,
     pub(super) schema_repair: Option<serde_json::Value>,

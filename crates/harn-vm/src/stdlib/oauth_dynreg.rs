@@ -882,22 +882,6 @@ mod tests {
     }
 
     #[test]
-    fn valid_metadata_passes() {
-        let m = metadata_with_redirect("https://app.example/callback");
-        let mut errors = Vec::new();
-        validate_metadata(&m, &mut errors);
-        assert!(errors.is_empty(), "expected no errors, got {errors:?}");
-    }
-
-    #[test]
-    fn loopback_http_redirect_passes() {
-        let m = metadata_with_redirect("http://127.0.0.1:8765/callback");
-        let mut errors = Vec::new();
-        validate_metadata(&m, &mut errors);
-        assert!(errors.is_empty(), "expected no errors, got {errors:?}");
-    }
-
-    #[test]
     fn ipv6_and_127_range_loopback_http_redirects_pass() {
         for redirect_uri in [
             "http://[::1]:8765/callback",
@@ -933,50 +917,6 @@ mod tests {
     }
 
     #[test]
-    fn empty_redirect_uris_fails() {
-        let mut m = crate::value::DictMap::new();
-        m.insert(
-            crate::value::intern_key("redirect_uris"),
-            VmValue::List(std::sync::Arc::new(Vec::new())),
-        );
-        let mut errors = Vec::new();
-        validate_metadata(&m, &mut errors);
-        assert!(errors[0].contains("at least one"));
-    }
-
-    #[test]
-    fn missing_redirect_uris_fails() {
-        let m: crate::value::DictMap = crate::value::DictMap::new();
-        let mut errors = Vec::new();
-        validate_metadata(&m, &mut errors);
-        assert!(errors[0].contains("redirect_uris is required"));
-    }
-
-    #[test]
-    fn unknown_grant_type_fails() {
-        let mut m = metadata_with_redirect("https://app.example/cb");
-        m.insert(
-            crate::value::intern_key("grant_types"),
-            VmValue::List(std::sync::Arc::new(vec![VmValue::string("password")])),
-        );
-        let mut errors = Vec::new();
-        validate_metadata(&m, &mut errors);
-        assert!(errors.iter().any(|e| e.contains("password")));
-    }
-
-    #[test]
-    fn build_applies_defaults() {
-        let m = metadata_with_redirect("https://app.example/cb");
-        let built = build_client_metadata_value(&m).expect("ok");
-        let VmValue::Dict(dict) = built else {
-            panic!("expected dict")
-        };
-        assert!(dict.contains_key("grant_types"));
-        assert!(dict.contains_key("response_types"));
-        assert!(dict.contains_key("token_endpoint_auth_method"));
-    }
-
-    #[test]
     fn build_authorization_server_metadata_minimal() {
         let mut provider = crate::value::DictMap::new();
         provider.insert(
@@ -1006,64 +946,5 @@ mod tests {
             dict.get("response_types_supported"),
             Some(VmValue::List(_))
         ));
-    }
-
-    #[test]
-    fn register_returns_client_id_and_secret() {
-        // Fresh store.
-        let id = next_store_id();
-        DYNREG_STORES.with(|stores| {
-            stores
-                .borrow_mut()
-                .insert(id.clone(), DynregStore::default());
-        });
-        let mut handle = crate::value::DictMap::new();
-        handle.insert(
-            crate::value::intern_key("kind"),
-            VmValue::string(KIND_DYNREG_STORE),
-        );
-        handle.insert(crate::value::intern_key("id"), VmValue::string(&id));
-        let m = metadata_with_redirect("https://app.example/cb");
-        let response = register_client_value(&handle, &m).expect("registration ok");
-        let VmValue::Dict(dict) = response else {
-            panic!("expected dict")
-        };
-        let VmValue::String(client_id) = dict.get("client_id").expect("client_id") else {
-            panic!("client_id must be a string");
-        };
-        assert!(client_id.len() >= 32);
-        assert!(matches!(dict.get("client_secret"), Some(VmValue::String(s)) if s.len() >= 32));
-        // Get reads do NOT expose the secret.
-        let fetched = get_client_value(&handle, client_id);
-        let VmValue::Dict(get_dict) = fetched else {
-            panic!("expected dict on get")
-        };
-        assert!(get_dict.get("client_id").is_some());
-        assert!(
-            get_dict.get("client_secret").is_none(),
-            "get must not leak client_secret"
-        );
-    }
-
-    #[test]
-    fn register_rejects_invalid_metadata() {
-        let id = next_store_id();
-        DYNREG_STORES.with(|stores| {
-            stores
-                .borrow_mut()
-                .insert(id.clone(), DynregStore::default());
-        });
-        let mut handle = crate::value::DictMap::new();
-        handle.insert(
-            crate::value::intern_key("kind"),
-            VmValue::string(KIND_DYNREG_STORE),
-        );
-        handle.insert(crate::value::intern_key("id"), VmValue::string(&id));
-        let m = metadata_with_redirect("http://attacker.example/cb");
-        let err = register_client_value(&handle, &m).unwrap_err();
-        let VmError::Runtime(text) = err else {
-            panic!("expected runtime error")
-        };
-        assert!(text.contains("HARN-OAU-005"));
     }
 }

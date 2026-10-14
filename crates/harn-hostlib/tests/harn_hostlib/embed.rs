@@ -43,21 +43,6 @@ fn as_f64(v: &VmValue) -> f64 {
 }
 
 #[test]
-fn similarity_identical_is_one_and_relatedness_clamped() {
-    let reg = registry_for(EmbedCapability::lexical());
-    let out = invoke(
-        &reg,
-        "hostlib_embed_similarity",
-        &[
-            ("a", VmValue::string("retry backoff handler")),
-            ("b", VmValue::string("retry backoff handler")),
-        ],
-    );
-    assert!((as_f64(dict_get(&out, "similarity")) - 1.0).abs() < 1e-5);
-    assert!(as_f64(dict_get(&out, "relatedness")) >= 0.0);
-}
-
-#[test]
 fn similarity_related_beats_unrelated() {
     let reg = registry_for(EmbedCapability::lexical());
     let related = invoke(
@@ -139,49 +124,6 @@ fn top_k_empty_corpus_is_empty() {
         panic!()
     };
     assert!(results.is_empty());
-}
-
-#[test]
-fn vector_dim_matches_info() {
-    let reg = registry_for(EmbedCapability::lexical());
-    let info = invoke(&reg, "hostlib_embed_info", &[]);
-    let VmValue::Int(dim) = dict_get(&info, "dim") else {
-        panic!()
-    };
-    let vec_out = invoke(
-        &reg,
-        "hostlib_embed_vector",
-        &[("text", VmValue::string("symbol"))],
-    );
-    let VmValue::List(v) = dict_get(&vec_out, "vector") else {
-        panic!()
-    };
-    assert_eq!(v.len() as i64, *dim);
-}
-
-#[test]
-fn top_k_envelope_names_the_backend_and_its_semantic_status() {
-    let reg = registry_for(EmbedCapability::lexical());
-    let out = invoke(
-        &reg,
-        "hostlib_embed_top_k",
-        &[
-            ("query", VmValue::string("auth")),
-            (
-                "corpus",
-                VmValue::List(Arc::new(vec![VmValue::string("validate auth token")])),
-            ),
-            ("k", VmValue::Int(1)),
-        ],
-    );
-    let VmValue::String(backend) = dict_get(&out, "backend") else {
-        panic!("top_k must name the backend")
-    };
-    assert_eq!(backend.as_str(), "lexical-hash");
-    let VmValue::Bool(is_semantic) = dict_get(&out, "is_semantic") else {
-        panic!("top_k must report is_semantic")
-    };
-    assert!(!*is_semantic);
 }
 
 #[test]

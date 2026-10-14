@@ -46,19 +46,19 @@ mod changed_paths;
 mod health;
 pub use changed_paths::{
     clear_all_session_changed_paths, clear_session_changed_paths, record_session_changed_path,
-    session_changed_paths, take_session_changed_paths,
+    record_tool_call_mutation, session_changed_paths, take_session_changed_paths,
 };
 pub(crate) use health::observe_event;
 mod journal;
-#[cfg(test)]
-mod publication_tests;
 pub mod reclaim_hooks;
 mod state;
 mod subscribers;
+#[cfg(test)]
+pub(crate) use journal::next_journal_event;
 pub(crate) use journal::{active_run_id, has_journal, journal_first_event_id, journal_store};
 pub(crate) use journal::{
     claim_journal_task, clear_journal, install_journal, journal_flush_lock, journal_owns_session,
-    journal_sessions_for_task, next_journal_event, record_persisted_journal_event,
+    journal_sessions_for_task, pending_journal_events, record_persisted_journal_events,
 };
 pub use subscribers::{append_subscriber, subscriber_count, subscribers_for, SessionSubscriber};
 const LIVE_CLIENT_EVENT_KIND: &str = "live_session_client";
@@ -182,7 +182,14 @@ impl Default for SessionTranscriptBudgetPolicy {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SessionAdmissionRole {
+    Admitted,
+    ParentReference,
+}
+
 pub struct SessionState {
+    admission_role: SessionAdmissionRole,
     pub id: String,
     pub transcript: VmValue,
     pub subscribers: Vec<SessionSubscriber>,
@@ -315,12 +322,12 @@ pub enum LiveClientMode {
 
 mod control_events;
 mod delegation;
-pub(crate) mod event_facts;
 mod host_injection;
 mod live_clients;
 mod metadata;
 mod runtime_store;
 mod scratchpad;
+pub(crate) mod session_event;
 mod text_tool_call_seq;
 mod transcript_lifecycle;
 mod types;
@@ -493,6 +500,7 @@ pub fn reset_session_store() {
     CURRENT_TOOL_CALL_STACK.with(|stack| stack.borrow_mut().clear());
     for session_id in owned_session_ids {
         clear_session_changed_paths(&session_id);
+        crate::agent_events::clear_session_parent_routes(&session_id);
     }
     active_session_runtime()
         .unknown_host_event_warnings
@@ -747,6 +755,7 @@ pub fn open_or_create_with_actor_chain(
     SESSIONS.with(|s| {
         let mut map = s.borrow_mut();
         if let Some(state) = map.get_mut(&resolved) {
+            state.admission_role = SessionAdmissionRole::Admitted;
             if let Some(actor_chain) = requested_actor_chain.clone() {
                 state.actor_chain = Some(actor_chain);
             }
@@ -785,15 +794,17 @@ pub fn open_or_create_with_actor_chain(
     })?;
     for evicted in evicted {
         clear_session_changed_paths(&evicted);
+        crate::agent_events::clear_session_parent_routes(&evicted);
     }
     if was_new {
-        // A prior owner may have been abandoned before its receipt drained.
-        // Opening a fresh session with the same id starts a fresh receipt.
+        // Local admission can follow global observer registration. Only an
+        // explicit close retires that identity and its incoming child routes.
         clear_session_changed_paths(&resolved);
+        crate::agent_events::clear_session_parent_routes(&resolved);
         if let Some(parent) = parent_session.as_deref() {
             crate::agent_events::mirror_session_sinks(parent, &resolved);
         }
-        try_register_event_log(&resolved);
+        register_event_log_sink(&resolved);
     }
     Ok(resolved)
 }
@@ -885,6 +896,7 @@ fn admit_linked_sessions(
         }
         if !map.contains_key(parent_id) {
             let mut parent = SessionState::new(parent_id.to_string());
+            parent.admission_role = SessionAdmissionRole::ParentReference;
             parent.actor_chain = inherited_actor_chain.clone();
             map.insert(parent_id.to_string(), parent);
             created.push(parent_id.to_string());
@@ -900,18 +912,28 @@ fn admit_linked_sessions(
             }
         }
         lineage.commit(&mut map, parent_id, child_id, branched_at_event_index);
+        map.get_mut(child_id)
+            .expect("admitted child exists")
+            .admission_role = SessionAdmissionRole::Admitted;
         Ok(())
     })?;
     for id in evicted {
         clear_session_changed_paths(&id);
+        crate::agent_events::clear_session_parent_routes(&id);
     }
     for id in created {
         clear_session_changed_paths(&id);
-        if let Some(parent) = ambient_parent.as_deref() {
-            crate::agent_events::mirror_session_sinks(parent, &id);
+        // A parent placeholder in a fresh worker is not a new global parent.
+        if id == child_id {
+            crate::agent_events::clear_session_parent_routes(&id);
         }
-        try_register_event_log(&id);
+        register_event_log_sink(&id);
     }
+    // Linked lineage owns observation. A background worker has no ambient
+    // session, and an unrelated ambient session must not receive these events.
+    // Replace the observer edge after admission even for an existing child;
+    // the event registry resolves current ancestors and deduplicates delivery.
+    crate::agent_events::link_session_sinks(parent_id, child_id);
     Ok(())
 }
 
@@ -952,32 +974,8 @@ pub fn ancestry(id: &str) -> Option<SessionAncestry> {
     })
 }
 
-/// Auto-register a persistent sink for a newly-created session.
-/// Silent no-op on failure — a broken observability sink must never
-/// prevent a session from starting.
-fn try_register_event_log(session_id: &str) {
-    if let Some(log) = crate::event_log::active_event_log() {
-        crate::agent_events::register_sink(
-            session_id,
-            crate::agent_events::EventLogSink::new(log, session_id),
-        );
-        return;
-    }
-    let Ok(dir) = std::env::var("HARN_EVENT_LOG_DIR") else {
-        return;
-    };
-    if dir.is_empty() {
-        return;
-    }
-    let path = std::path::PathBuf::from(dir).join(format!("event_log-{session_id}.jsonl"));
-    if let Ok(sink) = crate::agent_events::JsonlEventSink::open(&path) {
-        crate::agent_events::register_sink(session_id, sink);
-    }
-}
-
-pub fn register_event_log_sink(session_id: &str) {
-    try_register_event_log(session_id);
-}
+mod durable_sink;
+pub use durable_sink::{register_event_log_sink, DurableEventSink};
 
 /// Close an idle session.
 ///
@@ -987,6 +985,12 @@ pub fn register_event_log_sink(session_id: &str) {
 pub fn close(id: &str) -> bool {
     let (removed, active_run) = SESSIONS.with(|s| {
         let mut sessions = s.borrow_mut();
+        let Some(state) = sessions.get(id) else {
+            return (false, false);
+        };
+        if state.admission_role == SessionAdmissionRole::ParentReference {
+            return (false, false);
+        }
         if sessions
             .get(id)
             .is_some_and(|state| state.transcript_journal.is_some())
@@ -1002,14 +1006,16 @@ pub fn close(id: &str) -> bool {
         );
         return false;
     }
-    if removed {
-        reclaim_hooks::release_closed_session(id);
+    if !removed {
+        return false;
     }
+    reclaim_hooks::release_closed_session(id);
     // Cross-thread per-session state must be released too, otherwise
     // pending inbox entries can be delivered to a future session that
     // happens to reuse the same id.
     crate::orchestration::agent_inbox::clear_session(id);
     crate::agent_events::clear_session_sinks(id);
+    crate::agent_events::retire_session_observer_lineage(id);
     clear_unknown_host_event_warnings(id);
     removed
 }
@@ -1040,6 +1046,9 @@ pub fn close_with_status(
         let Some(state) = sessions.get_mut(id) else {
             return Ok(false);
         };
+        if state.admission_role == SessionAdmissionRole::ParentReference {
+            return Ok(false);
+        }
         if state.transcript_journal.is_some() {
             return Err(format!(
                 "agent session '{id}' has an active run; finalize it before closing"
@@ -1062,6 +1071,7 @@ pub fn close_with_status(
         metadata,
     });
     crate::agent_events::clear_session_sinks(id);
+    crate::agent_events::retire_session_observer_lineage(id);
     Ok(true)
 }
 
@@ -1099,7 +1109,6 @@ pub fn fork(src_id: &str, dst_id: Option<String>) -> Result<Option<String>, Sess
     if dst == src_id {
         return Ok(None);
     }
-    let ambient_parent = current_session_id();
     let mut evicted = Vec::new();
     let mut budget_event = None;
     let forked = SESSIONS.with(|s| {
@@ -1173,12 +1182,12 @@ pub fn fork(src_id: &str, dst_id: Option<String>) -> Result<Option<String>, Sess
     }
     for id in evicted {
         clear_session_changed_paths(&id);
+        crate::agent_events::clear_session_parent_routes(&id);
     }
     clear_session_changed_paths(&dst);
-    if let Some(parent) = ambient_parent.as_deref() {
-        crate::agent_events::mirror_session_sinks(parent, &dst);
-    }
-    try_register_event_log(&dst);
+    crate::agent_events::clear_session_parent_routes(&dst);
+    crate::agent_events::link_session_sinks(src_id, &dst);
+    register_event_log_sink(&dst);
     publish_transcript_budget_event(budget_event);
     Ok(Some(dst))
 }
@@ -1215,9 +1224,17 @@ pub fn fork_at(
     Ok(Some(new_id))
 }
 
+mod canonical_boundary;
+mod durable_fork;
+pub use canonical_boundary::{
+    canonical_history_boundaries, canonical_history_boundaries_schema, CanonicalHistoryBoundaries,
+    CanonicalHistoryPosition, CanonicalSessionBoundary, CANONICAL_HISTORY_BOUNDARIES_METHOD,
+    CANONICAL_HISTORY_BOUNDARIES_SCHEMA, CANONICAL_SESSION_BOUNDARY_SCHEMA,
+};
 mod truncation;
+pub use durable_fork::{fork_canonical, CanonicalForkError, CanonicalForkResult};
 use truncation::truncate_state;
-pub use truncation::{trim, truncate};
+pub use truncation::{trim, truncate, truncate_canonical};
 
 mod pop_last_assistant;
 pub use pop_last_assistant::pop_last_if_assistant;
@@ -1232,6 +1249,18 @@ pub(crate) use restore_message_event_ids::restore_message_event_ids;
 /// results, which must name the call they answer) use it to bind the receipt
 /// to the exact message rather than to "whatever came next".
 pub fn inject_message(id: &str, message: VmValue) -> Result<usize, String> {
+    inject_message_with_source(id, message).map(|receipt| receipt.message_index)
+}
+
+pub(crate) struct InjectedMessage {
+    pub message_index: usize,
+    pub source_event_id: String,
+}
+
+pub(crate) fn inject_message_with_source(
+    id: &str,
+    message: VmValue,
+) -> Result<InjectedMessage, String> {
     let Some(msg_dict) = message.as_dict().cloned() else {
         return Err("agent_session_inject: message must be a dict".into());
     };
@@ -1263,6 +1292,11 @@ pub fn inject_message(id: &str, message: VmValue) -> Result<usize, String> {
         let new_message = VmValue::dict(msg_dict);
         let message_index = messages.len();
         let transcript_event = crate::llm::helpers::transcript_event_from_message(&new_message);
+        let source_event_id = transcript_event
+            .as_dict()
+            .and_then(|event| event.get("id"))
+            .map(VmValue::display)
+            .ok_or_else(|| "injected transcript event has no source identity".to_string())?;
         events.push(transcript_event.clone());
         messages.push(new_message);
         let mut next = dict;
@@ -1287,9 +1321,12 @@ pub fn inject_message(id: &str, message: VmValue) -> Result<usize, String> {
             crate::llm::helpers::vm_value_to_json(&transcript_event),
             crate::llm::helpers::vm_value_to_json(&persisted_message),
         );
-        emit_identified_user_message_event(id, &persisted_message);
+        emit_identified_user_message_event(id, &persisted_message, &source_event_id);
         emit_llm_message_event(id, message_index, &persisted_message);
-        Ok(message_index)
+        Ok(InjectedMessage {
+            message_index,
+            source_event_id,
+        })
     })
 }
 

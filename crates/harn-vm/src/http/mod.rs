@@ -141,7 +141,7 @@ pub(crate) fn harness_http_mock_matches(
     registry.has_match(&http_method, &url)
 }
 #[cfg(test)]
-use mock::{mock_call_headers_value, redact_mock_call_url};
+use mock::redact_mock_call_url;
 
 #[derive(Clone)]
 struct HttpServerRoute {

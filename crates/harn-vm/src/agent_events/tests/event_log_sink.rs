@@ -256,6 +256,7 @@ async fn flush_waits_for_queued_appends_without_polling() {
     sink.handle_event(&AgentEvent::AgentMessageChunk {
         session_id: "flush-session".into(),
         content: "persist before replay".into(),
+        history_source_event_id: None,
     });
 
     sink.flush().await.expect("flush queued event-log append");
@@ -277,6 +278,7 @@ async fn session_flush_is_a_causal_registry_barrier() {
     emit_event(&AgentEvent::AgentMessageChunk {
         session_id: session_id.into(),
         content: "causally durable".into(),
+        history_source_event_id: None,
     });
 
     flush_session_sinks(session_id)
@@ -347,6 +349,7 @@ async fn cancelled_flush_does_not_consume_sticky_append_error() {
     sink.handle_event(&AgentEvent::AgentMessageChunk {
         session_id: "cancelled-flush-session".into(),
         content: "append must fail".into(),
+        history_source_event_id: None,
     });
 
     let cancelled = sink.enqueue_flush_for_test();
@@ -392,6 +395,7 @@ async fn flush_and_clear_removes_sinks_after_append_failure() {
     emit_event(&AgentEvent::AgentMessageChunk {
         session_id: session_id.into(),
         content: "append must fail before cleanup".into(),
+        history_source_event_id: None,
     });
 
     let error = flush_and_clear_session_sinks(session_id)
@@ -423,6 +427,7 @@ async fn flush_drains_concurrent_producers_without_scheduler_polling() {
                 sink.handle_event(&AgentEvent::AgentMessageChunk {
                     session_id: session_id.into(),
                     content: format!("producer-{producer}-event-{event}"),
+                    history_source_event_id: None,
                 });
             }
         }));
@@ -465,6 +470,7 @@ async fn session_flush_includes_wildcard_sinks() {
     emit_event(&AgentEvent::AgentMessageChunk {
         session_id: session_id.into(),
         content: "persisted by wildcard".into(),
+        history_source_event_id: None,
     });
 
     flush_session_sinks(session_id)

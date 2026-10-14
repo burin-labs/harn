@@ -1,0 +1,63 @@
+fn main(harness: Harness) {
+  const a = { x -> x }
+  const b = { x -> x + 1 }
+  const closures = set([a, b])
+  assert_eq(a == b, false)
+  assert_eq(len(closures), 2)
+  assert_eq(len(unique([a, b])), 2)
+  assert_eq(len([a, b].unique()), 2)
+  assert_eq(len(dedup_by([a, b], { x -> x })), 2)
+  for _ in [1, 2, 3] {
+    assert_eq(set([a]).contains(b), false)
+  }
+  assert_eq(set_contains(set([a]), b), false)
+  assert_eq(b in set([a]), false)
+  assert_eq(len(set_remove(closures, a)), 2)
+  const i1 = 9007199254740992
+  const i2 = 9007199254740993
+  const f = 9007199254740992.0
+  assert_eq(i1 == i2, false)
+  assert_eq(i2 == f, true)
+  assert_eq(len(set([i1, i2, f])), 2)
+  assert_eq(len(unique([i2, f])), 1)
+  assert_eq(len([i2, f].unique()), 1)
+  assert_eq(len(dedup_by([i2, f], { x -> x })), 1)
+  assert(set_contains(set([i2]), f))
+  assert(f in set([i2]))
+  assert(set_contains(set_remove(set([i1, i2]), i1), i2))
+  const nan = 0.0 / 0.0
+  const also_nan = nan
+  assert_eq(nan == also_nan, false)
+  assert_eq(len(set([nan, nan])), 2)
+  assert_eq(len(unique([nan, nan])), 2)
+  assert_eq(len([nan, nan].unique()), 2)
+  assert_eq(len(dedup_by([nan, nan], { x -> x })), 2)
+  assert_eq(set_contains(set([nan]), nan), false)
+  const atomic = harness.runtime.atomic(1)
+  const nested = set([{values: [atomic]}])
+  harness.runtime.atomic_set(atomic, 2)
+  const equal = {values: [harness.runtime.atomic(2)]}
+  assert(set_contains(nested, equal))
+  assert(equal in nested)
+  assert_eq(len(set_add(nested, equal)), 1)
+  assert_eq(len(set_remove(nested, equal)), 0)
+  const iterator = iter([1, 2])
+  const iterators = set([iterator])
+  assert_eq(iterator.to_list(), [1, 2])
+  assert(set_contains(iterators, iterator))
+  assert(iterator in iterators)
+  assert_eq(len(set_add(iterators, iterator)), 1)
+  const left = set([[i2, f], [i1, i1]])
+  const right = set([[f, i1], [i2, i2]])
+  assert_eq(len(left), 2)
+  assert_eq(len(right), 2)
+  assert(left == right)
+  assert(right == left)
+  assert_eq(len(unique([left, right])), 1)
+  assert_eq(set([i1, i2]) == set([f, 7]), false)
+  assert_eq(set([f, 7]) == set([i1, i2]), false)
+  assert_eq(set_contains(set([left]), set([3, 4])), false)
+  assert_eq(unique([3, 1, 3, 2, 1]), [3, 1, 2])
+  assert_eq(len(unique([1, 1.0])), 1)
+  harness.stdio.log("structural membership ok")
+}

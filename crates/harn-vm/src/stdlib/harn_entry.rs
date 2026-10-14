@@ -107,3 +107,7 @@ where
     serde_json::from_value(result)
         .map_err(|error| VmError::Runtime(format!("{label} returned invalid shape: {error}")))
 }
+
+#[cfg(test)]
+#[path = "harn_entry_tests.rs"]
+mod tests;

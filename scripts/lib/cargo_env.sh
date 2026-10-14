@@ -99,3 +99,79 @@ harn_export_cargo_build_dir_for_target() {
   export CARGO_BUILD_BUILD_DIR
   return 0
 }
+
+# The generated rustc wrapper that dev setup names in each worktree's
+# `.cargo/config.toml`. It lives in shared storage, so anything that reclaims
+# that storage can delete it while every configured worktree still points at
+# it, and then every Cargo command fails with a bare "No such file or
+# directory" from the missing wrapper. The artifact is addressed by its source
+# hash and host triple, so the same function that dev setup uses to build it
+# can rebuild it in place, and the Cargo entry points do exactly that.
+
+# Print the wrapper path for `root`'s wrapper source under `storage`.
+harn_sccache_wrapper_path() (
+  root="$1"
+  storage="$2"
+  source_hash=$(shasum -a 256 < "$root/scripts/sccache_rustc_wrapper.rs" | awk '{print $1}') || exit $?
+  host_triple=$(rustc -vV | sed -n 's/^host: //p')
+  if [ -z "$host_triple" ]; then
+    echo "error: rustc did not report a host triple for the sccache wrapper" >&2
+    exit 1
+  fi
+  suffix=""
+  case "${OS:-$(uname -s)}" in
+    Windows_NT | MINGW* | MSYS* | CYGWIN*) suffix=".exe" ;;
+  esac
+  printf '%s\n' "$storage/sccache-wrapper/$host_triple-$source_hash/harn-sccache-wrapper$suffix"
+)
+
+# Build `root`'s wrapper under `storage` unless it already exists, then print
+# its path.
+harn_build_sccache_wrapper() (
+  root="$1"
+  storage="$2"
+  wrapper_path=$(harn_sccache_wrapper_path "$root" "$storage") || exit $?
+  if [ ! -x "$wrapper_path" ]; then
+    mkdir -p "$(dirname "$wrapper_path")" || exit $?
+    temporary_path="$wrapper_path.tmp.$$"
+    rustc --edition=2021 -C strip=symbols "$root/scripts/sccache_rustc_wrapper.rs" \
+      -o "$temporary_path" || exit $?
+    # A same-filesystem hard link publishes the complete executable atomically
+    # and never replaces a live wrapper, including on Windows. A concurrent
+    # publisher may win first; its source-addressed artifact is equivalent.
+    if ! ln "$temporary_path" "$wrapper_path" 2>/dev/null \
+      && [ ! -x "$wrapper_path" ]; then
+      rm -f "$temporary_path"
+      echo "error: failed to publish the sccache wrapper" >&2
+      exit 1
+    fi
+    rm -f "$temporary_path"
+  fi
+  printf '%s\n' "$wrapper_path"
+)
+
+# Rebuild the wrapper `workspace`'s generated Cargo config names when it is
+# missing. Only the dev-setup managed wrapper is touched, and only when its
+# configured path is the one this checkout's source builds; a path from an
+# older wrapper source cannot be rebuilt in place, so that case names the
+# command that regenerates the config instead of letting Cargo fail obscurely.
+harn_restore_configured_sccache_wrapper() {
+  _harn_workspace="$1"
+  _harn_config="$_harn_workspace/.cargo/config.toml"
+  [ -f "$_harn_config" ] || return 0
+  _harn_wrapper=$(sed -n 's/^rustc-wrapper[[:space:]]*=[[:space:]]*"\(.*\)"[[:space:]]*$/\1/p' "$_harn_config" | head -n 1)
+  case "$_harn_wrapper" in
+    */sccache-wrapper/*/harn-sccache-wrapper | */sccache-wrapper/*/harn-sccache-wrapper.exe) ;;
+    *) return 0 ;;
+  esac
+  [ -x "$_harn_wrapper" ] && return 0
+  _harn_storage=$(dirname "$(dirname "$(dirname "$_harn_wrapper")")")
+  _harn_expected=$(harn_sccache_wrapper_path "$_harn_workspace" "$_harn_storage") || return $?
+  if [ "$_harn_expected" != "$_harn_wrapper" ]; then
+    echo "error: the rustc wrapper .cargo/config.toml names is missing: $_harn_wrapper" >&2
+    echo "       it was built from an older wrapper source; run \`make setup\` to regenerate the config" >&2
+    return 1
+  fi
+  echo "note: rebuilding the missing rustc wrapper .cargo/config.toml names: $_harn_wrapper" >&2
+  harn_build_sccache_wrapper "$_harn_workspace" "$_harn_storage" >/dev/null
+}

@@ -1107,21 +1107,7 @@ pub struct RunRecord {
     pub persisted_path: Option<String>,
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(default)]
-pub struct ToolCallRecord {
-    pub tool_name: String,
-    pub tool_use_id: String,
-    pub args_hash: String,
-    pub result: String,
-    pub is_rejected: bool,
-    /// End-to-end tool latency when the terminal session event measured it.
-    /// `Some(0)` is a real sub-millisecond measurement; `None` means the
-    /// source record did not carry a measurement.
-    pub duration_ms: Option<u64>,
-    pub iteration: usize,
-    pub timestamp: String,
-}
+pub use super::tool_call::{ToolCallRecord, ToolCallRecordStatus};
 
 /// Hash a tool invocation for fixture lookup (name + canonical args JSON).
 pub fn tool_fixture_hash(tool_name: &str, args: &serde_json::Value) -> String {

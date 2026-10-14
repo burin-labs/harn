@@ -1,0 +1,170 @@
+import { agent_loop } from "std/agent/loop"
+import { AgentSpec } from "std/agent/options"
+import { tool_call_history_text } from "std/llm/call_shape"
+import {
+  with_dry_run,
+  with_redaction,
+  with_scoped_executor,
+  with_timeout,
+} from "std/llm/tool_middleware"
+import { llm_text, with_llm_script } from "std/testing"
+
+type ToolLimits = {native: int, ordinary: int}
+
+type MiddlewareExpectation = {
+  native: int,
+  ordinary: int,
+  scope_rejections?: int,
+  redacted?: bool,
+  limits?: ToolLimits,
+}
+
+fn check_pair(harness: Harness, caller: any, expected: MiddlewareExpectation) {
+  const native = harness.runtime.atomic(0)
+  const ordinary = harness.runtime.atomic(0)
+  const rejected = harness.runtime.atomic(0)
+  const previews = harness.runtime.atomic(0)
+  const selected_limits = harness.runtime.atomic(0)
+  let tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "computer.inspect",
+    "A namespaced member.",
+    {
+      handler: { args ->
+        if expected.redacted ?? false {
+          require args.marker == "redacted", "the member's argument must be redacted"
+        }
+        harness.runtime.atomic_add(native, 1)
+        return "native reached"
+      },
+      parameters: {marker: {type: "string"}},
+      annotations: {kind: "read", side_effect_level: "read_only"},
+    },
+  )
+  tools = tool_define(
+    tools,
+    "inspect",
+    "An ordinary same-named function.",
+    {
+      handler: { args ->
+        require args.marker == "raw", "the ordinary function must retain its own argument"
+        harness.runtime.atomic_add(ordinary, 1)
+        return "ordinary reached"
+      },
+      parameters: {marker: {type: "string"}},
+      annotations: {kind: "read", side_effect_level: "read_only"},
+    },
+  )
+  with_llm_script(
+    harness.llm,
+    [
+      {
+        tool_calls: [
+          {id: "native", name: "inspect", toolset_name: "computer", arguments: {marker: "raw"}},
+          {id: "ordinary", name: "inspect", arguments: {marker: "raw"}},
+        ],
+      },
+      llm_text("##DONE##"),
+    ],
+    { ->
+      const opts: AgentSpec = {
+        provider: "mock",
+        tools: tools,
+        tool_format: "native",
+        max_iterations: 3,
+        loop_until_done: true,
+        done_sentinel: "##DONE##",
+        tool_caller: { call, next ->
+          const result = caller(call, next)
+          if result?.error_category == "scope_violation" {
+            harness.runtime.atomic_add(rejected, 1)
+          }
+          if result?.status == "dry_run" {
+            harness.runtime.atomic_add(previews, 1)
+          }
+          if expected.limits != nil {
+            const audit = result?.audit ?? {}
+            for layer in audit?.layers ?? [] {
+              if layer?.name == "with_timeout" {
+                const limit = if call.call_id == "native" {
+                  expected.limits.native
+                } else {
+                  expected.limits.ordinary
+                }
+                if layer.limit_ms == limit {
+                  harness.runtime.atomic_add(selected_limits, 1)
+                }
+              }
+            }
+          }
+          return result
+        },
+      }
+      const result = agent_loop(
+        harness,
+        "Inspect both tools through their own middleware.",
+        nil,
+        opts,
+      )
+      require result.status == "done", "the middleware session must finish"
+    },
+  )
+  require harness.runtime.atomic_get(native) == expected.native,
+    "the member's execution must follow its qualified middleware rule"
+  require harness.runtime.atomic_get(ordinary) == expected.ordinary,
+    "the ordinary function's execution must follow its own middleware rule"
+  require harness.runtime.atomic_get(rejected) == (expected.scope_rejections ?? 0),
+    "scope rejections must come from the stage guard itself"
+  if expected.native == 0 && (expected.scope_rejections ?? 0) == 0 {
+    require harness.runtime.atomic_get(previews) == 1, "the member preview must actually fire"
+  }
+  if expected.limits != nil {
+    require harness.runtime.atomic_get(selected_limits) == 2,
+      "each call must select its own qualified per-tool timeout limit"
+  }
+}
+
+fn main(harness: Harness) {
+  const history = tool_call_history_text(
+    "json",
+    "",
+    [{name: "inspect", toolset_name: "computer", arguments: {}}, {name: "inspect", arguments: {}}],
+  )
+  require contains(history, "\"name\":\"computer.inspect\"")
+    && contains(history, "\"name\":\"inspect\""),
+    "text history must retain distinct registered identities"
+  check_pair(harness, with_dry_run({only: ["computer.inspect"]}), {native: 0, ordinary: 1})
+  check_pair(harness, with_dry_run({except: ["inspect"]}), {native: 0, ordinary: 1})
+  check_pair(
+    harness,
+    with_scoped_executor(harness.runtime, {allowed_tools: ["computer.inspect"]}),
+    {native: 1, ordinary: 0, scope_rejections: 1},
+  )
+  check_pair(
+    harness,
+    with_scoped_executor(harness.runtime, {allowed_tools: ["inspect"]}),
+    {native: 0, ordinary: 1, scope_rejections: 1},
+  )
+  check_pair(
+    harness,
+    with_redaction(
+      { record ->
+        if record.phase == "in" && record.tool_name == "computer.inspect" {
+          return {args: record.args + {marker: "redacted"}}
+        }
+        return {}
+      },
+    ),
+    {native: 1, ordinary: 1, redacted: true},
+  )
+  check_pair(
+    harness,
+    with_timeout(
+      harness.clock,
+      {max_ms: 600000, per_tool: {"computer.inspect": 100000, inspect: 200000}},
+    ),
+    {native: 1, ordinary: 1, limits: {native: 100000, ordinary: 200000}},
+  )
+  harness.stdio.println("qualified middleware decisions reached")
+}

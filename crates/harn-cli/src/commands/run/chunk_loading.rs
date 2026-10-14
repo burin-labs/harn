@@ -354,6 +354,7 @@ fn error_span_from_parse(error: &harn_parser::ParserError) -> harn_lexer::Span {
     match error {
         harn_parser::ParserError::Unexpected { span, .. } => *span,
         harn_parser::ParserError::UnexpectedEof { span, .. } => *span,
+        harn_parser::ParserError::RemovedRangeSyntax { span } => *span,
     }
 }
 

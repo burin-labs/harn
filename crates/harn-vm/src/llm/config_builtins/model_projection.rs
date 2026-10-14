@@ -10,10 +10,16 @@ use super::capability_projection::{capabilities_to_vm_value, insert_batch_suppor
 use super::catalog_projection::insert_tool_mode_parity_fields;
 use super::provider_projection::{performance_to_vm_value, rate_limits_to_vm_value};
 
+#[derive(Clone, Copy)]
+pub(super) enum PricingView {
+    Effective,
+    Stored,
+}
+
 pub(crate) fn llm_catalog_value() -> VmValue {
     let entries: Vec<VmValue> = llm_config::model_catalog_entries()
         .into_iter()
-        .map(|(id, model)| model_def_to_vm_value(&id, &model))
+        .map(|(id, model)| model_def_to_vm_value(&id, &model, PricingView::Effective))
         .collect();
     VmValue::List(std::sync::Arc::new(entries))
 }
@@ -50,7 +56,7 @@ pub(super) fn model_info_to_vm_value(resolved: &llm_config::ResolvedModel) -> Vm
     dict.insert(
         crate::value::intern_key("catalog"),
         llm_config::model_catalog_entry(&resolved.id)
-            .map(|entry| model_def_to_vm_value(&resolved.id, &entry))
+            .map(|entry| model_def_to_vm_value(&resolved.id, &entry, PricingView::Effective))
             .unwrap_or(VmValue::Nil),
     );
     dict.insert(
@@ -66,7 +72,11 @@ pub(super) fn model_info_to_vm_value(resolved: &llm_config::ResolvedModel) -> Vm
     VmValue::dict(dict)
 }
 
-pub(super) fn model_def_to_vm_value(id: &str, model: &llm_config::ModelDef) -> VmValue {
+pub(super) fn model_def_to_vm_value(
+    id: &str,
+    model: &llm_config::ModelDef,
+    pricing_view: PricingView,
+) -> VmValue {
     let mut dict = crate::value::DictMap::new();
     let capabilities = crate::llm::capabilities::lookup(&model.provider, id);
     let batch_api =
@@ -194,7 +204,7 @@ pub(super) fn model_def_to_vm_value(id: &str, model: &llm_config::ModelDef) -> V
         model
             .pricing
             .as_ref()
-            .map(pricing_to_vm_value)
+            .map(|pricing| pricing_to_vm_value(pricing, pricing_view))
             .unwrap_or(VmValue::Nil),
     );
     dict.insert(
@@ -279,32 +289,19 @@ fn architecture_to_vm_value(architecture: &llm_config::ModelArchitectureDef) -> 
     json_to_vm_value(&serde_json::to_value(architecture).unwrap_or_else(|_| serde_json::json!({})))
 }
 
-fn pricing_to_vm_value(pricing: &llm_config::ModelPricing) -> VmValue {
+fn pricing_to_vm_value(pricing: &llm_config::ModelPricing, view: PricingView) -> VmValue {
+    if matches!(view, PricingView::Stored) {
+        return json_to_vm_value(
+            &serde_json::to_value(pricing).expect("model pricing is serializable"),
+        );
+    }
     let pricing = pricing.effective_today();
-    let mut dict = crate::value::DictMap::new();
-    dict.insert(
-        crate::value::intern_key("input_per_mtok"),
-        VmValue::Float(pricing.input_per_mtok),
-    );
-    dict.insert(
-        crate::value::intern_key("output_per_mtok"),
-        VmValue::Float(pricing.output_per_mtok),
-    );
-    dict.insert(
-        crate::value::intern_key("cache_read_per_mtok"),
-        pricing
-            .cache_read_per_mtok
-            .map(VmValue::Float)
-            .unwrap_or(VmValue::Nil),
-    );
-    dict.insert(
-        crate::value::intern_key("cache_write_per_mtok"),
-        pricing
-            .cache_write_per_mtok
-            .map(VmValue::Float)
-            .unwrap_or(VmValue::Nil),
-    );
-    VmValue::dict(dict)
+    json_to_vm_value(&serde_json::json!({
+        "input_per_mtok": pricing.input_per_mtok,
+        "output_per_mtok": pricing.output_per_mtok,
+        "cache_read_per_mtok": pricing.cache_read_per_mtok,
+        "cache_write_per_mtok": pricing.cache_write_per_mtok,
+    }))
 }
 
 fn completion_review_to_vm_value(review: &llm_config::CompletionReviewDef) -> VmValue {

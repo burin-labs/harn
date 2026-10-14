@@ -149,7 +149,11 @@ fn __merge_field(
     return {value: incoming_value, conflict: nil}
   }
   if base_value == incoming_value
-    || (rate && __pricing_values_equal(base_value, incoming_value)) {
+    || (rate
+      && __pricing_values_equal(
+        __pricing_comparison_value(key, base_value),
+        __pricing_comparison_value(key, incoming_value),
+      )) {
     return {value: base_value, conflict: nil}
   }
   if base_owner == "provider" && incoming_owner != "provider" {
@@ -317,6 +321,60 @@ fn __normalized_rate(value: any) -> float {
   return round(to_float(value) * 1000000.0) / 1000000.0
 }
 
+fn __pricing_record_without(record: dict, metadata: list<string>) -> dict {
+  let result: dict = {}
+  for key in keys(record) {
+    if !contains(metadata, key) {
+      result = result + {[key]: record[key]}
+    }
+  }
+  return result
+}
+
+/** Compare settlement fields while retaining the original cards for reports. */
+fn __pricing_comparison_value(key: string, value: any) -> any {
+  if value == nil {
+    return nil
+  }
+  if key == "schedules" {
+    let windows: list<dict> = []
+    for window in value {
+      const record = __pricing_record_without(
+        window,
+        ["id", "source_url", "review_after", "note", "days"],
+      )
+        + {
+          utc_offset: window?.utc_offset ?? "+00:00",
+          cache_read_multiplier: window?.cache_read_multiplier ?? window.input_multiplier,
+          cache_write_multiplier: window?.cache_write_multiplier ?? window.input_multiplier,
+        }
+      for day in window.days.unique().sorted() {
+        windows = windows + [record + {days: [day]}]
+      }
+    }
+    return windows.sorted_by(
+      { window -> window.days[0] + window.utc_offset + window.start + window.end },
+    )
+  }
+  if key == "promotions" {
+    return value.map(
+      { promotion -> __pricing_record_without(promotion, ["id", "source_url", "review_after"]) },
+    )
+      .sorted_by({ promotion -> promotion.starts_on + (promotion?.starts_at ?? "00:00") })
+  }
+  if key == "input_token_bands" {
+    return value.sorted_by({ band -> band.minimum_input_tokens })
+  }
+  if key == "hosted_tool_fees" {
+    let fees: dict = {}
+    for name in keys(value) {
+      fees = fees + {[name]: __pricing_record_without(value[name], ["source_url"])}
+    }
+    return fees
+  }
+  return value
+}
+
 fn __pricing_values_equal(left: any, right: any) -> bool {
   const lt = type_of(left)
   const rt = type_of(right)
@@ -361,38 +419,15 @@ fn __pricing_change(catalog_pricing: dict?, observed_pricing: dict?) -> list<dic
     }
     if cat == nil {
       changes = changes + [{key: key, from: nil, to: obs}]
-    } else if obs != nil && !__pricing_values_equal(cat, obs) {
+    } else if obs != nil
+      && !__pricing_values_equal(
+        __pricing_comparison_value(key, cat),
+        __pricing_comparison_value(key, obs),
+      ) {
       changes = changes + [{key: key, from: cat, to: obs}]
     }
   }
   return changes
-}
-
-fn __effective_catalog_pricing(pricing: dict?, observed_at: string?) -> dict? {
-  if pricing == nil || observed_at == nil {
-    return pricing
-  }
-  const date = to_string(observed_at).slice(0, 10)
-  let active = nil
-  for promotion in pricing?.promotions ?? [] {
-    const started = promotion?.starts_on != nil && promotion.starts_on <= date
-    const not_ended = promotion?.ends_on == nil || date <= promotion.ends_on
-    if started
-      && not_ended
-      && (active == nil || promotion.starts_on > active.starts_on) {
-      active = promotion
-    }
-  }
-  if active == nil {
-    return pricing
-  }
-  let effective = pricing
-  for field in PRICING_KEYS {
-    if active?.[field] != nil {
-      effective = effective + {[field]: active[field]}
-    }
-  }
-  return effective
 }
 
 fn __values_equal(left: any, right: any) {
@@ -491,10 +526,7 @@ pub fn build_drift(observations: list<dict>, catalog: dict) -> dict {
     } else {
       const cat = by_route[route]
       seen = seen + {[cat.provider + ":" + cat.id]: true}
-      const pricing_changes = __pricing_change(
-        __effective_catalog_pricing(cat.pricing, obs.observed_at),
-        obs.pricing,
-      )
+      const pricing_changes = __pricing_change(cat.pricing, obs.pricing)
       const capability_changes = __capability_changes(cat?.capabilities, obs?.capabilities)
       let ctx_change: dict? = nil
       if obs.context_window != nil && obs.context_window != cat.context_window {

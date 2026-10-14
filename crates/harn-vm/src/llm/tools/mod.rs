@@ -22,7 +22,9 @@ pub use function_schema::function_schema_from_catalog_row;
 pub(crate) use handle_local::{handle_tool_locally, is_vm_stdlib_short_circuit};
 #[cfg(test)]
 pub(crate) use messages::build_assistant_tool_message;
-pub(crate) use messages::{build_assistant_response_message, normalize_tool_args};
+pub(crate) use messages::{
+    build_assistant_response_message, normalize_tool_args, prepare_path_args,
+};
 pub(crate) use name_recovery::{
     normalize_repaired_denial, recover_provider_safe_alias, schema_match_repair_result,
 };

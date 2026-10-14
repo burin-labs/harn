@@ -58,6 +58,13 @@
   {
     "scope": "native-runner-option-helpers",
     "file": "crates/harn-vm/src/llm/agent_session_host/lifecycle.rs",
+    "expression": "\"initial_user_message_id\"",
+    "owner": "opt_str",
+    "evidence": "The caller supplies an opaque identity for the opening user message. The native session owner persists that correlation without selecting run policy or granting authority."
+  },
+  {
+    "scope": "native-runner-option-helpers",
+    "file": "crates/harn-vm/src/llm/agent_session_host/lifecycle.rs",
     "expression": "\"iterations\"",
     "owner": "opt_int",
     "evidence": "Measured iteration count is supplied by the runner result."

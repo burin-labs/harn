@@ -8,7 +8,6 @@ use uuid::Uuid;
 use harn_vm::mcp_protocol;
 use harn_vm::{append_secret_scan_audit, secret_scan_content, SecretFinding};
 
-use super::protocol::paginated_list_response;
 use super::types::{
     ConnectionState, DlqRetryRequest, InspectPayload, McpOrchestratorService, QueueSnapshot,
     SecretScanRequest, TopicPreview, TriggerFireRequest, TriggerListEntry, TriggerReplayRequest,
@@ -16,7 +15,7 @@ use super::types::{
 };
 use super::util::{
     handler_json, inject_trace_headers, merge_json_object, parse_trust_query_timestamp,
-    preview_events, report_milestone, trigger_kind_name, trigger_replay_steering_from_request,
+    preview_events, report_milestone, trigger_replay_steering_from_request,
 };
 use super::DEFAULT_TASK_TTL_MS;
 use crate::commands::orchestrator::common::{
@@ -216,7 +215,7 @@ impl McpOrchestratorService {
                 })),
             ),
         ];
-        paginated_list_response(id, "tools/list", "tools", params, tools)
+        harn_vm::mcp_protocol::list_response(id, "tools/list", "tools", params, tools)
     }
 
     pub(super) async fn handle_tools_call(
@@ -487,15 +486,15 @@ impl McpOrchestratorService {
         }
 
         let mut triggers = Vec::new();
-        for trigger in &ctx.collected_triggers {
-            let Some(snapshot) = snapshots_by_id.get(&trigger.config.id) else {
+        for trigger in &ctx.bindings {
+            let Some(snapshot) = snapshots_by_id.get(&trigger.id) else {
                 continue;
             };
             triggers.push(TriggerListEntry {
-                trigger_id: trigger.config.id.clone(),
-                kind: trigger_kind_name(trigger.config.kind).to_string(),
-                provider: trigger.config.provider.as_str().to_string(),
-                when: trigger.when.as_ref().map(|when| when.reference.raw.clone()),
+                trigger_id: trigger.id.clone(),
+                kind: trigger.kind.clone(),
+                provider: trigger.provider.as_str().to_string(),
+                when: trigger.when.as_ref().map(|when| when.raw.clone()),
                 handler: handler_json(&trigger.handler),
                 version: snapshot.version,
                 state: snapshot.state.as_str().to_string(),
@@ -817,8 +816,8 @@ fn run_report_tool_def(name: &str, title: &str, description: &str) -> JsonValue 
                 "checks"
             ],
             "properties": {
-                "schema": { "const": "harn.run_report.v1" },
-                "schema_version": { "const": 1 },
+                "schema": { "const": harn_vm::orchestration::RUN_REPORT_SCHEMA },
+                "schema_version": { "const": harn_vm::orchestration::RUN_REPORT_SCHEMA_VERSION },
                 "producer": { "type": "object" },
                 "projection": { "type": "object" },
                 "root_run_id": { "type": "string" },
@@ -869,8 +868,8 @@ fn run_review_tool_def() -> JsonValue {
             "type": "object",
             "required": ["schema", "schema_version", "provenance", "lifecycle", "verdict"],
             "properties": {
-                "schema": { "const": "harn.run_review.v1" },
-                "schema_version": { "const": 1 },
+                "schema": { "const": harn_vm::orchestration::RUN_REVIEW_SCHEMA },
+                "schema_version": { "const": harn_vm::orchestration::RUN_REVIEW_SCHEMA_VERSION },
                 "provenance": { "type": "object" },
                 "lifecycle": { "type": "object" },
                 "verdict": { "enum": ["pass", "concerns", "fail"] }

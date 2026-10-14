@@ -680,6 +680,24 @@ pub(super) async fn vm_websocket_connect(
     Ok(VmValue::String(arcstr::ArcStr::from(id)))
 }
 
+/// `wss://` trusts the same OS certificate store as HTTPS requests, so a
+/// custom CA that works for `http_get` also works for `websocket_connect`.
+/// The verifier loads the system roots once per process.
+fn websocket_tls_connector() -> Result<tokio_tungstenite::Connector, VmError> {
+    use rustls_platform_verifier::ConfigVerifierExt;
+    static CONFIG: std::sync::OnceLock<Result<Arc<rustls::ClientConfig>, String>> =
+        std::sync::OnceLock::new();
+    CONFIG
+        .get_or_init(|| {
+            rustls::ClientConfig::with_platform_verifier()
+                .map(Arc::new)
+                .map_err(|error| error.to_string())
+        })
+        .clone()
+        .map(tokio_tungstenite::Connector::Rustls)
+        .map_err(|error| vm_error(format!("websocket_connect: TLS setup failed: {error}")))
+}
+
 /// Connect with bounded retries on transient TCP-level failures.
 ///
 /// Connection-reset / broken-pipe / EOF on the very first byte usually
@@ -709,7 +727,12 @@ async fn connect_with_retry(
             break;
         }
         let request = websocket_client_request(url, options)?;
-        let connect = tokio_tungstenite::connect_async(request);
+        let connect = tokio_tungstenite::connect_async_tls_with_config(
+            request,
+            None,
+            false,
+            Some(websocket_tls_connector()?),
+        );
         match tokio::time::timeout(remaining, connect).await {
             Err(_) => {
                 last_error = Some(format!("timed out after {timeout_ms}ms"));

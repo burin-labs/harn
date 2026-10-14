@@ -21,6 +21,22 @@ import {
 const CARGO =
   "[workspace]\nresolver = \"2\"\n\n[workspace.package]\nversion = \"0.8.71\"\nedition = \"2021\"\n"
 
+@test
+pipeline test_retired_top_entry_keeps_the_actual_installable_release() {
+  const changelog =
+    "## Unreleased\n\n- carried\n\n## v0.8.71 (never published)\n\n- carried\n\n## v0.8.70\n\n- shipped\n"
+  assert_eq(detect_misformatted_headings(changelog), [])
+  assert_eq(changelog_versions(changelog), ["0.8.71", "0.8.70"])
+  assert_eq(check_metadata(replace(CARGO, "0.8.71", "0.8.72-dev"), changelog), "0.8.70")
+  const refused = try {
+    check_metadata(CARGO, changelog)
+    false
+  } catch (_) {
+    true
+  }
+  assert_eq(refused, true)
+}
+
 const CHANGELOG =
   "# Changelog\n\nintro text\n\n## v0.8.71\n\n- Added a thing.\n\n## v0.8.70\n\n- Fixed a thing.\n"
 

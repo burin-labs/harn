@@ -10,10 +10,10 @@
 //! `harn-parser` depends only on this crate plus `harn-builtin-meta`, never
 //! on the vm.
 
-use std::collections::BTreeMap;
-use std::sync::{OnceLock, RwLock};
+use std::collections::{BTreeMap, HashMap};
+use std::sync::{Arc, OnceLock, RwLock};
 
-use harn_builtin_meta::{BuiltinContract, BuiltinSignature};
+use harn_builtin_meta::{BuiltinContract, BuiltinExposure, BuiltinSignature, CapabilityId};
 
 /// One name-keyed projection of a macro-emitted builtin definition. Aliases
 /// receive their own entry so signature and contract can never drift.
@@ -99,11 +99,43 @@ impl<H: 'static> BuiltinDef<H> {
     }
 }
 
-static INSTALLED: OnceLock<RwLock<BTreeMap<&'static str, &'static BuiltinManifestEntry>>> =
-    OnceLock::new();
+/// The installed manifest and the indexes derived from it. Installs are rare
+/// (startup), while lookups run for every call site the type checker visits,
+/// so every projection is rebuilt on install and read without copying.
+#[derive(Default)]
+struct Registry {
+    by_name: BTreeMap<&'static str, &'static BuiltinManifestEntry>,
+    /// Every entry in name order, shared with whole-manifest readers.
+    ordered: Arc<[&'static BuiltinManifestEntry]>,
+    /// The first entry in name order exposed as each
+    /// `harness.<capability>.<method>`.
+    harness_methods: HashMap<CapabilityId, HashMap<&'static str, &'static BuiltinManifestEntry>>,
+    /// Manifest slices already installed, by address and length. Drivers
+    /// re-install the same static slice once per checked file, so a repeat
+    /// install must not take the write lock or compare every entry.
+    installed_slices: Vec<(usize, usize)>,
+}
 
-fn installed() -> &'static RwLock<BTreeMap<&'static str, &'static BuiltinManifestEntry>> {
-    INSTALLED.get_or_init(|| RwLock::new(BTreeMap::new()))
+impl Registry {
+    fn reindex(&mut self) {
+        self.ordered = self.by_name.values().copied().collect();
+        self.harness_methods.clear();
+        for entry in self.ordered.iter().copied() {
+            if let BuiltinExposure::HarnessMethod { capability, method } = entry.contract.exposure {
+                self.harness_methods
+                    .entry(capability)
+                    .or_default()
+                    .entry(method)
+                    .or_insert(entry);
+            }
+        }
+    }
+}
+
+static INSTALLED: OnceLock<RwLock<Registry>> = OnceLock::new();
+
+fn installed() -> &'static RwLock<Registry> {
+    INSTALLED.get_or_init(|| RwLock::new(Registry::default()))
 }
 
 /// Install the process-global builtin manifest.
@@ -113,17 +145,35 @@ fn installed() -> &'static RwLock<BTreeMap<&'static str, &'static BuiltinManifes
 /// the portable kernel and a native host). Installing structurally identical
 /// projections is idempotent; redefining an existing name panics.
 pub fn install_builtin_manifest(entries: &'static [&'static BuiltinManifestEntry]) {
-    let mut manifest = installed().write().expect("builtin manifest lock poisoned");
+    let slice = (entries.as_ptr() as usize, entries.len());
+    if installed()
+        .read()
+        .expect("builtin manifest lock poisoned")
+        .installed_slices
+        .contains(&slice)
+    {
+        return;
+    }
+    let mut registry = installed().write().expect("builtin manifest lock poisoned");
+    if registry.installed_slices.contains(&slice) {
+        return;
+    }
+    let mut changed = false;
     for entry in entries {
-        if let Some(previous) = manifest.get(entry.name) {
+        if let Some(previous) = registry.by_name.get(entry.name) {
             assert!(
                 *previous == *entry,
                 "builtin manifest name `{}` registered by multiple contracts",
                 entry.name
             );
         } else {
-            manifest.insert(entry.name, entry);
+            registry.by_name.insert(entry.name, entry);
+            changed = true;
         }
+    }
+    registry.installed_slices.push(slice);
+    if changed {
+        registry.reindex();
     }
 }
 
@@ -133,14 +183,15 @@ pub fn _test_only_reinstall(entries: &'static [&'static BuiltinManifestEntry]) {
     install_builtin_manifest(entries);
 }
 
-/// Read the installed manifest.
-pub fn installed_manifest() -> Vec<&'static BuiltinManifestEntry> {
-    installed()
-        .read()
-        .expect("builtin manifest lock poisoned")
-        .values()
-        .copied()
-        .collect()
+/// Read the installed manifest in name order. The slice is shared, so reading
+/// it costs one reference-count increment rather than a copy of the manifest.
+pub fn installed_manifest() -> Arc<[&'static BuiltinManifestEntry]> {
+    Arc::clone(
+        &installed()
+            .read()
+            .expect("builtin manifest lock poisoned")
+            .ordered,
+    )
 }
 
 /// Resolve one installed manifest entry.
@@ -148,7 +199,23 @@ pub fn builtin_entry(name: &str) -> Option<&'static BuiltinManifestEntry> {
     installed()
         .read()
         .expect("builtin manifest lock poisoned")
+        .by_name
         .get(name)
+        .copied()
+}
+
+/// Resolve the installed entry exposed as `harness.<capability>.<method>`.
+/// When several entries share that exposure, the first in name order owns it.
+pub fn harness_method_entry(
+    capability: CapabilityId,
+    method: &str,
+) -> Option<&'static BuiltinManifestEntry> {
+    installed()
+        .read()
+        .expect("builtin manifest lock poisoned")
+        .harness_methods
+        .get(&capability)?
+        .get(method)
         .copied()
 }
 
@@ -163,6 +230,7 @@ pub fn is_installed() -> bool {
     !installed()
         .read()
         .expect("builtin manifest lock poisoned")
+        .by_name
         .is_empty()
 }
 
@@ -191,6 +259,39 @@ mod tests {
     };
     static MANIFEST_A: &[&BuiltinManifestEntry] = &[&ENTRY_A];
     static MANIFEST_B: &[&BuiltinManifestEntry] = &[&ENTRY_B];
+
+    const HARNESS_METHOD: BuiltinContract =
+        BuiltinContract::harness(CapabilityId::Stdio, "__registry_index_probe", &[]);
+    static METHOD_LATER: BuiltinManifestEntry = BuiltinManifestEntry {
+        name: "__registry_index_probe_b",
+        canonical_name: "__registry_index_probe_b",
+        signature: &SIGNATURE_A,
+        contract: HARNESS_METHOD,
+    };
+    static METHOD_FIRST: BuiltinManifestEntry = BuiltinManifestEntry {
+        name: "__registry_index_probe_a",
+        canonical_name: "__registry_index_probe_a",
+        signature: &SIGNATURE_A,
+        contract: HARNESS_METHOD,
+    };
+    static METHOD_MANIFEST: &[&BuiltinManifestEntry] = &[&METHOD_LATER, &METHOD_FIRST];
+
+    #[test]
+    fn harness_method_index_agrees_with_a_name_ordered_scan() {
+        install_builtin_manifest(METHOD_MANIFEST);
+        let scanned = installed_manifest()
+            .iter()
+            .copied()
+            .find(|entry| entry.contract.exposure == HARNESS_METHOD.exposure);
+        let indexed = harness_method_entry(CapabilityId::Stdio, "__registry_index_probe");
+
+        assert_eq!(indexed.map(|entry| entry.name), Some(METHOD_FIRST.name));
+        assert_eq!(
+            indexed.map(|entry| entry.name),
+            scanned.map(|entry| entry.name)
+        );
+        assert!(harness_method_entry(CapabilityId::Clock, "__registry_index_probe").is_none());
+    }
 
     #[test]
     fn structurally_identical_projections_are_idempotent() {

@@ -1,4 +1,6 @@
 import { agent_typed_output_checkpoint } from "std/agent/primitives"
+import { LlmCallOptions } from "std/llm/options"
+import { with_default_temperature } from "std/llm/safe"
 
 fn __input_guardrail_bool(value: any, fallback: any) {
   if value == nil {
@@ -285,10 +287,9 @@ pub fn agent_input_guardrail(
       )
     }
     let schema = opts?.output ?? __input_guardrail_schema()
-    let llm_opts = {
+    let llm_opts: LlmCallOptions = {
       output: {schema: schema, strict: true, validation: "error"},
       max_tokens: opts?.max_tokens ?? 256,
-      temperature: opts?.temperature ?? 0.0,
       session_id: payload?.session_id ?? "",
       mock_scope: opts?.mock_scope ?? "agent.input_guardrail",
       _call_stage: "guard",
@@ -299,11 +300,12 @@ pub fn agent_input_guardrail(
     if provider != "" {
       llm_opts = llm_opts + {provider: provider}
     }
-    for key in ["top_p", "seed", "effort", "timeout_ms"] {
+    for key in ["temperature", "top_p", "seed", "effort", "timeout_ms"] {
       if opts[key] != nil {
         llm_opts[key] = opts[key]
       }
     }
+    llm_opts = with_default_temperature(llm, llm_opts)
     let checkpoint = agent_typed_output_checkpoint(
       agent,
       llm,

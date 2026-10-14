@@ -99,6 +99,11 @@ thread_local! {
     /// LocalSet, multi-thread runtime). Drained by stdlib via
     /// [`drain_audit_ring`].
     static AUDIT_RING: RefCell<Vec<RedactionEvent>> = const { RefCell::new(Vec::new()) };
+
+    /// Monotonic count of audit events emitted on this thread. Unlike the
+    /// capped ring it never stops advancing, so a caller can tell whether a
+    /// redaction recorded anything.
+    static AUDIT_EVENTS_EMITTED: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
 }
 
 /// Per-redaction event passed to an installed [`AuditSink`].
@@ -163,6 +168,22 @@ pub fn custom_pattern_names() -> Vec<String> {
     CUSTOM_PATTERNS.with(|cell| cell.borrow().iter().map(|p| p.name.to_string()).collect())
 }
 
+/// Number of audit events emitted on this thread so far.
+pub(crate) fn audit_events_emitted() -> u64 {
+    AUDIT_EVENTS_EMITTED.with(std::cell::Cell::get)
+}
+
+/// Name and source of every custom pattern installed on this thread, in
+/// match order. Two threads with equal identities redact identically.
+pub(crate) fn custom_pattern_identity() -> Vec<(&'static str, String)> {
+    CUSTOM_PATTERNS.with(|cell| {
+        cell.borrow()
+            .iter()
+            .map(|pattern| (pattern.name, pattern.regex.as_str().to_string()))
+            .collect()
+    })
+}
+
 /// Install a per-thread audit sink. The previous sink (if any) is
 /// returned so callers can chain or restore.
 pub fn install_audit_sink(sink: Option<AuditSink>) -> Option<AuditSink> {
@@ -173,6 +194,7 @@ fn emit_audit(events: &[RedactionEvent]) {
     if events.is_empty() {
         return;
     }
+    AUDIT_EVENTS_EMITTED.with(|count| count.set(count.get().wrapping_add(events.len() as u64)));
     // Always push to the per-thread ring so a synchronous
     // `drain_audit_ring` call returns every event recorded since
     // the last drain, regardless of whether an extra sink is

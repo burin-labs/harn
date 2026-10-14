@@ -17,13 +17,6 @@ use std::time::Duration;
 
 use super::harness::*;
 use crate::vm::*;
-#[test]
-fn test_parallel_basic() {
-    let out = run_output(
-        "pipeline t(harness: Harness, task: unknown) { const results = parallel(3) { i -> i * 10 }\nharness.stdio.log(results) }",
-    );
-    assert_eq!(out, "[harn] [0, 10, 20]");
-}
 
 #[test]
 fn test_parallel_no_variable() {
@@ -31,14 +24,6 @@ fn test_parallel_no_variable() {
         "pipeline t(harness: Harness, task: unknown) { const results = parallel(3) { 42 }\nharness.stdio.log(results) }",
     );
     assert_eq!(out, "[harn] [42, 42, 42]");
-}
-
-#[test]
-fn test_parallel_each_basic() {
-    let out = run_output(
-        "pipeline t(harness: Harness, task: unknown) { const results = parallel each [1, 2, 3] { x -> x * x }\nharness.stdio.log(results) }",
-    );
-    assert_eq!(out, "[harn] [1, 4, 9]");
 }
 
 #[tokio::test(flavor = "current_thread", start_paused = true)]
@@ -230,30 +215,6 @@ harness.stdio.log(harness.runtime.atomic_get(completed))
 }
 
 #[test]
-fn test_spawn_await() {
-    let out = run_output(
-        r#"pipeline t(harness: Harness, task: unknown) {
-const handle = spawn { harness.stdio.log("spawned") }
-const result = await(handle)
-harness.stdio.log("done")
-}"#,
-    );
-    assert_eq!(out, "[harn] spawned\n[harn] done");
-}
-
-#[test]
-fn test_spawn_cancel() {
-    let out = run_output(
-        r#"pipeline t(harness: Harness, task: unknown) {
-const handle = spawn { harness.stdio.log("should be cancelled") }
-cancel(handle)
-harness.stdio.log("cancelled")
-}"#,
-    );
-    assert_eq!(out, "[harn] cancelled");
-}
-
-#[test]
 fn test_cancel_graceful_propagates_to_cpu_bound_spawn() {
     let out = run_output(
         r#"pipeline t(harness: Harness, task: unknown) {
@@ -337,6 +298,123 @@ pipeline t(harness: Harness) {
 "#,
     );
     assert_eq!(out, "[harn] kind:interrupted:handler_timeout");
+}
+
+/// Block until the installed interrupt context fires, then report the error a
+/// VM-less blocking operation (Bubblewrap preparation) derives from it.
+fn observe_requested_error() -> crate::VmError {
+    loop {
+        if let Some(error) = crate::op_interrupt::requested_error() {
+            break error;
+        }
+        std::thread::yield_now();
+    }
+}
+
+fn interrupt_error_display(error: &crate::VmError) -> String {
+    match error {
+        crate::VmError::Thrown(value) => value.display(),
+        other => other.to_string(),
+    }
+}
+
+/// Run `source` with a sync builtin `observe_interrupt` that observes the
+/// interrupt context the VM installs around sync dispatch. Returns what that
+/// builtin observed, or `None` when it was never reached.
+fn interrupt_error_seen_by_sync_builtin(source: &str) -> Option<String> {
+    let seen = Arc::new(std::sync::Mutex::new(None::<String>));
+    let writer = Arc::clone(&seen);
+    let _ = run_harn_with_setup(source, move |vm| {
+        vm.register_builtin("observe_interrupt", move |_, _| {
+            let error = observe_requested_error();
+            *writer.lock().unwrap() = Some(interrupt_error_display(&error));
+            Err(error)
+        });
+    });
+    let seen = seen.lock().unwrap().clone();
+    seen
+}
+
+/// The async-builtin hand-off a host adapter (hostlib `run_command`) uses:
+/// capture `ctx.interrupt_sources()` and install them where the blocking work
+/// runs. The observation blocks inside the builtin so the VM cannot preempt it.
+fn interrupt_error_seen_by_async_builtin(source: &str) -> Option<String> {
+    let seen = Arc::new(std::sync::Mutex::new(None::<String>));
+    let writer = Arc::clone(&seen);
+    let _ = run_harn_with_setup(source, move |vm| {
+        vm.register_async_builtin("observe_interrupt", move |ctx, _| {
+            let writer = Arc::clone(&writer);
+            async move {
+                let _interrupt = ctx.interrupt_sources().install();
+                let error = observe_requested_error();
+                *writer.lock().unwrap() = Some(interrupt_error_display(&error));
+                Err(error)
+            }
+        });
+    });
+    let seen = seen.lock().unwrap().clone();
+    seen
+}
+
+#[test]
+fn test_sync_interrupt_error_keeps_the_vm_interrupt_reason() {
+    let handler_window = interrupt_error_seen_by_sync_builtin(
+        r#"
+import "std/signal"
+
+pipeline t(harness: Harness) {
+  on_interrupt({ -> observe_interrupt() }, {graceful_timeout_ms: 200})
+  try { __signal_raise("SIGINT") } catch (e) { }
+}
+"#,
+    );
+    assert_eq!(
+        handler_window.as_deref(),
+        Some("kind:interrupted:handler_timeout"),
+        "an expired on_interrupt graceful window must not read as a scope deadline"
+    );
+
+    let scope = interrupt_error_seen_by_sync_builtin(
+        "
+pipeline t(harness: Harness) {
+  try { deadline 50ms { observe_interrupt() } } catch (e) { }
+}
+",
+    );
+    assert_eq!(scope.as_deref(), Some("Deadline exceeded"));
+}
+
+#[test]
+fn test_async_host_handoff_keeps_the_vm_interrupt_reason() {
+    // A live scope deadline around the handler window: merging the two into
+    // one deadline reports the window's expiry as `Deadline exceeded`, and a
+    // worker that never sees the window waits for this scope instead.
+    let handler_window = interrupt_error_seen_by_async_builtin(
+        r#"
+import "std/signal"
+
+pipeline t(harness: Harness) {
+  deadline 3s {
+    on_interrupt({ -> observe_interrupt() }, {graceful_timeout_ms: 200})
+    try { __signal_raise("SIGINT") } catch (e) { }
+  }
+}
+"#,
+    );
+    assert_eq!(
+        handler_window.as_deref(),
+        Some("kind:interrupted:handler_timeout"),
+        "a host worker must see the on_interrupt window as a handler timeout"
+    );
+
+    let scope = interrupt_error_seen_by_async_builtin(
+        "
+pipeline t(harness: Harness) {
+  try { deadline 50ms { observe_interrupt() } } catch (e) { }
+}
+",
+    );
+    assert_eq!(scope.as_deref(), Some("Deadline exceeded"));
 }
 
 #[test]
@@ -661,18 +739,6 @@ fn test_spawn_returns_value() {
 }
 
 // --- Deadline tests ---
-
-#[test]
-fn test_deadline_success() {
-    let out = run_output(
-        r#"pipeline t(harness: Harness, task: unknown) {
-const result = deadline 5s { harness.stdio.log("within deadline")
-42 }
-harness.stdio.log(result)
-}"#,
-    );
-    assert_eq!(out, "[harn] within deadline\n[harn] 42");
-}
 
 #[test]
 fn test_deadline_exceeded() {

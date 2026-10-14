@@ -228,7 +228,7 @@ fn __tool_parse_verbatim_requests(calls: list<dict>) -> list<dict> {
       if declaration == nil {
         continue
       }
-      requests = requests.appending(
+      requests.push(
         {
           call_index: call_index,
           key: key,
@@ -527,12 +527,12 @@ pub fn json_chunks(text: string) -> dict {
     }
     if active_marker != "" {
       if active_tool && verbatim_remaining > 0 {
-        active_body = active_body.appending(line)
+        active_body.push(line)
         verbatim_remaining = verbatim_remaining - 1
         continue
       }
       if active_tool && verbatim_tag != "" {
-        active_body = active_body.appending(line)
+        active_body.push(line)
         if trimmed == verbatim_tag {
           verbatim_tag = ""
         }
@@ -545,13 +545,13 @@ pub fn json_chunks(text: string) -> dict {
           if count != nil {
             verbatim_remaining = count + 1
           }
-          active_body = active_body.appending(line)
+          active_body.push(line)
           continue
         }
         const tagged = regex_captures("^<<([A-Za-z_][A-Za-z0-9_.-]*)$", trimmed)
         if len(tagged) > 0 {
           verbatim_tag = to_string(tagged[0].groups[0])
-          active_body = active_body.appending(line)
+          active_body.push(line)
           continue
         }
       }
@@ -560,10 +560,10 @@ pub fn json_chunks(text: string) -> dict {
           const candidate = active_body.join("\n")
           const stream = __host_tool_json_stream(trim(candidate))
           if stream?.eof ?? false {
-            active_body = active_body.appending(line)
+            active_body.push(line)
             continue
           }
-          bodies = bodies.appending(candidate)
+          bodies.push(candidate)
         } else {
           prose = prose + active_body + [line]
         }
@@ -573,17 +573,17 @@ pub fn json_chunks(text: string) -> dict {
         verbatim_remaining = 0
         verbatim_tag = ""
       } else if active_tool && starts_with(trimmed, active_marker + FENCE_OPEN_INFO) {
-        bodies = bodies.appending(active_body.join("\n"))
+        bodies.push(active_body.join("\n"))
         const info = trim(trimmed.slice(3, len(trimmed)))
         const classified = __tool_parse_tool_fence_info(active_marker, info)
         active_tool = classified.tool
         active_body = []
         verbatim_tag = ""
         if classified.warning != nil {
-          violations = violations.appending(classified.warning)
+          violations.push(classified.warning)
         }
       } else {
-        active_body = active_body.appending(line)
+        active_body.push(line)
       }
       continue
     }
@@ -596,18 +596,18 @@ pub fn json_chunks(text: string) -> dict {
       verbatim_remaining = 0
       verbatim_tag = ""
       if classified.warning != nil {
-        violations = violations.appending(classified.warning)
+        violations.push(classified.warning)
       }
       if !active_tool {
-        active_body = active_body.appending(line)
+        active_body.push(line)
       }
       continue
     }
-    prose = prose.appending(line)
+    prose.push(line)
   }
   if active_marker != "" {
     if active_tool {
-      bodies = bodies.appending(active_body.join("\n"))
+      bodies.push(active_body.join("\n"))
     } else {
       prose = prose + active_body
     }
@@ -615,9 +615,9 @@ pub fn json_chunks(text: string) -> dict {
   const outside = trim(prose.join("\n"))
   if len(bodies) == 0 && (starts_with(outside, "{") || starts_with(outside, "["))
     && __tool_parse_bare_json_is_call(outside) {
-    bodies = bodies.appending(outside)
+    bodies.push(outside)
     prose = []
-    violations = violations.appending(
+    violations.push(
       protocol_violation(
         "bare_json",
         "protocol_violation: a tool call was emitted as a bare JSON object; the contract "

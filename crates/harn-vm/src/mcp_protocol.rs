@@ -249,11 +249,11 @@ impl McpServerSession {
         &self.client_identity
     }
 
-    pub(crate) fn is_ready_for_notifications(&self) -> bool {
+    pub fn is_ready_for_notifications(&self) -> bool {
         self.notifications_ready
     }
 
-    pub(crate) fn accept_initialized_notification(&mut self) {
+    pub fn accept_initialized_notification(&mut self) {
         if self.initialized_protocol_version.is_some() {
             self.notifications_ready = true;
         }
@@ -515,6 +515,56 @@ pub fn apply_result_envelope(result: &mut JsonValue, cache: Option<&McpCacheHint
             object.insert("cacheScope".to_string(), JsonValue::String(scope.into()));
         }
     }
+}
+
+/// Map a server method to its conservative cache hint. Read/list methods get
+/// a TTL; everything else is `None`, which still routes through
+/// [`apply_response_envelope`] so stable clients see `resultType`.
+pub fn cache_hint_for_method(method: &str) -> Option<&'static McpCacheHint> {
+    const LIST: McpCacheHint = McpCacheHint::list_default();
+    const READ: McpCacheHint = McpCacheHint::read_default();
+    match method {
+        "tools/list" | "resources/list" | "resources/templates/list" | "prompts/list" => {
+            Some(&LIST)
+        }
+        "resources/read" => Some(&READ),
+        _ => None,
+    }
+}
+
+/// Stamp the stable `resultType` and `method`'s cache hint onto a server
+/// response. Error responses pass through untouched.
+pub fn apply_response_envelope(mut response: JsonValue, method: &str) -> JsonValue {
+    if let Some(result) = response.get_mut("result") {
+        apply_result_envelope(result, cache_hint_for_method(method));
+    }
+    response
+}
+
+/// Answer one page of a list method: `items[cursor..]` under `result_key`,
+/// with `nextCursor` when more remain. A malformed cursor is `-32602`.
+pub fn list_response(
+    id: JsonValue,
+    method: &str,
+    result_key: &str,
+    params: &JsonValue,
+    items: Vec<JsonValue>,
+) -> JsonValue {
+    let page = match mcp_list_page(params, items.len(), method) {
+        Ok(page) => page,
+        Err(error) => return crate::jsonrpc::error_response(id, -32602, &error),
+    };
+    let page_items = items
+        .into_iter()
+        .skip(page.start)
+        .take(page.end - page.start)
+        .collect::<Vec<_>>();
+    let mut result = serde_json::Map::new();
+    result.insert(result_key.to_string(), JsonValue::Array(page_items));
+    if let Some(next_cursor) = page.next_cursor {
+        result.insert("nextCursor".to_string(), JsonValue::String(next_cursor));
+    }
+    crate::jsonrpc::response(id, JsonValue::Object(result))
 }
 
 /// Conservative cache hint surfaced on stable results. Servers can override
@@ -1033,6 +1083,61 @@ mod tests {
         let err = mcp_list_page(&json!({"cursor": "not-base64"}), 5, "resources/list")
             .expect_err("malformed cursor should fail");
         assert_eq!(err, "invalid resources/list cursor");
+    }
+
+    #[test]
+    fn list_response_pages_items_and_rejects_malformed_cursor() {
+        let items = (0..DEFAULT_MCP_LIST_PAGE_SIZE + 5)
+            .map(|index| json!({"name": format!("tool-{index}")}))
+            .collect::<Vec<_>>();
+        let first = list_response(json!(1), "tools/list", "tools", &json!({}), items.clone());
+        let tools = first["result"]["tools"].as_array().unwrap();
+        assert_eq!(tools.len(), DEFAULT_MCP_LIST_PAGE_SIZE);
+        let cursor = first["result"]["nextCursor"].as_str().unwrap();
+
+        let second = list_response(
+            json!(2),
+            "tools/list",
+            "tools",
+            &json!({"cursor": cursor}),
+            items.clone(),
+        );
+        assert_eq!(second["result"]["tools"].as_array().unwrap().len(), 5);
+        assert_eq!(
+            second["result"]["tools"][0]["name"],
+            json!(format!("tool-{DEFAULT_MCP_LIST_PAGE_SIZE}"))
+        );
+        assert!(second["result"].get("nextCursor").is_none());
+
+        let malformed = list_response(
+            json!(3),
+            "tools/list",
+            "tools",
+            &json!({"cursor": "not-base64"}),
+            items,
+        );
+        assert_eq!(malformed["error"]["code"], json!(-32602));
+    }
+
+    #[test]
+    fn response_envelope_carries_the_method_cache_hint() {
+        let listed = apply_response_envelope(
+            crate::jsonrpc::response(json!(1), json!({"tools": []})),
+            "tools/list",
+        );
+        assert_eq!(listed["result"]["resultType"], RESULT_TYPE_COMPLETE);
+        assert_eq!(listed["result"]["ttlMs"], json!(DEFAULT_LIST_CACHE_TTL_MS));
+        let called = apply_response_envelope(
+            crate::jsonrpc::response(json!(2), json!({"content": []})),
+            "tools/call",
+        );
+        assert_eq!(called["result"]["resultType"], RESULT_TYPE_COMPLETE);
+        assert!(called["result"].get("ttlMs").is_none());
+        let failed = apply_response_envelope(
+            crate::jsonrpc::error_response(json!(3), -32602, "bad"),
+            "tools/list",
+        );
+        assert!(failed.get("result").is_none());
     }
 
     #[test]

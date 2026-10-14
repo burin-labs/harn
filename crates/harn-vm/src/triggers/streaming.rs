@@ -812,6 +812,7 @@ mod tests {
         install_manifest_triggers(vec![TriggerBindingSpec {
             id: "stream-window-handler".to_string(),
             source: TriggerBindingSource::Manifest,
+            ingress_subscription: false,
             kind: "stream".to_string(),
             provider: ProviderId::from("kafka"),
             autonomy_tier: AutonomyTier::ActAuto,

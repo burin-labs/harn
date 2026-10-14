@@ -9,27 +9,17 @@ impl crate::vm::Vm {
         args: &[VmValue],
     ) -> Option<Result<VmValue, VmError>> {
         let result = match method {
-            "count" | "len" => Ok(VmValue::Int(set.len() as i64)),
+            "len" => Ok(VmValue::Int(set.len() as i64)),
             "empty" => Ok(VmValue::Bool(set.is_empty())),
-            "contains" | "includes" => {
+            "contains" => {
                 let needle = args.first().unwrap_or(&VmValue::Nil);
                 Ok(VmValue::Bool(set.contains(needle)))
-            }
-            "adding" | "add" => {
-                let mut new_set = (**set).clone();
-                new_set.insert(args.first().cloned().unwrap_or(VmValue::Nil));
-                Ok(VmValue::set_value(new_set))
-            }
-            "removing" | "remove" | "delete" => {
-                let mut new_set = (**set).clone();
-                new_set.remove(args.first().unwrap_or(&VmValue::Nil));
-                Ok(VmValue::set_value(new_set))
             }
             "union" => match args.first() {
                 Some(VmValue::Set(other)) => Ok(VmValue::set_value(set.union(other))),
                 _ => Ok(VmValue::Set(Arc::clone(set))),
             },
-            "intersect" | "intersection" => match args.first() {
+            "intersection" => match args.first() {
                 Some(VmValue::Set(other)) => Ok(VmValue::set_value(set.intersect(other))),
                 _ => Ok(VmValue::set_value(VmSet::new())),
             },
@@ -69,13 +59,16 @@ impl crate::vm::Vm {
                 }
                 Ok(VmValue::Bool(false))
             }
-            "all" | "every" => {
+            "all" => {
                 if args.first().is_some_and(Self::is_callable_value) {
                     return None;
                 }
                 Ok(VmValue::Bool(true))
             }
-            _ => Err(VmError::Runtime(format!("set has no method `{method}`"))),
+            _ => Err(Self::no_builtin_method_error(
+                harn_parser::builtin_methods::MethodReceiver::Set,
+                method,
+            )),
         };
         Some(result)
     }
@@ -127,7 +120,7 @@ impl crate::vm::Vm {
                 }
                 Ok(VmValue::Bool(false))
             }
-            "all" | "every" => {
+            "all" => {
                 let Some(callable) = args.first().filter(|v| Self::is_callable_value(v)) else {
                     return Ok(VmValue::Bool(true));
                 };
@@ -139,7 +132,10 @@ impl crate::vm::Vm {
                 }
                 Ok(VmValue::Bool(true))
             }
-            _ => Err(VmError::Runtime(format!("set has no method `{method}`"))),
+            _ => Err(Self::no_builtin_method_error(
+                harn_parser::builtin_methods::MethodReceiver::Set,
+                method,
+            )),
         }
     }
 }

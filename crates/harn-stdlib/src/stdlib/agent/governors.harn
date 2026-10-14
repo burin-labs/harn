@@ -573,7 +573,7 @@ pub fn compose_post_turn(callbacks: list) {
         break
       }
       if to_string(norm?.message ?? "") != "" {
-        messages = messages.appending(norm.message)
+        messages.push(norm.message)
       }
       if norm?.next_tool_claim != nil {
         if next_tool_claim != nil
@@ -619,10 +619,10 @@ pub fn with_governance(agent: HarnessAgent, opts: dict, config: dict) -> dict {
   let callbacks = []
   const existing = opts?.post_turn_callback
   if existing != nil {
-    callbacks = callbacks.appending(existing)
+    callbacks.push(existing)
   }
   if config?.governor != nil {
-    callbacks = callbacks.appending(governor_post_turn(agent, config.governor))
+    callbacks.push(governor_post_turn(agent, config.governor))
   }
   let result = opts
   const detectors = config?.detectors
@@ -635,7 +635,7 @@ pub fn with_governance(agent: HarnessAgent, opts: dict, config: dict) -> dict {
     result = result + {stall_diagnostics: existing_stall + detector_spec_to_stall(detectors)}
     const overlay = unified_detectors_post_turn(agent, detectors)
     if overlay != nil {
-      callbacks = callbacks.appending(overlay)
+      callbacks.push(overlay)
     }
   }
   if len(callbacks) > 0 {
@@ -696,7 +696,7 @@ pub fn governors_selftest(agent: HarnessAgent) -> dict {
   let missing = []
   for key in required {
     if !contains(keys(live_payload), key) {
-      missing = missing.appending(key)
+      missing.push(key)
     }
   }
   if len(missing) > 0 {

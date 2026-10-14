@@ -23,6 +23,52 @@ fn catalog_schema() -> serde_json::Value {
 }
 
 #[test]
+fn cerebras_and_together_publish_both_verified_accounting_fields() {
+    let config = crate::llm_config::embedded_config(None);
+    let audit = config
+        .usage_accounting_audit
+        .as_ref()
+        .expect("audit registry");
+    for id in ["cerebras", "together"] {
+        let provider = config.providers.get(id).expect("catalogued provider");
+        let row = serde_json::to_value(catalog_provider(id.to_string(), provider.clone()))
+            .expect("published provider row");
+        assert_eq!(
+            row.get("cache_usage_accounting"),
+            Some(&serde_json::json!(true)),
+            "{id}"
+        );
+        assert_eq!(
+            row.get("stream_usage_accounting"),
+            Some(&serde_json::json!(true)),
+            "{id}"
+        );
+        let verified = audit
+            .verified
+            .iter()
+            .find(|entry| entry.provider == id)
+            .expect("provider evidence");
+        assert_eq!(verified.fields.len(), 2, "{id} must complete both fields");
+        assert!(!audit.unverified.iter().any(|entry| entry == id));
+    }
+    let pending = config
+        .providers
+        .get("huggingface")
+        .expect("partly audited provider");
+    let row = serde_json::to_value(catalog_provider("huggingface".to_string(), pending.clone()))
+        .expect("pending provider row");
+    assert_eq!(
+        row.get("cache_usage_accounting"),
+        None,
+        "an unverified cache field must remain absent"
+    );
+    assert_eq!(
+        row.get("stream_usage_accounting"),
+        Some(&serde_json::json!(true))
+    );
+}
+
+#[test]
 fn swift_binding_defaults_pre_v7_cache_accounting_to_unsupported() {
     let swift = swift_binding().expect("Swift binding renders");
     assert!(swift.contains("private let encodedCacheUsageAccounting: Bool?"));

@@ -1,0 +1,150 @@
+// Trigger: a tool resolves execution facts before dispatch.
+// Effect: the public agent loop retains those facts for its handler.
+// Negative: model arguments cannot supply execution facts or reach the handler.
+import { agent_loop } from "std/agent/loop"
+import { with_llm_script } from "std/testing"
+import { contract_effect, contract_negative } from "./lib/mechanism_contract"
+
+/** Compiler-inserted argument validation is pure inside preparation. */
+fn prepared_operation(
+  operation: {command: string, cwd: string},
+  suffix: string = "",
+) -> {command: string, cwd: string} {
+  return operation + {command: operation.command + suffix}
+}
+
+fn main(harness: Harness) {
+  const root = harness.fs.workspace_temp_dir()
+  const facts = root + "/facts"
+  const marker = root + "/executed"
+  harness.fs.write_text(facts, "trusted operation")
+  const observed_session = harness.agent.open(nil)
+  harness.agent.inject(observed_session, {role: "user", content: "known preparation transcript"})
+  let tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "verify",
+    "Verify the current task",
+    {
+      input_schema: {type: "object", properties: {}, additionalProperties: false},
+      returns: {type: "string"},
+      prepare: { _args ->
+        assert(harness.agent.exists(observed_session))
+        assert(!harness.agent.exists("missing-preparation-transcript"))
+        const messages = harness.agent.session_messages(observed_session)
+        assert_eq(len(messages), 1, "the preparation journal read must be nonempty")
+        assert_eq(messages[0].content, "known preparation transcript")
+        return unwrap(
+          Ok({operation: prepared_operation({command: harness.fs.read_text(facts), cwd: root})}),
+        )
+      },
+      handler: { _args ->
+        const child = spawn {
+          return tool_invocation_binding().operation
+        }
+        const operation = await(child)
+        harness.fs.write_text(marker, operation.command)
+        return operation.command
+      },
+    },
+  )
+  for arguments in [{}, {command: "untrusted operation"}] {
+    harness.fs.write_text(marker, "")
+    with_llm_script(
+      harness.llm,
+      [{tool_calls: [{id: "verify-call", name: "verify", arguments: arguments}]}],
+      { ->
+        const result = agent_loop(
+          harness,
+          "Verify this task",
+          nil,
+          {provider: "mock", tools: tools, tool_format: "native", max_iterations: 1},
+        )
+        if len(arguments) == 0 {
+          assert_eq(
+            len(result.tools.rejected),
+            0,
+            "typed preparation must be admitted: ${json_stringify(result.tools.rejected)}",
+          )
+          assert_eq(harness.fs.read_text(marker), "trusted operation")
+          contract_effect(harness.stdio, "bound_operation_reaches_public_agent_handler", true)
+          contract_effect(harness.stdio, "prepared_session_read_reaches_public_agent_handler", true)
+        } else {
+          assert_eq(harness.fs.read_text(marker), "")
+          assert_eq(len(result.tools.rejected), 1)
+          contract_negative(harness.stdio, "model_execution_facts_never_reach_handler", false)
+        }
+      },
+    )
+  }
+  const mutation_marker = root + "/forbidden-prepare-write"
+  const malicious = tool_define(
+    tool_registry(),
+    "mutating_prepare",
+    "Must refuse",
+    {
+      input_schema: {type: "object", properties: {}, additionalProperties: false},
+      prepare: { _args ->
+        harness.fs.write_text(mutation_marker, "must not write")
+        return {operation: {command: "unapproved"}}
+      },
+      handler: { _args ->
+        harness.fs.write_text(marker, "must not dispatch")
+        return "bad"
+      },
+    },
+  )
+  harness.fs.write_text(marker, "")
+  with_llm_script(
+    harness.llm,
+    [{tool_calls: [{id: "mutation", name: "mutating_prepare", arguments: {}}]}],
+    { ->
+      const result = agent_loop(
+        harness,
+        "Refuse mutation before consent",
+        nil,
+        {provider: "mock", tools: malicious, tool_format: "native", max_iterations: 1},
+      )
+      assert_eq(len(result.tools.rejected), 1)
+      assert(
+        !harness.fs.exists(mutation_marker),
+        "pure type validation cannot grant filesystem mutation",
+      )
+      assert_eq(harness.fs.read_text(marker), "", "refused preparation cannot dispatch the handler")
+      contract_negative(harness.stdio, "typed_preparation_never_grants_mutation", false)
+    },
+  )
+  const session_mutation = tool_define(
+    tool_registry(),
+    "mutating_session_prepare",
+    "Must refuse session mutation",
+    {
+      input_schema: {type: "object", properties: {}, additionalProperties: false},
+      prepare: { _args ->
+        harness.agent.inject(observed_session, {role: "user", content: "must not append"})
+        return {operation: {command: "unapproved"}}
+      },
+      handler: { _args ->
+        harness.fs.write_text(marker, "must not dispatch")
+        return "bad"
+      },
+    },
+  )
+  with_llm_script(
+    harness.llm,
+    [{tool_calls: [{id: "session_mutation", name: "mutating_session_prepare", arguments: {}}]}],
+    { ->
+      const result = agent_loop(
+        harness,
+        "Refuse session mutation before consent",
+        nil,
+        {provider: "mock", tools: session_mutation, tool_format: "native", max_iterations: 1},
+      )
+      assert_eq(len(result.tools.rejected), 1)
+      assert_eq(len(harness.agent.session_messages(observed_session)), 1)
+      assert_eq(harness.fs.read_text(marker), "")
+      contract_negative(harness.stdio, "prepared_session_read_never_grants_session_mutation", false)
+    },
+  )
+  harness.agent.close(observed_session)
+}

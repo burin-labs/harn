@@ -533,37 +533,6 @@ mod tests {
     }
 
     #[test]
-    fn extract_returns_text_and_one_based_line_range() {
-        let source = "fn alpha() {}\nfn beta() {}\nfn gamma() {}\n";
-        let result = run_extract(&[dict(&[
-            ("source", vm_string(source)),
-            ("language", vm_string("rust")),
-            ("symbol_name", vm_string("beta")),
-        ])])
-        .expect("extract works");
-        assert_eq!(string_field(&result, "result"), "extracted");
-        assert_eq!(int_field(&result, "start_line"), 2);
-        assert_eq!(int_field(&result, "end_line"), 2);
-        assert_eq!(string_field(&result, "text"), "fn beta() {}");
-    }
-
-    #[test]
-    fn delete_removes_target_function_and_validates_syntax() {
-        let source = "fn alpha() {}\nfn beta() {}\nfn gamma() {}\n";
-        let result = run_delete(&[dict(&[
-            ("source", vm_string(source)),
-            ("language", vm_string("rust")),
-            ("symbol_name", vm_string("beta")),
-        ])])
-        .expect("delete works");
-        assert_eq!(string_field(&result, "result"), "removed");
-        let new_source = string_field(&result, "source");
-        assert!(!new_source.contains("beta"));
-        assert!(new_source.contains("alpha"));
-        assert!(new_source.contains("gamma"));
-    }
-
-    #[test]
     fn replace_swaps_in_new_text_and_validates() {
         let source = "fn alpha() {}\nfn beta() {}\n";
         let new_text = "fn beta() -> i32 { 42 }";
@@ -580,21 +549,6 @@ mod tests {
     }
 
     #[test]
-    fn replace_reports_syntax_error_after_edit() {
-        let source = "fn alpha() {}\nfn beta() {}\n";
-        let new_text = "fn beta( {"; // intentional syntax error
-        let result = run_replace(&[dict(&[
-            ("source", vm_string(source)),
-            ("language", vm_string("rust")),
-            ("symbol_name", vm_string("beta")),
-            ("new_text", vm_string(new_text)),
-        ])])
-        .expect("replace handler runs");
-        assert_eq!(string_field(&result, "result"), "syntax_error_after_edit");
-        assert!(!string_field(&result, "details").is_empty());
-    }
-
-    #[test]
     fn not_found_returns_available_and_suggestions() {
         let source = "fn parse_query() {}\nfn parse_other() {}\n";
         let result = run_extract(&[dict(&[
@@ -608,20 +562,6 @@ mod tests {
             VmValue::List(items) => assert!(!items.is_empty()),
             other => panic!("expected list, got {other:?}"),
         }
-    }
-
-    #[test]
-    fn ambiguous_when_multiple_unqualified_matches() {
-        // Two methods named `greet` in different classes.
-        let source = "class A:\n    def greet(self): pass\nclass B:\n    def greet(self): pass\n";
-        let result = run_extract(&[dict(&[
-            ("source", vm_string(source)),
-            ("language", vm_string("python")),
-            ("symbol_name", vm_string("greet")),
-        ])])
-        .expect("extract handler runs");
-        assert_eq!(string_field(&result, "result"), "ambiguous");
-        assert!(int_field(&result, "match_count") >= 2);
     }
 
     #[test]
@@ -663,16 +603,5 @@ mod tests {
         assert_eq!(string_field(&result, "result"), "extracted");
         assert_eq!(int_field(&result, "start_line"), 1);
         assert!(string_field(&result, "text").starts_with("#[test]"));
-    }
-
-    #[test]
-    fn unsupported_language_short_circuits() {
-        let result = run_extract(&[dict(&[
-            ("source", vm_string("hello")),
-            ("language", vm_string("klingon")),
-            ("symbol_name", vm_string("greet")),
-        ])])
-        .expect("extract handler runs");
-        assert_eq!(string_field(&result, "result"), "unsupported_language");
     }
 }

@@ -218,6 +218,23 @@ impl RunApprovalPolicy {
         self.resolve(decision)
     }
 
+    pub(crate) fn evaluate_dispatch(
+        &self,
+        tool: &str,
+        args: &serde_json::Value,
+        repeat_count: u64,
+        annotations: Option<&crate::tool_annotations::ToolAnnotations>,
+    ) -> (super::PolicyEvaluation, Option<String>) {
+        let (decision, identity) = super::approval_rules::evaluate_dispatch(
+            &self.declared,
+            tool,
+            args,
+            Some(repeat_count),
+            annotations,
+        );
+        (self.resolve(decision), identity)
+    }
+
     pub fn evaluate_detailed(
         &self,
         tool: &str,
@@ -231,6 +248,14 @@ impl RunApprovalPolicy {
         request: &super::ToolApprovalRequest,
     ) -> super::PolicyEvaluation {
         self.resolve(self.declared.evaluate_request(request))
+    }
+
+    pub(crate) fn evaluate_authority_request(
+        &self,
+        request: &super::PolicyAuthorityRequest,
+    ) -> Result<super::PolicyEvaluation, String> {
+        super::approval_rules::evaluate_authority_request(&self.declared, request)
+            .map(|decision| self.resolve(decision))
     }
 
     pub fn evaluate(&self, tool: &str, args: &serde_json::Value) -> super::ToolApprovalDecision {
@@ -262,6 +287,7 @@ impl RunApprovalPolicy {
                     .as_ref()
                     .and_then(|rule| rule.id.clone()),
                 index: decision.matched_rule.as_ref().and_then(|rule| rule.index),
+                contributing_rules: Vec::new(),
             });
             decision.receipt["action"] = serde_json::json!(decision.action);
             decision.receipt["reason"] = serde_json::json!(decision.reason);

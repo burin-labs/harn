@@ -19,8 +19,8 @@ mod prompt_tokens;
 mod receipt;
 mod reported_cache;
 pub(crate) use cache_fields::{
-    extract_cache_read_tokens, extract_cache_write_tokens, reported_cache_read_tokens,
-    reported_cache_write_tokens,
+    cache_field_roots, extract_cache_read_tokens, extract_cache_write_tokens,
+    reported_cache_read_tokens, reported_cache_write_tokens,
 };
 pub(crate) use prompt_tokens::{InputTokenBasis, PromptTokenCounts, ReportedTokenUsage};
 pub(crate) use receipt::ProviderUsageReceipt;

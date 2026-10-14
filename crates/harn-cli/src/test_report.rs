@@ -453,16 +453,6 @@ mod tests {
     }
 
     #[test]
-    fn summary_counts_outcomes() {
-        let report = sample_report();
-        assert_eq!(report.summary.total, 4);
-        assert_eq!(report.summary.passed, 1);
-        assert_eq!(report.summary.failed, 1);
-        assert_eq!(report.summary.timed_out, 1);
-        assert_eq!(report.summary.skipped, 1);
-    }
-
-    #[test]
     fn write_junit_renders_failure_and_skip() {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("report.xml");

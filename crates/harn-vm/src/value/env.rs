@@ -498,6 +498,13 @@ impl VmEnv {
         None
     }
 
+    /// Whether any visible binding was declared mutable.
+    pub(crate) fn has_mutable_binding(&self) -> bool {
+        self.scopes
+            .iter()
+            .any(|scope| scope.vars.values().any(Binding::mutable))
+    }
+
     pub(crate) fn contains(&self, name: &str) -> bool {
         self.scopes
             .iter()

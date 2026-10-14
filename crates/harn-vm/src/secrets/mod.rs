@@ -10,6 +10,7 @@ use zeroize::{Zeroize, Zeroizing};
 
 mod env;
 mod file;
+mod handoff;
 mod keyring;
 mod memory;
 #[cfg(all(
@@ -21,6 +22,7 @@ mod secret_service_lock;
 
 pub use env::EnvSecretProvider;
 pub use file::{FileSecretProvider, SECRET_FILE_PATH_ENV};
+pub use handoff::{with_parent_secret_handoff, ParentSecretHandoff, PARENT_SECRET_HANDOFF_OPTION};
 pub use keyring::{
     keychain_interaction_allowed, KeyringSecretProvider, NativeKeyring, NativeKeyringAvailability,
     NativeKeyringError, NativeKeyringUnavailable, SECRET_INTERACTIVE_ENV,
@@ -203,6 +205,14 @@ pub fn secret_ref_is_present(raw: &str) -> Result<Option<bool>, SecretError> {
         futures::executor::block_on(chain.contains(&id))?
     };
     Ok(Some(present))
+}
+
+/// The secret provider scoped onto the current task, if a host installed one.
+///
+/// Subtask preparation reads this so a branch of `parallel` resolves
+/// credentials through the same session view as the task that created it.
+pub(crate) fn active_secret_provider() -> Option<Arc<dyn SecretProvider>> {
+    ACTIVE_SECRET_PROVIDER.try_with(Arc::clone).ok()
 }
 
 /// Resolve secret references through `provider` for one async operation.
@@ -405,11 +415,14 @@ pub struct ConsultedSecretProvider {
 pub enum SecretProviderExclusion {
     /// An explicit provider-chain variable left this provider out.
     ChainOverride { variable: String, value: String },
+    /// A parent supplied a closed store through the one-shot launch transport.
+    ParentHandoff,
 }
 
 impl fmt::Display for SecretProviderExclusion {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::ParentHandoff => write!(f, "excluded by parent secret handoff"),
             Self::ChainOverride { variable, value } => {
                 write!(f, "disabled by {variable}={value}")
             }
@@ -691,6 +704,12 @@ impl From<&[u8]> for SecretBytes {
 
 #[async_trait]
 pub trait SecretProvider: Send + Sync {
+    /// Local stores may consult the host's CLI. Closed memory, environment,
+    /// remote, and scoped providers deny this source unless they opt in.
+    fn allows_local_cli_reads(&self) -> bool {
+        false
+    }
+
     async fn get(&self, id: &SecretId) -> Result<SecretBytes, SecretError>;
     async fn put(&self, id: &SecretId, value: SecretBytes) -> Result<(), SecretError>;
     async fn rotate(&self, id: &SecretId) -> Result<RotationHandle, SecretError>;
@@ -924,6 +943,12 @@ impl ChainSecretProvider {
 
 #[async_trait]
 impl SecretProvider for ChainSecretProvider {
+    fn allows_local_cli_reads(&self) -> bool {
+        self.providers
+            .iter()
+            .any(|provider| provider.allows_local_cli_reads())
+    }
+
     async fn get(&self, id: &SecretId) -> Result<SecretBytes, SecretError> {
         if self.providers.is_empty() {
             return Err(SecretError::NoProviders {
@@ -1162,6 +1187,19 @@ impl SecretChainPlan {
 
     /// Plan for this process's `HARN_SECRET_PROVIDERS`.
     pub fn configured() -> Self {
+        if handoff::active_parent_provider().is_some() {
+            return Self {
+                providers: vec!["parent-handoff".into()],
+                excluded: DEFAULT_SECRET_PROVIDER_CHAIN
+                    .split(',')
+                    .map(|provider| ExcludedSecretProvider {
+                        provider: provider.into(),
+                        reason: SecretProviderExclusion::ParentHandoff,
+                    })
+                    .collect(),
+                override_value: None,
+            };
+        }
         Self::from_value(std::env::var(SECRET_PROVIDER_CHAIN_ENV).ok().as_deref())
     }
 
@@ -1183,6 +1221,10 @@ pub fn configured_default_chain(
     namespace: impl Into<String>,
 ) -> Result<ChainSecretProvider, SecretError> {
     let namespace = namespace.into();
+    if let Some(parent) = handoff::active_parent_provider() {
+        return Ok(ChainSecretProvider::new(namespace, vec![parent])
+            .with_excluded(SecretChainPlan::configured().excluded));
+    }
     let plan = SecretChainPlan::configured();
     let mut providers: Vec<Arc<dyn SecretProvider>> = Vec::new();
 

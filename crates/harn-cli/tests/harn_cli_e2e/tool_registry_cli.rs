@@ -5,6 +5,63 @@ use serde_json::Value as JsonValue;
 use crate::test_util::process::harn_e2e_command;
 
 #[test]
+fn prepared_tool_cannot_bypass_consent_through_direct_cli_execution() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let path = temp.path().join("prepared.harn");
+    for prepared in [false, true] {
+        let preparation = if prepared {
+            "prepare: {_args -> {}},"
+        } else {
+            ""
+        };
+        fs::write(
+            &path,
+            format!(
+                r#"
+import {{ tool_registry_from }} from "std/tools"
+fn main(harness: Harness) {{
+  harness.tools.mcp_tools(tool_registry_from([{{
+    name: "inspect",
+    description: "Read an approved operation",
+    parameters: {{}},
+    {preparation}
+    handler: {{_args -> "HANDLER_REACHED"}},
+  }}]))
+}}
+"#
+            ),
+        )
+        .expect("write tool registry");
+        let output = harn_e2e_command()
+            .args(["tool", "run"])
+            .arg(&path)
+            .args(["inspect", "--json"])
+            .output()
+            .expect("run tool");
+        if prepared {
+            assert!(!output.status.success());
+            assert!(
+                String::from_utf8_lossy(&output.stderr)
+                    .contains("requires approved invocation preparation"),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            assert!(!String::from_utf8_lossy(&output.stdout).contains("HANDLER_REACHED"));
+        } else {
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            assert_eq!(
+                serde_json::from_slice::<JsonValue>(&output.stdout).unwrap(),
+                "HANDLER_REACHED"
+            );
+        }
+    }
+}
+
+#[test]
 fn declared_tool_runs_through_the_cli_argument_dictionary() {
     let temp = tempfile::tempdir().expect("tempdir");
     let path = temp.path().join("declared.harn");
