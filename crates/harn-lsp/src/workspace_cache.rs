@@ -99,7 +99,7 @@ impl WorkspaceCache {
             if generation != self.generation() {
                 continue;
             }
-            configs.insert(dir.clone(), Arc::clone(&config));
+            configs.insert(dir, Arc::clone(&config));
             return config;
         }
     }
