@@ -39,6 +39,23 @@ pub(crate) fn scope<R>(source: &str, f: impl FnOnce() -> R) -> R {
     f()
 }
 
+/// `source` tokenized with comments, or `None` when it fails to lex.
+pub(crate) fn with_comments(source: &str) -> Option<Rc<[Token]>> {
+    let lex = || {
+        Lexer::new(source)
+            .tokenize_with_comments()
+            .ok()
+            .map(Rc::from)
+    };
+    let linted = LINTED.with(|cell| cell.borrow().clone());
+    match linted {
+        Some(linted) if linted.start == source.as_ptr() && linted.len == source.len() => {
+            linted.tokens.get_or_init(lex).clone()
+        }
+        _ => lex(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -58,22 +75,5 @@ mod tests {
             assert!(Rc::ptr_eq(&outer, &with_comments(&source).unwrap()));
         });
         LINTED.with(|cell| assert!(cell.borrow().is_none()));
-    }
-}
-
-/// `source` tokenized with comments, or `None` when it fails to lex.
-pub(crate) fn with_comments(source: &str) -> Option<Rc<[Token]>> {
-    let lex = || {
-        Lexer::new(source)
-            .tokenize_with_comments()
-            .ok()
-            .map(Rc::from)
-    };
-    let linted = LINTED.with(|cell| cell.borrow().clone());
-    match linted {
-        Some(linted) if linted.start == source.as_ptr() && linted.len == source.len() => {
-            linted.tokens.get_or_init(lex).clone()
-        }
-        _ => lex(),
     }
 }
