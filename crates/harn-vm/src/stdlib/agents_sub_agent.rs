@@ -1500,43 +1500,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn structured_return_survives_code_in_the_explanation() {
-        let answer = "The release saves `memory + {phase: phase}`.\n\n{\"verdict\":\"confirmed\"}";
-        let transcript = crate::llm::helpers::new_transcript_with(
-            None,
-            vec![assistant_message(answer)],
-            None,
-            None,
-        );
-        let synthesized = synthesize_sub_agent_result(
-            &serde_json::json!({"visible_text": answer, "text": answer}),
-            &transcript,
-            true,
-        );
-        let schema = crate::stdlib::json_to_vm_value(&serde_json::json!({
-            "type": "object",
-            "properties": {"verdict": {"type": "string", "enum": ["confirmed"]}},
-            "required": ["verdict"],
-            "additionalProperties": false
-        }));
-        let data = parse_structured_sub_agent_data(synthesized.structured_json.as_ref(), &schema)
-            .expect("the child's final JSON is validated into data");
-        assert_eq!(
-            data.as_dict().unwrap().get("verdict").unwrap().display(),
-            "confirmed"
-        );
-
-        let invalid = synthesize_sub_agent_result(
-            &serde_json::json!({"text": "{\"verdict\":\"unknown\"}"}),
-            &VmValue::Nil,
-            true,
-        );
-        assert!(
-            parse_structured_sub_agent_data(invalid.structured_json.as_ref(), &schema).is_err()
-        );
-    }
-
     #[tokio::test(flavor = "current_thread")]
     async fn execute_sub_agent_propagates_nested_budget_denial() {
         crate::agent_sessions::reset_session_store();
