@@ -148,6 +148,12 @@ plan recovery RECOVERY=true FAKE_RUNS_FAIL=1
 plan recovery_missing RECOVERY=true FAKE_CONSUMER=missing
 [[ "$(output recovery_missing promote)" == true && "$(output recovery_missing requires_rehearsal)" == true ]] \
   || fail "missing rehearsal did not require actual measurement"
+plan recovery_explicit_pair RECOVERY=true FAKE_CONSUMER=missing CONSUMER_PULL_REQUEST=7
+[[ "$(output recovery_explicit_pair promote)" == true && "$(output recovery_explicit_pair requires_rehearsal)" == true ]] \
+  || fail "explicit consumer repair did not require actual measurement"
+plan recovery_existing_pair RECOVERY=true CONSUMER_PULL_REQUEST=7
+[[ "$(cat "$tmp/recovery_existing_pair.status")" != 0 ]] \
+  || fail "explicit pair replaced an existing measured rehearsal"
 for verdict in pending failure cancelled; do
   plan "recovery_consumer_$verdict" RECOVERY=true "FAKE_CONSUMER=$verdict"
   [[ "$(cat "$tmp/recovery_consumer_$verdict.status")" != 0 ]] \

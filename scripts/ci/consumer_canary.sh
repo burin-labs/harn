@@ -79,7 +79,7 @@ canary_fail() {
 canary_read_pairing() {
   local text=$1 reader
   reader="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/consumer-pairing.mjs"
-  CANARY_PAIRED=$(printf '%s' "$text" | env -i PATH="$PATH" node "$reader") || exit 1
+  CANARY_PAIRED=$(printf '%s' "$text" | env -i PATH="$PATH" node "$reader" "${CONSUMER_PULL_REQUEST:-}") || exit 1
 }
 
 canary_dispatch() {

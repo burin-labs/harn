@@ -174,6 +174,12 @@ candidate manifest attached to the release record.
   pass before publication. Missing, failed, cancelled or mismatched results
   refuse publication. A producer's existing failed rehearsal is not replaced.
   Recovery publishes the existing files without rebuilding them.
+  When the consumer needs a prepared repair before it can land against the
+  published tag, add `-f consumer_pull_request=PR_NUMBER`. Recovery selects
+  that open pull request in the registered consumer repository through the
+  existing pairing checks; a fork, closed pull, malformed number, or conflicting
+  source pairing refuses. Consumer observation and publication checks still
+  run. This selection cannot reuse an earlier default-branch rehearsal.
 - The consumer observer reached its deadline, but its exact dispatched child
   later succeeded: after the completed-child recovery policy is on main,
   dispatch the normal promoter with the same producer and source plus

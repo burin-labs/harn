@@ -48,6 +48,11 @@ on:
         description: Certified producer bound to the prior promotion
         required: false
         type: string
+      consumer_pull_request:
+        description: Explicit consumer repair for maintainer release recovery
+        required: false
+        default: ''
+        type: string
     secrets:
       RELEASE_APP_CLIENT_ID:
         required: true
@@ -145,6 +150,7 @@ jobs:
           SOURCE_REVISION: ${{ inputs.source_revision || github.sha }}
           REHEARSAL_PROMOTION_RUN_ID: ${{ inputs.rehearsal_promotion_run_id }}
           CANDIDATE_RUN_ID: ${{ inputs.candidate_run_id }}
+          CONSUMER_PULL_REQUEST: ${{ inputs.consumer_pull_request }}
           REHEARSAL_PROMOTION_READ_TOKEN: ${{ steps.history-token.outputs.token }}
         run: |
           CANARY_REPOSITORY="$CANARY_OWNER/$CANARY_NAME" \

@@ -521,9 +521,13 @@ export async function dispatchObserverConsumer(parentToken, consumerToken, conte
 
 /** Pairing is declared in public source; private branch identity stays inside
  * the authenticated source selector and dispatcher. */
-export function consumerPairing(text) {
+export function consumerPairing(text, requestedPull = '') {
   const lines=String(text??'').split(/\r?\n/).filter(line=>/^\s*Pairs-with:/.test(line));
   const pairs=new Set();
+  if(requestedPull !== '') {
+    if(typeof requestedPull !== 'string' || !id.test(requestedPull)) refuse('consumer_pairing_invalid');
+    pairs.add(requestedPull);
+  }
   for(const line of lines){
     const match=/^\s*Pairs-with:\s*consumer#([1-9][0-9]*)\s*$/.exec(line);
     if(!match) refuse('consumer_pairing_invalid');
