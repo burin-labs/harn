@@ -152,11 +152,14 @@ pub fn preview_inference_admission(
     };
     snapshot.local_runtime = Some(evidence.local_runtime);
     snapshot.open_weight = evidence.open_weight;
+    // Preview uses default API routing, including models requiring Responses.
+    // Live preflight also checks an explicitly selected API mode.
     let controls = chat_controls(
         &request.provider,
         &request.model,
         snapshot.data_posture,
         snapshot.effective_boundary,
+        super::super::options::LlmApiMode::ChatCompletions,
     );
     // The plan's own posture, not the requested one: a transport that cannot
     // carry per-request controls sends `default` whatever was asked.

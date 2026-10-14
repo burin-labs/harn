@@ -24,7 +24,8 @@ harn provider admission --request '{"provider":"ollama","model":"selected-model"
 The request accepts `provider`, `model`, an optional `boundary`, and optional
 `data_controls`. The boundary meets the process and inherited inference
 ceilings; it cannot widen them. Data controls use the selected chat transport's
-actual control plan.
+actual control plan under default API routing, including models that require
+Responses. Live preflight also checks an explicitly selected API mode.
 
 Read the required `status` field: `admitted`, `denied`, or `unknown`. A valid
 snapshot exits successfully for all three decisions. Missing catalog facts or

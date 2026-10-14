@@ -336,6 +336,7 @@ pub(crate) fn preflight_chat(
         &request.model,
         request.data_controls,
         boundary,
+        request.api_mode,
     );
     preflight(
         request.inference_boundary,
@@ -350,12 +351,18 @@ fn chat_controls(
     model: &str,
     requested_posture: crate::llm_config::DataPosture,
     boundary: Option<InferenceBoundary>,
+    api_mode: super::options::LlmApiMode,
 ) -> super::data_controls::DataControlsPlan {
     // The shared HTTP transports apply the resolved data-control plan again
-    // at send time. Native/ACP adapters do not, so never credit a planned
-    // no-training control to one of those routes.
+    // at send time. Native/ACP/Responses adapters do not, so never credit a
+    // planned no-training control to one of those routes.
     let shared_transport = !matches!(provider, "bedrock" | "azure_openai" | "vertex" | "gemini")
-        && !crate::llm::providers::AcpProvider::is_configured_acp(provider);
+        && !crate::llm::providers::AcpProvider::is_configured_acp(provider)
+        && !crate::llm::capabilities::should_use_responses_transport(
+            provider,
+            model,
+            api_mode == super::options::LlmApiMode::Responses,
+        );
     let posture = if shared_transport {
         requested_posture
     } else {

@@ -20,9 +20,14 @@ fn no_training_ceiling_plans_and_sends_only_required_controls() {
     let bodies = captured.clone();
     let server = spawn_llm_stub_many("privacy controls", 5, move |_, stream| {
         let (_, body) = super::ollama_openai_compat::read_http_request(stream);
+        let responses = body.get("input").is_some();
         bodies.lock().unwrap().push(body);
         requests.fetch_add(1, Ordering::SeqCst);
-        let body = r#"{"choices":[{"message":{"role":"assistant","content":"accepted"},"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":1,"total_tokens":4}}"#;
+        let body = if responses {
+            r#"{"status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"accepted"}]}],"usage":{"input_tokens":3,"output_tokens":1,"total_tokens":4}}"#
+        } else {
+            r#"{"choices":[{"message":{"role":"assistant","content":"accepted"},"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":1,"total_tokens":4}}"#
+        };
         write!(stream, "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}", body.len()).unwrap();
     });
     crate::llm_config::set_runtime_provider_endpoint_overrides(
@@ -110,6 +115,42 @@ fn no_training_ceiling_plans_and_sends_only_required_controls() {
     drop(_without_host);
 
     opts.inference_boundary = Some(boundary);
+    let mut responses = crate::llm_config::provider_config("openrouter").unwrap();
+    responses.features.push("responses_api".into());
+    let mut overlay = crate::llm_config::ProvidersConfig::default();
+    overlay.providers.insert("openrouter".into(), responses);
+    crate::llm_config::set_user_overrides(Some(overlay));
+    opts.api_mode = super::super::LlmApiMode::Responses;
+    assert!(crate::llm_config::provider_has_feature(
+        "openrouter",
+        "responses_api"
+    ));
+    assert!(crate::llm::capabilities::should_use_responses_transport(
+        &opts.provider,
+        &opts.model,
+        true
+    ));
+    let preflight = super::super::inference_boundary::preflight_chat(
+        &super::super::LlmRequestPayload::from(&opts),
+    );
+    let result = runtime.block_on(vm_call_llm_full(&opts));
+    assert_eq!(
+        counter.load(Ordering::SeqCst),
+        4,
+        "Responses preflight_admitted={}, response_accepted={}, transmitted_without_training_control={}",
+        preflight.is_ok(),
+        result.as_ref().is_ok_and(|result| result.text == "accepted"),
+        captured.lock().unwrap().last().unwrap()["provider"]
+            .get("data_collection")
+            .is_none()
+    );
+    assert!(preflight.is_err());
+    assert!(result
+        .expect_err("Responses cannot credit an unapplied training control")
+        .to_string()
+        .contains("inference_boundary.training_unknown"));
+    opts.api_mode = super::super::LlmApiMode::ChatCompletions;
+    crate::llm_config::clear_user_overrides();
     let mut definition = crate::llm_config::provider_config("openrouter").unwrap();
     for retention_only in [true, false] {
         if retention_only {
