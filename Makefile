@@ -760,7 +760,6 @@ test-pr-gate-scripts:
 	./scripts/tests/pre_push_signature_census_test.sh
 	./scripts/tests/ci_rust_test_lane_test.sh
 	bash ./scripts/tests/rust_test_duration_budget_test.sh
-	bash ./scripts/tests/rust_test_duration_budget_test.sh
 	./scripts/tests/thread_parity_receipt_test.sh
 	./scripts/tests/macos_nightly_test_env_test.sh
 	./scripts/tests/ci_finalize_sccache_test.sh
@@ -946,11 +945,18 @@ check-prompt-grammar:
 	@$(HARN_CLI_CMD) dump-prompt-grammar --check
 	@echo "    Prompt grammar OK."
 
+# Regenerate the precedence tables in the spec and the language guide plus the
+# tree-sitter `PREC` constants from harn_parser::operators::Precedence. Run
+# this whenever an operator's precedence or associativity changes.
 gen-operator-precedence:
 	$(HARN_CLI_CMD) dump-operator-precedence
 
+# CI guard: fail if a precedence projection drifted from the parser's table.
+# `make gen-operator-precedence` fixes it.
 check-operator-precedence:
+	@echo "=== Checking operator precedence projections match the parser ==="
 	@$(HARN_CLI_CMD) dump-operator-precedence --check
+	@echo "    Operator precedence projections OK."
 
 gen-builtin-methods:
 	$(HARN_CLI_CMD) dump-builtin-methods
@@ -1482,7 +1488,7 @@ check-grammar-fitness:
 	@$(HARN_CMD) run scripts/sync_grammar_fitness_receipt.harn -- --check
 
 # CI guard: fail if the tree-sitter grammar cannot parse the positive Harn
-# source sweep (conformance/tests, examples, tests/bridge). This is the same
+# source sweep (conformance/tests, examples, tests/bridge, crates/harn-stdlib). This is the same
 # sweep the release grammar-audit lane runs; wiring it into the PR-time audit
 # battery means a new .harn test that exercises syntax the editor grammar does
 # not cover fails the PR that introduces it, not the next release (see #4908 /

@@ -9,7 +9,7 @@
     {
       "id": "PAR",
       "title": "Parser / lexer",
-      "count": 6
+      "count": 7
     },
     {
       "id": "NAM",
@@ -598,6 +598,15 @@
       "code": "HARN-PAR-006",
       "category": "PAR",
       "summary": "integer literal is out of range for int (i64)",
+      "repairs": [],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-PAR-007",
+      "category": "PAR",
+      "summary": "the `start to end` range spelling was removed",
       "repairs": [],
       "related": [],
       "explanationPresent": true,
