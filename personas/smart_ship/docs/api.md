@@ -333,6 +333,14 @@ Original execution provenance remains attached to every selected output, includi
 pub type ReleaseArtifact = {artifact: Artifact, original: Execution, mode: "executed" | "reused"}
 ```
 
+### type `ReleaseFile`
+
+Paths identify the actual bytes supplied to the publishing adapter.
+
+```harn
+pub type ReleaseFile = {name: string, path: string}
+```
+
 ### type `ReleaseQualification`
 
 Qualification permits publication of these bytes; it does not report a completed deployment.
@@ -827,6 +835,21 @@ pub fn qualify_release(
   signed: SignedCheckpoint,
   trust: CheckpointTrust,
   request: ReleaseRequest,
+) -> Result<ReleaseQualification, string> {
+}
+```
+
+### fn `qualify_release_files`
+
+Hash the supplied files through the consumer's filesystem boundary before qualification.
+
+```harn
+pub fn qualify_release_files(
+  fs: HarnessFs,
+  signed: SignedCheckpoint,
+  trust: CheckpointTrust,
+  request: ReleaseRequest,
+  files: list<ReleaseFile>,
 ) -> Result<ReleaseQualification, string> {
 }
 ```

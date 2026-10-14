@@ -71,15 +71,17 @@ Retain remote state and signed checkpoint history for release consumers and reco
 
 Before publication, hash the actual artifact bytes and name their exact source
 commit and tree. Put that source and the artifact names and digests in a
-`ReleaseRequest`, together with the pinned checkpoint digest. Invoke the guard
-against the signed checkpoint file:
+`ReleaseRequest`, together with the pinned checkpoint digest. Supply the actual
+output paths as `files`; the guard reads and hashes them. Invoke it against the
+signed checkpoint file:
 
 ```sh
-harn run .smart-ship-source/personas/smart_ship/cli.harn -- '{"action":"release-guard","configuration":"smart-ship.json","release":{"checkpoint_file":"checkpoint.json","request":{"checkpoint":"sha256:<checkpoint-digest>","source":{"repository":"project","commit":"<commit>","tree":"<tree>"},"artifacts":[{"name":"binary","digest":"sha256:<artifact-digest>"}]}}}'
+harn run .smart-ship-source/personas/smart_ship/cli.harn -- '{"action":"release-guard","configuration":"smart-ship.json","release":{"checkpoint_file":"checkpoint.json","request":{"checkpoint":"sha256:<checkpoint-digest>","source":{"repository":"project","commit":"<commit>","tree":"<tree>"},"artifacts":[{"name":"binary","digest":"sha256:<artifact-digest>"}]},"files":[{"name":"binary","path":"dist/binary"}]}}'
 ```
 
 The guard refuses invalid signatures, incomplete verification, another checkpoint,
 a changed source, missing outputs, substituted bytes, or ambiguous producers.
 Successful output retains each original execution's provenance, including reuse.
-Publish the qualified bytes through your deployment adapter and record its actual
-receipt separately. Qualification does not report that deployment succeeded.
+Publish those same immutable bytes through your deployment adapter and record
+its actual receipt separately. The guard measures files at invocation; it does
+not lock them against later modification or report that deployment succeeded.

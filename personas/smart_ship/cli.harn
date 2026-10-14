@@ -1,6 +1,7 @@
 import {
   Controller,
   Installation,
+  ReleaseFile,
   ReleaseRequest,
   SignedCheckpoint,
   commit_state,
@@ -10,7 +11,7 @@ import {
   is_digest,
   load_installation,
   prepare_state,
-  qualify_release,
+  qualify_release_files,
   read_state,
   transfer,
 } from "./lib/main"
@@ -20,7 +21,7 @@ type Request = {
   configuration: string,
   mode?: "shadow" | "active" | "draining" | "stopped",
   target_controller?: string,
-  release?: {checkpoint_file: string, request: ReleaseRequest},
+  release?: {checkpoint_file: string, request: ReleaseRequest, files: list<ReleaseFile>},
 }
 
 fn change(process: HarnessProcess, config: Installation, request: Request) {
@@ -55,7 +56,13 @@ fn main(harness: Harness) {
     const text = harness.fs.read_text(request.release.checkpoint_file)
     require len(text) <= 16777216, "checkpoint manifest exceeds its size limit"
     const signed: SignedCheckpoint = schema_expect(json_parse(text), schema_of(SignedCheckpoint))
-    const result = qualify_release(signed, config.policy, request.release.request)
+    const result = qualify_release_files(
+      harness.fs,
+      signed,
+      config.policy,
+      request.release.request,
+      request.release.files,
+    )
     match result {
       Ok(qualification) -> { harness.stdio.println(json_stringify(qualification)) }
       Err(reason) -> {

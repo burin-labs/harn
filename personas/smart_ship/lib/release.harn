@@ -5,6 +5,9 @@ import { Artifact, CheckpointTrust, Execution, SignedCheckpoint, Source } from "
 /** A consumer pins the checkpoint and the exact source and output it intends to publish. */
 pub type ReleaseRequest = {checkpoint: string, source: Source, artifacts: list<Artifact>}
 
+/** Paths identify the actual bytes supplied to the publishing adapter. */
+pub type ReleaseFile = {name: string, path: string}
+
 /** Original execution provenance remains attached to every selected output, including reuse. */
 pub type ReleaseArtifact = {artifact: Artifact, original: Execution, mode: "executed" | "reused"}
 
@@ -55,4 +58,34 @@ pub fn qualify_release(
     selected.push({artifact: artifact, original: producer.original, mode: producer.mode})
   }
   return Ok({checkpoint: identity, source: request.source, artifacts: selected})
+}
+
+/** Hash the supplied files through the consumer's filesystem boundary before qualification. */
+pub fn qualify_release_files(
+  fs: HarnessFs,
+  signed: SignedCheckpoint,
+  trust: CheckpointTrust,
+  request: ReleaseRequest,
+  files: list<ReleaseFile>,
+) -> Result<ReleaseQualification, string> {
+  const qualified = qualify_release(signed, trust, request)
+  if is_err(qualified) {
+    return qualified
+  }
+  if len(files) != len(request.artifacts) {
+    return Err("release files do not cover the requested output inventory")
+  }
+  for artifact in request.artifacts {
+    const matching = files.filter({ file -> file.name == artifact.name })
+    if len(matching) != 1 || matching[0]?.path == "" {
+      return Err("release output requires one file with the expected name")
+    }
+    const measured = try {
+      "sha256:" + sha256_hex(fs.read_bytes(matching[0]!.path))
+    }
+    if is_err(measured) || unwrap(measured) != artifact.digest {
+      return Err("release file is unreadable or its bytes differ from the proven output")
+    }
+  }
+  return qualified
 }

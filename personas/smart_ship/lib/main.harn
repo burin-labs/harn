@@ -63,9 +63,11 @@ pub import {
 pub import { checkpoint_valid, fence_matches, promote, release_identity } from "./promotion"
 pub import {
   ReleaseArtifact,
+  ReleaseFile,
   ReleaseQualification,
   ReleaseRequest,
   qualify_release,
+  qualify_release_files,
 } from "./release"
 pub import { RepairContext, RepairModel, RepairRun, run_repair } from "./repair"
 pub import {
