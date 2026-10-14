@@ -539,6 +539,7 @@ mod tests {
     use super::DocumentState;
     use crate::rules::RuleWorkspace;
     use std::path::Path;
+    use std::sync::Arc;
     use tower_lsp::lsp_types::{
         Diagnostic, DiagnosticSeverity, NumberOrString, Position, Range, Url,
     };
