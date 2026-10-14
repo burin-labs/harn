@@ -5,21 +5,21 @@
   answer=null
   done=null
 # harmony channel suffix on the name
-  calls=0 errors=0 violations=1 stray=0
-  vio "unparsed_tool_syntax: text shaped like a tool call was not recognized as one and did not run. Emit every call as `<tool_call>name({ ... })</tool_call>`. Unrecognized fragment: …\"name\":\"run\ncommentary\",\"arguments\":{\"command\":\"cargo test\"}}"
-  prose="{\"name\":\"run\n\ncommentary\",\"arguments\":{\"command\":\"cargo test\"}}"
+  calls=1 errors=0 violations=0 stray=1
+  call run {"command":"cargo test"}
+  prose=""
   answer=null
   done=null
 # constrain marker with a command argument
-  calls=0 errors=0 violations=1 stray=0
-  vio "unparsed_tool_syntax: text shaped like a tool call was not recognized as one and did not run. Emit every call as `<tool_call>name({ ... })</tool_call>`. Unrecognized fragment: …\"name\":\"\njson\",\"arguments\":{\"command\":\"cargo test\"}}"
-  prose="{\"name\":\"\n\njson\",\"arguments\":{\"command\":\"cargo test\"}}"
+  calls=1 errors=0 violations=0 stray=1
+  call run {"command":"cargo test"}
+  prose=""
   answer=null
   done=null
 # constrain marker with a read intent
-  calls=0 errors=0 violations=1 stray=0
-  vio "unparsed_tool_syntax: text shaped like a tool call was not recognized as one and did not run. Emit every call as `<tool_call>name({ ... })</tool_call>`. Unrecognized fragment: …\"name\":\"\njson\",\"arguments\":{\"intent\":\"read\",\"path\":\"src/main.zig\"}}"
-  prose="{\"name\":\"\n\njson\",\"arguments\":{\"intent\":\"read\",\"path\":\"src/main.zig\"}}"
+  calls=1 errors=0 violations=0 stray=1
+  call look {"intent":"read","path":"src/main.zig"}
+  prose=""
   answer=null
   done=null
 # tool_call wrapper with a search intent

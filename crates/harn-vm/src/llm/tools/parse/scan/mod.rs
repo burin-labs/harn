@@ -487,6 +487,9 @@ impl<'a> Scan<'a> {
     fn inline_protocol_boundary(&self, cursor: usize) -> bool {
         let tail = &self.src[cursor..];
         tail.starts_with("</")
+            || tail.starts_with("<<")
+            || frames::frame_marker(&self.spec.harmony, &self.call_tag_opens, self.src, cursor)
+                .is_some()
             || self
                 .spec
                 .call_tags
