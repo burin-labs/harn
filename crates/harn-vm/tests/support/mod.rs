@@ -126,10 +126,19 @@ fn run_with_execution_context(source: &str, context: RunExecutionRecord) -> Resu
 
 /// Execute an agent fixture with the same host bridge and VM stack as the native runtime.
 pub fn run_with_host_bridge(source: &str) -> Result<String, String> {
-    harn_vm::on_vm_stack(|| run_with_environment_and_context(source, None, None, true))
+    run_with_environment_and_context(source, None, None, true)
 }
 
 fn run_with_environment_and_context(
+    source: &str,
+    environment: Option<SessionEnvironment>,
+    context: Option<RunExecutionRecord>,
+    with_bridge: bool,
+) -> Result<String, String> {
+    harn_vm::on_vm_stack(|| run_vm(source, environment, context, with_bridge))
+}
+
+fn run_vm(
     source: &str,
     environment: Option<SessionEnvironment>,
     context: Option<RunExecutionRecord>,
