@@ -1,5 +1,4 @@
-use crate::triggers::event::KnownProviderPayload;
-use crate::triggers::{ProviderPayload, TriggerEvent};
+use crate::triggers::TriggerEvent;
 
 pub(super) fn event_selector_matches(event: &TriggerEvent, expected: &str) -> bool {
     if expected == event.kind {
@@ -19,20 +18,14 @@ pub(super) fn event_selector_matches(event: &TriggerEvent, expected: &str) -> bo
     else {
         return false;
     };
-    // Connector contract v1 payloads own the normalized action. Do not infer
-    // it from a topic or a nested copy of the original provider body.
-    let payload = match &event.provider_payload {
-        ProviderPayload::Extension(payload) => &payload.raw,
-        ProviderPayload::Known(KnownProviderPayload::Webhook(payload)) => &payload.raw,
-        _ => return false,
-    };
-    payload.get("action").and_then(serde_json::Value::as_str) == Some(expected_action)
+    event.provider_payload.action() == Some(expected_action)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::triggers::{ProviderId, SignatureStatus};
+    use crate::triggers::event::KnownProviderPayload;
+    use crate::triggers::{ProviderId, ProviderPayload, SignatureStatus};
     use serde_json::json;
     use std::collections::BTreeMap;
 
@@ -113,5 +106,40 @@ mod tests {
         );
         assert!(event_selector_matches(&event, "webhook.issues.opened"));
         assert!(!event_selector_matches(&event, "webhook.issues.closed"));
+    }
+
+    #[test]
+    fn stream_selectors_use_the_normalized_payload_action() {
+        let provider = ProviderId::from("kafka");
+        let payload = ProviderPayload::normalize(
+            &provider,
+            "order",
+            &BTreeMap::new(),
+            json!({"kind": "order", "action": "created"}),
+        )
+        .unwrap();
+        assert!(matches!(
+            &payload,
+            ProviderPayload::Known(KnownProviderPayload::Kafka(_))
+        ));
+        let event = TriggerEvent::new(
+            provider,
+            "order",
+            None,
+            "stream-selector-test",
+            None,
+            BTreeMap::new(),
+            payload,
+            SignatureStatus::Unsigned,
+        );
+        for selector in [
+            "order",
+            "kafka.order",
+            "order.created",
+            "kafka.order.created",
+        ] {
+            assert!(event_selector_matches(&event, selector), "{selector}");
+        }
+        assert!(!event_selector_matches(&event, "kafka.order.deleted"));
     }
 }

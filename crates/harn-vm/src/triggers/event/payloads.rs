@@ -95,6 +95,27 @@ impl ProviderPayload {
             Self::Extension(payload) => payload.provider.as_str(),
         }
     }
+
+    /// The optional action in the provider's normalized payload, never a topic
+    /// or a nested copy of the original body. Channel selectors use names.
+    pub(crate) fn action(&self) -> Option<&str> {
+        let raw = match self {
+            Self::Extension(payload) => &payload.raw,
+            Self::Known(known) => match known {
+                KnownProviderPayload::Cron(payload) => &payload.raw,
+                KnownProviderPayload::Webhook(payload) => &payload.raw,
+                KnownProviderPayload::A2aPush(payload) => &payload.raw,
+                KnownProviderPayload::Kafka(payload)
+                | KnownProviderPayload::Nats(payload)
+                | KnownProviderPayload::Pulsar(payload)
+                | KnownProviderPayload::PostgresCdc(payload)
+                | KnownProviderPayload::Email(payload)
+                | KnownProviderPayload::Websocket(payload) => &payload.raw,
+                KnownProviderPayload::Channel(_) => return None,
+            },
+        };
+        raw.get("action").and_then(JsonValue::as_str)
+    }
 }
 
 // Keep the public payload hierarchy PartialEq-only; deriving Eq here would
