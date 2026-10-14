@@ -45,8 +45,9 @@ mod tests {
 
     #[test]
     fn an_unwinding_nested_scope_restores_the_previous_tokens() {
-        scope("outer", || {
-            let outer = with_comments("outer").unwrap();
+        let source = String::from("outer");
+        scope(&source, || {
+            let outer = with_comments(&source).unwrap();
             let result = std::panic::catch_unwind(|| {
                 scope("inner", || {
                     assert!(!Rc::ptr_eq(&outer, &with_comments("inner").unwrap()));
@@ -54,7 +55,7 @@ mod tests {
                 });
             });
             assert!(result.is_err());
-            assert!(Rc::ptr_eq(&outer, &with_comments("outer").unwrap()));
+            assert!(Rc::ptr_eq(&outer, &with_comments(&source).unwrap()));
         });
         LINTED.with(|cell| assert!(cell.borrow().is_none()));
     }
