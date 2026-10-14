@@ -146,7 +146,7 @@ module.exports = grammar({
     // accepted by `parse_attribute_value` in the runtime parser
     // (crates/harn-parser/src/parser/decls.rs): scalar literals, lists,
     // dicts, dotted identifiers used as sentinels (e.g.
-    // `github.pr_opened`), and simple call-shaped sentinels such as
+    // `github.pull_request.opened`), and simple call-shaped sentinels such as
     // `schedule("*/30 * * * *")`. Negative integers are also allowed
     // as a single attribute scalar.
     _attribute_value: ($) =>
@@ -167,7 +167,7 @@ module.exports = grammar({
       ),
 
     // Dotted-identifier sentinel used in attribute values, e.g.
-    // `github.pr_opened`. This intentionally does not extend into
+    // `github.pull_request.opened`. This intentionally does not extend into
     // `property_access` (which carries _expression on the LHS) because
     // attribute values are syntactically restricted to the literal
     // grammar above.

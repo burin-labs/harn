@@ -69,7 +69,7 @@ mod json_query;
 pub(crate) mod json_repair;
 pub(crate) mod json_stream;
 mod jsonrpc;
-mod junit;
+pub mod junit;
 mod lifecycle_receipts;
 mod logging;
 pub mod long_running;

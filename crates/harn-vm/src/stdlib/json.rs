@@ -1076,24 +1076,54 @@ fn write_vm_value_to_json(val: &VmValue, out: &mut String) {
 
 pub(crate) fn extract_json_from_text(text: &str) -> String {
     let trimmed = text.trim();
-
-    if let Some((_, after_backticks)) = trimmed.split_once("```") {
+    let mut eligible = trimmed.to_string();
+    let mut fallback = None;
+    let mut remaining = trimmed;
+    while let Some((before, after_backticks)) = remaining.split_once("```") {
         let content = after_backticks
             .split_once('\n')
             .map_or(after_backticks, |(_, rest)| rest);
-        if let Some((body, _)) = content.split_once("```") {
-            return body.trim().to_string();
+        if let Some((body, rest)) = content.split_once("```") {
+            if serde_json::from_str::<serde_json::Value>(body.trim()).is_ok() {
+                return body.trim().to_string();
+            }
+            fallback.get_or_insert_with(|| body.trim().to_string());
+            let start = trimmed.len() - remaining.len() + before.len();
+            let end = trimmed.len() - rest.len();
+            eligible.replace_range(start..end, &" ".repeat(end - start));
+            remaining = rest;
+        } else {
+            break;
         }
     }
 
-    if let Some(result) = find_balanced_json(trimmed, b'{', b'}') {
-        return result;
+    let mut array = None;
+    let mut remaining = eligible.as_str();
+    while let Some(start) = remaining.find(['{', '[']) {
+        let candidate = remaining.get(start..).unwrap_or_default();
+        let (open, close) = if candidate.starts_with('{') {
+            (b'{', b'}')
+        } else {
+            (b'[', b']')
+        };
+        if let Some(result) = find_balanced_json(candidate, open, close) {
+            if serde_json::from_str::<serde_json::Value>(&result).is_ok() {
+                if open == b'{' {
+                    return result;
+                }
+                array.get_or_insert_with(|| result.clone());
+            } else {
+                fallback.get_or_insert_with(|| result.clone());
+            }
+            // Only outer candidates are eligible. Neither delimiter kind may
+            // supply a nested fragment from a rejected code expression.
+            remaining = candidate.get(result.len()..).unwrap_or_default();
+        } else {
+            remaining = candidate.get(1..).unwrap_or_default();
+        }
     }
-    if let Some(result) = find_balanced_json(trimmed, b'[', b']') {
-        return result;
-    }
-
-    trimmed.to_string()
+    // The repair owner needs the malformed fragment without its preamble.
+    array.or(fallback).unwrap_or_else(|| trimmed.to_string())
 }
 
 fn find_balanced_json(text: &str, open: u8, close: u8) -> Option<String> {
@@ -1456,3 +1486,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "json_extraction_tests.rs"]
+mod extraction_tests;

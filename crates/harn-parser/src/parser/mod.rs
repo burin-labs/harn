@@ -629,7 +629,7 @@ interface Repository<T> {
     fn parses_durable_persona_annotation_values() {
         let source = r#"
 @persona(
-  triggers: [github.pr_opened, schedule("*/30 * * * *")],
+  triggers: [github.pull_request.opened, schedule("*/30 * * * *")],
   tools: [github, ci],
   autonomy: act_with_approval,
   budget: {daily_usd: 20, frontier_escalations: 3},
@@ -650,7 +650,9 @@ fn merge_captain(ctx) {
         let Node::ListLiteral(items) = &triggers.node else {
             panic!("expected trigger list");
         };
-        assert!(matches!(&items[0].node, Node::Identifier(name) if name == "github.pr_opened"));
+        assert!(
+            matches!(&items[0].node, Node::Identifier(name) if name == "github.pull_request.opened")
+        );
         assert!(matches!(
             &items[1].node,
             Node::FunctionCall { name, args, .. } if name == "schedule" && args.len() == 1

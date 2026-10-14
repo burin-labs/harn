@@ -399,7 +399,7 @@ impl Parser {
 
     /// Parse a compile-time attribute argument value. Attribute values are
     /// deliberately non-evaluating: literal scalars, bare or dotted
-    /// identifiers used as string sentinels (`github.pr_opened`), lists,
+    /// identifiers used as string sentinels (`github.pull_request.opened`), lists,
     /// dicts, and simple call-shaped sentinels such as `schedule("...")`.
     pub(super) fn parse_attribute_value(&mut self) -> Result<SNode, ParserError> {
         let span = self.current_span();

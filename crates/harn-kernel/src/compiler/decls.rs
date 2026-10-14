@@ -605,7 +605,7 @@ impl Compiler {
                 // Treat bare identifiers as string sentinels (e.g. `kind: edit`
                 // should behave the same as `kind: "edit"`). This mirrors
                 // common attribute-DSL ergonomics. The parser also folds
-                // dotted sentinels like `github.pr_opened` into this node.
+                // dotted sentinels like `github.pull_request.opened` into this node.
                 let idx = self.string_constant(name);
                 self.chunk.emit_u16(Op::Constant, idx, self.line);
             }

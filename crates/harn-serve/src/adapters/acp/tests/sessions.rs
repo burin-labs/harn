@@ -1165,6 +1165,8 @@ pipeline default(harness: Harness, task: unknown) {
   harness.stdio.println(blocks[2].media_type == "audio/wav")
   harness.stdio.println(contains(blocks[3].text, "file:///tmp/example.txt"))
   harness.stdio.println(contains(blocks[3].text, "hello from embedded context"))
+  harness.stdio.println(blocks[3]._harn.source_content.type == "resource")
+  harness.stdio.println(blocks[3]._harn.source_content.resource.text == "hello from embedded context")
 }"#,
             )
             .expect("write pipeline");
@@ -1237,10 +1239,7 @@ pipeline default(harness: Harness, task: unknown) {
                 }
             }
             assert!(saw_completed, "prompt should complete successfully");
-            assert!(
-                !output.contains("false"),
-                "multimodal prompt assertions failed; output was:\n{output}"
-            );
+            assert_eq!(output.trim(), ["true"; 11].join("\n"), "every prompt assertion must run");
             drop(request_tx);
             server.await.expect("ACP channel server task");
         })
