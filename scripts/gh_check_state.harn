@@ -803,6 +803,14 @@ fn main(harness: Harness) {
     harness.stdio.eprintln("gh_check_state: --sha must be a 40-character commit sha")
     harness.runtime.exit(EXIT_USAGE)
   }
+  // Runtime versions alone do not prove support for the census's list mutations.
+  const control = build_census(sha, [], ["CI status"], [], "explicit")
+  if control.missing != 1 || control.verdict != "missing" || control.exit_code != EXIT_MISSING {
+    harness.stdio.eprintln(
+      "gh_check_state: runtime failed the missing-check control; no check census was measured",
+    )
+    harness.runtime.exit(EXIT_MISSING)
+  }
   const collected = collect_observations(harness.process, harness.clock, harness.stdio, repo, sha)
   if !collected.ok {
     harness.stdio.eprintln(
