@@ -697,6 +697,7 @@ test-agent-scripts:
 	@echo "    Harn agent-loop tests OK."
 
 test-pr-gate-scripts:
+	bash ./scripts/tests/source_policy_grammar_test.sh
 	./scripts/tests/macos_lint_aggregate_test.sh
 	node scripts/tests/rust_lint_timings_test.cjs
 	./scripts/tests/gh_check_state_launcher_test.sh
@@ -1512,6 +1513,7 @@ verify-tree-sitter-parse:
 # the two sides cannot drift.
 SOURCE_REPOSITORY_POLICIES := \
   check-e2e-trigger-contract \
+  check-grammar-fitness \
   lint-agent-path-normalization \
   check-stdlib-host-neutral \
   check-public-product-names \
@@ -1537,7 +1539,6 @@ WARM_REPOSITORY_POLICIES := \
   check-agent-guidance \
   check-agent-gates \
   check-tree-sitter-keywords \
-  check-grammar-fitness \
   check-vm-exposures \
   check-turn-end-boundary \
   check-generated-registry \
