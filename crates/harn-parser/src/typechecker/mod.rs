@@ -69,7 +69,7 @@ pub struct TypeCheckFacts {
 }
 
 /// Static info for one `import * as alias from "path"` binding.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct NamespaceImportBinding {
     /// Module path as written / resolved display string for diagnostics.
     pub module_path: String,
