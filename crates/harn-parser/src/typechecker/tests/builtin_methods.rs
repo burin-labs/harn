@@ -35,19 +35,35 @@ fn methods_from_other_receivers_are_rejected_on_numbers_and_bools() {
   flag.lower()
   count.len()
   fraction.upper()
+}
+fn nullable(flag: bool?, count: int?, fraction: float?) {
+  flag?.lower()
+  count?.len()
+  fraction?.upper()
+}
+fn mixed(value: int | string) {
+  value.lower()
 }",
     );
-    assert_eq!(errs.len(), 3, "{errs:?}");
-    for (error, (method, receiver)) in
-        errs.iter()
-            .zip([("lower", "bool"), ("len", "int"), ("upper", "float")])
-    {
+    assert_eq!(errs.len(), 7, "{errs:?}");
+    for (error, (method, receiver)) in errs.iter().zip([
+        ("lower", "bool"),
+        ("len", "int"),
+        ("upper", "float"),
+        ("lower", "bool"),
+        ("len", "int"),
+        ("upper", "float"),
+        ("lower", "int"),
+    ]) {
         assert!(
             error.contains(&format!("method `{method}` does not exist on `{receiver}`")),
             "{error}"
         );
     }
-    let valid = errors(r#"fn f() { "A".lower(); [1].len(); "a".upper() }"#);
+    let valid = errors(
+        r#"fn f(value: string?) { "A".lower(); [1].len(); "a".upper(); value?.lower() }
+fn gradual(value: unknown) { value.lower() }"#,
+    );
     assert!(valid.is_empty(), "{valid:?}");
 }
 

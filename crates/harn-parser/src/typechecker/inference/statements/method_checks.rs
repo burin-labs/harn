@@ -21,12 +21,13 @@ impl TypeChecker {
         let receiver = Self::builtin_method_receiver_type(resolved, method)
             .and_then(|ty| Self::builtin_method_receiver(&ty).map(|(kind, _)| kind));
         let Some(kind) = receiver else {
+            // Optional chaining skips nil, but a concrete member of a union
+            // must still support the call. Numbers and bools have no methods.
+            if let Some(name) = Self::methodless_primitive_member(resolved) {
+                self.emit_unknown_method(method, &format!("`{name}`"), &[], false, span);
+                return;
+            }
             match resolved {
-                // Numbers and bools expose no value methods, including names
-                // that belong to another builtin receiver.
-                TypeExpr::Named(name) if matches!(name.as_str(), "int" | "float" | "bool") => {
-                    self.emit_unknown_method(method, &format!("`{name}`"), &[], false, span);
-                }
                 TypeExpr::Named(name) if is_gradual_type_name(name) => {
                     self.check_removed_method_on_unknown_receiver(object, method, args, span);
                 }
@@ -67,6 +68,16 @@ impl TypeChecker {
         }
         if row.is_mutating() {
             self.check_mutating_method_receiver(object, method, kind, scope, span);
+        }
+    }
+
+    fn methodless_primitive_member(ty: &TypeExpr) -> Option<&str> {
+        match ty {
+            TypeExpr::Named(name) if matches!(name.as_str(), "int" | "float" | "bool") => {
+                Some(name)
+            }
+            TypeExpr::Union(members) => members.iter().find_map(Self::methodless_primitive_member),
+            _ => None,
         }
     }
 

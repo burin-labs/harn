@@ -571,8 +571,7 @@ impl TypeChecker {
     /// Emit a HARN-NAM-005 with the same "did you mean" + "available"
     /// affordances as the field-typo diagnostic. `list_available` controls
     /// whether the help enumerates the candidate set (omitted for the
-    /// permissive number/bool tier, whose candidate set is the whole builtin
-    /// universe).
+    /// number/bool receivers, which have no method candidates).
     pub(super) fn emit_unknown_method(
         &mut self,
         method: &str,
