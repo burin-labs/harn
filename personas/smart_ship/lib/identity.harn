@@ -20,7 +20,7 @@ pub fn requirement_identity(requirement: Requirement) -> string {
       requirement.coverage_digest,
       requirement.trust_domain,
       requirement.reuse_allowed,
-      requirement.artifacts.sort(),
+      requirement.artifacts.sorted(),
     ],
   )
 }
@@ -39,7 +39,7 @@ pub fn execution_bytes(execution: Execution) -> string {
         execution.result,
         execution.log_digest,
         execution.artifacts.map({ artifact -> json_stringify([artifact.name, artifact.digest]) })
-          .sort(),
+          .sorted(),
         if execution.tests == nil {
           nil
         } else {
@@ -66,9 +66,9 @@ pub fn policy_digest(policy: Policy) -> string {
         + json_stringify(
           [
             policy.installation,
-            policy.repositories.sort(),
-            policy.verifier_keys.map(keys).sort(),
-            policy.checkpoint_keys.map(keys).sort(),
+            policy.repositories.sorted(),
+            policy.verifier_keys.map(keys).sorted(),
+            policy.checkpoint_keys.map(keys).sorted(),
             policy.max_changes,
             policy.max_unverified_ms,
             policy.max_repair_attempts,
@@ -89,7 +89,7 @@ pub fn snapshot_bytes(snapshot: Snapshot) -> string {
         snapshot.policy_digest,
         snapshot.previous_checkpoint,
         snapshot.created_at_ms,
-        snapshot.sources.map({ source -> source_identity(source) }).sort(),
+        snapshot.sources.map({ source -> source_identity(source) }).sorted(),
         snapshot.changes.map(
           { change ->
             json_stringify(
@@ -104,8 +104,8 @@ pub fn snapshot_bytes(snapshot: Snapshot) -> string {
             )
           },
         )
-          .sort(),
-        snapshot.requirements.map({ requirement -> requirement_identity(requirement) }).sort(),
+          .sorted(),
+        snapshot.requirements.map({ requirement -> requirement_identity(requirement) }).sorted(),
         snapshot.inventory_complete,
       ],
     )
@@ -136,7 +136,7 @@ pub fn checkpoint_bytes(checkpoint: Checkpoint) -> string {
             )
           },
         )
-          .sort(),
+          .sorted(),
       ],
     )
 }

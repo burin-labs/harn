@@ -8,6 +8,7 @@ import {
   finish_repair,
   offer,
   repair_authorized,
+  repair_spend,
   start,
   transfer,
 } from "../lib/controller"
@@ -15,6 +16,12 @@ import { Fence } from "../lib/types"
 
 fn fence(state: Controller) -> Fence {
   return pick(state.authority, ["installation", "generation", "revision", "controller"])
+}
+
+fn spend(state: Controller) {
+  const incident = state.incidents[0]
+  assert(incident != nil)
+  return repair_spend(incident)
 }
 
 pipeline test_newest_pending_preserves_running_source_and_admitted_work(harness: Harness) {
@@ -79,12 +86,23 @@ pipeline test_failed_source_has_one_bounded_owner_and_stop_invalidates_workers(h
   const incident = failed.incidents[0]
   assert(incident != nil)
   const owned = unwrap(
-    claim_repair(failed, fence(failed), incident.id, "worker-a", 2000, 10000, f.policy),
+    claim_repair(failed, fence(failed), incident.id, "worker-a", 2000, 10000, 1.0, f.policy),
   )
-  assert(!is_ok(claim_repair(owned, fence(owned), incident.id, "worker-b", 3000, 10000, f.policy)))
+  assert(
+    !is_ok(claim_repair(owned, fence(owned), incident.id, "worker-b", 3000, 10000, 1.0, f.policy)),
+  )
+  assert(
+    !is_ok(claim_repair(owned, fence(owned), incident.id, "worker-b", 12001, 10000, 5.0, f.policy)),
+    "an expired, unreported attempt must not restore its spend allowance",
+  )
   const unknown_cost = unwrap(finish_repair(owned, fence(owned), incident.id, "worker-a", 1, nil))
-  assert_eq(unknown_cost.incidents[0]?.spent_usd, nil)
-  assert_eq(unknown_cost.incidents[0]?.owner, nil)
+  assert_eq(spend(unknown_cost).spent_usd, nil)
+  const unknown_incident = unknown_cost.incidents[0]
+  assert(unknown_incident != nil)
+  const unknown_attempt = unknown_incident!.attempts[0]
+  assert(unknown_attempt != nil)
+  assert_eq(unknown_attempt!.status, "unknown")
+  assert_eq(spend(unknown_cost).unreported_attempts, [1])
   assert(
     !is_ok(
       claim_repair(
@@ -94,6 +112,7 @@ pipeline test_failed_source_has_one_bounded_owner_and_stop_invalidates_workers(h
         "worker-b",
         3000,
         10000,
+        5.0,
         f.policy,
       ),
     ),
@@ -115,11 +134,36 @@ pipeline test_failed_source_has_one_bounded_owner_and_stop_invalidates_workers(h
   const resumed = unwrap(control(stopped, fence(stopped), "active"))
   assert(!repair_authorized(resumed, permit, 4000))
   const reclaim = unwrap(
-    claim_repair(resumed, fence(resumed), incident.id, "worker-a", 4000, 10000, f.policy),
+    claim_repair(resumed, fence(resumed), incident.id, "worker-a", 4000, 10000, 1.0, f.policy),
   )
   assert(!repair_authorized(reclaim, permit, 4000))
+  assert_eq(spend(reclaim).spent_usd, nil)
+  assert_eq(spend(reclaim).committed_usd, 2.0)
+  assert_eq(spend(reclaim).unreported_attempts, [1, 2])
+  const expired = unwrap(
+    claim_repair(owned, fence(owned), incident.id, "worker-b", 12001, 10000, 2.0, f.policy),
+  )
+  assert_eq(spend(expired).spent_usd, nil)
+  assert_eq(spend(expired).committed_usd, 3.0)
   assert(
-    !is_ok(claim_repair(stopped, fence(owned), incident.id, "worker-a", 4000, 10000, f.policy)),
+    !is_ok(
+      claim_repair(expired, fence(expired), incident.id, "worker-c", 22002, 10000, 3.0, f.policy),
+    ),
+  )
+  assert(!is_ok(finish_repair(expired, fence(expired), incident.id, "worker-a", 1, 0.0)))
+  const measured = unwrap(finish_repair(owned, fence(owned), incident.id, "worker-a", 1, 0.25))
+  assert_eq(spend(measured).spent_usd, 0.25)
+  assert_eq(spend(measured).committed_usd, 0.25)
+  assert_eq(spend(measured).unreported_attempts, [])
+  const measured_incident = measured.incidents[0]
+  assert(measured_incident != nil)
+  const measured_attempt = measured_incident!.attempts[0]
+  assert(measured_attempt != nil)
+  assert_eq(measured_attempt!.status, "settled")
+  assert(
+    !is_ok(
+      claim_repair(stopped, fence(owned), incident.id, "worker-a", 4000, 10000, 1.0, f.policy),
+    ),
   )
   assert(!is_ok(offer(stopped, fence(stopped), f.snapshot + {sequence: 2}, f.policy, 4000)))
   const draining = unwrap(control(stopped, fence(stopped), "draining"))

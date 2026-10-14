@@ -1,5 +1,6 @@
 import { prepare_interaction } from "../fixtures/interaction"
-import { STACKS, Stack, git, job } from "../fixtures/neutral"
+import { STACKS, Stack, git, job, project } from "../fixtures/neutral"
+import { fixture } from "../fixtures/support"
 import {
   Controller,
   Fence,
@@ -112,4 +113,54 @@ fn interaction(harness: Harness, stack: Stack) {
   assert(checkpoint_id(settled.checkpoint) != previous)
   assert_eq(len(settled.incidents), 1)
   assert_eq(settled.incidents[0]?.resolved, true)
+}
+
+pipeline test_python_verification_cannot_read_controller_files(harness: Harness) {
+  isolate(
+    harness,
+    "python",
+    "test_capacity.py",
+    "\n    def test_controller_file_is_denied(self):\n        with self.assertRaises(PermissionError):\n            open(os.environ['SMART_SHIP_FILE_CANARY']).read()\n",
+  )
+}
+
+pipeline test_typescript_verification_cannot_read_controller_files(harness: Harness) {
+  isolate(
+    harness,
+    "typescript",
+    "test-capacity.ts",
+    "\nimport { readFileSync } from 'node:fs';\ntest('controller file is denied', () => {\n  assert.throws(() => readFileSync(process.env.SMART_SHIP_FILE_CANARY!), (error: any) => error.code === 'EPERM' || error.code === 'EACCES');\n});\n",
+  )
+}
+
+fn isolate(harness: Harness, name: string, test_path: string, probe: string) {
+  const stack = STACKS.find({ item -> item.name == name })
+  assert(stack != nil)
+  const root = project(pick(harness, ["fs", "process"]), stack)
+  const parent = harness.fs.mkdtemp_in_workspace("smart-ship-controller-")
+  defer {
+    harness.fs.delete(root)
+    harness.fs.delete(parent)
+  }
+  const marker = path_join(parent, "nonsecret-marker.txt")
+  harness.fs.write_text(marker, "harmless controller marker")
+  assert_eq(harness.fs.read_text(marker), "harmless controller marker")
+  const test_file = path_join(root, test_path)
+  harness.fs.write_text(test_file, harness.fs.read_text(test_file) + probe)
+  git(harness.process, root, ["add", test_path])
+  git(harness.process, root, ["commit", "--quiet", "-m", "probe process file isolation"])
+  const base = job(pick(harness, ["env", "system"]), stack, root, "isolation", 10)
+  const request = base
+    + {
+      command: base.command
+        + {environment: base.command.environment + {SMART_SHIP_FILE_CANARY: marker}},
+    }
+  const f = fixture(harness.random)
+  const measured = run_job(
+    pick(harness, ["clock", "fs", "process", "system"]),
+    request,
+    {id: "executor", private_key: f.private_key},
+  )
+  assert_eq(measured.proof.original.result, "passed")
+  assert_eq(measured.proof.original.tests?.passed, 5)
 }

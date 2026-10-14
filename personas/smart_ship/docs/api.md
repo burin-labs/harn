@@ -188,7 +188,7 @@ pub type GitStore = {
 
 ### type `Incident`
 
-One incident retains the failed immutable source and its original evidence.
+One incident retains the failed immutable source, original evidence, and all repair attempts.
 
 ```harn
 pub type Incident = {
@@ -196,10 +196,7 @@ pub type Incident = {
   snapshot: Snapshot,
   proofs: list<Proof>,
   verification: Verification,
-  owner: string?,
-  lease_until_ms: int,
-  attempts: int,
-  spent_usd: float?,
+  attempts: list<RepairAttempt>,
   resolved: bool,
 }
 ```
@@ -328,6 +325,20 @@ pub type Proof = {
 }
 ```
 
+### type `RepairAttempt`
+
+An unreported attempt retains its full allowance, even after revocation or expiry.
+
+```harn
+pub type RepairAttempt = {
+  owner: string,
+  lease_until_ms: int,
+  max_usd: float,
+  spent_usd: float?,
+  status: "active" | "unknown" | "settled",
+}
+```
+
 ### type `RepairContext`
 
 Evidence and reviewed intent supplied by the incident owner, without forge credentials.
@@ -393,6 +404,14 @@ pub type RepairRun = {
   unpriced_calls: int,
   usage_unknown_calls: int,
 }
+```
+
+### type `RepairSpend`
+
+Charged allowances are distinct from completely measured actual spend.
+
+```harn
+pub type RepairSpend = {committed_usd: float, spent_usd: float?, unreported_attempts: list<int>}
 ```
 
 ### type `Requirement`
@@ -546,6 +565,7 @@ pub fn claim_repair(
   owner: string,
   now_ms: int,
   lease_ms: int,
+  max_usd: float,
   policy: Policy,
 ) -> Result<Controller, string> {
 }
@@ -788,12 +808,30 @@ pub fn release_identity(signed: SignedCheckpoint, trust: CheckpointTrust) -> str
 }
 ```
 
+### fn `repair_allowance`
+
+Fresh authority exposes only the spend already reserved for this exact attempt.
+
+```harn
+pub fn repair_allowance(state: Controller, permit: RepairPermit, now_ms: int) -> float? {
+}
+```
+
 ### fn `repair_authorized`
 
 Check against freshly read durable state immediately before a repair effect.
 
 ```harn
 pub fn repair_authorized(state: Controller, permit: RepairPermit, now_ms: int) -> bool {
+}
+```
+
+### fn `repair_spend`
+
+Derive the budget projection from the one authoritative attempt ledger.
+
+```harn
+pub fn repair_spend(incident: Incident) -> RepairSpend {
 }
 ```
 
@@ -839,7 +877,7 @@ pub fn run_repair(
   context: RepairContext,
   tools: ToolRegistry,
   config: RepairModel,
-  is_authorized: fn() -> bool,
+  current_allowance: fn() -> float?,
 ) -> RepairRun {
 }
 ```

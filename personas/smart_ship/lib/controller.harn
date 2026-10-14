@@ -3,17 +3,68 @@ import { fence_matches, promote } from "./promotion"
 import { Authority, Checkpoint, Fence, Policy, Proof, Snapshot, Verification } from "./types"
 import { policy_errors, verify } from "./verification"
 
-/** One incident retains the failed immutable source and its original evidence. */
+/** An unreported attempt retains its full allowance, even after revocation or expiry. */
+pub type RepairAttempt = {
+  owner: string,
+  lease_until_ms: int,
+  max_usd: float,
+  spent_usd: float?,
+  status: "active" | "unknown" | "settled",
+}
+
+/** One incident retains the failed immutable source, original evidence, and all repair attempts. */
 pub type Incident = {
   id: string,
   snapshot: Snapshot,
   proofs: list<Proof>,
   verification: Verification,
-  owner: string?,
-  lease_until_ms: int,
-  attempts: int,
-  spent_usd: float?,
+  attempts: list<RepairAttempt>,
   resolved: bool,
+}
+
+/** Charged allowances are distinct from completely measured actual spend. */
+pub type RepairSpend = {committed_usd: float, spent_usd: float?, unreported_attempts: list<int>}
+
+/** Derive the budget projection from the one authoritative attempt ledger. */
+pub fn repair_spend(incident: Incident) -> RepairSpend {
+  let committed = 0.0
+  let measured = 0.0
+  let unreported: list<int> = []
+  let number = 0
+  for attempt in incident.attempts {
+    number += 1
+    if attempt.spent_usd == nil {
+      committed += attempt.max_usd
+      unreported.push(number)
+    } else {
+      committed += attempt.spent_usd
+      measured += attempt.spent_usd
+    }
+  }
+  return {
+    committed_usd: committed,
+    spent_usd: if len(unreported) == 0 {
+      measured
+    } else {
+      nil
+    },
+    unreported_attempts: unreported,
+  }
+}
+
+fn revoke_attempts(incident: Incident) -> Incident {
+  return incident
+    + {
+      attempts: incident.attempts.map(
+        { attempt ->
+          if attempt.status == "active" {
+            attempt + {status: "unknown"}
+          } else {
+            attempt
+          }
+        },
+      ),
+    }
 }
 
 /** An installation adapter's exact external action, retained through uncertain results. */
@@ -59,20 +110,38 @@ pub type RepairPermit = {
 /** Check against freshly read durable state immediately before a repair effect. */
 pub fn repair_authorized(state: Controller, permit: RepairPermit, now_ms: int) -> bool {
   const incident = state.incidents.find({ item -> item.id == permit.incident })
+  if incident == nil || len(incident.attempts) == 0 {
+    return false
+  }
+  const attempt = incident.attempts[len(incident.attempts) - 1]
   return ["active", "draining"].contains(state.authority.mode)
     && state.authority.installation == permit.installation
     && state.authority.generation == permit.generation
     && state.authority.controller == permit.controller
-    && incident != nil
     && !incident.resolved
-    && incident.owner == permit.owner
-    && incident.attempts == permit.attempt
-    && incident.lease_until_ms > now_ms
+    && attempt != nil
+    && attempt.status == "active"
+    && attempt.owner == permit.owner
+    && len(incident.attempts) == permit.attempt
+    && attempt.max_usd > 0.0
+    && attempt.lease_until_ms > now_ms
     && !state.authority.held_repositories.any(
       { repository ->
         incident.snapshot.sources.any({ source -> source.repository == repository })
       },
     )
+}
+
+/** Fresh authority exposes only the spend already reserved for this exact attempt. */
+pub fn repair_allowance(state: Controller, permit: RepairPermit, now_ms: int) -> float? {
+  if !repair_authorized(state, permit, now_ms) {
+    return nil
+  }
+  const incident = state.incidents.find({ item -> item.id == permit.incident })
+  if incident == nil {
+    return nil
+  }
+  return incident.attempts[permit.attempt - 1]?.max_usd
 }
 
 fn authorized(state: Controller, fence: Fence) -> bool {
@@ -283,7 +352,7 @@ pub fn complete(
               )
             },
           ) {
-          incident + {resolved: true, owner: nil, lease_until_ms: 0}
+          revoke_attempts(incident) + {resolved: true}
         } else {
           incident
         }
@@ -306,10 +375,7 @@ pub fn complete(
             snapshot: completed,
             proofs: proofs,
             verification: decision.verification,
-            owner: nil,
-            lease_until_ms: 0,
-            attempts: 0,
-            spent_usd: 0.0,
+            attempts: [],
             resolved: false,
           },
         ]
@@ -326,6 +392,7 @@ pub fn claim_repair(
   owner: string,
   now_ms: int,
   lease_ms: int,
+  max_usd: float,
   policy: Policy,
 ) -> Result<Controller, string> {
   if !authorized(state, fence) || state.authority.mode != "active"
@@ -335,12 +402,16 @@ pub fn claim_repair(
     return Err("repair authority or lease is invalid")
   }
   const incident = state.incidents.find({ item -> item.id == id })
-  if incident == nil || incident.resolved || incident.attempts >= policy.max_repair_attempts
-    || incident.spent_usd == nil
-    || incident.spent_usd >= policy.max_repair_usd {
+  if incident == nil || incident.resolved || len(incident.attempts) >= policy.max_repair_attempts
+    || is_nan(max_usd)
+    || is_infinite(max_usd)
+    || max_usd <= 0.0
+    || max_usd > policy.max_repair_usd - repair_spend(incident).committed_usd {
     return Err("incident is absent, resolved, or over budget")
   }
-  if incident.owner != nil && incident.lease_until_ms > now_ms {
+  if incident.attempts.any(
+    { attempt -> attempt.status == "active" && attempt.lease_until_ms > now_ms },
+  ) {
     return Err("incident already has a live repair owner")
   }
   let next = advance(state)
@@ -349,7 +420,20 @@ pub fn claim_repair(
       if item.id != id {
         item
       } else {
-        {...item, owner: owner, lease_until_ms: now_ms + lease_ms, attempts: item.attempts + 1}
+        const revoked = revoke_attempts(item)
+        revoked
+          + {
+            attempts: revoked.attempts
+              + [
+                {
+                  owner: owner,
+                  lease_until_ms: now_ms + lease_ms,
+                  max_usd: max_usd,
+                  spent_usd: nil,
+                  status: "active",
+                },
+              ],
+          }
       }
     },
   )
@@ -368,7 +452,7 @@ pub fn control(
   let next = advance(state)
   next.authority.mode = mode
   if mode == "stopped" || mode == "shadow" {
-    next.incidents = next.incidents.map({ incident -> incident + {owner: nil, lease_until_ms: 0} })
+    next.incidents = next.incidents.map(revoke_attempts)
     next.effects = next.effects.map(
       { effect ->
         if effect.status == "reserved" {
@@ -396,7 +480,11 @@ pub fn finish_repair(
     return Err("repair completion authority or measured cost is invalid")
   }
   const incident = state.incidents.find({ item -> item.id == id })
-  if incident == nil || incident.owner != owner || incident.attempts != attempt {
+  if incident == nil || len(incident.attempts) != attempt || attempt <= 0 {
+    return Err("repair completion belongs to a stale attempt")
+  }
+  const claimed = incident.attempts[attempt - 1]
+  if claimed == nil || claimed.owner != owner || claimed.status != "active" {
     return Err("repair completion belongs to a stale attempt")
   }
   let next = advance(state)
@@ -407,13 +495,23 @@ pub fn finish_repair(
       } else {
         item
           + {
-            owner: nil,
-            lease_until_ms: 0,
-            spent_usd: if item.spent_usd == nil || spent_usd == nil {
-              nil
-            } else {
-              item.spent_usd + spent_usd
-            },
+            attempts: item.attempts.map(
+              { record ->
+                if record == claimed {
+                  record
+                    + {
+                      spent_usd: spent_usd,
+                      status: if spent_usd == nil {
+                        "unknown"
+                      } else {
+                        "settled"
+                      },
+                    }
+                } else {
+                  record
+                }
+              },
+            ),
           }
       }
     },
@@ -426,7 +524,7 @@ pub fn transfer(state: Controller, fence: Fence, controller: string) -> Result<C
   if !authorized(state, fence) || state.authority.mode != "draining" || controller == ""
     || state.active != nil
     || state.effects.any({ effect -> ["reserved", "unknown"].contains(effect.status) })
-    || state.incidents.any({ item -> !item.resolved && item.owner != nil }) {
+    || state.incidents.any({ item -> item.attempts.any({ attempt -> attempt.status == "active" }) }) {
     return Err("old mutation owners have not drained")
   }
   let next = advance(state)

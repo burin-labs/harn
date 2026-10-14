@@ -31,6 +31,17 @@ fn check_store(process: HarnessProcess, store: GitStore) {
     && store.ref.starts_with("refs/heads/")
     && store.timeout_ms > 0,
     "store requires a private workspace, remote, branch ref, and timeout"
+  if store.remote.contains("://") {
+    const location = url_parse(store.remote)
+    require ["http", "https", "ssh", "git", "file"].contains(location.scheme)
+      && location.password == nil
+      && location.query == nil
+      && location.fragment == nil
+      && (location.username == nil || location.scheme == "ssh"),
+      "state remote must use host-managed credentials without URL tokens"
+  } else {
+    require !store.remote.contains("::"), "state remote helpers are unsupported"
+  }
   const ref = process.run({program: "git", args: ["check-ref-format", store.ref]})
   require ref.success && ref.exit_code == 0, "state branch ref is invalid"
   const bare = process.run(

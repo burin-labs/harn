@@ -149,19 +149,25 @@ pub fn local_source(process: HarnessProcess, repository: string, workspace: stri
   return {repository: repository, commit: commit, tree: tree}
 }
 
-/** Derive conservative input identity from the actual tree, command, toolchain, and environment. */
-pub fn local_requirement(harness: LocalHarness, job: LocalJob, source: Source) -> Requirement {
-  check_job(job)
-  const version = harness.process.run(
+fn execute(process: HarnessProcess, job: LocalJob, args: list<string>) {
+  return process.run(
     {
       program: job.command.program,
-      args: job.command.version_args,
+      args: args,
       cwd: job.workspace,
       env: job.command.environment,
       env_mode: "replace",
       timeout_ms: job.command.timeout_ms,
+      sandbox_profile: "os_hardened",
+      sandbox: {workspace_roots: [job.workspace]},
     },
   )
+}
+
+/** Derive conservative input identity from the actual tree, command, toolchain, and environment. */
+pub fn local_requirement(harness: LocalHarness, job: LocalJob, source: Source) -> Requirement {
+  check_job(job)
+  const version = execute(harness.process, job, job.command.version_args)
   require version.success && version.exit_code == 0
     && (version.stdout.trim() != "" || version.stderr.trim() != ""),
     "toolchain version is unmeasured"
@@ -181,7 +187,7 @@ pub fn local_requirement(harness: LocalHarness, job: LocalJob, source: Source) -
     )
   const environment = "sha256:" + sha256_hex(json_stringify(job.command.environment.entries()))
   const output_identity = job.outputs.map({ output -> json_stringify([output.name, output.path]) })
-    .sort()
+    .sorted()
   const inputs = "sha256:"
     + sha256_hex(
       json_stringify(
@@ -282,16 +288,7 @@ pub fn run_job(harness: LocalHarness, job: LocalJob, signer: SigningIdentity) ->
   const requirement = local_requirement(harness, job, source)
   prepare_report(pick(harness, ["fs", "process"]), job)
   const started = harness.clock.now_ms()
-  const result = harness.process.run(
-    {
-      program: job.command.program,
-      args: job.command.args,
-      cwd: job.workspace,
-      env: job.command.environment,
-      env_mode: "replace",
-      timeout_ms: job.command.timeout_ms,
-    },
-  )
+  const result = execute(harness.process, job, job.command.args)
   const completed = harness.clock.now_ms()
   const after = local_source(harness.process, job.repository, job.workspace)
   require source_identity(after) == source_identity(source),

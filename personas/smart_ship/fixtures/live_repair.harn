@@ -17,7 +17,9 @@ import {
   offer,
   prepare_state,
   read_state,
+  repair_allowance,
   repair_authorized,
+  repair_spend,
   run_job,
   run_repair,
   snapshot_id,
@@ -222,6 +224,7 @@ fn main(harness: Harness) {
       owner,
       harness.clock.now_ms(),
       config.model.timeout_ms + 10000,
+      config.model.max_usd,
       policy,
     ),
   )
@@ -234,7 +237,7 @@ fn main(harness: Harness) {
     controller: claimed.authority.controller,
     owner: owner,
     incident: incident.id,
-    attempt: lease.attempts,
+    attempt: len(lease.attempts),
   }
   const repair = run_repair(
     harness,
@@ -250,7 +253,7 @@ fn main(harness: Harness) {
     },
     workspace_tools(harness, scenario, store, permit),
     config.model,
-    { -> repair_authorized(current(harness.process, store), permit, harness.clock.now_ms()) },
+    { -> repair_allowance(current(harness.process, store), permit, harness.clock.now_ms()) },
   )
   harness.stdio.println(
     json_stringify({stage: "repair_returned", stack: stack.name, repair: repair}),
@@ -262,11 +265,22 @@ fn main(harness: Harness) {
       fence(after_worker),
       incident.id,
       owner,
-      lease.attempts,
+      len(lease.attempts),
       repair.cost_usd,
     ),
   )
   save(harness.process, store, accounted)
+  harness.stdio.println(
+    json_stringify(
+      {
+        stage: "repair_accounted",
+        stack: stack.name,
+        checkpoint_preserved: accounted.authority.previous_checkpoint
+          == checkpoint_id(scenario.checkpoint),
+        spend: repair_spend(accounted.incidents.find({ item -> item.id == incident.id })!),
+      },
+    ),
+  )
   require repair.cost_usd != nil && repair.unpriced_calls == 0 && repair.usage_unknown_calls == 0,
     "repair spend is not completely measured; incident budget remains unavailable"
   require accounted.authority.previous_checkpoint == checkpoint_id(scenario.checkpoint),

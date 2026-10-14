@@ -45,6 +45,11 @@ test inventory covers the application. Incomplete and empty inventories fail.
 
 `offer`, `start`, and `complete` coalesce pending cumulative work while preserving
 the running snapshot. `claim_repair` reserves one bounded incident owner.
+Each claim charges its declared spend allowance before dispatch. Measured
+completion returns the unused allowance; expiry, stop, or missing usage retains
+the full charge. `repair_spend` reports `spent_usd` as nil when actual spend is
+unknown, lists every unreported attempt, and reports the conservative charge in
+`committed_usd` to limit further attempts.
 `repair_authorized` checks a generation-bound permit against freshly read state
 before a worker effect. Stop revokes claims, including after resume. Transfer
 requires drained workers and moves authority to a new generation in shadow mode.
@@ -57,3 +62,8 @@ test. `fixtures/live_repair.harn` uses a real configured model, independently
 verifies the repair, and checks the signed checkpoint through the consumer
 interface. Fixture review receipts are synthetic; these local examples do not
 qualify GitHub review admission or a production controller.
+
+Verification requires OS filesystem confinement to the job checkout and replaces
+the inherited environment with the declared job environment. macOS and Linux
+can supply that boundary. A host without the required sandbox backend refuses
+execution; it cannot qualify a checkpoint from an unconstrained test run.

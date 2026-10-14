@@ -48,9 +48,11 @@ pub fn run_repair(
   context: RepairContext,
   tools: ToolRegistry,
   config: RepairModel,
-  is_authorized: fn() -> bool,
+  current_allowance: fn() -> float?,
 ) -> RepairRun {
-  require is_authorized(), "repair authority is unavailable before the provider run"
+  const allowance = current_allowance()
+  require allowance != nil && config.max_usd <= allowance,
+    "repair requires fresh authority and a reserved spend allowance"
   require context.incident != "" && context.snapshot != "" && context.failure != ""
     && len(context.files) > 0
     && len(context.intent) > 0,
@@ -87,7 +89,8 @@ pub fn run_repair(
     stop_after_successful_tools: config.verification_tools,
     final_wrapup: false,
     loop_control: { _state ->
-      if is_authorized() {
+      const remaining = current_allowance()
+      if remaining != nil && config.max_usd <= remaining {
         nil
       } else {
         {action: "stop", reason: "repair authority revoked"}

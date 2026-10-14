@@ -133,7 +133,11 @@ pub fn inspect_installation(process: HarnessProcess, config: Installation) -> In
         } else {
           []
         },
-        config.policy,
+        if qualified {
+          checkpoint.policy
+        } else {
+          config.policy
+        },
       )
     },
     incidents: state.incidents,

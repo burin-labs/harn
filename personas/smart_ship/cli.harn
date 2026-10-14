@@ -42,7 +42,9 @@ fn change(process: HarnessProcess, config: Installation, request: Request) {
   require result.status == "committed", "control change is unconfirmed: " + result.status
 }
 
-fn main(harness: Harness, request: Request) {
+fn main(harness: Harness) {
+  require len(argv) == 1, "pass one JSON installation request after --"
+  const request: Request = schema_expect(json_parse(argv[0]), schema_of(Request))
   const config = load_installation(harness.fs, request.configuration)
   if request.action == "init" {
     initialize_installation(harness.process, config)
