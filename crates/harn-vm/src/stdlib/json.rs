@@ -1076,7 +1076,7 @@ fn write_vm_value_to_json(val: &VmValue, out: &mut String) {
 
 pub(crate) fn extract_json_from_text(text: &str) -> String {
     let trimmed = text.trim();
-
+    let mut fallback = None;
     let mut remaining = trimmed;
     while let Some((_, after_backticks)) = remaining.split_once("```") {
         let content = after_backticks
@@ -1086,6 +1086,7 @@ pub(crate) fn extract_json_from_text(text: &str) -> String {
             if serde_json::from_str::<serde_json::Value>(body.trim()).is_ok() {
                 return body.trim().to_string();
             }
+            fallback.get_or_insert_with(|| body.trim().to_string());
             remaining = rest;
         } else {
             break;
@@ -1098,6 +1099,7 @@ pub(crate) fn extract_json_from_text(text: &str) -> String {
             if serde_json::from_str::<serde_json::Value>(&result).is_ok() {
                 return result;
             }
+            fallback.get_or_insert_with(|| result.clone());
             // A code expression in the explanation is not the return value.
             // Skip the whole balanced candidate so a nested fragment cannot
             // make a malformed outer object look valid.
@@ -1109,7 +1111,8 @@ pub(crate) fn extract_json_from_text(text: &str) -> String {
         }
     }
 
-    trimmed.to_string()
+    // The repair owner needs the malformed fragment without its preamble.
+    fallback.unwrap_or_else(|| trimmed.to_string())
 }
 
 fn find_balanced_json(text: &str, open: u8, close: u8) -> Option<String> {
