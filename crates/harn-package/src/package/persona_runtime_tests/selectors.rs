@@ -15,8 +15,11 @@ async fn normalized_connector_events_select_and_run_manifest_personas() {
                 r#"
 [[personas]]
 name = "reviewer"
+description = "Reviews opened pull requests."
 entry_workflow = "workflow.harn#run"
+tools = ["github"]
 autonomy = "suggest"
+receipts = "required"
 triggers = ["github.pull_request.opened"]
 "#,
                 None,
