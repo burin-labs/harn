@@ -1077,20 +1077,36 @@ fn write_vm_value_to_json(val: &VmValue, out: &mut String) {
 pub(crate) fn extract_json_from_text(text: &str) -> String {
     let trimmed = text.trim();
 
-    if let Some((_, after_backticks)) = trimmed.split_once("```") {
+    let mut remaining = trimmed;
+    while let Some((_, after_backticks)) = remaining.split_once("```") {
         let content = after_backticks
             .split_once('\n')
             .map_or(after_backticks, |(_, rest)| rest);
-        if let Some((body, _)) = content.split_once("```") {
-            return body.trim().to_string();
+        if let Some((body, rest)) = content.split_once("```") {
+            if serde_json::from_str::<serde_json::Value>(body.trim()).is_ok() {
+                return body.trim().to_string();
+            }
+            remaining = rest;
+        } else {
+            break;
         }
     }
 
-    if let Some(result) = find_balanced_json(trimmed, b'{', b'}') {
-        return result;
-    }
-    if let Some(result) = find_balanced_json(trimmed, b'[', b']') {
-        return result;
+    for (open, close) in [(b'{', b'}'), (b'[', b']')] {
+        let mut remaining = trimmed;
+        while let Some(result) = find_balanced_json(remaining, open, close) {
+            if serde_json::from_str::<serde_json::Value>(&result).is_ok() {
+                return result;
+            }
+            // A code expression in the explanation is not the return value.
+            // Skip the whole balanced candidate so a nested fragment cannot
+            // make a malformed outer object look valid.
+            let Some(start) = remaining.find(&result) else {
+                break;
+            };
+            let end = start + result.len();
+            remaining = remaining.get(end..).unwrap_or_default();
+        }
     }
 
     trimmed.to_string()
@@ -1424,6 +1440,24 @@ mod tests {
     fn extract_handles_escaped_quotes() {
         let text = r#"{"key": "value with \" quote"}"#;
         assert_eq!(extract_json_from_text(text), text);
+    }
+
+    #[test]
+    fn extract_return_value_after_code_in_the_explanation() {
+        let answer = r#"{"verdict":"confirmed","change_caused":true,"breaks":true}"#;
+        let text = format!("The release saves `memory + {{phase: phase}}`.\n\n{answer}");
+        let result = json_extract_impl(&[VmValue::string(text)], &mut String::new())
+            .expect("a code expression must not hide the child's typed return");
+        assert_eq!(
+            result.as_dict().unwrap().get("verdict").unwrap().display(),
+            "confirmed"
+        );
+        let fenced = format!("```harn\n{{phase: phase}}\n```\n```json\n{answer}\n```");
+        assert_eq!(extract_json_from_text(&fenced), answer);
+        assert!(
+            json_extract_impl(&[VmValue::string("{phase: phase}")], &mut String::new()).is_err(),
+            "code alone must not become a measured return"
+        );
     }
 
     #[test]
