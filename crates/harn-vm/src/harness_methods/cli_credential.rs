@@ -251,6 +251,11 @@ async fn capture(
     deadline: Duration,
 ) -> Result<String, VmError> {
     crate::op_interrupt::configure_tokio_kill_group(&mut command);
+    #[cfg(windows)]
+    let job = {
+        crate::op_interrupt::windows::configure_suspended(command.as_std_mut());
+        crate::op_interrupt::windows::KillOnCloseJob::new().map_err(|_| unavailable())?
+    };
     let cleanup_token = crate::op_interrupt::new_process_cleanup_token();
     command.env(
         crate::op_interrupt::PROCESS_CLEANUP_TOKEN_ENV,
@@ -263,6 +268,12 @@ async fn capture(
         .stderr(Stdio::null())
         .kill_on_drop(true);
     let mut child = command.spawn().map_err(|_| unavailable())?;
+    #[cfg(windows)]
+    {
+        let pid = child.id().ok_or_else(unavailable)?;
+        job.assign_process(pid).map_err(|_| unavailable())?;
+        crate::op_interrupt::windows::resume_process(pid).map_err(|_| unavailable())?;
+    }
     let registration =
         crate::op_interrupt::register_active_process_cleanup(child.id(), &cleanup_token, None)
             .terminate_on_drop();

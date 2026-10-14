@@ -1,35 +1,20 @@
-//! Cooperative interrupt observation for blocking sync builtins.
+//! Cooperative interruption and process lifetime ownership.
 //!
-//! Sync builtins (including every subprocess-spawning path: the hostlib
-//! `run_command` tool family and the VM-side `process.exec`/`exec_opts`
-//! builtins) execute inline on the VM's async task. While one of them
-//! blocks — typically waiting on a child process — the interpreter's
-//! `tokio::select!` cancel/deadline race in
-//! `vm/execution.rs::execute_op_with_scope_interrupts` cannot run: the op
-//! future never yields, so scope cancellation, `deadline` expiry, and host
-//! aborts used to wait for the child to exit on its own (orphaning it on
-//! task abort / VM drop).
+//! Blocking builtin waits observe the host cancel token and innermost deadline
+//! installed by [`install`]. They poll [`requested`], terminate their process
+//! tree with SIGTERM followed by SIGKILL after [`SUBPROCESS_TERM_GRACE`], then
+//! return so the VM can surface the cancellation at its next op boundary.
+//! Spawned-task VMs share that token, covering parallel cancellation and drop.
 //!
-//! This module closes that gap cooperatively. Before invoking a sync
-//! builtin, the VM installs the *currently armed* interrupt sources — its
-//! host cancel token (`Arc<AtomicBool>`) and the innermost deadline — into
-//! a thread-local via [`install`]. Blocking wait loops poll [`requested`]
-//! (they already poll `try_wait` every ~20ms) and, when it fires,
-//! gracefully terminate their child process tree/group (SIGTERM, then SIGKILL
-//! after [`SUBPROCESS_TERM_GRACE`]) and return. The VM then surfaces the
-//! ordinary cancellation / deadline error at the next op boundary.
-//!
-//! Trigger coverage:
-//! - **Scope / `parallel` cancellation and VM drop**: spawned-task child
-//!   VMs share the `Arc<AtomicBool>` stored in their `VmTaskHandle`;
-//!   `Vm::cancel_spawned_tasks` (also called from `Drop for Vm`) sets it,
-//!   which the blocked wait loop observes.
-//! - **Host abort**: hosts cancel a VM by setting its cancel token — same
-//!   observation path.
-//! - **`deadline` expiry**: the deadline `Instant` is captured when the
-//!   builtin starts; the wait loop compares against `Instant::now()`.
+//! Async spawners register their child for out-of-band interruption. An owned
+//! guard also terminates on future drop and normal completion. Cleanup precedes
+//! reaping; afterward the root PID is cleared and only inherited tokens may
+//! identify descendants. Windows Job Object ownership is shared with hostlib.
 
 mod context;
+
+#[cfg(target_os = "windows")]
+pub mod windows;
 
 #[cfg(all(test, unix))]
 mod probe_tests;

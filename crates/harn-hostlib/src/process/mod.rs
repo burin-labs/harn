@@ -14,7 +14,7 @@ pub mod real;
 mod secret_handoff;
 
 #[cfg(target_os = "windows")]
-mod windows;
+pub(crate) use harn_vm::op_interrupt::windows;
 
 pub use handle::{
     current_spawner, install_spawner, spawn_process, EnvMode, ExitStatus, OutputCapture,

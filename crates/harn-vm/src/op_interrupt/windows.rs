@@ -105,12 +105,12 @@ impl KillOnCloseJob {
 
 /// Start a managed worker suspended so it cannot create an uncontained
 /// descendant before the supervisor assigns it to the Job Object.
-pub(crate) fn configure_suspended(command: &mut std::process::Command) {
+pub fn configure_suspended(command: &mut std::process::Command) {
     command.creation_flags(CREATE_SUSPENDED);
 }
 
 /// Resume the initial thread of a newly created suspended process.
-pub(crate) fn resume_process(pid: u32) -> io::Result<()> {
+pub fn resume_process(pid: u32) -> io::Result<()> {
     let snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0) };
     if snapshot == INVALID_HANDLE_VALUE {
         return Err(io::Error::last_os_error());
@@ -174,7 +174,7 @@ mod tests {
     use super::KillOnCloseJob;
 
     const OWNER_ENV: &str = "HARN_TEST_KILL_ON_CLOSE_OWNER";
-    const OWNER_TEST: &str = "process::windows::tests::kill_on_close_job_owner_fixture";
+    const OWNER_TEST: &str = "op_interrupt::windows::tests::kill_on_close_job_owner_fixture";
 
     #[test]
     fn kill_on_close_job_owner_fixture() {
