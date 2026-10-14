@@ -10,6 +10,28 @@ fn step_by_name(steps: list, name: string) {
 }
 
 @test
+pipeline test_release_attribution_uses_the_release_feature_identity(harness: Harness) {
+  const workflow = read_yaml(harness.fs, "../../.github/workflows/build-release-binaries.yml", nil)
+  const build_job = workflow.jobs.build
+  assert_eq(build_job.env.HARN_RELEASE_FEATURES, "embedded-stdlib")
+  for selection in [
+    {name: "Build", prefix: "cargo build"},
+    {name: "Generate cargo-bloat report", prefix: "cargo bloat"},
+  ] {
+    const step = step_by_name(build_job.steps, selection.name)
+    assert(step != nil)
+    const commands = step.run.split("\n").filter(
+      { line -> trim(line).starts_with(selection.prefix) },
+    )
+    assert_eq(len(commands), 2)
+    for command in commands {
+      assert(command.contains("--features \"$HARN_RELEASE_FEATURES\""))
+      assert(command.contains("--profile dist"))
+    }
+  }
+}
+
+@test
 pipeline test_release_build_records_cache_mode_stats_and_budget(harness: Harness, task: unknown) {
   const workflow = read_yaml(harness.fs, "../../.github/workflows/build-release-binaries.yml", nil)
   const steps = workflow?.jobs?.build?.steps ?? []
