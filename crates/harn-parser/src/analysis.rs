@@ -524,26 +524,28 @@ mod tests {
         let id = source_id();
         db.set_source(
             id.clone(),
-            "import * as api from \"api\"\nconst text: string = api.value()\n".into(),
+            "import * as api from \"api\"\napi.take(\"text\")\n".into(),
             SourceVersion(1),
         );
-        let config = |returns: &str| {
+        let config = |accepts: &str| {
             TypeCheckConfig::new().with_namespace_imports(vec![(
                 "api".into(),
                 crate::NamespaceImportBinding {
                     module_path: "api".into(),
-                    members: ["value".into()].into_iter().collect(),
+                    members: ["take".into()].into_iter().collect(),
                     member_types: [(
-                        "value".into(),
+                        "take".into(),
                         TypeExpr::FnType {
-                            params: Vec::new(),
-                            return_type: Box::new(TypeExpr::Named(returns.into())),
+                            params: vec![TypeExpr::Named(accepts.into())],
+                            return_type: Box::new(TypeExpr::Named("nil".into())),
                         },
                     )]
                     .into_iter()
                     .collect(),
-                    member_param_names: [("value".into(), Vec::new())].into_iter().collect(),
-                    member_required_params: [("value".into(), 0)].into_iter().collect(),
+                    member_param_names: [("take".into(), vec!["input".into()])]
+                        .into_iter()
+                        .collect(),
+                    member_required_params: [("take".into(), 1)].into_iter().collect(),
                     member_type_predicates: Default::default(),
                 },
             )])

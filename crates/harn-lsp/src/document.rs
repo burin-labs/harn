@@ -591,7 +591,7 @@ mod tests {
     }
 
     #[test]
-    fn update_source_marks_document_dirty_until_reparse() {
+    fn invalid_source_clears_old_syntax_until_semantic_analysis_finishes() {
         let mut state = DocumentState::new("pipeline default(task) { log(1) }\n".to_string());
         assert!(!state.dirty, "fresh parse should clear dirty flag");
         assert!(
@@ -602,8 +602,8 @@ mod tests {
         state.update_source("pipeline default(task) { let = }\n".to_string());
         assert!(state.dirty, "source update should mark the document dirty");
         assert!(
-            state.cached_ast.is_some(),
-            "cached AST should remain available until debounce reparses"
+            state.cached_ast.is_none(),
+            "an invalid edit cannot retain an AST for different text"
         );
 
         state.reparse_if_dirty();
