@@ -58,6 +58,17 @@ Toolchain, dependency, feature, and source changes can invalidate that reuse.
 Use the [testing guide](docs/src/dev/testing.md) to select the smallest check
 that proves your change.
 
+### Shared target cleanup
+
+`scripts/prune_stale_targets.sh --host-maintenance` applies the shared target
+retention and byte limits. Add `--dry-run` to inspect its decisions first.
+Repeat `--protect-entry NAME` to reserve several exact entry basenames; quote
+names containing spaces. Protections apply to both managed cache families and
+outrank `--remove-entry NAME`, rank, age, and size. `HARN_TARGET_GC_PROTECT`
+also reserves the calling worktree's target path or basename. Live processes
+always survive. Retained protected bytes still count toward the ceiling, so
+the summary reports `status=partial` if those entries leave a root oversized.
+
 ### Stale bytecode cache
 
 If tests fail in ways that don't match your edits — especially right after

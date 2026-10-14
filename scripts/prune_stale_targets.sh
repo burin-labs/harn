@@ -52,6 +52,7 @@
 #   scripts/prune_stale_targets.sh [--dry-run] [--measure-bytes]
 #   scripts/prune_stale_targets.sh [--dry-run] --host-maintenance
 #   scripts/prune_stale_targets.sh [--dry-run] --remove-entry NAME [--remove-entry NAME]...
+#   scripts/prune_stale_targets.sh [--protect-entry NAME]... [other options]
 #
 # `--measure-bytes` makes the summary account for allocated bytes removed and
 # retained. It walks target trees, so periodic host maintenance should use it;
@@ -76,6 +77,9 @@
 # entry is finished had no way to say so through this tool, and the alternative
 # was removing paths around it, which skips the liveness probe and the
 # read-back. Named entries still go through both: a live process always wins.
+# `--protect-entry` keeps each named entry ahead of removal, rank, age, and size
+# rules. Repeat it to reserve several lanes; each NAME is one exact basename,
+# including spaces, and protects that name in both managed cache families.
 # Env:
 #   HARN_TARGET_GC_ROOTS        space-separated repo search roots
 #                               (default: "$HOME/projects $HOME/.codex/worktrees /private/tmp")
@@ -142,19 +146,45 @@ dry_run=0
 measure_bytes=0
 host_maintenance=0
 requested_entries=()
+protected_entries=()
+usage() {
+  cat <<'EOF'
+Usage: scripts/prune_stale_targets.sh [options]
+
+  --dry-run            Report candidates without removing entries.
+  --measure-bytes      Measure reclaimed and retained allocated bytes.
+  --host-maintenance   Apply the host retention and size policy; measure bytes.
+  --remove-entry NAME  Retire this exact basename regardless of rank or age.
+  --protect-entry NAME Keep this exact basename ahead of every removal rule.
+  --help               Show this help without scanning or changing caches.
+
+Repeat --remove-entry and --protect-entry to name several entries. Names cannot
+contain slashes; names with spaces must be quoted. Protection and live processes
+outrank named removal. Both managed cache families use the same protections.
+HARN_TARGET_GC_PROTECT adds the caller's own target path or basename to the set.
+Protected bytes still count toward the ceiling; an oversized retained root is
+reported as partial. See the script's Env reference for the remaining bounds.
+EOF
+}
 while [ "$#" -gt 0 ]; do
   case "$1" in
+    --help|-h) usage; exit 0 ;;
     --dry-run) dry_run=1; shift ;;
     --measure-bytes) measure_bytes=1; shift ;;
     --host-maintenance) host_maintenance=1; measure_bytes=1; shift ;;
-    --remove-entry)
-      [ "$#" -ge 2 ] || { echo "--remove-entry needs a NAME" >&2; exit 2; }
+    --remove-entry|--protect-entry)
+      [ "$#" -ge 2 ] || { echo "$1 needs a NAME" >&2; exit 2; }
       # One path segment only. A name carrying a separator could otherwise
       # address a directory outside the managed root.
       case "$2" in
-        ""|.|..|*/*) echo "invalid --remove-entry name: $2" >&2; exit 2 ;;
+        ""|.|..|*/*) echo "invalid $1 name: $2" >&2; exit 2 ;;
       esac
-      requested_entries+=("$2"); shift 2 ;;
+      if [ "$1" = --remove-entry ]; then
+        requested_entries+=("$2")
+      else
+        protected_entries+=("$2")
+      fi
+      shift 2 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
 done
@@ -164,6 +194,15 @@ entry_requested() {
   local name="$1" want
   [ "${#requested_entries[@]}" -gt 0 ] || return 1
   for want in "${requested_entries[@]}"; do
+    [ "$want" = "$name" ] && return 0
+  done
+  return 1
+}
+
+entry_protected() {
+  local name="$1" want
+  [ "${#protected_entries[@]}" -gt 0 ] || return 1
+  for want in "${protected_entries[@]}"; do
     [ "$want" = "$name" ] && return 0
   done
   return 1
@@ -420,9 +459,8 @@ fi
 # still protects the right entry, and a name shared across the two managed roots
 # protects both. Over-protecting keeps a tree that a later sweep will collect;
 # under-protecting deletes a tree that is in use.
-protect_name=""
 if [ -n "${HARN_TARGET_GC_PROTECT:-}" ]; then
-  protect_name="$(basename "${HARN_TARGET_GC_PROTECT}")"
+  protected_entries+=("$(basename "${HARN_TARGET_GC_PROTECT}")")
 fi
 
 # The pids this GC must never mistake for a build: its own process and every
@@ -599,12 +637,15 @@ prune_root() {
     scanned=$((scanned + 1))
     name="$(basename "$d")"
     warm_entry=0
+    if entry_requested "$name"; then
+      matched_entries+=("$name")
+    fi
 
     # The caller's own entry outranks every other rule, including the process
     # probe: a setup run that has restored a seed but not yet started Cargo owns
     # its tree without holding a lock or naming it on any command line.
-    if [ -n "$protect_name" ] && [ "$name" = "$protect_name" ]; then
-      echo "keep (caller's own entry): $name"
+    if entry_protected "$name"; then
+      echo "keep (caller protected entry): $name"
       kept=$((kept + 1)); kept_paths+=("$d"); continue
     fi
 
@@ -631,7 +672,6 @@ prune_root() {
     # a lane being finished but cannot be wrong about a compiler holding the
     # tree open. Rank and age are exactly what the caller is overriding.
     if entry_requested "$name"; then
-      matched_entries+=("$name")
       remove_entry "$target_root" "$d" "named by caller"
       continue
     fi
