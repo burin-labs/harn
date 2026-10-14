@@ -529,7 +529,7 @@ pub static BUILTIN_METHODS: &[M] = &[
     M::pure(
         Range,
         sig!("to_string() -> string"),
-        "Source form such as `1 to 5`.",
+        "Source form such as `1..=5`.",
     ),
     M::pure(
         Range,
