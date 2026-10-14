@@ -166,8 +166,9 @@ impl HarnLsp {
         }
         let state = DocumentState::new_for_language(source, language_id, &uri);
         self.documents.lock().unwrap().insert(uri.clone(), state);
-        self.reanalyze_and_publish(&uri).await;
-        self.recheck_importers_of(&uri).await;
+        if self.reanalyze_and_publish(&uri).await {
+            self.recheck_importers_of(&uri).await;
+        }
     }
 
     pub(super) async fn handle_did_change(&self, params: DidChangeTextDocumentParams) {
@@ -249,7 +250,7 @@ impl HarnLsp {
     /// and every other open document stay readable while it runs, then
     /// publish its diagnostics. An edit that lands mid-analysis runs another
     /// pass.
-    pub(crate) async fn reanalyze_and_publish(&self, uri: &Url) {
+    pub(crate) async fn reanalyze_and_publish(&self, uri: &Url) -> bool {
         loop {
             let input_generation = self.workspace.generation();
             let rule_workspace = self.rule_workspace.lock().unwrap().clone();
@@ -260,7 +261,7 @@ impl HarnLsp {
                 .get_mut(uri)
                 .and_then(DocumentState::begin_analysis)
             else {
-                return;
+                return false;
             };
             let workspace = std::sync::Arc::clone(&self.workspace);
             let rule_workspace = rule_workspace.clone();
@@ -285,7 +286,7 @@ impl HarnLsp {
             let diagnostics = {
                 let mut docs = self.documents.lock().unwrap();
                 let Some(entry) = docs.get_mut(uri) else {
-                    return;
+                    return false;
                 };
                 if !entry.finish_analysis(analyzed, input_generation == self.workspace.generation())
                 {
@@ -296,7 +297,7 @@ impl HarnLsp {
             self.client
                 .publish_diagnostics(uri.clone(), diagnostics, None)
                 .await;
-            return;
+            return true;
         }
     }
 
