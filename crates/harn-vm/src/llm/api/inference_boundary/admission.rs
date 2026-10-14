@@ -152,7 +152,12 @@ pub fn preview_inference_admission(
     };
     snapshot.local_runtime = Some(evidence.local_runtime);
     snapshot.open_weight = evidence.open_weight;
-    let controls = chat_controls(&request.provider, &request.model, snapshot.data_posture);
+    let controls = chat_controls(
+        &request.provider,
+        &request.model,
+        snapshot.data_posture,
+        snapshot.effective_boundary,
+    );
     // The plan's own posture, not the requested one: a transport that cannot
     // carry per-request controls sends `default` whatever was asked.
     snapshot.data_posture = serde_json::from_value(serde_json::Value::String(
