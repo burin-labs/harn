@@ -1097,30 +1097,33 @@ pub(crate) fn extract_json_from_text(text: &str) -> String {
         }
     }
 
-    for (open, close) in [(b'{', b'}'), (b'[', b']')] {
-        let mut offset = 0;
-        while let Some(result) =
-            find_balanced_json(eligible.get(offset..).unwrap_or_default(), open, close)
-        {
+    let mut array = None;
+    let mut remaining = eligible.as_str();
+    while let Some(start) = remaining.find(['{', '[']) {
+        let candidate = remaining.get(start..).unwrap_or_default();
+        let (open, close) = if candidate.starts_with('{') {
+            (b'{', b'}')
+        } else {
+            (b'[', b']')
+        };
+        if let Some(result) = find_balanced_json(candidate, open, close) {
             if serde_json::from_str::<serde_json::Value>(&result).is_ok() {
-                return result;
+                if open == b'{' {
+                    return result;
+                }
+                array.get_or_insert_with(|| result.clone());
+            } else {
+                fallback.get_or_insert_with(|| result.clone());
             }
-            fallback.get_or_insert_with(|| result.clone());
-            // A code expression in the explanation is not the return value.
-            // Exclude its whole span for both delimiter passes so a nested
-            // array cannot make a malformed outer object look valid.
-            let Some(relative) = eligible.get(offset..).and_then(|rest| rest.find(&result)) else {
-                break;
-            };
-            let start = offset + relative;
-            let end = start + result.len();
-            eligible.replace_range(start..end, &" ".repeat(end - start));
-            offset = end;
+            // Only outer candidates are eligible. Neither delimiter kind may
+            // supply a nested fragment from a rejected code expression.
+            remaining = candidate.get(result.len()..).unwrap_or_default();
+        } else {
+            remaining = candidate.get(1..).unwrap_or_default();
         }
     }
-
     // The repair owner needs the malformed fragment without its preamble.
-    fallback.unwrap_or_else(|| trimmed.to_string())
+    array.or(fallback).unwrap_or_else(|| trimmed.to_string())
 }
 
 fn find_balanced_json(text: &str, open: u8, close: u8) -> Option<String> {

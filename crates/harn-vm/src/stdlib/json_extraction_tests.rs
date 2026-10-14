@@ -22,6 +22,10 @@ fn rejected_code_spans_cannot_supply_nested_json() {
     let answer = r#"{"verdict":"confirmed"}"#;
     for (text, expected) in [
         (
+            format!("[phase: {{\"verdict\":\"draft\"}}] {answer}"),
+            answer,
+        ),
+        (
             format!("```python\npayload = {{\"phase\":\"draft\"}}\n```\n{answer}"),
             answer,
         ),
