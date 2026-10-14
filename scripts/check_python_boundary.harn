@@ -20,6 +20,14 @@ const SKIP_SEGMENTS = [
 
 const PYTHON_ALLOWLIST = [
   {
+    kind: "prefix",
+    pattern: "personas/smart_ship/fixtures/python/",
+    category: "subprocess-fixture",
+    owner: "Smart Ship neutral-stack verification",
+    reason:
+      "Ordinary Python project and stock unittest runner prove foreign-stack verification and combined-change repair; controller orchestration remains Harn.",
+  },
+  {
     kind: "exact",
     pattern: "scripts/tests/fixtures/release_publication_github.py",
     category: "subprocess-fixture",
