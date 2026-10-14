@@ -26,6 +26,9 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
+  # Cargo.toml owns dev debuginfo. Clear runner-local overrides so hosted and
+  # self-hosted jobs build the same profile and artifact manifest.
+  CARGO_PROFILE_DEV_DEBUG: ""
   # A cold merge-group producer can take more than 15 minutes to publish its
   # exact-run artifacts. The waits that remain (the security barrier and the
   # lanes that overlap real work with the build) share this bounded policy,
