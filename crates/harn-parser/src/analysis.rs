@@ -182,19 +182,15 @@ impl TypeCheckConfig {
         if let Some(names) = &mut imported_names {
             names.sort();
         }
-        let mut namespace_aliases: Vec<String> = self
-            .namespace_imports
-            .iter()
-            .map(|(alias, _)| alias.clone())
-            .collect();
-        namespace_aliases.sort();
+        let mut namespace_imports: Vec<_> = self.namespace_imports.iter().collect();
+        namespace_imports.sort_by(|a, b| a.0.cmp(&b.0));
         TypeCheckCacheKey {
             strict_types: self.strict_types,
             privileged_wire_builtins: self.privileged_wire_builtins,
             imported_names,
             imported_type_decls_digest: structural_digest(&self.imported_type_decls),
             imported_callable_decls_digest: structural_digest(&self.imported_callable_decls),
-            namespace_imports_digest: structural_digest(&namespace_aliases),
+            namespace_imports_digest: structural_digest(&namespace_imports),
         }
     }
 
@@ -520,6 +516,50 @@ mod tests {
         db.parse(&id).expect("same digest parse");
         assert_eq!(db.stats().lex_runs, 1);
         assert_eq!(db.stats().parse_runs, 1);
+    }
+
+    #[test]
+    fn namespace_signature_changes_invalidate_cached_typechecks() {
+        let mut db = AnalysisDatabase::new();
+        let id = source_id();
+        db.set_source(
+            id.clone(),
+            "import * as api from \"api\"\nconst text: string = api.value()\n".into(),
+            SourceVersion(1),
+        );
+        let config = |returns: &str| {
+            TypeCheckConfig::new().with_namespace_imports(vec![(
+                "api".into(),
+                crate::NamespaceImportBinding {
+                    module_path: "api".into(),
+                    members: ["value".into()].into_iter().collect(),
+                    member_types: [(
+                        "value".into(),
+                        TypeExpr::FnType {
+                            params: Vec::new(),
+                            return_type: Box::new(TypeExpr::Named(returns.into())),
+                        },
+                    )]
+                    .into_iter()
+                    .collect(),
+                    member_param_names: [("value".into(), Vec::new())].into_iter().collect(),
+                    member_required_params: [("value".into(), 0)].into_iter().collect(),
+                    member_type_predicates: Default::default(),
+                },
+            )])
+        };
+        assert!(db
+            .typecheck(&id, config("string"))
+            .unwrap()
+            .diagnostics
+            .is_empty());
+        assert!(db
+            .typecheck(&id, config("int"))
+            .unwrap()
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.severity == DiagnosticSeverity::Error));
+        assert_eq!(db.stats().typecheck_runs, 2);
     }
 
     #[test]

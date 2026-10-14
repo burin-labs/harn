@@ -77,8 +77,8 @@ impl DocumentState {
         state
     }
 
-    /// A newly opened document, not yet analyzed; the server analyzes it
-    /// outside its document lock.
+    /// Prepare current syntax before publication; semantic analysis runs
+    /// outside the document lock and reuses this parse.
     pub(crate) fn new_for_language(
         source: String,
         language_id: impl Into<String>,
@@ -86,7 +86,29 @@ impl DocumentState {
     ) -> Self {
         let language_id = language_id.into();
         let kind = DocumentKind::classify(uri, &language_id);
-        Self::new_unparsed(source, language_id, kind)
+        let mut state = Self::new_unparsed(source, language_id, kind);
+        state.prepare_syntax();
+        state
+    }
+
+    fn prepare_syntax(&mut self) {
+        match self.kind {
+            DocumentKind::Harn => {
+                self.cached_ast = self
+                    .analysis
+                    .parse(&self.source_id)
+                    .ok()
+                    .map(|parsed| parsed.program);
+                if let Some(program) = &self.cached_ast {
+                    self.symbols = build_symbol_table(program, &self.source);
+                }
+            }
+            DocumentKind::Prompt => {
+                self.prompt_outline =
+                    harn_vm::stdlib::template::outline::parse(&self.source).unwrap_or_default();
+            }
+            DocumentKind::Other => {}
+        }
     }
 
     /// Move the inputs of a pending analysis into a detached state, so the
@@ -188,11 +210,33 @@ impl DocumentState {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn update_source(&mut self, source: String) {
+        let mut prepared = Self::new_unparsed(source, self.language_id.clone(), self.kind);
+        prepared.prepare_syntax();
+        self.update_prepared_source(prepared);
+    }
+
+    /// Install text and its syntax together. The caller prepares it outside
+    /// the shared lock, while any prior semantic worker keeps its own inputs.
+    pub(crate) fn update_prepared_source(&mut self, mut prepared: Self) {
         self.version = SourceVersion(self.version.0 + 1);
-        self.analysis
-            .set_source(self.source_id.clone(), source.clone(), self.version);
-        self.source = SourceText::new(source);
+        prepared.analysis.set_source(
+            self.source_id.clone(),
+            prepared.source.to_string(),
+            self.version,
+        );
+        self.analysis = prepared.analysis;
+        self.source = prepared.source;
+        self.cached_ast = prepared.cached_ast;
+        self.symbols = prepared.symbols;
+        self.prompt_outline = prepared.prompt_outline;
+        self.diagnostics.clear();
+        self.lint_diagnostics.clear();
+        self.type_diagnostics = Default::default();
+        self.rule_diagnostics.clear();
+        self.invariant_diagnostics.clear();
+        self.inlay_hints = Default::default();
         self.dirty = true;
     }
 

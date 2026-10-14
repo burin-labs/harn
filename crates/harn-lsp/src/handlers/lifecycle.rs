@@ -178,12 +178,20 @@ impl HarnLsp {
             if let Ok(path) = uri.to_file_path() {
                 self.workspace.set_buffer(path, source.clone());
             }
+            let language_id = self
+                .documents
+                .lock()
+                .unwrap()
+                .get(&uri)
+                .map(|state| state.language_id.clone())
+                .unwrap_or_default();
+            let prepared = DocumentState::new_for_language(source, language_id, &uri);
             {
                 let mut docs = self.documents.lock().unwrap();
                 let entry = docs
                     .entry(uri.clone())
                     .or_insert_with(|| DocumentState::placeholder(&uri));
-                entry.update_source(source);
+                entry.update_prepared_source(prepared);
             }
 
             let version = {
@@ -409,6 +417,68 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn syntax_features_are_ready_while_semantic_analysis_is_pending() {
+        let (service, _socket) = LspService::new(HarnLsp::new);
+        let server = service.inner();
+        let reached = Arc::new(tokio::sync::Notify::new());
+        let gate = Arc::new((std::sync::Mutex::new(false), std::sync::Condvar::new()));
+        *server.analysis_probe.lock().unwrap() = Some({
+            let reached = Arc::clone(&reached);
+            let gate = Arc::clone(&gate);
+            Arc::new(move || {
+                reached.notify_one();
+                let (ready, wake) = &*gate;
+                let mut ready = ready.lock().unwrap();
+                while !*ready {
+                    ready = wake.wait(ready).unwrap();
+                }
+            })
+        });
+        let uri = Url::parse("file:///syntax-ready/main.harn").unwrap();
+        let text = "pub fn helper(value) {\n  return value\n}\npipeline main() {\n  helper(1)\n}\n";
+        let opening = server.handle_did_open(open(&uri, text));
+        let requesting = async {
+            reached.notified().await;
+            let folds = server
+                .handle_folding_range(FoldingRangeParams {
+                    text_document: TextDocumentIdentifier { uri: uri.clone() },
+                    work_done_progress_params: WorkDoneProgressParams::default(),
+                    partial_result_params: PartialResultParams::default(),
+                })
+                .await
+                .unwrap()
+                .unwrap();
+            let hierarchy = server
+                .handle_prepare_call_hierarchy(CallHierarchyPrepareParams {
+                    text_document_position_params: TextDocumentPositionParams {
+                        text_document: TextDocumentIdentifier { uri: uri.clone() },
+                        position: Position::new(0, 8),
+                    },
+                    work_done_progress_params: WorkDoneProgressParams::default(),
+                })
+                .await
+                .unwrap();
+            let pending = server.documents.lock().unwrap()[&uri].dirty;
+            let (ready, wake) = &*gate;
+            *ready.lock().unwrap() = true;
+            wake.notify_one();
+            (folds, hierarchy, pending)
+        };
+        let (_, (folds, hierarchy, pending)) = tokio::join!(opening, requesting);
+        assert!(
+            pending,
+            "the requests must reach the pending-analysis state"
+        );
+        assert!(
+            folds
+                .iter()
+                .any(|fold| fold.start_line == 3 && fold.end_line == 5),
+            "{folds:?}"
+        );
+        assert_eq!(hierarchy.unwrap()[0].name, "helper");
+    }
+
     fn open(uri: &Url, text: &str) -> DidOpenTextDocumentParams {
         DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
@@ -484,7 +554,10 @@ mod tests {
                 let still_pending = {
                     let docs = server.documents.lock().unwrap();
                     let state = &docs[&uri];
-                    state.dirty && state.cached_ast.is_none()
+                    state.dirty
+                        && state.cached_ast.is_some()
+                        && state.source.as_ref() == text
+                        && state.type_diagnostics.is_empty()
                 };
                 // Release before asserting so a failed control cannot strand
                 // a blocking analysis worker inside the test runtime.
