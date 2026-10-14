@@ -6,6 +6,7 @@ pub import {
   RepairAttempt,
   RepairPermit,
   RepairSpend,
+  begin_effect,
   claim_repair,
   complete,
   control,
@@ -20,6 +21,12 @@ pub import {
   start,
   transfer,
 } from "./controller"
+pub import {
+  EffectDispatch,
+  EffectOutcome,
+  EffectOwnerHost,
+  dispatch_reserved_effect,
+} from "./effect_owner"
 pub import {
   CommitResult,
   GitStore,

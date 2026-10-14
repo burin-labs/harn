@@ -81,8 +81,13 @@ pub type Effect = {
   request: EffectRequest,
   generation: int,
   controller: string,
-  status: "reserved" | "unknown" | "confirmed" | "refused",
+  status: "reserved" | "dispatching" | "unknown" | "confirmed" | "refused",
+  dispatch_id: string?,
   receipt: string?,
+}
+
+fn unresolved_effect(effect: Effect) -> bool {
+  return ["reserved", "dispatching", "unknown"].contains(effect.status)
 }
 
 /** Persist this whole record with compare-and-swap before executing any returned work. */
@@ -184,7 +189,7 @@ pub fn reserve_effect(
   if state.effects.any(
     { effect ->
       effect.request.repository == request.repository
-        && ["reserved", "unknown"].contains(effect.status)
+        && unresolved_effect(effect)
     },
   ) {
     return Err("repository already has an unresolved external effect")
@@ -198,6 +203,7 @@ pub fn reserve_effect(
         generation: state.authority.generation,
         controller: state.authority.controller,
         status: "reserved",
+        dispatch_id: nil,
         receipt: nil,
       },
     ]
@@ -213,6 +219,32 @@ pub fn effect_authorized(state: Controller, effect: Effect) -> bool {
     && !state.authority.held_repositories.contains(effect.request.repository)
     && state.effects.contains(effect)
     && effect.status == "reserved"
+}
+
+/** Commit this transition with CAS at the privileged owner before contacting the provider. */
+pub fn begin_effect(
+  state: Controller,
+  fence: Fence,
+  request: EffectRequest,
+  dispatch_id: string,
+) -> Result<Controller, string> {
+  const effect = state.effects.find({ item -> item.request == request })
+  if !authorized(state, fence) || effect == nil || !effect_authorized(state, effect)
+    || !is_digest(dispatch_id)
+    || effect.dispatch_id != nil {
+    return Err("external dispatch authority is stale, stopped, or already consumed")
+  }
+  let next = advance(state)
+  next.effects = state.effects.map(
+    { item ->
+      if item == effect {
+        item + {status: "dispatching", dispatch_id: dispatch_id}
+      } else {
+        item
+      }
+    },
+  )
+  return Ok(next)
 }
 
 /** Only a measured terminal receipt settles a request; timeout remains a transfer barrier. */
@@ -232,7 +264,7 @@ pub fn settle_effect(
   if effect == nil || effect.installation != state.authority.installation
     || effect.generation != state.authority.generation
     || effect.controller != state.authority.controller
-    || !["reserved", "unknown"].contains(effect.status) {
+    || !["reserved", "dispatching", "unknown"].contains(effect.status) {
     return Err("effect settlement is stale or does not match the reserved request")
   }
   let next = advance(state)
@@ -455,7 +487,7 @@ pub fn control(
     next.incidents = next.incidents.map(revoke_attempts)
     next.effects = next.effects.map(
       { effect ->
-        if effect.status == "reserved" {
+        if unresolved_effect(effect) {
           effect + {status: "unknown"}
         } else {
           effect
@@ -523,7 +555,7 @@ pub fn finish_repair(
 pub fn transfer(state: Controller, fence: Fence, controller: string) -> Result<Controller, string> {
   if !authorized(state, fence) || state.authority.mode != "draining" || controller == ""
     || state.active != nil
-    || state.effects.any({ effect -> ["reserved", "unknown"].contains(effect.status) })
+    || state.effects.any(unresolved_effect)
     || state.incidents.any({ item -> item.attempts.any({ attempt -> attempt.status == "active" }) }) {
     return Err("old mutation owners have not drained")
   }

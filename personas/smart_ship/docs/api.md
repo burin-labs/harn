@@ -146,9 +146,39 @@ pub type Effect = {
   request: EffectRequest,
   generation: int,
   controller: string,
-  status: "reserved" | "unknown" | "confirmed" | "refused",
+  status: "reserved" | "dispatching" | "unknown" | "confirmed" | "refused",
+  dispatch_id: string?,
   receipt: string?,
 }
+```
+
+### type `EffectDispatch`
+
+A started dispatch is never retried from its reservation, even if settlement is uncertain.
+
+```harn
+pub type EffectDispatch = {
+  status: "not_started" | "settled" | "reconciliation_required",
+  dispatch_started: bool,
+  state_commit: string?,
+  outcome: EffectOutcome?,
+}
+```
+
+### type `EffectOutcome`
+
+Provider evidence is separate from confirmation that its receipt reached durable state.
+
+```harn
+pub type EffectOutcome = {status: "confirmed" | "refused" | "unknown", receipt: string?}
+```
+
+### type `EffectOwnerHost`
+
+Only the effect owner receives these handles; dispatch identities come from its own entropy.
+
+```harn
+pub type EffectOwnerHost = {process: HarnessProcess, random: HarnessRandom}
 ```
 
 ### type `EffectRequest`
@@ -633,6 +663,20 @@ An executor key has one declared trust domain; another installation cannot borro
 pub type VerifierKey = {id: string, public_key: string, trust_domain: string}
 ```
 
+### fn `begin_effect`
+
+Commit this transition with CAS at the privileged owner before contacting the provider.
+
+```harn
+pub fn begin_effect(
+  state: Controller,
+  fence: Fence,
+  request: EffectRequest,
+  dispatch_id: string,
+) -> Result<Controller, string> {
+}
+```
+
 ### fn `checkpoint_bytes`
 
 Checkpoint identity includes original proofs, their signatures, and how each was used.
@@ -721,6 +765,24 @@ Decode an archived observation without fabricating absent actor, source, or plat
 
 ```harn
 pub fn decode_review_observation(value: unknown) -> ReviewObservation {
+}
+```
+
+### fn `dispatch_reserved_effect`
+
+Run only in the privileged effect owner. The callback retains provider credentials there;
+workers submit requests and fences. The remote CAS is the dispatch commitment boundary.
+Stop before commitment refuses dispatch; an already committed provider action requires a
+measured terminal receipt. Transfer is barred throughout dispatch and uncertain recovery.
+
+```harn
+pub fn dispatch_reserved_effect(
+  host: EffectOwnerHost,
+  store: GitStore,
+  fence: Fence,
+  request: EffectRequest,
+  dispatch: fn(EffectRequest) -> EffectOutcome,
+) -> EffectDispatch {
 }
 ```
 

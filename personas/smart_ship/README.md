@@ -37,8 +37,11 @@ identities must all match the candidate's requirement.
 held, shadow, or stale controller receives a refusal. A draining controller can
 finish already admitted verification while refusing new admission. Successful
 assessment returns an immutable checkpoint; it does not mutate a branch or
-deployment. The effect adapter must atomically compare the fence at its durable
-owner before publication. A prior read of a lease is insufficient.
+deployment. `dispatch_reserved_effect` commits a unique dispatch claim through
+the Git state's remote compare-and-swap before its privileged adapter contacts
+the provider. The adapter keeps mutation credentials away from repair workers.
+Every mutation owner must use this protocol before authority can transfer.
+A prior read of a lease is insufficient.
 
 `checkpoint_valid` verifies both the original execution signatures and the
 checkpoint publisher's signature. Consumers use `release_identity` to obtain
@@ -59,8 +62,11 @@ unknown, lists every unreported attempt, and reports the conservative charge in
 `repair_authorized` checks a generation-bound permit against freshly read state
 before a worker effect. Stop revokes claims, including after resume. Transfer
 requires drained workers and moves authority to a new generation in shadow mode.
-The Git state adapter commits transitions with remote compare-and-swap; forge
-effects must enforce the same authority at their mutation owner.
+The Git state adapter commits transitions with remote compare-and-swap. Stop
+before dispatch commitment refuses the provider callback. An action already
+committed for dispatch may finish; stop preserves its uncertain outcome until
+an actual provider receipt is recorded. Unknown results block transfer and are
+never redispatched from the original reservation.
 
 The Python and TypeScript fixtures execute ordinary commands against clean Git
 sources. Each reviewed change passes independently; their combination fails one
@@ -71,5 +77,6 @@ qualify GitHub review admission or a production controller.
 
 Verification requires OS filesystem confinement to the job checkout and replaces
 the inherited environment with the declared job environment. macOS and Linux
-can supply that boundary. A host without the required sandbox backend refuses
+can supply that boundary; macOS requires kernel and System Integrity Protection
+settings that enforce host-environment redaction. A host without the required sandbox backend refuses
 execution; it cannot qualify a checkpoint from an unconstrained test run.
