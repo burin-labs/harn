@@ -11,6 +11,8 @@ class LspClient {
     this.server = server;
     this.nextId = 1;
     this.pending = new Map();
+    this.diagnostics = new Map();
+    this.diagnosticWaiters = new Map();
     this.buffer = Buffer.alloc(0);
     this.stderr = "";
     this.exitError = undefined;
@@ -21,27 +23,48 @@ class LspClient {
     });
     server.on("error", (err) => {
       this.exitError = err;
-      for (const { reject, timeout } of this.pending.values()) {
-        clearTimeout(timeout);
-        reject(err);
-      }
-      this.pending.clear();
+      this.failPending(err);
     });
     server.on("exit", (code, signal) => {
       const error = new Error(
         `harn-lsp exited code=${code} signal=${signal}: ${this.stderr}`,
       );
       this.exitError = error;
-      for (const { reject, timeout } of this.pending.values()) {
-        clearTimeout(timeout);
-        reject(error);
-      }
-      this.pending.clear();
+      this.failPending(error);
     });
   }
 
   // Bound an unresponsive server; this is not a performance assertion.
   static REQUEST_TIMEOUT_MS = 15_000;
+
+  failPending(error) {
+    for (const { reject, timeout } of [
+      ...this.pending.values(),
+      ...this.diagnosticWaiters.values(),
+    ]) {
+      clearTimeout(timeout);
+      reject(error);
+    }
+    this.pending.clear();
+    this.diagnosticWaiters.clear();
+  }
+
+  waitForDiagnostics(uri) {
+    if (this.exitError) return Promise.reject(this.exitError);
+    if (this.diagnostics.has(uri))
+      return Promise.resolve(this.diagnostics.get(uri));
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        this.diagnosticWaiters.delete(uri);
+        reject(
+          new Error(
+            `background analysis did not publish diagnostics for ${uri}`,
+          ),
+        );
+      }, LspClient.REQUEST_TIMEOUT_MS);
+      this.diagnosticWaiters.set(uri, { resolve, reject, timeout });
+    });
+  }
 
   request(method, params, { timeoutMs = LspClient.REQUEST_TIMEOUT_MS } = {}) {
     if (this.exitError) {
@@ -93,6 +116,16 @@ class LspClient {
         this.buffer.slice(messageStart, messageEnd).toString("utf8"),
       );
       this.buffer = this.buffer.slice(messageEnd);
+      if (message.method === "textDocument/publishDiagnostics") {
+        const { uri } = message.params;
+        this.diagnostics.set(uri, message.params);
+        const waiter = this.diagnosticWaiters.get(uri);
+        if (waiter) {
+          clearTimeout(waiter.timeout);
+          this.diagnosticWaiters.delete(uri);
+          waiter.resolve(message.params);
+        }
+      }
       if (Object.prototype.hasOwnProperty.call(message, "id")) {
         const pending = this.pending.get(message.id);
         if (!pending) {
@@ -154,18 +187,17 @@ function resolveLspBinary(root) {
   const resolver = path.join(root, "scripts/harn_bin.sh");
   const env = lspEnvironment();
   const options = { cwd: root, env, encoding: "utf8" };
-  const resolved = spawnSync(
-    "bash",
-    [resolver, "--print"],
-    options,
-  );
+  const resolved = spawnSync("bash", [resolver, "--print"], options);
   assert.equal(
     resolved.status,
     0,
     `Harn binary resolution failed\nstdout:\n${resolved.stdout}\nstderr:\n${resolved.stderr}`,
   );
   const binary = resolved.stdout.trim();
-  assert.ok(binary && fs.existsSync(binary), `Harn binary does not exist: ${binary}`);
+  assert.ok(
+    binary && fs.existsSync(binary),
+    `Harn binary does not exist: ${binary}`,
+  );
   return binary;
 }
 
@@ -269,6 +301,15 @@ test("VS Code-facing LSP surface supports on-type formatting, folding, and call 
     });
   }
 
+  // Navigation must survive completed background analysis, including a
+  // dependency-triggered retry. An immediate request only sees provisional
+  // syntax and can pass while the later analysis erases it.
+  await Promise.all(
+    [uri, fileUri(sibling), fileUri(decoy)].map((opened) =>
+      client.waitForDiagnostics(opened),
+    ),
+  );
+
   const edits = await client.request("textDocument/onTypeFormatting", {
     textDocument: { uri },
     position: positionOf(source, "return value;"),
@@ -299,6 +340,10 @@ test("VS Code-facing LSP surface supports on-type formatting, folding, and call 
     textDocument: { uri },
     position: positionOf(source, "callee(value){"),
   });
+  assert.ok(
+    prepared?.length,
+    "callee must remain available after background analysis settles",
+  );
   assert.equal(prepared[0].name, "callee");
 
   const incoming = await client.request("callHierarchy/incomingCalls", {
@@ -328,6 +373,11 @@ test("VS Code-facing LSP surface supports on-type formatting, folding, and call 
     textDocument: { uri },
     position: positionOf(source, "main(task)"),
   });
+  assert.equal(
+    main?.[0]?.name,
+    "main",
+    "main must remain available after background analysis settles",
+  );
   const outgoing = await client.request("callHierarchy/outgoingCalls", {
     item: main[0],
   });

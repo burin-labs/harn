@@ -144,6 +144,12 @@ impl DocumentState {
         }
         self.analyzing = false;
         if !inputs_unchanged || analyzed.version != self.version {
+            // The worker borrowed this database. A dependency-only change
+            // invalidates its facts, not the current source registration and
+            // parse cache. An edit already installed its own newer database.
+            if analyzed.version == self.version {
+                self.analysis = analyzed.analysis;
+            }
             self.dirty = true;
             return false;
         }
@@ -634,14 +640,34 @@ mod tests {
     #[test]
     fn a_dependency_change_rejects_detached_facts_even_without_a_source_edit() {
         let uri = Url::parse("file:///dependency/main.harn").unwrap();
-        let mut state = DocumentState::new_for_language("let value = 1\n".into(), "harn", &uri);
-        let job = state.begin_analysis().unwrap();
+        let mut state = DocumentState::new_for_language(
+            "fn retained() -> int { return 1 }\n".into(),
+            "harn",
+            &uri,
+        );
+        let parsed = Arc::clone(state.cached_ast.as_ref().unwrap());
+        assert!(state.symbols.iter().any(|symbol| symbol.name == "retained"));
+        let mut job = state.begin_analysis().unwrap();
+        job.reparse_if_dirty();
         assert!(!state.finish_analysis(job, false));
         assert!(state.dirty);
-        let fresh = state
+        let mut fresh = state
             .begin_analysis()
             .expect("the stale job releases its analysis");
+        fresh.reparse_if_dirty();
+        assert!(
+            fresh.symbols.iter().any(|symbol| symbol.name == "retained"),
+            "retry must analyze the actual registered source"
+        );
+        assert!(Arc::ptr_eq(
+            &parsed,
+            fresh
+                .cached_ast
+                .as_ref()
+                .expect("the retry must retain its syntax")
+        ));
         assert!(state.finish_analysis(fresh, true));
+        assert!(state.symbols.iter().any(|symbol| symbol.name == "retained"));
     }
 
     #[test]
