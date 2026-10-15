@@ -116,10 +116,12 @@ take effect in builds that do **not** pull in the full CLI.
 
 ## Construct a VM directly
 
-Create the native interpreter with `harn_vm::new_vm()` and register its standard
-library before executing code:
+Add `harn-vm` and `harn-stdlib` at the same repository tag. Install the embedded
+standard library once during host startup, then construct the native interpreter
+and register its builtins:
 
 ```rust
+harn_stdlib::install().expect("install embedded standard library");
 let mut vm = harn_vm::new_vm();
 harn_vm::register_vm_stdlib(&mut vm);
 ```

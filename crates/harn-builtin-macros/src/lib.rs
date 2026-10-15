@@ -27,6 +27,9 @@ mod sig_parser;
 /// sibling `static <NAME>_DEF: harn_vm_core::builtin_support::VmBuiltinDef = ...`
 /// containing the signature, aliases, handler pointer, and metadata.
 ///
+/// The declaring crate must depend directly on `harn-vm-core`. Generated
+/// registrations use its registry without requiring a native stdlib layout.
+///
 /// # Attribute keys
 ///
 /// - `sig = "name(a: dict, b: dict) -> dict"` — Harn-style signature parsed
