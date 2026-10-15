@@ -58,7 +58,10 @@ pub(crate) fn compatible_locked_entry(
     }
     if let Some(url) = dependency.archive_url() {
         let source = archive_source_uri(url)?;
-        return Ok(lock.source == source && lock.content_hash.is_some());
+        let requested_hash = dependency_content_hash(alias, dependency)?;
+        return Ok(lock.source == source
+            && lock.content_hash.as_deref() == Some(requested_hash.as_str())
+            && lock.registry == dependency.registry_provenance());
     }
     Ok(false)
 }
