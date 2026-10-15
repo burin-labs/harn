@@ -20,6 +20,8 @@ const DEFAULT_ALLOWLIST = "scripts/allowed_long_strings.txt"
 const MAX_ALLOWLIST_ENTRIES = 10
 
 const PROTECTED_PATHS = [
+  "crates/harn-llm/src",
+  "crates/harn-orchestration/src",
   "crates/harn-vm/src/llm",
   "crates/harn-vm/src/orchestration/workflow.rs",
   "crates/harn-vm/src/orchestration/artifacts.rs",
