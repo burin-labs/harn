@@ -1,5 +1,6 @@
 //! Provider catalog contracts shared by the runtime and host applications.
-//! Runtime loading and routing policy remain in `harn-vm`.
+//! Configuration and capability policy have one owner here. Runtime environment
+//! loading, credentials, provider requests, and live measurements remain in `harn-vm`.
 
 pub mod artifact;
 pub mod capabilities;
