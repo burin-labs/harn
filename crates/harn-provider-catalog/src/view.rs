@@ -139,10 +139,12 @@ mod tests {
 [providers.proxy]
 features = ["wire_model_capabilities"]
 [models.private-alias]
+name = "Private alias"
 provider = "proxy"
 wire_model = "wire-model"
 context_window = 8192
 [models.other-provider]
+name = "Other provider"
 provider = "elsewhere"
 wire_model = "wire-model"
 context_window = 8192

@@ -178,7 +178,7 @@ pub fn schema_value() -> Value {
                         "additionalProperties": {"$ref": "#/$defs/endpoint_region"}
                     },
                     "chat_endpoint": {"type": "string", "minLength": 1},
-                    "chat_api_adapter": {"enum": harn_provider_catalog::ChatApiAdapter::ALL},
+                    "chat_api_adapter": {"enum": crate::ChatApiAdapter::ALL},
                     "completion_endpoint": {"type": "string"},
                     "embeddings_endpoint": {"type": "string"}
                 },

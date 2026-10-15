@@ -2,6 +2,9 @@
 //! Configuration and capability policy have one owner here. Runtime environment
 //! loading, credentials, provider requests, and live measurements remain in `harn-vm`.
 
+// The catalog schema expands one complete JSON object through serde_json's macro.
+#![recursion_limit = "256"]
+
 pub mod artifact;
 mod bindings;
 pub mod capabilities;
