@@ -1212,7 +1212,6 @@ mod tests {
     use super::*;
     use crate::compiler::Compiler;
     use crate::stdlib::register_vm_stdlib;
-    use crate::vm::Vm;
     use harn_lexer::Lexer;
     use harn_parser::Parser;
 

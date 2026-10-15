@@ -1,12 +1,8 @@
-use crate::{Vm, VmValue};
 use harn_vm_core::vm::{
     reset_stdlib_cache_for_test as reset_stdlib_module_artifact_cache,
     stdlib_cached_ptr_for_test as cached_stdlib_module_ptr,
 };
-use std::{
-    path::Path,
-    sync::{Arc, Mutex, MutexGuard, OnceLock},
-};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 static CACHE_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 fn cache_test_guard() -> MutexGuard<'static, ()> {
     CACHE_LOCK.get_or_init(|| Mutex::new(())).lock().unwrap()
@@ -31,7 +27,7 @@ fn stdlib_artifact_cache_reuses_compilation_with_fresh_vm_state() {
             let first_state = first_exports
                 .get("render_agent_prompt")
                 .expect("first export exists")
-                .module_state()
+                .module_state_for_test()
                 .expect("first module state stays live while VM owns module");
             let first_state_weak = Arc::downgrade(&first_state);
             let first_state_ptr = Arc::as_ptr(&first_state);
@@ -44,7 +40,7 @@ fn stdlib_artifact_cache_reuses_compilation_with_fresh_vm_state() {
             let second_state = second_exports
                 .get("render_agent_prompt")
                 .expect("second export exists")
-                .module_state()
+                .module_state_for_test()
                 .expect("second module state stays live while VM owns module");
             let second_state_weak = Arc::downgrade(&second_state);
 
@@ -73,8 +69,8 @@ fn stdlib_artifact_cache_reuses_compilation_with_fresh_vm_state() {
     assert!(!Arc::ptr_eq(first, second));
     assert!(Arc::ptr_eq(&first.func, &second.func));
     assert!(Arc::ptr_eq(&first.func.chunk, &second.func.chunk));
-    assert!(first.module_state().is_none());
-    assert!(second.module_state().is_none());
+    assert!(first.module_state_for_test().is_none());
+    assert!(second.module_state_for_test().is_none());
     assert!(first_state_weak.upgrade().is_none());
     assert!(second_state_weak.upgrade().is_none());
 }

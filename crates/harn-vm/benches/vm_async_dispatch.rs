@@ -5,7 +5,7 @@
 use std::hint::black_box;
 
 use criterion::{criterion_group, criterion_main, Criterion, Throughput};
-use harn_vm::{compile_source, Chunk, Vm, VmValue};
+use harn_vm::{compile_source, Chunk, VmValue};
 
 const ASYNC_CALLS: u64 = 20_000;
 

@@ -643,7 +643,7 @@ fn dispatch_error(error: impl std::fmt::Display) -> VmError {
 mod tests {
     use super::*;
     use crate::event_log::{install_active_event_log, install_memory_for_current_thread, EventLog};
-    use crate::{compile_source, register_vm_stdlib, reset_thread_local_state, Vm};
+    use crate::{compile_source, register_vm_stdlib, reset_thread_local_state};
 
     async fn execute_monitor_script(
         base_dir: &std::path::Path,

@@ -39,7 +39,7 @@ fn end(id: u64) {
 
 #[cfg(test)]
 mod tests {
-    use crate::{value::VmValue, vm::Vm};
+    use crate::value::VmValue;
 
     #[tokio::test(flavor = "current_thread")]
     async fn builtin_observation_is_inert_when_disabled_and_classifies_both_public_paths() {

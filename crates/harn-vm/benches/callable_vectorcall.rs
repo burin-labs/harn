@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use criterion::{criterion_group, criterion_main, Criterion};
 use harn_lexer::Lexer;
 use harn_parser::Parser;
-use harn_vm::{register_vm_stdlib, Chunk, Compiler, Vm, VmValue};
+use harn_vm::{register_vm_stdlib, Chunk, Compiler, VmValue};
 
 struct CountingAllocator;
 

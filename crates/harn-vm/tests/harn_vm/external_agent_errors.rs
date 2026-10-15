@@ -1,6 +1,6 @@
 use harn_vm::{
     a2a::A2aClientError, compile_source, external_agent::ExternalAgentError, register_vm_stdlib,
-    reset_thread_local_state, Vm, VmError,
+    reset_thread_local_state, VmError,
 };
 
 fn run_source(source: &str) -> Result<String, String> {

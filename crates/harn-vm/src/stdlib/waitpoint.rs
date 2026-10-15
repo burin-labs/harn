@@ -1222,7 +1222,7 @@ impl InstantLike {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{compile_source, register_vm_stdlib, reset_thread_local_state, Vm};
+    use crate::{compile_source, register_vm_stdlib, reset_thread_local_state};
 
     async fn execute(source: &str) -> Result<String, VmError> {
         reset_thread_local_state();

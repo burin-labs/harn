@@ -413,7 +413,7 @@ mod tests {
     use super::*;
     use crate::event_log::{install_memory_for_current_thread, EventLog};
     use crate::stdlib::register_vm_stdlib;
-    use crate::{compile_source, reset_thread_local_state, Vm};
+    use crate::{compile_source, reset_thread_local_state};
     use serde_json::json;
 
     async fn append_hitl_request(

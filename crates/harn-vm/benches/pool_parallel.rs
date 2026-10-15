@@ -1,7 +1,7 @@
 use std::hint::black_box;
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
-use harn_vm::{compile_source, register_vm_stdlib, Chunk, Vm, VmValue};
+use harn_vm::{compile_source, register_vm_stdlib, Chunk, VmValue};
 use tokio::runtime::{Builder, Runtime};
 
 const TASKS: usize = 16;

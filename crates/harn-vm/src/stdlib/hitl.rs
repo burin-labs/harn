@@ -1729,7 +1729,7 @@ mod tests {
     use crate::event_log::{
         install_active_event_log, install_memory_for_current_thread, EventLog, Topic,
     };
-    use crate::{register_vm_stdlib, reset_thread_local_state, Vm, VmError};
+    use crate::{register_vm_stdlib, reset_thread_local_state, VmError};
 
     fn hitl_lock() -> &'static Mutex<()> {
         static LOCK: OnceLock<Mutex<()>> = OnceLock::new();

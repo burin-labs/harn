@@ -1,7 +1,7 @@
 use std::hint::black_box;
 
 use criterion::{criterion_group, criterion_main, Criterion};
-use harn_vm::{compile_source, register_vm_stdlib, Chunk, Vm, VmValue};
+use harn_vm::{compile_source, register_vm_stdlib, Chunk, VmValue};
 
 fn find_text_hits_chunk(root: &str, pattern: &str) -> Chunk {
     let root = serde_json::to_string(root).expect("root string literal");

@@ -13,7 +13,7 @@
 use std::hint::black_box;
 
 use criterion::{criterion_group, criterion_main, Criterion};
-use harn_vm::{compile_source, register_vm_stdlib, Chunk, Vm};
+use harn_vm::{compile_source, register_vm_stdlib, Chunk};
 
 fn run_chunk(rt: &tokio::runtime::Runtime, chunk: &Chunk) -> String {
     rt.block_on(async {

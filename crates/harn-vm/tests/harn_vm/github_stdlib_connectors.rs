@@ -6,7 +6,7 @@ use serde_json::{json, Value as JsonValue};
 
 use harn_vm::{
     compile_source, install_active_connector_clients, register_vm_stdlib, reset_thread_local_state,
-    ClientError, ConnectorClient, ProviderId, Vm, VmError,
+    ClientError, ConnectorClient, ProviderId, VmError,
 };
 
 #[derive(Default)]

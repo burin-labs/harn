@@ -1,6 +1,4 @@
 #[cfg(test)]
-use crate::NativeVmExt;
-
 #[cfg(test)]
 #[cfg(test)]
 mod tests {

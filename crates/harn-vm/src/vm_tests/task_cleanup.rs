@@ -113,7 +113,7 @@ async fn graceful_cancel_early_failure_releases_its_lifecycle_owner() {
         .expect("cancel_graceful executes");
     assert!(matches!(
         result,
-        VmValue::EnumVariant(variant) if variant.is_variant("Result", "Err")
+        VmValue::EnumVariant(ref variant) if variant.is_variant("Result", "Err")
     ));
     assert!(result.display().contains("graceful boom"));
     assert_cleanup_released(cleanup_progress, session_id).await;

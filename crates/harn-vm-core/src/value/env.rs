@@ -254,6 +254,12 @@ impl VmClosure {
             .and_then(WeakModuleState::upgrade)
     }
 
+    #[cfg(feature = "vm-test-support")]
+    #[doc(hidden)]
+    pub fn module_state_for_test(&self) -> Option<ModuleState> {
+        self.module_state()
+    }
+
     /// Return a clone of this closure suitable for storage in a process- or
     /// thread-local registry that outlives the VM that created it (reminder
     /// providers, session/lifecycle hooks). The clone pins strong owners of

@@ -772,7 +772,6 @@ mod tests {
         TriggerBindingSpec, TriggerHandlerSpec,
     };
     use crate::trust_graph::AutonomyTier;
-    use crate::vm::Vm;
 
     use super::*;
 
