@@ -49,6 +49,14 @@ fn supports_harn_version(range: &str, current: &semver::Version) -> bool {
         return false;
     };
     if !current.pre.is_empty() {
+        // Partial comparators constrain a release line, rather than a specific
+        // stable patch. Let their equality case include this development suffix.
+        // Fully specified comparators retain their original prerelease ordering.
+        for comparator in &mut requirement.comparators {
+            if comparator.patch.is_none() {
+                comparator.pre = current.pre.clone();
+            }
+        }
         // Harn development runtimes remain usable within the declared bounds.
         // This tautological lower bound opts the current prerelease into semver
         // matching without erasing its precedence or relaxing any original bound.
@@ -255,6 +263,12 @@ mod runtime_version_tests {
     #[test]
     fn development_runtime_obeys_full_version_bounds() {
         let current = semver::Version::parse("0.10.167-dev").unwrap();
+        for range in [">=0.10,<0.11", "=0.10", "<=0.10", "~0.10", ">=0,<1"] {
+            assert!(supports_harn_version(range, &current), "{range}");
+        }
+        for range in [">0.10", "<0.10", ">=0.11", "=0.11", "~0.11", "^0.11"] {
+            assert!(!supports_harn_version(range, &current), "{range}");
+        }
         assert!(supports_harn_version(">=0.10.166,<0.11", &current));
         assert!(supports_harn_version("^0.10.166", &current));
         assert!(supports_harn_version(">=0.10.167-dev,<0.11", &current));
