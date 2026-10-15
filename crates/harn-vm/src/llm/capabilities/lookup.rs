@@ -224,7 +224,7 @@ pub fn lookup_with_user_overrides(
         user_overrides,
         crate::llm_config::provider_has_feature(provider, "responses_api"),
     )
-    .capabilities
+    .capabilities()
 }
 
 pub fn lookup_with_base_file(provider: &str, model: &str, base: &CapabilitiesFile) -> Capabilities {
@@ -236,7 +236,7 @@ pub fn lookup_with_base_file(provider: &str, model: &str, base: &CapabilitiesFil
         None,
         crate::llm_config::provider_has_feature(provider, "responses_api"),
     )
-    .capabilities
+    .capabilities()
 }
 
 /// Resolve source-owned rules and wire identities without ambient registry state.
@@ -253,7 +253,7 @@ pub fn lookup_with_source_config(
             .iter()
             .any(|feature| feature == "responses_api")
     });
-    resolve_with_features(provider, &model, base, None, responses).capabilities
+    resolve_with_features(provider, &model, base, None, responses).capabilities()
 }
 
 #[cfg(test)]

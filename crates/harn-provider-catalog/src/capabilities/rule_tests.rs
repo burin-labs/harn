@@ -25,7 +25,7 @@ fn extends_caps(src: &str) -> Capabilities {
             model: "test-model",
             responses_api: false,
         })
-        .capabilities
+        .capabilities()
 }
 
 #[test]

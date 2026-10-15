@@ -49,10 +49,17 @@ pub struct CapabilityRules<'a> {
 /// conservative defaults. An unmatched route must never look like an authored
 /// rule that deliberately supports nothing.
 pub struct CapabilityResolution {
-    pub capabilities: Capabilities,
     pub matched_rule: Option<MatchedCapabilityRule>,
     pub defaults: ProviderDefaults,
     pub provenance: Vec<String>,
+    route_kind: CapabilityRouteKind,
+}
+
+#[derive(Clone, Copy)]
+enum CapabilityRouteKind {
+    OpenAi,
+    Mock,
+    Other { responses_api: bool },
 }
 
 impl CapabilityResolution {
@@ -63,29 +70,28 @@ impl CapabilityResolution {
     pub fn has_defaults(&self) -> bool {
         self.defaults.has_any_field()
     }
-}
 
-impl<'a> CapabilityRules<'a> {
-    pub fn new(builtin: &'a CapabilitiesFile, overlay: Option<&'a CapabilitiesFile>) -> Self {
-        Self { builtin, overlay }
-    }
-
-    pub fn resolve(&self, route: CapabilityRoute<'_>) -> CapabilityResolution {
-        let (mut resolution, defaults, layer) =
-            route::resolve_route(self.overlay, self.builtin, route.provider, route.model);
-        let provenance = std::mem::take(&mut resolution.matched_rules);
-        let mut capabilities = if let Some(rule) = resolution.merged.as_ref() {
-            projection::rule_to_caps(rule, &defaults)
-        } else if route.provider == "mock" || !defaults.has_any_field() {
+    /// Materialize effective capabilities only when requested. Admission and
+    /// provenance callers can inspect authored rules without allocating the
+    /// full capability projection.
+    pub fn capabilities(&self) -> Capabilities {
+        let mut capabilities = if let Some(matched) = self.matched_rule.as_ref() {
+            projection::rule_to_caps(&matched.rule, &self.defaults)
+        } else if matches!(self.route_kind, CapabilityRouteKind::Mock) || !self.has_defaults() {
             Capabilities::default()
         } else {
-            projection::defaults_to_caps(&defaults)
+            projection::defaults_to_caps(&self.defaults)
         };
-        if route.provider == "mock" && layer == Some("anthropic") {
+        if matches!(self.route_kind, CapabilityRouteKind::Mock)
+            && self
+                .matched_rule
+                .as_ref()
+                .is_some_and(|matched| matched.provider == "anthropic")
+        {
             capabilities.native_tool_wire_format = "openai".to_string();
         }
-        if route.provider != "openai" && route.provider != "mock" {
-            if !route.responses_api {
+        if let CapabilityRouteKind::Other { responses_api } = self.route_kind {
+            if !responses_api {
                 capabilities.responses_api = false;
                 capabilities.chat_completions_unsupported = false;
             }
@@ -96,11 +102,31 @@ impl<'a> CapabilityRules<'a> {
             capabilities.background_mode = false;
             capabilities.tool_approval_policy = None;
         }
+        capabilities
+    }
+}
+
+impl<'a> CapabilityRules<'a> {
+    pub fn new(builtin: &'a CapabilitiesFile, overlay: Option<&'a CapabilitiesFile>) -> Self {
+        Self { builtin, overlay }
+    }
+
+    pub fn resolve(&self, route: CapabilityRoute<'_>) -> CapabilityResolution {
+        let (mut resolution, defaults, _) =
+            route::resolve_route(self.overlay, self.builtin, route.provider, route.model);
+        let provenance = std::mem::take(&mut resolution.matched_rules);
+        let route_kind = match route.provider {
+            "openai" => CapabilityRouteKind::OpenAi,
+            "mock" => CapabilityRouteKind::Mock,
+            _ => CapabilityRouteKind::Other {
+                responses_api: route.responses_api,
+            },
+        };
         CapabilityResolution {
-            capabilities,
             matched_rule: resolution.into_matched(),
             defaults,
             provenance,
+            route_kind,
         }
     }
 }
