@@ -15,10 +15,9 @@ use crate::llm_config::{
 use chrono::{NaiveDate, Utc};
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 
-pub const PROVIDER_CATALOG_SCHEMA_VERSION: u32 = 13;
-pub const PROVIDER_CATALOG_SCHEMA_ID: &str =
-    "https://harnlang.com/schemas/provider-catalog.v13.json";
-pub const PROVIDER_CATALOG_GENERATOR: &str = "harn provider catalog generate";
+pub use harn_provider_catalog::{
+    PROVIDER_CATALOG_GENERATOR, PROVIDER_CATALOG_SCHEMA_ID, PROVIDER_CATALOG_SCHEMA_VERSION,
+};
 pub const HARN_DISABLE_CATALOG_REFRESH_ENV: &str = "HARN_DISABLE_CATALOG_REFRESH";
 pub const HARN_PROVIDER_CATALOG_URL_ENV: &str = "HARN_PROVIDER_CATALOG_URL";
 pub const HARN_PROVIDER_CATALOG_ALLOW_UNSIGNED_ENV: &str = "HARN_PROVIDER_CATALOG_ALLOW_UNSIGNED";
@@ -34,7 +33,6 @@ const FACT_FRESHNESS_WARNING_DAYS: i64 = 180;
 
 #[cfg(test)]
 mod automatic_eligibility_tests;
-mod bindings;
 #[cfg(test)]
 mod cache_accounting_tests;
 mod decision_contract;
@@ -42,7 +40,6 @@ mod decision_contract;
 mod decision_contract_tests;
 #[cfg(test)]
 mod display_name_tests;
-mod from_artifact;
 pub use decision_contract::{decision_contract_for_route, DecisionContract};
 mod pricing_validation;
 use pricing_validation::validate_pricing;
@@ -61,7 +58,6 @@ mod pricing_tests;
 #[cfg(test)]
 mod released_row_kind_tests;
 mod remote;
-mod schema;
 #[cfg(test)]
 mod schema_shape_tests;
 #[cfg(test)]
@@ -72,12 +68,12 @@ mod tests;
 mod tests_parity_provenance;
 mod validation;
 
-pub use bindings::{swift_binding, swift_binding_embedded, typescript_declarations};
-pub(crate) use from_artifact::config_from_artifact;
 pub use harn_binding::harn_declarations;
 pub use harn_provider_catalog::artifact::*;
+pub(crate) use harn_provider_catalog::config_from_artifact;
+pub use harn_provider_catalog::{schema_json, schema_value};
+pub use harn_provider_catalog::{swift_binding, swift_binding_embedded, typescript_declarations};
 pub use remote::{refresh_runtime_catalog, CatalogRefreshOptions, CatalogRefreshReport};
-pub use schema::{schema_json, schema_value};
 pub use validation::{validate_artifact, validate_current};
 
 pub fn artifact() -> ProviderCatalogArtifact {

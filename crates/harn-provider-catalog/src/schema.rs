@@ -1,6 +1,7 @@
 use serde_json::{json, Value};
 
 use super::*;
+use crate::config as llm_config;
 
 pub fn schema_json() -> Result<String, serde_json::Error> {
     serde_json::to_string_pretty(&schema_value()).map(|mut text| {

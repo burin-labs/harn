@@ -1916,6 +1916,20 @@
       "reason": "An unchanged entry count also passes when parsing runs twice without caching, so it does not prove the claimed reuse. Keep observable content invalidation and embedded-asset rendering instead.",
       "retainedPath": "crates/harn-vm/src/stdlib/template/tests.rs",
       "retainedName": "filesystem_template_cache_invalidates_when_contents_change"
+    },
+    {
+      "path": "crates/harn-vm/src/provider_catalog/tests.rs",
+      "name": "live_catalog_has_one_tier_per_equivalence_group",
+      "reason": "SUBSUMED: Repeats full artifact generation and validation, then accepts every error except one prose substring. The retained test rejects every validation error; validation_rejects_conflicting_tiers_within_an_equivalence_group still proves this rule fires.",
+      "retainedPath": "crates/harn-vm/src/provider_catalog/tests.rs",
+      "retainedName": "generated_catalog_validates"
+    },
+    {
+      "path": "crates/harn-vm/src/provider_catalog/tests.rs",
+      "name": "live_catalog_has_no_local_strengths_decoration_over_baseline",
+      "reason": "SUBSUMED: Repeats full artifact generation and validation, then accepts every error except one prose substring. The retained test rejects every validation error; validation_rejects_local_strengths_inheriting_cloud_decoration still proves this rule fires.",
+      "retainedPath": "crates/harn-vm/src/provider_catalog/tests.rs",
+      "retainedName": "generated_catalog_validates"
     }
   ],
   "retainedScenarios": [

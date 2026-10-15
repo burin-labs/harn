@@ -8,10 +8,9 @@
 //! a matching line here, and a field that silently does not is easy to spot.
 
 use super::*;
+use crate::config::{self as llm_config, HealthcheckDef};
 
-pub(crate) fn config_from_artifact(
-    artifact: &ProviderCatalogArtifact,
-) -> llm_config::ProvidersConfig {
+pub fn config_from_artifact(artifact: &ProviderCatalogArtifact) -> llm_config::ProvidersConfig {
     llm_config::ProvidersConfig {
         providers: artifact
             .providers

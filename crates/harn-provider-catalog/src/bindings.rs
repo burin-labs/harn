@@ -1,4 +1,5 @@
 use super::*;
+use crate::config as llm_config;
 
 // The two type blocks are pure literal text and together push this file past
 // the source file-length cap, so they live beside it rather than in it.
@@ -13,7 +14,7 @@ pub fn typescript_declarations() -> String {
 }
 
 fn typescript_type_block(language: &str) -> String {
-    let chat_adapters = harn_provider_catalog::ChatApiAdapter::ALL
+    let chat_adapters = crate::ChatApiAdapter::ALL
         .iter()
         .map(|adapter| serde_json::to_string(adapter).expect("chat adapter is serializable"))
         .collect::<Vec<_>>()
@@ -43,10 +44,10 @@ pub fn swift_binding() -> Result<String, serde_json::Error> {
 }
 
 /// Hermetic counterpart of [`swift_binding`] for generating the checked-in
-/// `HarnProviderCatalog.swift` artifact. See [`artifact_embedded`].
+/// `HarnProviderCatalog.swift` artifact.
 pub fn swift_binding_embedded(
-    _explicit_overlay: Option<&crate::llm_config::ProvidersConfig>,
-    _explicit_capabilities: Option<&crate::llm::capabilities::CapabilitiesFile>,
+    _explicit_overlay: Option<&crate::config::ProvidersConfig>,
+    _explicit_capabilities: Option<&crate::capabilities::CapabilitiesFile>,
 ) -> Result<String, serde_json::Error> {
     Ok(swift_binding_body())
 }
