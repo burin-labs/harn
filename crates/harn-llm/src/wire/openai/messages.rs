@@ -5,11 +5,11 @@
 //! parallel tool-call batches on single-call routes, images riding on a
 //! `role:"tool"` message, provider-private fields, and reserved `<tool_call>`
 //! delimiters. Call/result pairing is repaired for every provider before this
-//! module runs; see `crate::llm::tool_call_history`.
+//! module runs, by the native transcript adapter.
 
 use std::collections::HashSet;
 
-pub(super) fn enforce_single_tool_call_history(
+pub fn enforce_single_tool_call_history(
     messages: Vec<serde_json::Value>,
     has_native_tools: bool,
 ) -> Vec<serde_json::Value> {
@@ -48,7 +48,7 @@ fn strip_native_tool_metadata_from_text_history(
         .collect()
 }
 
-pub(super) fn split_parallel_native_tool_call_history(
+pub fn split_parallel_native_tool_call_history(
     messages: Vec<serde_json::Value>,
 ) -> Vec<serde_json::Value> {
     let mut normalized = Vec::with_capacity(messages.len());
@@ -167,10 +167,10 @@ fn is_deferable_non_tool_message(message: &serde_json::Value) -> bool {
 
 /// Remap canonical `<tool_call>` delimiters to the non-special wire form for a
 /// reserved-token model (no-op when `remap` is false). Applied to every outgoing
-/// message; see [`crate::llm::tool_delimiter`].
-pub(super) fn maybe_remap_tool_call_text(text: &str, remap: bool) -> String {
+/// message; see [`crate::tool_delimiter`].
+pub fn maybe_remap_tool_call_text(text: &str, remap: bool) -> String {
     if remap {
-        crate::llm::tool_delimiter::canonical_to_wire(text)
+        crate::tool_delimiter::canonical_to_wire(text)
     } else {
         text.to_string()
     }
@@ -191,7 +191,7 @@ pub(super) fn maybe_remap_tool_call_text(text: &str, remap: bool) -> String {
 /// flushed as a single `user` message once the run ends (the next non-tool
 /// message, or the end of history). Messages with no tool-message image content
 /// pass through untouched.
-pub(super) fn relocate_tool_message_images_to_user(
+pub fn relocate_tool_message_images_to_user(
     msgs: Vec<serde_json::Value>,
 ) -> Vec<serde_json::Value> {
     fn is_image_part(part: &serde_json::Value) -> bool {
@@ -255,7 +255,7 @@ pub(super) fn relocate_tool_message_images_to_user(
 }
 
 fn remap_tool_call_content(content: &serde_json::Value) -> serde_json::Value {
-    use crate::llm::tool_delimiter::canonical_to_wire;
+    use crate::tool_delimiter::canonical_to_wire;
     match content {
         serde_json::Value::String(s) => serde_json::Value::String(canonical_to_wire(s)),
         serde_json::Value::Array(parts) => serde_json::Value::Array(
@@ -277,11 +277,13 @@ fn remap_tool_call_content(content: &serde_json::Value) -> serde_json::Value {
     }
 }
 
-pub(super) fn sanitize_openai_message_for_request(
+pub fn sanitize_openai_message_for_request(
     message: &mut serde_json::Value,
     remap_tool_call: bool,
-    reasoning_round_trip: crate::llm::capabilities::ReasoningRoundTripPolicy,
-    reasoning_history_wire_field: Option<crate::llm::capabilities::ReasoningHistoryWireField>,
+    reasoning_round_trip: harn_provider_catalog::capabilities::ReasoningRoundTripPolicy,
+    reasoning_history_wire_field: Option<
+        harn_provider_catalog::capabilities::ReasoningHistoryWireField,
+    >,
     request_has_tools: bool,
 ) {
     // Harn persists native results in one provider-neutral shape. Project it
@@ -308,7 +310,7 @@ pub(super) fn sanitize_openai_message_for_request(
     // reasoning field is replayed. Project only Harn-owned canonical reasoning
     // through the typed catalog mode; never pass through arbitrary seeded
     // `reasoning_content` from transcript/history input.
-    let replay_reasoning = crate::llm::reasoning_history::openai_same_key_reasoning(
+    let replay_reasoning = crate::reasoning_history::openai_same_key_reasoning(
         message,
         reasoning_round_trip,
         reasoning_history_wire_field,
@@ -333,7 +335,7 @@ pub(super) fn sanitize_openai_message_for_request(
         };
         object.insert(
             "content".to_string(),
-            crate::llm::content::openai_content(&content),
+            crate::content::openai_content(&content),
         );
     }
     if let Some(tool_calls) = object.get_mut("tool_calls") {

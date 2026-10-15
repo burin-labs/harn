@@ -3802,6 +3802,7 @@ dependencies = [
  "harn-vm-core",
  "proptest",
  "regex",
+ "schemars",
  "serde",
  "serde_json",
  "tiktoken-rs",

@@ -6,7 +6,9 @@
 //! distinct prevents compatibility shims from leaking into generic
 //! OpenAI-compatible providers.
 
-use crate::llm::api::{DeltaSender, LlmRequestPayload, LlmResult, OutputFormat, ThinkingConfig};
+use crate::llm::api::{
+    DeltaSender, LlmRequestPayload, LlmRequestPayloadExt, LlmResult, OutputFormat, ThinkingConfig,
+};
 use crate::llm::providers::schema_compat::{
     sanitize_schema_for_provider, SchemaCompatProfile, SchemaSurface,
 };

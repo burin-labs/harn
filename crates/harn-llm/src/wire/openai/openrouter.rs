@@ -6,7 +6,7 @@
 //! materializations of those rows — provider-agnostic data plumbing with no
 //! model-specific logic of their own.
 
-pub(crate) fn ensure_openrouter_require_parameters(body: &mut serde_json::Value) {
+pub fn ensure_openrouter_require_parameters(body: &mut serde_json::Value) {
     match body.get_mut("provider") {
         Some(serde_json::Value::Object(provider)) => {
             provider
@@ -26,7 +26,7 @@ pub(crate) fn ensure_openrouter_require_parameters(body: &mut serde_json::Value)
 /// materialization of the capability-row `provider_route_denylist`; it is
 /// provider-agnostic data plumbing with no model-specific logic — the caller
 /// decides whether a denylist applies by consulting the capability matrix.
-pub(crate) fn apply_openrouter_route_denylist(body: &mut serde_json::Value, deny: &[String]) {
+pub fn apply_openrouter_route_denylist(body: &mut serde_json::Value, deny: &[String]) {
     if deny.is_empty() {
         return;
     }
@@ -67,7 +67,7 @@ pub(crate) fn apply_openrouter_route_denylist(body: &mut serde_json::Value, deny
 /// the capability matrix. A pre-existing `provider.order` (e.g. a caller
 /// override) and `provider.only` are left untouched; `allow_fallbacks` is always
 /// forced to `false` so the pin is closed. No-op when `order` is empty.
-pub(crate) fn apply_openrouter_provider_order(body: &mut serde_json::Value, order: &[String]) {
+pub fn apply_openrouter_provider_order(body: &mut serde_json::Value, order: &[String]) {
     if order.is_empty() {
         return;
     }

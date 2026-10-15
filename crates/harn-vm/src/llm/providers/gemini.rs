@@ -17,8 +17,8 @@ mod interactions_tests;
 mod test_support;
 
 use crate::llm::api::{
-    DeltaSender, LlmRequestPayload, LlmResult, OutputFormat, ProviderTelemetry,
-    RawProviderToolCall, ReasoningEffort, ThinkingConfig,
+    DeltaSender, LlmRequestPayload, LlmRequestPayloadExt, LlmResult, OutputFormat,
+    ProviderTelemetry, RawProviderToolCall, ReasoningEffort, ThinkingConfig,
 };
 use crate::llm::provider::{LlmProvider, LlmProviderChat};
 use crate::llm::providers::common::{

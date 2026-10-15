@@ -20,8 +20,8 @@
 //! step → transcript mapping and the SSE path only owns event → step assembly.
 
 use crate::llm::api::{
-    DeltaSender, LlmRequestPayload, LlmResult, OutputFormat, ProviderTelemetry,
-    RawProviderToolCall, ReasoningEffort, ThinkingConfig,
+    DeltaSender, LlmRequestPayload, LlmRequestPayloadExt, LlmResult, OutputFormat,
+    ProviderTelemetry, RawProviderToolCall, ReasoningEffort, ThinkingConfig,
 };
 use crate::llm::providers::common::{
     apply_provider_overrides, maybe_emit_delta, output_text_block, reasoning_block,

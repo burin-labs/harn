@@ -6,13 +6,13 @@
 //! subset of the directives. The capability row picks the dialect; these
 //! builders produce its body.
 
-use crate::llm::api::ThinkingConfig;
+use crate::request::ThinkingConfig;
 
 /// True when the OpenRouter `reasoning` body explicitly disables reasoning
 /// (`{"enabled": false}`). These are the directives that, on a model with no
 /// reasoning support, cause OpenRouter to drop every endpoint under
 /// `require_parameters: true`.
-pub(super) fn is_openrouter_reasoning_disable(reasoning: &serde_json::Value) -> bool {
+pub fn is_openrouter_reasoning_disable(reasoning: &serde_json::Value) -> bool {
     reasoning
         .get("enabled")
         .and_then(serde_json::Value::as_bool)
@@ -26,11 +26,11 @@ pub(super) fn is_openrouter_reasoning_disable(reasoning: &serde_json::Value) -> 
 /// empty-endpoint 404. `reasoning_effort_supported` needs no separate disjunct:
 /// it is derived from `thinking_modes` containing `effort`, so it can never be
 /// true for a row with empty modes.
-pub(super) fn model_declares_reasoning(caps: &crate::llm::capabilities::Capabilities) -> bool {
+pub fn model_declares_reasoning(caps: &harn_provider_catalog::capabilities::Capabilities) -> bool {
     !caps.thinking_modes.is_empty() || caps.reasoning_none_supported
 }
 
-pub(super) fn openrouter_reasoning_config(thinking: &ThinkingConfig) -> Option<serde_json::Value> {
+pub fn openrouter_reasoning_config(thinking: &ThinkingConfig) -> Option<serde_json::Value> {
     match thinking {
         // Explicitly disable on the wire. The previous `None` return left
         // the request silent, which on Qwen3 thinking variants caused the
@@ -55,7 +55,7 @@ pub(super) fn openrouter_reasoning_config(thinking: &ThinkingConfig) -> Option<s
             "enabled": true
         })),
         ThinkingConfig::Effort {
-            level: crate::llm::api::ReasoningEffort::None,
+            level: crate::request::ReasoningEffort::None,
         } => Some(serde_json::json!({
             "enabled": false
         })),
@@ -65,9 +65,9 @@ pub(super) fn openrouter_reasoning_config(thinking: &ThinkingConfig) -> Option<s
     }
 }
 
-pub(super) fn enabled_reasoning_config(
+pub fn enabled_reasoning_config(
     thinking: &ThinkingConfig,
-    caps: &crate::llm::capabilities::Capabilities,
+    caps: &harn_provider_catalog::capabilities::Capabilities,
 ) -> Option<serde_json::Value> {
     let supports_enabled = caps.thinking_modes.iter().any(|mode| mode == "enabled");
     if !supports_enabled {
@@ -76,7 +76,7 @@ pub(super) fn enabled_reasoning_config(
     match thinking {
         ThinkingConfig::Disabled
         | ThinkingConfig::Effort {
-            level: crate::llm::api::ReasoningEffort::None,
+            level: crate::request::ReasoningEffort::None,
         } => Some(serde_json::json!({ "enabled": false })),
         ThinkingConfig::Enabled { .. } | ThinkingConfig::Adaptive => {
             Some(serde_json::json!({ "enabled": true }))
@@ -86,11 +86,11 @@ pub(super) fn enabled_reasoning_config(
 }
 
 /// Project Groq Qwen's two-state reasoning switch from Harn's thinking toggle.
-pub(super) fn groq_qwen_reasoning_effort(thinking: &ThinkingConfig) -> Option<&'static str> {
+pub fn groq_qwen_reasoning_effort(thinking: &ThinkingConfig) -> Option<&'static str> {
     match thinking {
         ThinkingConfig::Disabled
         | ThinkingConfig::Effort {
-            level: crate::llm::api::ReasoningEffort::None,
+            level: crate::request::ReasoningEffort::None,
         } => Some("none"),
         ThinkingConfig::Enabled {
             budget_tokens: None,
@@ -103,11 +103,11 @@ pub(super) fn groq_qwen_reasoning_effort(thinking: &ThinkingConfig) -> Option<&'
     }
 }
 
-pub(super) fn minimax_thinking_config(thinking: &ThinkingConfig) -> Option<serde_json::Value> {
+pub fn minimax_thinking_config(thinking: &ThinkingConfig) -> Option<serde_json::Value> {
     match thinking {
         ThinkingConfig::Disabled
         | ThinkingConfig::Effort {
-            level: crate::llm::api::ReasoningEffort::None,
+            level: crate::request::ReasoningEffort::None,
         } => Some(serde_json::json!({ "type": "disabled" })),
         ThinkingConfig::Enabled { .. }
         | ThinkingConfig::Adaptive
@@ -115,11 +115,11 @@ pub(super) fn minimax_thinking_config(thinking: &ThinkingConfig) -> Option<serde
     }
 }
 
-pub(super) fn typed_thinking_config(thinking: &ThinkingConfig) -> Option<serde_json::Value> {
+pub fn typed_thinking_config(thinking: &ThinkingConfig) -> Option<serde_json::Value> {
     match thinking {
         ThinkingConfig::Disabled
         | ThinkingConfig::Effort {
-            level: crate::llm::api::ReasoningEffort::None,
+            level: crate::request::ReasoningEffort::None,
         } => Some(serde_json::json!({ "type": "disabled" })),
         ThinkingConfig::Enabled { .. }
         | ThinkingConfig::Adaptive

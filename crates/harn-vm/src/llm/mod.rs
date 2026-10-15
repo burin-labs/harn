@@ -151,7 +151,8 @@ pub(crate) fn catalog_may_shape_requested_reasoning() -> bool {
 mod effective_effort;
 pub(crate) mod reasoning_modes;
 pub mod reasoning_receipt;
-pub use effective_effort::{EffectiveReasoningEffort, ReasoningEffortSource};
+#[doc(inline)]
+pub use harn_llm::effective_effort::{EffectiveReasoningEffort, ReasoningEffortSource};
 pub use reasoning_receipt::{
     dropped_reasoning_receipts, peek_reasoning_receipts, reset_reasoning_receipts, ReasoningReceipt,
 };

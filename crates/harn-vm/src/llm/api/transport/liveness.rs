@@ -1,3 +1,4 @@
+use crate::llm::api::LlmRequestPayloadExt;
 use crate::value::{
     ProviderStreamDeadline, ProviderStreamFailure, ProviderStreamFailureReason,
     ProviderStreamPhase, VmError,

@@ -33,6 +33,13 @@ pub(crate) fn project_output_schema_for_provider(
     )
 }
 
+pub(crate) fn publish_wire_request(request: harn_llm::wire::EncodedRequest) -> Value {
+    for projection in request.schema_projections {
+        publish_projection(projection, true);
+    }
+    request.body
+}
+
 fn publish_projection(projection: SchemaProjection, emit_receipts: bool) -> Value {
     if emit_receipts {
         if let Some(metadata) = projection.audit_metadata() {

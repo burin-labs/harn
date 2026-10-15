@@ -6,14 +6,12 @@
 //! provider's schema-compatibility profile, and `tool_choice` is narrowed to
 //! the modes the capability row says the route accepts.
 
-use crate::llm::api::LlmRequestPayload;
-use crate::llm::providers::schema_compat::{
-    sanitize_schema_for_provider, SchemaCompatProfile, SchemaSurface,
-};
+use crate::request::LlmRequestPayload;
+use crate::schema_compat::{SchemaCompatProfile, SchemaProjection, SchemaSurface};
 
 pub(super) fn normalize_tool_choice_for_capabilities(
     tool_choice: &serde_json::Value,
-    caps: &crate::llm::capabilities::Capabilities,
+    caps: &harn_provider_catalog::capabilities::Capabilities,
     has_native_tools: bool,
 ) -> Option<serde_json::Value> {
     // OpenAI-compatible providers interpret `tool_choice` as a selector over the
@@ -92,15 +90,9 @@ fn tool_choice_mode(tool_choice: &serde_json::Value) -> Option<String> {
 pub(super) fn provider_request_tools(
     opts: &LlmRequestPayload,
     tools: &[serde_json::Value],
+    supports_openai_tool_search_extensions: bool,
+    projections: &mut Vec<SchemaProjection>,
 ) -> Vec<serde_json::Value> {
-    let supports_openai_tool_search_extensions =
-        crate::llm::provider::openai_tool_search_wire_extensions_enabled(
-            &opts.provider,
-            &opts.model,
-            tools,
-            opts.provider_overrides.as_ref(),
-        );
-
     tools
         .iter()
         .map(|tool| {
@@ -109,6 +101,7 @@ pub(super) fn provider_request_tools(
                 &opts.model,
                 tool,
                 supports_openai_tool_search_extensions,
+                projections,
             )
         })
         .collect()
@@ -119,6 +112,7 @@ fn sanitize_openai_tool_for_request(
     model: &str,
     tool: &serde_json::Value,
     supports_openai_tool_search_extensions: bool,
+    projections: &mut Vec<SchemaProjection>,
 ) -> serde_json::Value {
     let mut tool = tool.clone();
     let Some(object) = tool.as_object_mut() else {
@@ -152,12 +146,13 @@ fn sanitize_openai_tool_for_request(
         if let Some(parameters) = function.get("parameters").cloned() {
             function.insert(
                 "parameters".to_string(),
-                sanitize_schema_for_provider(
+                super::sanitize_schema_for_provider(
                     provider,
                     model,
                     schema_profile,
                     SchemaSurface::ToolParameters,
                     &parameters,
+                    projections,
                 ),
             );
         }
