@@ -117,12 +117,33 @@ pub type GithubAdmissionUnknown = {
 
 ### type `GithubCiArtifact`
 
-Failed artifact reads remain inspectable; an absent execution never becomes an empty pass.
+An unavailable execution remains distinct from a successfully read artifact.
 
 ```harn
-pub type GithubCiArtifact = {
+pub type GithubCiArtifact = GithubCiArtifactRead | GithubCiArtifactUnavailable
+```
+
+### type `GithubCiArtifactRead`
+
+A decoded immutable artifact receipt is ordinary data that survives JSON archival.
+
+```harn
+pub type GithubCiArtifactRead = {
   requirement: string,
-  result: GithubConnectorResult<GithubWorkflowJsonArtifactReceipt<JobRun>>,
+  status: "read",
+  receipt: GithubWorkflowJsonArtifactReceipt<JobRun>,
+}
+```
+
+### type `GithubCiArtifactUnavailable`
+
+Preserve the connector's exact refusal without persisting a runtime Result value.
+
+```harn
+pub type GithubCiArtifactUnavailable = {
+  requirement: string,
+  status: "unavailable",
+  error: GithubConnectorError,
 }
 ```
 

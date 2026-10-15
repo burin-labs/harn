@@ -53,6 +53,8 @@ type CiFixture = {
 
 type ArtifactPage = {total_count: int, artifacts: list<{id: int, name: string}>}
 
+type ArtifactArchive = list<GithubCiArtifact>
+
 fn ci_fixture(random: HarnessRandom) -> CiFixture {
   const f = fixture(random)
   const policy = f.policy
@@ -309,6 +311,37 @@ pipeline test_green_provider_job_without_structured_execution_stays_pending(harn
   assert_eq(actual.assessment.checks.required, 1)
   assert_eq(actual.assessment.checks.executed, 0)
   assert_eq(actual.assessment.checks.pending, ["tests"])
+}
+
+pipeline test_archived_unavailable_artifacts_preserve_measured_zero_and_absence(harness: Harness) {
+  const f = ci_fixture(harness.random)
+  const error = {code: "rate_limited", category: "provider", message: "no execution received"}
+  for refused in [
+    {requirement: "tests", status: "unavailable", error: error},
+    {requirement: "tests", status: "unavailable", error: error + {rate_limit_remaining: 0}},
+  ] {
+    const artifacts: list<GithubCiArtifact> = schema_expect([refused], schema_of(ArtifactArchive))
+    const actual = assess_github_ci(
+      f.request.policy,
+      source(f),
+      POLICY,
+      f.producer,
+      f.request,
+      JOBS,
+      artifacts,
+      7000,
+    )
+    const stored: GithubCiAssessment = schema_expect(
+      json_parse(json_stringify(actual)),
+      schema_of(GithubCiAssessment),
+    )
+    assert_eq(json_stringify(stored.artifacts), json_stringify([refused]))
+    assert_eq(stored.assessment.checks.executed, 0)
+    assert_eq(stored.assessment.checks.pending, ["tests"])
+    assert_eq(replay_github_ci(f.request.policy, stored, POLICY, JOBS), actual)
+    const falsely_read: unknown = json_parse(json_stringify(refused + {status: "read"}))
+    assert(!schema_is(falsely_read, GithubCiArtifact))
+  }
 }
 
 pipeline test_submitted_signing_policy_cannot_authorize_itself_before_provider_reads(
