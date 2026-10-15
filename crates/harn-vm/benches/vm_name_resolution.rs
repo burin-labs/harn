@@ -20,7 +20,7 @@ fn run_chunk(rt: &tokio::runtime::Runtime, chunk: &Chunk) -> String {
         let local = tokio::task::LocalSet::new();
         local
             .run_until(async {
-                let mut vm = crate::new_vm();
+                let mut vm = harn_vm::new_vm();
                 register_vm_stdlib(&mut vm);
                 let result = vm.execute(chunk).await.expect("bench script runs");
                 black_box(result);
