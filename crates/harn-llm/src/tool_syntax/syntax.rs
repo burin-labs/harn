@@ -8,11 +8,11 @@
 use std::collections::BTreeSet;
 use std::sync::OnceLock;
 
-use super::super::ts_value_parser::TsValueParser;
+use super::ts_value_parser::TsValueParser;
 
 /// Byte length of the first balanced `{ ... }` JSON object at the start of
 /// `src`, ignoring braces inside JSON strings.
-pub(super) fn balanced_json_object_len(src: &str) -> Option<usize> {
+pub fn balanced_json_object_len(src: &str) -> Option<usize> {
     let bytes = src.as_bytes();
     if bytes.first() != Some(&b'{') {
         return None;
@@ -165,12 +165,14 @@ fn render_available_tools(known: &BTreeSet<String>) -> String {
 /// message when the name looks like the model's own code, or a plain
 /// unknown-tool listing. Shared by the bare and native-JSON parsers so both
 /// surfaces give the same precise {what/why/how-to-fix} guidance.
-pub(super) fn unknown_tool_feedback(name: &str, known: &BTreeSet<String>) -> String {
+pub fn unknown_tool_feedback(name: &str, known: &BTreeSet<String>) -> String {
     let available = render_available_tools(known);
 
     // Genuine close-miss typo (e.g. `edt` → `edit`): keep the existing
     // suggestion behavior, which is the most likely intent.
-    if let Some(suggestion) = crate::value::closest_match(name, known.iter().map(String::as_str)) {
+    if let Some(suggestion) =
+        harn_vm_core::value::closest_match(name, known.iter().map(String::as_str))
+    {
         return format!(
             "Unknown tool '{name}'. Did you mean '{suggestion}'? \
              Tool calls must be one of: [{available}]."
@@ -202,7 +204,7 @@ pub(super) fn unknown_tool_feedback(name: &str, known: &BTreeSet<String>) -> Str
 /// streaming transport merges thinking and content channels. These tags
 /// break tool-call parsing because they appear between or before valid
 /// tool invocations.
-pub(super) fn strip_thinking_tags(text: &str) -> std::borrow::Cow<'_, str> {
+pub fn strip_thinking_tags(text: &str) -> std::borrow::Cow<'_, str> {
     if !text.contains("<think>") && !text.contains("</think>") {
         return std::borrow::Cow::Borrowed(text);
     }
@@ -290,8 +292,8 @@ pub(super) fn strip_thinking_tags(text: &str) -> std::borrow::Cow<'_, str> {
 /// Replacing each tag token with `\n` fixes both: the inner call lands at a
 /// line start and the wrapper bytes never reach `prose`. Returns a borrowed
 /// `Cow` unchanged when no wrapper tags are present.
-pub(super) fn strip_tool_call_wrappers(text: &str) -> std::borrow::Cow<'_, str> {
-    use super::super::{
+pub fn strip_tool_call_wrappers(text: &str) -> std::borrow::Cow<'_, str> {
+    use crate::tool_protocol::{
         TEXT_TOOL_CALL_CLOSE, TEXT_TOOL_CALL_CLOSE_COMPACT, TEXT_TOOL_CALL_OPEN,
         TEXT_TOOL_CALL_OPEN_COMPACT,
     };
@@ -359,14 +361,14 @@ pub(super) fn match_block<'a>(src: &'a str, start: usize, tag: &str) -> Option<(
 
 /// Render a parsed tool call back to the bare TS syntax used inside
 /// `<tool_call>` tags. Used to build the canonical history entry.
-pub(crate) fn render_canonical_call(name: &str, args: &serde_json::Value) -> String {
+pub fn render_canonical_call(name: &str, args: &serde_json::Value) -> String {
     // JSON object literals are accepted by our tool-call grammar, so
     // pretty-printed JSON is sufficient for replay.
     let rendered_args = serde_json::to_string_pretty(args).unwrap_or_else(|_| "{}".to_string());
     format!("{name}({rendered_args})")
 }
 
-pub(super) fn preview_str(s: &str, max: usize) -> String {
+pub fn preview_str(s: &str, max: usize) -> String {
     let chars: Vec<char> = s.chars().collect();
     if chars.len() <= max {
         return s.to_string();
@@ -375,7 +377,7 @@ pub(super) fn preview_str(s: &str, max: usize) -> String {
     format!("{kept}…")
 }
 
-pub(super) fn has_object_literal_arg_start(text: &str, open_paren_idx: usize) -> bool {
+pub fn has_object_literal_arg_start(text: &str, open_paren_idx: usize) -> bool {
     let bytes = text.as_bytes();
     let mut idx = open_paren_idx;
     while idx < bytes.len() && (bytes[idx] == b' ' || bytes[idx] == b'\t') {
@@ -386,7 +388,7 @@ pub(super) fn has_object_literal_arg_start(text: &str, open_paren_idx: usize) ->
 
 /// Parse a TypeScript-ish object literal starting at the beginning of `text`.
 /// Returns the parsed object and bytes consumed through the closing `}`.
-pub(super) fn parse_object_literal_from(
+pub fn parse_object_literal_from(
     text: &str,
     name: &str,
 ) -> Result<(serde_json::Value, usize), String> {
@@ -412,7 +414,7 @@ pub(super) fn parse_object_literal_from(
     }
 }
 
-pub(super) fn unwrap_exact_code_wrapper(text: &str) -> Option<&str> {
+pub fn unwrap_exact_code_wrapper(text: &str) -> Option<&str> {
     let trimmed = text.trim();
     if let Some(rest) = trimmed.strip_prefix("```") {
         let (_opener_line, after_opener) = rest.split_once('\n')?;
@@ -429,7 +431,7 @@ pub(super) fn unwrap_exact_code_wrapper(text: &str) -> Option<&str> {
 /// Collapse runs of ≥3 consecutive newlines down to 2 (one blank line). Used
 /// to tidy the `prose` output after tool-call ranges are excised, so the
 /// removed bytes don't leave an ugly vertical gap between surrounding prose.
-pub(super) fn collapse_blank_lines(text: &str) -> String {
+pub fn collapse_blank_lines(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut newline_run = 0usize;
     for ch in text.chars() {
@@ -449,7 +451,7 @@ pub(super) fn collapse_blank_lines(text: &str) -> String {
 /// Strip empty Markdown fence pairs (```lang\n``` or ```lang\n\n```) from text.
 /// Models sometimes emit these as failed tool-call attempts. If left in prose
 /// they accumulate in conversation history and cause duplication loops.
-pub(super) fn strip_empty_fences(text: &str) -> String {
+pub fn strip_empty_fences(text: &str) -> String {
     static EMPTY_FENCE_RE: OnceLock<regex::Regex> = OnceLock::new();
     let re = EMPTY_FENCE_RE.get_or_init(|| {
         regex::Regex::new(r"(?m)^[ \t]*```[^\n]*\n\s*```[ \t]*\n?")
@@ -459,7 +461,7 @@ pub(super) fn strip_empty_fences(text: &str) -> String {
 }
 
 /// A located `<<TAG ... TAG` heredoc body.
-pub(crate) struct HeredocSpan {
+pub struct HeredocSpan {
     /// Byte range of the body content, with the trailing newline excluded
     /// (matching `Parser::parse_heredoc`'s returned string).
     pub content: std::ops::Range<usize>,
@@ -476,7 +478,7 @@ pub(crate) struct HeredocSpan {
 /// Why a `<<` opener is not a complete heredoc. Carries the tag where one was
 /// read so the value parser can reproduce its precise model-facing diagnostics.
 #[derive(Debug, PartialEq, Eq)]
-pub(crate) enum HeredocError {
+pub enum HeredocError {
     /// `<<` was not followed by an identifier tag (e.g. a bare shift operator).
     MissingTag,
     /// The opening `<<TAG` line was not terminated by a newline.
@@ -493,7 +495,7 @@ pub(crate) enum HeredocError {
 /// run of `[A-Za-z0-9_]`, optionally wrapped in `'`/`"`; the body runs to a
 /// line that — after leading whitespace — begins with the tag at a word
 /// boundary. Anything after the tag on the closing line is left to the caller.
-pub(crate) fn scan_heredoc(src: &str, start: usize) -> Result<HeredocSpan, HeredocError> {
+pub fn scan_heredoc(src: &str, start: usize) -> Result<HeredocSpan, HeredocError> {
     let bytes = src.as_bytes();
     if bytes.get(start) != Some(&b'<') || bytes.get(start + 1) != Some(&b'<') {
         return Err(HeredocError::MissingTag);
@@ -831,7 +833,7 @@ fn escaped_close_at(
 /// literal-`\n` form. Decodes `\n`, `\t`, `\r`, `\"`, and `\\`; any other escape
 /// is left verbatim (both the backslash and the following byte) so unrecognized
 /// sequences in code survive unchanged. A trailing lone backslash is preserved.
-pub(crate) fn unescape_heredoc_body(raw: &str) -> String {
+pub fn unescape_heredoc_body(raw: &str) -> String {
     let mut out = String::with_capacity(raw.len());
     let mut chars = raw.chars();
     while let Some(ch) = chars.next() {
@@ -887,7 +889,7 @@ pub(super) fn skip_heredoc_body(src: &str, start: usize) -> Option<usize> {
 /// begin with a `<<TAG` opener AND have the heredoc's closing sentinel consume
 /// the entire remaining value. A heredoc that closes early (more content after
 /// the sentinel) is left untouched, because that trailing content would be lost.
-pub(crate) fn unwrap_fully_wrapping_heredoc(value: &str) -> Option<String> {
+pub fn unwrap_fully_wrapping_heredoc(value: &str) -> Option<String> {
     let trimmed = value.trim_start();
     let lead = value.len() - trimmed.len();
     // Cheap reject: a fully-wrapping heredoc must START with the `<<` opener.
@@ -911,7 +913,7 @@ pub(crate) fn unwrap_fully_wrapping_heredoc(value: &str) -> Option<String> {
 }
 
 /// Outcome of searching for a tag while stepping over heredoc bodies.
-pub(super) enum CloseScan {
+pub enum CloseScan {
     /// The tag begins at this byte offset, outside any heredoc body.
     Found(usize),
     /// A `<<TAG` heredoc opened but its closing tag line hasn't arrived yet —
@@ -957,7 +959,7 @@ pub(super) fn skip_string_span(src: &str, start: usize) -> Option<usize> {
 /// This is the one place that knows "where does a tagged block really end",
 /// shared by the buffered matcher, the truncation detector, and the streaming
 /// scanner.
-pub(super) fn find_close_tag(src: &str, from: usize, needle: &str) -> CloseScan {
+pub fn find_close_tag(src: &str, from: usize, needle: &str) -> CloseScan {
     let bytes = src.as_bytes();
     let mut i = from;
     while i < src.len() {
@@ -1080,7 +1082,7 @@ fn is_line_leading(src: &str, at: usize) -> bool {
 
 /// Length of a JavaScript-ish identifier starting at bytes[0]. Returns None
 /// if the first byte is not a valid identifier start.
-pub(crate) fn ident_length(bytes: &[u8]) -> Option<usize> {
+pub fn ident_length(bytes: &[u8]) -> Option<usize> {
     if bytes.is_empty() {
         return None;
     }
@@ -1104,10 +1106,7 @@ pub(crate) fn ident_length(bytes: &[u8]) -> Option<usize> {
 /// `text`. Returns the parsed argument JSON and the number of bytes consumed
 /// (from the start of the name through the closing paren), or an error with
 /// a diagnostic suitable to show the model.
-pub(crate) fn parse_ts_call_from(
-    text: &str,
-    name: String,
-) -> Result<(serde_json::Value, usize), String> {
+pub fn parse_ts_call_from(text: &str, name: String) -> Result<(serde_json::Value, usize), String> {
     let bytes = text.as_bytes();
     let paren_open = name.len();
     if bytes.get(paren_open) != Some(&b'(') {

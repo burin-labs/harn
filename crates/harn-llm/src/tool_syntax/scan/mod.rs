@@ -44,7 +44,7 @@ use super::syntax::{
     find_opener_after, find_span_end, ident_length, match_block, parse_ts_call_from,
     skip_heredoc_body, skip_string_span, strip_thinking_tags, SpanEnd,
 };
-use crate::text_index::TextIndex;
+use harn_vm_core::text_index::TextIndex;
 
 pub(crate) use head::call_head;
 pub(crate) use spec::ScanSpec;

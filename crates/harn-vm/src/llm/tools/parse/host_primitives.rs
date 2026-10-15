@@ -20,10 +20,10 @@ use harn_builtin_macros::harn_builtin;
 use harn_vm_core::builtin_support::VmBuiltinDef;
 
 use super::bare::{bare_tool_names, parse_bare_calls_in_body, parse_bare_calls_scoped, ProseScope};
-use super::scan::{call_head, scan_units, ScanSpec};
 use super::syntax::{
     balanced_json_object_len, parse_object_literal_from, parse_ts_call_from, render_canonical_call,
 };
+use harn_llm::tool_syntax::{call_head, scan_units};
 
 /// The primitives, in the order the composition reaches for them. Registered
 /// from `llm::register_llm_builtins` alongside the other agent-host slices.
@@ -68,9 +68,9 @@ fn host_tool_scan_units_builtin(args: &[VmValue], _out: &mut String) -> Result<V
         }
         None => return Err(VmError::Runtime(format!("{LABEL}: missing spec"))),
     };
-    let spec = ScanSpec::from_json(&spec_value)
+    let scanned = scan_units(&text, &spec_value)
         .map_err(|error| VmError::Runtime(format!("{LABEL}: {error}")))?;
-    Ok(json_to_vm_value(&scan_units(&text, &spec).to_json()))
+    Ok(json_to_vm_value(&scanned))
 }
 
 /// Parse a complete `name(args)` TS call expression at the start of `text`.
@@ -143,10 +143,7 @@ fn host_tool_parse_object_literal_builtin(
 )]
 fn host_tool_call_head_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let text = string_arg(args, 0, "text", "__host_tool_call_head(text)")?;
-    Ok(json_to_vm_value(&match call_head(&text) {
-        Some(head) => serde_json::json!({"name": head.name, "sep": head.sep.to_string()}),
-        None => serde_json::json!({}),
-    }))
+    Ok(json_to_vm_value(&call_head(&text)))
 }
 
 /// Byte length of the balanced `{ … }` object at the start of `text`, counting

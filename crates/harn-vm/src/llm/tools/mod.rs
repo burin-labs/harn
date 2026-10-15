@@ -11,7 +11,6 @@ mod params;
 mod parse;
 use harn_llm::tool_protocol as protocol;
 mod summary;
-mod ts_value_parser;
 mod type_expr;
 
 pub(crate) use summary::TOOL_DESCRIPTION_SUMMARY_IMPL_DEF;

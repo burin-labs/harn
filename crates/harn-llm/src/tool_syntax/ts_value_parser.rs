@@ -12,7 +12,7 @@
               scanning — every slice bound is a char boundary"
 )]
 
-use super::parse::{ident_length, scan_heredoc, unescape_heredoc_body, HeredocError};
+use super::syntax::{ident_length, scan_heredoc, unescape_heredoc_body, HeredocError};
 
 /// Minimal recursive-descent parser for a TypeScript value expression. Handles
 /// object and array literals, string literals (double-quoted and single-quoted),
