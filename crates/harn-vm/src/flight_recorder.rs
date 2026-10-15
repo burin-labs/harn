@@ -121,7 +121,7 @@ mod tests {
 
     #[test]
     fn only_the_root_vm_owns_terminal_state_and_rollover() {
-        let mut root = crate::Vm::new();
+        let mut root = crate::new_vm();
         root.enable_flight_recorder(8);
         let configured_id = root.execution_id().to_string();
         root.prepare_execution_for_top_level();
@@ -158,7 +158,7 @@ mod tests {
         let local = tokio::task::LocalSet::new();
         local
             .run_until(async {
-                let mut vm = crate::Vm::new();
+                let mut vm = crate::new_vm();
                 crate::register_vm_stdlib(&mut vm);
                 vm.set_harness(crate::Harness::real());
                 vm.set_source_info("main.harn", source);

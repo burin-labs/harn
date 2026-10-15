@@ -16,6 +16,7 @@
 //!   the API level so user code is portable; today they fail with a clear
 //!   diagnostic until an embedding host wires a tenant/org pool backend.
 
+use crate::native_vm::NativeBuiltinCtxExt;
 use crate::value::VmDictExt;
 use std::any::Any;
 use std::collections::{BTreeMap, HashMap, VecDeque};

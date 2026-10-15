@@ -600,7 +600,7 @@ pipeline test(harness: Harness, task: unknown) {
 ",
         )
         .expect("compile source");
-        let mut vm = Vm::new();
+        let mut vm = crate::new_vm();
         register_vm_stdlib(&mut vm);
         vm.execute(&chunk).await.expect("execute");
         assert_eq!(vm.output().trim_end(), "0");

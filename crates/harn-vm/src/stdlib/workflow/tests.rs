@@ -1,6 +1,7 @@
 use super::artifact::{load_run_tree, snapshot_trace_spans};
 use super::stage::{execute_stage_attempts, replay_stage};
 use super::state::{prepare_workflow_state, reset_workflow_run_states, workflow_run_state_count};
+use crate::native_vm::NativeBuiltinCtxExt;
 use crate::orchestration::{
     save_run_record, stage_verification_contracts, verification_contract_from_verify,
     workflow_verification_contracts, RunChildRecord, RunExecutionRecord, RunRecord, RunStageRecord,
@@ -320,7 +321,7 @@ async fn verify_stage_reads_transcript_from_session_store() {
         ..Default::default()
     };
 
-    let mut vm = crate::Vm::new();
+    let mut vm = crate::new_vm();
     crate::register_vm_stdlib(&mut vm);
     let ctx = crate::vm::AsyncBuiltinCtx::for_test(vm);
     let executed = execute_stage_attempts(&ctx, "run tests", "verify", &node, &[], None)
@@ -360,7 +361,7 @@ async fn command_verify_retry_policy_records_each_attempt() {
         ..Default::default()
     };
 
-    let mut vm = crate::Vm::new();
+    let mut vm = crate::new_vm();
     crate::register_vm_stdlib(&mut vm);
     let ctx = crate::vm::AsyncBuiltinCtx::for_test(vm);
     let executed = execute_stage_attempts(&ctx, "run tests", "verify", &node, &[], None)
@@ -413,7 +414,7 @@ async fn command_verify_retry_policy_with_feedback_records_each_attempt() {
         ..Default::default()
     };
 
-    let mut vm = crate::Vm::new();
+    let mut vm = crate::new_vm();
     crate::register_vm_stdlib(&mut vm);
     let ctx = crate::vm::AsyncBuiltinCtx::for_test(vm);
     let executed = execute_stage_attempts(&ctx, "run tests", "verify", &node, &[], None)
@@ -446,7 +447,7 @@ async fn host_stage_execute_once_matches_legacy_static_stage_shape() {
         ..Default::default()
     };
 
-    let mut vm = crate::Vm::new();
+    let mut vm = crate::new_vm();
     crate::register_vm_stdlib(&mut vm);
     let ctx = crate::vm::AsyncBuiltinCtx::for_test(vm);
 

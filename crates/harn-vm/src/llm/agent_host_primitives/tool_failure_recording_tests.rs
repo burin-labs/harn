@@ -2,6 +2,7 @@
 //! observation. These tests compile real Harn closures and exercise the public
 //! dispatch primitive, including successful outcomes and host-call boundaries.
 
+use crate::native_vm::NativeBuiltinCtxExt;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
@@ -95,7 +96,7 @@ async fn dispatch(tool_name: &str, handler_source: &str) -> serde_json::Value {
         "name": tool_name,
         "arguments": {},
     }));
-    let mut vm = crate::vm::Vm::new();
+    let mut vm = crate::new_vm();
     crate::register_vm_stdlib(&mut vm);
     let result = host_agent_dispatch_tool_call(
         crate::vm::AsyncBuiltinCtx::for_test(vm),
@@ -116,7 +117,7 @@ async fn dispatch_trusted(tool_name: &str, handler_source: &str) -> serde_json::
         "name": tool_name,
         "arguments": {},
     }));
-    let mut vm = crate::vm::Vm::new();
+    let mut vm = crate::new_vm();
     crate::register_vm_stdlib(&mut vm);
     let result = host_agent_dispatch_tool_call(
         crate::vm::AsyncBuiltinCtx::for_test(vm),

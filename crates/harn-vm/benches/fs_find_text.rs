@@ -84,7 +84,7 @@ fn execute(rt: &tokio::runtime::Runtime, chunk: &Chunk) -> VmValue {
         let local = tokio::task::LocalSet::new();
         local
             .run_until(async {
-                let mut vm = Vm::new();
+                let mut vm = crate::new_vm();
                 register_vm_stdlib(&mut vm);
                 vm.execute(chunk).await.expect("bench source executes")
             })

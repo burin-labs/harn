@@ -2,7 +2,7 @@ use rand::{seq::SliceRandom, Rng, RngExt};
 
 use super::{args::Args, VmError, VmRngHandle, VmValue};
 
-pub(crate) enum RandomOperation {
+pub enum RandomOperation {
     Float,
     Range,
     Choice,
@@ -10,11 +10,7 @@ pub(crate) enum RandomOperation {
 }
 
 impl RandomOperation {
-    pub(crate) fn apply<R: Rng + ?Sized>(
-        self,
-        rng: &mut R,
-        args: &[VmValue],
-    ) -> Result<VmValue, VmError> {
+    pub fn apply<R: Rng + ?Sized>(self, rng: &mut R, args: &[VmValue]) -> Result<VmValue, VmError> {
         match self {
             Self::Float => Ok(VmValue::Float(rng.random())),
             Self::Range => {
@@ -53,11 +49,7 @@ impl RandomOperation {
 }
 
 impl VmRngHandle {
-    pub(crate) fn call_method(
-        &self,
-        method: &str,
-        args: &[VmValue],
-    ) -> Option<Result<VmValue, VmError>> {
+    pub fn call_method(&self, method: &str, args: &[VmValue]) -> Option<Result<VmValue, VmError>> {
         let operation = match method {
             "f64" => RandomOperation::Float,
             "range" => RandomOperation::Range,

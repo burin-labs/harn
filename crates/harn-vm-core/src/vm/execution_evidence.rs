@@ -1,6 +1,13 @@
 use super::Vm;
 
 impl Vm {
+    /// Prepare explicit host work under this interpreter's execution owner.
+    pub fn prepare_host_call(&mut self) -> Result<super::AsyncBuiltinCtx, crate::VmError> {
+        self.ensure_execution_available()?;
+        self.prepare_execution_for_top_level();
+        Ok(super::AsyncBuiltinCtx::from_inline_parent(self))
+    }
+
     /// Enable exact, value-free source-path recording for this VM execution
     /// tree. Child VMs inherit the same bounded recorder.
     pub fn enable_flight_recorder(&mut self, max_events: usize) {

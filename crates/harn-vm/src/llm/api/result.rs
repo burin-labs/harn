@@ -595,7 +595,7 @@ pub(crate) async fn parse_text_tools_with_harn(
     let ctx = match ctx {
         Some(ctx) => ctx,
         None => {
-            let mut vm = crate::Vm::new();
+            let mut vm = crate::new_vm();
             crate::register_core_stdlib(&mut vm);
             crate::stdlib::macros::register_builtin_defs(
                 &mut vm,

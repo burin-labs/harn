@@ -1,7 +1,7 @@
 use super::{char_range_to_byte_range, string_char_count, VmError, VmValue};
 
 /// Bucket keys must be strings: displaying a scalar would merge distinct keys.
-pub(crate) fn string_discriminator(value: &VmValue, builtin: &str) -> Result<String, VmError> {
+pub fn string_discriminator(value: &VmValue, builtin: &str) -> Result<String, VmError> {
     match value {
         VmValue::String(s) => Ok((**s).to_string()),
         VmValue::Nil => Err(VmError::TypeError(format!(
@@ -14,7 +14,7 @@ pub(crate) fn string_discriminator(value: &VmValue, builtin: &str) -> Result<Str
     }
 }
 
-pub(crate) fn split_separator_required() -> VmError {
+pub fn split_separator_required() -> VmError {
     VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
         "split: separator is required (use split(text, sep) or text.split(sep))",
     )))
@@ -26,7 +26,7 @@ pub(crate) fn split_separator_required() -> VmError {
     clippy::string_slice,
     reason = "char_range_to_byte_range returns clamped char-boundary offsets"
 )]
-pub(crate) fn char_substring(s: &str, start: i64, end: Option<i64>) -> String {
+pub fn char_substring(s: &str, start: i64, end: Option<i64>) -> String {
     let len = string_char_count(s) as i64;
     let start = start.clamp(0, len);
     let end = end.unwrap_or(len).clamp(0, len).max(start);

@@ -32,7 +32,7 @@ fn {FILTER_FN_NAME}(record: dict) {{
 "
         );
         Ok(Self {
-            vm: Vm::new(),
+            vm: crate::new_vm(),
             chunk: Arc::new(crate::compile_source(&source)?),
             closure: None,
             normalized_expr,

@@ -113,7 +113,7 @@ pub fn atomic_write_with_durability(
     })
 }
 
-pub(crate) fn atomic_write_with_durability_unlocked(
+pub fn atomic_write_with_durability_unlocked(
     path: &Path,
     bytes: &[u8],
     durability: AtomicWriteDurability,

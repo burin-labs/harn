@@ -122,7 +122,7 @@ impl ExecutionDeadlineState {
     }
 }
 
-pub(crate) struct ExecutionDeadlinePauseGuard {
+pub struct ExecutionDeadlinePauseGuard {
     state: Arc<ExecutionDeadlineState>,
 }
 
@@ -161,7 +161,7 @@ impl Drop for ExecutionDeadlinePauseGuard {
     }
 }
 
-pub(crate) struct ExecutionDeadlineGuard {
+pub struct ExecutionDeadlineGuard {
     state: Arc<ExecutionDeadlineState>,
     previous: u64,
     completed: bool,
@@ -170,7 +170,7 @@ pub(crate) struct ExecutionDeadlineGuard {
 impl ExecutionDeadlineGuard {
     /// Mark an awaited execution as terminal before restoring its prior host
     /// deadline. Dropping without this acknowledgement poisons the VM.
-    pub(crate) fn complete(mut self) {
+    pub fn complete(mut self) {
         self.completed = true;
     }
 }

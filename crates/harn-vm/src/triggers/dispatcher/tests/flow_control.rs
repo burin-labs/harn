@@ -430,7 +430,7 @@ pub fn local_fn(harness: Harness, event: TriggerEvent) -> string {
             )
             .expect("write module source");
 
-            let mut vm = Vm::new();
+            let mut vm = crate::new_vm();
             register_vm_stdlib(&mut vm);
             vm.set_source_dir(dir.path());
             let flow_control = crate::triggers::TriggerFlowControlConfig {
@@ -622,7 +622,7 @@ pub fn slow_handler(harness: Harness, event: TriggerEvent) -> string {
             )
             .expect("write module source");
 
-            let mut vm = Vm::new();
+            let mut vm = crate::new_vm();
             register_vm_stdlib(&mut vm);
             vm.set_source_dir(dir.path());
             let flow_control = crate::triggers::TriggerFlowControlConfig {

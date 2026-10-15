@@ -1,4 +1,5 @@
 use super::{agent_primitive_denied_tool, host_agent_dispatch_tool_call};
+use crate::native_vm::NativeBuiltinCtxExt;
 
 #[test]
 fn approval_unavailable_names_terminal_risk_class() {
@@ -117,7 +118,7 @@ async fn dispatch_exec(command: &str, options: &crate::value::DictMap) -> serde_
         "arguments": {"command": command},
     }));
     let result = host_agent_dispatch_tool_call(
-        crate::vm::AsyncBuiltinCtx::for_test(crate::vm::Vm::new()),
+        crate::vm::AsyncBuiltinCtx::for_test(crate::new_vm()),
         call,
         None,
         options,

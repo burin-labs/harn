@@ -78,7 +78,7 @@ mod tests {
         let chunk = harn_vm::compile_source(
             "fn main(harness: Harness) { harness.runtime.waitpoint_create(\"hitl_question_live_response_owner\") }",
         ).unwrap();
-        let mut vm = harn_vm::Vm::new();
+        let mut vm = harn_vm::new_vm();
         harn_vm::register_vm_stdlib(&mut vm);
         vm.execute(&chunk).await.unwrap();
         let waitpoint = Topic::new(format!("waitpoint.state.{request_id}")).unwrap();

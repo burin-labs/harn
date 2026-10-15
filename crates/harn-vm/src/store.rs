@@ -204,7 +204,7 @@ mod tests {
         reset_active_event_log();
         let existing = install_memory_for_current_thread(8);
         let temp_dir = tempfile::tempdir().expect("tempdir");
-        let mut vm = Vm::new();
+        let mut vm = crate::new_vm();
 
         register_store_builtins(&mut vm, temp_dir.path());
 

@@ -14,7 +14,7 @@ use crate::value::{VmError, VmValue};
 /// preserved (a struct as its field map), `Decimal` becomes a
 /// precision-preserving string (read back via `decimal(...)`), and any non-data
 /// value kind becomes `null`.
-pub(crate) fn vm_to_storage_json(val: &VmValue) -> Result<serde_json::Value, VmError> {
+pub fn vm_to_storage_json(val: &VmValue) -> Result<serde_json::Value, VmError> {
     Ok(match val {
         VmValue::String(s) => serde_json::Value::String(s.to_string()),
         VmValue::Int(n) => serde_json::json!(*n),

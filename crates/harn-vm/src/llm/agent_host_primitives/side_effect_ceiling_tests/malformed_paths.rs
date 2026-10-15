@@ -1,6 +1,7 @@
 //! Model path-shape mistakes are retryable before policy callbacks or prompts.
 
 use super::*;
+use crate::native_vm::NativeBuiltinCtxExt;
 use crate::orchestration::ToolInterceptionScope;
 use crate::value::{VmDictExt, VmValue};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -190,7 +191,7 @@ impl Calls {
             "tools",
             VmValue::List(Arc::new(vec![VmValue::dict_map(entry)])),
         )]);
-        let mut vm = crate::vm::Vm::new();
+        let mut vm = crate::new_vm();
         crate::register_vm_stdlib(&mut vm);
         let precheck = self.precheck.clone();
         let effect = self.effect.clone();

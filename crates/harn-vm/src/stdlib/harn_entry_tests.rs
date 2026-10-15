@@ -1,13 +1,14 @@
 //! Rust-to-Harn crossings reuse immutable stdlib module instances from the
 //! execution tree's shared store (`vm/modules/shared_instances.rs`).
 
+use crate::native_vm::NativeBuiltinCtxExt;
 use std::path::PathBuf;
 
 use crate::value::VmValue;
 use crate::vm::{AsyncBuiltinCtx, Vm};
 
 fn stdlib_root() -> Vm {
-    let mut vm = Vm::new();
+    let mut vm = crate::new_vm();
     crate::stdlib::register_vm_stdlib(&mut vm);
     vm
 }

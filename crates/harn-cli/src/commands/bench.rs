@@ -122,7 +122,7 @@ pub(crate) async fn run_bench(path: &str, iterations: usize, profile: RunProfile
             harn_vm::tracing::set_tracing_enabled(true);
         }
 
-        let mut vm = harn_vm::Vm::new();
+        let mut vm = harn_vm::new_vm();
         harn_vm::register_vm_stdlib(&mut vm);
         crate::install_default_hostlib(&mut vm);
         harn_vm::register_store_builtins(&mut vm, store_base);

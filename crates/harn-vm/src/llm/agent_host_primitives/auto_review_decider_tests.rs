@@ -14,6 +14,7 @@
 //! `host_unavailable`. Asserting only the first would pass on a build that
 //! stamped `auto_reviewer` on everything.
 
+use crate::native_vm::NativeBuiltinCtxExt;
 use std::sync::Arc;
 
 use super::host_agent_dispatch_tool_call;
@@ -123,7 +124,7 @@ pub(super) async fn dispatch_pip_install(
         "arguments": {"command": "pip install pytest"},
     }));
     let result = host_agent_dispatch_tool_call(
-        crate::vm::AsyncBuiltinCtx::for_test(crate::vm::Vm::new()),
+        crate::vm::AsyncBuiltinCtx::for_test(crate::new_vm()),
         call,
         None,
         &options,

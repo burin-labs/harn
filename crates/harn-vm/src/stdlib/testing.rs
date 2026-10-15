@@ -1,4 +1,5 @@
 use crate::value::VmDictExt;
+use crate::NativeVmExt;
 use std::collections::BTreeMap;
 
 use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};

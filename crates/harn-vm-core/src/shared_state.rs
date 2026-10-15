@@ -6,9 +6,9 @@ use std::sync::Arc;
 use crate::value::{values_equal, VmChannelCloseState, VmChannelHandle, VmValue};
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub(crate) struct ScopedKey {
-    pub(crate) scope: String,
-    pub(crate) key: String,
+pub struct ScopedKey {
+    pub scope: String,
+    pub key: String,
 }
 
 struct SharedCell {
@@ -51,14 +51,14 @@ struct CircuitState {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum CircuitStatus {
+pub enum CircuitStatus {
     Closed,
     Open,
     HalfOpen,
 }
 
 impl CircuitStatus {
-    pub(crate) const fn as_str(self) -> &'static str {
+    pub const fn as_str(self) -> &'static str {
         match self {
             Self::Closed => "closed",
             Self::Open => "open",
@@ -68,7 +68,7 @@ impl CircuitStatus {
 }
 
 #[derive(Default)]
-pub(crate) struct VmSharedStateRuntime {
+pub struct VmSharedStateRuntime {
     cells: parking_lot::Mutex<BTreeMap<ScopedKey, SharedCell>>,
     maps: parking_lot::Mutex<BTreeMap<ScopedKey, SharedMap>>,
     mailboxes: parking_lot::Mutex<BTreeMap<ScopedKey, Mailbox>>,
@@ -76,11 +76,11 @@ pub(crate) struct VmSharedStateRuntime {
 }
 
 impl VmSharedStateRuntime {
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         Self::default()
     }
 
-    pub(crate) fn configure_circuit(
+    pub fn configure_circuit(
         &self,
         name: String,
         threshold: usize,
@@ -97,7 +97,7 @@ impl VmSharedStateRuntime {
         );
     }
 
-    pub(crate) fn circuit_status(&self, name: &str, now: std::time::Instant) -> CircuitStatus {
+    pub fn circuit_status(&self, name: &str, now: std::time::Instant) -> CircuitStatus {
         let circuits = self.circuits.lock();
         let Some(state) = circuits.get(name) else {
             return CircuitStatus::Closed;
@@ -111,14 +111,14 @@ impl VmSharedStateRuntime {
         }
     }
 
-    pub(crate) fn record_circuit_success(&self, name: &str) {
+    pub fn record_circuit_success(&self, name: &str) {
         if let Some(state) = self.circuits.lock().get_mut(name) {
             state.failures = 0;
             state.opened_at = None;
         }
     }
 
-    pub(crate) fn record_circuit_failure(&self, name: &str, now: std::time::Instant) -> bool {
+    pub fn record_circuit_failure(&self, name: &str, now: std::time::Instant) -> bool {
         let mut circuits = self.circuits.lock();
         let Some(state) = circuits.get_mut(name) else {
             return false;
@@ -131,11 +131,11 @@ impl VmSharedStateRuntime {
         false
     }
 
-    pub(crate) fn reset_circuit(&self, name: &str) {
+    pub fn reset_circuit(&self, name: &str) {
         self.record_circuit_success(name);
     }
 
-    pub(crate) fn open_cell(&self, scoped: ScopedKey, initial: VmValue) -> VmValue {
+    pub fn open_cell(&self, scoped: ScopedKey, initial: VmValue) -> VmValue {
         self.cells
             .lock()
             .entry(scoped.clone())
@@ -147,21 +147,21 @@ impl VmSharedStateRuntime {
         handle_value("shared_cell", &scoped)
     }
 
-    pub(crate) fn cell_get(&self, scoped: &ScopedKey) -> VmValue {
+    pub fn cell_get(&self, scoped: &ScopedKey) -> VmValue {
         let mut cells = self.cells.lock();
         let cell = cells.entry(scoped.clone()).or_default();
         cell.metrics.read_count += 1;
         cell.value.clone()
     }
 
-    pub(crate) fn cell_snapshot(&self, scoped: &ScopedKey) -> VmValue {
+    pub fn cell_snapshot(&self, scoped: &ScopedKey) -> VmValue {
         let mut cells = self.cells.lock();
         let cell = cells.entry(scoped.clone()).or_default();
         cell.metrics.read_count += 1;
         snapshot_value(cell.value.clone(), cell.version)
     }
 
-    pub(crate) fn cell_set(&self, scoped: &ScopedKey, value: VmValue) -> VmValue {
+    pub fn cell_set(&self, scoped: &ScopedKey, value: VmValue) -> VmValue {
         let mut cells = self.cells.lock();
         let cell = cells.entry(scoped.clone()).or_default();
         let old = std::mem::replace(&mut cell.value, value);
@@ -170,12 +170,7 @@ impl VmSharedStateRuntime {
         old
     }
 
-    pub(crate) fn cell_cas(
-        &self,
-        scoped: &ScopedKey,
-        expected: &VmValue,
-        new_value: VmValue,
-    ) -> bool {
+    pub fn cell_cas(&self, scoped: &ScopedKey, expected: &VmValue, new_value: VmValue) -> bool {
         let mut cells = self.cells.lock();
         let cell = cells.entry(scoped.clone()).or_default();
         let (expected_value, expected_version) = snapshot_expected(expected);
@@ -196,11 +191,7 @@ impl VmSharedStateRuntime {
         }
     }
 
-    pub(crate) fn open_map(
-        &self,
-        scoped: ScopedKey,
-        initial: Option<crate::value::DictMap>,
-    ) -> VmValue {
+    pub fn open_map(&self, scoped: ScopedKey, initial: Option<crate::value::DictMap>) -> VmValue {
         self.maps
             .lock()
             .entry(scoped.clone())
@@ -212,14 +203,14 @@ impl VmSharedStateRuntime {
         handle_value("shared_map", &scoped)
     }
 
-    pub(crate) fn map_get(&self, scoped: &ScopedKey, key: &str, default: VmValue) -> VmValue {
+    pub fn map_get(&self, scoped: &ScopedKey, key: &str, default: VmValue) -> VmValue {
         let mut maps = self.maps.lock();
         let map = maps.entry(scoped.clone()).or_default();
         map.metrics.read_count += 1;
         map.entries.get(key).cloned().unwrap_or(default)
     }
 
-    pub(crate) fn map_snapshot(&self, scoped: &ScopedKey, key: &str) -> VmValue {
+    pub fn map_snapshot(&self, scoped: &ScopedKey, key: &str) -> VmValue {
         let mut maps = self.maps.lock();
         let map = maps.entry(scoped.clone()).or_default();
         map.metrics.read_count += 1;
@@ -229,14 +220,14 @@ impl VmSharedStateRuntime {
         )
     }
 
-    pub(crate) fn map_entries(&self, scoped: &ScopedKey) -> VmValue {
+    pub fn map_entries(&self, scoped: &ScopedKey) -> VmValue {
         let mut maps = self.maps.lock();
         let map = maps.entry(scoped.clone()).or_default();
         map.metrics.read_count += 1;
         VmValue::dict(map.entries.clone())
     }
 
-    pub(crate) fn map_set(&self, scoped: &ScopedKey, key: String, value: VmValue) -> VmValue {
+    pub fn map_set(&self, scoped: &ScopedKey, key: String, value: VmValue) -> VmValue {
         let mut maps = self.maps.lock();
         let map = maps.entry(scoped.clone()).or_default();
         let old = map
@@ -248,7 +239,7 @@ impl VmSharedStateRuntime {
         old
     }
 
-    pub(crate) fn map_delete(&self, scoped: &ScopedKey, key: &str) -> VmValue {
+    pub fn map_delete(&self, scoped: &ScopedKey, key: &str) -> VmValue {
         let mut maps = self.maps.lock();
         let map = maps.entry(scoped.clone()).or_default();
         let old = map.entries.remove(key).unwrap_or(VmValue::Nil);
@@ -259,7 +250,7 @@ impl VmSharedStateRuntime {
         old
     }
 
-    pub(crate) fn map_cas(
+    pub fn map_cas(
         &self,
         scoped: &ScopedKey,
         key: String,
@@ -296,7 +287,7 @@ impl VmSharedStateRuntime {
         }
     }
 
-    pub(crate) fn open_mailbox(&self, scoped: ScopedKey, capacity: usize) -> VmValue {
+    pub fn open_mailbox(&self, scoped: ScopedKey, capacity: usize) -> VmValue {
         self.mailboxes
             .lock()
             .entry(scoped.clone())
@@ -324,7 +315,7 @@ impl VmSharedStateRuntime {
         handle_value("mailbox", &scoped)
     }
 
-    pub(crate) fn mailbox(&self, scoped: &ScopedKey) -> Option<VmValue> {
+    pub fn mailbox(&self, scoped: &ScopedKey) -> Option<VmValue> {
         if self.mailboxes.lock().contains_key(scoped) {
             Some(handle_value("mailbox", scoped))
         } else {
@@ -332,14 +323,14 @@ impl VmSharedStateRuntime {
         }
     }
 
-    pub(crate) fn mailbox_channel(&self, scoped: &ScopedKey) -> Option<VmChannelHandle> {
+    pub fn mailbox_channel(&self, scoped: &ScopedKey) -> Option<VmChannelHandle> {
         self.mailboxes
             .lock()
             .get(scoped)
             .map(|mailbox| mailbox.channel.clone())
     }
 
-    pub(crate) fn note_mailbox_send(&self, scoped: &ScopedKey, ok: bool) {
+    pub fn note_mailbox_send(&self, scoped: &ScopedKey, ok: bool) {
         if let Some(mailbox) = self.mailboxes.lock().get(scoped) {
             if ok {
                 mailbox.sent_count.fetch_add(1, Ordering::SeqCst);
@@ -350,7 +341,7 @@ impl VmSharedStateRuntime {
         }
     }
 
-    pub(crate) fn note_mailbox_receive(&self, scoped: &ScopedKey) {
+    pub fn note_mailbox_receive(&self, scoped: &ScopedKey) {
         if let Some(mailbox) = self.mailboxes.lock().get(scoped) {
             mailbox.received_count.fetch_add(1, Ordering::SeqCst);
             let _ = mailbox
@@ -361,7 +352,7 @@ impl VmSharedStateRuntime {
         }
     }
 
-    pub(crate) fn close_mailbox(&self, scoped: &ScopedKey) -> bool {
+    pub fn close_mailbox(&self, scoped: &ScopedKey) -> bool {
         let Some(mailbox) = self.mailboxes.lock().get(scoped).cloned() else {
             return false;
         };
@@ -374,7 +365,7 @@ impl VmSharedStateRuntime {
         true
     }
 
-    pub(crate) fn metrics(&self, kind: Option<&str>, scoped: Option<&ScopedKey>) -> VmValue {
+    pub fn metrics(&self, kind: Option<&str>, scoped: Option<&ScopedKey>) -> VmValue {
         match (kind, scoped) {
             (Some("shared_cell"), Some(scoped)) => self
                 .cells

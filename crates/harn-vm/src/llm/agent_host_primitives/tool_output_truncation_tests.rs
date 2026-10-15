@@ -1,3 +1,4 @@
+use crate::native_vm::NativeBuiltinCtxExt;
 use std::sync::Arc;
 
 use super::host_agent_dispatch_tool_call;
@@ -36,7 +37,7 @@ async fn explicit_hook_truncation_emits_even_when_final_length_is_unchanged() {
     }));
 
     let result = host_agent_dispatch_tool_call(
-        crate::vm::AsyncBuiltinCtx::for_test(crate::vm::Vm::new()),
+        crate::vm::AsyncBuiltinCtx::for_test(crate::new_vm()),
         call,
         Some(&tools),
         &crate::value::DictMap::new(),

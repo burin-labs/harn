@@ -17,7 +17,7 @@ fn execute(rt: &tokio::runtime::Runtime, chunk: &Chunk, record: bool) {
     rt.block_on(async {
         tokio::task::LocalSet::new()
             .run_until(async {
-                let mut vm = Vm::new();
+                let mut vm = crate::new_vm();
                 register_vm_stdlib(&mut vm);
                 if record {
                     vm.enable_flight_recorder(harn_vm::flight_recorder::DEFAULT_MAX_EVENTS);

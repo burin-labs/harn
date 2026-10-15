@@ -88,7 +88,7 @@ fn stdout_text(responses: &[DapResponse]) -> String {
 #[test]
 fn flush_output_recovers_when_cached_output_is_not_a_prefix() {
     let mut dbg = Debugger::new();
-    let mut vm = Vm::new();
+    let mut vm = harn_vm::new_vm();
     vm.append_output("new\n");
     dbg.vm = Some(vm);
     dbg.output = "stale and longer".to_string();
@@ -526,7 +526,7 @@ fn test_source_reads_stdlib_synthetic_source() {
 #[test]
 fn test_source_reference_reads_vm_generated_source() {
     let source = "pub fn generated_answer() {\n  return 42\n}\n";
-    let mut vm = Vm::new();
+    let mut vm = harn_vm::new_vm();
     let runtime = tokio::runtime::Builder::new_current_thread()
         .build()
         .expect("runtime");

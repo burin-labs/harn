@@ -221,7 +221,7 @@ impl SandboxMechanismUnavailable {
     /// One owner for the requirement derivation: `OsHardened` requires the
     /// mechanism by profile, every other confining profile only reaches a
     /// refusal because the resolved fallback said enforce.
-    pub(crate) fn new(
+    pub fn new(
         mechanism: SandboxMechanism,
         availability: SandboxMechanismAvailability,
         profile: SandboxProfile,
@@ -245,7 +245,7 @@ impl SandboxMechanismUnavailable {
         ErrorCategory::ToolRejected
     }
 
-    pub(crate) fn into_error(self) -> VmError {
+    pub fn into_error(self) -> VmError {
         VmError::SandboxMechanismUnavailable(Box::new(self))
     }
 
@@ -322,4 +322,4 @@ impl std::fmt::Display for SandboxMechanismUnavailable {
 }
 
 /// The fact every refusal and warning from the unconfined backend states.
-pub(crate) const NO_OS_SANDBOX: &str = "this platform has no OS process sandbox";
+pub const NO_OS_SANDBOX: &str = "this platform has no OS process sandbox";

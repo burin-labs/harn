@@ -5,12 +5,21 @@ use crate::{
     vm::Vm,
 };
 
-impl Vm {
-    /// Finish hooks run on this VM so their final output reaches the host.
-    pub(crate) async fn run_pipeline_finish_lifecycle(
+pub(super) trait NativeVmLifecycle {
+    fn run_pipeline_finish_lifecycle(
         &mut self,
         value: VmValue,
-    ) -> Result<VmValue, VmError> {
+    ) -> impl std::future::Future<Output = Result<VmValue, VmError>> + Send;
+    fn fire_finish_lifecycle_event(
+        &mut self,
+        event: crate::orchestration::HookEvent,
+        payload: &serde_json::Value,
+    ) -> impl std::future::Future<Output = Result<(), VmError>> + Send;
+}
+
+impl NativeVmLifecycle for Vm {
+    /// Finish hooks run on this VM so their final output reaches the host.
+    async fn run_pipeline_finish_lifecycle(&mut self, value: VmValue) -> Result<VmValue, VmError> {
         use crate::orchestration::{
             take_pipeline_on_finish, unsettled_state_snapshot_async, HookEvent,
         };

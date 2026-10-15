@@ -1,6 +1,7 @@
 //! Pipeline execution glue — compiles and runs a Harn chunk under the
 //! ACP bridge, and loads MCP clients from host capabilities.
 
+use harn_vm::NativeVmExt;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -58,7 +59,7 @@ mod prompt_execution_error_tests {
 
     #[test]
     fn typed_vm_category_outweighs_misleading_message_prose() {
-        let vm = harn_vm::Vm::new();
+        let vm = harn_vm::new_vm();
         let error = harn_vm::VmError::CategorizedError {
             category: harn_vm::ErrorCategory::ToolRejected,
             message: "provider rate limit 429 in /tmp/run-429/result".to_string(),
@@ -73,7 +74,7 @@ mod prompt_execution_error_tests {
 
     #[test]
     fn ambiguous_vm_category_does_not_claim_provider_provenance() {
-        let vm = harn_vm::Vm::new();
+        let vm = harn_vm::new_vm();
         let error = harn_vm::VmError::CategorizedError {
             category: harn_vm::ErrorCategory::Auth,
             message: "missing harness tenant principal".to_string(),
@@ -88,7 +89,7 @@ mod prompt_execution_error_tests {
 
     #[test]
     fn resource_contention_preserves_its_typed_terminal_class() {
-        let vm = harn_vm::Vm::new();
+        let vm = harn_vm::new_vm();
         let error = harn_vm::VmError::CategorizedError {
             category: harn_vm::ErrorCategory::ResourceBusy,
             message: "session_store: database is locked".to_string(),
@@ -188,7 +189,7 @@ pub(super) async fn prepare_vm_baseline(
     project_root: Option<&Path>,
     runtime_configurator: Arc<dyn AcpRuntimeConfigurator>,
 ) -> Result<harn_vm::VmBaseline, String> {
-    let mut vm = harn_vm::Vm::new();
+    let mut vm = harn_vm::new_vm();
     configure_stable_vm(
         &mut vm,
         source,
@@ -219,7 +220,7 @@ pub(super) async fn execute_chunk(
     let mut vm = if let Some(baseline) = setup.baseline {
         baseline.instantiate()
     } else {
-        let mut vm = harn_vm::Vm::new();
+        let mut vm = harn_vm::new_vm();
         configure_stable_vm(
             &mut vm,
             setup.source,

@@ -46,7 +46,7 @@ impl Debugger {
             chunk.source_file = Some(path.clone());
         }
 
-        let mut vm = Vm::new();
+        let mut vm = harn_vm::new_vm();
         if let Some(ref path) = self.source_path {
             vm.set_source_info(path, source);
         }

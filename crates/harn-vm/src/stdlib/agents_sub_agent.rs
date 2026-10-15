@@ -1,6 +1,7 @@
 use super::agents_workers;
 use super::sub_agent_lifecycle as lifecycle;
 use super::{SubAgentExecutionResult, SubAgentRunSpec};
+use crate::native_vm::NativeBuiltinCtxExt;
 use crate::orchestration::CapabilityPolicy;
 #[cfg(test)]
 use crate::orchestration::{annotate_nested_execution_options, NestedExecutionKind};
@@ -1538,7 +1539,7 @@ mod tests {
             stop_emitted: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         };
 
-        let mut vm = crate::Vm::new();
+        let mut vm = crate::new_vm();
         crate::register_vm_stdlib(&mut vm);
         let ctx = crate::vm::AsyncBuiltinCtx::for_test(vm);
         let result = execute_sub_agent(&ctx, spec).await.unwrap();

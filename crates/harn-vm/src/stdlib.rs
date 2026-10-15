@@ -308,7 +308,7 @@ pub(crate) fn rebind_execution_state_builtins(vm: &mut Vm) {
 }
 
 fn stdlib_probe_vm() -> Vm {
-    let mut vm = Vm::new();
+    let mut vm = crate::new_vm();
     register_vm_stdlib(&mut vm);
     // Name-only/metadata introspection never accesses this path, but passing
     // a real per-platform temp dir keeps registration logic honest if a
@@ -677,7 +677,7 @@ fn main(harness: Harness) {
 ",
         )
         .expect("compile harness clock probe");
-        let mut vm = Vm::new();
+        let mut vm = crate::new_vm();
         register_vm_stdlib(&mut vm);
 
         assert!(vm.root_harness_value().is_some());
@@ -958,7 +958,7 @@ mod ambient_host_internal_projection_tests {
             std::env::set_var(harn_parser::HARN_LEGACY_AMBIENT_CAPABILITIES_ENV, "1");
         }
         harn_parser::refresh_legacy_ambient_capabilities();
-        let mut vm = Vm::new();
+        let mut vm = crate::new_vm();
         register_vm_stdlib(&mut vm);
         assert!(
             vm.builtin_metadata_for("agent_emit_event").is_some(),

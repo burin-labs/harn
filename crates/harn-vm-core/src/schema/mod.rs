@@ -1,7 +1,7 @@
 use crate::value::VmValue;
 
 /// Shared missing-field diagnostic for shape and schema validation.
-pub(crate) fn format_available_fields(keys: &[&str]) -> String {
+pub fn format_available_fields(keys: &[&str]) -> String {
     if keys.is_empty() {
         "no fields present".to_string()
     } else {
@@ -19,9 +19,9 @@ mod transform;
 mod type_check;
 mod validate;
 
-pub(crate) use admit::reject_unsatisfiable_output_schema;
+pub use admit::reject_unsatisfiable_output_schema;
 
-pub(crate) use api::{
+pub use api::{
     canonical_param_schema, first_schema_validation_issue, schema_assert_canonical_param,
     schema_assert_param, schema_expect_value, schema_extend_value, schema_from_json_schema_value,
     schema_from_openapi_schema_value, schema_is_value, schema_omit_value, schema_partial_value,
@@ -33,7 +33,7 @@ pub use canonicalize::json_to_vm_value;
 
 /// Rewrite Harn schema vocabulary inside a JSON-Schema-shaped value without
 /// canonicalizing or dropping any other keyword.
-pub(crate) fn normalize_provider_json_schema(value: &mut serde_json::Value) {
+pub fn normalize_provider_json_schema(value: &mut serde_json::Value) {
     match value {
         serde_json::Value::Object(object) => {
             // Harn's compact tool parameter declarations use
@@ -79,7 +79,7 @@ pub(crate) fn normalize_provider_json_schema(value: &mut serde_json::Value) {
     }
 }
 
-pub(crate) fn json_schema_type_name(harn_type: &str) -> Option<&'static str> {
+pub fn json_schema_type_name(harn_type: &str) -> Option<&'static str> {
     match harn_type {
         "str" | "string" => Some("string"),
         "int" | "integer" => Some("integer"),
@@ -153,7 +153,7 @@ pub fn validate_value_against_canonical_schema(
     }
 }
 
-pub(crate) use crate::value::json::{tagged_bytes_json, BYTES_B64_TAG};
+pub use crate::value::json::{tagged_bytes_json, BYTES_B64_TAG};
 
 pub(super) fn vm_value_to_serde_json(value: &VmValue) -> serde_json::Value {
     match value {

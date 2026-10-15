@@ -4,7 +4,7 @@ use crate::vm::Vm;
 use std::sync::Arc;
 
 fn vm() -> Vm {
-    let mut vm = Vm::new();
+    let mut vm = crate::new_vm();
     register_crypto_builtins(&mut vm);
     vm
 }

@@ -36,7 +36,7 @@ async fn never_executed_vm_cleanup_keeps_transport_explicitly_empty() {
     let (ambient, count) = transport();
     ambient
         .scope(async {
-            let vm = crate::Vm::new();
+            let vm = crate::new_vm();
             emit_event(&event("never-executed-cleanup"));
             assert_eq!(count.load(Ordering::SeqCst), 1);
             ScopedCleanup {
@@ -55,7 +55,7 @@ async fn never_executed_vm_cleanup_keeps_transport_explicitly_empty() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn reused_vm_captures_current_runtimes_and_retains_them_for_children_and_cleanup() {
-    let mut vm = crate::Vm::new();
+    let mut vm = crate::new_vm();
     crate::register_vm_stdlib(&mut vm);
     let chunk = crate::compile_source("pipeline main() {}").unwrap();
     let (old, old_count) = transport();
@@ -115,7 +115,7 @@ async fn top_level_vm_drop_keeps_origin_after_execution_scope_has_unwound() {
     let (new, new_count) = transport();
     let vm = old
         .scope(async {
-            let mut vm = crate::Vm::new();
+            let mut vm = crate::new_vm();
             crate::register_vm_stdlib(&mut vm);
             let chunk = crate::compile_source("pipeline main() {}").unwrap();
             vm.execute(&chunk).await.unwrap();
@@ -249,7 +249,7 @@ async fn pending_cleanup_after_vm_reuse(drop_instead_of_retry: bool) {
     let public_id = "public-pending-reuse";
     let (old, old_count) = transport();
     let (new, new_count) = transport();
-    let mut vm = crate::Vm::new();
+    let mut vm = crate::new_vm();
     crate::register_vm_stdlib(&mut vm);
     let chunk = crate::compile_source("pipeline main() {}").unwrap();
     old.scope(vm.execute(&chunk)).await.unwrap();
@@ -400,7 +400,7 @@ async fn active_child_cancel_after_same_runtime_vm_reuse_retains_original_owner(
     let public_id = "public-active-reuse";
     let (old, old_count) = transport();
     let (new, new_count) = transport();
-    let mut vm = crate::Vm::new();
+    let mut vm = crate::new_vm();
     crate::register_vm_stdlib(&mut vm);
     let chunk = crate::compile_source("pipeline main() {}").unwrap();
     old.scope(vm.execute(&chunk)).await.unwrap();

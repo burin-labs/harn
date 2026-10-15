@@ -85,7 +85,7 @@ fn runtime() -> Runtime {
 fn execute(rt: &Runtime, chunk: &Chunk) -> VmValue {
     harn_vm::reset_thread_local_state();
     rt.block_on(async {
-        let mut vm = Vm::new();
+        let mut vm = crate::new_vm();
         register_vm_stdlib(&mut vm);
         vm.execute(chunk).await.expect("pool fixture executes")
     })

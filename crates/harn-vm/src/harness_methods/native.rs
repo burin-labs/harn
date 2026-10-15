@@ -109,7 +109,7 @@ fn call_harness_stdio_method(
     method: &str,
     args: &[VmValue],
 ) -> Result<VmValue, VmError> {
-    call_harness_stdio_method_sync_fast(&mut vm.output, method, args)
+    call_harness_stdio_method_sync_fast(vm.output_mut(), method, args)
         .unwrap_or_else(|| Err(method_unsupported(handle, method)))
 }
 
@@ -594,7 +594,7 @@ async fn call_runtime_capability_method(
     match method {
         "context" => return Ok(crate::runtime_context::runtime_context_value(vm)),
         "context_values" => {
-            return Ok(VmValue::dict(vm.runtime_context.values.clone()));
+            return Ok(VmValue::dict(vm.runtime_context().values.clone()));
         }
         "context_get" => return crate::runtime_context::runtime_context_get(vm, args),
         "context_set" => return crate::runtime_context::runtime_context_set(vm, args),

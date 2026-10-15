@@ -3,6 +3,7 @@ use crate::event_log::{
     install_active_event_log, install_memory_for_current_thread, reset_active_event_log,
     AnyEventLog, SqliteEventLog,
 };
+use crate::native_vm::NativeBuiltinCtxExt;
 use crate::observability::execution_scope::{enter_execution_scope, mint_execution_scope};
 
 fn string(value: &str) -> VmValue {
@@ -44,7 +45,7 @@ fn hypothesis_event_payload() -> (VmValue, String) {
 }
 
 fn ctx() -> crate::vm::AsyncBuiltinCtx {
-    crate::vm::AsyncBuiltinCtx::for_test(Vm::new())
+    crate::vm::AsyncBuiltinCtx::for_test(crate::new_vm())
 }
 
 async fn mint_proof(

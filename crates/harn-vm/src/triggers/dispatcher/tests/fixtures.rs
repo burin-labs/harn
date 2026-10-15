@@ -130,7 +130,7 @@ pub(super) async fn dispatcher_fixture_with_budget_strategy(
     let lib_path = dir.path().join("lib.harn");
     std::fs::write(&lib_path, source).expect("write module source");
 
-    let mut vm = Vm::new();
+    let mut vm = crate::new_vm();
     register_vm_stdlib(&mut vm);
     vm.set_source_dir(dir.path());
     let exports = vm
@@ -203,7 +203,7 @@ pub(super) async fn a2a_dispatcher_fixture(
     let dir = tempfile::tempdir().expect("tempdir");
     let log = install_test_event_log();
 
-    let mut vm = Vm::new();
+    let mut vm = crate::new_vm();
     register_vm_stdlib(&mut vm);
     vm.set_source_dir(dir.path());
 
@@ -258,7 +258,7 @@ pub(super) async fn worker_dispatcher_fixture(
     let dir = tempfile::tempdir().expect("tempdir");
     let log = install_test_event_log();
 
-    let mut vm = Vm::new();
+    let mut vm = crate::new_vm();
     register_vm_stdlib(&mut vm);
     vm.set_source_dir(dir.path());
 

@@ -319,7 +319,7 @@ fn runtime_paths_uses_configurable_state_roots() {
         ..Default::default()
     }));
 
-    let mut vm = crate::vm::Vm::new();
+    let mut vm = crate::new_vm();
     register_process_builtins(&mut vm);
     let mut out = String::new();
     let builtin = vm

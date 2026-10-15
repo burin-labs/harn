@@ -59,7 +59,7 @@ async fn call_harness_method_in_scope(
             return Err(method_unsupported(handle, method));
         }
         if let Some(entry) = declared {
-            if vm.denied_builtins.contains(entry.canonical_name) {
+            if vm.builtin_is_denied(entry.canonical_name) {
                 return Err(VmError::CategorizedError {
                     message: format!("Tool '{}' is not permitted.", entry.canonical_name),
                     category: ErrorCategory::ToolRejected,
@@ -167,19 +167,8 @@ async fn call_harness_method_in_scope(
                 .is_some_and(|capability| state.has_capability_response(capability, method)));
     if !serves_canned_response {
         if let Some(capability) = handle.kind().capability_id() {
-            if let Some(dispatch) = vm
-                .capability_methods
-                .get(&capability)
-                .and_then(|methods| methods.get(method))
-                .cloned()
-            {
-                let qualified_name = format!("harness.{}.{method}", capability.field_name());
-                // Capability dispatch bypasses `call_builtin_impl`, so it
-                // owns opening the observation scope for this call.
-                let _observe = vm.observe_builtin_call(&qualified_name);
-                return vm
-                    .call_builtin_entry(&qualified_name, dispatch, args.to_vec())
-                    .await;
+            if let Some(result) = vm.call_registered_capability_method(capability, method, args).await {
+                return result;
             }
         }
     }
@@ -189,7 +178,7 @@ async fn call_harness_method_in_scope(
     // Only an explicit, matching Harness exposure may use the builtin
     // registry as the method implementation.
     let declared_builtin_method = handle.kind().capability_id().is_some_and(|capability| {
-        vm.builtin_metadata.get(method).is_some_and(|metadata| {
+        vm.builtin_metadata_for(method).is_some_and(|metadata| {
             matches!(
                 metadata.contract().exposure,
                 harn_builtin_meta::BuiltinExposure::HarnessMethod {
@@ -201,20 +190,11 @@ async fn call_harness_method_in_scope(
     });
     if declared_builtin_method
         && !serves_canned_response
-        && (vm.builtins.contains_key(method) || vm.async_builtins.contains_key(method))
+        && vm.has_builtin(method)
     {
         return vm.call_capability_builtin(method, args.to_vec()).await;
     }
-    let sync_result = {
-        let _interrupt = vm.sync_builtin_interrupt_guard();
-        call_harness_method_sync_fast(
-            &mut vm.output,
-            &mut vm.runtime_effects,
-            handle,
-            method,
-            args,
-        )
-    };
+    let sync_result = vm.call_harness_method_sync(handle, method, args);
     if let Some(result) = sync_result {
         return result;
     }

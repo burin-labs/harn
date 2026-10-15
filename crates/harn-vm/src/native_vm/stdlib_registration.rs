@@ -11,7 +11,7 @@ thread_local! {
     // VmValue is thread-affine. Keep namespace constants on their creating
     // thread rather than extending their authority with an unsafe Send impl.
     static REGISTRATION: LazyCell<VmBuiltinRegistration> = LazyCell::new(|| {
-        let mut vm = Vm::new();
+        let mut vm = crate::new_vm();
         crate::stdlib::register_stdlib_bindings(&mut vm);
         vm.builtin_registration()
     });
@@ -29,8 +29,8 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn standard_library_shares_bindings_but_not_invocation_state() {
-        let mut first = Vm::new();
-        let mut sibling = Vm::new();
+        let mut first = crate::new_vm();
+        let mut sibling = crate::new_vm();
         crate::stdlib::register_vm_stdlib(&mut first);
         crate::stdlib::register_vm_stdlib(&mut sibling);
         assert!(first.builtins.len() > 100, "empty registry is not sharing");
@@ -68,7 +68,7 @@ mod tests {
                 .unwrap(),
             VmValue::Int(7)
         ));
-        let mut later = Vm::new();
+        let mut later = crate::new_vm();
         crate::stdlib::register_vm_stdlib(&mut later);
         assert!(matches!(
             later.call_named_builtin("abs", args).await.unwrap(),
@@ -82,7 +82,7 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn preinstalled_host_bindings_keep_ordered_registration() {
-        let mut vm = Vm::new();
+        let mut vm = crate::new_vm();
         vm.register_builtin("host_custom", |_, _| Ok(VmValue::Int(42)));
         vm.set_global("host_fact", VmValue::Int(13));
         assert!(!install_shared_stdlib_registration(&mut vm));
@@ -102,7 +102,7 @@ mod tests {
 
     #[test]
     fn namespaces_cannot_capture_execution_objects() {
-        let mut vm = Vm::new();
+        let mut vm = crate::new_vm();
         vm.set_global("constant", VmValue::Float(1.0));
         let _ = vm.builtin_registration();
         vm.set_global("authority", crate::Harness::null().into_vm_value());

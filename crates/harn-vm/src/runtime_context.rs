@@ -83,10 +83,7 @@ pub(crate) fn runtime_context_value(vm: &crate::vm::Vm) -> VmValue {
     let agent_ancestry = agent_session_id
         .as_deref()
         .and_then(crate::agent_sessions::ancestry);
-    let cancelled = vm
-        .cancel_token
-        .as_ref()
-        .is_some_and(|token| token.load(std::sync::atomic::Ordering::SeqCst));
+    let cancelled = vm.is_cancel_requested();
 
     let workflow_id = overlay.workflow_id;
     let run_id = overlay
@@ -103,29 +100,33 @@ pub(crate) fn runtime_context_value(vm: &crate::vm::Vm) -> VmValue {
     insert_string(
         &mut values,
         "task_id",
-        Some(vm.runtime_context.task_id.clone()),
+        Some(vm.runtime_context().task_id.clone()),
     );
     insert_string(
         &mut values,
         "parent_task_id",
-        vm.runtime_context.parent_task_id.clone(),
+        vm.runtime_context().parent_task_id.clone(),
     );
     insert_string(
         &mut values,
         "root_task_id",
-        Some(vm.runtime_context.root_task_id.clone()),
+        Some(vm.runtime_context().root_task_id.clone()),
     );
     insert_string(
         &mut values,
         "task_name",
-        vm.runtime_context.task_name.clone(),
+        vm.runtime_context().task_name.clone(),
     );
     insert_string(
         &mut values,
         "task_group_id",
-        vm.runtime_context.task_group_id.clone(),
+        vm.runtime_context().task_group_id.clone(),
     );
-    insert_string(&mut values, "scope_id", vm.runtime_context.scope_id.clone());
+    insert_string(
+        &mut values,
+        "scope_id",
+        vm.runtime_context().scope_id.clone(),
+    );
     insert_string(&mut values, "workflow_id", workflow_id);
     insert_string(&mut values, "run_id", run_id);
     insert_string(&mut values, "stage_id", stage_id);
@@ -212,7 +213,7 @@ pub(crate) fn runtime_context_value(vm: &crate::vm::Vm) -> VmValue {
     insert_string(&mut values, "capacity_class", None);
     values.insert(
         crate::value::intern_key("context_values"),
-        VmValue::dict(vm.runtime_context.values.clone()),
+        VmValue::dict(vm.runtime_context().values.clone()),
     );
     values.insert(
         crate::value::intern_key("cancelled"),
@@ -235,8 +236,7 @@ fn debug_context_value(vm: &crate::vm::Vm, cancelled: bool) -> VmValue {
     debug.insert(
         crate::value::intern_key("active_task_ids"),
         VmValue::List(std::sync::Arc::new(
-            vm.spawned_tasks
-                .keys()
+            vm.active_task_ids()
                 .map(|id| VmValue::String(arcstr::ArcStr::from(id.as_str())))
                 .collect(),
         )),

@@ -168,7 +168,7 @@ pub fn current_execution_scope() -> Option<ExecutionId> {
 /// orchestration ambient-scope machinery to carry the owner across
 /// `spawn_local` fan-out boundaries (which plain thread-locals do not cross),
 /// mirroring how the current-session stack is propagated.
-pub(crate) fn swap_execution_scope_stack(replacement: Vec<ExecutionId>) -> Vec<ExecutionId> {
+pub fn swap_execution_scope_stack(replacement: Vec<ExecutionId>) -> Vec<ExecutionId> {
     ACTIVE_EXECUTION_SCOPE_STACK
         .with(|stack| std::mem::replace(&mut *stack.borrow_mut(), replacement))
 }

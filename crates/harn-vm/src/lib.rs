@@ -88,6 +88,7 @@ pub mod host_stdio;
 mod native_vm;
 pub(crate) use harn_vm_core::runtime_effects;
 use harn_vm_core::source_compile;
+pub use native_vm::{new_vm, NativeVmExt};
 pub mod task_retry;
 pub(crate) mod tool_call_mutations;
 

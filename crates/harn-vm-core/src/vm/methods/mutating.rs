@@ -11,7 +11,7 @@ use std::sync::Arc;
 use crate::value::{compare_values, VmError, VmValue};
 
 /// The receiver's next value and the call's result.
-pub(crate) struct Mutation {
+pub struct Mutation {
     pub receiver: VmValue,
     pub result: VmValue,
 }
@@ -21,7 +21,7 @@ impl crate::vm::Vm {
     /// receiver is not a builtin value with that mutating method (a struct
     /// whose impl defines `push`, a dict carrying a callable `remove`, a
     /// module namespace), so the caller performs an ordinary method call.
-    pub(crate) async fn apply_mutating_method(
+    pub async fn apply_mutating_method(
         &mut self,
         receiver: &VmValue,
         method: &str,

@@ -1227,7 +1227,7 @@ mod tests {
     async fn execute(source: &str) -> Result<String, VmError> {
         reset_thread_local_state();
         let chunk = compile_source(source).expect("compile source");
-        let mut vm = Vm::new();
+        let mut vm = crate::new_vm();
         register_vm_stdlib(&mut vm);
         vm.execute(&chunk).await?;
         Ok(vm.output().trim_end().to_string())

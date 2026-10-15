@@ -24,7 +24,7 @@ async fn completion_judge_calls_are_billed_in_the_durable_run_record() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            let mut vm = crate::Vm::new();
+            let mut vm = crate::new_vm();
             crate::register_vm_stdlib(&mut vm);
             vm.execute(&chunk).await.expect("run the judged agent loop");
             assert!(

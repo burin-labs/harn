@@ -1,4 +1,5 @@
 use super::host_agent_parse_tool_calls_impl;
+use crate::native_vm::NativeBuiltinCtxExt;
 use crate::value::VmValue;
 
 fn vm_str(value: &str) -> VmValue {
@@ -25,7 +26,7 @@ fn look_tool_catalog() -> VmValue {
 }
 
 fn parse_ids(text: &str) -> Vec<String> {
-    let mut vm = crate::vm::Vm::new();
+    let mut vm = crate::new_vm();
     crate::register_core_stdlib(&mut vm);
     crate::stdlib::macros::register_builtin_defs(
         &mut vm,

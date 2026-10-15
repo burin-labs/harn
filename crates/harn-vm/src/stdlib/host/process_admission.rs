@@ -295,7 +295,7 @@ mod tests {
                     .expect("gate is open")
                     .expect("test occupies the only process lane");
 
-                let mut vm = crate::Vm::new();
+                let mut vm = crate::new_vm();
                 register_vm_stdlib(&mut vm);
                 vm.set_harness(crate::Harness::real());
                 let caller_deadline = Arc::clone(&vm.execution_deadline);

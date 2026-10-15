@@ -41,6 +41,7 @@
 //!    Untrusted results are still subject to taint because they flow through
 //!    the same gated dispatch.
 
+use crate::native_vm::NativeBuiltinCtxExt;
 use std::collections::BTreeSet;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -135,7 +136,7 @@ async fn run_code_mode(
     options: DictMap,
     allow_tools: Option<BTreeSet<String>>,
 ) -> Result<VmValue, VmError> {
-    let mut sandbox = crate::Vm::new();
+    let mut sandbox = crate::new_vm();
     crate::register_core_stdlib(&mut sandbox);
     // The compiler-owned entrypoint ABI always receives a root Harness. Code
     // mode intentionally installs a deny-by-default root: its sole egress is
@@ -325,7 +326,7 @@ pipeline main(harness: Harness) {
 }
 "#;
         let chunk = crate::compile_source(source).expect("compile registry source");
-        let mut vm = crate::Vm::new();
+        let mut vm = crate::new_vm();
         crate::register_vm_stdlib(&mut vm);
         vm.execute(&chunk).await.expect("run registry source")
     }
@@ -342,7 +343,7 @@ const second = json_parse(call_tool("connector_read", { q: "two" }))
 const total = len(first.records) + len(second.records)
 return { total: total, first_title: first.records[0].title }
 "#;
-            let mut vm = crate::Vm::new();
+            let mut vm = crate::new_vm();
             crate::register_vm_stdlib(&mut vm);
             let ctx = AsyncBuiltinCtx::for_test(vm);
             run_code_mode(ctx, code.to_string(), Some(tools), DictMap::new(), None)
@@ -396,7 +397,7 @@ return { total: total, first_title: first.records[0].title }
                 ..Default::default()
             });
             let tools = secret_tool_registry().await;
-            let mut vm = crate::Vm::new();
+            let mut vm = crate::new_vm();
             crate::register_vm_stdlib(&mut vm);
             let ctx = AsyncBuiltinCtx::for_test(vm);
             let result = run_code_mode(
@@ -424,7 +425,7 @@ return { total: total, first_title: first.records[0].title }
     fn sandbox_core_stdlib_has_no_io_builtins() {
         // The sandbox VM must not expose filesystem / network / process /
         // secret / host builtins — the script's only egress is `call_tool`.
-        let mut sandbox = crate::Vm::new();
+        let mut sandbox = crate::new_vm();
         crate::register_core_stdlib(&mut sandbox);
         let names = sandbox.builtin_names();
         for banned in [
@@ -445,7 +446,7 @@ return { total: total, first_title: first.records[0].title }
         let err = block_on_local(async {
             let tools = secret_tool_registry().await;
             let allow: BTreeSet<String> = std::iter::once("something_else".to_string()).collect();
-            let mut vm = crate::Vm::new();
+            let mut vm = crate::new_vm();
             crate::register_vm_stdlib(&mut vm);
             let ctx = AsyncBuiltinCtx::for_test(vm);
             run_code_mode(

@@ -265,7 +265,7 @@ impl Vm {
     /// truth: declaring `exposure = "harness.<capability>.<method>"` is enough
     /// to make that handler callable through the typed capability and never
     /// creates a second hand-maintained registration list.
-    pub(crate) fn project_declared_capability_methods(&mut self) {
+    pub fn project_declared_capability_methods(&mut self) {
         use harn_builtin_meta::BuiltinExposure;
 
         let projections = self
@@ -328,7 +328,7 @@ impl Vm {
     /// projected under their pre-cutover ambient names (`agent_emit_event`) so
     /// ambient pipelines keep calling the in-process implementation instead of
     /// falling through to an embedder bridge under execution policy.
-    pub(crate) fn project_legacy_capability_globals(&mut self) {
+    pub fn project_legacy_capability_globals(&mut self) {
         if self.global("harness").is_none() {
             return;
         }
@@ -629,7 +629,7 @@ impl Vm {
     /// `VmValue::BuiltinRef`, so builtin names passed by reference (e.g.
     /// `dict.map_keys(snake_to_camel)`) dispatch through the same code path as
     /// user-defined closures.
-    pub(crate) async fn call_callable_value(
+    pub async fn call_callable_value(
         &mut self,
         callable: &VmValue,
         args: &[VmValue],
@@ -638,7 +638,7 @@ impl Vm {
             .await
     }
 
-    pub(crate) async fn call_callable_owned(
+    pub async fn call_callable_owned(
         &mut self,
         callable: &VmValue,
         args: Vec<VmValue>,
@@ -647,14 +647,11 @@ impl Vm {
             .await
     }
 
-    pub(crate) async fn call_callable_zero(
-        &mut self,
-        callable: &VmValue,
-    ) -> Result<VmValue, VmError> {
+    pub async fn call_callable_zero(&mut self, callable: &VmValue) -> Result<VmValue, VmError> {
         self.call_callable_args(callable, CallArgs::Empty).await
     }
 
-    pub(crate) async fn call_callable_one(
+    pub async fn call_callable_one(
         &mut self,
         callable: &VmValue,
         arg: &VmValue,
@@ -662,7 +659,7 @@ impl Vm {
         self.call_callable_args(callable, CallArgs::One(arg)).await
     }
 
-    pub(crate) async fn call_callable_two(
+    pub async fn call_callable_two(
         &mut self,
         callable: &VmValue,
         first: &VmValue,
@@ -748,7 +745,7 @@ impl Vm {
 
     /// Resolve a named builtin: sync builtins → async builtins → bridge → error.
     /// Used by Call, TailCall, and Pipe handlers to avoid duplicating this lookup.
-    pub(crate) async fn call_named_builtin(
+    pub async fn call_named_builtin(
         &mut self,
         name: &str,
         args: Vec<VmValue>,
@@ -760,7 +757,7 @@ impl Vm {
     /// method. The nominal capability contract is the policy/effect owner;
     /// applying the legacy builtin contract again would duplicate receipts
     /// and, for approval-gated effects, request human approval twice.
-    pub(crate) async fn call_capability_builtin(
+    pub async fn call_capability_builtin(
         &mut self,
         name: &str,
         args: Vec<VmValue>,
@@ -776,7 +773,7 @@ impl Vm {
     /// therefore preserves one contract owner and keeps deeply nested
     /// agent/tool execution from accumulating the much larger async builtin
     /// frame for ordinary filesystem operations.
-    pub(crate) fn call_capability_sync_builtin(
+    pub fn call_capability_sync_builtin(
         &mut self,
         name: &str,
         args: &[VmValue],

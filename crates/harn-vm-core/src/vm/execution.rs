@@ -121,7 +121,7 @@ impl Vm {
         runtime.execute_timed(self, entry, deadline).await
     }
 
-    pub(crate) fn install_execution_deadline(
+    pub fn install_execution_deadline(
         &self,
         deadline: Instant,
     ) -> super::execution_deadline::ExecutionDeadlineGuard {
