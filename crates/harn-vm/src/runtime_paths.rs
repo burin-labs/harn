@@ -20,7 +20,7 @@ const NEXTEST_ATTEMPT_ID_ENV: &str = "NEXTEST_ATTEMPT_ID";
 /// Directory name of the default run root, `<base>/.harn-runs`.
 pub const DEFAULT_RUN_DIR_NAME: &str = ".harn-runs";
 
-const SELF_IGNORE_CONTENTS: &str = "# Created by Harn; safe to delete.\n*\n";
+pub(crate) const SELF_IGNORE_CONTENTS: &str = "# Created by Harn; safe to delete.\n*\n";
 
 /// Give a Harn-owned directory inside someone's checkout a `.gitignore` that
 /// ignores everything in it, so its contents never show in `git status`.
