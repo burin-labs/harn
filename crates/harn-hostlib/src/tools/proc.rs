@@ -648,7 +648,7 @@ pub(crate) fn build_response(
     if let Some(receipt) = outcome.verifier_receipt {
         builder = builder.value(
             "verifier_receipt",
-            harn_vm::stdlib::json_to_vm_value(
+            harn_vm::value::json::json_to_vm_value(
                 &serde_json::to_value(receipt).expect("typed verifier receipt"),
             ),
         );

@@ -425,7 +425,7 @@ pub(crate) fn build_sandboxed_command(
         crate::process_sandbox::ProcessSandboxScope::from_value(params.get("sandbox"))?,
     )?;
     let launch = ProcessExecLaunch::from_params(params, label)?;
-    let verifier = crate::prepared_run::prepared_source_verifier(
+    let verifier = crate::prepared_run::prepared_verifier(
         &launch.program,
         &launch.args,
         launch.cwd.as_deref().expect("normalized process cwd"),

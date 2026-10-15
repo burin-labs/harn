@@ -35,7 +35,7 @@ pub(super) fn pinned_verifier(
         .map_err(|error| {
             super::ProcessError::Spawn(format!("verifier working directory: {error}"))
         })?;
-    harn_vm::prepared_run::prepared_source_verifier(&spec.program, &spec.args, &cwd)
+    harn_vm::prepared_run::prepared_verifier(&spec.program, &spec.args, &cwd)
         .and_then(|verifier| {
             verifier
                 .map(|value| value.launch_avoiding(reserved))

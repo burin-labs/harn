@@ -205,13 +205,13 @@ where
 
 /// Resolve only original native material in the active host-owned authority.
 /// `None` supplies no verifier qualification or accepted execution evidence.
-pub fn prepared_source_verifier(
+pub fn prepared_verifier(
     program: &str,
     args: &[String],
     cwd: &std::path::Path,
 ) -> Result<Option<Arc<crate::verifier_provenance::PreparedVerifier>>, String> {
     match current_prepared_identity_context() {
-        Some(context) => context.authority.source_verifier(program, args, cwd),
+        Some(context) => context.authority.verifier(program, args, cwd),
         None => Ok(None),
     }
 }

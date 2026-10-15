@@ -781,9 +781,8 @@ fn run_captured_spawn(spec: CapturedSpawn<'_>) -> Result<CapturedRun, VmError> {
                 "{label}: verifier cwd unavailable: {error}"
             )))
         })?;
-    let verifier =
-        crate::prepared_run::prepared_source_verifier(&resolved_cmd, spec.args, &actual_cwd)
-            .map_err(|error| VmError::Thrown(VmValue::string(format!("{label}: {error}"))))?;
+    let verifier = crate::prepared_run::prepared_verifier(&resolved_cmd, spec.args, &actual_cwd)
+        .map_err(|error| VmError::Thrown(VmValue::string(format!("{label}: {error}"))))?;
     #[cfg(target_os = "linux")]
     let pinned = verifier
         .as_ref()

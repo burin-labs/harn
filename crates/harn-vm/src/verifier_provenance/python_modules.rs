@@ -51,7 +51,19 @@ impl IsolatedPythonModuleVerifier {
             entry: self.module.clone(),
             modules: BTreeMap::new(),
             candidates: BTreeMap::new(),
+            source_bytes: 0,
         };
+        for root in &self.search_roots {
+            if !root.is_absolute()
+                || root.canonicalize().map_err(unmeasured)? != *root
+                || !root.is_dir()
+            {
+                return Err(VerifierLoaderObservation::Refused {
+                    reason: "Python verifier search roots must be canonical absolute directories"
+                        .into(),
+                });
+            }
+        }
         for module in std::iter::once(&self.module).chain(self.dependencies.iter()) {
             if !valid_module_name(module) {
                 return Err(VerifierLoaderObservation::Refused {
@@ -63,16 +75,6 @@ impl IsolatedPythonModuleVerifier {
                 continue;
             }
             for root in &self.search_roots {
-                if !root.is_absolute()
-                    || root.canonicalize().map_err(unmeasured)? != *root
-                    || !root.is_dir()
-                {
-                    return Err(VerifierLoaderObservation::Refused {
-                        reason:
-                            "Python verifier search roots must be canonical absolute directories"
-                                .into(),
-                    });
-                }
                 let package = root.join(top);
                 let source = root.join(format!("{top}.py"));
                 let package_source = package.join("__init__.py");
@@ -85,14 +87,16 @@ impl IsolatedPythonModuleVerifier {
                     result.candidates.insert(source.clone(), None);
                 }
                 if package_present {
-                    collect_package(&package, top, &mut result.modules).map_err(unmeasured)?;
+                    collect_package(&package, top, &mut result).map_err(unmeasured)?;
                     break;
                 }
                 if module_present {
-                    result.modules.insert(
-                        top.into(),
-                        capture_module(&source, false).map_err(unmeasured)?,
-                    );
+                    result
+                        .insert(
+                            top.into(),
+                            capture_module(&source, false).map_err(unmeasured)?,
+                        )
+                        .map_err(unmeasured)?;
                     break;
                 }
                 if package.exists() || root.join(format!("{top}.pyc")).exists() {
@@ -169,10 +173,25 @@ pub(super) struct CapturedModules {
     pub(super) modules: BTreeMap<String, CapturedModule>,
     #[serde(skip)]
     candidates: BTreeMap<PathBuf, Option<super::MaterialIdentity>>,
+    #[serde(skip)]
+    source_bytes: usize,
 }
 
 #[cfg(target_os = "linux")]
 impl CapturedModules {
+    fn insert(&mut self, name: String, module: CapturedModule) -> Result<(), String> {
+        if self.modules.len() >= super::limits().module_count
+            || module.source.len()
+                > super::limits()
+                    .bundle_bytes
+                    .saturating_sub(self.source_bytes)
+        {
+            return Err("Python verifier package exceeds capture limits".into());
+        }
+        self.source_bytes += module.source.len();
+        self.modules.insert(name, module);
+        Ok(())
+    }
     pub(super) fn extend_baseline(
         &self,
         baseline: &mut BTreeMap<PathBuf, Option<super::MaterialIdentity>>,
@@ -215,14 +234,16 @@ pub(super) struct CapturedModule {
 
 #[cfg(target_os = "linux")]
 fn valid_module_name(name: &str) -> bool {
-    !name.is_empty()
-        && name.split('.').all(|part| {
-            let mut chars = part.chars();
-            chars
-                .next()
-                .is_some_and(|c| c == '_' || c.is_ascii_alphabetic())
-                && chars.all(|c| c == '_' || c.is_ascii_alphanumeric())
-        })
+    !name.is_empty() && name.split('.').all(valid_identifier)
+}
+
+#[cfg(target_os = "linux")]
+fn valid_identifier(name: &str) -> bool {
+    let mut chars = name.chars();
+    chars
+        .next()
+        .is_some_and(|c| c == '_' || c.is_ascii_alphabetic())
+        && chars.all(|c| c == '_' || c.is_ascii_alphanumeric())
 }
 
 #[cfg(target_os = "linux")]
@@ -243,11 +264,7 @@ fn capture_module(path: &Path, package: bool) -> Result<CapturedModule, String> 
 }
 
 #[cfg(target_os = "linux")]
-fn collect_package(
-    path: &Path,
-    name: &str,
-    modules: &mut BTreeMap<String, CapturedModule>,
-) -> Result<(), String> {
+fn collect_package(path: &Path, name: &str, modules: &mut CapturedModules) -> Result<(), String> {
     if path
         .symlink_metadata()
         .map_err(|e| e.to_string())?
@@ -256,13 +273,10 @@ fn collect_package(
     {
         return Err("symlinked Python verifier packages are unmeasured".into());
     }
-    if modules.len() >= super::limits().module_count {
-        return Err("Python verifier package exceeds capture limits".into());
-    }
     modules.insert(
         name.into(),
         capture_module(&path.join("__init__.py"), true)?,
-    );
+    )?;
     for entry in std::fs::read_dir(path).map_err(|e| e.to_string())? {
         let entry = entry.map_err(|e| e.to_string())?;
         let path = entry.path();
@@ -271,18 +285,17 @@ fn collect_package(
         };
         if path.extension().is_some_and(|extension| extension == "py")
             && stem != "__init__"
-            && valid_module_name(stem)
+            && valid_identifier(stem)
         {
-            if modules.len() >= super::limits().module_count {
-                return Err("Python verifier package exceeds capture limits".into());
+            modules.insert(format!("{name}.{stem}"), capture_module(&path, false)?)?;
+        } else if path.is_dir() && path.join("__init__.py").is_file() {
+            let name_part = path
+                .file_name()
+                .and_then(|part| part.to_str())
+                .unwrap_or("");
+            if valid_identifier(name_part) {
+                collect_package(&path, &format!("{name}.{name_part}"), modules)?;
             }
-            modules.insert(format!("{name}.{stem}"), capture_module(&path, false)?);
-        } else if path.is_dir() && path.join("__init__.py").is_file() && valid_module_name(stem) {
-            collect_package(&path, &format!("{name}.{stem}"), modules)?;
-        }
-        let total: usize = modules.values().map(|module| module.source.len()).sum();
-        if total > super::limits().bundle_bytes {
-            return Err("Python verifier package exceeds capture limits".into());
         }
     }
     Ok(())

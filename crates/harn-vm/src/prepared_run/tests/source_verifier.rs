@@ -78,6 +78,16 @@ impl PreparedRunExecutor for SourceExecutor {
     type Error = String;
 
     async fn execute(&self, _authority: &AuthorityUse) -> Result<Self::Output, Self::Error> {
+        assert!(
+            prepared_verifier(
+                "/bin/cat",
+                &[self.request.source.display().to_string()],
+                &self.request.workspace
+            )
+            .unwrap()
+            .is_none(),
+            "reading runner source is an ordinary command"
+        );
         if !self.mutate_and_repair {
             return self.invoke(json!({}));
         }
@@ -241,6 +251,14 @@ async fn module_and_package_verifiers_execute_the_baseline_through_the_real_proc
                 other => panic!("module preparation failed: {other:?}"),
             };
             let first = prepare();
+            let schema: serde_json::Value =
+                serde_json::from_str(RUN_AUTHORITY_PLAN_V1_SCHEMA_JSON).unwrap();
+            let validator = jsonschema::validator_for(&schema).unwrap();
+            let plan = serde_json::to_value(first.plan()).unwrap();
+            assert!(
+                validator.is_valid(&plan),
+                "module loader declaration must match the public schema"
+            );
             // Both a changed selected runner and a newly introduced earlier shadow
             // exit zero normally. Neither can replace the captured execution.
             std::fs::write(&runner, "print('CHANGED_RUNNER')\n").unwrap();
@@ -678,7 +696,7 @@ async fn concurrent_prepared_verifiers_keep_their_own_native_material_across_wor
         }
     }
     assert!(
-        prepared_source_verifier(
+        prepared_verifier(
             &first.request.interpreter.display().to_string(),
             &first.request.invocation_args(),
             &first.request.workspace,

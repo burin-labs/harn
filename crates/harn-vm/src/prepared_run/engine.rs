@@ -163,7 +163,7 @@ impl<E> PreparedRun<E> {
                 }
                 Ok(_) => diagnostics.push(diagnostic(
                     "verifier_duplicate_id",
-                    "isolated source verifier id is repeated",
+                    "verifier loader id is repeated",
                     None,
                     "Declare each host-admitted verifier exactly once.",
                 )),
@@ -175,7 +175,7 @@ impl<E> PreparedRun<E> {
                         "verifier_unmeasured",
                         format!("{error:?}"),
                         None,
-                        "Admit a supported isolated source verifier before executor mutation.",
+                        "Admit a supported verifier loader before executor mutation.",
                     ));
                 }
             }
@@ -654,7 +654,7 @@ impl AuthorityUse {
             .executor_invoked = true;
     }
 
-    pub(crate) fn source_verifier(
+    pub(crate) fn verifier(
         &self,
         program: &str,
         args: &[String],
@@ -673,24 +673,6 @@ impl AuthorityUse {
                 return Err("prepared verifier authority expired".to_string());
             }
             return Ok(Some(verifier.clone()));
-        }
-        let plan = crate::shells::plan_invocation(program, args);
-        for verifier in self.lease.source_verifiers.values() {
-            if args
-                .iter()
-                .any(|arg| Path::new(arg) == verifier.request().source)
-                || plan
-                    .as_ref()
-                    .and_then(|plan| plan.literal_argv.as_ref())
-                    .is_some_and(|args| {
-                        args.iter()
-                            .any(|arg| Path::new(arg) == verifier.request().source)
-                    })
-            {
-                return Err(
-                    "declared isolated verifier invocation changed after preparation".to_string(),
-                );
-            }
         }
         Ok(None)
     }

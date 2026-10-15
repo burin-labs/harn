@@ -156,10 +156,6 @@ pub struct PreparedVerifier {
 }
 
 impl PreparedVerifier {
-    pub fn request(&self) -> &IsolatedPythonSourceVerifier {
-        &self.request
-    }
-
     pub fn spec(&self) -> &VerifierLoaderSpec {
         &self.spec
     }
