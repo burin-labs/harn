@@ -1966,6 +1966,97 @@
       "name": "vm_new_installs_the_seam",
       "reason": "STRUCTURAL: native Vm construction supplies NativeExecutionState directly; there is no installation bit. The JSON conformance fixture reaches native Harness method dispatch through the real constructor.",
       "retainedPath": "conformance/tests/stdlib/json/json_roundtrip.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/vm/tests_runtime/smoke.rs",
+      "name": "test_hello_world",
+      "reason": "SUBSUMED: the CLI string-concatenation fixture compares the complete logged greeting, including the same [harn] prefix and newline, through the production constructor and output adapter.",
+      "retainedPath": "conformance/tests/strings/string_concat.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/vm/tests_runtime/smoke.rs",
+      "name": "test_string_concat_new",
+      "reason": "SUBSUMED: the CLI fixture checks concatenated string contents through the canonical compiler and runtime, with exact expected output.",
+      "retainedPath": "conformance/tests/strings/string_concat.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/vm/tests_runtime/smoke.rs",
+      "name": "test_if_else_new",
+      "reason": "SUBSUMED: the CLI fixture exercises both true and false conditions and checks that only the selected branches print.",
+      "retainedPath": "conformance/tests/control_flow/if_else.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/vm/tests_runtime/smoke.rs",
+      "name": "test_while_loop_new",
+      "reason": "SUBSUMED: the CLI fixture mutates a loop counter across five iterations and checks its terminal value through the canonical runtime.",
+      "retainedPath": "conformance/tests/control_flow/while_loop.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/vm/tests_runtime/smoke.rs",
+      "name": "test_function_call_new",
+      "reason": "SUBSUMED: the retained native test makes the same untyped add-function call; functions/fn_decl.harn also proves the public typed CLI path.",
+      "retainedPath": "crates/harn-vm/src/vm/tests_runtime/language.rs",
+      "retainedName": "test_fn_decl_and_call"
+    },
+    {
+      "path": "crates/harn-vm/src/vm/tests_runtime/smoke.rs",
+      "name": "test_recursion",
+      "reason": "SUBSUMED: the CLI fixture executes the same non-tail-recursive factorial body at n=5 and compares the resulting 120, while also checking recursive return inference.",
+      "retainedPath": "conformance/tests/types/fn_return_inference.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/vm/tests_runtime/smoke.rs",
+      "name": "test_try_catch_new",
+      "reason": "SUBSUMED: the CLI fixture throws a string, catches it, and checks the complete logged exception value.",
+      "retainedPath": "conformance/tests/errors_by_feature/throw_catch.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/vm/tests_runtime/smoke.rs",
+      "name": "test_try_no_error_new",
+      "reason": "SUBSUMED: the CLI fixture checks normal try completion and that the catch branch does not execute.",
+      "retainedPath": "conformance/tests/errors_by_feature/try_no_error.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/vm/tests_runtime/smoke.rs",
+      "name": "test_list_map_new",
+      "reason": "SUBSUMED: the CLI fixture maps the same [1, 2, 3] through x * 2 and compares every output element.",
+      "retainedPath": "conformance/tests/collections/list_map.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/vm/tests_runtime/smoke.rs",
+      "name": "test_list_filter_new",
+      "reason": "SUBSUMED: the CLI fixture exercises accepted and rejected list elements and compares the complete filtered result.",
+      "retainedPath": "conformance/tests/collections/list_filter.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/vm/tests_runtime/smoke.rs",
+      "name": "test_dict_access_new",
+      "reason": "SUBSUMED: the CLI fixture reads both string and integer dictionary fields and checks their exact values.",
+      "retainedPath": "conformance/tests/collections/dict_access.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/vm/tests_runtime/smoke.rs",
+      "name": "test_string_interpolation",
+      "reason": "SUBSUMED: the CLI fixture checks variable interpolation, arithmetic inside interpolation, and multiple interpolated values.",
+      "retainedPath": "conformance/tests/strings/string_interpolation.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/vm/tests_runtime/smoke.rs",
+      "name": "test_match_new",
+      "reason": "SUBSUMED: the CLI fixture selects the same middle string-match branch and checks that adjacent branches do not print.",
+      "retainedPath": "conformance/tests/control_flow/match.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/vm/tests_runtime/smoke.rs",
+      "name": "test_json_roundtrip",
+      "reason": "SUBSUMED: the removed test only searched serialized text for a key and digit. The CLI fixture decodes serialized objects and arrays and compares the actual nested values and integer limits.",
+      "retainedPath": "conformance/tests/stdlib/json/json_roundtrip.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/vm/tests_runtime/smoke.rs",
+      "name": "test_type_of",
+      "reason": "SUBSUMED: the CLI fixture branches on runtime string and int type names, including 42, with nil and inverted-predicate controls.",
+      "retainedPath": "conformance/tests/types/type_narrowing_typeof.harn"
     }
   ],
   "retainedScenarios": [
