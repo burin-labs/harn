@@ -943,7 +943,7 @@ check-portable-benchmark-schema:
 
 # Regenerate the VS Code `.harn.prompt` TextMate grammar from the live
 # prompt-template keyword, filter, and section vocabulary. Run this whenever
-# crates/harn-vm/src/stdlib/template/vocabulary.rs changes.
+# crates/harn-prompt-syntax/src/vocabulary.rs changes.
 gen-prompt-grammar:
 	$(HARN_CLI_CMD) dump-prompt-grammar
 
