@@ -2,6 +2,48 @@
   "issue": 9649,
   "baselineRevision": "7deefa6d8215dc5ce0bac2705624516d17c89392",
   "removedCases": [
+  {
+    "path": "crates/harn-vm/tests/acp_host_call_parity.rs",
+    "name": "every_call_in_the_canonical_dispatch_is_classified",
+    "reason": "REMOVED: a handwritten table and call-spelling scanner classified source text without exercising ACP dispatch. Runtime ownership remains in the canonical host builtin, with executable ACP memo and command-policy coverage; classification of every future source callee is no longer a unit-test claim.",
+    "retainedPath": "crates/harn-serve/src/adapters/acp/tests/host_call_turn_cache.rs",
+    "retainedName": "process_exec_host_call_is_gated_by_command_policy_on_acp_bridge"
+  },
+  {
+    "path": "crates/harn-vm/tests/acp_host_call_parity.rs",
+    "name": "the_census_describes_only_calls_that_exist",
+    "reason": "REMOVED: this tested the source scanner and its exemption list. A renamed fixture lookup changed the scanned spelling while preserving the canonical runtime route. Retained ACP dispatch tests prove their named behavior by invoking it.",
+    "retainedPath": "crates/harn-serve/src/adapters/acp/tests/host_call_turn_cache.rs",
+    "retainedName": "turn_stable_read_is_served_without_an_acp_round_trip"
+  },
+  {
+    "path": "crates/harn-vm/tests/acp_host_call_parity.rs",
+    "name": "runtime_owned_divergences_carry_a_tracking_issue",
+    "reason": "REMOVED: assertions over handwritten ownership flags and issue numbers did not observe an ACP execution. The retained command-policy check drives an allowed and denied real bridge route.",
+    "retainedPath": "crates/harn-serve/src/adapters/acp/tests/host_call_turn_cache.rs",
+    "retainedName": "process_exec_host_call_is_gated_by_command_policy_on_acp_bridge"
+  },
+  {
+    "path": "crates/harn-vm/tests/acp_host_call_parity.rs",
+    "name": "the_per_turn_memo_is_observed_over_acp",
+    "reason": "SUBSUMED: asserting a handwritten acp_observes boolean cannot prove cache admission. The retained ACP test counts actual host bridge calls across repeated reads, and its non-turn-stable sibling is the bypass control.",
+    "retainedPath": "crates/harn-serve/src/adapters/acp/tests/host_call_turn_cache.rs",
+    "retainedName": "turn_stable_read_is_served_without_an_acp_round_trip"
+  },
+  {
+    "path": "crates/harn-vm/tests/acp_host_call_parity.rs",
+    "name": "every_runtime_owned_branch_is_observed_over_acp",
+    "reason": "REMOVED: this checked static booleans rather than reaching runtime branches. Canonical ACP behavior is covered by executed memo, invalidation and process-policy tests; no exhaustive per-callee coverage claim is carried forward.",
+    "retainedPath": "crates/harn-serve/src/adapters/acp/tests/host_call_turn_cache.rs",
+    "retainedName": "metadata_write_invalidates_a_memoized_acp_read_before_the_next_dispatch"
+  },
+  {
+    "path": "crates/harn-vm/tests/acp_host_call_parity.rs",
+    "name": "every_entry_states_its_reasoning",
+    "reason": "REMOVED: a minimum rationale length on a handwritten source census tested prose rather than behavior. The retained ACP route tests assert real dispatch outcomes.",
+    "retainedPath": "crates/harn-serve/src/adapters/acp/tests/host_call_turn_cache.rs",
+    "retainedName": "non_turn_stable_read_still_reaches_the_editor"
+  },
     {
       "path": "crates/harn-vm/src/stdlib/args/drift_tests.rs",
       "name": "stdlib_diagnostics_name_types_the_runtime_has",
