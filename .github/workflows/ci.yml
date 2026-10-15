@@ -534,14 +534,14 @@ jobs:
           version-file: .release-orchestrator/.harn-version
           token: ${{ github.token }}
 
-      # The check reads the prior-fold evidence from `origin/<base>` and the
-      # contract from the exact integrated checkout at HEAD. A PR checkout does
-      # not necessarily carry the base branch as a local ref.
-      - name: Fetch the base branch and immutable release attempts
+      # Preserve the event's base identity if a stacked parent lands and its
+      # branch disappears while this job is running.
+      - name: Fetch the captured base and immutable release attempts
         env:
           BASE_REF: ${{ github.event.pull_request.base.ref || 'main' }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.sha }}
         run: |
-          git fetch --no-tags origin "+refs/heads/${BASE_REF}:refs/remotes/origin/${BASE_REF}"
+          bash scripts/ci/fetch_release_base.sh "$BASE_REF" "$BASE_SHA"
           git fetch --no-tags origin 'refs/heads/release-attempt/*:refs/remotes/origin/release-attempt/*'
 
       - name: Evaluate the release contract
