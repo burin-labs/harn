@@ -1,0 +1,64 @@
+import {
+  AdmissionRequest,
+  JobPlan,
+  LocalJob,
+  Snapshot,
+  bind_admission_job,
+  bind_job,
+  execute_job,
+  prepare_job,
+} from "./lib/main"
+
+type AdmissionDispatch = {kind: "admission", request: AdmissionRequest}
+
+type SnapshotDispatch = {kind: "snapshot", snapshot: Snapshot}
+
+type Dispatch = AdmissionDispatch | SnapshotDispatch
+
+type PrepareRequest = {action: "prepare", job: LocalJob}
+
+type ExecuteRequest = {
+  action: "execute",
+  plan: JobPlan,
+  dispatch: Dispatch,
+  signer: {id: string, secret: string},
+}
+
+type Request = PrepareRequest | ExecuteRequest
+
+fn main(harness: Harness) {
+  require len(argv) == 1, "pass one public job request file after --"
+  const text = harness.fs.read_text(argv[0])
+  require len(text) <= 16777216, "job request exceeds its size limit"
+  const request: Request = schema_expect(json_parse(text), schema_of(Request))
+  const host = pick(harness, ["clock", "fs", "process", "random", "system"])
+  if request.action == "prepare" {
+    const prepare = schema_expect(request, schema_of(PrepareRequest))
+    harness.stdio.println(json_stringify(prepare_job(host, prepare.job)))
+    return
+  }
+  const execution = schema_expect(request, schema_of(ExecuteRequest))
+  const dispatch = execution.dispatch
+  const plan = if dispatch.kind == "admission" {
+    const binding = schema_expect(dispatch, schema_of(AdmissionDispatch))
+    bind_admission_job(execution.plan, binding.request)
+  } else {
+    const binding = schema_expect(dispatch, schema_of(SnapshotDispatch))
+    bind_job(execution.plan, binding.snapshot)
+  }
+  const result = execute_job(
+    host,
+    plan,
+    {id: execution.signer.id, private_key: harness.secrets.read(execution.signer.secret)},
+  )
+  harness.stdio.println(json_stringify(result))
+  if result.proof.original.result != "passed" {
+    harness.runtime.exit(
+      if result.exit_code > 0 && result.exit_code <= 255 {
+        result.exit_code
+      } else {
+        1
+      },
+    )
+  }
+}
