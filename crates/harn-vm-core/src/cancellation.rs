@@ -25,7 +25,7 @@ const CANCELLATION_PAYLOAD: &str = "kind:cancelled:VM cancelled by host";
 /// Each variant is a claim about the call site that a reviewer can check, not
 /// a catch-all. Adding one means a new reason genuinely exists.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum NotDispatchedReason {
+pub enum NotDispatchedReason {
     /// The observing code holds a cancellation token and no machine, so it has
     /// nothing to dispatch through. Its caller dispatches instead.
     NoMachineInScope,
@@ -45,7 +45,7 @@ impl NotDispatchedReason {
 
 /// Whether interrupt handlers ran for this cancellation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum HandlerDispatch {
+pub enum HandlerDispatch {
     /// Handlers were dispatched through the machine's single owner before this
     /// error was constructed.
     Dispatched,
@@ -58,7 +58,7 @@ pub(crate) enum HandlerDispatch {
 /// The payload is identical for every caller. `dispatch` records what happened
 /// to the interrupt handlers so a receipt can report it; it deliberately does
 /// not reach the thrown value, because consumers match that value by text.
-pub(crate) fn cancelled_error(dispatch: HandlerDispatch) -> VmError {
+pub fn cancelled_error(dispatch: HandlerDispatch) -> VmError {
     if let HandlerDispatch::NotDispatched(reason) = dispatch {
         record_undispatched_cancellation(reason);
     }
@@ -70,7 +70,7 @@ pub(crate) fn cancelled_error(dispatch: HandlerDispatch) -> VmError {
 /// Named rather than spelled out at each site, because the three
 /// token-holding families repeat it and the name says the same thing the
 /// variant does. The frame that awaits the operation dispatches on its behalf.
-pub(crate) fn cancelled_without_machine() -> VmError {
+pub fn cancelled_without_machine() -> VmError {
     cancelled_error(HandlerDispatch::NotDispatched(
         NotDispatchedReason::NoMachineInScope,
     ))
@@ -80,7 +80,7 @@ pub(crate) fn cancelled_without_machine() -> VmError {
 ///
 /// The payload is matched here and nowhere else, so a caller asking "was this
 /// cancelled" does not have to re-type the text and drift from it.
-pub(crate) fn is_cancellation(error: &VmError) -> bool {
+pub fn is_cancellation(error: &VmError) -> bool {
     matches!(
         error,
         VmError::Thrown(VmValue::String(message)) if message.as_str() == CANCELLATION_PAYLOAD

@@ -1216,7 +1216,7 @@ mod tests {
     #[test]
     fn inclusive_range_at_i64_max_yields_the_endpoint() {
         run_iter_test(async {
-            let mut vm = crate::vm::Vm::new();
+            let mut vm = crate::vm::test_runtime::new_vm();
             let VmValue::Iter(handle) = iter_from_value(VmValue::range(VmRange {
                 start: i64::MAX,
                 end: i64::MAX,
@@ -1235,7 +1235,7 @@ mod tests {
     #[test]
     fn exclusive_range_at_i64_max_is_empty() {
         run_iter_test(async {
-            let mut vm = crate::vm::Vm::new();
+            let mut vm = crate::vm::test_runtime::new_vm();
             let VmValue::Iter(handle) = iter_from_value(VmValue::range(VmRange {
                 start: i64::MAX,
                 end: i64::MAX,

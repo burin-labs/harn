@@ -237,7 +237,7 @@ fn debug_context_value(vm: &crate::vm::Vm, cancelled: bool) -> VmValue {
         crate::value::intern_key("active_task_ids"),
         VmValue::List(std::sync::Arc::new(
             vm.active_task_ids()
-                .map(|id| VmValue::String(arcstr::ArcStr::from(id.as_str())))
+                .map(|id| VmValue::String(arcstr::ArcStr::from(id)))
                 .collect(),
         )),
     );

@@ -310,7 +310,7 @@ pub fn builtin_manifest_entry(
 }
 
 /// Runtime-only constructors have contracts but are not source manifest entries.
-pub(crate) fn builtin_policy_metadata(
+pub fn builtin_policy_metadata(
     name: &str,
 ) -> (
     Option<&'static harn_builtin_registry::BuiltinManifestEntry>,

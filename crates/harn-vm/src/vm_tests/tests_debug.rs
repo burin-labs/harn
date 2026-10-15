@@ -55,7 +55,7 @@ fn test_evaluate_in_frame_literal() {
     // expression, because the scratch chunk inherits source info
     // from the top frame. Seed one by compiling & starting an empty
     // pipeline that just waits on a breakpoint.
-    let mut vm = Vm::new();
+    let mut vm = crate::new_vm();
     register_vm_stdlib(&mut vm);
     vm.set_breakpoints(vec![2]);
     let chunk =
@@ -78,7 +78,7 @@ fn test_evaluate_in_frame_literal() {
 
 #[test]
 fn test_evaluate_in_frame_sees_locals() {
-    let mut vm = Vm::new();
+    let mut vm = crate::new_vm();
     register_vm_stdlib(&mut vm);
     vm.set_breakpoints(vec![3]);
     let chunk = crate::compile_source(
@@ -105,30 +105,36 @@ fn test_evaluate_in_frame_sees_locals() {
 fn test_evaluate_in_frame_does_not_leak_state() {
     // Evaluation must be transparent to the live session — no
     // scope leftovers, no stack residue, no step-mode drift.
-    let mut vm = Vm::new();
+    let mut vm = crate::new_vm();
     register_vm_stdlib(&mut vm);
     vm.set_breakpoints(vec![2]);
     let chunk = crate::compile_source("const x: int = 7\nconst __sink__ = x\n").unwrap();
     run_until_paused(&mut vm, &chunk);
 
-    let pre_stack = vm.stack.len();
-    let pre_frames = vm.frames.len();
-    let pre_scope = vm.env.scope_depth();
+    let before = vm.debug_state();
+    let identifiers = vm.identifiers_in_scope(0);
     let _ = eval(&mut vm, "x + 100").unwrap();
     let _ = eval(&mut vm, "x * x").unwrap();
-    assert_eq!(vm.stack.len(), pre_stack);
-    assert_eq!(vm.frames.len(), pre_frames);
-    assert_eq!(vm.env.scope_depth(), pre_scope);
+    let after = vm.debug_state();
+    assert_eq!(before.frame_depth, after.frame_depth);
+    assert!(values_equal(
+        &VmValue::dict(before.variables),
+        &VmValue::dict(after.variables)
+    ));
+    assert_eq!(vm.identifiers_in_scope(0), identifiers);
     // The synthetic `__harn_eval_result__` binding must not linger
     // in the paused scope.
-    assert!(vm.env.get("__harn_eval_result__").is_none());
+    assert!(!vm
+        .identifiers_in_scope(0)
+        .iter()
+        .any(|name| name == "__harn_eval_result__"));
 }
 
 #[test]
 fn test_set_variable_in_frame_updates_let_binding() {
     // Pipeline authors overwhelmingly use `let`; the debug
     // setVariable path must bypass immutability or it's useless.
-    let mut vm = Vm::new();
+    let mut vm = crate::new_vm();
     register_vm_stdlib(&mut vm);
     vm.set_breakpoints(vec![3]);
     let chunk = crate::compile_source(
@@ -173,7 +179,7 @@ fn test_set_variable_in_frame_updates_let_binding() {
 
 #[test]
 fn test_set_variable_in_frame_rejects_undefined() {
-    let mut vm = Vm::new();
+    let mut vm = crate::new_vm();
     register_vm_stdlib(&mut vm);
     vm.set_breakpoints(vec![2]);
     let chunk = crate::compile_source("const x: int = 1\nconst __sink__ = x\n").unwrap();
@@ -203,7 +209,7 @@ fn test_restart_frame_rewinds_ip_and_rebinds_args() {
     // Pause inside a function, mutate a local, restart the frame
     // — the mutation must vanish and execution must resume from
     // the top of the function with the original args.
-    let mut vm = Vm::new();
+    let mut vm = crate::new_vm();
     register_vm_stdlib(&mut vm);
     vm.set_breakpoints(vec![3]);
     let chunk = crate::compile_source(
@@ -245,7 +251,7 @@ fn test_restart_frame_rewinds_ip_and_rebinds_args() {
 
 #[test]
 fn test_restart_frame_rejects_scratch_frames() {
-    let mut vm = Vm::new();
+    let mut vm = crate::new_vm();
     register_vm_stdlib(&mut vm);
     vm.set_breakpoints(vec![2]);
     let chunk = crate::compile_source("const x: int = 1\nconst __sink__ = x\n").unwrap();
@@ -261,7 +267,7 @@ fn test_restart_frame_rejects_scratch_frames() {
 
 #[test]
 fn test_signal_cancel_unwinds_step_loop() {
-    let mut vm = Vm::new();
+    let mut vm = crate::new_vm();
     register_vm_stdlib(&mut vm);
     // A busy-looping pipeline that would never terminate under a
     // normal run; signal cancel before stepping so the first
@@ -294,7 +300,7 @@ fn test_signal_cancel_unwinds_step_loop() {
 
 #[test]
 fn test_function_breakpoint_stops_on_entry() {
-    let mut vm = Vm::new();
+    let mut vm = crate::new_vm();
     register_vm_stdlib(&mut vm);
     vm.set_function_breakpoints(vec!["do_work".to_string()]);
     let chunk = crate::compile_source(
@@ -317,7 +323,7 @@ fn test_function_breakpoint_stops_on_entry() {
 #[test]
 fn test_generated_module_source_is_cached_and_tagged_for_debugger() {
     let source = "pub fn generated_answer() {\n  return 42\n}\n";
-    let mut vm = Vm::new();
+    let mut vm = crate::new_vm();
     let rt = tokio::runtime::Builder::new_current_thread()
         .build()
         .unwrap();
@@ -341,7 +347,7 @@ fn test_generated_module_source_is_cached_and_tagged_for_debugger() {
 
 #[test]
 fn test_function_breakpoint_unknown_name_does_not_fire() {
-    let mut vm = Vm::new();
+    let mut vm = crate::new_vm();
     register_vm_stdlib(&mut vm);
     vm.set_function_breakpoints(vec!["nonexistent".to_string()]);
     let chunk = crate::compile_source(
@@ -377,7 +383,7 @@ fn test_function_breakpoint_unknown_name_does_not_fire() {
 
 #[test]
 fn test_evaluate_in_frame_parse_error_is_surfaced_standalone() {
-    let mut vm = Vm::new();
+    let mut vm = crate::new_vm();
     register_vm_stdlib(&mut vm);
     vm.set_breakpoints(vec![1]);
     let chunk = crate::compile_source("const __sink__ = 0\n").unwrap();
@@ -393,7 +399,7 @@ fn test_evaluate_in_frame_parse_error_is_surfaced_standalone() {
 
 #[test]
 fn test_breakpoints_wildcard_matches_any_file() {
-    let mut vm = Vm::new();
+    let mut vm = crate::new_vm();
     vm.set_breakpoints(vec![3, 7]);
     assert!(vm.breakpoint_matches(3));
     assert!(vm.breakpoint_matches(7));
@@ -402,7 +408,7 @@ fn test_breakpoints_wildcard_matches_any_file() {
 
 #[test]
 fn test_breakpoints_per_file_does_not_leak_to_wildcard() {
-    let mut vm = Vm::new();
+    let mut vm = crate::new_vm();
     vm.set_breakpoints_for_file("auto.harn", vec![10]);
     // Without an active frame, only the empty-string key matches; a
     // file-scoped breakpoint must NOT fire when no frame is active.
@@ -411,7 +417,7 @@ fn test_breakpoints_per_file_does_not_leak_to_wildcard() {
 
 #[test]
 fn test_breakpoints_per_file_clear_on_empty() {
-    let mut vm = Vm::new();
+    let mut vm = crate::new_vm();
     vm.set_breakpoints_for_file("a.harn", vec![1, 2]);
     vm.set_breakpoints_for_file("a.harn", vec![]);
     assert!(!vm.breakpoints.contains_key("a.harn"));

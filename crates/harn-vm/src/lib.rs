@@ -86,6 +86,8 @@ pub mod harness_tenant;
 pub mod host_attachments;
 pub mod host_stdio;
 mod native_vm;
+#[cfg(test)]
+mod vm_tests;
 pub(crate) use harn_vm_core::runtime_effects;
 use harn_vm_core::source_compile;
 pub use native_vm::{new_vm, NativeVmExt};
@@ -133,7 +135,7 @@ pub mod metadata;
 pub use harn_vm_core::module_artifact;
 pub use harn_vm_core::module_source;
 pub mod observability;
-pub use harn_vm_core::op_interrupt;
+pub mod op_interrupt;
 pub mod orchestration;
 pub mod runtime_content;
 pub use runtime_content::{

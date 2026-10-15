@@ -138,7 +138,7 @@ pub fn with_deadline(deadline: Instant) -> OpInterruptGuard {
 /// owns the outcome. Caller cancellation, the handler window, and the scope
 /// deadline stay installed and keep their own error kinds.
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
-pub(crate) fn with_operation_budget(budget: Instant) -> OpInterruptGuard {
+pub fn with_operation_budget(budget: Instant) -> OpInterruptGuard {
     let parent = CURRENT
         .with(|slot| slot.borrow().clone())
         .unwrap_or_default();
@@ -178,7 +178,7 @@ enum InterruptReason {
 /// Whether only an internal [`with_operation_budget`] stopped the wait. Any
 /// caller interrupt takes precedence and reads `false` here.
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
-pub(crate) fn operation_budget_expired() -> bool {
+pub fn operation_budget_expired() -> bool {
     matches!(requested_reason(), Some(InterruptReason::OperationBudget))
 }
 
@@ -188,7 +188,7 @@ pub(crate) fn operation_budget_expired() -> bool {
 /// operation budget is not a caller interrupt and returns `None`.
 // Only Linux Bubblewrap preparation consumes it outside tests today.
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
-pub(crate) fn requested_error() -> Option<crate::VmError> {
+pub fn requested_error() -> Option<crate::VmError> {
     requested_reason().and_then(|reason| match reason {
         InterruptReason::HandlerTimeout => Some(crate::Vm::interrupt_handler_timeout_error()),
         InterruptReason::Cancelled => Some(crate::cancellation::cancelled_without_machine()),

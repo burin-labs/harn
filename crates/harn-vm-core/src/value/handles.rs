@@ -207,7 +207,7 @@ pub struct VmChannelCloseState {
 }
 
 impl VmChannelCloseState {
-    pub(crate) fn open() -> Self {
+    pub fn open() -> Self {
         let (signal, _) = tokio::sync::watch::channel(false);
         Self {
             closed: AtomicBool::new(false),
@@ -215,7 +215,7 @@ impl VmChannelCloseState {
         }
     }
 
-    pub(crate) fn close(&self) -> bool {
+    pub fn close(&self) -> bool {
         if self.closed.swap(true, Ordering::SeqCst) {
             return false;
         }
@@ -233,7 +233,7 @@ impl VmChannelCloseState {
 }
 
 impl VmChannelHandle {
-    pub(crate) fn close(&self) -> bool {
+    pub fn close(&self) -> bool {
         self.close.close()
     }
 

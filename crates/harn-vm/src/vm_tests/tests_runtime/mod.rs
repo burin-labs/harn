@@ -18,6 +18,6 @@ mod process_sandbox;
 mod sandbox_builtins;
 mod slots;
 
-pub(in crate::vm) use harness::{
+pub(in crate::vm_tests) use harness::{
     run_harn, run_harn_at, run_harn_result_async, run_harn_result_display_with_options,
 };

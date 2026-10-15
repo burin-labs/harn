@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-pub(crate) fn normalize_context_path(path: &Path) -> PathBuf {
+pub fn normalize_context_path(path: &Path) -> PathBuf {
     if path.is_absolute() {
         return path.to_path_buf();
     }
@@ -180,7 +180,7 @@ pub fn classify_permission_path(path: &str, workspace_root: Option<&Path>) -> Wo
 
 /// Resolve physical path identity while preserving a not-yet-created suffix.
 /// Dangling links and errors other than absence remain errors.
-pub(crate) fn canonicalize_existing_ancestor(path: &Path) -> std::io::Result<PathBuf> {
+pub fn canonicalize_existing_ancestor(path: &Path) -> std::io::Result<PathBuf> {
     let mut ancestor = path;
     let mut suffix = Vec::new();
     loop {
@@ -356,7 +356,7 @@ fn to_posix(s: &str) -> String {
 
 /// Return whether a serialized path is absolute in either POSIX or Windows
 /// syntax, independent of the host running Harn.
-pub(crate) fn is_absolute_path_syntax(path: &str) -> bool {
+pub fn is_absolute_path_syntax(path: &str) -> bool {
     let path = to_posix(path);
     if path.starts_with('/') {
         return true;
@@ -365,11 +365,11 @@ pub(crate) fn is_absolute_path_syntax(path: &str) -> bool {
     bytes.len() >= 3 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' && bytes[2] == b'/'
 }
 
-pub(crate) fn split_segments(path: &str) -> (bool, Option<String>, Vec<String>) {
+pub fn split_segments(path: &str) -> (bool, Option<String>, Vec<String>) {
     crate::windows_path::split_segments(path)
 }
 
-pub(crate) fn normalize_lexical(path: &str) -> String {
+pub fn normalize_lexical(path: &str) -> String {
     let serialized = to_posix(path);
     if crate::windows_path::is_opaque_device_path(&serialized) {
         return serialized;

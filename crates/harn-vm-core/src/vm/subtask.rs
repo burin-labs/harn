@@ -42,7 +42,7 @@ pin_project! {
     /// one through [`prepare`], and the spawn functions only accept this type,
     /// so a new child-interpreter path cannot accidentally bypass scope
     /// capture while still compiling.
-    pub(crate) struct PreparedSubtask<F> {
+    pub struct PreparedSubtask<F> {
         #[pin]
         inner: F,
     }
@@ -60,7 +60,7 @@ impl<F: Future> PreparedSubtask<F> {
     /// Transform the output without discarding the proof carried by this
     /// future. Executors use this to attach source-order indices before
     /// inserting a branch into a `JoinSet`.
-    pub(crate) fn map_output<M, T>(self, map: M) -> PreparedSubtask<impl Future<Output = T>>
+    pub fn map_output<M, T>(self, map: M) -> PreparedSubtask<impl Future<Output = T>>
     where
         M: FnOnce(F::Output) -> T,
     {
@@ -159,9 +159,7 @@ thread_local! {
 
 /// Swap the execution-scoped placement override. Paired with
 /// the native execution scope's per-poll swap.
-pub(crate) fn swap_subtask_placement_context(
-    next: Option<SubtaskPlacement>,
-) -> Option<SubtaskPlacement> {
+pub fn swap_subtask_placement_context(next: Option<SubtaskPlacement>) -> Option<SubtaskPlacement> {
     SUBTASK_PLACEMENT_CONTEXT.with(|slot| std::mem::replace(&mut *slot.borrow_mut(), next))
 }
 
@@ -180,7 +178,7 @@ pub fn placement() -> SubtaskPlacement {
 /// scope has already been swapped out would otherwise read an empty or sibling
 /// context: subtasks are independent runtime tasks, not nested inside the
 /// parent's poll.
-pub(crate) fn prepare<F: Future>(
+pub fn prepare<F: Future>(
     scope: Box<dyn super::VmExecutionScope>,
     future: F,
 ) -> PreparedSubtask<impl Future<Output = F::Output>> {
@@ -190,7 +188,7 @@ pub(crate) fn prepare<F: Future>(
 }
 
 /// Put a prepared subtask on the runtime.
-pub(crate) fn spawn<F>(future: PreparedSubtask<F>) -> tokio::task::JoinHandle<F::Output>
+pub fn spawn<F>(future: PreparedSubtask<F>) -> tokio::task::JoinHandle<F::Output>
 where
     F: Future + Send + 'static,
     F::Output: Send + 'static,
@@ -248,7 +246,7 @@ where
 /// shutdown. Cleanup spawned on that runtime can therefore be cancelled
 /// before its first poll. This process-owned runtime is deliberately tiny and
 /// exists only for terminal persistence and release of task-owned sessions.
-pub(crate) fn spawn_lifecycle_cleanup<F>(future: F) -> tokio::task::JoinHandle<F::Output>
+pub fn spawn_lifecycle_cleanup<F>(future: F) -> tokio::task::JoinHandle<F::Output>
 where
     F: Future + Send + 'static,
     F::Output: Send + 'static,

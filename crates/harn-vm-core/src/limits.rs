@@ -18,7 +18,7 @@ pub(crate) const MAX_REPEAT_OUTPUT_BYTES: usize = 1 << 24;
 /// [`MAX_REPEAT_OUTPUT_BYTES`]. Returns an empty string for non-positive
 /// counts (callers pass `count.max(0)`), and a [`VmError::ValueByteLimit`]
 /// rather than panicking/OOM-ing when the result would be too large.
-pub(crate) fn checked_repeat(s: &str, count: usize) -> Result<String, VmError> {
+pub fn checked_repeat(s: &str, count: usize) -> Result<String, VmError> {
     let total = s.len().saturating_mul(count);
     if total > MAX_REPEAT_OUTPUT_BYTES {
         return Err(VmError::ValueByteLimit(Box::new(ValueByteLimitError {

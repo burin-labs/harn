@@ -312,7 +312,7 @@ mod tests {
     fn iter_init_list_keeps_shared_backing_store() {
         run_iter_init_test(async {
             let items = Arc::new(vec![VmValue::Int(1), VmValue::Int(2)]);
-            let mut vm = Vm::new();
+            let mut vm = crate::vm::test_runtime::new_vm();
             vm.stack.push(VmValue::List(items.clone()));
 
             vm.execute_iter_init().unwrap();
@@ -335,7 +335,7 @@ mod tests {
         run_iter_init_test(async {
             let set: crate::value::VmSet = [VmValue::Int(1), VmValue::Int(2)].into_iter().collect();
             let backing = set.shared_items();
-            let mut vm = Vm::new();
+            let mut vm = crate::vm::test_runtime::new_vm();
             vm.stack.push(VmValue::set_value(set));
 
             vm.execute_iter_init().unwrap();
@@ -360,7 +360,7 @@ mod tests {
                 (crate::value::intern_key("a"), VmValue::Int(1)),
                 (crate::value::intern_key("b"), VmValue::Int(2)),
             ]));
-            let mut vm = Vm::new();
+            let mut vm = crate::vm::test_runtime::new_vm();
             vm.stack.push(VmValue::Dict(entries.clone()));
 
             vm.execute_iter_init().unwrap();
@@ -383,7 +383,7 @@ mod tests {
     #[test]
     fn iter_init_inclusive_range_at_i64_max_is_not_empty() {
         run_iter_init_test(async {
-            let mut vm = Vm::new();
+            let mut vm = crate::vm::test_runtime::new_vm();
             vm.stack.push(VmValue::range(crate::value::VmRange {
                 start: i64::MAX,
                 end: i64::MAX,
