@@ -76,7 +76,7 @@ impl<'a> CapabilityRules<'a> {
         let provenance = std::mem::take(&mut resolution.matched_rules);
         let mut capabilities = if let Some(rule) = resolution.merged.as_ref() {
             projection::rule_to_caps(rule, &defaults)
-        } else if route.provider == "mock" {
+        } else if route.provider == "mock" || !defaults.has_any_field() {
             Capabilities::default()
         } else {
             projection::defaults_to_caps(&defaults)
