@@ -17,7 +17,8 @@ pub(crate) async fn call_harn_export_by_name(
     label: &str,
     args: &[VmValue],
 ) -> Result<VmValue, VmError> {
-    let mut vm = ctx.child_vm();
+    // Keep the child interpreter out of every composing export-call future.
+    let mut vm = Box::new(ctx.child_vm());
     let result = call_harn_export_on_vm(&mut vm, import_path, export_name, label, args).await;
     let output = vm.take_output();
     ctx.forward_output(&output);
