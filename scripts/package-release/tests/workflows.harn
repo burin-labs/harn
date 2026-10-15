@@ -96,3 +96,19 @@ pipeline test_package_workflow_policy_and_negative_controls(harness: Harness) {
     }
   assert(policy_errors(missing_metadata, promotion).contains("single-member metadata projection"))
 }
+
+pipeline test_native_release_asset_writers_are_scoped_to_runtime_tags(harness: Harness) {
+  const sdk = workflow(harness.fs, "sdk-codegen.yml")
+  const runtime_release = "startsWith(github.event.release.tag_name, 'v')"
+  assert_eq(sdk.jobs.generate.get("if"), "github.event_name != 'release' || " + runtime_release)
+  assert_eq(
+    sdk.jobs.get("require-both").get("if"),
+    "always() && !cancelled() && (github.event_name != 'release' || " + runtime_release + ")",
+  )
+  assert_eq(
+    sdk.jobs.get("publish-release-assets").get("if"),
+    "github.event_name == 'release' && " + runtime_release,
+  )
+  const native = workflow(harness.fs, "publish-release.yml")
+  assert_eq(native.on.push.tags, ["v*"])
+}

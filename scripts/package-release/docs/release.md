@@ -49,7 +49,8 @@ single-file copy of the metadata for the bounded promotion reader.
    shared publisher checks the files and their attestations again.
 4. Confirm the release tag is `harn-smart-ship/v<package version>`, points to
    the recorded source, and contains the candidate's archive and evidence.
-   Confirm the native runtime's latest release did not change.
+   Confirm the native runtime's latest release did not change. Native crate and
+   SDK publication accept runtime tags only and must not append package assets.
 
 Publication releases the tested bytes without rebuilding them. It does not
 advance a Smart Ship checkpoint or transfer repository authority. Install the
