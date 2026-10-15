@@ -1,3 +1,4 @@
+import { assert_error_contains } from "std/testing"
 import { git } from "../fixtures/neutral"
 import { digest, execution, fixture, proof } from "../fixtures/support"
 import {
@@ -98,6 +99,10 @@ pipeline test_installation_starts_in_shadow_and_inspects_archived_checkpoint_pol
   assert_eq(view.verification?.status, "verified")
   assert_eq(view.verification?.required, 1)
   assert_eq(view.verification?.executed, 1)
-  assert_eq(initialize_installation(harness.process, changed).state, settled)
+  assert_error_contains(
+    fn() { initialize_installation(harness.process, changed) },
+    "policy changed without a fenced generation transfer",
+  )
+  assert_eq(initialize_installation(harness.process, config).state, settled)
   assert_eq(inspect_installation(harness.process, config).checkpoint, view.checkpoint)
 }

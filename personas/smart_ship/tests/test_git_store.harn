@@ -1,6 +1,13 @@
+import { assert_error_contains } from "std/testing"
 import { git } from "../fixtures/neutral"
 import { digest, fixture } from "../fixtures/support"
-import { Controller, control, effect_authorized, reserve_effect } from "../lib/controller"
+import {
+  Controller,
+  admission_effect,
+  control,
+  effect_authorized,
+  reserve_effect,
+} from "../lib/controller"
 import { GitStore, commit_state, prepare_state, read_state } from "../lib/git_store"
 
 pipeline test_remote_state_cas_refuses_a_stale_writer_and_survives_a_new_reader(harness: Harness) {
@@ -70,16 +77,24 @@ pipeline test_remote_state_cas_refuses_a_stale_writer_and_survives_a_new_reader(
     ["installation", "generation", "revision", "controller"],
   )
   const active = unwrap(control(winner_state, resume_fence, "active"))
+  const substituted = active
+    + {authority: active.authority + {policy_digest: digest("substituted policy")}}
+  assert_error_contains(
+    fn() { prepare_state(harness.process, store, recovered, substituted) },
+    "policy cannot change within an authority generation",
+  )
+  const forged_authority = winner_state.authority
+    + {policy_digest: substituted.authority.policy_digest}
+  const forged_previous = recovered + {state: winner_state + {authority: forged_authority}}
+  const forged_write = prepare_state(harness.process, store, forged_previous, substituted)
+  assert_error_contains(
+    fn() { commit_state(harness.process, store, forged_write) },
+    "policy cannot change within an authority generation",
+  )
+  assert_eq(read_state(harness.process, store).commit, recovered.commit)
   const resume = prepare_state(harness.process, store, recovered, active)
   assert_eq(commit_state(harness.process, store, resume).status, "committed")
-  const source = f.snapshot.sources[0]
-  assert(source != nil)
-  const request = {
-    kind: "admission",
-    repository: source.repository,
-    source: source.commit,
-    input_digest: digest("exact reviewed forge request"),
-  }
+  const request = admission_effect(f.snapshot.changes[0]!.admission)
   const active_fence = pick(
     active.authority,
     ["installation", "generation", "revision", "controller"],

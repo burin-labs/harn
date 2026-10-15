@@ -1,4 +1,4 @@
-import { checkpoint_bytes, checkpoint_id } from "./identity"
+import { checkpoint_bytes, checkpoint_id, policy_digest } from "./identity"
 import {
   Authority,
   CheckpointTrust,
@@ -32,6 +32,7 @@ pub fn promote(
   )
   let reason = ""
   if !fence_matches(authority, fence) || authority.installation != snapshot.installation
+    || authority.policy_digest != policy_digest(policy)
     || authority.generation != snapshot.generation {
     reason = "controller authority changed"
   } else if !["active", "draining"].contains(authority.mode) {
