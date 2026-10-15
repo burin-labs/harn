@@ -41,7 +41,7 @@ pub(crate) enum SessionEventPayload {
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub(crate) struct TranscriptRecord {
     #[serde(default)]
-    pub transcript_event: TranscriptEvent,
+    pub transcript_event: Box<TranscriptEvent>,
     /// The provider message, verbatim: hydration hands it back to a provider.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub raw_message: Option<Value>,
@@ -527,7 +527,7 @@ pub(crate) fn float(value: &Option<Number>) -> Option<f64> {
 impl TranscriptRecord {
     pub(crate) fn new(transcript_event: Value, raw_message: Option<Value>) -> Self {
         Self {
-            transcript_event: TranscriptEvent::from_json(transcript_event),
+            transcript_event: Box::new(TranscriptEvent::from_json(transcript_event)),
             raw_message,
         }
     }
