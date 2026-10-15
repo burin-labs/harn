@@ -1,0 +1,63 @@
+{
+  "issue": "https://github.com/burin-labs/harn/issues/9112",
+  "observed_at": "2026-10-15",
+  "library_build_trial": {
+    "host": "hetzner-1",
+    "toolchain": "rustc 1.95.0 (59807616e 2026-04-14)",
+    "profile": "ci-cli",
+    "build_jobs": 8,
+    "memory_limit_gib": 44,
+    "incremental": false,
+    "rustflags": "-D warnings -Clink-arg=-fuse-ld=mold",
+    "command": "./scripts/cargo_with_worktree_build_dir.sh build --locked --profile ci-cli -p harn-vm --timings",
+    "target_isolation": "Separate initially empty targets, sequential capacity-leased builds, one shared pinned Kache 1.2.1 object store with private runtime directories.",
+    "before": {
+      "source": "78283823a1b281057e56cf91715a6921b1515d95",
+      "package_wall_seconds": 212.73,
+      "native_library_seconds": 173.21,
+      "maximum_rss_kib": 11520088,
+      "cache": {"requests": 707, "hits": 600, "misses": 107, "errors": 0}
+    },
+    "after": {
+      "source": "653b3b903de6ffe2bd3681c60b13ca5bf85a5f4e",
+      "package_wall_seconds": 176.03,
+      "native_library_seconds": 160.83,
+      "core_library_seconds": 12.26,
+      "core_library_start_seconds": 9.77,
+      "native_library_start_seconds": 14.47,
+      "maximum_rss_kib": 10992792,
+      "cache": {"requests": 708, "hits": 693, "misses": 15, "errors": 0}
+    },
+    "limitations": [
+      "One observation per source, in that order, on a shared host. This is not a controlled latency distribution.",
+      "The first arm primed unchanged dependencies for the second, as the unequal cache counters show. The package-wall difference cannot be attributed solely to extraction.",
+      "Cargo's native library unit fell by 12.38 seconds in this sample; the new core unit took 12.26 seconds and pipelined with the native unit. These are full compilation-unit durations, not isolated frontend timings.",
+      "The command includes harn-test-echo-env; it does not build the shared CLI producer or compile the test units.",
+      "The latest recorded merge-queue p90 remains 1225 seconds against the 600-second goal."
+    ]
+  },
+  "generator_runtime_control": {
+    "command": "harn run -e <200000-yield sum probe>",
+    "expected_sum": 19999900000,
+    "all_six_runs_reached_expected_sum": true,
+    "native_control": {
+      "version": "0.10.166",
+      "source_revision": null,
+      "binary_sha256": "54bb35068dc67f7905a46b9560a61fdf5d3a7b0b0c9243e564070eb224eafecf",
+      "wall_seconds": [6.87, 6.66, 6.86],
+      "user_seconds": [5.93, 5.73, 5.89]
+    },
+    "physical_core": {
+      "version": "0.10.167",
+      "source": "653b3b903de6ffe2bd3681c60b13ca5bf85a5f4e",
+      "binary_sha256": "288b26df99940187bd513f8f11cb914401537354ee06e1e4663ad2b88bb9ddfd",
+      "wall_seconds": [6.88, 6.92, 6.68],
+      "user_seconds": [5.93, 5.90, 5.75]
+    },
+    "conclusion": "The repeated control does not establish a runtime speedup or regression. Earlier slower measurements of the same control artifact do not establish an extraction benefit.",
+    "limitations": [
+      "The control artifact's source revision is unavailable and its version differs, so this is an artifact comparison, not a source-isolated causal experiment.",
+      "The samples are sequential on a shared developer host and do not establish a production performance distribution."
+    ]
+  }
+}
