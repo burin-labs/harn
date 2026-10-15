@@ -24,7 +24,7 @@ use super::{
 pub(super) fn async_builtin_cancel_token(
     ctx: Option<&AsyncBuiltinCtx>,
 ) -> Option<std::sync::Arc<std::sync::atomic::AtomicBool>> {
-    ctx.and_then(|ctx| ctx.child_vm().cancel_token.clone())
+    ctx.and_then(|ctx| ctx.child_vm().cancellation_token())
 }
 
 /// Apply the command-policy preflight (deny-patterns, approval gating,

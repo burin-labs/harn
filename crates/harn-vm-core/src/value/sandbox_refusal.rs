@@ -152,6 +152,14 @@ pub enum SandboxMechanismAvailability {
 }
 
 impl SandboxMechanismAvailability {
+    /// Fact reported when a host proceeds without the requested confinement.
+    pub fn description(self) -> &'static str {
+        match self {
+            Self::AbsentOnHost => "is not available on this host",
+            Self::DoesNotConfine => "does not confine every requested dimension",
+        }
+    }
+
     pub fn as_str(self) -> &'static str {
         match self {
             Self::AbsentOnHost => "absent_on_host",

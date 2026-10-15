@@ -4,6 +4,7 @@
 //! verification. This module maps Harn values to that typed contract, projects
 //! retired per-session JSONL data on reads, and imports it on the first write.
 
+#[cfg(test)]
 use crate::native_vm::NativeBuiltinCtxExt;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;

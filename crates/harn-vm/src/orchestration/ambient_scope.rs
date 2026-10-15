@@ -18,8 +18,6 @@
 //! Swaps are O(1) pointer moves regardless of stack depth.
 use std::future::Future;
 use std::path::PathBuf;
-use std::pin::Pin;
-use std::task::{Context, Poll};
 
 use pin_project_lite::pin_project;
 

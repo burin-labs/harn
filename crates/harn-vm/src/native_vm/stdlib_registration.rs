@@ -18,7 +18,7 @@ thread_local! {
 }
 
 pub(crate) fn install_shared_stdlib_registration(vm: &mut Vm) -> bool {
-    vm.install_builtin_registration(|| REGISTRATION.with(Clone::clone))
+    vm.install_builtin_registration(|| REGISTRATION.with(|cached| (**cached).clone()))
 }
 
 #[cfg(test)]

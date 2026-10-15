@@ -457,12 +457,7 @@ pub(crate) fn mechanism_skipped_warning(
     if mechanism == SandboxMechanism::Unconfined {
         return format!("{NO_OS_SANDBOX}; child processes run unconfined");
     }
-    let fact = match availability {
-        SandboxMechanismAvailability::AbsentOnHost => "is not available on this host",
-        SandboxMechanismAvailability::DoesNotConfine => {
-            "does not confine every requested dimension"
-        }
-    };
+    let fact = availability.description();
     format!(
         "{} {fact}; process filesystem isolation is disabled",
         mechanism.display_name()

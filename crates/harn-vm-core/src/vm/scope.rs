@@ -65,7 +65,7 @@ impl Vm {
         call_env
     }
 
-    pub(crate) fn resolve_named_closure(&self, name: &str) -> Option<Arc<VmClosure>> {
+    pub fn resolve_named_closure(&self, name: &str) -> Option<Arc<VmClosure>> {
         if let Some(value) = self.resolve_lexical_named_value(name) {
             return match value {
                 VmValue::Closure(closure) => Some(closure),

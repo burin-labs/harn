@@ -1,6 +1,34 @@
 use super::*;
 
 impl Vm {
+    /// Call a module export while preserving the caller's lexical bindings.
+    /// Module initialization commits through the same transaction as imports.
+    pub async fn call_module_export(
+        &mut self,
+        import_path: &str,
+        export_name: &str,
+        label: &str,
+        args: &[VmValue],
+    ) -> Result<VmValue, VmError> {
+        let mut transaction = self.module_load_transaction();
+        transaction.env = VmEnv::new();
+        transaction.imported_paths.clear();
+        let exports = transaction
+            .load_module_exports_from_import(import_path)
+            .await?;
+        let saved_env = std::mem::take(&mut self.env);
+        let saved_imported_paths = std::mem::take(&mut self.imported_paths);
+        self.commit_module_load_transaction(&mut transaction);
+        self.env = saved_env;
+        self.imported_paths = saved_imported_paths;
+        let closure = exports.get(export_name).ok_or_else(|| {
+            VmError::Runtime(format!(
+                "{label}: stdlib module {import_path} did not export `{export_name}`"
+            ))
+        })?;
+        self.call_closure_pub(closure, args).await
+    }
+
     /// Create an isolated VM for one module-graph transaction.
     pub(super) fn module_load_transaction(&self) -> Vm {
         let mut transaction = self.child_vm_inline();

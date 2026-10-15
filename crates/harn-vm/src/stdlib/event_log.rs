@@ -1,3 +1,4 @@
+#[cfg(test)]
 use crate::native_vm::NativeBuiltinCtxExt;
 use std::collections::BTreeMap;
 use std::sync::atomic::AtomicBool;

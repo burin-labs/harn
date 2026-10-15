@@ -270,7 +270,7 @@ impl VmClosure {
     /// already pinned, or its `Weak`s do not upgrade — e.g. an entry-chunk
     /// closure whose sibling functions live in captured `env` rather than a
     /// module registry, which resolves without this.
-    pub(crate) fn retained_for_host_registry(self: &Arc<Self>) -> Arc<Self> {
+    pub fn retained_for_host_registry(self: &Arc<Self>) -> Arc<Self> {
         if self.retained_module_scope.is_some() {
             return Arc::clone(self);
         }

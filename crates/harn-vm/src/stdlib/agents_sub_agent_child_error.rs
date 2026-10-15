@@ -19,6 +19,7 @@ use super::{
     sub_agent_result_event, transcript_tokens_used, wrap_sub_agent_error, SubAgentExecutionResult,
     SubAgentRunSpec,
 };
+#[cfg(test)]
 use crate::native_vm::NativeBuiltinCtxExt;
 use crate::value::{VmError, VmValue};
 

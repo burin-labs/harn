@@ -360,11 +360,7 @@ fn call_args_for_handler(
 }
 
 fn default_namespace(vm: &Vm) -> String {
-    if let Some(source_file) = vm
-        .source_file
-        .as_deref()
-        .filter(|value| !value.trim().is_empty())
-    {
+    if let Some(source_file) = vm.source_file().filter(|value| !value.trim().is_empty()) {
         return source_file.to_string();
     }
     if let Some(project_root) = vm.project_root() {

@@ -9,7 +9,7 @@ use std::sync::Arc;
 use harn_builtin_meta::HarnessKind;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum InlineCacheEntry {
+pub enum InlineCacheEntry {
     Empty,
     Property {
         name_idx: u16,
@@ -30,7 +30,7 @@ pub(crate) enum InlineCacheEntry {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum AdaptiveBinaryOp {
+pub enum AdaptiveBinaryOp {
     Add,
     Sub,
     Mul,
@@ -47,7 +47,7 @@ pub(crate) enum AdaptiveBinaryOp {
 /// Adaptive-binary IC state. All fields are scalar `Copy`, which lets the
 /// specialization path inspect the state without cloning its entry.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum AdaptiveBinaryState {
+pub enum AdaptiveBinaryState {
     Warmup {
         shape: BinaryShape,
         hits: u8,
@@ -60,7 +60,7 @@ pub(crate) enum AdaptiveBinaryState {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum BinaryShape {
+pub enum BinaryShape {
     Int,
     Float,
     Bool,
@@ -68,7 +68,7 @@ pub(crate) enum BinaryShape {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) enum DirectCallState {
+pub enum DirectCallState {
     Warmup {
         argc: usize,
         target: DirectCallTarget,
@@ -83,7 +83,7 @@ pub(crate) enum DirectCallState {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) enum DirectCallTarget {
+pub enum DirectCallTarget {
     Closure(Arc<crate::value::VmClosure>),
 }
 
@@ -139,7 +139,7 @@ impl PartialEq for DirectCallState {
 impl Eq for DirectCallState {}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum PropertyCacheTarget {
+pub enum PropertyCacheTarget {
     DictField(Arc<str>),
     StructField { field_name: Arc<str>, index: usize },
     HarnessSubHandle(HarnessKind),
@@ -156,7 +156,7 @@ pub(crate) enum PropertyCacheTarget {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum MethodCacheTarget {
+pub enum MethodCacheTarget {
     Harness(HarnessKind),
     ListLen,
     ListEmpty,

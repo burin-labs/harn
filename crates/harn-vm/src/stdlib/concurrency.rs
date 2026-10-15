@@ -359,7 +359,7 @@ fn current_async_vm(ctx: &crate::vm::AsyncBuiltinCtx, _builtin: &str) -> Vm {
 }
 
 fn channel_send_wait(vm: &Vm, target: ChannelTarget) -> Result<Option<WaitGuard>, VmError> {
-    if !vm.deadlines.is_empty() {
+    if vm.has_scope_deadline() {
         return Ok(None);
     }
     vm.wait_for_graph()
@@ -367,7 +367,7 @@ fn channel_send_wait(vm: &Vm, target: ChannelTarget) -> Result<Option<WaitGuard>
 }
 
 fn channel_receive_wait(vm: &Vm, channels: &[VmValue]) -> Result<Option<WaitGuard>, VmError> {
-    if !vm.deadlines.is_empty() {
+    if vm.has_scope_deadline() {
         return Ok(None);
     }
     let targets = channels

@@ -34,7 +34,8 @@ pub(crate) use crate::vm::ops::{is_adaptive_binary_op, op_reads_outer_name};
 mod disassembly;
 pub(crate) use disassembly::*;
 mod inline_cache;
-pub(crate) use inline_cache::*;
+#[doc(hidden)]
+pub use inline_cache::*;
 
 // Native execution consumes the compiler's metadata directly. Runtime caches
 // remain native, while constants, local slots and type assertions have one owner.
@@ -427,7 +428,7 @@ impl CompiledFunction {
     }
 
     /// Minimum number of caller-supplied arguments needed to enter the function.
-    pub(crate) fn minimum_arg_count(&self) -> usize {
+    pub fn minimum_arg_count(&self) -> usize {
         if self.has_rest_param {
             self.required_param_count()
                 .min(self.params.len().saturating_sub(1))

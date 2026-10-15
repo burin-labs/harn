@@ -275,9 +275,3 @@ fn field_names_from_value(value: &VmValue) -> Option<Vec<String>> {
             .collect(),
     )
 }
-
-/// Render the "available fields: …" tail used in missing-field errors.
-/// Matches the wording the typechecker emits at `harn check` time so
-/// authors see the same phrasing whether the failure surfaces at static
-/// analysis or runtime shape validation.
-pub(crate) use crate::schema::format_available_fields;

@@ -1,6 +1,7 @@
 use super::agents_workers;
 use super::sub_agent_lifecycle as lifecycle;
 use super::{SubAgentExecutionResult, SubAgentRunSpec};
+#[cfg(test)]
 use crate::native_vm::NativeBuiltinCtxExt;
 use crate::orchestration::CapabilityPolicy;
 #[cfg(test)]

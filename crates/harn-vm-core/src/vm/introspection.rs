@@ -3,6 +3,18 @@
 use super::{Vm, VmBuiltinMetadata};
 
 impl Vm {
+    pub fn source_dir(&self) -> Option<&std::path::Path> {
+        self.source_dir.as_deref()
+    }
+
+    pub fn source_file(&self) -> Option<&str> {
+        self.source_file.as_deref()
+    }
+
+    pub fn has_scope_deadline(&self) -> bool {
+        !self.deadlines.is_empty()
+    }
+
     pub fn has_builtin(&self, name: &str) -> bool {
         self.builtins.contains_key(name) || self.async_builtins.contains_key(name)
     }

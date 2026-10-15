@@ -69,7 +69,7 @@ pub struct DeadlockError {
 }
 
 impl DeadlockError {
-    pub(crate) fn self_deadlock(
+    pub fn self_deadlock(
         kind: impl Into<String>,
         key: impl Into<String>,
         detail: impl Into<String>,

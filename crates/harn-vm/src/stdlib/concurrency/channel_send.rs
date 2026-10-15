@@ -20,7 +20,7 @@ pub(super) async fn send(
         loop {
             val = match ch.sender.try_send(val) {
                 Ok(()) => {
-                    vm.wait_for_graph.notify_channel_send(&target);
+                    vm.wait_for_graph().notify_channel_send(&target);
                     return Ok(VmValue::Bool(true));
                 }
                 Err(tokio::sync::mpsc::error::TrySendError::Full(val)) => val,
@@ -41,7 +41,7 @@ pub(super) async fn send(
                 result = ch.sender.send(val) => {
                     match result {
                         Ok(()) => {
-                            vm.wait_for_graph.notify_channel_send(&target);
+                            vm.wait_for_graph().notify_channel_send(&target);
                             Ok(VmValue::Bool(true))
                         }
                         Err(_) => Err(channel_closed_error("send", ch.name.as_ref())),

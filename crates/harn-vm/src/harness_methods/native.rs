@@ -198,7 +198,7 @@ async fn call_harness_fs_method(
             // including workflow child-VM crossings.
             let path = crate::stdlib::process::VM_SOURCE_DIR
                 .with(|source_dir| source_dir.borrow().clone())
-                .or_else(|| vm.source_dir.clone())
+                .or_else(|| vm.source_dir().map(std::path::Path::to_path_buf))
                 .or_else(|| std::env::current_dir().ok())
                 .unwrap_or_else(|| std::path::PathBuf::from("."));
             return Ok(path_value(&path));
