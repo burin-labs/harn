@@ -25,6 +25,30 @@ fn ceiling_pass_through_is_within() {
 }
 
 #[test]
+fn flattened_stage_cannot_remove_host_process_confinement() {
+    let mut ceiling = CapabilityPolicy::default();
+    ceiling.process_sandbox.read_deny_roots = vec!["/private/host-secret".into()];
+    ceiling.process_sandbox.netns_launcher_path = Some("/opt/host/netns".into());
+    assert!(enforce_flattened_ceiling(&options_with_policy(&ceiling), &ceiling).is_ok());
+
+    let mut denied_path_removed = ceiling.clone();
+    denied_path_removed.process_sandbox.read_deny_roots.clear();
+    let mut helper_replaced = ceiling.clone();
+    helper_replaced.process_sandbox.netns_launcher_path = Some("/tmp/stage/netns".into());
+    let mut profile_loosened = ceiling.clone();
+    profile_loosened.sandbox_profile = crate::orchestration::SandboxProfile::Wasi;
+    for requested in [denied_path_removed, helper_replaced, profile_loosened] {
+        assert!(matches!(
+            enforce_flattened_ceiling(&options_with_policy(&requested), &ceiling),
+            Err(VmError::CategorizedError {
+                category: crate::value::ErrorCategory::ToolRejected,
+                ..
+            })
+        ));
+    }
+}
+
+#[test]
 fn narrowing_is_allowed() {
     let ceiling = ceiling_with_tools(&["read", "edit", "run_command"]);
     let narrowed = ceiling_with_tools(&["read"]);
