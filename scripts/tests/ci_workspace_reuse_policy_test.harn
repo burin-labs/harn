@@ -19,6 +19,8 @@ type CacheSourceManifest = {
   workspace: dict,
 }
 
+type WorkspaceDevProfile = {profile: {dev: {debug: string}}}
+
 fn cache_step(reuse: bool) {
   let inputs = {"shared-key": "workspace-tests", "cache-workspace-crates": "true", save: "true"}
   if reuse {
@@ -117,14 +119,20 @@ fn cache_identity_step(fs: HarnessFs) {
 fn run_cache_identity(capabilities: {fs: HarnessFs, process: HarnessProcess}, env: dict) {
   const root = capabilities.fs.mkdtemp_in_workspace("rust-cache-identity-")
   const output = path_join(root, "output")
+  const profile_env = path_join(root, "profile-env")
   const result = capabilities.process.run(
     {
       program: "bash",
       args: ["-e", "-c", cache_identity_step(capabilities.fs).run],
-      env: env + {GITHUB_OUTPUT: output},
+      env: env
+        + {
+          CACHE_DEV_DEBUG: cache_identity_step(capabilities.fs).env.CACHE_DEV_DEBUG,
+          GITHUB_OUTPUT: output,
+          GITHUB_ENV: profile_env,
+        },
     },
   )
-  return {root: root, output: output, result: result}
+  return {root: root, output: output, profile_env: profile_env, result: result}
 }
 
 pipeline test_cache_identity_executes_precise_generation_and_upstream_archive_paths(
@@ -146,9 +154,19 @@ pipeline test_cache_identity_executes_precise_generation_and_upstream_archive_pa
     CACHE_WORKSPACE_CRATES: "true",
     CACHE_RUNNER_TEMP: root,
     CARGO_HOME: cargo,
+    // The owned runner that exposed this defect inherited debug=0. The
+    // action must publish the manifest profile before any cache reader runs.
+    CARGO_PROFILE_DEV_DEBUG: "0",
   }
   const run = run_cache_identity(pick(harness, ["fs", "process"]), env)
   assert(run.result.success, run.result.stderr)
+  const workspace_manifest = schema_expect(
+    toml_parse(harness.fs.read_text("../../Cargo.toml")),
+    schema_of(WorkspaceDevProfile),
+  )
+  const manifest_profile = workspace_manifest.profile.dev.debug
+  assert_eq(cache_identity_step(harness.fs).env.CACHE_DEV_DEBUG, manifest_profile)
+  assert_eq(harness.fs.read_text(run.profile_env), "CARGO_PROFILE_DEV_DEBUG=${manifest_profile}\n")
   assert_eq(
     harness.fs.read_text(run.output),
     "shared-key=workspace-tests-workspace-crates-v3\n"

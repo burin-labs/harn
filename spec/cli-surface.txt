@@ -285,6 +285,9 @@ harn doctor --json
 harn doctor --no-network
 harn doctor sandbox
 harn doctor sandbox --json
+harn dump-builtin-methods
+harn dump-builtin-methods --check
+harn dump-builtin-methods --output
 harn dump-cli-surface
 harn dump-cli-surface --check
 harn dump-cli-surface --output
@@ -300,6 +303,10 @@ harn dump-highlight-keywords --check
 harn dump-highlight-keywords --json-output
 harn dump-highlight-keywords --output
 harn dump-highlight-keywords --wasm-json-output
+harn dump-operator-precedence
+harn dump-operator-precedence --check
+harn dump-operator-precedence --markdown
+harn dump-operator-precedence --tree-sitter
 harn dump-portable-benchmark-schema
 harn dump-portable-benchmark-schema --check
 harn dump-portable-benchmark-schema --output
@@ -419,6 +426,7 @@ harn fix --capability-migrations-only
 harn fix --code
 harn fix --dry-run
 harn fix --json
+harn fix --migrate-operator-syntax
 harn fix --plan
 harn fix --preserve-implicit-any
 harn fix --safety

@@ -385,7 +385,7 @@ fn a_call_does_not_reach_an_unimported_same_named_function() {
         .iter()
         .filter(|e| e.kind == EdgeKind::Calls)
         .filter_map(|e| g.node(e.to))
-        .map(|n| n.path.as_str())
+        .map(|n| &*n.path)
         .collect();
     assert_eq!(
         targets,
@@ -401,7 +401,7 @@ fn a_call_does_not_reach_an_unimported_same_named_function() {
             .iter()
             .find(|id| {
                 g.node(**id)
-                    .is_some_and(|n| n.kind == NodeKind::Function && n.path == path)
+                    .is_some_and(|n| n.kind == NodeKind::Function && *n.path == *path)
             })
             .expect("declaration exists");
         assert!(
@@ -443,7 +443,7 @@ fn a_local_definition_shadows_an_imported_one() {
         .iter()
         .filter(|e| e.kind == EdgeKind::Calls)
         .filter_map(|e| g.node(e.to))
-        .map(|n| n.path.as_str())
+        .map(|n| &*n.path)
         .collect();
     assert_eq!(targets, vec!["local.rs"]);
 }
@@ -483,7 +483,7 @@ fn a_unique_name_resolves_without_an_import_edge() {
         .iter()
         .filter(|e| e.kind == EdgeKind::Calls)
         .filter_map(|e| g.node(e.to))
-        .map(|n| n.path.as_str())
+        .map(|n| &*n.path)
         .collect();
     assert_eq!(
         targets,
@@ -589,7 +589,7 @@ fn harn_reference_projection_replaces_stale_edges_and_keeps_names_separate() {
             .outgoing(module)
             .iter()
             .filter(|edge| edge.kind == EdgeKind::Refs)
-            .map(|edge| graph.node(edge.to).unwrap().path.clone())
+            .map(|edge| graph.node(edge.to).unwrap().path.to_string())
             .collect::<Vec<_>>()
     };
     assert_eq!(target_path(&graph), vec!["a.harn"]);

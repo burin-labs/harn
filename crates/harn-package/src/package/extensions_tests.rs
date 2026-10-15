@@ -946,7 +946,7 @@ receipts = "required"
 id = "merge-captain-pr-opened"
 kind = "webhook"
 provider = "webhook"
-match = { events = ["pr_opened"] }
+match = { events = ["pull_request.opened"] }
 handler = "persona://merge_captain"
 secrets = { signing_secret = "webhook/signing-secret" }
 "#,

@@ -20,7 +20,7 @@ pipeline default(harness: Harness, task: unknown) {
   const path = "src/lib/utils/lib.rs"
   harness.stdio.println(path.index_of("lib"))
   harness.stdio.println(path.last_index_of("lib"))
-  harness.stdio.println(path.rfind("lib"))
+  harness.stdio.println(path.last_index_of("lib"))
   // len method (on string)
   harness.stdio.println("cafe".len())
 }

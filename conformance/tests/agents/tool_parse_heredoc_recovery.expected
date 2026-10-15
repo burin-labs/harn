@@ -65,9 +65,9 @@
   answer=null
   done=null
 # thinking tags inside arguments, bare
-  calls=0 errors=1 violations=0 stray=0
-  err "TOOL CALL PARSE ERROR: `edit(...)` — unterminated string literal. Tool arguments must be a TypeScript object literal: `{ key: value, key: value }`. Raw: {\n    action: \"create\",\n    path: \"doc.md\",\n    title: \"use"
-  prose="<think> and </think> markers\",\n\ncontent: <<EOF\nModels emit <think>reasoning</think> on the thinking channel.\nKeep the </think> close tag intact in docs.\nEOF\n})"
+  calls=1 errors=0 violations=0 stray=1
+  call edit {"action":"create","content":"Models emit <think>reasoning</think> on the thinking channel.\nKeep the </think> close tag intact in docs.","path":"doc.md","title":"use <think> and </think> markers"}
+  prose=""
   answer=null
   done=null
 # over-closed object string recovers an embedded raw string

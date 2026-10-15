@@ -42,7 +42,7 @@ mod unit;
 
 use super::syntax::{
     find_opener_after, find_span_end, ident_length, match_block, parse_ts_call_from,
-    skip_heredoc_body, strip_thinking_tags, SpanEnd,
+    skip_heredoc_body, skip_string_span, strip_thinking_tags, SpanEnd,
 };
 use crate::text_index::TextIndex;
 
@@ -440,6 +440,16 @@ impl<'a> Scan<'a> {
         let mut probe = start;
         loop {
             while probe < bytes.len() && bytes[probe] != b'<' {
+                if self.index.markdown_fence_marker_at(probe) {
+                    probe += 3;
+                    continue;
+                }
+                if matches!(bytes[probe], b'"' | b'\'' | b'`') {
+                    if let Some(after) = skip_string_span(self.src, probe) {
+                        probe = after;
+                        continue;
+                    }
+                }
                 probe += 1;
             }
             if probe + 1 < bytes.len() && bytes[probe] == b'<' && bytes[probe + 1] == b'<' {
@@ -457,8 +467,40 @@ impl<'a> Scan<'a> {
                 probe = after;
                 continue;
             }
+            // Literal inline '<' must stay in one text span. Protocol markup
+            // still delimits a span even beside another tag or prose.
+            if probe < bytes.len()
+                && !self.index.is_line_leading(self.src, probe)
+                && !self.inline_protocol_boundary(probe)
+            {
+                probe += 1;
+                continue;
+            }
             return probe;
         }
+    }
+
+    fn inline_protocol_boundary(&self, cursor: usize) -> bool {
+        let tail = &self.src[cursor..];
+        tail.starts_with("</")
+            || tail.starts_with("<<")
+            || frames::frame_marker(&self.spec.harmony, &self.call_tag_opens, self.src, cursor)
+                .is_some()
+            || self
+                .spec
+                .call_tags
+                .iter()
+                .chain(&self.spec.block_tags)
+                .chain(&self.spec.wrapper_tags)
+                .any(|tag| {
+                    tail.starts_with(&format!("<{tag}>")) || tail.starts_with(&format!("</{tag}>"))
+                })
+            || self
+                .spec
+                .markup_openers
+                .iter()
+                .any(|markup| tail.starts_with(&markup.opener))
+            || self.angle_wrapped_call(cursor).is_some()
     }
 
     /// Branch 9's extent. `<name(…)>` is a unit only when `name` is a known

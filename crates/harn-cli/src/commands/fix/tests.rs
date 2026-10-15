@@ -339,6 +339,7 @@ fn run_returns_error_after_reporting_skipped_files() {
         safety: None,
         capability_migrations_only: false,
         preserve_implicit_any: false,
+        migrate_operator_syntax: false,
         codes: Vec::new(),
         json: false,
         workspace: false,
@@ -446,6 +447,7 @@ fn apply_rejects_needs_human_safety_ceiling() {
         safety: Some(RepairSafety::NeedsHuman),
         capability_migrations_only: false,
         preserve_implicit_any: false,
+        migrate_operator_syntax: false,
         codes: Vec::new(),
         json: false,
         workspace: false,
@@ -1181,6 +1183,33 @@ fn apply_rewrites_zero_and_optional_metadata_arguments_to_named_requests() {
 }
 
 #[test]
+fn apply_keeps_a_bundle_literal_when_an_unresolved_import_may_bind_pick() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let script = temp.path().join("host_projections.harn");
+    fs::write(
+        &script,
+        "import \"./missing_module\"\n\nfn describe() {\n  return platform() + \"-\" + arch() + home_dir()\n}\n\nfn main(harness: Harness) {\n  describe()\n}\n",
+    )
+    .unwrap();
+
+    apply_repairs_with_options_at(
+        &script,
+        RepairSafety::SurfaceChanging,
+        false,
+        FixOptions::capability_migrations(),
+    )
+    .unwrap();
+
+    // The import cannot be resolved, so nothing proves `pick` is the builtin.
+    let updated = fs::read_to_string(&script).unwrap();
+    assert!(!updated.contains("pick("), "{updated}");
+    assert!(
+        updated.contains("describe({fs: harness.fs, system: harness.system})"),
+        "{updated}"
+    );
+}
+
+#[test]
 fn apply_rewrites_legacy_host_projections_to_typed_snapshots() {
     let temp = tempfile::TempDir::new().unwrap();
     let script = temp.path().join("host_projections.harn");
@@ -1209,8 +1238,20 @@ fn apply_rewrites_legacy_host_projections_to_typed_snapshots() {
     );
     assert!(updated.contains("harness.fs.home_dir()"), "{updated}");
     assert!(
-        updated.contains("describe({fs: harness.fs, system: harness.system})"),
+        updated.contains("describe(pick(harness, [\"fs\", \"system\"]))"),
         "{updated}"
+    );
+    // A migration must not write code its own lint rejects: strict consumers
+    // run `harn check --strict` on the bump that applies it.
+    let program = harn_parser::parse_source(&updated).unwrap();
+    let diagnostics = harn_parser::TypeChecker::new()
+        .check_with_facts(&program, &updated)
+        .diagnostics;
+    assert!(
+        !diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == harn_parser::DiagnosticCode::LintPreferPick),
+        "{diagnostics:?}"
     );
 }
 

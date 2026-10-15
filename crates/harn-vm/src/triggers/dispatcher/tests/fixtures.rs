@@ -155,6 +155,7 @@ pub(super) async fn dispatcher_fixture_with_budget_strategy(
     install_manifest_triggers(vec![TriggerBindingSpec {
         id: "github-new-issue".to_string(),
         source: TriggerBindingSource::Manifest,
+        ingress_subscription: false,
         kind: "webhook".to_string(),
         provider: ProviderId::from("github"),
         autonomy_tier: crate::AutonomyTier::ActAuto,
@@ -209,6 +210,7 @@ pub(super) async fn a2a_dispatcher_fixture(
     install_manifest_triggers(vec![TriggerBindingSpec {
         id: "github-a2a-review".to_string(),
         source: TriggerBindingSource::Manifest,
+        ingress_subscription: false,
         kind: "webhook".to_string(),
         provider: ProviderId::from("github"),
         autonomy_tier: crate::AutonomyTier::ActAuto,
@@ -263,6 +265,7 @@ pub(super) async fn worker_dispatcher_fixture(
     install_manifest_triggers(vec![TriggerBindingSpec {
         id: "github-worker-review".to_string(),
         source: TriggerBindingSource::Manifest,
+        ingress_subscription: false,
         kind: "webhook".to_string(),
         provider: ProviderId::from("github"),
         autonomy_tier: crate::AutonomyTier::ActAuto,

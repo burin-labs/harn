@@ -228,10 +228,53 @@ fn attenuated_capability_bundle_repair_projects_existing_root_grant() {
     );
     assert_eq!(edits.len(), 1);
     assert_eq!(edits[0].span, span);
-    assert_eq!(
-        edits[0].replacement,
-        "{fs: harness.fs, tools: harness.tools}"
-    );
+    assert_eq!(edits[0].replacement, "pick(harness, [\"fs\", \"tools\"])");
+}
+
+#[test]
+fn attenuated_capability_bundle_repair_emits_pick_only_when_the_builtin_is_in_scope() {
+    const PICK: &str = "pick(harness, [\"fs\", \"tools\"])";
+    const LITERAL: &str = "{fs: harness.fs, tools: harness.tools}";
+    let cases = [
+        ("", PICK),
+        ("fn pick(value, keys) {\n  return value\n}\n", LITERAL),
+        ("import { pick } from \"./module\"\n", LITERAL),
+        ("import * as pick from \"./module\"\n", LITERAL),
+        ("import \"./module\"\n", LITERAL),
+    ];
+    for (prelude, expected) in cases {
+        let source = format!(
+            "{prelude}fn helper(caps: {{fs: HarnessFs, tools: HarnessTools}}, label: string) -> string {{\n  return label\n}}\n\nfn main(harness: Harness) {{\n  helper(harness, \"old\")\n}}\n"
+        );
+        let program = harn_parser::parse_source(&source).unwrap();
+        let start = source.find("harness, \"").unwrap();
+        let line = source.get(..start).unwrap().matches('\n').count() + 1;
+        let span = harn_lexer::Span::with_offsets(start, start + "harness".len(), line, 10);
+        let (_, edits, _) = synthesize_missing_capability_argument_repair(
+            span,
+            &capability_shape(&[("fs", "HarnessFs"), ("tools", "HarnessTools")]),
+            &named_type("Harness"),
+            &source,
+            &program,
+        )
+        .expect("capability bundle repair");
+        assert_eq!(edits[0].replacement, expected, "prelude: {prelude:?}");
+        if expected == PICK {
+            // The migrated call must pass strict checking with no follow-up.
+            let migrated = FixEdit::apply_all(&source, &edits);
+            let migrated_program = harn_parser::parse_source(&migrated).unwrap();
+            let diagnostics = harn_parser::TypeChecker::new()
+                .check_with_facts(&migrated_program, &migrated)
+                .diagnostics;
+            assert!(
+                diagnostics.iter().all(|diagnostic| {
+                    diagnostic.code != harn_parser::DiagnosticCode::LintPreferPick
+                        && diagnostic.severity != harn_parser::DiagnosticSeverity::Error
+                }),
+                "{migrated}\n{diagnostics:?}"
+            );
+        }
+    }
 }
 
 #[test]

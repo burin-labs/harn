@@ -1,0 +1,53 @@
+import { admission_bytes } from "./identity"
+import { AdmissionVerification, Policy, SignedAdmission, Verification } from "./types"
+import { verify_admission } from "./verification"
+
+/** An exact external target and its immutable input identity. */
+pub type EffectTarget = {repository: string, source: string, input_digest: string}
+
+/** Admission effects retain the complete independently qualified witness. */
+pub type AdmissionEffect = EffectTarget & {kind: "admission", admission: SignedAdmission}
+
+/** Release input identity names the exact proven checkpoint. */
+pub type ReleaseEffect = EffectTarget & {kind: "release"}
+
+/** A rerun retains the installation-selected source and input identity. */
+pub type RerunEffect = EffectTarget & {kind: "rerun"}
+
+/** A digest cannot stand in for an admission record at the mutation boundary. */
+pub type EffectRequest = AdmissionEffect | ReleaseEffect | RerunEffect
+
+/** Unmeasured evidence remains nil; measured refusals retain complete counts and names. */
+pub type EffectRefusal = {
+  reason: string,
+  admission: AdmissionVerification?,
+  verification: Verification?,
+}
+
+/** Derive the external target and dispatch identity from the full signed admission. */
+pub fn admission_effect(signed: SignedAdmission) -> AdmissionEffect {
+  return {
+    kind: "admission",
+    repository: signed.record.source.repository,
+    source: signed.record.source.head,
+    input_digest: "sha256:"
+      + sha256_hex(
+        json_stringify([admission_bytes(signed.record), signed.signer, signed.signature]),
+      ),
+    admission: signed,
+  }
+}
+
+/** Qualify admission once at reservation under the independently trusted generation policy. */
+pub fn qualify_admission_effect(request: EffectRequest, policy: Policy) -> AdmissionVerification? {
+  if request.kind != "admission" {
+    return nil
+  }
+  const admitted = schema_expect(request, schema_of(AdmissionEffect))
+  const verified = verify_admission(admitted.admission, policy)
+  return if admission_effect(admitted.admission) == admitted {
+    verified
+  } else {
+    verified + {status: "invalid", invalid: verified.invalid + ["admission-effect-target"]}
+  }
+}

@@ -190,7 +190,9 @@ pub(super) fn parse_equivalent_failover_option(
     provider: &str,
     model: &str,
     explicit_routing_policy: bool,
-    requirements: crate::llm_config::EquivalentModelRequirements,
+    // Deriving requirements projects the request's context tokens over the
+    // whole transcript, so only a call that enables failover pays for it.
+    requirements: impl FnOnce() -> crate::llm_config::EquivalentModelRequirements,
 ) -> Result<Option<std::sync::Arc<crate::llm::routing::RoutingPolicyConfig>>, VmError> {
     let Some(raw) = options.and_then(|o| o.get("equivalent_failover")) else {
         return Ok(None);

@@ -25,7 +25,7 @@ impl crate::vm::Vm {
                 map.values().cloned().collect(),
             ))),
             "entries" => Ok(VmValue::List(std::sync::Arc::new(Self::dict_entries(map)))),
-            "count" => Ok(VmValue::Int(map.len() as i64)),
+            "len" => Ok(VmValue::Int(map.len() as i64)),
             "has" => Ok(VmValue::Bool(
                 map.contains_key(
                     args.first()
@@ -34,7 +34,7 @@ impl crate::vm::Vm {
                         .as_str(),
                 ),
             )),
-            "merging" | "merge" => {
+            "merge" => {
                 if let Some(VmValue::Dict(other)) = args.first() {
                     if map.is_empty() {
                         return Some(Ok(VmValue::Dict(Arc::clone(other))));
@@ -49,17 +49,11 @@ impl crate::vm::Vm {
                     Ok(VmValue::Dict(Arc::clone(map)))
                 }
             }
-            "map_values" | "rekeyed" | "rekey" | "map_keys" | "filter" => {
+            "map_values" | "map_keys" | "filter" => {
                 if args.first().is_some_and(Self::is_callable_value) {
                     return None;
                 }
                 Ok(VmValue::Nil)
-            }
-            "removing" | "remove" => {
-                let key = args.first().map(|a| a.display()).unwrap_or_default();
-                let mut result = (**map).clone();
-                result.remove(key.as_str());
-                Ok(VmValue::dict(result))
             }
             "get" => {
                 let key = args.first().map(|a| a.display()).unwrap_or_default();
@@ -88,7 +82,10 @@ impl crate::vm::Vm {
                         "module `{module_path}` has no exported member `{method}`{hint}"
                     ))));
                 }
-                Err(VmError::Runtime(format!("dict has no method `{method}`")))
+                Err(Self::no_builtin_method_error(
+                    harn_parser::builtin_methods::MethodReceiver::Dict,
+                    method,
+                ))
             }
         };
         Some(result)
@@ -122,7 +119,7 @@ impl crate::vm::Vm {
                 }
                 Ok(VmValue::dict(result))
             }
-            "rekeyed" | "rekey" | "map_keys" => {
+            "map_keys" => {
                 let Some(callable) = args.first().filter(|v| Self::is_callable_value(v)) else {
                     return Ok(VmValue::Nil);
                 };
@@ -152,7 +149,10 @@ impl crate::vm::Vm {
                 if let Some(callable) = map.get(method).filter(|v| Self::is_callable_value(v)) {
                     self.call_callable_value(callable, args).await
                 } else {
-                    Err(VmError::Runtime(format!("dict has no method `{method}`")))
+                    Err(Self::no_builtin_method_error(
+                        harn_parser::builtin_methods::MethodReceiver::Dict,
+                        method,
+                    ))
                 }
             }
         }

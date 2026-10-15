@@ -38,6 +38,12 @@ headers into `TriggerEvent`, and exposes outbound GitHub App calls through its
 connector exports. The core runtime treats those exports like any other
 connector contract v1 package.
 
+The connector keeps `TriggerEvent.kind` equal to the `X-GitHub-Event` header,
+such as `pull_request`, and stores `action` in the normalized payload.
+Use [event selectors](../triggers/manifest.md#event-selectors) such as
+`pull_request.opened` or `github.pull_request.opened` to select one action.
+Use `pull_request` to select every pull request action.
+
 Use the generic `webhook` provider only for forge-agnostic intake. Use
 `provider = "github"` with the package above when handlers need GitHub event
 families such as `issues`, `pull_request`, `issue_comment`,

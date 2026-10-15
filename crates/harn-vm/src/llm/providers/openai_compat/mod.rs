@@ -23,16 +23,15 @@ mod tests;
 
 use crate::llm::api::{DeltaSender, LlmRequestPayload, LlmResult, ThinkingConfig};
 use crate::llm::provider::{LlmProvider, LlmProviderChat};
-use crate::llm::providers::common::parse_major_minor_tail;
 use crate::llm::providers::schema_compat::{
     sanitize_schema_for_provider, SchemaCompatProfile, SchemaSurface,
 };
 use crate::value::VmError;
+pub(crate) use harn_provider_catalog::capabilities::gpt_generation;
 
 use self::messages::{
-    enforce_single_tool_call_history, enforce_tool_result_adjacency, maybe_remap_tool_call_text,
-    preserve_orphan_tool_results_as_observations, relocate_tool_message_images_to_user,
-    sanitize_openai_message_for_request,
+    enforce_single_tool_call_history, maybe_remap_tool_call_text,
+    relocate_tool_message_images_to_user, sanitize_openai_message_for_request,
 };
 use self::reasoning::{
     enabled_reasoning_config, groq_qwen_reasoning_effort, is_openrouter_reasoning_disable,
@@ -46,27 +45,6 @@ pub(crate) use self::openrouter::{
     apply_openrouter_provider_order, apply_openrouter_route_denylist,
     ensure_openrouter_require_parameters,
 };
-
-/// Parse the (major, minor) version out of a GPT model ID. Handles dotted
-/// forms like `gpt-5.4`, `gpt-5.4-preview`, `gpt-5.4-turbo-20260115`, and
-/// dashed forms like `gpt-5-4`. Also strips OpenRouter-style prefixes
-/// (`openai/gpt-5.4`, `azure/gpt-5.4`) so the same parser can gate
-/// capabilities regardless of which OpenAI-compatible provider is routing.
-///
-/// Returns `None` for non-GPT shapes (`claude-opus-4-7`, `llama-3.1`, …).
-#[expect(
-    clippy::string_slice,
-    reason = "idx comes from find() of the ASCII needle on the sliced string"
-)]
-pub(crate) fn gpt_generation(model: &str) -> Option<(u32, u32)> {
-    let lower = model.to_lowercase();
-    let stripped = match lower.rsplit_once('/') {
-        Some((_, tail)) => tail,
-        None => lower.as_str(),
-    };
-    let idx = stripped.find("gpt-")?;
-    parse_major_minor_tail(&stripped[idx + "gpt-".len()..])
-}
 
 /// True for GPT models that expose OpenAI's Responses-API `tool_search` meta-tool
 /// and the `defer_loading: true` flag on user tool definitions. Per OpenAI's
@@ -198,10 +176,6 @@ impl OpenAiCompatibleProvider {
             }));
         }
         msgs = crate::llm::api::normalize_openai_style_messages(msgs, false);
-        msgs = preserve_orphan_tool_results_as_observations(msgs);
-        if caps.requires_tool_result_adjacency {
-            msgs = enforce_tool_result_adjacency(msgs);
-        }
         if !caps.supports_parallel_tool_calls {
             msgs = enforce_single_tool_call_history(msgs, has_native_tools);
         }

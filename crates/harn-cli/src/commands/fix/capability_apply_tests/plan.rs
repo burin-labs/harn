@@ -66,7 +66,7 @@ fn capability_plan_counts_uses_inside_string_interpolation() {
                  }}\n\n\
                  pipeline main(harness: Harness, task) {{\n\
                  \x20 return with_temp_dir(\n\
-                 \x20   {{fs: harness.fs, process: harness.process, random: harness.random}},\n\
+                 \x20   pick(harness, [\"fs\", \"process\", \"random\"]),\n\
                  \x20   {{ dir -> dir }},\n\
                  \x20 )\n\
                  }}\n"

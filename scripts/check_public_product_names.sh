@@ -105,7 +105,7 @@ is_allowlisted() {
     CHANGELOG.md|changelog/archive/*|experiments/step-judge/results/*) return 0 ;;
     spec/provider-catalog/provider-catalog.json) return 0 ;;
     crates/harn-vm/src/llm/catalog_sources/50-presentation/00-model-selection.toml) return 0 ;;
-    crates/harn-vm/src/llm/providers.toml) return 0 ;;
+    crates/harn-provider-catalog/src/providers.toml) return 0 ;;
     scripts/agent_shell_guard_policy.harn|scripts/tests/agent_shell_guard_test.harn) return 0 ;;
     crates/harn-hostlib/src/code_index/walker.rs|crates/harn-hostlib/tests/harn_hostlib/code_index.rs) return 0 ;;
     *) return 1 ;;

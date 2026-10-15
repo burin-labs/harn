@@ -75,7 +75,7 @@ use assistant_messages::durable_anthropic_blocks;
 use cancellation::CancelSafeNestedExecutionGuard;
 mod live_transcript_journal;
 mod message_history;
-pub(crate) use message_history::answer_unanswered_tool_calls;
+pub(crate) use tool_result_messages::harness_repair_tool_result;
 mod plan_document;
 mod run_identity;
 mod session_policies;
@@ -88,8 +88,9 @@ use session_policies::{
 pub(crate) use session_policies::{install_session_policy_guard, options_request_session_policies};
 mod visible_messages;
 #[cfg(test)]
-#[cfg(test)]
-pub(crate) use visible_messages::{visible_message_values, visible_messages_with_lineage};
+pub(crate) use visible_messages::{
+    visible_message_projections, visible_message_values, visible_messages_with_lineage,
+};
 
 #[cfg(test)]
 use inbox::{

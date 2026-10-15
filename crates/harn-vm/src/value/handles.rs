@@ -347,7 +347,7 @@ impl VmSyncPermitHandle {
 /// - Inclusive empty when `start > end`.
 /// - Exclusive empty when `start >= end`.
 ///
-/// Negative / reversed ranges are NOT supported in v1: `5 to 1` is simply
+/// Negative / reversed ranges are NOT supported in v1: `5..=1` is simply
 /// empty. Authors who want reverse iteration should call `.to_list().reverse()`.
 #[derive(Debug, Clone, Copy)]
 pub struct VmRange {
@@ -362,8 +362,8 @@ impl VmRange {
     /// Uses saturating arithmetic so that pathological ranges near
     /// `i64::MAX`/`i64::MIN` do not panic on overflow. Because a range's
     /// element count must fit in `i64` the returned length saturates at
-    /// `i64::MAX` for ranges whose width exceeds that (e.g. `i64::MIN to
-    /// i64::MAX` inclusive). Callers that later narrow to `usize` for
+    /// `i64::MAX` for ranges whose width exceeds that (e.g. `i64::MIN..=
+    /// i64::MAX`). Callers that later narrow to `usize` for
     /// allocation should still guard against huge lengths — see
     /// `to_vec` / `get` for the indexable-range invariants.
     pub fn len(&self) -> i64 {

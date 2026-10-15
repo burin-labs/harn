@@ -712,7 +712,7 @@ fn peek_property_cache_returns_none_for_non_property_variants() {
         InlineCacheEntry::Method {
             name_idx: 0,
             argc: 0,
-            target: MethodCacheTarget::ListCount,
+            target: MethodCacheTarget::ListLen,
         },
     );
     assert!(chunk.peek_property_cache(slot).is_none());

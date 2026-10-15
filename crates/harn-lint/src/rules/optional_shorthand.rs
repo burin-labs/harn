@@ -581,12 +581,11 @@ impl<'a, 'd> State<'a, 'd> {
 /// forms. Returns an empty list when the source fails to lex; the lint
 /// downgrades to "no diagnostics" rather than crashing on partial input.
 fn collect_redacted_ranges(source: &str) -> Vec<(usize, usize)> {
-    let mut lexer = harn_lexer::Lexer::new(source);
-    let Ok(tokens) = lexer.tokenize_with_comments() else {
+    let Some(tokens) = crate::source_tokens::with_comments(source) else {
         return Vec::new();
     };
     tokens
-        .into_iter()
+        .iter()
         .filter_map(|t| match t.kind {
             TokenKind::LineComment { .. }
             | TokenKind::BlockComment { .. }

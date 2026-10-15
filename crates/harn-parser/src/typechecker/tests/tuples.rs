@@ -273,7 +273,7 @@ fn arity_changing_tuple_operations_widen_to_lists() {
     let errs = errors(
         r#"pipeline t(task) {
   const row = tuple(1, "one")
-  const appended: list<int | string | bool> = row.appending(true)
+  const appended: list<int | string | bool> = row + [true]
   const sliced: list<int | string> = row[0:1]
   const reversed: list<int | string> = row.reversed()
 }"#,

@@ -359,7 +359,7 @@ fn plan(
             ),
         )));
     }
-    let seed_path = seed_node.path.clone();
+    let seed_path = seed_node.path.to_string();
     let seed_line = seed_node.line;
     let Some(language) = Language::detect(Path::new(&seed_path), None) else {
         return Ok(Err(unsupported_language(&seed_path, None)));

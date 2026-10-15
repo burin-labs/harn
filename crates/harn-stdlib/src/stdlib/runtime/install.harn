@@ -59,7 +59,7 @@ pub fn checksum_for_asset(manifest: string, asset: string) -> string? {
     require fields != nil, "malformed SHA256SUMS line"
     const name = fields.groups[1]
     require checksums[name] == nil, "SHA256SUMS contains duplicate entry for " + name
-    checksums[name] = fields.groups[0].to_lower()
+    checksums[name] = fields.groups[0].lower()
   }
   require len(checksums) > 0, "SHA256SUMS is empty"
   return checksums[asset]

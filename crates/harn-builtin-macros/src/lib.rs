@@ -72,6 +72,19 @@ pub fn harn_capability_method(input: TokenStream) -> TokenStream {
     }
 }
 
+/// Parse one builtin-method signature (`"<T> push(item: T) -> nil"`) into a
+/// `harn_builtin_meta::BuiltinSignature` const expression, using the same sig
+/// grammar as `#[harn_builtin(sig = ...)]`.
+#[proc_macro]
+pub fn harn_method_sig(input: TokenStream) -> TokenStream {
+    let sig = parse_macro_input!(input as LitStr);
+    let support = quote!(::harn_builtin_meta);
+    match sig_parser::parse_sig(&sig.value(), sig.span(), &support) {
+        Ok(tokens) => tokens.into(),
+        Err(error) => error.to_compile_error().into(),
+    }
+}
+
 /// Declare a capability method in the dependency-leaf contract crate.
 #[proc_macro]
 pub fn harn_capability_contract(input: TokenStream) -> TokenStream {

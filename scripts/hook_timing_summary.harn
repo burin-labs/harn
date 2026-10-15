@@ -374,7 +374,12 @@ fn observation_window(events: list<HookTimingEvent>) -> string {
   if timestamps.count == 0 {
     return "unknown"
   }
-  return timestamps[0] + "/" + timestamps[timestamps.count - 1]
+  const first = timestamps[0]
+  const last = timestamps[timestamps.count - 1]
+  if first == nil || last == nil {
+    throw "hook timing lost a checked observation"
+  }
+  return first + "/" + last
 }
 
 pub fn derive_hook_timing_budgets(events: list<HookTimingEvent>) -> HookTimingBudgetReport {

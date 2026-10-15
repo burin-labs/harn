@@ -89,7 +89,15 @@ fn require_call(command: string, result_var: string) -> string {
   if len(parts) != 2 {
     return ""
   }
-  return parts[1].split("\n\n")[0]
+  const body = parts[1]
+  if body == nil {
+    throw "split lost a checked requirement body"
+  }
+  const call = body.split("\n\n")[0]
+  if call == nil {
+    throw "split returned no requirement call"
+  }
+  return call
 }
 
 pub fn post_merge_tier_errors(workflows: dict) -> list<string> {

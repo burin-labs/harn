@@ -389,10 +389,9 @@ mod tests {
     use super::*;
 
     fn caps_with_style(style: ComputerUseStyle) -> Capabilities {
-        Capabilities {
-            computer_use_style: Some(style),
-            ..Capabilities::default()
-        }
+        let mut caps = Capabilities::default();
+        caps.computer_use_style = Some(style);
+        caps
     }
 
     fn function_tool(name: &str) -> Value {

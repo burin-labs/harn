@@ -318,11 +318,6 @@ fn parameter_error_with_function(error: VmError, function_name: &str) -> VmError
         VmError::TypeError(message) => {
             VmError::TypeError(format!("function '{function_name}' {message}"))
         }
-        VmError::Runtime(message) => VmError::Runtime(message.replacen(
-            "TypeError: ",
-            &format!("TypeError: function '{function_name}' "),
-            1,
-        )),
         other => other,
     }
 }

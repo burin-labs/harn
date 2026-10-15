@@ -290,6 +290,7 @@ const COLLECTION_ASYNC_BUILTINS: &[&VmBuiltinDef] = &[
     &TAKE_WHILE_IMPL_DEF,
     &DROP_WHILE_IMPL_DEF,
     &COUNT_BY_IMPL_DEF,
+    &METHOD_MUTATE_IMPL_DEF,
 ];
 
 /// Registers the native fast-paths for the `std/collections` and `std/json`
@@ -806,4 +807,33 @@ mod tests {
             Some(99)
         );
     }
+}
+
+/// Bytecode helper for a mutating method call on a place (`xs.push(v)`).
+/// Returns `[next_receiver, result]` when the receiver is a builtin value
+/// with that mutating method; the compiled call site then writes
+/// `next_receiver` back to the place. Returns `nil` otherwise, and the call
+/// site falls back to an ordinary method call.
+#[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
+    sig = "__method_mutate(receiver: any, method: string, ...args: any) -> any",
+    kind = "async",
+    category = "collections",
+    runtime_only = true
+)]
+async fn method_mutate_impl(ctx: AsyncBuiltinCtx, args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let receiver = args.first().cloned().unwrap_or(VmValue::Nil);
+    let Some(VmValue::String(method)) = args.get(1) else {
+        return Err(VmError::Runtime(
+            "__method_mutate: expected a method name".to_string(),
+        ));
+    };
+    let mut vm = current_async_vm(&ctx, "__method_mutate");
+    let mutation = vm
+        .apply_mutating_method(&receiver, method, args.get(2..).unwrap_or_default())
+        .await?;
+    Ok(mutation.map_or(VmValue::Nil, |mutation| {
+        VmValue::List(Arc::new(vec![mutation.receiver, mutation.result]))
+    }))
 }

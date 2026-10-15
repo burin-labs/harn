@@ -1,37 +1,22 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::net::SocketAddr;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration as StdDuration;
 
-use axum::body::Bytes;
-use axum::extract::{DefaultBodyLimit, State};
-use axum::http::{HeaderMap, HeaderName, HeaderValue, Method, StatusCode};
-use axum::response::{IntoResponse, Response};
-use axum::routing::post;
-use axum::{Json, Router};
 use harn_serve::{
     A2aHttpServeOptions, A2aServer, A2aServerConfig, AcpProfileConfig, AcpSandboxConfig,
     AcpWebSocketServeOptions, ApiHttpServeOptions, ApiKeyAuthConfig, ApiKeyEntry, ApiServer,
-    ApiServerConfig, AuthMethodConfig, AuthPolicy, AuthRequest, AuthorizationDecision,
-    DispatchCore, DispatchCoreConfig, ExportCatalog, ExportedCallableKind, HmacAuthConfig,
-    HttpTlsConfig, McpHttpServeOptions, McpServer, McpServerConfig, SiteHttpServeOptions,
-    SiteServer, SiteServerConfig, MCP_PROTOCOL_VERSION,
+    ApiServerConfig, AuthMethodConfig, AuthPolicy, DispatchCore, DispatchCoreConfig, ExportCatalog,
+    ExportedCallableKind, HmacAuthConfig, HttpTlsConfig, McpHttpServeOptions, McpServer,
+    McpServerConfig, SiteHttpServeOptions, SiteServer, SiteServerConfig,
 };
-use serde_json::Value as JsonValue;
 use time::Duration;
-use tokio::sync::{mpsc as tokio_mpsc, oneshot};
 
 use crate::cli::{
     A2aServeArgs, AcpServeTransport, ApiServeArgs, McpServeTransport, ServeAcpArgs, ServeCommand,
     ServeMcpArgs, ServeObsMode, ServeTlsMode, SiteServeArgs, WorkerServeArgs,
 };
-
-/// Default 10 MiB request-body cap applied to every `harn serve` HTTP
-/// router. Mirrors `DEFAULT_MAX_BODY_BYTES` in the orchestrator
-/// listener so large/runaway POSTs cannot exhaust process memory while
-/// axum buffers a request.
-pub(crate) const SERVE_DEFAULT_MAX_BODY_BYTES: usize = 10 * 1024 * 1024;
 
 /// Build the dispatch configuration for a file-backed server.
 ///
@@ -517,244 +502,6 @@ pub(crate) async fn run_mcp_server(args: &ServeMcpArgs) -> Result<(), String> {
     }
 }
 
-pub(crate) async fn run_script_mcp_http_server(
-    server: harn_vm::McpServer,
-    vm: harn_vm::Vm,
-    options: McpHttpServeOptions,
-    auth_policy: AuthPolicy,
-) -> Result<(), String> {
-    let state = ScriptMcpHttpState {
-        runtime: ScriptMcpRuntime::start(server, vm),
-        options: options.clone(),
-        auth_policy,
-    };
-    let router = Router::new()
-        .route(&options.path, post(script_http_post_request))
-        .layer(DefaultBodyLimit::max(SERVE_DEFAULT_MAX_BODY_BYTES))
-        .with_state(state);
-    let router = harn_serve::tls::apply_security_headers(router, &options.tls);
-    let listener = harn_serve::tls::bind_listener(options.bind)?;
-    let local_addr = listener
-        .local_addr()
-        .map_err(|error| format!("failed to read local addr: {error}"))?;
-    eprintln!(
-        "[harn] MCP workflow server ready on {}://{local_addr}{}",
-        options.tls.listener_scheme(),
-        options.path
-    );
-    harn_serve::tls::serve_router_from_tcp(listener, router, &options.tls)
-        .await
-        .map_err(|error| format!("MCP HTTP server failed: {error}"))
-}
-
-#[derive(Clone)]
-struct ScriptMcpHttpState {
-    runtime: ScriptMcpRuntime,
-    options: McpHttpServeOptions,
-    auth_policy: AuthPolicy,
-}
-
-#[derive(Clone)]
-pub(crate) struct ScriptMcpRuntime {
-    tx: tokio_mpsc::UnboundedSender<ScriptMcpJob>,
-}
-
-struct ScriptMcpJob {
-    request: JsonValue,
-    response_tx: oneshot::Sender<Option<JsonValue>>,
-}
-
-impl ScriptMcpRuntime {
-    pub(crate) fn start(server: harn_vm::McpServer, mut vm: harn_vm::Vm) -> Self {
-        let (tx, mut rx) = tokio_mpsc::unbounded_channel::<ScriptMcpJob>();
-        tokio::task::spawn_local(async move {
-            while let Some(job) = rx.recv().await {
-                let response = server.handle_json_rpc(job.request, &mut vm).await;
-                let _ = job.response_tx.send(response);
-            }
-        });
-        Self { tx }
-    }
-
-    pub(crate) async fn call(&self, request: JsonValue) -> Result<Option<JsonValue>, String> {
-        let (response_tx, response_rx) = oneshot::channel();
-        self.tx
-            .send(ScriptMcpJob {
-                request,
-                response_tx,
-            })
-            .map_err(|_| "script MCP runtime is not running".to_string())?;
-        response_rx
-            .await
-            .map_err(|_| "script MCP runtime dropped response".to_string())
-    }
-}
-
-async fn script_http_post_request(
-    State(state): State<ScriptMcpHttpState>,
-    method: Method,
-    headers: HeaderMap,
-    body: Bytes,
-) -> Response {
-    if let Err(response) = validate_script_origin(&headers) {
-        return *response;
-    }
-    if let Err(response) = validate_script_protocol_header(&headers) {
-        return *response;
-    }
-
-    let request = match serde_json::from_slice::<JsonValue>(body.as_ref()) {
-        Ok(value) => value,
-        Err(error) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(script_parse_error_response(&error.to_string())),
-            )
-                .into_response()
-        }
-    };
-    if let Err(response) = authorize_script_rpc(
-        &state,
-        &request,
-        script_http_auth_request(method, &state.options.path, body.to_vec(), &headers),
-    )
-    .await
-    {
-        let mut http = Json(response).into_response();
-        attach_script_http_headers(&mut http);
-        return http;
-    }
-
-    match state.runtime.call(request).await {
-        Ok(Some(response)) => {
-            let mut http = Json(response).into_response();
-            attach_script_http_headers(&mut http);
-            http
-        }
-        Ok(None) => StatusCode::ACCEPTED.into_response(),
-        Err(error) => {
-            let mut http = Json(harn_vm::jsonrpc::error_response(
-                JsonValue::Null,
-                -32000,
-                &error,
-            ))
-            .into_response();
-            attach_script_http_headers(&mut http);
-            http
-        }
-    }
-}
-
-async fn authorize_script_rpc(
-    state: &ScriptMcpHttpState,
-    request: &JsonValue,
-    auth: AuthRequest,
-) -> Result<(), JsonValue> {
-    let method = request
-        .get("method")
-        .and_then(JsonValue::as_str)
-        .unwrap_or_default();
-    if !script_method_requires_auth(method) {
-        return Ok(());
-    }
-    match state.auth_policy.authorize(&auth).await {
-        AuthorizationDecision::Authorized(_) => Ok(()),
-        AuthorizationDecision::Rejected(message) => Err(harn_vm::jsonrpc::error_response(
-            request.get("id").cloned().unwrap_or(JsonValue::Null),
-            -32001,
-            &message,
-        )),
-        AuthorizationDecision::MissingScope { required, granted } => {
-            Err(harn_vm::jsonrpc::error_response(
-                request.get("id").cloned().unwrap_or(JsonValue::Null),
-                -32003,
-                &harn_serve::forbidden_message(&required, &granted),
-            ))
-        }
-        AuthorizationDecision::McpNotAllowlisted { reason, .. } => {
-            Err(harn_vm::jsonrpc::error_response(
-                request.get("id").cloned().unwrap_or(JsonValue::Null),
-                -32003,
-                &reason,
-            ))
-        }
-    }
-}
-
-/// Discovery and connectivity checks are public; every method that exposes or
-/// invokes the script's catalog clears the configured authorization policy.
-fn script_method_requires_auth(method: &str) -> bool {
-    !matches!(
-        method,
-        harn_vm::mcp_protocol::METHOD_SERVER_DISCOVER | "ping"
-    )
-}
-
-fn script_http_auth_request(
-    method: Method,
-    path: &str,
-    body: Vec<u8>,
-    headers: &HeaderMap,
-) -> AuthRequest {
-    AuthRequest {
-        method: method.as_str().to_string(),
-        path: path.to_string(),
-        body,
-        headers: script_normalized_headers(headers),
-        ..AuthRequest::default()
-    }
-}
-
-fn script_normalized_headers(headers: &HeaderMap) -> BTreeMap<String, String> {
-    headers
-        .iter()
-        .filter_map(|(name, value)| {
-            value
-                .to_str()
-                .ok()
-                .map(|value| (name.as_str().to_ascii_lowercase(), value.to_string()))
-        })
-        .collect()
-}
-
-fn attach_script_http_headers(response: &mut Response) {
-    response.headers_mut().insert(
-        HeaderName::from_static("mcp-protocol-version"),
-        HeaderValue::from_static(MCP_PROTOCOL_VERSION),
-    );
-}
-
-fn validate_script_protocol_header(headers: &HeaderMap) -> Result<(), Box<Response>> {
-    let Some(value) = headers
-        .get("mcp-protocol-version")
-        .and_then(|value| value.to_str().ok())
-    else {
-        return Ok(());
-    };
-    if value == MCP_PROTOCOL_VERSION {
-        Ok(())
-    } else {
-        Err(Box::new(StatusCode::BAD_REQUEST.into_response()))
-    }
-}
-
-fn validate_script_origin(headers: &HeaderMap) -> Result<(), Box<Response>> {
-    let Some(origin) = headers.get("origin").and_then(|value| value.to_str().ok()) else {
-        return Ok(());
-    };
-    let Ok(url) = url::Url::parse(origin) else {
-        return Err(Box::new(StatusCode::FORBIDDEN.into_response()));
-    };
-    match url.host_str() {
-        Some("127.0.0.1") | Some("localhost") | Some("[::1]") | Some("::1") => Ok(()),
-        _ => Err(Box::new(StatusCode::FORBIDDEN.into_response())),
-    }
-}
-
-fn script_parse_error_response(message: &str) -> JsonValue {
-    harn_vm::jsonrpc::error_response(JsonValue::Null, -32700, &format!("Parse error: {message}"))
-}
-
 fn build_tls_config(
     mode: ServeTlsMode,
     cert: Option<&std::path::PathBuf>,
@@ -1006,28 +753,6 @@ pub fn on_tick(_event) -> nil {
                 _ => panic!("expected ACP or MCP serve command"),
             }
         }
-    }
-
-    #[test]
-    fn script_method_requires_auth_denies_by_default() {
-        // Discovery and ping stay open for capability and connectivity checks.
-        assert!(!script_method_requires_auth("server/discover"));
-        assert!(!script_method_requires_auth("ping"));
-        // The previous allowlist gated only these three; they must
-        // continue to require auth under the inverted policy.
-        assert!(script_method_requires_auth("tools/call"));
-        assert!(script_method_requires_auth("resources/read"));
-        assert!(script_method_requires_auth("prompts/get"));
-        // The reason for the inversion: every other method (catalog
-        // listings, sampling, elicitation, custom RPCs) must
-        // require auth before exposing the script's surface.
-        assert!(script_method_requires_auth("tools/list"));
-        assert!(script_method_requires_auth("resources/list"));
-        assert!(script_method_requires_auth("prompts/list"));
-        assert!(script_method_requires_auth("completion/complete"));
-        assert!(script_method_requires_auth("sampling/createMessage"));
-        assert!(script_method_requires_auth("elicitation/create"));
-        assert!(script_method_requires_auth("some/custom/method"));
     }
 
     #[test]

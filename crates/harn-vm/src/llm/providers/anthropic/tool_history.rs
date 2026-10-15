@@ -118,89 +118,6 @@ pub(super) fn normalize_tool_call_ids(messages: &mut [serde_json::Value]) {
     }
 }
 
-/// Preserve a durable tool-result observation whose call envelope was removed
-/// by compaction, interruption, or a legacy recorder. Anthropic requires every
-/// `tool_result` to pair with the immediately preceding assistant message, so
-/// an orphan becomes text rather than a fabricated call or discarded evidence.
-pub(super) fn preserve_orphan_results_as_text(messages: &mut [serde_json::Value]) {
-    let mut preceding_tool_use_ids = HashSet::<String>::new();
-    for message in messages {
-        let role = message
-            .get("role")
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or_default();
-        if role == "assistant" {
-            preceding_tool_use_ids = assistant_tool_use_ids(message).unwrap_or_default();
-            continue;
-        }
-        if role != "user" {
-            preceding_tool_use_ids.clear();
-            continue;
-        }
-        let Some(blocks) = message
-            .get_mut("content")
-            .and_then(serde_json::Value::as_array_mut)
-        else {
-            preceding_tool_use_ids.clear();
-            continue;
-        };
-        let mut saw_tool_result = false;
-        for block in blocks {
-            if block.get("type").and_then(serde_json::Value::as_str) != Some("tool_result") {
-                continue;
-            }
-            saw_tool_result = true;
-            let id = block
-                .get("tool_use_id")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or_default();
-            if preceding_tool_use_ids.remove(id) {
-                continue;
-            }
-            let content = block
-                .get("content")
-                .cloned()
-                .unwrap_or(serde_json::Value::String(String::new()));
-            let text = content
-                .as_str()
-                .map(ToString::to_string)
-                .unwrap_or_else(|| {
-                    serde_json::to_string(&content)
-                        .unwrap_or_else(|_| "result unavailable".to_string())
-                });
-            *block = serde_json::json!({
-                "type": "text",
-                "text": format!("[unpaired durable tool result]\n{text}"),
-            });
-        }
-        // A recorder may persist results for one assistant turn as multiple
-        // consecutive user messages. Keep only the still-unmatched ids across
-        // those messages; an ordinary user turn closes the result envelope.
-        if !saw_tool_result {
-            preceding_tool_use_ids.clear();
-        }
-    }
-}
-
-pub(super) fn assistant_tool_use_ids(message: &serde_json::Value) -> Option<HashSet<String>> {
-    if message.get("role").and_then(serde_json::Value::as_str) != Some("assistant") {
-        return None;
-    }
-    let ids: HashSet<String> = message
-        .get("content")?
-        .as_array()?
-        .iter()
-        .filter(|block| block.get("type").and_then(serde_json::Value::as_str) == Some("tool_use"))
-        .filter_map(|block| {
-            block
-                .get("id")
-                .and_then(serde_json::Value::as_str)
-                .map(ToString::to_string)
-        })
-        .collect();
-    (!ids.is_empty()).then_some(ids)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -218,7 +135,10 @@ mod tests {
                 {"type": "tool_result", "tool_use_id": "ordinary", "content": "text"}
             ]}),
         ];
-        messages = super::super::enforce_tool_result_adjacency(messages);
+        messages = crate::llm::tool_call_history::repair_tool_call_history(messages)
+            .into_iter()
+            .map(super::super::anthropic_translate_tool_role_message)
+            .collect();
         echo_toolset_names(&mut messages);
         let results: Vec<_> = messages
             .iter()
@@ -285,57 +205,5 @@ mod tests {
         for (tool_use, tool_result) in tool_uses.iter().zip(tool_results) {
             assert_eq!(tool_use["id"], tool_result["tool_use_id"]);
         }
-    }
-
-    #[test]
-    fn orphaned_durable_tool_result_is_preserved_as_text() {
-        let mut messages = vec![
-            serde_json::json!({
-                "role": "assistant",
-                "content": [{"type": "tool_use", "id": "toolu_valid"}],
-            }),
-            serde_json::json!({
-                "role": "user",
-                "content": [
-                    {"type": "tool_result", "tool_use_id": "toolu_valid", "content": "valid"},
-                    {"type": "tool_result", "tool_use_id": "", "content": "legacy observation"},
-                ],
-            }),
-        ];
-
-        preserve_orphan_results_as_text(&mut messages);
-
-        assert_eq!(messages[1]["content"][0]["type"], "tool_result");
-        assert_eq!(messages[1]["content"][1]["type"], "text");
-        assert!(messages[1]["content"][1]["text"]
-            .as_str()
-            .expect("preserved text")
-            .contains("legacy observation"));
-    }
-
-    #[test]
-    fn matching_results_may_span_consecutive_user_messages() {
-        let mut messages = vec![
-            serde_json::json!({
-                "role": "assistant",
-                "content": [
-                    {"type": "tool_use", "id": "toolu_first"},
-                    {"type": "tool_use", "id": "toolu_second"},
-                ],
-            }),
-            serde_json::json!({
-                "role": "user",
-                "content": [{"type": "tool_result", "tool_use_id": "toolu_first", "content": "one"}],
-            }),
-            serde_json::json!({
-                "role": "user",
-                "content": [{"type": "tool_result", "tool_use_id": "toolu_second", "content": "two"}],
-            }),
-        ];
-
-        preserve_orphan_results_as_text(&mut messages);
-
-        assert_eq!(messages[1]["content"][0]["type"], "tool_result");
-        assert_eq!(messages[2]["content"][0]["type"], "tool_result");
     }
 }

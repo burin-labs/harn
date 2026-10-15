@@ -174,7 +174,7 @@ pub fn agent_observation_fingerprint(
   if len(normalized) == 0 {
     return {fingerprint: nil, surfaces: []}
   }
-  const stable = normalized.sort_by({ surface -> surface.name })
+  const stable = normalized.sorted_by({ surface -> surface.name })
   let fingerprint_rows = []
   for surface in stable {
     fingerprint_rows = fingerprint_rows

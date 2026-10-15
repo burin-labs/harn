@@ -312,34 +312,27 @@ mod tests {
     /// leaving. Rows may be removed, never added, and a row that is no longer
     /// an offender must be removed — a stale allowance is how a ratchet stops
     /// measuring anything.
-    const HARNESS_STACK_BASELINE: [&str; 27] = [
+    const HARNESS_STACK_BASELINE: [&str; 20] = [
         "harn-vm/tests/agent_inbox_e2e.rs",
         "harn-vm/tests/agent_terminal_ledger.rs",
         "harn-vm/tests/call_frame_allocations.rs",
         "harn-vm/tests/command_ledger_hold_paused_clock.rs",
         "harn-vm/tests/harn_vm/agent_fanout.rs",
-        "harn-vm/tests/harn_vm/agent_loop_output_schema.rs",
         "harn-vm/tests/harn_vm/agent_loop_steering_seams.rs",
         "harn-vm/tests/harn_vm/agent_mcp_mid_conversation.rs",
         "harn-vm/tests/harn_vm/agent_mcp_tool_ceiling.rs",
-        "harn-vm/tests/harn_vm/agent_prompt_prefix_stability.rs",
         "harn-vm/tests/harn_vm/agent_sessions.rs",
         "harn-vm/tests/harn_vm/builtin_call_dispatch.rs",
-        "harn-vm/tests/harn_vm/compaction_policy_primitive.rs",
         "harn-vm/tests/harn_vm/external_agent_errors.rs",
         "harn-vm/tests/harn_vm/github_stdlib_connectors.rs",
         "harn-vm/tests/harn_vm/host_tool_batch_overlap.rs",
         "harn-vm/tests/harn_vm/pool_multithread.rs",
-        "harn-vm/tests/harn_vm/runtime_introspection.rs",
         "harn-vm/tests/harn_vm/skill_activation_evidence_conformance.rs",
         "harn-vm/tests/harn_vm/stdlib_event_registration.rs",
         "harn-vm/tests/harn_vm/tool_call_cancellation.rs",
         "harn-vm/tests/harn_vm/tool_calling_bootcamp.rs",
-        "harn-vm/tests/harn_vm/tool_input_schema_spelling.rs",
-        "harn-vm/tests/harn_vm/tool_ref.rs",
         "harn-vm/tests/harn_vm/worker_overlap.rs",
         "harn-vm/tests/portable_kernel_parity.rs",
-        "harn-vm/tests/support/mod.rs",
     ];
 
     /// A test that drives the VM on the harness thread escapes both scans

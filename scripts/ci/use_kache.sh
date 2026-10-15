@@ -16,19 +16,19 @@
 # Usage: scripts/ci/use_kache.sh [github-env]
 set -euo pipefail
 
-KACHE_VERSION=v1.0.0
+KACHE_VERSION=v1.2.1
 KACHE_ASSET="kache-x86_64-unknown-linux-musl.tar.gz"
-KACHE_SHA256=756e9701a6afb8354fd8b1d76164e13272d320354d84f01197e57d8a3b4be397
+KACHE_SHA256=9b2b86d592c5ffb53400218f450fc6b02008bd132827ae6cd133ec8859c9b753
 
 github_env=${1:-${GITHUB_ENV:?GITHUB_ENV is required}}
 if [[ "$(uname -s)-$(uname -m)" != Linux-x86_64 ]]; then
   echo "::error::Kache is pinned for Linux x86_64 only, not $(uname -s)-$(uname -m)"
   exit 1
 fi
-max_gib=${HARN_KACHE_MAX_GIB:-100}
-[[ "$max_gib" =~ ^[1-9][0-9]*$ ]] || { echo "::error::HARN_KACHE_MAX_GIB must be a positive integer"; exit 1; }
+max_gib=${HARN_EXT_KACHE_MAX_GIB:-100}
+[[ "$max_gib" =~ ^[1-9][0-9]*$ ]] || { echo "::error::HARN_EXT_KACHE_MAX_GIB must be a positive integer"; exit 1; }
 
-root="${HARN_KACHE_ROOT:-${XDG_CACHE_HOME:-${HOME:?}/.cache}/harn-ci-kache}"
+root="${HARN_EXT_KACHE_ROOT:-${XDG_CACHE_HOME:-${HOME:?}/.cache}/harn-ci-kache}"
 kache="$root/bin/$KACHE_VERSION/kache"
 if [[ ! -x "$kache" ]]; then
   mkdir -p "$root/bin/$KACHE_VERSION"
@@ -55,6 +55,9 @@ mkdir -p "$root/store" "$root/run"
   echo "KACHE_CACHE_DIR=$root/store"
   echo "KACHE_RUNTIME_DIR=$root/run"
   echo "KACHE_CONFIG=$root/kache.toml"
+  # Persistent targets live outside the checkout. Pin telemetry to this job's
+  # source root instead of the common ancestor Kache infers from output paths.
+  echo "KACHE_EVENT_ROOT=${GITHUB_WORKSPACE:-$PWD}"
   echo "KACHE_HOST_CONFIG="
   echo "KACHE_LOCAL_ONLY=1"
   echo "KACHE_SCHEDULER=0"
@@ -62,6 +65,7 @@ mkdir -p "$root/store" "$root/run"
   echo "KACHE_AUTO_CLEAN_ORPHANED_TARGETS=0"
   echo "KACHE_AUTO_CLEAN_UNUSED_UNITS_DAYS=0"
   echo "KACHE_AUTO_RECOVER_MIN_FREE_BYTES=0"
+  echo "KACHE_AUTO_RECOVER_TARGETS=0"
   echo "KACHE_AUTO_SHARE_TARGET_FILES=0"
 } >> "$github_env"
 echo "::notice::HARN_COMPILER_CACHE=kache version=\"$version\" store=$root/store max=${max_gib}GiB"

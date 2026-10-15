@@ -38,67 +38,49 @@ pub(crate) fn required_package_string<'a>(
 }
 
 pub(crate) fn supports_current_harn(range: &str) -> bool {
-    let current = env!("CARGO_PKG_VERSION");
-    let Some((major, minor)) = parse_major_minor(current) else {
-        return true;
-    };
-    let range = range.trim();
-    if range.is_empty() {
+    let Ok(current) = semver::Version::parse(env!("CARGO_PKG_VERSION")) else {
         return false;
-    }
-    if let Some(rest) = range.strip_prefix('^') {
-        return parse_major_minor(rest).is_some_and(|(m, n)| m == major && n == minor);
-    }
-    if !range.contains([',', '<', '>', '=']) {
-        return parse_major_minor(range).is_some_and(|(m, n)| m == major && n == minor);
-    }
+    };
+    supports_harn_version(range, &current)
+}
 
-    let current_value = major * 1000 + minor;
-    let mut lower_ok = true;
-    let mut upper_ok = true;
-    let mut saw_constraint = false;
-    for raw in range.split(',') {
-        let part = raw.trim();
-        if part.is_empty() {
-            continue;
-        }
-        saw_constraint = true;
-        if let Some(rest) = part.strip_prefix(">=") {
-            if let Some((m, n)) = parse_major_minor(rest.trim()) {
-                lower_ok &= current_value >= m * 1000 + n;
-            } else {
-                return false;
-            }
-        } else if let Some(rest) = part.strip_prefix('>') {
-            if let Some((m, n)) = parse_major_minor(rest.trim()) {
-                lower_ok &= current_value > m * 1000 + n;
-            } else {
-                return false;
-            }
-        } else if let Some(rest) = part.strip_prefix("<=") {
-            if let Some((m, n)) = parse_major_minor(rest.trim()) {
-                upper_ok &= current_value <= m * 1000 + n;
-            } else {
-                return false;
-            }
-        } else if let Some(rest) = part.strip_prefix('<') {
-            if let Some((m, n)) = parse_major_minor(rest.trim()) {
-                upper_ok &= current_value < m * 1000 + n;
-            } else {
-                return false;
-            }
-        } else if let Some(rest) = part.strip_prefix('=') {
-            if let Some((m, n)) = parse_major_minor(rest.trim()) {
-                lower_ok &= current_value == m * 1000 + n;
-                upper_ok &= current_value == m * 1000 + n;
-            } else {
-                return false;
-            }
-        } else {
-            return false;
+fn supports_harn_version(range: &str, current: &semver::Version) -> bool {
+    let Ok(mut requirement) = semver::VersionReq::parse(range) else {
+        return false;
+    };
+    if !current.pre.is_empty() {
+        // Harn development runtimes remain usable within the declared bounds.
+        // This tautological lower bound opts the current prerelease into semver
+        // matching without erasing its precedence or relaxing any original bound.
+        requirement.comparators.push(semver::Comparator {
+            op: semver::Op::GreaterEq,
+            major: current.major,
+            minor: Some(current.minor),
+            patch: Some(current.patch),
+            pre: current.pre.clone(),
+        });
+    }
+    requirement.matches(current)
+}
+
+pub(crate) fn validate_runtime_compatibility(
+    manifest: &Manifest,
+    manifest_path: &Path,
+) -> Result<(), PackageError> {
+    if let Some(range) = manifest
+        .package
+        .as_ref()
+        .and_then(|package| package.harn.as_deref())
+    {
+        if !supports_current_harn(range) {
+            return Err(PackageError::Validation(format!(
+                "{}: unsupported Harn version range '{range}' in [package].harn; current version is {}",
+                manifest_path.display(),
+                env!("CARGO_PKG_VERSION"),
+            )));
         }
     }
-    saw_constraint && lower_ok && upper_ok
+    Ok(())
 }
 
 pub fn current_harn_range_example() -> String {
@@ -107,14 +89,6 @@ pub fn current_harn_range_example() -> String {
         return ">=0.7,<0.8".to_string();
     };
     format!(">={major}.{minor},<{major}.{}", minor + 1)
-}
-
-pub(crate) fn current_harn_line_label() -> String {
-    let current = env!("CARGO_PKG_VERSION");
-    let Some((major, minor)) = parse_major_minor(current) else {
-        return "0.7".to_string();
-    };
-    format!("{major}.{minor}")
 }
 
 pub(crate) fn parse_major_minor(raw: &str) -> Option<(u64, u64)> {
@@ -271,5 +245,21 @@ pub(crate) fn print_package_doctor_report(report: &PackageDoctorReport) {
         if let Some(help) = diagnostic.help.as_deref() {
             println!("  help: {help}");
         }
+    }
+}
+
+#[cfg(test)]
+mod runtime_version_tests {
+    use super::*;
+
+    #[test]
+    fn development_runtime_obeys_full_version_bounds() {
+        let current = semver::Version::parse("0.10.167-dev").unwrap();
+        assert!(supports_harn_version(">=0.10.166,<0.11", &current));
+        assert!(supports_harn_version("^0.10.166", &current));
+        assert!(supports_harn_version(">=0.10.167-dev,<0.11", &current));
+        assert!(!supports_harn_version(">=0.10.167,<0.11", &current));
+        assert!(!supports_harn_version(">=0.10.168-dev,<0.11", &current));
+        assert!(!supports_harn_version("<0.10.166", &current));
     }
 }

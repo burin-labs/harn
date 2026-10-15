@@ -1011,6 +1011,7 @@ fn job_binding_spec(
     TriggerBindingSpec {
         id: format!("job:{}", job.name),
         source: TriggerBindingSource::Dynamic,
+        ingress_subscription: false,
         kind: kind.to_string(),
         provider: ProviderId::from(provider),
         autonomy_tier: harn_vm::AutonomyTier::ActAuto,

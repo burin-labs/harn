@@ -180,9 +180,7 @@ pipeline default(harness: Harness) {
     } else {
       "B"
     }
-    pingpong_steps = pingpong_steps.appending(
-      {calls: call(name, {}), prev: ok_dispatch(name, "obs-" + to_string(i))},
-    )
+    pingpong_steps.push({calls: call(name, {}), prev: ok_dispatch(name, "obs-" + to_string(i))})
   }
   const pingpong = run_actions(harness.agent, cfg, pingpong_steps)
   harness.stdio.println("pingpong=" + pingpong.pattern)

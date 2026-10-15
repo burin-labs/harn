@@ -2,6 +2,19 @@ use super::*;
 use crate::llm::api::options::base_opts;
 use crate::llm::cost::LlmBudgetEnvelope;
 
+/// [`super::reserve`] with the attempt's token projection taken from `opts`,
+/// as an observed attempt does.
+fn reserve(
+    opts: &LlmCallOptions,
+    request: &LlmRequestPayload,
+) -> Result<Option<AttemptReservation>, VmError> {
+    super::reserve(
+        opts,
+        request,
+        crate::llm::cost_context::LlmCallTokenProjection::for_options(opts),
+    )
+}
+
 #[test]
 fn concurrent_native_calls_share_one_reservation_and_unknown_usage_keeps_it() {
     let scope = AdmissionScope::default();

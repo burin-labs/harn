@@ -112,6 +112,19 @@ pub struct BindingTypeMismatchError {
     pub span: Option<Span>,
 }
 
+/// A script-controlled expansion would build a string past the runtime's
+/// byte budget. The portable kernel reports the same failure as
+/// `value_byte_limit`; carrying it as a variant keeps that identity once the
+/// error leaves the VM instead of folding it into prose.
+#[derive(Debug, Clone)]
+pub struct ValueByteLimitError {
+    /// The expansion that was refused (`repeat`, `pad`, ...).
+    pub operation: &'static str,
+    /// Bytes the result would have needed, saturated on overflow.
+    pub requested_bytes: usize,
+    pub limit_bytes: usize,
+}
+
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub enum VmError {
@@ -193,6 +206,8 @@ pub enum VmError {
     /// The binding-site counterpart of [`VmError::ArgTypeMismatch`]; a
     /// declared type is checked wherever it is written.
     BindingTypeMismatch(Box<BindingTypeMismatchError>),
+    /// A string expansion would exceed the runtime's per-value byte budget.
+    ValueByteLimit(Box<ValueByteLimitError>),
 }
 
 impl VmError {
@@ -900,6 +915,11 @@ impl std::fmt::Display for VmError {
                     fmt_span_suffix(&err.span)
                 )
             }
+            VmError::ValueByteLimit(err) => write!(
+                f,
+                "Value byte limit: {} output would be {} bytes (limit {})",
+                err.operation, err.requested_bytes, err.limit_bytes
+            ),
             VmError::BindingTypeMismatch(err) => {
                 write!(
                     f,

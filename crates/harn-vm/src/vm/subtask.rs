@@ -199,12 +199,21 @@ pub(crate) fn prepare<F: Future>(
     registry: Arc<PoolRegistry>,
     future: F,
 ) -> PreparedSubtask<impl Future<Output = F::Output>> {
+    // The host's secret provider is a task-local, so a subtask is a new task
+    // that would otherwise resolve credentials through the configured chain
+    // instead of its session's view: a `sub_agent_run` inside `parallel` then
+    // failed to find a provider key its creator held (harn#9816).
     PreparedSubtask {
         inner: scope_ambient(
             AmbientExecutionScope::capture_for_inline_subtask(),
-            crate::tool_registry::preparation_scope::scope_subtask(
-                with_pool_registry_scope(registry, future),
-                true,
+            // Boxed so the provider scope adds a pointer, not a nested state
+            // machine, to the frame of every `parallel` branch.
+            crate::secrets::with_active_secret_provider(
+                crate::secrets::active_secret_provider(),
+                Box::pin(crate::tool_registry::preparation_scope::scope_subtask(
+                    with_pool_registry_scope(registry, future),
+                    true,
+                )),
             ),
         ),
     }

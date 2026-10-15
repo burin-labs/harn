@@ -30,18 +30,13 @@ use std::sync::{Mutex, OnceLock};
 use crate::value::VmError;
 
 mod assets;
-mod ast;
 mod error;
-mod expr_parser;
 pub mod filters;
-mod lexer;
-pub mod lint;
 pub(crate) mod llm_context;
-pub mod outline;
-mod parser;
 mod render;
 mod sections;
-pub mod vocabulary;
+use harn_prompt_syntax::{ast, parser};
+pub use harn_prompt_syntax::{lint, outline, validate_template_syntax, vocabulary};
 
 #[cfg(test)]
 mod tests;
@@ -286,14 +281,6 @@ fn warn_user_llm_shadowed(asset: &TemplateAsset) {
             ),
         ]),
     );
-}
-
-/// Parse-only validation for lint/preflight. Returns a human-readable error
-/// message when the template body is syntactically invalid; `Ok(())` when the
-/// template would parse. Does not resolve `{{ include }}` targets — those are
-/// validated at render time with their own error reporting.
-pub fn validate_template_syntax(src: &str) -> Result<(), String> {
-    parser::parse(src).map(|_| ()).map_err(|e| e.message())
 }
 
 /// Full-featured entrypoint that preserves errors. `base` is the directory

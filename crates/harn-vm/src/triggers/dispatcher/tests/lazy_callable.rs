@@ -17,6 +17,7 @@ async fn lazy_dispatcher(
     install_manifest_triggers(vec![TriggerBindingSpec {
         id: "lazy-github-issue".to_string(),
         source: TriggerBindingSource::Manifest,
+        ingress_subscription: false,
         kind: "webhook".to_string(),
         provider: ProviderId::from("github"),
         autonomy_tier,

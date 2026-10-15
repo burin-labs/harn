@@ -221,7 +221,7 @@
     },
     {
       "max_bytes": 233845,
-      "path": "crates/harn-vm/src/provider_catalog/schema.rs"
+      "path": "crates/harn-provider-catalog/src/schema.rs"
     },
     {
       "max_bytes": 159582,

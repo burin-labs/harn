@@ -1,5 +1,8 @@
 //! Message-history normalization: tool-result adjacency, orphan and duplicate
 //! results, parallel tool-call splitting, and image relocation.
+//!
+//! Pairing is repaired by `tool_call_history` when the payload is built;
+//! `base_request_payload` bypasses that seam, so those cases apply it here.
 
 use super::fixtures::{base_request_payload, part_is_image};
 use crate::llm::providers::openai_compat::messages::{
@@ -7,6 +10,10 @@ use crate::llm::providers::openai_compat::messages::{
 };
 use crate::llm::providers::openai_compat::OpenAiCompatibleProvider;
 use serde_json::json;
+
+fn repaired(messages: Vec<serde_json::Value>) -> Vec<serde_json::Value> {
+    crate::llm::tool_call_history::repair_tool_call_history(messages)
+}
 
 #[test]
 fn tool_message_image_relocated_to_following_user_message() {
@@ -65,7 +72,7 @@ fn strict_provider_defers_feedback_until_after_tool_result() {
     let mut payload = base_request_payload();
     payload.provider = "minimax".to_string();
     payload.model = "MiniMax-M2".to_string();
-    payload.messages = vec![
+    payload.messages = repaired(vec![
         json!({"role": "user", "content": "inspect"}),
         json!({
             "role": "assistant",
@@ -78,7 +85,7 @@ fn strict_provider_defers_feedback_until_after_tool_result() {
         }),
         json!({"role": "user", "content": "[runtime_feedback] keep going"}),
         json!({"role": "tool", "tool_call_id": "call_001", "content": "fn main() {}"}),
-    ];
+    ]);
 
     let body = OpenAiCompatibleProvider::build_request_body(&payload);
     let messages = body["messages"].as_array().expect("messages array");
@@ -96,7 +103,7 @@ fn strict_provider_keeps_parallel_tool_results_adjacent() {
     let mut payload = base_request_payload();
     payload.provider = "moonshot".to_string();
     payload.model = "moonshot/kimi-k2.6".to_string();
-    payload.messages = vec![
+    payload.messages = repaired(vec![
         json!({"role": "user", "content": "inspect"}),
         json!({
             "role": "assistant",
@@ -117,7 +124,7 @@ fn strict_provider_keeps_parallel_tool_results_adjacent() {
         json!({"role": "user", "content": "[runtime_feedback] keep going"}),
         json!({"role": "tool", "tool_call_id": "call_002", "content": "b"}),
         json!({"role": "tool", "tool_call_id": "call_001", "content": "a"}),
-    ];
+    ]);
 
     let body = OpenAiCompatibleProvider::build_request_body(&payload);
     let messages = body["messages"].as_array().expect("messages array");
@@ -148,7 +155,7 @@ fn native_route_preserves_unpaired_results_without_tool_metadata() {
             }
         }
     })]);
-    payload.messages = vec![
+    payload.messages = repaired(vec![
         json!({"role": "user", "content": "inspect"}),
         json!({"role": "tool", "tool_call_id": "stale_call", "content": "stale compacted result"}),
         json!({
@@ -163,7 +170,7 @@ fn native_route_preserves_unpaired_results_without_tool_metadata() {
         json!({"role": "tool", "tool_call_id": "call_001", "content": "fresh result"}),
         json!({"role": "tool", "tool_call_id": "call_001", "content": "duplicate result"}),
         json!({"role": "user", "content": "continue"}),
-    ];
+    ]);
 
     let body = OpenAiCompatibleProvider::build_request_body(&payload);
     let messages = body["messages"].as_array().expect("messages array");
@@ -191,7 +198,7 @@ fn native_route_preserves_unpaired_results_without_tool_metadata() {
 #[test]
 fn unpaired_observation_does_not_split_parallel_tool_results() {
     let mut payload = base_request_payload();
-    payload.messages = vec![
+    payload.messages = repaired(vec![
         json!({
             "role": "assistant", "content": "",
             "tool_calls": [
@@ -202,7 +209,7 @@ fn unpaired_observation_does_not_split_parallel_tool_results() {
         json!({"role": "tool", "tool_call_id": "c1", "content": "first"}),
         json!({"role": "tool", "tool_call_id": "stale", "content": "still useful"}),
         json!({"role": "tool", "tool_call_id": "c2", "content": "second"}),
-    ];
+    ]);
     let body = OpenAiCompatibleProvider::build_request_body(&payload);
     let messages = body["messages"].as_array().expect("messages array");
     assert_eq!(messages[0]["role"], "assistant");
@@ -218,7 +225,7 @@ fn unpaired_observation_does_not_split_parallel_tool_results() {
 #[test]
 fn trimmed_result_keeps_text_and_images_when_next_request_has_no_tools() {
     let mut payload = base_request_payload();
-    payload.messages = vec![json!({
+    payload.messages = repaired(vec![json!({
         "role": "tool_result",
         "tool_use_id": "trimmed_call",
         "name": "screenshot",
@@ -226,7 +233,7 @@ fn trimmed_result_keeps_text_and_images_when_next_request_has_no_tools() {
             {"type": "text", "text": "The build failed."},
             {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAAA"}},
         ],
-    })];
+    })]);
 
     let body = OpenAiCompatibleProvider::build_request_body(&payload);
     let messages = body["messages"].as_array().expect("messages array");

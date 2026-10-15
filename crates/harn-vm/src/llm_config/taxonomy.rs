@@ -71,16 +71,7 @@ pub(crate) fn infer_provider_with_config(
     )
 }
 
-pub(super) fn configured_provider_selector<'a>(
-    config: &ProvidersConfig,
-    selector: &'a str,
-) -> Option<&'a str> {
-    let (provider, model) = selector.split_once(':')?;
-    if model.is_empty() {
-        return None;
-    }
-    config.providers.contains_key(provider).then_some(provider)
-}
+pub(super) use harn_provider_catalog::configured_provider_selector;
 
 pub fn default_provider() -> String {
     let config = effective_config();
@@ -199,52 +190,15 @@ pub fn model_tier(model_id: &str) -> String {
     model_tier_with_config(&config, model_id)
 }
 
-pub(crate) fn model_tier_with_config(config: &ProvidersConfig, model_id: &str) -> String {
-    // Per-model self-declared tier wins. This is the only path.
-    if let Some(model) = config.models.get(model_id) {
-        if let Some(tier) = model.tier.as_deref() {
-            let trimmed = tier.trim();
-            if !trimmed.is_empty() {
-                return trimmed.to_string();
-            }
-        }
-    }
-    // Legacy pattern-rules: still consulted while we finish migrating the
-    // long tail of models to per-row `tier = "..."`. Newly added rows
-    // should set `tier` directly; the rule table is a fallback only.
-    for rule in &config.tier_rules {
-        if let Some(exact) = &rule.exact {
-            if model_id == exact {
-                return rule.tier.clone();
-            }
-        }
-        if let Some(pattern) = &rule.pattern {
-            if glob_match(pattern, model_id) {
-                return rule.tier.clone();
-            }
-        }
-        if let Some(substr) = &rule.contains {
-            if model_id.contains(substr.as_str()) {
-                return rule.tier.clone();
-            }
-        }
-    }
-    config.tier_defaults.default.clone()
-}
+pub(crate) use harn_provider_catalog::taxonomy::{
+    derive_model_family, derive_model_lineage, model_family_with_config, model_lineage_with_config,
+    model_tier_with_config, normalized_catalog_token,
+};
 
 /// Return the normalized model-family token used for cross-family review.
 pub fn model_family(provider: &str, model_id: &str) -> String {
     let config = effective_config();
     model_family_with_config(&config, provider, model_id)
-}
-
-pub(crate) fn model_family_with_config(
-    config: &ProvidersConfig,
-    provider: &str,
-    model_id: &str,
-) -> String {
-    catalog_family_token(config, model_id)
-        .unwrap_or_else(|| derive_model_family(provider, model_id))
 }
 
 pub(crate) fn model_family_with_inference_source(
@@ -253,7 +207,11 @@ pub(crate) fn model_family_with_inference_source(
     model_id: &str,
     source: crate::llm::provider::ProviderInferenceSource,
 ) -> String {
-    if let Some(family) = catalog_family_token(config, model_id) {
+    if let Some(family) = config
+        .models
+        .get(model_id)
+        .and_then(|model| normalized_catalog_token(model.family.as_deref()))
+    {
         return family;
     }
     let id_family = derive_model_family("", model_id);
@@ -275,22 +233,17 @@ pub fn model_lineage(provider: &str, model_id: &str) -> String {
     model_lineage_with_config(&config, provider, model_id)
 }
 
-pub(crate) fn model_lineage_with_config(
-    config: &ProvidersConfig,
-    provider: &str,
-    model_id: &str,
-) -> String {
-    catalog_lineage_token(config, model_id)
-        .unwrap_or_else(|| derive_model_lineage(provider, model_id))
-}
-
 pub(crate) fn model_lineage_with_inference_source(
     config: &ProvidersConfig,
     provider: &str,
     model_id: &str,
     source: crate::llm::provider::ProviderInferenceSource,
 ) -> String {
-    if let Some(lineage) = catalog_lineage_token(config, model_id) {
+    if let Some(lineage) = config
+        .models
+        .get(model_id)
+        .and_then(|model| normalized_catalog_token(model.lineage.as_deref()))
+    {
         return lineage;
     }
     let id_lineage = derive_model_lineage("", model_id);
@@ -304,152 +257,4 @@ pub(crate) fn model_lineage_with_inference_source(
         return "unknown".to_string();
     }
     derive_model_lineage(provider, model_id)
-}
-
-fn catalog_family_token(config: &ProvidersConfig, model_id: &str) -> Option<String> {
-    config
-        .models
-        .get(model_id)
-        .and_then(|model| normalized_catalog_token(model.family.as_deref()))
-}
-
-fn catalog_lineage_token(config: &ProvidersConfig, model_id: &str) -> Option<String> {
-    config
-        .models
-        .get(model_id)
-        .and_then(|model| normalized_catalog_token(model.lineage.as_deref()))
-}
-
-pub(crate) fn normalized_catalog_token(value: Option<&str>) -> Option<String> {
-    value
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(|value| value.to_ascii_lowercase().replace('_', "-"))
-}
-
-fn derive_model_family(provider: &str, model_id: &str) -> String {
-    let id = model_id.to_ascii_lowercase();
-    if contains_any(&id, &["claude", "anthropic.claude"]) {
-        return "anthropic-claude".to_string();
-    }
-    if contains_any(&id, &["gemini", "google/gemini"]) {
-        return "google-gemini".to_string();
-    }
-    if contains_any(&id, &["deepseek"]) {
-        return "deepseek".to_string();
-    }
-    if contains_any(&id, &["qwen"]) {
-        return "qwen".to_string();
-    }
-    if contains_any(&id, &["kimi", "moonshot"]) {
-        return "kimi".to_string();
-    }
-    if contains_any(&id, &["glm", "z-ai/glm", "zhipu"]) {
-        return "glm".to_string();
-    }
-    if contains_any(&id, &["mistral", "mixtral", "devstral"]) {
-        return "mistral".to_string();
-    }
-    if contains_any(&id, &["minimax"]) {
-        return "minimax".to_string();
-    }
-    if contains_any(&id, &["llama"]) {
-        return "llama".to_string();
-    }
-    if contains_any(&id, &["gemma"]) {
-        return "gemma".to_string();
-    }
-    if is_openai_reasoning_model(&id) {
-        return "openai-reasoning".to_string();
-    }
-    if contains_any(&id, &["gpt-oss", "openai/gpt", "gpt-"]) {
-        return "openai-gpt".to_string();
-    }
-    match provider {
-        "anthropic" | "bedrock" | "vertex-anthropic" => "anthropic-claude".to_string(),
-        "openai" | "azure" | "azure_openai" => "openai-gpt".to_string(),
-        "gemini" | "vertex" | "google" => "google-gemini".to_string(),
-        "deepseek" => "deepseek".to_string(),
-        "zai" => "glm".to_string(),
-        "minimax" => "minimax".to_string(),
-        other if !other.is_empty() => normalize_identifier_token(other),
-        _ => "unknown".to_string(),
-    }
-}
-
-fn derive_model_lineage(provider: &str, model_id: &str) -> String {
-    let id = model_id.to_ascii_lowercase();
-    if contains_any(&id, &["haiku"]) {
-        return "claude-haiku".to_string();
-    }
-    if contains_any(&id, &["opus-4-7", "opus-4-8", "opus-mythos"]) {
-        return "claude-opus-adaptive".to_string();
-    }
-    if contains_any(&id, &["claude"]) {
-        return "claude-sonnet-opus".to_string();
-    }
-    if contains_any(&id, &["gpt-5"]) {
-        return "openai-gpt5".to_string();
-    }
-    if is_openai_reasoning_model(&id) {
-        return "openai-reasoning".to_string();
-    }
-    if contains_any(&id, &["gpt-", "gpt_"]) {
-        return "openai-legacy".to_string();
-    }
-    if contains_any(&id, &["gemini"]) {
-        if contains_any(&id, &["flash"]) {
-            return "gemini-flash".to_string();
-        }
-        return "gemini-pro".to_string();
-    }
-    if contains_any(&id, &["qwen3", "qwen/qwen3"]) {
-        return "qwen3".to_string();
-    }
-    if contains_any(&id, &["gemma4", "gemma-4"]) {
-        return "gemma4".to_string();
-    }
-    let family = derive_model_family(provider, model_id);
-    if family == "unknown" {
-        "unknown".to_string()
-    } else {
-        family
-    }
-}
-
-fn contains_any(haystack: &str, needles: &[&str]) -> bool {
-    needles.iter().any(|needle| haystack.contains(needle))
-}
-
-fn starts_with_any(haystack: &str, prefixes: &[&str]) -> bool {
-    prefixes.iter().any(|prefix| haystack.starts_with(prefix))
-}
-
-fn is_openai_reasoning_model(id: &str) -> bool {
-    starts_with_any(id, &["o1", "o3", "o4"])
-        || contains_any(
-            id,
-            &[
-                "/o1", "/o3", "/o4", ":o1", ":o3", ":o4", ".o1", ".o3", ".o4",
-            ],
-        )
-}
-
-fn normalize_identifier_token(value: &str) -> String {
-    value
-        .trim()
-        .to_ascii_lowercase()
-        .chars()
-        .map(|ch| {
-            if ch.is_ascii_alphanumeric() || ch == '-' {
-                ch
-            } else {
-                '-'
-            }
-        })
-        .collect::<String>()
-        .split('-')
-        .filter(|part| !part.is_empty())
-        .collect::<Vec<_>>()
-        .join("-")
 }

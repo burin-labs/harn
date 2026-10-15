@@ -119,7 +119,7 @@ fn process(input) {
     throw "expected string, got ${type_of(input)}"
   }
   // input is guaranteed non-nil and a string here
-  return input.uppercase()
+  return input.upper()
 }
 ```
 

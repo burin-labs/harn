@@ -278,7 +278,7 @@ fn __tool_parse_narration(body: string, tools: any) -> dict {
       if close_at >= 0 {
         const text = trim(rest.slice(len(open), close_at))
         if text != "" {
-          prose = prose.appending(text)
+          prose.push(text)
         }
         rest = trim(rest.slice(close_at + len(close), len(rest)))
       }

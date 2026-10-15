@@ -9,9 +9,9 @@ impl crate::vm::Vm {
         args: &[VmValue],
     ) -> Result<VmValue, VmError> {
         match method {
-            "count" => Ok(VmValue::Int(string_char_count(s) as i64)),
+            "len" => Ok(VmValue::Int(string_char_count(s) as i64)),
             "empty" => Ok(VmValue::Bool(s.is_empty())),
-            "contains" | "includes" => Ok(VmValue::Bool(
+            "contains" => Ok(VmValue::Bool(
                 s.contains(&*args.first().map(|a| a.as_str_cow()).unwrap_or_default()),
             )),
             "replace" if args.len() >= 2 => Ok(VmValue::String(arcstr::ArcStr::from(
@@ -34,8 +34,8 @@ impl crate::vm::Vm {
             "ends_with" => Ok(VmValue::Bool(
                 s.ends_with(&*args.first().map(|a| a.as_str_cow()).unwrap_or_default()),
             )),
-            "lowercase" => Ok(VmValue::String(arcstr::ArcStr::from(s.to_lowercase()))),
-            "uppercase" => Ok(VmValue::String(arcstr::ArcStr::from(s.to_uppercase()))),
+            "lower" => Ok(VmValue::String(arcstr::ArcStr::from(s.to_lowercase()))),
+            "upper" => Ok(VmValue::String(arcstr::ArcStr::from(s.to_uppercase()))),
             "substring" => Ok(VmValue::String(arcstr::ArcStr::from(
                 crate::stdlib::strings::char_substring(
                     s,
@@ -85,7 +85,7 @@ impl crate::vm::Vm {
                 let repeated = crate::limits::checked_repeat(s, n.max(0) as usize)?;
                 Ok(VmValue::String(arcstr::ArcStr::from(repeated)))
             }
-            "reversed" | "reverse" => Ok(VmValue::String(arcstr::ArcStr::from(
+            "reversed" => Ok(VmValue::String(arcstr::ArcStr::from(
                 s.chars().rev().collect::<String>(),
             ))),
             "pad_left" | "pad_right" => {
@@ -141,17 +141,17 @@ impl crate::vm::Vm {
                     .map(VmValue::char_value)
                     .unwrap_or(VmValue::Nil))
             }
-            "last_index_of" | "rfind" => {
+            "last_index_of" => {
                 let needle = args.first().map(|a| a.as_str_cow()).unwrap_or_default();
                 let idx = s
                     .rfind(&*needle)
                     .map(|byte_pos| byte_offset_to_char_index(s, byte_pos) as i64);
                 Ok(VmValue::Int(idx.unwrap_or(-1)))
             }
-            "lower" | "to_lower" => Ok(VmValue::String(arcstr::ArcStr::from(s.to_lowercase()))),
-            "upper" | "to_upper" => Ok(VmValue::String(arcstr::ArcStr::from(s.to_uppercase()))),
-            "len" => Ok(VmValue::Int(string_char_count(s) as i64)),
-            _ => Err(VmError::Runtime(format!("string has no method `{method}`"))),
+            _ => Err(Self::no_builtin_method_error(
+                harn_parser::builtin_methods::MethodReceiver::String,
+                method,
+            )),
         }
     }
 }

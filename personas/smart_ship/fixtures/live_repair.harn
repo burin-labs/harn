@@ -1,0 +1,358 @@
+import { agent_tool_handler_result } from "std/agent/tool_lifecycle"
+import { ToolRegistry } from "std/tools"
+import {
+  Controller,
+  Fence,
+  GitStore,
+  RepairModel,
+  RepairPermit,
+  bind_job,
+  checkpoint_bytes,
+  checkpoint_id,
+  checkpoint_valid,
+  claim_repair,
+  commit_state,
+  complete,
+  execute_job,
+  finish_repair,
+  freeze_snapshot,
+  local_lineage,
+  offer,
+  prepare_job,
+  prepare_state,
+  read_state,
+  repair_allowance,
+  repair_authorized,
+  repair_spend,
+  run_job,
+  run_repair,
+  snapshot_id,
+  start,
+} from "../lib/main"
+import { Interaction, prepare_interaction } from "./interaction"
+import { STACKS, git, job } from "./neutral"
+
+type Experiment = {stack: string, model: RepairModel}
+
+fn fence(state: Controller) -> Fence {
+  return pick(state.authority, ["installation", "generation", "revision", "controller"])
+}
+
+fn save(process: HarnessProcess, store: GitStore, next: Controller) {
+  const prior = read_state(process, store)
+  const write = prepare_state(process, store, prior, next)
+  require commit_state(process, store, write).status == "committed",
+    "controller state CAS did not commit"
+}
+
+fn current(process: HarnessProcess, store: GitStore) -> Controller {
+  const state = read_state(process, store).state
+  if state == nil {
+    throw "controller state is absent"
+  }
+  return state
+}
+
+fn authorized(
+  harness: {clock: HarnessClock, process: HarnessProcess},
+  store: GitStore,
+  permit: RepairPermit,
+) {
+  const state = current(harness.process, store)
+  require repair_authorized(state, permit, harness.clock.now_ms()),
+    "repair effect no longer has an active owner and lease"
+}
+
+fn workspace_tools(
+  harness: Harness,
+  scenario: Interaction,
+  store: GitStore,
+  permit: RepairPermit,
+) -> ToolRegistry {
+  const root = scenario.root
+  const stack = scenario.stack
+  const control = pick(harness, ["clock", "process"])
+  let tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "read_file",
+    "Read one file in the repair project.",
+    {
+      parameters: {path: {type: "string"}},
+      returns: {type: "string"},
+      annotations: {kind: "read"},
+      handler: { args ->
+        authorized(control, store, permit)
+        require stack.files.contains(args.path), "read is outside the admitted project files"
+        harness.fs.read_text(path_join(root, args.path))
+      },
+    },
+  )
+  tools = tool_define(
+    tools,
+    "write_file",
+    "Replace the capacity implementation. Tests and reviewed worker configuration are read-only.",
+    {
+      parameters: {path: {type: "string"}, content: {type: "string"}},
+      returns: {type: "string"},
+      annotations: {kind: "edit", side_effect_level: "workspace_write"},
+      handler: { args ->
+        authorized(control, store, permit)
+        require args.path == stack.capacity_path && len(args.content) <= 65536,
+          "write is outside the repair scope or exceeds its limit"
+        harness.fs.write_text(path_join(root, args.path), args.content)
+        "source proposal written"
+      },
+    },
+  )
+  tools = tool_define(
+    tools,
+    "run_tests",
+    "Run the frozen project test command and return observed results.",
+    {
+      parameters: {},
+      returns: {type: "object"},
+      annotations: {
+        kind: "execute",
+        side_effect_level: "process_exec",
+        completion_evidence_role: "verification",
+      },
+      handler: { _args ->
+        authorized(control, store, permit)
+        const changed = git(harness.process, root, ["diff", "--name-only", "HEAD"])
+        require changed == "" || changed == stack.capacity_path, "repair changed an unapproved path"
+        if changed != "" {
+          git(harness.process, root, ["add", "--", stack.capacity_path])
+          git(
+            harness.process,
+            root,
+            ["commit", "--quiet", "-m", "propose forward integration repair"],
+          )
+        }
+        const measured = run_job(
+          pick(harness, ["clock", "fs", "process", "random", "system"]),
+          job(
+            pick(harness, ["env", "system"]),
+            stack,
+            root,
+            "repair-feedback-" + harness.random.uuid(),
+          ),
+          {id: "executor", private_key: scenario.fixture.private_key},
+        )
+        harness.stdio.println(
+          json_stringify(
+            {
+              stage: "repair_feedback",
+              stack: stack.name,
+              result: measured.proof.original.result,
+              tests: measured.proof.original.tests,
+              stdout: measured.stdout,
+              stderr: measured.stderr,
+            },
+          ),
+        )
+        agent_tool_handler_result(
+          measured.stdout + "\n" + measured.stderr,
+          pick(measured.proof.original, ["result", "tests"]),
+          if measured.proof.original.result == "passed" {
+            "ok"
+          } else {
+            "error"
+          },
+        )
+      },
+    },
+  )
+  return schema_expect(tools, schema_of(ToolRegistry))
+}
+
+fn main(harness: Harness) {
+  const config: Experiment = schema_expect(json_parse(argv[0] ?? "{}"), schema_of(Experiment))
+  require config.model.provider != "mock", "live repair must execute a real provider"
+  const stack = STACKS.find({ item -> item.name == config.stack })
+  require stack != nil, "unknown neutral stack"
+  const scenario = prepare_interaction(harness, stack)
+  defer {
+    harness.fs.delete(scenario.root)
+  }
+  const state_root = harness.fs.mkdtemp_in_workspace("smart-ship-live-state-")
+  defer {
+    harness.fs.delete(state_root)
+  }
+  const objects = path_join(state_root, "controller.git")
+  const remote = path_join(state_root, "remote.git")
+  git(harness.process, state_root, ["init", "--quiet", "--bare", objects])
+  git(harness.process, state_root, ["init", "--quiet", "--bare", remote])
+  git(harness.process, objects, ["config", "user.name", "Smart Ship Fixture"])
+  git(harness.process, objects, ["config", "user.email", "fixture@example.invalid"])
+  const store: GitStore = {
+    workspace: objects,
+    remote: remote,
+    ref: "refs/heads/smart-ship-state",
+    timeout_ms: 10000,
+    signed_commits: false,
+  }
+  const initial: Controller = {
+    schema: "smart-ship.controller.v1",
+    authority: scenario.authority,
+    active: nil,
+    pending: nil,
+    checkpoint: scenario.checkpoint,
+    incidents: [],
+    effects: [],
+    unverified_since_ms: nil,
+  }
+  save(harness.process, store, initial)
+  const policy = scenario.fixture.policy
+  const queued = unwrap(
+    offer(initial, fence(initial), scenario.candidate, policy, harness.clock.now_ms()),
+  )
+  save(harness.process, store, queued)
+  const running = unwrap(start(queued, fence(queued)))
+  save(harness.process, store, running)
+  const failed = unwrap(
+    complete(running, fence(running), scenario.candidate, [scenario.combined.proof], policy),
+  )
+  save(harness.process, store, failed)
+  require failed.authority.previous_checkpoint == checkpoint_id(scenario.checkpoint),
+    "failure advanced the checkpoint"
+  const incident = failed.incidents[0]
+  require incident != nil && incident.verification.failed == ["tests"],
+    "combined failure did not open an incident"
+  const owner = "repair-" + harness.random.uuid()
+  const claimed = unwrap(
+    claim_repair(
+      failed,
+      fence(failed),
+      incident.id,
+      owner,
+      harness.clock.now_ms(),
+      config.model.timeout_ms + 10000,
+      config.model.max_usd,
+      policy,
+    ),
+  )
+  save(harness.process, store, claimed)
+  const lease = claimed.incidents[0]
+  require lease != nil, "repair lease is absent"
+  const permit: RepairPermit = {
+    installation: claimed.authority.installation,
+    generation: claimed.authority.generation,
+    controller: claimed.authority.controller,
+    owner: owner,
+    incident: incident.id,
+    attempt: len(lease.attempts),
+  }
+  const repair = run_repair(
+    harness,
+    {
+      incident: incident.id,
+      snapshot: snapshot_id(scenario.candidate),
+      intent: [
+        "Preserve the reviewed idle capacity of 2",
+        "Serve the reviewed configuration of 3 active workers without exceeding capacity",
+      ],
+      failure: scenario.combined.stdout + "\n" + scenario.combined.stderr,
+      files: stack.files,
+    },
+    workspace_tools(harness, scenario, store, permit),
+    config.model,
+    { -> repair_allowance(current(harness.process, store), permit, harness.clock.now_ms()) },
+  )
+  harness.stdio.println(
+    json_stringify({stage: "repair_returned", stack: stack.name, repair: repair}),
+  )
+  const after_worker = current(harness.process, store)
+  const accounted = unwrap(
+    finish_repair(
+      after_worker,
+      fence(after_worker),
+      incident.id,
+      owner,
+      len(lease.attempts),
+      repair.cost_usd,
+    ),
+  )
+  save(harness.process, store, accounted)
+  harness.stdio.println(
+    json_stringify(
+      {
+        stage: "repair_accounted",
+        stack: stack.name,
+        checkpoint_preserved: accounted.authority.previous_checkpoint
+          == checkpoint_id(scenario.checkpoint),
+        spend: repair_spend(accounted.incidents.find({ item -> item.id == incident.id })!),
+      },
+    ),
+  )
+  require repair.cost_usd != nil && repair.unpriced_calls == 0 && repair.usage_unknown_calls == 0,
+    "repair spend is not completely measured; incident budget remains unavailable"
+  require accounted.authority.previous_checkpoint == checkpoint_id(scenario.checkpoint),
+    "agent completion advanced the checkpoint"
+  require repair.provider_calls > 0 && repair.terminal.kind == "natural",
+    "repair did not complete a real provider run"
+  require repair.successful_tools.contains("write_file")
+    && repair.successful_tools.contains("run_tests"),
+    "repair did not reach source mutation and passing verification"
+  const final_plan = prepare_job(
+    pick(harness, ["clock", "fs", "process", "random", "system"]),
+    job(pick(harness, ["env", "system"]), stack, scenario.root, "independent-verification"),
+  )
+  const repaired = freeze_snapshot(
+    scenario.candidate
+      + {
+        sequence: 3,
+        sources: [final_plan.source],
+        requirements: [final_plan.requirement],
+        created_at_ms: harness.clock.now_ms(),
+      },
+  )
+  const next = unwrap(offer(accounted, fence(accounted), repaired, policy, harness.clock.now_ms()))
+  save(harness.process, store, next)
+  const verifying = unwrap(start(next, fence(next)))
+  save(harness.process, store, verifying)
+  const measured = execute_job(
+    pick(harness, ["clock", "fs", "process", "random", "system"]),
+    bind_job(final_plan, repaired),
+    {id: "executor", private_key: scenario.fixture.private_key},
+  )
+  require measured.proof.original.result == "passed"
+    && measured.proof.original.source.commit != scenario.combined.proof.original.source.commit,
+    "independent verification did not prove a new passing source"
+  const lineage = local_lineage(
+    harness.process,
+    scenario.root,
+    measured.proof.original.source,
+    scenario.candidate.changes,
+  )
+  require lineage.required == 2 && lineage.checked == 2 && len(lineage.missing) == 0
+    && len(lineage.unknown) == 0,
+    "repair lost admitted work or source ancestry is unmeasured"
+  const finished = unwrap(complete(verifying, fence(verifying), repaired, [measured.proof], policy))
+  save(harness.process, store, finished)
+  require current(harness.process, store).incidents.all({ item -> item.resolved }),
+    "independent verification did not resolve the incident"
+  const checkpoint = current(harness.process, store).checkpoint
+  require checkpoint != nil && checkpoint_id(checkpoint) != checkpoint_id(scenario.checkpoint),
+    "checkpoint did not advance"
+  const signed = {
+    checkpoint: checkpoint,
+    signer: "publisher",
+    signature: ed25519_sign(scenario.fixture.private_key, checkpoint_bytes(checkpoint)),
+  }
+  require checkpoint_valid(signed, policy), "release consumer refused the checkpoint"
+  harness.stdio.println(
+    json_stringify(
+      {
+        stack: stack.name,
+        repair: repair,
+        lineage: lineage,
+        previous_checkpoint: checkpoint_id(scenario.checkpoint),
+        checkpoint_id: checkpoint_id(checkpoint),
+        checkpoint: signed,
+        combined_tests: scenario.combined.proof.original.tests,
+        repaired_tests: measured.proof.original.tests,
+      },
+    ),
+  )
+}

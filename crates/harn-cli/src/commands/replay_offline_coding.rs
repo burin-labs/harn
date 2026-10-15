@@ -994,7 +994,9 @@ fn snapshot_tree_into(
             ));
         }
         if metadata.is_dir() {
-            snapshot_tree_into(root, &path, snapshot)?;
+            if !harn_vm::process_sandbox::is_workspace_runtime_directory(&entry.file_name()) {
+                snapshot_tree_into(root, &path, snapshot)?;
+            }
         } else if metadata.is_file() {
             let relative = path
                 .strip_prefix(root)
@@ -1173,6 +1175,29 @@ fn print_human(ok: bool, receipt: &OfflineCodingReplayData) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn replay_snapshot_retains_application_directories_and_omits_runtime_directories() {
+        let workspace = tempfile::tempdir().unwrap();
+        for name in [
+            "src",
+            ".harn-tmp-extra",
+            ".harn-tmp",
+            ".harn-toolchain-cache",
+        ] {
+            let directory = workspace.path().join(name);
+            std::fs::create_dir(&directory).unwrap();
+            std::fs::write(directory.join("note.txt"), name).unwrap();
+        }
+        let snapshot = super::snapshot_tree(workspace.path()).unwrap();
+        assert_eq!(
+            snapshot.keys().map(String::as_str).collect::<Vec<_>>(),
+            [".harn-tmp-extra/note.txt", "src/note.txt"]
+        );
+        std::fs::write(workspace.path().join("src/note.txt"), "changed").unwrap();
+        let changed = super::snapshot_tree(workspace.path()).unwrap();
+        assert_ne!(snapshot["src/note.txt"], changed["src/note.txt"]);
+    }
+
     use std::collections::BTreeMap;
     use std::fs;
 

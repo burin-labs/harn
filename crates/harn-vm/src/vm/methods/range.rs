@@ -9,9 +9,9 @@ impl crate::vm::Vm {
         args: &[VmValue],
     ) -> Option<Result<VmValue, VmError>> {
         let result = match method {
-            "len" | "count" => Ok(VmValue::Int(r.len())),
+            "len" => Ok(VmValue::Int(r.len())),
             "empty" => Ok(VmValue::Bool(r.is_empty())),
-            "contains" | "includes" => {
+            "contains" => {
                 let needle = args.first().unwrap_or(&VmValue::Nil);
                 let result = match needle {
                     VmValue::Int(n) => r.contains(*n),

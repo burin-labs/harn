@@ -20,19 +20,6 @@ impl ReportedCacheUsage {
         self.read_tokens.is_some() || self.write_tokens.is_some()
     }
 
-    /// Each streamed frame updates only the categories it actually reports.
-    pub(crate) fn merge_value(
-        &mut self,
-        value: &serde_json::Value,
-    ) -> Result<(), crate::value::VmError> {
-        let newer = Self::from_value(value).map_err(|reason| {
-            crate::value::VmError::Runtime(format!("invalid provider cache usage: {reason}"))
-        })?;
-        self.read_tokens = newer.read_tokens.or(self.read_tokens);
-        self.write_tokens = newer.write_tokens.or(self.write_tokens);
-        Ok(())
-    }
-
     pub(crate) fn complete_prompt_tokens(&self, fresh: i64) -> Option<i64> {
         super::PromptTokenCounts::from_reported(
             fresh,
@@ -52,18 +39,17 @@ mod tests {
 
     #[test]
     fn omitted_cache_categories_cannot_authorize_prompt_settlement() {
-        let mut usage =
-            ReportedCacheUsage::from_value(&json!({"cache_read_input_tokens": 0})).unwrap();
+        let usage = ReportedCacheUsage::from_value(&json!({"cache_read_input_tokens": 0})).unwrap();
         assert_eq!(usage.complete_prompt_tokens(7), None);
-        usage
-            .merge_value(&json!({"cache_creation_input_tokens": 20}))
-            .unwrap();
+        let usage = ReportedCacheUsage::from_value(
+            &json!({"cache_read_input_tokens": 0, "cache_creation_input_tokens": 20}),
+        )
+        .unwrap();
         assert_eq!(usage.complete_prompt_tokens(7), Some(27));
-        usage.merge_value(&json!({"output_tokens": 3})).unwrap();
-        assert_eq!(usage.complete_prompt_tokens(7), Some(27));
-        usage
-            .merge_value(&json!({"cache_creation_input_tokens": 0}))
-            .unwrap();
+        let usage = ReportedCacheUsage::from_value(
+            &json!({"cache_read_input_tokens": 0, "cache_creation_input_tokens": 0}),
+        )
+        .unwrap();
         assert_eq!(usage.complete_prompt_tokens(7), Some(7));
     }
 

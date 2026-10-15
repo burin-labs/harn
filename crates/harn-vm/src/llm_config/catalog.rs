@@ -19,16 +19,7 @@ pub fn pricing_clock_now() -> OffsetDateTime {
         .unwrap_or(OffsetDateTime::UNIX_EPOCH)
 }
 
-const LOGICAL_MODEL_DEFAULT_PREFIX: &str = "logical:";
 const MODEL_DEFAULT_UNSET_KEY: &str = "_unset";
-
-/// True for `[model_defaults."logical:<model>"]` selectors, which name one
-/// exact publisher-level logical model rather than globbing serving routes.
-/// The two selector kinds resolve through different lookups, so every site
-/// that must tell them apart asks here instead of re-testing the prefix.
-pub(crate) fn is_logical_model_selector(selector: &str) -> bool {
-    selector.starts_with(LOGICAL_MODEL_DEFAULT_PREFIX)
-}
 
 /// Get provider config for resolving base_url, auth, etc.
 pub fn provider_config(name: &str) -> Option<ProviderDef> {
@@ -559,23 +550,6 @@ pub(crate) fn model_catalog_entries_with_config(
         .collect()
 }
 
-pub(crate) fn sorted_model_entries_with_config(
-    config: &ProvidersConfig,
-) -> Vec<(String, ModelDef)> {
-    let mut entries: Vec<_> = config
-        .models
-        .iter()
-        .map(|(id, model)| (id.clone(), model.clone()))
-        .collect();
-    entries.sort_by(|(id_a, model_a), (id_b, model_b)| {
-        model_a
-            .provider
-            .cmp(&model_b.provider)
-            .then_with(|| id_a.cmp(id_b))
-    });
-    entries
-}
-
 pub fn model_catalog_entry(model_id: &str) -> Option<ModelDef> {
     effective_config()
         .models
@@ -653,26 +627,7 @@ pub(crate) fn capability_model_id(provider: &str, model_id: &str) -> String {
     capability_model_id_for_config(provider, model_id, &effective_config())
 }
 
-pub(crate) fn capability_model_id_for_config(
-    provider: &str,
-    model_id: &str,
-    config: &ProvidersConfig,
-) -> String {
-    if !config.providers.get(provider).is_some_and(|provider| {
-        provider
-            .features
-            .iter()
-            .any(|feature| feature == "wire_model_capabilities")
-    }) {
-        return model_id.to_string();
-    }
-    config
-        .models
-        .get(model_id)
-        .filter(|model| model.provider == provider)
-        .and_then(|model| model.wire_model.clone())
-        .unwrap_or_else(|| model_id.to_string())
-}
+pub(crate) use harn_provider_catalog::capability_model_id_for_config;
 
 pub fn provider_rate_limits(provider: &str) -> Option<RateLimitsDef> {
     provider_config(provider).and_then(|provider| {
@@ -1069,14 +1024,6 @@ pub fn pricing_per_1k_for(provider: &str, model_id: &str) -> Option<(f64, f64)> 
         })
 }
 
-pub fn auth_env_names(auth_env: &AuthEnv) -> Vec<String> {
-    match auth_env {
-        AuthEnv::None => Vec::new(),
-        AuthEnv::Single(name) => vec![name.clone()],
-        AuthEnv::Multiple(names) => names.clone(),
-    }
-}
-
 /// Check if a provider advertises a legacy provider-level feature.
 pub fn provider_has_feature(provider: &str, feature: &str) -> bool {
     provider_config(provider)
@@ -1263,57 +1210,6 @@ pub fn effective_batch_api_supported(
     caps: &crate::llm::capabilities::Capabilities,
 ) -> bool {
     caps.batch_api || provider_has_feature(provider, "batch")
-}
-
-pub(crate) fn capability_tags_from_capabilities(
-    caps: &crate::llm::capabilities::Capabilities,
-) -> Vec<String> {
-    let mut tags = Vec::new();
-    // Today all Harn chat providers expose streaming. Keep this as a
-    // transport baseline rather than a duplicated per-model declaration.
-    tags.push("streaming".to_string());
-    if caps.native_tools || caps.text_tool_wire_format_supported {
-        tags.push("tools".to_string());
-    }
-    if !caps.tool_search.is_empty() {
-        tags.push("tool_search".to_string());
-    }
-    if caps.vision || caps.vision_supported {
-        tags.push("vision".to_string());
-    }
-    if caps.audio {
-        tags.push("audio".to_string());
-    }
-    if caps.pdf {
-        tags.push("pdf".to_string());
-    }
-    if caps.video {
-        tags.push("video".to_string());
-    }
-    if caps.files_api_supported {
-        tags.push("files".to_string());
-    }
-    if caps.batch_api {
-        tags.push("batch".to_string());
-    }
-    if caps.prompt_caching {
-        tags.push("prompt_caching".to_string());
-    }
-    if !caps.thinking_modes.is_empty() {
-        tags.push("thinking".to_string());
-    }
-    if caps.interleaved_thinking_supported
-        || caps
-            .thinking_modes
-            .iter()
-            .any(|mode| mode == "adaptive" || mode == "effort")
-    {
-        tags.push("extended_thinking".to_string());
-    }
-    if caps.structured_output.is_some() || caps.json_schema.is_some() {
-        tags.push("structured_output".to_string());
-    }
-    tags
 }
 
 /// Resolve a tier or alias into a concrete model/provider pair.

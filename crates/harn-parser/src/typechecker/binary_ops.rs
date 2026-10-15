@@ -98,15 +98,13 @@ pub(in crate::typechecker) fn fold_open_shape(
 
 /// Infer the result type of a binary operation.
 pub(super) fn infer_binary_op_type(
-    op: &str,
+    op: BinaryOperator,
     left: &InferredType,
     right: &InferredType,
 ) -> InferredType {
     match op {
-        "==" | "!=" | "<" | ">" | "<=" | ">=" | "&&" | "||" | "in" | "not_in" => {
-            Some(TypeExpr::Named("bool".into()))
-        }
-        "+" => match (left, right) {
+        _ if op.is_comparison() || op.is_logical() => Some(TypeExpr::Named("bool".into())),
+        BinaryOperator::Add => match (left, right) {
             (Some(TypeExpr::Named(l)), Some(TypeExpr::Named(r))) => {
                 match (l.as_str(), r.as_str()) {
                     ("int", "int") => Some(TypeExpr::Named("int".into())),
@@ -138,7 +136,7 @@ pub(super) fn infer_binary_op_type(
             }
             _ => None,
         },
-        "-" | "/" | "%" => match (left, right) {
+        BinaryOperator::Sub | BinaryOperator::Div | BinaryOperator::Mod => match (left, right) {
             (Some(TypeExpr::Named(l)), Some(TypeExpr::Named(r))) => {
                 match (l.as_str(), r.as_str()) {
                     ("int", "int") => Some(TypeExpr::Named("int".into())),
@@ -151,7 +149,7 @@ pub(super) fn infer_binary_op_type(
             }
             _ => None,
         },
-        "**" => match (left, right) {
+        BinaryOperator::Pow => match (left, right) {
             (Some(TypeExpr::Named(l)), Some(TypeExpr::Named(r))) => {
                 match (l.as_str(), r.as_str()) {
                     ("int", "int") => Some(TypeExpr::Named("int".into())),
@@ -161,7 +159,7 @@ pub(super) fn infer_binary_op_type(
             }
             _ => None,
         },
-        "*" => match (left, right) {
+        BinaryOperator::Mul => match (left, right) {
             (Some(TypeExpr::Named(l)), Some(TypeExpr::Named(r))) => {
                 match (l.as_str(), r.as_str()) {
                     ("string", "int") | ("int", "string") => Some(TypeExpr::Named("string".into())),
@@ -175,7 +173,7 @@ pub(super) fn infer_binary_op_type(
             }
             _ => None,
         },
-        "??" => match (left, right) {
+        BinaryOperator::NilCoalesce => match (left, right) {
             (Some(left), right) => match without_nil(left) {
                 // Left is only nil, so the result is exactly the fallback.
                 None => right.clone(),
@@ -197,7 +195,7 @@ pub(super) fn infer_binary_op_type(
             // sound `type_of(...) == "T"` narrowing a caller then relies on.
             (None, _) => None,
         },
-        "|>" => None,
+        BinaryOperator::Pipe => None,
         _ => None,
     }
 }

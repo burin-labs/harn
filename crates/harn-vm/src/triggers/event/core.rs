@@ -157,10 +157,11 @@ impl TriggerEvent {
         provider_payload: ProviderPayload,
         signature_status: SignatureStatus,
     ) -> Self {
+        let kind = provider_payload.event_kind(&kind.into());
         Self {
             id: TriggerEventId::new(),
             provider,
-            kind: kind.into(),
+            kind,
             received_at: clock::now_utc(),
             occurred_at,
             dedupe_key: dedupe_key.into(),

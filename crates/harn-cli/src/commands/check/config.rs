@@ -80,6 +80,7 @@ pub(crate) fn lint_options<'a>(
     surface: LintSurface,
 ) -> harn_lint::LintOptions<'a> {
     harn_lint::LintOptions {
+        binding_types: None,
         file_path: Some(path),
         require_file_header: lint_config.require_file_header,
         require_docstrings: lint_config.require_docstrings,
@@ -141,6 +142,18 @@ pub(crate) fn build_module_graph_and_seed_analysis(
     files: &[PathBuf],
     analysis: &mut AnalysisDatabase,
 ) -> harn_modules::ModuleGraph {
+    let (graph, parsed) = build_module_graph_with_parsed_targets(files);
+    for file in files {
+        parsed.seed(analysis, file);
+    }
+    graph
+}
+
+/// The module graph plus each target's parse from building it, so a target is
+/// lexed and parsed once per run however many workers analyze the targets.
+pub(crate) fn build_module_graph_with_parsed_targets(
+    files: &[PathBuf],
+) -> (harn_modules::ModuleGraph, ParsedTargets) {
     ensure_module_dependencies(files);
     let mut build = harn_modules::build_with_parsed_sources(files);
     let mut targets_by_canonical: HashMap<PathBuf, Vec<&PathBuf>> = HashMap::new();
@@ -154,31 +167,51 @@ pub(crate) fn build_module_graph_and_seed_analysis(
             .or_default()
             .push(file);
     }
+    let mut by_path = HashMap::new();
     for (canonical, files) in targets_by_canonical {
         if let Some(parsed) = build.parsed_sources.remove(&canonical) {
             let mut files = files;
             if let Some(file) = files.pop() {
                 for file in files {
-                    seed_parsed_source(analysis, file, parsed.clone());
+                    by_path.insert(file.clone(), parsed.clone());
                 }
-                seed_parsed_source(analysis, file, parsed);
+                by_path.insert(file.clone(), parsed);
             }
         }
     }
-    build.graph
+    (
+        build.graph,
+        ParsedTargets {
+            by_path: std::sync::Mutex::new(by_path),
+        },
+    )
 }
 
-fn seed_parsed_source(
-    analysis: &mut AnalysisDatabase,
-    path: &Path,
-    parsed: harn_modules::ParsedModuleSource,
-) {
-    analysis.set_parsed_source(
-        SourceId::path(path),
-        parsed.source,
-        SourceVersion(1),
-        parsed.program,
-    );
+/// Target parses from the module-graph build, each handed to the first
+/// analysis database that claims it and then dropped from here.
+pub(crate) struct ParsedTargets {
+    by_path: std::sync::Mutex<HashMap<PathBuf, harn_modules::ParsedModuleSource>>,
+}
+
+impl ParsedTargets {
+    /// Seed `analysis` with `file`'s parse when it is still unclaimed. A file
+    /// that failed to parse during the graph build has no entry, so the
+    /// database parses it and reports the error itself.
+    pub(crate) fn seed(&self, analysis: &mut AnalysisDatabase, file: &Path) {
+        let parsed = self
+            .by_path
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(file);
+        if let Some(parsed) = parsed {
+            analysis.set_parsed_source(
+                SourceId::path(file),
+                parsed.source,
+                SourceVersion(1),
+                parsed.program,
+            );
+        }
+    }
 }
 
 pub(crate) fn ensure_module_dependencies(files: &[PathBuf]) {

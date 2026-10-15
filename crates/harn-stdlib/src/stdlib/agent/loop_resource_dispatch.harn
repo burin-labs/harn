@@ -153,7 +153,7 @@ fn __tool_batch_plan(clock: HarnessClock, tool_calls: list, tools: any, options:
       selected_phase = phase
       selected_rank = phase_rank
     }
-    entries = entries.appending(
+    entries.push(
       {
         index: index,
         call: call,
@@ -168,7 +168,7 @@ fn __tool_batch_plan(clock: HarnessClock, tool_calls: list, tools: any, options:
         },
       },
     )
-    signatures = signatures.appending(signature)
+    signatures.push(signature)
   }
   entries = entries.map({ entry -> entry + {selected: entry.phase == selected_phase} })
   const batch_id = sha256(
@@ -349,7 +349,7 @@ fn __tool_batch_merge_deferred_signatures(previous: any, newly_deferred: list, e
   let merged = previous_sigs.filter({ sig -> !contains(executed_sigs, sig) })
   for sig in __tool_batch_deferred_signatures(newly_deferred) {
     if !contains(merged, sig) {
-      merged = merged.appending(sig)
+      merged.push(sig)
     }
   }
   return merged
@@ -385,7 +385,7 @@ fn __tool_batch_dispatch(harness: Harness, tool_calls: list, tools: any, options
   if __tool_batch_blocking_barrier_applies(plan) {
     let blocked_results = []
     for entry in plan.entries {
-      blocked_results = blocked_results.appending(
+      blocked_results.push(
         __tool_batch_blocked_result(
           harness.agent,
           harness.random,
@@ -466,16 +466,14 @@ fn __tool_batch_dispatch(harness: Harness, tool_calls: list, tools: any, options
       receipt_timing,
       raw_result?.partial_apply,
     )
-    ordered = ordered.appending(
-      {index: entry.index, result: raw_result + {dispatch_receipt: receipt}},
-    )
+    ordered.push({index: entry.index, result: raw_result + {dispatch_receipt: receipt}})
     __tool_batch_emit_receipt(harness.agent, options, receipt)
     if __tool_batch_result_blocks_later_phase(entry, raw_result) {
       blocking_result = __tool_batch_blocking_result(entry, raw_result)
     }
   }
   for entry in deferred {
-    ordered = ordered.appending(
+    ordered.push(
       {
         index: entry.index,
         result: __tool_batch_deferred_result(
@@ -714,7 +712,7 @@ pub fn __intra_turn_push_resource_key(keys: any, value: any) {
   if contains(keys, key) {
     return keys
   }
-  return keys.appending(key)
+  return keys + [key]
 }
 
 pub fn __intra_turn_push_resource_value(keys: any, value: any) {
@@ -836,7 +834,7 @@ pub fn __intra_turn_dependency_target_ranges(resource_keys: any, args: any, anno
       continue
     }
     for key in resource_keys {
-      ranges = ranges.appending({resource_key: key, start: range.start, end: range.end})
+      ranges.push({resource_key: key, start: range.start, end: range.end})
     }
   }
   return ranges
@@ -852,7 +850,7 @@ pub fn __intra_turn_dependency_key_components(args: any, annotations: any) {
       if type_of(value) == "string" && trim(value) == "" {
         continue
       }
-      components = components.appending({name: name, value: value})
+      components.push({name: name, value: value})
     }
   }
   return components
@@ -866,7 +864,7 @@ pub fn __intra_turn_dependency_target_keys(resource_keys: any, args: any, annota
   const digest = substring(sha256(json_stringify(components)), 0, 24)
   let keys = []
   for key in resource_keys {
-    keys = keys.appending(key + "#target:" + digest)
+    keys.push(key + "#target:" + digest)
   }
   return keys
 }
@@ -1329,7 +1327,7 @@ pub fn __dispatch_tool_calls_with_middleware(
           tools,
           options,
         )
-        results = results.appending(blocked)
+        results.push(blocked)
         continue
       }
       if fanout_cap > 0 && capped_call_signature != nil
@@ -1346,13 +1344,13 @@ pub fn __dispatch_tool_calls_with_middleware(
             tools,
             options,
           )
-          results = results.appending(collapsed)
+          results.push(collapsed)
           collapsed_emitted = true
         }
         continue
       }
       const result = __invoke_tool_with_index(harness, call, source_index, tools, options)
-      results = results.appending(result)
+      results.push(result)
       // Poison this resource for later same-resource siblings only when the
       // execution boundary cannot prove the failure was a no-op. A structured
       // `mutation_status: "not_applied"` leaves the view byte-identical, so an
@@ -1360,7 +1358,7 @@ pub fn __dispatch_tool_calls_with_middleware(
       // Unknown still poisons, preserving today's conservative behavior.
       if resource_guard != nil && !__tool_result_ok(result)
         && __intra_turn_failure_poisons_resource(result) {
-        failed_resource_guards = failed_resource_guards.appending(
+        failed_resource_guards.push(
           __intra_turn_failed_guard_record(call, source_index, resource_guard, result),
         )
       }
@@ -1395,7 +1393,7 @@ pub fn __dispatch_tool_calls_with_middleware(
   }
   let indexed = []
   for (index, call) in iter(tool_calls).enumerate() {
-    indexed = indexed.appending({index: __dispatch_source_index(source_indices, index), call: call})
+    indexed.push({index: __dispatch_source_index(source_indices, index), call: call})
   }
   const settled = parallel settle indexed with { max_concurrent: cap } { entry ->
     __invoke_tool_with_index(harness, entry.call, entry.index, tools, options)
@@ -1403,7 +1401,7 @@ pub fn __dispatch_tool_calls_with_middleware(
   let results = []
   for r in settled.results {
     if is_ok(r) {
-      results = results.appending(unwrap(r))
+      results.push(unwrap(r))
     } else {
       // `__invoke_tool` traps its own middleware exceptions, so a thrown
       // value here is a VM-level bug (e.g. parallel-task plumbing). Surface a
@@ -1413,7 +1411,7 @@ pub fn __dispatch_tool_calls_with_middleware(
       if __agent_error_must_propagate(err) {
         throw err
       }
-      results = results.appending(
+      results.push(
         {
           ok: false,
           status: "error",

@@ -4,14 +4,14 @@
 //! little-endian format version, then postcard-encoded sections, each
 //! preceded by its little-endian `u64` length. In order: file facts and
 //! bookkeeping, the graph's next node id, graph edges, trigram postings,
-//! word postings, and then the graph's nodes split into up to
-//! [`NODE_SECTIONS`] runs. The header lets a reader reject another layout
+//! word postings, the path and language of each file with graph nodes, and
+//! then the graph's nodes split into up to [`NODE_SECTIONS`] runs. A node
+//! record omits its path and language, which its file entry holds once for
+//! every node of that file. The header lets a reader reject another layout
 //! before decoding it, and every section decodes on its own thread because
-//! the sections share nothing; nodes are split because they are the largest. Restart time is dominated by
-//! decoding and restoring this file; the compact binary body decodes several
-//! times faster than the JSON it replaced while taking about a third of the
-//! space. Earlier versions, including every JSON snapshot, are rebuilt rather
-//! than restored.
+//! the sections share nothing; nodes are split because they are the largest.
+//! Earlier versions, including every JSON snapshot, are rebuilt rather than
+//! restored.
 //!
 //! The snapshot is the recovery primitive. On daemon startup, the
 //! embedder restores from the snapshot if one exists, then calls
@@ -42,9 +42,9 @@ use super::IndexState;
 /// file that has not changed. v4 adds partial HEAD-verification progress;
 /// older readers must not treat a checkpoint as a fully verified HEAD when
 /// the checkout reverts to the previously recorded commit. v5 replaces JSON
-/// with a binary layout; v6 splits the graph into the sections described in
-/// the module documentation.
-pub const SNAPSHOT_FORMAT_VERSION: u32 = 6;
+/// with a binary layout; v6 splits the graph into sections; v7 stores each
+/// file's path and language once, as the module documentation describes.
+pub const SNAPSHOT_FORMAT_VERSION: u32 = 7;
 
 /// The most runs graph nodes are split into, each decoded on its own thread.
 const NODE_SECTIONS: usize = 4;
@@ -227,13 +227,15 @@ impl CodeIndexSnapshot {
         }
         let decode_phase = super::timing::Phase::start("snapshot.decode");
         let mut sections = SectionReader(body);
-        let (core, next_node_id, edges, trigrams, words) = (
+        let (core, next_node_id, edges, trigrams, words, graph_files) = (
+            sections.next()?,
             sections.next()?,
             sections.next()?,
             sections.next()?,
             sections.next()?,
             sections.next()?,
         );
+        let graph_files = GraphFileTable::decode(graph_files)?;
         let mut node_runs = Vec::new();
         while !sections.0.is_empty() {
             node_runs.push(sections.next()?);
@@ -248,9 +250,7 @@ impl CodeIndexSnapshot {
             let words = scope.spawn(|| decode_section("snapshot.decode_words", words));
             let node_runs: Vec<_> = node_runs
                 .iter()
-                .map(|run| {
-                    scope.spawn(|| decode_section::<Vec<Node>>("snapshot.decode_nodes", run))
-                })
+                .map(|run| scope.spawn(|| graph_files.decode_nodes(run)))
                 .collect();
             let core: io::Result<CoreSection> = decode_section("snapshot.decode_core", core);
             let next_node_id: io::Result<Option<NodeId>> =
@@ -348,6 +348,7 @@ impl SectionsRef<'_> {
             self.go_modules,
         );
         let run_len = self.nodes.len().div_ceil(NODE_SECTIONS).max(1);
+        let graph_files = GraphFiles::of(&self.nodes)?;
         let sections = scope(|scope| {
             let next_node_id = scope.spawn(|| encode_section(&self.next_node_id));
             let edges = scope.spawn(|| encode_section(&self.edges));
@@ -356,7 +357,7 @@ impl SectionsRef<'_> {
             let runs: Vec<_> = self
                 .nodes
                 .chunks(run_len)
-                .map(|run| scope.spawn(move || encode_section(&run)))
+                .map(|run| scope.spawn(move || encode_section(&NodeRun(run))))
                 .collect();
             let core = encode_section(&core);
             [
@@ -365,6 +366,7 @@ impl SectionsRef<'_> {
                 joined(edges),
                 joined(trigrams),
                 joined(words),
+                encode_section(&graph_files),
             ]
             .into_iter()
             .chain(runs.into_iter().map(joined))
@@ -374,6 +376,112 @@ impl SectionsRef<'_> {
             format_version: self.meta.format_version,
             sections,
         })
+    }
+}
+
+/// Each file's path and language, written once for all of its graph nodes.
+#[derive(Serialize)]
+struct GraphFiles<'a>(Vec<(FileId, &'a str, &'a str)>);
+
+impl<'a> GraphFiles<'a> {
+    /// Collect the file entries of `nodes`, refusing a node whose path or
+    /// language disagrees with its file's, which this layout could not keep.
+    fn of(nodes: &[&'a Node]) -> io::Result<Self> {
+        let mut files: foldhash::HashMap<FileId, (&'a str, &'a str)> = Default::default();
+        for node in nodes {
+            let entry = *files
+                .entry(node.file_id)
+                .or_insert((&node.path, node.language));
+            if entry != (&*node.path, node.language) {
+                return Err(invalid("graph nodes of one file disagree on its path"));
+            }
+        }
+        let mut files: Vec<_> = files
+            .into_iter()
+            .map(|(file, (path, language))| (file, path, language))
+            .collect();
+        files.sort_unstable_by_key(|(file, _, _)| *file);
+        Ok(Self(files))
+    }
+}
+
+/// Decoded file entries, shared by every node of each file.
+struct GraphFileTable(foldhash::HashMap<FileId, (std::sync::Arc<str>, &'static str)>);
+
+impl GraphFileTable {
+    fn decode(bytes: &[u8]) -> io::Result<GraphFileTable> {
+        let rows: Vec<(FileId, String, String)> = decode_section("snapshot.decode_core", bytes)?;
+        let mut table = foldhash::HashMap::default();
+        for (file, path, language) in rows {
+            let language = super::symbol_graph::static_language_name(&language)
+                .ok_or_else(|| invalid("code-index snapshot names an unknown graph language"))?;
+            table.insert(file, (std::sync::Arc::from(path), language));
+        }
+        Ok(GraphFileTable(table))
+    }
+}
+
+/// A node as a snapshot stores it: every field but the path and language its
+/// file entry already holds.
+type NodeRecord = (
+    NodeId,
+    super::symbol_graph::NodeKind,
+    String,
+    FileId,
+    u32,
+    String,
+    Option<String>,
+    Option<String>,
+);
+
+/// A run of nodes written as [`NodeRecord`]s without copying them.
+struct NodeRun<'a, 'n>(&'a [&'n Node]);
+
+impl Serialize for NodeRun<'_, '_> {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.collect_seq(self.0.iter().map(|node| {
+            (
+                node.id,
+                node.kind,
+                &node.name,
+                node.file_id,
+                node.line,
+                &node.signature,
+                &node.container,
+                &node.access_level,
+            )
+        }))
+    }
+}
+
+impl GraphFileTable {
+    /// Decode one run of node records and give each its file's shared path
+    /// and language.
+    fn decode_nodes(&self, bytes: &[u8]) -> io::Result<Vec<Node>> {
+        let records: Vec<NodeRecord> = decode_section("snapshot.decode_nodes", bytes)?;
+        records
+            .into_iter()
+            .map(
+                |(id, kind, name, file_id, line, signature, container, access_level)| {
+                    let (path, language) = self
+                        .0
+                        .get(&file_id)
+                        .ok_or_else(|| invalid("graph node names a file with no entry"))?;
+                    Ok(Node {
+                        id,
+                        kind,
+                        name,
+                        file_id,
+                        path: path.clone(),
+                        line,
+                        signature,
+                        container,
+                        access_level,
+                        language,
+                    })
+                },
+            )
+            .collect()
     }
 }
 
@@ -802,6 +910,48 @@ mod tests {
             IndexState::from_snapshot(CodeIndexSnapshot::load(root).unwrap().unwrap()).unwrap();
         assert_eq!(restored.words.get("beta").len(), 2);
         assert_eq!(restored.symbols.node_count(), state.symbols.node_count());
+    }
+
+    #[test]
+    fn restored_nodes_of_one_file_share_its_path_and_language() {
+        let dir = fixture_tree();
+        snapshot_for(dir.path()).save(dir.path()).unwrap();
+        let snap = CodeIndexSnapshot::load(dir.path()).unwrap().unwrap();
+        let state = IndexState::from_snapshot(snap).unwrap();
+        let nodes: Vec<_> = state
+            .symbols
+            .iter_nodes()
+            .filter(|node| &*node.path == "src/alpha.rs")
+            .collect();
+        assert!(nodes.len() >= 2, "a module node and a function node");
+        assert!(nodes
+            .windows(2)
+            .all(|pair| std::sync::Arc::ptr_eq(&pair[0].path, &pair[1].path)));
+        assert!(nodes.iter().all(|node| node.language == "rust"));
+    }
+
+    #[test]
+    fn saving_refuses_nodes_that_disagree_on_their_files_path() {
+        let dir = fixture_tree();
+        let mut snap = snapshot_for(dir.path());
+        let nodes = &mut snap.symbols.as_mut().unwrap().nodes;
+        assert!(nodes.len() >= 2);
+        let file = nodes[0].file_id;
+        let other = nodes.iter().rposition(|node| node.file_id == file).unwrap();
+        assert_ne!(other, 0, "the fixture file has several nodes");
+        nodes[other].path = std::sync::Arc::from("src/elsewhere.rs");
+        let error = snap.save(dir.path()).expect_err("refused");
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+    }
+
+    #[test]
+    fn load_refuses_an_unknown_graph_language() {
+        let dir = fixture_tree();
+        let snap = snapshot_for(dir.path());
+        let mut bytes = serde_json::to_value(&snap).unwrap();
+        bytes["symbols"]["nodes"][0]["language"] = "klingon".into();
+        let error = serde_json::from_value::<CodeIndexSnapshot>(bytes).expect_err("refused");
+        assert!(error.to_string().contains("unknown graph language"));
     }
 
     #[test]

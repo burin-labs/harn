@@ -48,8 +48,18 @@ async fn invalid_cache_counters_fail_json_and_stream_parsers() {
         )
         .unwrap_err();
         assert!(error.to_string().contains("invalid provider cache usage"));
-        let frame = json!({"type": "message_start", "message": response});
-        let body = format!("data: {frame}\n\n");
+        let mut start = response.clone();
+        start["content"] = json!([]);
+        let body = [
+            json!({"type": "message_start", "message": start}),
+            json!({"type": "content_block_start", "index": 0, "content_block": {"type": "text", "text": ""}}),
+            json!({"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "ok"}}),
+            json!({"type": "content_block_stop", "index": 0}),
+            json!({"type": "message_stop"}),
+        ]
+        .iter()
+        .map(|frame| format!("data: {frame}\n\n"))
+        .collect::<String>();
         let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
         let error = consume_sse_lines(
             tokio::io::BufReader::new(body.as_bytes()),
@@ -429,16 +439,28 @@ async fn first_frame_latency_survives_the_usage_frame_rebuild() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn a_stream_with_no_parseable_frame_reports_no_first_frame() {
-    // Absent, not zero. A comment-only stream produced no provider frame, and
-    // reporting 0 would claim the first frame arrived instantly.
+    // Absent, not zero. A comment-only stream produced no provider frame, so
+    // it is an empty generation rather than an instant first frame.
     let body = ": keepalive\n\ndata: [DONE]\n".to_string();
-    let result = drive_openai(&body).await;
-
-    assert_eq!(
-        result.telemetry.client_first_frame_ms, None,
-        "a keepalive is not a provider frame"
+    let (delta_tx, _delta_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+    let error = consume_sse_lines(
+        tokio::io::BufReader::new(body.as_bytes()),
+        "llamacpp",
+        "test-model",
+        DialectContract::new(WireDialect::OpenAiCompat, None),
+        delta_tx,
+        None,
+        None,
+        false,
+    )
+    .await
+    .expect_err("a keepalive is not a provider frame");
+    assert!(
+        error.to_string().contains("delivered no content"),
+        "{error}"
     );
-    let encoded = serde_json::to_value(&result.telemetry).expect("telemetry serializes");
+    let encoded = serde_json::to_value(crate::llm::api::ProviderTelemetry::default())
+        .expect("telemetry serializes");
     assert!(
         encoded.get("client_first_frame_ms").is_none(),
         "an unmeasured first frame is omitted from the artifact, not written as 0"

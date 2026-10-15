@@ -17,6 +17,7 @@ mod blocks;
 mod check_helpers;
 mod check_node;
 mod expressions;
+mod method_checks;
 mod name_resolution;
 mod nil_coalesce;
 mod patterns;

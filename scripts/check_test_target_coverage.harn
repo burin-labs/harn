@@ -197,7 +197,7 @@ pub fn unlisted_test_files(block: string, root: string, file_names: list<string>
       out = out + [root + "/" + name]
     }
   }
-  return out.sort()
+  return out.sorted()
 }
 
 /** This gate's own name, quoted back into any denial it reports. */
@@ -220,7 +220,7 @@ fn test_files_in(fs: HarnessFs, root_dir: string, suffix: string) -> list<string
       names = names + [name]
     }
   }
-  return names.sort()
+  return names.sorted()
 }
 
 pub fn check_test_target_coverage(fs: HarnessFs, root: string = "") -> dict {
@@ -370,7 +370,7 @@ pub fn recipe_walked_paths(
       }
     }
   }
-  return out.sort()
+  return out.sorted()
 }
 
 /** The prerequisites named on `target`'s rule header, before any order-only `|`. */
@@ -446,10 +446,18 @@ fn attributed_root(path: string) -> string {
     }
   }
   const parts = path.split("/")
-  if len(parts) <= 2 {
-    return parts[0]
+  const first = parts[0]
+  if first == nil {
+    throw "split returned no attributed path components"
   }
-  return parts[0] + "/" + parts[1]
+  if len(parts) <= 2 {
+    return first
+  }
+  const second = parts[1]
+  if second == nil {
+    throw "split lost a checked attributed path component"
+  }
+  return first + "/" + second
 }
 
 /** Add one to the tally for `name`, starting it at one when it is new. */

@@ -350,8 +350,9 @@ Nil Coalescing Versus Arithmetic
 ==================
 
 pipeline test(task) {
-  let c = x ?? y + z
+  let c = b ?? 0 + 1
   let d = x ?? y * z
+  let e = a ?? 0 == 1
 }
 
 ---
@@ -365,18 +366,25 @@ pipeline test(task) {
     (block
       (let_binding
         name: (identifier)
-        value: (binary_expression
-          (nil_coalescing_expression
-            (identifier)
-            (identifier))
-          (identifier)))
+        value: (nil_coalescing_expression
+          (identifier)
+          (binary_expression
+            (integer_literal)
+            (integer_literal))))
       (let_binding
         name: (identifier)
         value: (nil_coalescing_expression
           (identifier)
           (binary_expression
             (identifier)
-            (identifier)))))))
+            (identifier))))
+      (let_binding
+        name: (identifier)
+        value: (binary_expression
+          (nil_coalescing_expression
+            (identifier)
+            (integer_literal))
+          (integer_literal))))))
 
 ==================
 Backslash Continued Expression

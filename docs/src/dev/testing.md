@@ -57,6 +57,18 @@ Release and audit gates that call `make test` must have nextest installed
 (they do after `make setup`); failing loudly is preferred to silently changing
 what "the tests pass" means (#6145).
 
+## Read macOS test duration warnings
+
+Read `Rust workspace test step` in the macOS test job's log or summary.
+It reports elapsed seconds, the job limit, and measured runner memory.
+The job warns when test execution exceeds 80% of its limit:
+75 minutes for hosted runs or 45 minutes for owned-runner dispatches.
+Compare runs with the same memory size when investigating slower execution.
+
+`RUST_TEST_DURATION_UNMEASURED` means duration, limit, or memory could not be
+measured. Check the reported fields before treating the run as within budget.
+The warning preserves the test command's exit status.
+
 ## Parser stack budget
 
 Run the expression parser's stack regression in unoptimized and release builds:

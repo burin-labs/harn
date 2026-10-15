@@ -252,10 +252,12 @@ fn evaluate_constant_bool(condition: &SNode) -> Option<bool> {
         Node::IntLiteral(v) => Some(*v != 0),
         Node::FloatLiteral(v) => Some(*v != 0.0),
         Node::StringLiteral(s) | Node::RawStringLiteral(s) => Some(!s.is_empty()),
-        Node::BinaryOp { op, left, right } if op == "&&" || op == "||" => {
+        Node::BinaryOp { op, left, right }
+            if matches!(op, BinaryOperator::And | BinaryOperator::Or) =>
+        {
             let lv = evaluate_constant_bool(left);
             let rv = evaluate_constant_bool(right);
-            if op == "&&" {
+            if matches!(op, BinaryOperator::And) {
                 match (lv, rv) {
                     // Either side known-falsy collapses `&&` to falsy.
                     (Some(false), _) | (_, Some(false)) => Some(false),
@@ -271,7 +273,9 @@ fn evaluate_constant_bool(condition: &SNode) -> Option<bool> {
                 }
             }
         }
-        Node::UnaryOp { op, operand } if op == "!" => evaluate_constant_bool(operand).map(|b| !b),
+        Node::UnaryOp { op, operand } if *op == UnaryOperator::Not => {
+            evaluate_constant_bool(operand).map(|b| !b)
+        }
         _ => None,
     }
 }
@@ -358,18 +362,20 @@ impl TypeChecker {
             }
         }
         match &condition.node {
-            Node::BinaryOp { op, left, right } if op == "&&" || op == "||" => {
+            Node::BinaryOp { op, left, right }
+                if matches!(op, BinaryOperator::And | BinaryOperator::Or) =>
+            {
                 self.lint_vacuous_condition(left, scope);
                 let left_ref = self.extract_refinements(left, scope);
                 let mut right_scope = scope.child();
-                if op == "&&" {
+                if matches!(op, BinaryOperator::And) {
                     left_ref.apply_truthy(&mut right_scope);
                 } else {
                     left_ref.apply_falsy(&mut right_scope);
                 }
                 self.lint_vacuous_condition(right, &right_scope);
             }
-            Node::UnaryOp { op, operand } if op == "!" => {
+            Node::UnaryOp { op, operand } if *op == UnaryOperator::Not => {
                 self.lint_vacuous_condition(operand, scope);
             }
             Node::FunctionCall { name, args, .. }
@@ -513,11 +519,13 @@ impl TypeChecker {
             }
         }
         match &condition.node {
-            Node::BinaryOp { op, left, right } if op == "!=" || op == "==" => {
+            Node::BinaryOp { op, left, right }
+                if matches!(op, BinaryOperator::Neq | BinaryOperator::Eq) =>
+            {
                 let (left, left_aliased) = self.resolve_typeof_alias_node(left, scope);
                 let (right, right_aliased) = self.resolve_typeof_alias_node(right, scope);
                 let aliased = left_aliased || right_aliased;
-                let nil_ref = self.extract_nil_refinements(op, &left, &right, scope);
+                let nil_ref = self.extract_nil_refinements(*op, &left, &right, scope);
                 if !nil_ref.is_empty() {
                     return if aliased {
                         nil_ref.retain_stable(scope)
@@ -525,7 +533,7 @@ impl TypeChecker {
                         nil_ref
                     };
                 }
-                let typeof_ref = self.extract_typeof_refinements(op, &left, &right, scope);
+                let typeof_ref = self.extract_typeof_refinements(*op, &left, &right, scope);
                 if !typeof_ref.is_empty() {
                     return if aliased {
                         typeof_ref.retain_stable(scope)
@@ -533,7 +541,7 @@ impl TypeChecker {
                         typeof_ref
                     };
                 }
-                let tag_ref = self.extract_discriminator_refinements(op, &left, &right, scope);
+                let tag_ref = self.extract_discriminator_refinements(*op, &left, &right, scope);
                 if !tag_ref.is_empty() {
                     return if aliased {
                         tag_ref.retain_stable(scope)
@@ -551,13 +559,18 @@ impl TypeChecker {
             // every other fallback opaque: `x ?? true`, for example, may pass
             // while `x` is still nil.
             Node::BinaryOp { op, left, right }
-                if op == "??" && matches!(right.node, Node::BoolLiteral(false)) =>
+                if matches!(op, BinaryOperator::NilCoalesce)
+                    && matches!(right.node, Node::BoolLiteral(false)) =>
             {
                 self.extract_refinements(left, scope)
             }
 
             // Logical AND: both operands must be truthy, so truthy refinements compose.
-            Node::BinaryOp { op, left, right } if op == "&&" => {
+            Node::BinaryOp {
+                op: BinaryOperator::And,
+                left,
+                right,
+            } => {
                 let left_ref = self.extract_refinements(left, scope);
                 let mut right_scope = scope.child();
                 left_ref.apply_truthy(&mut right_scope);
@@ -579,7 +592,11 @@ impl TypeChecker {
             }
 
             // Logical OR: both operands must be falsy for the whole to be falsy.
-            Node::BinaryOp { op, left, right } if op == "||" => {
+            Node::BinaryOp {
+                op: BinaryOperator::Or,
+                left,
+                right,
+            } => {
                 let left_ref = self.extract_refinements(left, scope);
                 let mut right_scope = scope.child();
                 left_ref.apply_falsy(&mut right_scope);
@@ -600,7 +617,7 @@ impl TypeChecker {
                 }
             }
 
-            Node::UnaryOp { op, operand } if op == "!" => {
+            Node::UnaryOp { op, operand } if *op == UnaryOperator::Not => {
                 self.extract_refinements(operand, scope).inverted()
             }
 
@@ -676,7 +693,7 @@ impl TypeChecker {
     /// Extract nil-check refinements from `x != nil` / `x == nil` patterns.
     fn extract_nil_refinements(
         &self,
-        op: &str,
+        op: BinaryOperator,
         left: &SNode,
         right: &SNode,
         scope: &TypeScope,
@@ -699,7 +716,7 @@ impl TypeChecker {
                             falsy: vec![(name.clone(), Some(TypeExpr::Named("nil".into())))],
                             ..Refinements::default()
                         };
-                        return if op == "!=" {
+                        return if matches!(op, BinaryOperator::Neq) {
                             neq_refs
                         } else {
                             neq_refs.inverted()
@@ -713,7 +730,7 @@ impl TypeChecker {
                         falsy: vec![(name.clone(), Some(TypeExpr::Never))],
                         ..Refinements::default()
                     };
-                    return if op == "==" {
+                    return if matches!(op, BinaryOperator::Eq) {
                         eq_refs
                     } else {
                         eq_refs.inverted()
@@ -757,7 +774,7 @@ impl TypeChecker {
         if refs.truthy.is_empty() && refs.truthy_paths.is_empty() && refs.falsy_paths.is_empty() {
             return Refinements::empty();
         }
-        if op == "!=" {
+        if matches!(op, BinaryOperator::Neq) {
             refs
         } else {
             refs.inverted()
@@ -767,7 +784,7 @@ impl TypeChecker {
     /// Extract type_of refinements from `type_of(x) == "typename"` patterns.
     fn extract_typeof_refinements(
         &self,
-        op: &str,
+        op: BinaryOperator,
         left: &SNode,
         right: &SNode,
         scope: &TypeScope,
@@ -806,7 +823,7 @@ impl TypeChecker {
                 if self.path_type_is_top(arg, scope) {
                     eq_refs.falsy_ruled_out = vec![(key, type_name)];
                 }
-                return if op == "==" {
+                return if matches!(op, BinaryOperator::Eq) {
                     eq_refs
                 } else {
                     eq_refs.inverted()
@@ -831,7 +848,7 @@ impl TypeChecker {
                             .unwrap_or_default(),
                         ..Refinements::default()
                     };
-                    return if op == "==" {
+                    return if matches!(op, BinaryOperator::Eq) {
                         eq_refs
                     } else {
                         eq_refs.inverted()
@@ -850,7 +867,7 @@ impl TypeChecker {
                     falsy_ruled_out: vec![(var_name, type_name)],
                     ..Refinements::default()
                 };
-                return if op == "==" {
+                return if matches!(op, BinaryOperator::Eq) {
                     eq_refs
                 } else {
                     eq_refs.inverted()
@@ -878,7 +895,7 @@ impl TypeChecker {
                             .unwrap_or_default(),
                         ..Refinements::default()
                     };
-                    return if op == "==" {
+                    return if matches!(op, BinaryOperator::Eq) {
                         eq_refs
                     } else {
                         eq_refs.inverted()
@@ -900,7 +917,7 @@ impl TypeChecker {
     /// `dict`/`unknown` object into a closed one-field shape).
     fn extract_discriminator_refinements(
         &self,
-        op: &str,
+        op: BinaryOperator,
         left: &SNode,
         right: &SNode,
         scope: &TypeScope,
@@ -977,7 +994,7 @@ impl TypeChecker {
         } else {
             return Refinements::empty();
         };
-        if op == "==" {
+        if matches!(op, BinaryOperator::Eq) {
             eq_refs
         } else {
             eq_refs.inverted()

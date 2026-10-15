@@ -1,23 +1,17 @@
 //! Canonical embedded Harn standard library source catalog.
 //!
-//! This crate intentionally contains only static source strings so runtime and
-//! static tooling crates can share the same stdlib modules without depending on
-//! each other. Loading this catalog is pure: modules cannot register ambient
+//! This crate intentionally contains only static source strings. The compiler,
+//! runtime, and tooling read them through `harn-stdlib-catalog` and never
+//! depend on this crate, so editing a stdlib module rebuilds only this crate
+//! and the binaries that link it. A host calls [`install`] once at startup.
+//! Loading this catalog is pure: modules cannot register ambient
 //! effects, and every effectful stdlib function must receive its typed Harness
 //! capability explicitly from the caller, including callbacks that may perform
 //! effects.
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct StdlibSource {
-    pub module: &'static str,
-    pub source: &'static str,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct StdlibPromptAsset {
-    pub path: &'static str,
-    pub source: &'static str,
-}
+pub use harn_stdlib_catalog::{
+    builtin_reexports, StdlibCatalog, StdlibCliScript, StdlibPromptAsset, StdlibSource,
+};
 
 macro_rules! embedded_catalog {
     ($entry:ident, $key:ident, [$($name:literal => $path:literal),* $(,)?]) => {
@@ -518,20 +512,6 @@ pub const STDLIB_PROMPT_ASSETS: &[StdlibPromptAsset] = embedded_catalog!(StdlibP
     "orchestration/prompts/compaction_state_grounding.harn.prompt" => "stdlib/orchestration/prompts/compaction_state_grounding.harn.prompt",
 ]);
 
-/// Embedded `.harn` script that backs a CLI subcommand. Looked up by
-/// the `harn-cli` dispatch wedge (see harn#2293 epic and harn#2294 G1)
-/// so subcommands can ship in Harn instead of Rust.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct StdlibCliScript {
-    /// Lookup name. For nested scripts this is the path under
-    /// `stdlib/cli/` without the `.harn` extension (e.g. `"eval/prompt"`
-    /// for `stdlib/cli/eval/prompt.harn`).
-    pub name: &'static str,
-    /// Embedded source. Run via the existing `harn run` codepath by the
-    /// dispatch wedge.
-    pub source: &'static str,
-}
-
 pub const STDLIB_CLI_SCRIPTS: &[StdlibCliScript] = embedded_catalog!(StdlibCliScript, name, [
     "codemod" => "stdlib/cli/codemod.harn",
     "canon/check" => "stdlib/cli/canon/check.harn",
@@ -583,60 +563,37 @@ pub const STDLIB_CLI_SCRIPTS: &[StdlibCliScript] = embedded_catalog!(StdlibCliSc
     "version" => "stdlib/cli/version.harn",
 ]);
 
-pub fn get_stdlib_source(module: &str) -> Option<&'static str> {
-    STDLIB_SOURCES
-        .iter()
-        .find_map(|entry| (entry.module == module).then_some(entry.source))
+/// This crate's catalog: every embedded stdlib module, prompt asset, and CLI
+/// script.
+pub static CATALOG: StdlibCatalog = StdlibCatalog {
+    sources: STDLIB_SOURCES,
+    prompt_assets: STDLIB_PROMPT_ASSETS,
+    cli_scripts: STDLIB_CLI_SCRIPTS,
+};
+
+/// Install [`CATALOG`] as the process's standard library. Hosts call this once
+/// at startup, before running Harn code; calling it again is a no-op.
+///
+/// # Errors
+///
+/// Refuses when a different catalog is already installed.
+pub fn install() -> Result<(), harn_stdlib_catalog::CatalogAlreadyInstalled> {
+    harn_stdlib_catalog::install(&CATALOG)
 }
 
-/// Builtins a stdlib module re-exports under its own name, so
-/// `import { assert_eq } from "std/testing"` resolves.
-///
-/// Some of the standard library is implemented in Rust rather than Harn — the
-/// value differ behind `assert_eq` needs to walk the runtime representation of
-/// a value, which Harn source cannot do. Those builtins are callable without an
-/// import, but a reader who has just typed `import { assert_throws } from
-/// "std/testing"` has every reason to expect its sibling `assert_eq` to come
-/// from the same place, and no reason to know which side of the Rust/Harn line
-/// a given assertion happens to fall on. This table erases that seam: the
-/// module's export surface is its `pub fn`s plus the names listed here.
-///
-/// The list is explicit rather than derived from the builtins' `category`
-/// metadata: a category is a free-form label for docs and observability, and an
-/// export surface is an API contract. Deriving one from the other would let an
-/// unrelated metadata edit silently add or remove a public export.
-///
-/// `harn_vm::stdlib::tests` pins every name here to a registered builtin, so an
-/// entry cannot rot into a name that no longer exists.
-pub fn builtin_reexports(module: &str) -> &'static [&'static str] {
-    match module {
-        "testing" => &[
-            "assert",
-            "assert_approx",
-            "assert_eq",
-            "assert_matches",
-            "assert_ne",
-            "skip",
-            "value_diff",
-        ],
-        _ => &[],
-    }
+pub fn get_stdlib_source(module: &str) -> Option<&'static str> {
+    CATALOG.source(module)
 }
 
 /// Find an embedded CLI subcommand script by name. Returns the embedded
 /// source string when present, or `None` if no script with that name is
 /// registered in [`STDLIB_CLI_SCRIPTS`].
 pub fn find_cli_script(name: &str) -> Option<&'static str> {
-    STDLIB_CLI_SCRIPTS
-        .iter()
-        .find_map(|entry| (entry.name == name).then_some(entry.source))
+    CATALOG.cli_script(name)
 }
 
 pub fn get_stdlib_prompt_asset(path: &str) -> Option<&'static str> {
-    let path = path.strip_prefix("std/").unwrap_or(path);
-    STDLIB_PROMPT_ASSETS
-        .iter()
-        .find_map(|entry| (entry.path == path).then_some(entry.source))
+    CATALOG.prompt_asset(path)
 }
 
 pub fn public_functions_for_module(module: &str) -> Vec<StdlibPublicFunction> {

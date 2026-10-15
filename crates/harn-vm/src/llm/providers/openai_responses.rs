@@ -913,27 +913,35 @@ mod tests {
         // must move to a following `user` input item as an `input_image`, flushed
         // by `responses_input_items` after the tool-result run.
         let mut opts = crate::llm::api::options::base_opts("openai");
-        opts.messages = vec![serde_json::json!({
-            "role": "tool",
-            "tool_call_id": "call_1",
-            "content": [
-                {"type": "text", "text": "Captured screenshot."},
-                {"base64": "AAAB", "media_type": "image/png", "scale_factor": 2.0},
-            ],
-        })];
+        opts.messages = vec![
+            serde_json::json!({
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [{"id": "call_1", "name": "computer", "arguments": {}}],
+            }),
+            serde_json::json!({
+                "role": "tool",
+                "tool_call_id": "call_1",
+                "content": [
+                    {"type": "text", "text": "Captured screenshot."},
+                    {"base64": "AAAB", "media_type": "image/png", "scale_factor": 2.0},
+                ],
+            }),
+        ];
         let payload = LlmRequestPayload::from(&opts);
         let items = responses_input_items(&payload);
         assert_eq!(
             items.len(),
-            2,
-            "function_call_output + a user image message"
+            3,
+            "function_call + function_call_output + a user image message"
         );
-        assert_eq!(items[0]["type"], "function_call_output");
-        assert_eq!(items[0]["output"], "Captured screenshot.");
+        assert_eq!(items[0]["type"], "function_call");
+        assert_eq!(items[1]["type"], "function_call_output");
+        assert_eq!(items[1]["output"], "Captured screenshot.");
         // No image leaked into the string output.
-        assert!(!items[0]["output"].as_str().unwrap().contains("base64"));
-        assert_eq!(items[1]["role"], "user");
-        let content = items[1]["content"].as_array().expect("user content");
+        assert!(!items[1]["output"].as_str().unwrap().contains("base64"));
+        assert_eq!(items[2]["role"], "user");
+        let content = items[2]["content"].as_array().expect("user content");
         let img = content
             .iter()
             .find(|c| c.get("type").and_then(|t| t.as_str()) == Some("input_image"))
@@ -1029,6 +1037,14 @@ mod tests {
         let mut opts = crate::llm::api::options::base_opts("openai");
         opts.messages = vec![
             serde_json::json!({
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {"id": "c1", "name": "computer", "arguments": {}},
+                    {"id": "c2", "name": "read", "arguments": {}},
+                ],
+            }),
+            serde_json::json!({
                 "role": "tool",
                 "tool_call_id": "c1",
                 "content": [
@@ -1056,7 +1072,13 @@ mod tests {
             .collect();
         assert_eq!(
             kinds,
-            ["function_call_output", "function_call_output", "user"],
+            [
+                "function_call",
+                "function_call",
+                "function_call_output",
+                "function_call_output",
+                "user"
+            ],
             "outputs stay adjacent; image flushes after the run: {items:?}"
         );
     }

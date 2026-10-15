@@ -209,7 +209,7 @@ pub fn __merge_tool_names(existing: list?, additions: list?) {
   const values = additions ?? []
   for name in values {
     if name != "" && !contains(merged, name) {
-      merged = merged.appending(name)
+      merged.push(name)
     }
   }
   return merged
@@ -576,16 +576,17 @@ pub fn __agent_loop_record_budget_stop(
   current_max: any,
   reason: any,
 ) {
-  return decisions.appending(
-    {
-      iteration: iteration,
-      action: "stop",
-      old_limit: current_max,
-      new_limit: current_max,
-      reason: reason,
-      status: "budget_exhausted",
-    },
-  )
+  return decisions
+    + [
+      {
+        iteration: iteration,
+        action: "stop",
+        old_limit: current_max,
+        new_limit: current_max,
+        reason: reason,
+        status: "budget_exhausted",
+      },
+    ]
 }
 
 pub fn __stall_judge_opts(
@@ -795,16 +796,17 @@ pub fn __agent_loop_record_terminal_callback_continue(
   old_limit: any,
   new_limit: any,
 ) {
-  return decisions.appending(
-    {
-      iteration: iteration,
-      action: "extend",
-      old_limit: old_limit,
-      new_limit: new_limit,
-      reason: "terminal_callback_continue",
-      status: "",
-    },
-  )
+  return decisions
+    + [
+      {
+        iteration: iteration,
+        action: "extend",
+        old_limit: old_limit,
+        new_limit: new_limit,
+        reason: "terminal_callback_continue",
+        status: "",
+      },
+    ]
 }
 
 pub fn __agent_loop_state_budget_fields(

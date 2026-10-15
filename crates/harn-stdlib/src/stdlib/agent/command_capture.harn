@@ -133,7 +133,7 @@ fn __cc_filter_allowed(filter: string) {
   if word.contains("=") {
     return false
   }
-  const name = __cc_basename(word).lowercase()
+  const name = __cc_basename(word).lower()
   if !__cc_list_has(__cc_consume_all_filters(), name) {
     return false
   }
@@ -208,11 +208,11 @@ fn __cc_scan_cuts(command: string) {
     } else if ch == "(" {
       return nil
     } else if ch == ";" {
-      cuts = cuts.appending({pos: i, len: 1, kind: "stmt"})
+      cuts.push({pos: i, len: 1, kind: "stmt"})
       i = i + 1
     } else if ch == "&" {
       if command.char_at(i + 1) == "&" {
-        cuts = cuts.appending({pos: i, len: 2, kind: "stmt"})
+        cuts.push({pos: i, len: 2, kind: "stmt"})
         i = i + 2
       } else if i > 0 && (command.char_at(i - 1) == ">" || command.char_at(i - 1) == "<") {
         // fd-duplication redirection (e.g. `2>&1`, `>&2`), not a
@@ -224,12 +224,12 @@ fn __cc_scan_cuts(command: string) {
     } else if ch == "|" {
       const next = command.char_at(i + 1)
       if next == "|" {
-        cuts = cuts.appending({pos: i, len: 2, kind: "stmt"})
+        cuts.push({pos: i, len: 2, kind: "stmt"})
         i = i + 2
       } else if next == "&" {
         return nil
       } else {
-        cuts = cuts.appending({pos: i, len: 1, kind: "pipe"})
+        cuts.push({pos: i, len: 1, kind: "pipe"})
         i = i + 1
       }
     } else {
@@ -358,7 +358,7 @@ fn __cc_new_capture_path(fs: HarnessFs, random: HarnessRandom) {
 }
 
 fn __cc_posix_shell(word: string) {
-  const name = __cc_basename(word).lowercase()
+  const name = __cc_basename(word).lower()
   return name == "sh" || name == "bash" || name == "zsh" || name == "dash" || name == "ksh"
 }
 
@@ -392,9 +392,9 @@ pub fn command_capture_plan_request(harness: Harness, request: dict) {
       let i = 0
       while i < len(argv) {
         if i == 2 {
-          new_argv = new_argv.appending(plan.rewritten)
+          new_argv.push(plan.rewritten)
         } else {
-          new_argv = new_argv.appending(argv[i])
+          new_argv.push(argv[i])
         }
         i = i + 1
       }

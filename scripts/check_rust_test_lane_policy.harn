@@ -184,7 +184,11 @@ pub fn workflow_violations(workflow: string, document: dict) -> list<LaneViolati
 
 fn workflow_name(path: string) -> string {
   const parts = path.split("/")
-  return parts[len(parts) - 1]
+  const name = parts[len(parts) - 1]
+  if name == nil {
+    throw "split returned no workflow path components"
+  }
+  return name
 }
 
 pub fn main(harness: Harness) {

@@ -102,6 +102,10 @@ pub fn logged_isolated(source: &str) -> Result<Vec<String>, String> {
 }
 
 pub fn log_lines(output: String) -> Vec<String> {
+    output_lines(&output)
+}
+
+pub fn output_lines(output: &str) -> Vec<String> {
     output
         .lines()
         .filter_map(|line| line.strip_prefix("[harn] "))
@@ -113,17 +117,32 @@ fn run_with_environment(
     source: &str,
     environment: Option<SessionEnvironment>,
 ) -> Result<String, String> {
-    run_with_environment_and_context(source, environment, None)
+    run_with_environment_and_context(source, environment, None, false)
 }
 
 fn run_with_execution_context(source: &str, context: RunExecutionRecord) -> Result<String, String> {
-    run_with_environment_and_context(source, None, Some(context))
+    run_with_environment_and_context(source, None, Some(context), false)
+}
+
+/// Execute an agent fixture with the same host bridge and VM stack as the native runtime.
+pub fn run_with_host_bridge(source: &str) -> Result<String, String> {
+    run_with_environment_and_context(source, None, None, true)
 }
 
 fn run_with_environment_and_context(
     source: &str,
     environment: Option<SessionEnvironment>,
     context: Option<RunExecutionRecord>,
+    with_bridge: bool,
+) -> Result<String, String> {
+    harn_vm::on_vm_stack(|| run_vm(source, environment, context, with_bridge))
+}
+
+fn run_vm(
+    source: &str,
+    environment: Option<SessionEnvironment>,
+    context: Option<RunExecutionRecord>,
+    with_bridge: bool,
 ) -> Result<String, String> {
     harn_vm::reset_thread_local_state();
     let chunk = harn_vm::compile_source(source)?;
@@ -135,6 +154,18 @@ fn run_with_environment_and_context(
         let local = tokio::task::LocalSet::new();
         local
             .run_until(async move {
+                if with_bridge {
+                    harn_vm::llm::install_current_host_bridge(std::sync::Arc::new(
+                        harn_vm::bridge::HostBridge::from_parts(
+                            std::sync::Arc::new(tokio::sync::Mutex::new(
+                                std::collections::HashMap::new(),
+                            )),
+                            std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                            std::sync::Arc::new(Mutex::new(())),
+                            1,
+                        ),
+                    ));
+                }
                 harn_vm::stdlib::process::set_session_environment(environment);
                 harn_vm::stdlib::process::set_thread_execution_context(context);
                 let mut vm = harn_vm::Vm::new();
@@ -145,6 +176,9 @@ fn run_with_environment_and_context(
                     .map_err(|error: VmError| format!("{error:?}"));
                 harn_vm::stdlib::process::set_session_environment(None);
                 harn_vm::stdlib::process::set_thread_execution_context(None);
+                if with_bridge {
+                    harn_vm::llm::clear_current_host_bridge();
+                }
                 result.map(|_| vm.output().to_string())
             })
             .await

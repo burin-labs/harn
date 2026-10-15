@@ -524,6 +524,10 @@ impl KeyringSecretProvider {
 
 #[async_trait]
 impl SecretProvider for KeyringSecretProvider {
+    fn allows_local_cli_reads(&self) -> bool {
+        true
+    }
+
     async fn get(&self, id: &SecretId) -> Result<SecretBytes, SecretError> {
         match self
             .keyring

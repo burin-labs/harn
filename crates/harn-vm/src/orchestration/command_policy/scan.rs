@@ -1068,22 +1068,15 @@ fn grep_option_takes_value(arg: &str) -> bool {
     )
 }
 
+/// Words that mark a secret in free text: command output, JSON keys. Paths are
+/// recognized by the shared registry instead (`crate::known_paths`).
+const SECRET_WORDS: &[&str] = &["credentials", "secret", "token", "api_key", "apikey"];
+
 pub(super) fn contains_secret_like_text(lower: &str) -> bool {
-    [
-        ".env",
-        "id_rsa",
-        "id_ed25519",
-        ".aws/credentials",
-        ".npmrc",
-        ".netrc",
-        "credentials",
-        "secret",
-        "token",
-        "api_key",
-        "apikey",
-    ]
-    .iter()
-    .any(|needle| lower.contains(needle))
+    SECRET_WORDS.iter().any(|word| lower.contains(word))
+        || lower
+            .split_whitespace()
+            .any(crate::known_paths::is_credential_path)
 }
 
 pub(super) fn has_network_exfil(lower: &str) -> bool {

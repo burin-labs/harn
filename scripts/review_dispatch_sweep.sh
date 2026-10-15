@@ -26,11 +26,6 @@ ends with nothing:
               on the pull request, under its own marker, so the stop is
               visible where reviews are read.
 
-The pull request events skip bot authors. The sweep also covers pull requests
-opened by this repository's release App (REVIEW_SWEEP_RELEASE_APP, default
-harn-release-bot): release and development-update pull requests carry the
-`ship` label, and Smart Ship lands only after an approving review.
-
 A head counts as decided when the reviewer App left a review on it (other than
 an unfinished verdict) or posted
 any other stand-down for it (draft, opt-out label, generated-only, ...). Every
@@ -42,7 +37,7 @@ The default is a read-only plan: one line per candidate, oldest pull request
 first. --apply dispatches up to --limit (default 4) of them, waiting
 REVIEW_SWEEP_SPACING_SECONDS (default 90) between requests so the reviewer's
 admission queue never holds two pending runs. --apply reads
-REVIEW_REPOSITORY, REVIEW_WORKFLOW, optional REVIEW_REF, and DISPATCH_TOKEN
+REVIEW_REPOSITORY, REVIEW_WORKFLOW, the measured REVIEW_REF, and DISPATCH_TOKEN
 (the App token that may dispatch the review workflow); GH_TOKEN reads this
 repository and records the check run.
 USAGE
@@ -99,8 +94,6 @@ max_unfinished="${REVIEW_SWEEP_MAX_UNFINISHED:-3}"
 [[ "$max_unfinished" =~ ^[1-9][0-9]?$ ]] || die "REVIEW_SWEEP_MAX_UNFINISHED must be between 1 and 99"
 
 request_check="Automatic review: requested"
-# GraphQL names an App author by its slug, without the REST `[bot]` suffix.
-release_app="${REVIEW_SWEEP_RELEASE_APP:-harn-release-bot}"
 owner="${repo%%/*}"
 name="${repo#*/}"
 
@@ -115,7 +108,7 @@ query='query($owner: String!, $name: String!) {
         isDraft
         isCrossRepository
         headRefOid
-        author { __typename login }
+        author { __typename }
         reviews(last: 15) { nodes { author { __typename } commit { oid } submittedAt body } }
         comments(last: 20) { nodes { author { __typename } createdAt body } }
       }
@@ -126,18 +119,17 @@ query='query($owner: String!, $name: String!) {
 response="$(gh api graphql -f query="$query" -f owner="$owner" -f name="$name")" \
   || die "could not read the open pull requests of $repo"
 
-# Heads still waiting: ready, same-repository, authored by a person or the
-# release App, and without a
+# Heads still waiting: ready, same-repository, person-authored, and without a
 # review from a bot on that exact head. A failure verdict carries the
 # unfinished marker and is not a review: it is counted, not taken as an
 # outcome. One JSON object per head, carrying the kind of the reviewer's latest
 # stand-down for it, if any.
-waiting="$(jq -c --arg release_app "$release_app" '
+waiting="$(jq -c '
   if .data.repository.pullRequests == null then error("no pull requests in the response") else . end
   | .data.repository.pullRequests.nodes[]
   | select(.isDraft | not)
   | select(.isCrossRepository | not)
-  | select(.author.__typename != "Bot" or .author.login == $release_app)
+  | select(.author.__typename != "Bot")
   | .headRefOid as $head
   # On a line of its own: a review that quotes the marker in prose is a review.
   | ("(^|\n)<!-- [a-z][a-z0-9-]*-review-unfinished: " + $head + " -->(\n|$)") as $unfinished_marker
@@ -205,10 +197,7 @@ printf '%s\n' "$plan"
 : "${REVIEW_REPOSITORY:?REVIEW_REPOSITORY is required with --apply}"
 : "${REVIEW_WORKFLOW:?REVIEW_WORKFLOW is required with --apply}"
 : "${DISPATCH_TOKEN:?DISPATCH_TOKEN is required with --apply}"
-ref_args=()
-if [[ -n "${REVIEW_REF:-}" ]]; then
-  ref_args=(--ref "$REVIEW_REF")
-fi
+: "${REVIEW_REF:?the measured review workflow ref is required with --apply}"
 
 sent=0
 while IFS=$'\t' read -r number head reason; do
@@ -227,7 +216,7 @@ while IFS=$'\t' read -r number head reason; do
   fi
   GH_TOKEN="$DISPATCH_TOKEN" gh workflow run "$REVIEW_WORKFLOW" \
     --repo "$REVIEW_REPOSITORY" \
-    "${ref_args[@]}" \
+    --ref "$REVIEW_REF" \
     -f repository="$repo" \
     -f pr="$number" \
     -f head_sha="$head"

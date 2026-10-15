@@ -1,0 +1,67 @@
+import { completion_requirement_report } from "std/agent/completion_requirements"
+import { agent_capture_events } from "std/agent/events"
+import { __judge_emit_decision } from "std/agent/judge_internals"
+
+pipeline test_handler_evidence_survives_the_native_judge_event(harness: Harness) {
+  const dir = harness.fs.mkdtemp_in_workspace("requirement-handler")
+  const path = dir + "/handler.harn"
+  const contract = {
+    requirements: [
+      {
+        requirement_id: "behavior",
+        name: "Reach the requested handler.",
+        evidence_roles: ["deterministic_verification"],
+      },
+    ],
+  }
+  for implemented in [false, true] {
+    const declaration = if implemented {
+      "fn requested_handler() -> string { return \"handler reached\" }\n"
+    } else {
+      ""
+    }
+    harness.fs.write_text(
+      path,
+      declaration + "fn main(harness: Harness) { harness.stdio.println(requested_handler()) }\n",
+    )
+    const binary = harness.env.get("HARN_BIN") ?? "harn"
+    const execution = harness.process.exec(binary, "run", path)
+    assert_eq(execution.exit_code == 0, implemented)
+    assert_eq(contains(execution.stdout, "handler reached"), implemented)
+    const report = completion_requirement_report(
+      contract,
+      [{requirement_id: "behavior", met: true, evidence_refs: [9]}],
+      {
+        requirement_evidence: [
+          {
+            evidence_index: 9,
+            role: "deterministic_verification",
+            supports_completion: execution.exit_code == 0,
+            summary: execution.stdout,
+            representative_artifact_ids: [path],
+            measurement: execution.exit_code == 0 ? "passed" : "failed",
+          },
+        ],
+      },
+    )
+    assert_eq(report.complete, implemented)
+    assert_eq(report.pending_count, implemented ? 0 : 1)
+    const session = "requirement-handler-" + harness.random.uuid()
+    const captured = agent_capture_events(
+      harness.agent,
+      session,
+      { ->
+        __judge_emit_decision(
+          harness.agent,
+          session,
+          0,
+          {vetoed: !report.complete, requirement_report: report},
+        )
+      },
+    )
+    assert_eq(len(captured.events), 1)
+    assert_eq(captured.events[0].type, "judge_decision")
+    assert_eq(captured.events[0].requirement_report, report)
+  }
+  harness.fs.delete(dir)
+}

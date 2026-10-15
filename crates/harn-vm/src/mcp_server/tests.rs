@@ -12,7 +12,7 @@ use super::defs::{
 use super::tool_registry_to_mcp_tools;
 use super::tools_schema::params_to_json_schema;
 use super::uri::match_uri_template;
-use super::{McpServer, McpServerMetadata, McpToolSet};
+use super::{McpScriptRegistry, McpServerMetadata, McpToolSet};
 
 #[path = "tests/application_errors.rs"]
 mod application_errors;
@@ -282,15 +282,36 @@ fn test_tool_registry_to_mcp_tools_preserves_metadata() {
     );
 }
 
+fn script_registry(tools: McpToolSet) -> McpScriptRegistry {
+    McpScriptRegistry::new(
+        "test".to_string(),
+        tools,
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+    )
+}
+
+async fn call(
+    registry: &McpScriptRegistry,
+    params: serde_json::Value,
+    as_task: bool,
+) -> serde_json::Value {
+    let mut vm = crate::Vm::new();
+    registry
+        .call_tool(&serde_json::json!(1), &params, &mut vm, None, as_task)
+        .await
+}
+
 #[tokio::test]
-async fn server_projects_extension_metadata_on_tools_and_resource_content() {
+async fn registry_projects_extension_metadata_on_tools_and_resource_content() {
     let extension_meta = serde_json::json!({
         "ui": {
             "resourceUri": "ui://example/editor",
             "visibility": ["model", "app"]
         }
     });
-    let server = McpServer::new(
+    let registry = McpScriptRegistry::new(
         "test".to_string(),
         tool_set(vec![tool_def(
             "open_editor",
@@ -312,52 +333,21 @@ async fn server_projects_extension_metadata_on_tools_and_resource_content() {
         Vec::new(),
         Vec::new(),
     );
-    let mut vm = crate::Vm::new();
-
-    let discovered = server
-        .handle_json_rpc(
-            crate::jsonrpc::request(
-                0,
-                crate::mcp_protocol::METHOD_SERVER_DISCOVER,
-                stable_metadata_params(serde_json::json!({})),
-            ),
-            &mut vm,
-        )
-        .await
-        .unwrap();
+    let surface = registry.surface();
+    assert!(surface.serves_mcp_apps);
     assert_eq!(
-        discovered["result"]["capabilities"]["extensions"]["io.modelcontextprotocol/ui"]
-            ["mimeTypes"][0],
-        "text/html;profile=mcp-app"
-    );
-
-    let tools = server
-        .handle_json_rpc(
-            crate::jsonrpc::request(
-                1,
-                "tools/list",
-                stable_metadata_params(serde_json::json!({})),
-            ),
-            &mut vm,
-        )
-        .await
-        .unwrap();
-    assert_eq!(
-        tools["result"]["tools"][0]["_meta"]["ui"]["resourceUri"],
+        surface.tools[0]["_meta"]["ui"]["resourceUri"],
         "ui://example/editor"
     );
 
-    let content = server
-        .handle_json_rpc(
-            crate::jsonrpc::request(
-                2,
-                "resources/read",
-                stable_metadata_params(serde_json::json!({"uri": "ui://example/editor"})),
-            ),
+    let mut vm = crate::Vm::new();
+    let content = registry
+        .read_resource(
+            &serde_json::json!(2),
+            &serde_json::json!({"uri": "ui://example/editor"}),
             &mut vm,
         )
-        .await
-        .unwrap();
+        .await;
     assert_eq!(
         content["result"]["contents"][0]["_meta"]["ui"]["prefersBorder"],
         false
@@ -373,47 +363,29 @@ async fn mcp_audience_blocks_discovery_and_forged_calls() {
         crate::mcp_tasks::McpTaskSupport::Forbidden,
     );
     excluded.catalog.governance.audiences = vec![crate::tool_registry::ToolAudience::Cli];
-    let server = McpServer::new(
-        "test".to_string(),
-        tool_set(vec![excluded]),
-        Vec::new(),
-        Vec::new(),
-        Vec::new(),
-    );
-    let mut vm = crate::Vm::new();
+    let registry = script_registry(tool_set(vec![excluded]));
 
-    let listed = server
-        .handle_json_rpc(
-            crate::jsonrpc::request(
-                1,
-                "tools/list",
-                stable_metadata_params(serde_json::json!({})),
-            ),
-            &mut vm,
-        )
-        .await
-        .expect("tools/list response");
-    assert_eq!(listed["result"]["tools"], serde_json::json!([]));
+    let surface = registry.surface();
+    assert!(surface.tools.is_empty());
+    assert!(surface.task_support.is_empty());
 
-    let forged = server
-        .handle_json_rpc(
-            crate::jsonrpc::request(
-                2,
-                "tools/call",
-                stable_metadata_params(serde_json::json!({
-                    "name": "cli_only",
-                    "arguments": {}
-                })),
-            ),
-            &mut vm,
-        )
-        .await
-        .expect("tools/call response");
+    let forged = call(
+        &registry,
+        serde_json::json!({"name": "cli_only", "arguments": {}}),
+        false,
+    )
+    .await;
     assert_eq!(forged["error"]["code"], -32602);
     assert!(forged["error"]["message"]
         .as_str()
         .unwrap()
         .contains("Unknown tool"));
+    assert!(registry
+        .admit_tool(
+            &serde_json::json!(2),
+            &serde_json::json!({"name": "cli_only", "arguments": {}})
+        )
+        .is_err());
 }
 
 #[test]
@@ -522,50 +494,9 @@ fn test_annotations_empty_returns_none() {
     assert!(annotations_to_json(&VmValue::dict(d)).is_none());
 }
 
-#[tokio::test]
-async fn server_advertises_stable_resource_and_task_capabilities() {
-    let server = McpServer::new(
-        "test".to_string(),
-        tool_set(Vec::new()),
-        vec![McpResourceDef {
-            uri: "docs://readme".to_string(),
-            name: "README".to_string(),
-            title: None,
-            description: None,
-            mime_type: Some("text/plain".to_string()),
-            meta: None,
-            text: "hello".to_string(),
-        }],
-        Vec::new(),
-        Vec::new(),
-    );
-    let mut vm = crate::Vm::new();
-
-    let response = server
-        .handle_json_rpc(
-            crate::jsonrpc::request(
-                1,
-                crate::mcp_protocol::METHOD_SERVER_DISCOVER,
-                stable_metadata_params(serde_json::json!({})),
-            ),
-            &mut vm,
-        )
-        .await
-        .expect("response");
-
-    assert_eq!(
-        response["result"]["capabilities"]["resources"],
-        serde_json::json!({})
-    );
-    assert_eq!(
-        response["result"]["capabilities"]["extensions"][crate::mcp_protocol::TASKS_EXTENSION_ID],
-        serde_json::json!({})
-    );
-}
-
-#[tokio::test]
-async fn server_metadata_overrides_discover() {
-    let server = McpServer::new(
+#[test]
+fn registry_metadata_overrides_identity() {
+    let registry = McpScriptRegistry::new(
         "file-stem".to_string(),
         tool_set(Vec::new()),
         Vec::new(),
@@ -577,31 +508,17 @@ async fn server_metadata_overrides_discover() {
         version: Some("1.0.0".to_string()),
         instructions: Some("Use echo server tools only for conformance.".to_string()),
     });
-    let mut vm = crate::Vm::new();
-
-    let discover = server
-        .handle_json_rpc(
-            crate::jsonrpc::request(
-                2,
-                crate::mcp_protocol::METHOD_SERVER_DISCOVER,
-                stable_metadata_params(serde_json::json!({})),
-            ),
-            &mut vm,
-        )
-        .await
-        .expect("discover response");
+    let surface = registry.surface();
+    assert_eq!(surface.server_name, "test-echo-server");
+    assert_eq!(surface.server_version, "1.0.0");
     assert_eq!(
-        discover["result"]["instructions"],
-        serde_json::json!("Use echo server tools only for conformance.")
-    );
-    assert_eq!(
-        discover["result"]["_meta"]["io.modelcontextprotocol/serverInfo"],
-        serde_json::json!({"name": "test-echo-server", "version": "1.0.0"})
+        surface.instructions.as_deref(),
+        Some("Use echo server tools only for conformance.")
     );
 }
 
 #[tokio::test]
-async fn server_completion_complete_returns_prompt_and_resource_suggestions() {
+async fn registry_completes_prompt_and_resource_arguments() {
     let mut resource_completions = std::collections::BTreeMap::new();
     resource_completions.insert(
         "key".to_string(),
@@ -610,7 +527,7 @@ async fn server_completion_complete_returns_prompt_and_resource_suggestions() {
             handler: None,
         },
     );
-    let server = McpServer::new(
+    let registry = McpScriptRegistry::new(
         "test".to_string(),
         tool_set(Vec::new()),
         Vec::new(),
@@ -644,51 +561,24 @@ async fn server_completion_complete_returns_prompt_and_resource_suggestions() {
             handler: empty_closure("prompt"),
         }],
     );
-    let mut vm = crate::Vm::new();
-
-    let discover = server
-        .handle_json_rpc(
-            crate::jsonrpc::request(
-                1,
-                crate::mcp_protocol::METHOD_SERVER_DISCOVER,
-                stable_metadata_params(serde_json::json!({})),
-            ),
-            &mut vm,
-        )
-        .await
-        .expect("response");
-    assert!(discover["result"]["capabilities"]["completions"].is_object());
-
-    let prompts = server
-        .handle_json_rpc(
-            crate::jsonrpc::request(
-                4,
-                "prompts/list",
-                stable_metadata_params(serde_json::json!({})),
-            ),
-            &mut vm,
-        )
-        .await
-        .expect("response");
+    let surface = registry.surface();
+    assert_eq!(surface.prompts[0]["arguments"][0]["title"], "Language");
     assert_eq!(
-        prompts["result"]["prompts"][0]["arguments"][0]["title"],
-        "Language"
+        surface.resource_templates[0]["uriTemplate"],
+        "config://{key}"
     );
 
-    let prompt = server
-        .handle_json_rpc(
-            crate::jsonrpc::request(
-                2,
-                crate::mcp_protocol::METHOD_COMPLETION_COMPLETE,
-                stable_metadata_params(serde_json::json!({
-                    "ref": {"type": "ref/prompt", "name": "review"},
-                    "argument": {"name": "language", "value": "ru"},
-                })),
-            ),
+    let mut vm = crate::Vm::new();
+    let prompt = registry
+        .complete(
+            &serde_json::json!(2),
+            &serde_json::json!({
+                "ref": {"type": "ref/prompt", "name": "review"},
+                "argument": {"name": "language", "value": "ru"},
+            }),
             &mut vm,
         )
-        .await
-        .expect("response");
+        .await;
     assert_eq!(
         prompt["result"]["completion"]["values"],
         serde_json::json!(["ruby", "rust"])
@@ -702,20 +592,16 @@ async fn server_completion_complete_returns_prompt_and_resource_suggestions() {
         serde_json::json!(false)
     );
 
-    let resource = server
-        .handle_json_rpc(
-            crate::jsonrpc::request(
-                3,
-                crate::mcp_protocol::METHOD_COMPLETION_COMPLETE,
-                stable_metadata_params(serde_json::json!({
-                    "ref": {"type": "ref/resource", "uri": "config://{key}"},
-                    "argument": {"name": "key", "value": "ver"},
-                })),
-            ),
+    let resource = registry
+        .complete(
+            &serde_json::json!(3),
+            &serde_json::json!({
+                "ref": {"type": "ref/resource", "uri": "config://{key}"},
+                "argument": {"name": "key", "value": "ver"},
+            }),
             &mut vm,
         )
-        .await
-        .expect("response");
+        .await;
     assert_eq!(
         resource["result"]["completion"]["values"],
         serde_json::json!(["version"])
@@ -723,100 +609,9 @@ async fn server_completion_complete_returns_prompt_and_resource_suggestions() {
 }
 
 #[tokio::test]
-async fn server_rejects_client_bound_sampling_and_elicitation_requests() {
-    let server = McpServer::new(
+async fn registry_reads_static_resources_and_reports_unknown_uris() {
+    let registry = McpScriptRegistry::new(
         "test".to_string(),
-        tool_set(Vec::new()),
-        Vec::new(),
-        Vec::new(),
-        Vec::new(),
-    );
-    let mut vm = crate::Vm::new();
-    for (method, feature) in [
-        (
-            crate::mcp_protocol::METHOD_SAMPLING_CREATE_MESSAGE,
-            "sampling",
-        ),
-        (
-            crate::mcp_protocol::METHOD_ELICITATION_CREATE,
-            "elicitation",
-        ),
-    ] {
-        let response = server
-            .handle_json_rpc(
-                crate::jsonrpc::request(7, method, stable_metadata_params(serde_json::json!({}))),
-                &mut vm,
-            )
-            .await
-            .expect("response");
-        assert!(response.get("result").is_none());
-        assert_eq!(response["error"]["code"], serde_json::json!(-32601));
-        assert_eq!(response["error"]["data"]["feature"], feature);
-        assert_eq!(response["error"]["data"]["role"], "client");
-    }
-}
-
-#[tokio::test]
-async fn server_tool_call_ignores_client_task_support_and_executes_inline() {
-    let server = McpServer::new(
-        "test".to_string(),
-        tool_set(Vec::new()),
-        Vec::new(),
-        Vec::new(),
-        Vec::new(),
-    );
-    let mut vm = crate::Vm::new();
-    let response = server
-        .handle_json_rpc(
-            crate::jsonrpc::request(
-                1,
-                "tools/call",
-                stable_metadata_params(serde_json::json!({
-                    "name": "missing",
-                    "arguments": {},
-                    "_meta": {
-                        crate::mcp_protocol::MCP_META_KEY_PROTOCOL_VERSION:
-                            crate::mcp_protocol::PROTOCOL_VERSION,
-                        crate::mcp_protocol::MCP_META_KEY_CLIENT_INFO:
-                            {"name": "stable-client", "version": "1.0"},
-                        crate::mcp_protocol::MCP_META_KEY_CLIENT_CAPABILITIES: {
-                            "extensions": {crate::mcp_protocol::TASKS_EXTENSION_ID: {}}
-                        }
-                    }
-                })),
-            ),
-            &mut vm,
-        )
-        .await
-        .expect("response");
-
-    assert_eq!(response["error"]["code"], serde_json::json!(-32602));
-    assert_eq!(response["error"]["message"], "Unknown tool: missing");
-}
-
-fn stable_metadata_params(rest: serde_json::Value) -> serde_json::Value {
-    let mut object = match rest {
-        serde_json::Value::Object(map) => map,
-        serde_json::Value::Null => serde_json::Map::new(),
-        other => serde_json::Map::from_iter([("value".to_string(), other)]),
-    };
-    let meta = object
-        .entry("_meta".to_string())
-        .or_insert_with(|| serde_json::json!({}));
-    let meta = meta.as_object_mut().expect("_meta must be an object");
-    meta.entry(crate::mcp_protocol::MCP_META_KEY_PROTOCOL_VERSION)
-        .or_insert_with(|| serde_json::json!(crate::mcp_protocol::PROTOCOL_VERSION));
-    meta.entry(crate::mcp_protocol::MCP_META_KEY_CLIENT_INFO)
-        .or_insert_with(|| serde_json::json!({"name": "stable-client", "version": "1.0"}));
-    meta.entry(crate::mcp_protocol::MCP_META_KEY_CLIENT_CAPABILITIES)
-        .or_insert_with(|| serde_json::json!({}));
-    serde_json::Value::Object(object)
-}
-
-#[tokio::test]
-async fn server_discover_returns_capabilities_and_supported_versions() {
-    let server = McpServer::new(
-        "stable-test".to_string(),
         tool_set(Vec::new()),
         vec![McpResourceDef {
             uri: "docs://readme".to_string(),
@@ -830,328 +625,34 @@ async fn server_discover_returns_capabilities_and_supported_versions() {
         Vec::new(),
         Vec::new(),
     );
+    assert_eq!(registry.surface().resources[0]["uri"], "docs://readme");
     let mut vm = crate::Vm::new();
-    let response = server
-        .handle_json_rpc(
-            crate::jsonrpc::request(
-                1,
-                crate::mcp_protocol::METHOD_SERVER_DISCOVER,
-                stable_metadata_params(serde_json::json!({})),
-            ),
+    let read = registry
+        .read_resource(
+            &serde_json::json!(1),
+            &serde_json::json!({"uri": "docs://readme"}),
             &mut vm,
         )
-        .await
-        .expect("response");
-    assert_eq!(
-        response["result"]["resultType"],
-        serde_json::json!(crate::mcp_protocol::RESULT_TYPE_COMPLETE)
-    );
-    assert_eq!(response["result"]["ttlMs"], serde_json::json!(0));
-    assert_eq!(
-        response["result"]["cacheScope"],
-        serde_json::json!("private")
-    );
-    let supported = response["result"]["supportedVersions"]
-        .as_array()
-        .expect("supportedVersions");
-    assert_eq!(
-        supported.as_slice(),
-        [serde_json::json!(crate::mcp_protocol::PROTOCOL_VERSION)]
-    );
-    assert_eq!(
-        response["result"]["_meta"]["io.modelcontextprotocol/serverInfo"]["name"],
-        "stable-test"
-    );
+        .await;
+    assert_eq!(read["result"]["contents"][0]["text"], "hello");
+    let missing = registry
+        .read_resource(
+            &serde_json::json!(2),
+            &serde_json::json!({"uri": "docs://missing"}),
+            &mut vm,
+        )
+        .await;
+    assert_eq!(missing["error"]["code"], -32002);
 }
 
-#[tokio::test]
-async fn server_rejects_request_with_unsupported_protocol_version_metadata() {
-    let server = McpServer::new(
-        "stable-test".to_string(),
-        tool_set(Vec::new()),
-        Vec::new(),
-        Vec::new(),
-        Vec::new(),
-    );
-    let mut vm = crate::Vm::new();
-    let response = server
-        .handle_json_rpc(
-            crate::jsonrpc::request(
-                7,
-                "tools/list",
-                serde_json::json!({
-                    "_meta": {
-                        crate::mcp_protocol::MCP_META_KEY_PROTOCOL_VERSION: "2099-01-01"
-                    }
-                }),
-            ),
-            &mut vm,
-        )
-        .await
-        .expect("response");
-    assert_eq!(
-        response["error"]["code"],
-        serde_json::json!(crate::mcp_protocol::UNSUPPORTED_PROTOCOL_VERSION_CODE)
-    );
-    let supported = response["error"]["data"]["supported"]
-        .as_array()
-        .expect("supported array");
-    assert!(supported
-        .iter()
-        .any(|v| v == &serde_json::json!(crate::mcp_protocol::PROTOCOL_VERSION)));
-}
-
-#[tokio::test]
-async fn server_stable_tools_list_emits_result_type_and_cache_hint() {
-    let server = McpServer::new(
-        "stable-test".to_string(),
-        tool_set(Vec::new()),
-        vec![McpResourceDef {
-            uri: "docs://readme".to_string(),
-            name: "README".to_string(),
-            title: None,
-            description: None,
-            mime_type: Some("text/plain".to_string()),
-            meta: None,
-            text: "hello".to_string(),
-        }],
-        Vec::new(),
-        Vec::new(),
-    );
-    let mut vm = crate::Vm::new();
-
-    let stable = server
-        .handle_json_rpc(
-            crate::jsonrpc::request(
-                1,
-                "resources/list",
-                stable_metadata_params(serde_json::json!({})),
-            ),
-            &mut vm,
-        )
-        .await
-        .expect("stable response");
-    assert_eq!(
-        stable["result"]["resultType"],
-        serde_json::json!(crate::mcp_protocol::RESULT_TYPE_COMPLETE)
-    );
-    assert_eq!(
-        stable["result"]["cacheScope"],
-        serde_json::json!(crate::mcp_protocol::DEFAULT_LIST_CACHE_SCOPE)
-    );
-    assert_eq!(
-        stable["result"]["ttlMs"],
-        serde_json::json!(crate::mcp_protocol::DEFAULT_LIST_CACHE_TTL_MS)
-    );
-}
-
-#[tokio::test]
-async fn server_stable_non_list_methods_carry_result_type_envelope() {
-    let server = McpServer::new(
-        "stable-test".to_string(),
-        tool_set(Vec::new()),
-        Vec::new(),
-        Vec::new(),
-        Vec::new(),
-    );
-    let mut vm = crate::Vm::new();
-    let params = stable_metadata_params(serde_json::json!({}));
-    let response = server
-        .handle_json_rpc(crate::jsonrpc::request(1, "ping", params), &mut vm)
-        .await
-        .expect("response");
-    assert_eq!(
-        response["result"]["resultType"],
-        serde_json::json!(crate::mcp_protocol::RESULT_TYPE_COMPLETE)
-    );
-}
-
-#[tokio::test]
-async fn script_server_initializes_released_clients_without_stable_request_metadata() {
-    let server = McpServer::new(
-        "released-client-test".to_string(),
-        tool_set(vec![tool_def(
-            "render_fixture",
-            "Render a fixture",
-            None,
-            crate::mcp_tasks::McpTaskSupport::Forbidden,
-        )]),
-        Vec::new(),
-        Vec::new(),
-        Vec::new(),
-    );
-    let mut vm = crate::Vm::new();
-    let initialized = server
-        .handle_json_rpc(
-            crate::jsonrpc::request(
-                1,
-                "initialize",
-                serde_json::json!({
-                    "protocolVersion": "2025-11-25",
-                    "capabilities": {},
-                    "clientInfo": {"name": "released-client", "version": "1"},
-                }),
-            ),
-            &mut vm,
-        )
-        .await
-        .expect("initialize response");
-    assert_eq!(initialized["result"]["protocolVersion"], "2025-11-25");
-
-    let listed = server
-        .handle_json_rpc(
-            crate::jsonrpc::request(2, "tools/list", serde_json::json!({})),
-            &mut vm,
-        )
-        .await
-        .expect("tools/list response");
-    assert_eq!(listed["result"]["tools"][0]["name"], "render_fixture");
-    assert!(listed["result"].get("resultType").is_none());
-}
-
-#[tokio::test]
-async fn reloadable_script_server_advertises_tool_list_changes() {
-    let server = McpServer::new(
-        "reloadable-test".to_string(),
-        tool_set(Vec::new()),
-        Vec::new(),
-        Vec::new(),
-        Vec::new(),
-    )
-    .with_list_changes(true);
-    let mut vm = crate::Vm::new();
-    let initialized = server
-        .handle_json_rpc(
-            crate::jsonrpc::request(
-                1,
-                "initialize",
-                serde_json::json!({
-                    "protocolVersion": "2025-11-25",
-                    "capabilities": {},
-                    "clientInfo": {"name": "reload-client", "version": "1"},
-                }),
-            ),
-            &mut vm,
-        )
-        .await
-        .expect("initialize response");
-
-    assert_eq!(
-        initialized["result"]["capabilities"]["tools"]["listChanged"],
-        true
-    );
-    assert_eq!(
-        initialized["result"]["capabilities"]["resources"]["listChanged"],
-        true
-    );
-    assert_eq!(
-        initialized["result"]["capabilities"]["prompts"]["listChanged"],
-        true
-    );
-}
-
-#[tokio::test]
-async fn server_stable_resources_read_emits_cache_hint() {
-    let server = McpServer::new(
-        "stable-test".to_string(),
-        tool_set(Vec::new()),
-        vec![McpResourceDef {
-            uri: "docs://readme".to_string(),
-            name: "README".to_string(),
-            title: None,
-            description: None,
-            mime_type: Some("text/plain".to_string()),
-            meta: None,
-            text: "hello".to_string(),
-        }],
-        Vec::new(),
-        Vec::new(),
-    );
-    let mut vm = crate::Vm::new();
-    let response = server
-        .handle_json_rpc(
-            crate::jsonrpc::request(
-                1,
-                "resources/read",
-                stable_metadata_params(serde_json::json!({"uri": "docs://readme"})),
-            ),
-            &mut vm,
-        )
-        .await
-        .expect("response");
-    assert_eq!(
-        response["result"]["resultType"],
-        serde_json::json!(crate::mcp_protocol::RESULT_TYPE_COMPLETE)
-    );
-    assert_eq!(
-        response["result"]["ttlMs"],
-        serde_json::json!(crate::mcp_protocol::DEFAULT_READ_CACHE_TTL_MS)
-    );
-}
-
-#[tokio::test]
-async fn server_task_endpoints_report_a_genuinely_missing_task() {
-    let server = McpServer::new(
-        "test".to_string(),
-        tool_set(Vec::new()),
-        Vec::new(),
-        Vec::new(),
-        Vec::new(),
-    );
-    let mut vm = crate::Vm::new();
-    let missing = server
-        .handle_json_rpc(
-            crate::jsonrpc::request(
-                2,
-                "tasks/get",
-                stable_metadata_params(serde_json::json!({"taskId": "missing"})),
-            ),
-            &mut vm,
-        )
-        .await
-        .expect("response");
-    assert_eq!(missing["error"]["code"], serde_json::json!(-32021));
-
-    let genuinely_missing = server
-        .handle_json_rpc(
-            crate::jsonrpc::request(
-                3,
-                "tasks/get",
-                task_client_params(serde_json::json!({"taskId": "missing"})),
-            ),
-            &mut vm,
-        )
-        .await
-        .expect("response");
-    assert_eq!(
-        genuinely_missing["error"]["code"],
-        serde_json::json!(-32602)
-    );
-}
-
-fn task_capable_server(support: crate::mcp_tasks::McpTaskSupport) -> McpServer {
+fn task_capable_registry(support: crate::mcp_tasks::McpTaskSupport) -> McpScriptRegistry {
     let mut tool = tool_def("slow_report", "Build a report", None, support);
     tool.catalog.output_schema = Some(serde_json::json!({"type": "null"}));
-    McpServer::new(
-        "test".to_string(),
-        tool_set(vec![tool]),
-        Vec::new(),
-        Vec::new(),
-        Vec::new(),
-    )
-}
-
-/// `_meta` for a client that carries the tasks extension.
-fn task_client_params(rest: serde_json::Value) -> serde_json::Value {
-    let mut params = stable_metadata_params(rest);
-    params["_meta"][crate::mcp_protocol::MCP_META_KEY_CLIENT_CAPABILITIES] = serde_json::json!({
-        "extensions": {crate::mcp_protocol::TASKS_EXTENSION_ID: {}}
-    });
-    params
+    script_registry(tool_set(vec![tool]))
 }
 
 #[tokio::test]
-async fn tool_contract_validation_precedes_execution_and_task_success() {
+async fn tool_contract_validation_precedes_execution() {
     let mut tool = tool_def(
         "bounded_report",
         "Build a bounded report",
@@ -1166,101 +667,40 @@ async fn tool_contract_validation_precedes_execution_and_task_success() {
     });
     tool.catalog.output_schema = Some(serde_json::json!({"type": "integer"}));
     // empty_closure returns nil, intentionally violating the declared output.
-    let server = McpServer::new(
-        "test".to_string(),
-        tool_set(vec![tool]),
-        Vec::new(),
-        Vec::new(),
-        Vec::new(),
+    let registry = script_registry(tool_set(vec![tool]));
+
+    let invalid =
+        serde_json::json!({"name": "bounded_report", "arguments": {"count": 0, "ignored": true}});
+    let refused = registry
+        .admit_tool(&serde_json::json!(1), &invalid)
+        .expect_err("invalid input is refused before any task exists");
+    assert_eq!(refused["error"]["code"], serde_json::json!(-32602));
+    assert_eq!(
+        call(&registry, invalid, false).await["error"]["code"],
+        serde_json::json!(-32602)
     );
-    let mut vm = crate::Vm::new();
 
-    let invalid_input = server
-        .handle_json_rpc(
-            crate::jsonrpc::request(
-                1,
-                "tools/call",
-                stable_metadata_params(serde_json::json!({
-                    "name": "bounded_report",
-                    "arguments": {"count": 0, "ignored": true}
-                })),
-            ),
-            &mut vm,
-        )
-        .await
-        .expect("response");
-    assert_eq!(invalid_input["error"]["code"], serde_json::json!(-32602));
-
-    let invalid_output = server
-        .handle_json_rpc(
-            crate::jsonrpc::request(
-                2,
-                "tools/call",
-                stable_metadata_params(serde_json::json!({
-                    "name": "bounded_report",
-                    "arguments": {"count": 1}
-                })),
-            ),
-            &mut vm,
-        )
-        .await
-        .expect("response");
-    assert_eq!(invalid_output["result"]["isError"], serde_json::json!(true));
-    assert!(invalid_output["result"]["structuredContent"].is_null());
-
-    let created = server
-        .handle_json_rpc(
-            crate::jsonrpc::request(
-                3,
-                "tools/call",
-                task_client_params(serde_json::json!({
-                    "name": "bounded_report",
-                    "arguments": {"count": 1}
-                })),
-            ),
-            &mut vm,
-        )
-        .await
-        .expect("response");
-    let task_id = created["result"]["taskId"].as_str().expect("task id");
-    let read = server
-        .handle_json_rpc(
-            crate::jsonrpc::request(
-                4,
-                "tasks/get",
-                task_client_params(serde_json::json!({"taskId": task_id})),
-            ),
-            &mut vm,
-        )
-        .await
-        .expect("response");
-    assert_eq!(read["result"]["status"], serde_json::json!("completed"));
-    assert_eq!(read["result"]["result"]["isError"], true);
-    assert!(read["result"]["result"]["structuredContent"].is_null());
+    let valid = serde_json::json!({"name": "bounded_report", "arguments": {"count": 1}});
+    assert!(registry.admit_tool(&serde_json::json!(2), &valid).is_ok());
+    for as_task in [false, true] {
+        let invalid_output = call(&registry, valid.clone(), as_task).await;
+        assert_eq!(invalid_output["result"]["isError"], serde_json::json!(true));
+        assert!(invalid_output["result"]["structuredContent"].is_null());
+    }
 }
 
-/// The whole point of the extension from a client's side: hand back an id,
-/// then answer questions about it. The server used to advertise the capability
-/// and answer every one of these with `task not found`, which a polling client
-/// cannot distinguish from its task having been dropped.
+/// Inline and task completion share one `CallToolResult`; the server files
+/// the task's copy unchanged.
 #[tokio::test]
-async fn a_declared_tool_hands_back_a_task_a_client_can_actually_read() {
-    let server = task_capable_server(crate::mcp_tasks::McpTaskSupport::Optional);
-    let mut vm = crate::Vm::new();
-
-    let listed = server
-        .handle_json_rpc(
-            crate::jsonrpc::request(
-                0,
-                "tools/list",
-                stable_metadata_params(serde_json::json!({})),
-            ),
-            &mut vm,
-        )
-        .await
-        .expect("response");
+async fn a_declared_tool_produces_the_same_result_inline_and_as_a_task() {
+    let registry = task_capable_registry(crate::mcp_tasks::McpTaskSupport::Optional);
+    let surface = registry.surface();
     assert_eq!(
-        listed["result"]["tools"][0]["outputSchema"],
+        surface.task_support.get("slow_report"),
+        Some(&crate::mcp_tasks::McpTaskSupport::Optional)
+    );
+    assert_eq!(
+        surface.tools[0]["outputSchema"],
         serde_json::json!({
             "type": "object",
             "properties": {"result": {"type": "null"}},
@@ -1269,159 +709,30 @@ async fn a_declared_tool_hands_back_a_task_a_client_can_actually_read() {
         })
     );
 
-    let inline = server
-        .handle_json_rpc(
-            crate::jsonrpc::request(
-                0,
-                "tools/call",
-                stable_metadata_params(serde_json::json!({"name": "slow_report", "arguments": {}})),
-            ),
-            &mut vm,
-        )
-        .await
-        .expect("response");
-
-    let created = server
-        .handle_json_rpc(
-            crate::jsonrpc::request(
-                1,
-                "tools/call",
-                task_client_params(serde_json::json!({"name": "slow_report", "arguments": {}})),
-            ),
-            &mut vm,
-        )
-        .await
-        .expect("response");
-    assert_eq!(created["result"]["resultType"], serde_json::json!("task"));
-    assert_eq!(created["result"]["status"], serde_json::json!("working"));
-    let task_id = created["result"]["taskId"]
-        .as_str()
-        .expect("a created task carries an id")
-        .to_string();
-
-    let read = server
-        .handle_json_rpc(
-            crate::jsonrpc::request(
-                2,
-                "tasks/get",
-                task_client_params(serde_json::json!({"taskId": task_id})),
-            ),
-            &mut vm,
-        )
-        .await
-        .expect("response");
-    assert_eq!(read["result"]["taskId"], serde_json::json!(task_id));
-    assert_eq!(read["result"]["status"], serde_json::json!("completed"));
-    assert!(
-        read["result"]["result"].is_object(),
-        "a completed task must carry the tool result, got {read}",
-    );
-    for field in ["content", "isError", "structuredContent"] {
-        assert_eq!(
-            read["result"]["result"][field], inline["result"][field],
-            "inline and task completion must share CallToolResult field {field}"
-        );
-    }
+    let params = serde_json::json!({"name": "slow_report", "arguments": {}});
+    let inline = call(&registry, params.clone(), false).await;
+    let task = call(&registry, params, true).await;
+    assert_eq!(inline["result"], task["result"]);
     assert_eq!(
-        read["result"]["result"]["structuredContent"],
+        task["result"]["structuredContent"],
         serde_json::json!({"result": null})
     );
-    let output_validator =
-        jsonschema::draft202012::new(&listed["result"]["tools"][0]["outputSchema"])
-            .expect("advertised output schema");
-    assert!(output_validator.is_valid(&read["result"]["result"]["structuredContent"]));
-
-    // Cancelling something already terminal is idempotent. The terminal read
-    // above remains the authority for whether cancellation beat the work.
-    let cancel = server
-        .handle_json_rpc(
-            crate::jsonrpc::request(
-                3,
-                "tasks/cancel",
-                task_client_params(serde_json::json!({"taskId": task_id})),
-            ),
-            &mut vm,
-        )
-        .await
-        .expect("response");
-    assert_eq!(
-        cancel["result"]["resultType"],
-        serde_json::json!("complete")
-    );
-}
-
-/// Opting in is per tool, so adding the extension cannot change how a tool that
-/// never declared it behaves — even for a client that supports tasks.
-#[tokio::test]
-async fn an_undeclared_tool_still_answers_a_task_capable_client_inline() {
-    let server = task_capable_server(crate::mcp_tasks::McpTaskSupport::Forbidden);
-    let mut vm = crate::Vm::new();
-
-    let response = server
-        .handle_json_rpc(
-            crate::jsonrpc::request(
-                1,
-                "tools/call",
-                task_client_params(serde_json::json!({"name": "slow_report", "arguments": {}})),
-            ),
-            &mut vm,
-        )
-        .await
-        .expect("response");
-    assert!(
-        response["result"]["taskId"].is_null(),
-        "a forbidden tool must not create a task, got {response}",
-    );
-    assert_eq!(response["result"]["isError"], serde_json::json!(false));
-}
-
-/// `required` is the half that has to be enforced on the call: a client that
-/// simply omits the capability must not get the work done synchronously.
-#[tokio::test]
-async fn a_required_tool_refuses_a_client_that_did_not_ask_for_a_task() {
-    let server = task_capable_server(crate::mcp_tasks::McpTaskSupport::Required);
-    let mut vm = crate::Vm::new();
-
-    let response = server
-        .handle_json_rpc(
-            crate::jsonrpc::request(
-                1,
-                "tools/call",
-                stable_metadata_params(serde_json::json!({"name": "slow_report", "arguments": {}})),
-            ),
-            &mut vm,
-        )
-        .await
-        .expect("response");
-    assert_eq!(response["error"]["code"], serde_json::json!(-32021));
-    assert_eq!(
-        response["error"]["data"]["requiredCapabilities"]["extensions"]
-            [crate::mcp_protocol::TASKS_EXTENSION_ID],
-        serde_json::json!({})
-    );
+    let output_validator = jsonschema::draft202012::new(&surface.tools[0]["outputSchema"])
+        .expect("advertised output schema");
+    assert!(output_validator.is_valid(&task["result"]["structuredContent"]));
 }
 
 /// The stable tasks extension makes the server the sole per-request decider;
 /// retired tool-level task metadata must not leak back into discovery.
-#[tokio::test]
-async fn tools_list_omits_retired_tool_level_task_support() {
-    let mut vm = crate::Vm::new();
+#[test]
+fn tools_list_omits_retired_tool_level_task_support() {
     for support in [
         crate::mcp_tasks::McpTaskSupport::Optional,
         crate::mcp_tasks::McpTaskSupport::Required,
         crate::mcp_tasks::McpTaskSupport::Forbidden,
     ] {
-        let listed = task_capable_server(support)
-            .handle_json_rpc(
-                crate::jsonrpc::request(
-                    1,
-                    "tools/list",
-                    stable_metadata_params(serde_json::json!({})),
-                ),
-                &mut vm,
-            )
-            .await
-            .expect("response");
-        assert!(listed["result"]["tools"][0].get("execution").is_none());
+        let surface = task_capable_registry(support).surface();
+        assert!(surface.tools[0].get("execution").is_none());
+        assert_eq!(surface.task_support.get("slow_report"), Some(&support));
     }
 }

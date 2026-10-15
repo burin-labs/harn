@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::bytecode_cache;
 use crate::chunk::{CachedChunk, Chunk};
-use crate::module_artifact::ModuleArtifact;
+use crate::module_artifact::{ModuleArtifact, ModuleCompilationContext};
 use crate::prepared_module::PreparedModuleArtifact;
 
 pub const LINKED_PROGRAM_SCHEMA_VERSION: u32 = 1;
@@ -41,17 +41,10 @@ pub fn link_program(
             entrypoint.display()
         ))
     })?;
-    let imported_enums = build
-        .graph
-        .imported_names_by_kind_for_file(&entrypoint, harn_modules::DefKind::Enum)
-        .unwrap_or_default();
-    let imported_callables = build
-        .graph
-        .imported_callable_names_for_file(&entrypoint)
-        .unwrap_or_default();
+    let entry_context = ModuleCompilationContext::from_graph(&build.graph, &entrypoint);
     let entry_chunk = crate::Compiler::new()
-        .with_imported_enum_candidates(imported_enums)
-        .with_imported_source_callable_names(imported_callables)
+        .with_imported_enum_candidates(entry_context.enum_candidates().to_vec())
+        .with_imported_source_callable_names(entry_context.source_callable_names().to_vec())
         .compile(&entry_source.program)
         .map_err(|error| {
             LinkedProgramError::invalid(format!(
@@ -113,17 +106,7 @@ pub fn link_program(
             continue;
         }
         let compilation_context =
-            crate::module_artifact::ModuleCompilationContext::for_source_in_graph(
-                &build.graph,
-                &path,
-                &parsed.source,
-            )
-            .map_err(|error| {
-                LinkedProgramError::invalid(format!(
-                    "module context failed for {}: {error}",
-                    path.display()
-                ))
-            })?;
+            ModuleCompilationContext::for_program_in_graph(&build.graph, &path, &parsed.program);
         let compile_path = runtime_compile_path(&path);
         let full = if harn_modules::stdlib_module_name(&path).is_some() {
             crate::module_artifact::compile_embedded_stdlib_module_artifact_from_source_with_context(
@@ -746,7 +729,14 @@ mod tests {
         )
         .unwrap();
 
+        let parses = || crate::module_artifact::MODULE_PARSES.with(std::cell::Cell::get);
+        let before = parses();
         let linked = link_program(&entry, dir.path()).expect("link succeeds");
+        assert_eq!(
+            parses() - before,
+            1,
+            "only artifact compilation may reparse the imported module"
+        );
         let library = &linked.modules[Path::new("library.harn")];
         assert!(library.functions.contains_key("kept"));
         assert!(library.functions.contains_key("helper_a"));

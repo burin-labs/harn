@@ -89,7 +89,7 @@ fn __tool_mw_string_list(value: any) -> list {
   let out = []
   for item in __tool_mw_list(value) {
     if item != nil {
-      out = out.appending(to_string(item))
+      out.push(to_string(item))
     }
   }
   return out
@@ -128,7 +128,7 @@ fn __tool_mw_drop_keys(value: unknown, keys: string | list) {
   if type_of(value) == "list" {
     let out = []
     for item in value {
-      out = out.appending(__tool_mw_drop_keys(item, keys))
+      out.push(__tool_mw_drop_keys(item, keys))
     }
     return out
   }
@@ -140,16 +140,14 @@ fn __tool_mw_canonical_json(value: unknown) -> string {
     const keys = value.keys().sorted()
     let parts = []
     for key in keys {
-      parts = parts.appending(
-        json_stringify(to_string(key)) + ":" + __tool_mw_canonical_json(value[key]),
-      )
+      parts.push(json_stringify(to_string(key)) + ":" + __tool_mw_canonical_json(value[key]))
     }
     return "{" + join(parts, ",") + "}"
   }
   if type_of(value) == "list" {
     let parts = []
     for item in value {
-      parts = parts.appending(__tool_mw_canonical_json(item))
+      parts.push(__tool_mw_canonical_json(item))
     }
     return "[" + join(parts, ",") + "]"
   }
@@ -279,7 +277,7 @@ pub fn tools_use_middleware(registry: dict, transform: any) {
   let rewritten = []
   for entry in entries {
     if type_of(entry) != "dict" {
-      rewritten = rewritten.appending(entry)
+      rewritten.push(entry)
       continue
     }
     const mapped = try {
@@ -295,7 +293,7 @@ pub fn tools_use_middleware(registry: dict, transform: any) {
     if type_of(value) != "dict" {
       throw "tools_use_middleware: transform returned " + type_of(value) + "; expected dict or nil"
     }
-    rewritten = rewritten.appending(value)
+    rewritten.push(value)
   }
   return registry + {tools: rewritten}
 }
@@ -362,7 +360,7 @@ pub fn tool_inject_param(entry: dict, name: string, schema_fragment: dict, opts:
     const new_props = props + {[name]: property_fragment}
     const req_list = __tool_mw_list(params?.required)
     const new_req = if required && !contains(req_list, name) {
-      req_list.appending(name)
+      req_list + [name]
     } else {
       req_list
     }

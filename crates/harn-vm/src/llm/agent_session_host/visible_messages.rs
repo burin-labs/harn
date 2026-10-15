@@ -52,33 +52,85 @@ pub(crate) fn visible_message_values(session_id: &str, messages: Vec<VmValue>) -
         visible.push(super::json_to_vm(&envelope));
     }
     let compaction_receipt_ref = latest_compaction_receipt_ref(session_id);
-    for (position, message) in visible.iter_mut().enumerate() {
-        let Some(fields) = message.as_dict() else {
-            continue;
-        };
-        let mut attached = attached_lineage(
-            fields.get(crate::llm::message_lineage::MESSAGE_LINEAGE_KEY),
-            (position < source_count).then_some(position),
-        );
-        attached.message.semantic_kind = semantic_kind(message);
-        if attached.message.source_message_index == Some(0) {
-            attached.message.compaction_receipt_ref = compaction_receipt_ref.clone();
-            if attached.message.compaction_receipt_ref.is_some() {
-                attached.message.semantic_kind =
-                    crate::llm::message_lineage::MessageSemanticKind::CondensedMemory;
+    // Each call re-projects the whole transcript, and the durable messages are
+    // the same shared values call after call. Reusing the projected message
+    // keeps it the same shared value too, so options building downstream
+    // converts only the messages that changed.
+    VISIBLE_MESSAGE_MEMO.with(|memo| {
+        let mut memo = memo.borrow_mut();
+        for (position, message) in visible.iter_mut().enumerate() {
+            if message.as_dict().is_none() {
+                continue;
             }
+            let source_index = (position < source_count).then_some(position);
+            let input = message.clone();
+            *message = memo.project(
+                position,
+                &input,
+                (source_index, compaction_receipt_ref.clone()),
+                || with_lineage(&input, source_index, compaction_receipt_ref.as_ref()),
+                |_| 1,
+            );
         }
-        let lineage = super::json_to_vm(
-            &serde_json::to_value(attached).expect("message lineage is JSON representable"),
-        );
-        let mut next = fields.clone();
-        next.insert(
-            crate::value::intern_key(crate::llm::message_lineage::MESSAGE_LINEAGE_KEY),
-            lineage,
-        );
-        *message = VmValue::dict_map(next);
-    }
+    });
     visible
+}
+
+/// Projected messages keyed by the source index and compaction receipt the
+/// lineage reads.
+type VisibleMessageMemo =
+    crate::llm::content_hash::IdentitySequenceMemo<(Option<usize>, Option<String>), VmValue>;
+
+thread_local! {
+    static VISIBLE_MESSAGE_MEMO: std::cell::RefCell<VisibleMessageMemo> = const {
+        std::cell::RefCell::new(crate::llm::content_hash::IdentitySequenceMemo::new(
+            VISIBLE_MESSAGE_MEMO_ENTRIES,
+        ))
+    };
+    #[cfg(test)]
+    static VISIBLE_MESSAGE_PROJECTIONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+const VISIBLE_MESSAGE_MEMO_ENTRIES: usize = 65_536;
+
+/// Messages [`visible_message_values`] has projected on this thread.
+#[cfg(test)]
+pub(crate) fn visible_message_projections() -> usize {
+    VISIBLE_MESSAGE_PROJECTIONS.with(std::cell::Cell::get)
+}
+
+/// `message` with its lineage attached. A pure function of its arguments.
+fn with_lineage(
+    message: &VmValue,
+    source_index: Option<usize>,
+    compaction_receipt_ref: Option<&String>,
+) -> VmValue {
+    #[cfg(test)]
+    VISIBLE_MESSAGE_PROJECTIONS.with(|count| count.set(count.get() + 1));
+    let Some(fields) = message.as_dict() else {
+        return message.clone();
+    };
+    let mut attached = attached_lineage(
+        fields.get(crate::llm::message_lineage::MESSAGE_LINEAGE_KEY),
+        source_index,
+    );
+    attached.message.semantic_kind = semantic_kind(message);
+    if attached.message.source_message_index == Some(0) {
+        attached.message.compaction_receipt_ref = compaction_receipt_ref.cloned();
+        if attached.message.compaction_receipt_ref.is_some() {
+            attached.message.semantic_kind =
+                crate::llm::message_lineage::MessageSemanticKind::CondensedMemory;
+        }
+    }
+    let lineage = super::json_to_vm(
+        &serde_json::to_value(attached).expect("message lineage is JSON representable"),
+    );
+    let mut next = fields.clone();
+    next.insert(
+        crate::value::intern_key(crate::llm::message_lineage::MESSAGE_LINEAGE_KEY),
+        lineage,
+    );
+    VmValue::dict_map(next)
 }
 
 /// JSON form of [`visible_message_values`] for tests that build messages as JSON.

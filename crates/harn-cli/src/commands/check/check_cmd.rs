@@ -250,7 +250,7 @@ pub(crate) fn check_file_report_inner(
         });
     }
 
-    for diag in &output.diagnostics {
+    for diag in output.diagnostics.iter() {
         if harn_lint::type_diagnostic_lint_disabled(diag, &config.disable_rules) {
             continue;
         }
@@ -345,14 +345,17 @@ pub(crate) fn check_file_report_inner(
         externally_imported_names,
         module_graph,
         path,
-        &super::config::lint_options(
-            path,
-            config,
-            &check_lint_config,
-            &[],
-            &[],
-            super::config::LintSurface::Check,
-        ),
+        &harn_lint::LintOptions {
+            binding_types: Some(&output.binding_types),
+            ..super::config::lint_options(
+                path,
+                config,
+                &check_lint_config,
+                &[],
+                &[],
+                super::config::LintSurface::Check,
+            )
+        },
     );
     diagnostic_count += lint_diagnostics.len();
     if lint_diagnostics

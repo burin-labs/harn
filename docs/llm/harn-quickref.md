@@ -516,6 +516,35 @@ while i < n {
 when line- or token-oriented scanning suffices, and reach for `regex_*`
 (see [Regex](#regex)) for pattern matching rather than hand-rolled cursors.
 
+## Collection methods
+
+Each builtin operation has one name: `len`, `contains`, `lower`, `upper`,
+`windows`, `chunks`, `map_keys`, `merge`, `all`. Old spellings (`count()`,
+`includes`, `to_lower`, `lowercase`, `each_cons`, `appending`, `rekeyed`) are
+type errors (`HARN-NAM-013`); `harn fix --apply --safety behavior-preserving`
+rewrites them. The full table is "Builtin methods" in `docs/src/builtins.md`.
+
+Mutating methods change a `let` binding in place, Swift-style; copy-returning
+methods leave the receiver alone:
+
+```harn
+let stack = [1, 2, 3]
+stack.push(4)                 // stack is [1, 2, 3, 4]
+const top = stack.pop()       // 4; stack is [1, 2, 3]
+stack.reverse()               // stack is [3, 2, 1]
+const ordered = stack.sorted() // new list; stack unchanged
+let seen = set()
+seen.add("a")
+let opts = {model: "x", debug: true}
+const was = opts.remove("debug") // true; opts is {model: "x"}
+```
+
+Mutating: list `push`, `pop`, `insert`, `extend`, `clear`, `sort`, `sort_by`,
+`reverse`; set `add`, `remove`, `clear`; dict `remove`, `clear`. The receiver
+must be a `let` binding or a path rooted at one (`state.items.push(x)`); on a
+`const`, a parameter, or a temporary it is a type error. Use `xs + [v]`,
+`sorted()`, `reversed()`, `s.union(...)`, or `omit(d, keys)` for a new value.
+
 ## Control flow: `if` is an expression
 
 `if` / `else` produces a value. Bind it directly into `let`, pass it
@@ -557,8 +586,8 @@ for {key, value} in my_dict.entries() { /* work */ }
 // [0, 1, 2, 3, 4] — half-open, Python-style
 const first_5 = range(5)
 const middle  = range(3, 7)      // [3, 4, 5, 6]
-const inc     = 1 to 5            // [1, 2, 3, 4, 5] — inclusive default
-const exc     = 1 to 5 exclusive  // [1, 2, 3, 4]    — half-open
+const inc     = 1..=5            // [1, 2, 3, 4, 5]: includes the end
+const exc     = 1..5             // [1, 2, 3, 4]: excludes it
 ```
 
 Note: `for` heads accept three destructuring shapes, each matching what the
@@ -966,10 +995,11 @@ Optional chaining works for properties, methods, and subscripts:
 return `nil` when the receiver is `nil`; otherwise they perform the same
 access as `.`, method call, or `[]`.
 
-`??` binds tighter than comparisons/logical operators and looser than
-multiplication. Read `classified == maybe_flag ?? false` as
-`classified == (maybe_flag ?? false)`. `harn fmt` inserts those clarifying
-parentheses automatically.
+`??` binds like Swift's: looser than arithmetic and ranges, tighter than
+comparisons and logical operators. Read `count ?? 0 + 1` as
+`count ?? (0 + 1)` and `classified == maybe_flag ?? false` as
+`classified == (maybe_flag ?? false)`. `harn fmt` keeps clarifying
+parentheses around a `??` that is an operand of another operator.
 
 `try* EXPR` (prefix) evaluates `EXPR` and rethrows any throw so an
 enclosing `try { ... } catch (e) { ... }` sees it. Use it instead of
@@ -1247,7 +1277,7 @@ explicitly; `.zip` and `.enumerate` also emit pairs.
 
 ### Ranges and iters
 
-`Range` (from `a to b` / `range(n)`) is its own value type with O(1)
+`Range` (from `a..b`, `a..=b`, or `range(n)`) is its own value type with O(1)
 `.len() / .first() / .last() / .contains(x)` and `r[k]` subscript —
 no materialization. Calling any lazy combinator on a Range
 (`.map / .filter / .flat_map / .take / .skip / .take_while /
@@ -1255,7 +1285,7 @@ no materialization. Calling any lazy combinator on a Range
 returns a lazy `iter`. Sinks (`.to_list / .sum / .reduce / ...`)
 drain through the iter. In short: Range handles integer ranges
 with O(1) ops; Iter handles arbitrary lazy sequences. Chaining
-`(1 to 10000000).map(...).take(5).to_list()` finishes instantly
+`(1..=10000000).map(...).take(5).to_list()` finishes instantly
 because only 5 elements flow through the pipeline.
 
 ## Regex
@@ -1814,7 +1844,7 @@ Semantics:
 ### Provider capabilities (data-driven matrix)
 
 The per-provider / per-model capability surface lives in a shipped
-TOML table (`crates/harn-vm/src/llm/capabilities.toml`), overridable
+TOML table (`crates/harn-provider-catalog/src/capabilities.toml`), overridable
 per-project via `[[capabilities.provider.<name>]]` in `harn.toml`:
 
 ```toml

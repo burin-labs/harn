@@ -201,11 +201,10 @@ mod tests {
     use super::*;
 
     fn caps(style: CacheBreakpointStyle) -> Capabilities {
-        Capabilities {
-            prompt_caching: true,
-            cache_breakpoint_style: style,
-            ..Capabilities::default()
-        }
+        let mut caps = Capabilities::default();
+        caps.prompt_caching = true;
+        caps.cache_breakpoint_style = style;
+        caps
     }
 
     fn request(messages: Vec<serde_json::Value>) -> LlmRequestPayload {
@@ -338,12 +337,17 @@ mod tests {
     #[test]
     fn caller_markers_in_every_provider_position_defer() {
         let caps = caps(CacheBreakpointStyle::LastBlock);
-        let tool_result_block = request(vec![serde_json::json!({
-            "role": "user",
-            "content": [{"type": "tool_result", "tool_use_id": "t1", "content": [
-                {"type": "text", "text": "out", "cache_control": marker()},
-            ]}],
-        })]);
+        let tool_result_block = request(vec![
+            serde_json::json!({"role": "assistant", "content": [
+                {"type": "tool_use", "id": "t1", "name": "run", "input": {}},
+            ]}),
+            serde_json::json!({
+                "role": "user",
+                "content": [{"type": "tool_result", "tool_use_id": "t1", "content": [
+                    {"type": "text", "text": "out", "cache_control": marker()},
+                ]}],
+            }),
+        ]);
         let mut tool_definition = ordinary();
         tool_definition.native_tools = Some(vec![serde_json::json!({
             "name": "lookup",
@@ -565,11 +569,9 @@ mod tests {
             CacheBreakpointStyle::LastBlock,
             CacheBreakpointStyle::None,
         ] {
-            let off = Capabilities {
-                prompt_caching: false,
-                cache_breakpoint_style: style,
-                ..Capabilities::default()
-            };
+            let mut off = Capabilities::default();
+            off.prompt_caching = false;
+            off.cache_breakpoint_style = style;
             let breakpoint = PromptCacheBreakpoint::resolve(&ordinary(), &off);
             assert_eq!(breakpoint, PromptCacheBreakpoint::Unsupported, "{style:?}");
             let mut value = body();

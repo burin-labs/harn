@@ -82,6 +82,9 @@ struct ProgramCallable {
     root_attenuation: Option<BTreeSet<CapabilityId>>,
     direct_requirements: BTreeSet<CapabilityId>,
     direct_root_requirement: bool,
+    /// `pick` resolves to the builtin in this callable's file, so a capability
+    /// bundle copied from one binding can be emitted as `pick(...)`.
+    pick_available: bool,
 }
 
 #[derive(Debug)]
@@ -190,6 +193,11 @@ pub(super) fn plan(
             &imported_type_declarations,
         );
         let imported_capability_signatures = imported_signatures(file, module_graph, &type_aliases);
+        let pick_available = !super::signature_threading::program_binds_name(&program, "pick", false)
+                // `None` means an import is unresolved and may bind `pick`.
+                && module_graph
+                    .imported_names_for_file(file)
+                    .is_some_and(|names| !names.contains("pick"));
         for info in infos {
             let Some((params, body, boundary, flow_predicate)) =
                 declaration_parts(&program, &boundaries, info.span)
@@ -276,6 +284,7 @@ pub(super) fn plan(
                 root_attenuation,
                 direct_requirements,
                 direct_root_requirement,
+                pick_available,
             });
         }
         let value_reference_sites = collect_value_reference_sites(&program);
@@ -553,7 +562,12 @@ pub(super) fn plan(
                         )
                     },
                     |(binding, available)| {
-                        argument_from_binding(binding, available, callee_desired)
+                        argument_from_binding(
+                            binding,
+                            available,
+                            callee_desired,
+                            caller.pick_available,
+                        )
                     },
                 )
                 .map_err(|error| {

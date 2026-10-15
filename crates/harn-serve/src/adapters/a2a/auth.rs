@@ -73,21 +73,13 @@ pub(super) async fn push_http_client(
             let pem = tokio::fs::read(ca_path).await.map_err(|error| {
                 PushDeliveryError::Config(format!("read mTLS CA bundle {ca_path}: {error}"))
             })?;
-            match reqwest::Certificate::from_pem_bundle(&pem) {
-                Ok(certs) => {
-                    for cert in certs {
-                        builder = builder.add_root_certificate(cert);
-                    }
-                }
-                Err(_) => {
-                    let cert = reqwest::Certificate::from_pem(&pem).map_err(|error| {
-                        PushDeliveryError::Config(format!(
-                            "parse mTLS CA bundle {ca_path}: {error}"
-                        ))
-                    })?;
-                    builder = builder.add_root_certificate(cert);
-                }
-            }
+            let certs = match reqwest::Certificate::from_pem_bundle(&pem) {
+                Ok(certs) => certs,
+                Err(_) => vec![reqwest::Certificate::from_pem(&pem).map_err(|error| {
+                    PushDeliveryError::Config(format!("parse mTLS CA bundle {ca_path}: {error}"))
+                })?],
+            };
+            builder = builder.tls_certs_merge(certs);
         }
         if authentication_schemes(auth).iter().any(|scheme| {
             matches!(

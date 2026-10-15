@@ -142,8 +142,8 @@ pipeline main(harness: Harness) {
 
   harness.stdio.log(len(mapped))
   harness.stdio.log(filtered[0])
-  harness.stdio.log(dict.count())
-  harness.stdio.log(set_out.count())
+  harness.stdio.log(dict.len())
+  harness.stdio.log(set_out.len())
 }
 ",
         limits_with_max_frames(8),

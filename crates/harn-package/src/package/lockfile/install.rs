@@ -25,6 +25,7 @@ pub(crate) fn install_packages_in_locked(
     let ctx = workspace.load_manifest_context()?;
     let existing = LockFile::load(&ctx.lock_path())?;
     if ctx.manifest.dependencies.is_empty() {
+        validate_runtime_compatibility(&ctx.manifest, &ctx.manifest_path())?;
         let empty = LockFile::default();
         if frozen || offline {
             // A lock that still pins packages the manifest no longer

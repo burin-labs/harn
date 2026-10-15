@@ -137,6 +137,7 @@ pub use runtime_content::{
     runtime_content_fingerprint, RuntimeBuildFeatures, RuntimeCompatibilityFingerprint,
     RuntimeContentFingerprint,
 };
+pub mod known_paths;
 pub mod package_scripts;
 mod persistent_state;
 pub mod personas;
@@ -169,6 +170,7 @@ pub(crate) mod shared_state;
 pub mod shells;
 pub mod skills;
 pub mod stdlib;
+pub mod verifier_provenance;
 /// What the active backend does with a Unix-socket grant, so a launcher can
 /// disclose the shape it actually applied rather than the shape the field
 /// name suggests.
@@ -219,6 +221,9 @@ pub enum RuntimeInitError {
     Environment(environment_registry::EnvironmentValidationError),
     /// A configured cache directory cannot be honored.
     CacheDir(bytecode_cache::CacheDirError),
+    /// No standard library is installed; the host never called
+    /// `harn_stdlib::install()`.
+    StdlibCatalog(harn_stdlib_catalog::CatalogNotInstalled),
 }
 
 impl std::fmt::Display for RuntimeInitError {
@@ -226,6 +231,7 @@ impl std::fmt::Display for RuntimeInitError {
         match self {
             Self::Environment(error) => error.fmt(formatter),
             Self::CacheDir(error) => error.fmt(formatter),
+            Self::StdlibCatalog(error) => error.fmt(formatter),
         }
     }
 }
@@ -233,7 +239,9 @@ impl std::fmt::Display for RuntimeInitError {
 impl std::error::Error for RuntimeInitError {}
 
 /// Validate the Harn-owned environment namespace and initialize process-wide
-/// runtime assets through the same bootstrap boundary used by the CLI.
+/// runtime assets through the same bootstrap boundary used by the CLI. The
+/// host must have installed the standard library (`harn_stdlib::install()`)
+/// first; without one this fails instead of running with no stdlib.
 ///
 /// Returns a warning the caller should print once when startup succeeded but
 /// something degraded — today, that caching is off because no cache directory
@@ -241,6 +249,7 @@ impl std::error::Error for RuntimeInitError {}
 /// an operator who set `HARN_CACHE_DIR` gets a hard failure rather than a
 /// silent downgrade to no caching.
 pub fn initialize_runtime() -> Result<Option<&'static str>, RuntimeInitError> {
+    harn_modules::try_stdlib_catalog().map_err(RuntimeInitError::StdlibCatalog)?;
     environment_registry::validate_startup_environment().map_err(RuntimeInitError::Environment)?;
     let warning = bytecode_cache::check_cache_config().map_err(RuntimeInitError::CacheDir)?;
     initialize_runtime_assets();
@@ -382,7 +391,7 @@ pub use mcp_server::{
     reset_mcp_serve_publication, take_mcp_serve_metadata, take_mcp_serve_prompts,
     take_mcp_serve_registry, take_mcp_serve_rejection, take_mcp_serve_resource_templates,
     take_mcp_serve_resources, tool_registry_to_mcp_tools, McpPromptDef, McpResourceDef,
-    McpResourceTemplateDef, McpServer, McpServerMetadata, McpServerReload, McpToolSet,
+    McpResourceTemplateDef, McpScriptRegistry, McpScriptSurface, McpServerMetadata, McpToolSet,
 };
 pub use metadata::register_metadata_builtins;
 pub use observability::audit::{audit_events as audit_obs_events, AuditFinding, AuditFindingKind};
@@ -503,39 +512,40 @@ pub use tenant::{
 pub use triggers::{
     append_dispatch_cancel_request, begin_in_flight, binding_autonomy_budget_would_exceed,
     binding_budget_would_exceed, binding_version_as_of, classify_trigger_dlq_error,
-    clear_dispatcher_state, clear_orchestrator_budget, clear_trigger_registry, drain,
-    dynamic_deregister, dynamic_register, expected_predicate_cost_usd_micros, finish_in_flight,
-    install_manifest_triggers, install_orchestrator_budget, micros_to_usd,
-    note_autonomous_decision, note_orchestrator_budget_cost, orchestrator_budget_would_exceed,
-    parse_flow_control_duration, pause, pin_trigger_binding, provider_metadata,
-    record_predicate_cost_sample, redact_headers, register_provider_metadata,
-    registered_provider_metadata, registered_provider_schema_names, reset_binding_budget_windows,
-    reset_provider_catalog, resolve_live_or_as_of, resolve_live_trigger_binding,
-    resolve_trigger_binding_as_of, resume, run_trigger_harness_fixture, scheduler_in_flight_by_key,
-    scheduler_ready_stats_by_key, snapshot_dispatcher_stats, snapshot_orchestrator_budget,
-    snapshot_trigger_bindings, unpin_trigger_binding, usd_to_micros, worker_claims_topic_name,
-    worker_job_topic_name, worker_response_topic_name, ClaimedWorkerJob, DispatchCancelRequest,
-    DispatchError, DispatchOutcome, DispatchStatus, Dispatcher, DispatcherDrainReport,
-    DispatcherStatsSnapshot, ExtensionProviderPayload, FairnessKey, HeaderRedactionPolicy,
-    InboxIndex, OrchestratorBudgetConfig, OrchestratorBudgetSnapshot, ProviderCatalog,
-    ProviderCatalogError, ProviderId, ProviderMetadata, ProviderOutboundMethod, ProviderPayload,
-    ProviderRuntimeMetadata, ProviderSecretRequirement, ReadyKeyStats, RecordedTriggerBinding,
-    RetryPolicy, SchedulableJob, SchedulerKeyStat, SchedulerPolicy, SchedulerSnapshot,
-    SchedulerState, SchedulerStrategy, SignatureStatus, SignatureVerificationMetadata,
-    StreamEventPayload, TenantId, TraceId, TriggerBatchConfig, TriggerBindingSnapshot,
-    TriggerBindingSource, TriggerBindingSpec, TriggerBudgetExhaustionStrategy,
-    TriggerConcurrencyConfig, TriggerDebounceConfig, TriggerDispatchOutcome, TriggerEvent,
-    TriggerEventId, TriggerExpressionSpec, TriggerFlowControlConfig, TriggerHandlerSpec,
-    TriggerHarnessResult, TriggerId, TriggerMetricsSnapshot, TriggerPredicateSpec,
-    TriggerPriorityOrderConfig, TriggerRateLimitConfig, TriggerRegistryError, TriggerRetryConfig,
-    TriggerSingletonConfig, TriggerState, TriggerThrottleConfig, WorkerQueue,
-    WorkerQueueClaimHandle, WorkerQueueEnqueueReceipt, WorkerQueueInspectSnapshot, WorkerQueueJob,
-    WorkerQueueJobState, WorkerQueuePriority, WorkerQueueResponseRecord, WorkerQueueState,
-    WorkerQueueSummary, DEFAULT_INBOX_RETENTION_DAYS, DEFAULT_STARVATION_AGE_MS,
-    TRIGGERS_LIFECYCLE_TOPIC, TRIGGER_ATTEMPTS_TOPIC, TRIGGER_CANCEL_REQUESTS_TOPIC,
-    TRIGGER_DLQ_TOPIC, TRIGGER_INBOX_CLAIMS_TOPIC, TRIGGER_INBOX_ENVELOPES_TOPIC,
-    TRIGGER_INBOX_LEGACY_TOPIC, TRIGGER_INBOX_OBSERVABILITY_TOPIC, TRIGGER_OPERATION_AUDIT_TOPIC,
-    TRIGGER_OUTBOX_TOPIC, TRIGGER_TEST_FIXTURES, WORKER_QUEUE_CATALOG_TOPIC,
+    clear_dispatcher_state, clear_orchestrator_budget, clear_trigger_registry,
+    current_trigger_binding_snapshots, drain, dynamic_deregister, dynamic_register,
+    expected_predicate_cost_usd_micros, finish_in_flight, install_manifest_triggers,
+    install_orchestrator_budget, micros_to_usd, note_autonomous_decision,
+    note_orchestrator_budget_cost, orchestrator_budget_would_exceed, parse_flow_control_duration,
+    pause, pin_trigger_binding, provider_metadata, record_predicate_cost_sample, redact_headers,
+    register_provider_metadata, registered_provider_metadata, registered_provider_schema_names,
+    reset_binding_budget_windows, reset_provider_catalog, resolve_live_or_as_of,
+    resolve_live_trigger_binding, resolve_trigger_binding_as_of, resume,
+    run_trigger_harness_fixture, scheduler_in_flight_by_key, scheduler_ready_stats_by_key,
+    snapshot_dispatcher_stats, snapshot_orchestrator_budget, snapshot_trigger_bindings,
+    unpin_trigger_binding, usd_to_micros, worker_claims_topic_name, worker_job_topic_name,
+    worker_response_topic_name, ClaimedWorkerJob, DispatchCancelRequest, DispatchError,
+    DispatchOutcome, DispatchStatus, Dispatcher, DispatcherDrainReport, DispatcherStatsSnapshot,
+    ExtensionProviderPayload, FairnessKey, HeaderRedactionPolicy, InboxIndex,
+    OrchestratorBudgetConfig, OrchestratorBudgetSnapshot, ProviderCatalog, ProviderCatalogError,
+    ProviderId, ProviderMetadata, ProviderOutboundMethod, ProviderPayload, ProviderRuntimeMetadata,
+    ProviderSecretRequirement, ReadyKeyStats, RecordedTriggerBinding, RetryPolicy, SchedulableJob,
+    SchedulerKeyStat, SchedulerPolicy, SchedulerSnapshot, SchedulerState, SchedulerStrategy,
+    SignatureStatus, SignatureVerificationMetadata, StreamEventPayload, TenantId, TraceId,
+    TriggerBatchConfig, TriggerBindingSnapshot, TriggerBindingSource, TriggerBindingSpec,
+    TriggerBudgetExhaustionStrategy, TriggerConcurrencyConfig, TriggerDebounceConfig,
+    TriggerDispatchOutcome, TriggerEvent, TriggerEventId, TriggerExpressionSpec,
+    TriggerFlowControlConfig, TriggerHandlerSpec, TriggerHarnessResult, TriggerId,
+    TriggerMetricsSnapshot, TriggerPredicateSpec, TriggerPriorityOrderConfig,
+    TriggerRateLimitConfig, TriggerRegistryError, TriggerRetryConfig, TriggerSingletonConfig,
+    TriggerState, TriggerThrottleConfig, WorkerQueue, WorkerQueueClaimHandle,
+    WorkerQueueEnqueueReceipt, WorkerQueueInspectSnapshot, WorkerQueueJob, WorkerQueueJobState,
+    WorkerQueuePriority, WorkerQueueResponseRecord, WorkerQueueState, WorkerQueueSummary,
+    DEFAULT_INBOX_RETENTION_DAYS, DEFAULT_STARVATION_AGE_MS, TRIGGERS_LIFECYCLE_TOPIC,
+    TRIGGER_ATTEMPTS_TOPIC, TRIGGER_CANCEL_REQUESTS_TOPIC, TRIGGER_DLQ_TOPIC,
+    TRIGGER_INBOX_CLAIMS_TOPIC, TRIGGER_INBOX_ENVELOPES_TOPIC, TRIGGER_INBOX_LEGACY_TOPIC,
+    TRIGGER_INBOX_OBSERVABILITY_TOPIC, TRIGGER_OPERATION_AUDIT_TOPIC, TRIGGER_OUTBOX_TOPIC,
+    TRIGGER_TEST_FIXTURES, WORKER_QUEUE_CATALOG_TOPIC,
 };
 pub use trust_graph::{
     append_active_scope_attenuation_alert, append_active_trust_record,

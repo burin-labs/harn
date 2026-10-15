@@ -15,7 +15,7 @@ fn warm_embedded_stdlib_leaves_the_agent_stack_on_disk() {
     reset_stdlib_module_artifact_cache();
 
     let report = crate::vm::warm_embedded_stdlib(4);
-    assert_eq!(report.modules, harn_stdlib::STDLIB_SOURCES.len());
+    assert_eq!(report.modules, harn_modules::stdlib_catalog().sources.len());
     assert!(report.failed.is_empty(), "{:?}", report.failed);
     assert_eq!(report.warmed, report.modules);
     // The warm held the cache's lock and released it on return.

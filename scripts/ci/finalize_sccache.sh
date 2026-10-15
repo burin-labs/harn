@@ -3,17 +3,46 @@
 # runner's orphan-process cleanup cannot turn a successful proof into a flake.
 set -euo pipefail
 
-# A job that compiled through Kache reports Kache. The host's sccache counters
-# would describe other runners' work, not this job's.
+# A job that compiled through Kache reports its checkout session. The host's
+# sccache counters would describe other runners' work instead.
 if [[ "$(basename -- "${RUSTC_WRAPPER:-}")" == kache ]]; then
-  report="$("$RUSTC_WRAPPER" stats --last-build --root "${GITHUB_WORKSPACE:-$PWD}" 2>&1)" || true
-  printf '%s\n' "$report"
+  root="${GITHUB_WORKSPACE:-$PWD}"
+  report_status=0
+  report="$("$RUSTC_WRAPPER" report --last-build --root "$root" --format json 2>&1)" || report_status=$?
+  if [[ "$report_status" -ne 0 ]]; then
+    printf '%s\n' "$report"
+    echo "::warning title=Kache measurement unavailable::Report command failed with exit ${report_status}; cache activity is unknown."
+    exit 0
+  fi
+  # The checkout session may span several Cargo commands. Its identity and
+  # retained events must be present before zero hits can mean a cold cache.
+  if ! measurement="$(jq -ce --arg root "$root" '
+    def counter: type == "number" and . >= 0 and floor == .;
+    select(.schema_version == 1) |
+    select(.meta.session.root == $root) |
+    select(.meta.session.inferred | type == "boolean") |
+    .summary as $s |
+    select([$s.total_crates, $s.local_hits, $s.prefetch_hits, $s.remote_hits,
+      $s.dups, $s.misses, $s.errors, $s.passthroughs] | all(.[]; counter)) |
+    select($s.total_crates > 0) |
+    select($s.total_crates == ($s.local_hits + $s.prefetch_hits +
+      $s.remote_hits + $s.dups + $s.misses)) |
+    {scope: "checkout_session", inferred: .meta.session.inferred,
+      per_job_attribution: "unmeasured",
+      requests: $s.total_crates,
+      hits: ($s.local_hits + $s.prefetch_hits + $s.remote_hits),
+      misses: $s.misses, duplicates: $s.dups, errors: $s.errors,
+      passthroughs: $s.passthroughs}
+  ' <<< "$report" 2>/dev/null)"; then
+    echo "::warning title=Kache measurement unavailable::Report lacks a matching session with valid nonempty compiler counters; cache activity is unknown."
+    exit 0
+  fi
+  echo "Kache measured: $measurement"
   if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
     fence='```'
-    printf '### Kache\n\n%stext\n%s\n%s\n' "$fence" "$report" "$fence" >> "$GITHUB_STEP_SUMMARY"
+    printf '### Kache\n\n%sjson\n%s\n%s\n' "$fence" "$measurement" "$fence" >> "$GITHUB_STEP_SUMMARY"
   fi
-  rate="$(awk '/Hit rate/ {print $3, $4, $5, $6; exit}' <<< "$report")"
-  echo "::notice title=Kache::HARN_COMPILER_CACHE=kache job ${rate:-hit rate unreported}"
+  echo "::notice title=Kache::HARN_COMPILER_CACHE=kache $measurement"
   exit 0
 fi
 

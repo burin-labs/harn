@@ -11,6 +11,7 @@ import { completion_judge_feedback_prompt, completion_judge_system_prompt } from
 import { agent_reasoning_apply } from "std/agent/reasoning"
 import { AgentLoopRetryOptions, agent_apply_default_retry } from "std/agent/retry"
 import { agent_scratchpad_options } from "std/agent/scratchpad"
+import { omit } from "std/json"
 import { pack_for } from "std/llm/defaults"
 import { project_context_profile } from "std/project"
 
@@ -35,7 +36,7 @@ pub fn __task_ledger_from_shorthand(opts: dict) {
     for (index, item) in iter(shorthand).enumerate() {
       const text = __task_ledger_deliverable_text(item)
       if text != "" {
-        deliverables = deliverables.appending(
+        deliverables.push(
           {id: "deliverable-" + to_string(index + 1), text: text, status: "open", note: nil},
         )
       }
@@ -803,10 +804,10 @@ pub fn __auto_tool_format_source(value: string?) {
 }
 
 pub fn __clear_tool_format_resolution(opts: any) {
-  return opts.removing("tool_format").removing("_tool_format_source").removing(
-    "_tool_format_capability_gap",
+  return omit(
+    opts,
+    ["tool_format", "_tool_format_source", "_tool_format_capability_gap", "_tool_format_override"],
   )
-    .removing("_tool_format_override")
 }
 /**
  * Merge per-turn LLM overrides while preserving the difference between a

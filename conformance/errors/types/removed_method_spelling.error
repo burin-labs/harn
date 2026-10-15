@@ -1,0 +1,1 @@
+method `to_lower` was removed from `string` — did you mean `lower`?

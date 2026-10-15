@@ -255,13 +255,13 @@ harness.stdio.log("éx"[-1])
 }
 
 #[test]
-fn test_includes_aliases_membership_methods() {
+fn test_contains_is_the_membership_method_on_every_collection() {
     let out = run_output(
         r#"pipeline t(harness: Harness, task: unknown) {
-harness.stdio.log("hello world".includes("world"))
-harness.stdio.log(["alpha", "beta"].includes("beta"))
-harness.stdio.log(set("read", "write").includes("write"))
-harness.stdio.log((1 to 4).includes(3))
+harness.stdio.log("hello world".contains("world"))
+harness.stdio.log(["alpha", "beta"].contains("beta"))
+harness.stdio.log(set("read", "write").contains("write"))
+harness.stdio.log((1..=4).contains(3))
 }"#,
     );
     assert_eq!(out, "[harn] true\n[harn] true\n[harn] true\n[harn] true");
@@ -274,11 +274,10 @@ fn test_string_length_fast_paths_keep_unicode_scalar_semantics() {
 harness.stdio.log(len("abcd"))
 harness.stdio.log(len("é🙂"))
 harness.stdio.log("é🙂".count)
-harness.stdio.log("é🙂".count())
 harness.stdio.log("é🙂".len())
 }"#,
     );
-    assert_eq!(out, "[harn] 4\n[harn] 2\n[harn] 2\n[harn] 2\n[harn] 2");
+    assert_eq!(out, "[harn] 4\n[harn] 2\n[harn] 2\n[harn] 2");
 }
 
 #[test]

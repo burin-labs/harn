@@ -12,6 +12,9 @@ impl AcpServer {
     /// unless the host already owns the compatible current-thread runtime and
     /// wants to drive incoming JSON-RPC messages directly.
     pub fn new_with_output(config: AcpServerConfig, output: AcpOutput) -> Self {
+        // Every transport and embedded host reaches this assembly seam. The
+        // catalog is process-wide and identical across server instances.
+        let _ = harn_stdlib::install();
         let notifier_output = output.clone();
         let known_sessions = super::session_watch::KnownSessions::default();
         let notifier_sessions = known_sessions.clone();

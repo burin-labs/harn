@@ -27,36 +27,8 @@ use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 
 fn run_with_bridge(source: &str) -> Result<String, String> {
-    harn_vm::reset_thread_local_state();
     let source = format!("import {{ agent_fanout }} from \"std/agent/workers\"\n{source}");
-    let chunk = harn_vm::compile_source(&source)?;
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .map_err(|e| e.to_string())?;
-    rt.block_on(async {
-        let local = tokio::task::LocalSet::new();
-        local
-            .run_until(async {
-                let bridge = Arc::new(HostBridge::from_parts(
-                    Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
-                    Arc::new(AtomicBool::new(false)),
-                    Arc::new(Mutex::new(())),
-                    1,
-                ));
-                harn_vm::llm::install_current_host_bridge(bridge.clone());
-                let mut vm = harn_vm::Vm::new();
-                harn_vm::register_vm_stdlib(&mut vm);
-                let result = vm
-                    .execute(&chunk)
-                    .await
-                    .map_err(|e: VmError| format!("{e:?}"));
-                harn_vm::llm::clear_current_host_bridge();
-                result?;
-                Ok(vm.output().to_string())
-            })
-            .await
-    })
+    crate::support::run_with_host_bridge(&source)
 }
 
 fn run_with_bridge_in_parent_workspace(
@@ -264,7 +236,7 @@ pipeline main(harness: Harness, task: unknown) {{
   let i = 0
   for label in labels {{
     const marker = "MARK-" + to_string(i)
-    reqs = reqs.appending({{task: "do " + marker, options: base_opts(ok_caller(marker)), label: label}})
+    reqs.push({{task: "do " + marker, options: base_opts(ok_caller(marker)), label: label}})
     i = i + 1
   }}
   const results = agent_fanout(harness, reqs, {{max_parallel: 8}})
@@ -323,7 +295,7 @@ pipeline main(harness: Harness, task: unknown) {{
   for label in labels {{
     const marker = "MARK-" + to_string(i)
     const caller = if i == 2 {{ fail_caller(marker) }} else {{ ok_caller(marker) }}
-    reqs = reqs.appending({{task: "do " + marker, options: base_opts(caller), label: label}})
+    reqs.push({{task: "do " + marker, options: base_opts(caller), label: label}})
     i = i + 1
   }}
   const results = agent_fanout(harness, reqs, {{max_parallel: 8}})
@@ -393,7 +365,7 @@ pipeline main(harness: Harness, task: unknown) {{
   let i = 0
   for label in labels {{
     const marker = "WAVE-" + to_string(i)
-    reqs = reqs.appending({{task: "do " + marker, options: base_opts(ok_caller(marker)), label: label}})
+    reqs.push({{task: "do " + marker, options: base_opts(ok_caller(marker)), label: label}})
     i = i + 1
   }}
   const results = agent_fanout(harness, reqs, {{max_parallel: 2}})
@@ -565,7 +537,7 @@ pipeline main(harness: Harness, task: unknown) {{
     }} else {{
       base_opts(ok_caller(marker))
     }}
-    reqs = reqs.appending({{task: "do " + marker, options: opts, label: label}})
+    reqs.push({{task: "do " + marker, options: opts, label: label}})
     i = i + 1
   }}
   const results = agent_fanout(harness, reqs, {{max_parallel: 8}})
@@ -651,7 +623,7 @@ pipeline main(harness: Harness, task: unknown) {{
     }} else {{
       base_opts(ok_caller(marker))
     }}
-    reqs = reqs.appending({{task: "do " + marker, options: opts, label: label}})
+    reqs.push({{task: "do " + marker, options: opts, label: label}})
     i = i + 1
   }}
   const results = agent_fanout(harness, reqs, {{max_parallel: 2}})

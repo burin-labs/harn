@@ -451,6 +451,18 @@ impl<'source> LexicalAnalysis<'source> {
                 }
                 self.walk_children(node, scopes, inside_nested_callable, owner);
             }
+            // `xs.push(v)` rewrites `xs` the way `xs[i] = v` does.
+            Node::MethodCall { .. }
+                if crate::builtin_methods::mutating_call_place(node).is_some() =>
+            {
+                if inside_nested_callable && self.record_property_writes {
+                    let place = crate::builtin_methods::mutating_call_place(node);
+                    if let Some(name) = place.and_then(crate::builtin_methods::place_root) {
+                        self.record_reassignment(name, scopes);
+                    }
+                }
+                self.walk_children(node, scopes, inside_nested_callable, owner);
+            }
             Node::Closure { params, body, .. }
             | Node::FnDecl { params, body, .. }
             | Node::ToolDecl { params, body, .. } => {

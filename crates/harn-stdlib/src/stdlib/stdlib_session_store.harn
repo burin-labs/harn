@@ -294,7 +294,7 @@ pub fn session_store_payloads(
   let payloads = []
   for event in events.value {
     if event.payload != nil {
-      payloads = payloads.appending(event.payload)
+      payloads.push(event.payload)
     }
   }
   return {state: "present", value: payloads}

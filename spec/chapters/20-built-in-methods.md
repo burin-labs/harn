@@ -1,58 +1,63 @@
 ## Built-in methods
 
-### String methods
+Strings, lists, sets, dicts, ranges, iterators, and generators have builtin
+methods called with dot syntax. One method registry owns every method: its
+receiver type, name, signature, whether it mutates its receiver, and its
+reference text. The typechecker, the linter, the language server, both
+runtimes, and the method reference in the builtins guide all read that
+registry, so the reference lists exactly the methods that exist.
 
-| Method | Signature | Returns |
-|---|---|---|
-| `count` | `.count` (property) | int -- character count |
-| `empty` | `.empty` (property) | bool -- true if empty |
-| `contains(sub)` | string | bool |
-| `replace(old, new)` | string, string | string |
-| `split(sep)` | string | list of strings; `sep` is required |
-| `trim()` | (none) | string -- whitespace stripped |
-| `starts_with(prefix)` | string | bool |
-| `ends_with(suffix)` | string | bool |
-| `lowercase()` | (none) | string |
-| `uppercase()` | (none) | string |
-| `substring(start, end?)` | int, int? | string -- character range |
-| `index_of(substr)` | string | int -- first character offset, or -1 |
-| `last_index_of(substr)` / `rfind(substr)` | string | int -- last character offset, or -1 |
-| `chars()` | (none) | list of single-character strings |
+### One name per operation
+
+Each operation has one name, following Python and Rust: `len`, `contains`,
+`lower`, `upper`, `windows`, `chunks`, `map_keys`, `merge`, `all`. A removed
+spelling (`count`, `includes`, `to_lower`, `lowercase`, `each_cons`,
+`appending`, `rekeyed`, …) is a type error, `HARN-NAM-013`, whose repair
+names the replacement; `harn fix` rewrites the mechanical ones. A spelling no
+builtin uses any more is flagged even through an untyped receiver; a spelling
+another receiver still uses (`count` on an iterator) is flagged only when the
+receiver's type is known.
+
+### Mutating methods
+
+These methods change their receiver:
+
+| Receiver | Mutating methods |
+|---|---|
+| list | `push(item)`, `pop()`, `insert(index, item)`, `extend(items)`, `clear()`, `sort()`, `sort_by(key)`, `reverse()` |
+| set | `add(item)`, `remove(item)`, `clear()` |
+| dict | `remove(key)`, `clear()` |
+
+A mutating call `place.m(args)` evaluates `place` once, computes the
+receiver's next value and the call's result, writes the next value back to
+`place`, and evaluates to the result. `place` is a `let` binding or a property
+or subscript path rooted at one; each index in the path is evaluated once. A
+mutating method on a `const` binding, a function parameter, a temporary, or
+through `?.` is a type error (`HARN-OWN-001`). Because values are immutable, an
+alias taken before the call keeps the old value.
+
+| Method | Result |
+|---|---|
+| `pop()` | the removed last element, or `nil` when empty |
+| `remove(item)` on a set | `true` when `item` was a member |
+| `remove(key)` on a dict | the removed value, or `nil` when absent |
+| every other mutating method | `nil` |
+
+`list.insert` clamps an out-of-range index to the ends; a negative index
+counts from the end. When the receiver turns out not to be a builtin value at
+runtime (a struct whose `impl` defines `push`), the call is an ordinary method
+call and nothing is written back.
+
+`sorted()`, `sorted_by(key)`, and `reversed()` return a sorted or reversed copy
+and leave the receiver alone.
+
+### Strings
 
 `chars()` (also the `chars(text)` builtin) materializes a string into a list of
 single-character strings in one linear pass. Because a string is UTF-8, random
-character access (`s[i]`, `s[a:b]`, `.count`, `substring(...)`) is O(n) per call;
-materialize once with `chars()` and scan the list with O(1) indexing when writing
-cursor-style source scanners.
-
-### List methods
-
-| Method | Signature | Returns |
-|---|---|---|
-| `count` | (property) | int |
-| `empty` | (property) | bool |
-| `first` | (property) | value or nil |
-| `last` | (property) | value or nil |
-| `map(closure)` | closure(item) -> value | list |
-| `filter(closure)` | closure(item) -> bool | list |
-| `reduce(init, closure)` | value, closure(acc, item) -> value | value |
-| `find(closure)` | closure(item) -> bool | value or nil |
-| `any(closure)` | closure(item) -> bool | bool |
-| `all(closure)` | closure(item) -> bool | bool |
-| `flat_map(closure)` | closure(item) -> value/list | list (flattened) |
-
-### Dict methods
-
-| Method | Signature | Returns |
-|---|---|---|
-| `keys()` | (none) | list of strings (sorted) |
-| `values()` | (none) | list of values (sorted by key) |
-| `entries()` | (none) | list of `{key, value}` dicts (sorted by key) |
-| `count` | (property) | int |
-| `has(key)` | string | bool |
-| `merge(other)` | dict | dict (other wins on conflict) |
-| `map_values(closure)` | closure(value) -> value | dict |
-| `filter(closure)` | closure(value) -> bool | dict |
+character access (`s[i]`, `s[a:b]`, `.len()`, `substring(...)`) is O(n) per
+call; materialize once with `chars()` and scan the list with O(1) indexing when
+writing cursor-style source scanners.
 
 ### Dict property access
 
@@ -60,8 +65,8 @@ cursor-style source scanners.
 
 ### Set builtins
 
-Sets are created with the `set()` builtin and are immutable -- mutation
-operations return a new set. Sets deduplicate values using structural
+Sets are created with the `set()` builtin. The `set_*` builtins return a new
+set; the `add` and `remove` methods change a `let` binding in place. Sets deduplicate values using structural
 equality, retaining the first occurrence. Membership uses the same equality
 as `==`, including mixed numeric coercion; closures and NaN are never equal.
 Two sets are equal when their members can be paired one-to-one with equal

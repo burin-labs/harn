@@ -3,7 +3,7 @@ import { diff_artifact, diff_lines } from "std/diff"
 pipeline test(harness: Harness, task: unknown) {
   let lines = []
   for index in range(0, 2000) {
-    lines = lines.appending("line " + to_string(index))
+    lines.push("line " + to_string(index))
   }
   const changed = lines[:1000] + ["changed line"] + lines[1001:]
   const before = join(lines, "\n")

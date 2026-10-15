@@ -74,18 +74,19 @@ fn __tool_parse_consume_stray(
     const fragment = text.slice(response_tag_at, len(text))
     return state
       + {
-        violations: state.violations.appending(
-          protocol_violation(
-            "stray_text",
-            "Stray text outside response tags: "
-              + json_stringify(fragment)
-              + ". Wrap all prose in <assistant_prose>...</assistant_prose> or "
-              + "<user_response>...</user_response>, and every tool call in "
-              + "<tool_call>...</tool_call>.",
-            fragment,
-          ),
-        ),
-        dropped: state.dropped.appending({text: fragment, reason: "salvaged_as_prose"}),
+        violations: state.violations
+          + [
+            protocol_violation(
+              "stray_text",
+              "Stray text outside response tags: "
+                + json_stringify(fragment)
+                + ". Wrap all prose in <assistant_prose>...</assistant_prose> or "
+                + "<user_response>...</user_response>, and every tool call in "
+                + "<tool_call>...</tool_call>.",
+              fragment,
+            ),
+          ],
+        dropped: state.dropped + [{text: fragment, reason: "salvaged_as_prose"}],
       }
   }
   const reason = unit?.kind == "fenced_line" ? "fenced_narration" : "salvaged_as_prose"
@@ -95,14 +96,14 @@ fn __tool_parse_consume_stray(
     let calls = next.calls
     let canonical = next.canonical
     for call in sniffed.calls {
-      calls = calls.appending(call)
-      canonical = canonical.appending(call_block(call))
+      calls.push(call)
+      canonical.push(call_block(call))
     }
     const sniffed_prose = trim(to_string(sniffed?.prose ?? ""))
     let prose = next.prose
     if sniffed_prose != "" {
-      prose = prose.appending(sniffed_prose)
-      canonical = canonical.appending(prose_block(sniffed_prose))
+      prose.push(sniffed_prose)
+      canonical.push(prose_block(sniffed_prose))
     }
     return next
       + {
@@ -119,32 +120,33 @@ fn __tool_parse_consume_stray(
     return next
       + {
         errors: next.errors + sniffed.errors,
-        dropped: next.dropped.appending({text: text, reason: reason}),
+        dropped: next.dropped + [{text: text, reason: reason}],
       }
   }
   if has_response_protocol_fragment(text) {
     return next
       + {
-        violations: next.violations.appending(
-          protocol_violation(
-            "stray_text",
-            "Stray text outside response tags: "
-              + json_stringify(text)
-              + ". Wrap all prose in <assistant_prose>...</assistant_prose> or "
-              + "<user_response>...</user_response>, and every tool call in "
-              + "<tool_call>...</tool_call>.",
-            text,
-          ),
-        ),
+        violations: next.violations
+          + [
+            protocol_violation(
+              "stray_text",
+              "Stray text outside response tags: "
+                + json_stringify(text)
+                + ". Wrap all prose in <assistant_prose>...</assistant_prose> or "
+                + "<user_response>...</user_response>, and every tool call in "
+                + "<tool_call>...</tool_call>.",
+              text,
+            ),
+          ],
         recovered: next.recovered + 1,
-        dropped: next.dropped.appending({text: text, reason: reason}),
+        dropped: next.dropped + [{text: text, reason: reason}],
       }
   }
   return next
     + {
-      prose: next.prose.appending(text),
-      canonical: next.canonical.appending(prose_block(text)),
-      dropped: next.dropped.appending({text: text, reason: reason}),
+      prose: next.prose + [text],
+      canonical: next.canonical + [prose_block(text)],
+      dropped: next.dropped + [{text: text, reason: reason}],
     }
 }
 
@@ -160,10 +162,7 @@ fn __tool_parse_pending_unit(unit: dict, state: dict) -> dict {
     }
     return {
       state: state
-        + {
-          prose: state.prose.appending(body),
-          canonical: state.canonical.appending(prose_block(body)),
-        },
+        + {prose: state.prose + [body], canonical: state.canonical + [prose_block(body)]},
       consumed: true,
     }
   }
@@ -173,17 +172,18 @@ fn __tool_parse_pending_unit(unit: dict, state: dict) -> dict {
       + {
         pending_response: nil,
         unclosed_response_prose: __tool_parse_tag_spellings("user_response").contains(pending),
-        violations: state.violations.appending(
-          protocol_violation(
-            "unclosed_response",
-            "Unclosed <"
-              + pending
-              + "> block. Close it with </"
-              + pending
-              + "> or remove it; only <tool_call>, <assistant_prose>, "
-              + "<user_response>, and <done> are accepted.",
-          ),
-        ),
+        violations: state.violations
+          + [
+            protocol_violation(
+              "unclosed_response",
+              "Unclosed <"
+                + pending
+                + "> block. Close it with </"
+                + pending
+                + "> or remove it; only <tool_call>, <assistant_prose>, "
+                + "<user_response>, and <done> are accepted.",
+            ),
+          ],
       },
     consumed: false,
   }
@@ -203,38 +203,33 @@ fn __tool_parse_block_unit(
       return state
     }
     return state
-      + {
-        prose: state.prose.appending(body),
-        canonical: state.canonical.appending(prose_block(body)),
-      }
+      + {prose: state.prose + [body], canonical: state.canonical + [prose_block(body)]}
   }
   if __tool_parse_tag_spellings("user_response").contains(tag) {
     const body = trim(to_string(unit?.body ?? ""))
     if body == "" {
-      return state + {answers: state.answers.appending(body)}
+      return state + {answers: state.answers + [body]}
     }
     return state
-      + {
-        answers: state.answers.appending(body),
-        canonical: state.canonical.appending(answer_block(body)),
-      }
+      + {answers: state.answers + [body], canonical: state.canonical + [answer_block(body)]}
   }
   if __tool_parse_tag_spellings("done").contains(tag) {
     const body = trim(to_string(unit?.body ?? ""))
     if body == "" {
       return state
         + {
-          violations: state.violations.appending(
-            protocol_violation(
-              "empty_done",
-              "<done> block is empty. Emit the configured done sentinel "
-                + "(default `##DONE##`) inside the block.",
-            ),
-          ),
+          violations: state.violations
+            + [
+              protocol_violation(
+                "empty_done",
+                "<done> block is empty. Emit the configured done sentinel "
+                  + "(default `##DONE##`) inside the block.",
+              ),
+            ],
         }
     }
     return state
-      + {done: body, canonical: state.canonical.appending("<done>" + body + "</done>")}
+      + {done: body, canonical: state.canonical + ["<done>" + body + "</done>"]}
   }
   const parsed = __tool_parse_call_from_body(
     to_string(unit?.body ?? ""),
@@ -249,18 +244,18 @@ fn __tool_parse_block_unit(
     let prose = state.prose
     let violations = state.violations
     if parsed?.call != nil {
-      calls = calls.appending(parsed.call)
-      canonical = canonical.appending(call_block(parsed.call))
+      calls.push(parsed.call)
+      canonical.push(call_block(parsed.call))
     }
     for narration in parsed?.prose ?? [] {
-      prose = prose.appending(narration)
-      canonical = canonical.appending(prose_block(narration))
+      prose.push(narration)
+      canonical.push(prose_block(narration))
     }
     // Forgiving a missing close still has to say so. A silent accept would
     // teach the model that the close tag is optional and would blind every
     // consumer that reads parse outcomes to detect dialect drift.
     if kind == "unclosed_block" && parsed?.call != nil {
-      violations = violations.appending(
+      violations.push(
         protocol_violation(
           "recovered_dialect",
           "Recovered a tool call from a `<tool_call>` block that was never closed. "
@@ -289,7 +284,7 @@ fn __tool_parse_block_unit(
         + "the response appears to have been cut off mid-call."
     }
   }
-  return state + {errors: state.errors.appending(message)}
+  return state + {errors: state.errors + [message]}
 }
 
 fn __tool_parse_tag_unit(unit: dict, state: dict) -> dict {
@@ -303,34 +298,36 @@ fn __tool_parse_tag_unit(unit: dict, state: dict) -> dict {
   if starts_with(raw, "</") {
     return state
       + {
-        violations: state.violations.appending(
-          protocol_violation(
-            "stray_text",
-            "Stray text outside response tags: "
-              + json_stringify(raw)
-              + ". Wrap all prose in <assistant_prose>...</assistant_prose> or "
-              + "<user_response>...</user_response>, and every tool call in "
-              + "<tool_call>...</tool_call>.",
-            raw,
-          ),
-        ),
+        violations: state.violations
+          + [
+            protocol_violation(
+              "stray_text",
+              "Stray text outside response tags: "
+                + json_stringify(raw)
+                + ". Wrap all prose in <assistant_prose>...</assistant_prose> or "
+                + "<user_response>...</user_response>, and every tool call in "
+                + "<tool_call>...</tool_call>.",
+              raw,
+            ),
+          ],
         recovered: state.recovered + 1,
-        dropped: state.dropped.appending({text: raw, reason: "salvaged_as_prose"}),
+        dropped: state.dropped + [{text: raw, reason: "salvaged_as_prose"}],
       }
   }
   return state
     + {
-      violations: state.violations.appending(
-        protocol_violation(
-          "unknown_tag",
-          "Unknown top-level tag "
-            + json_stringify(raw)
-            + ". Use <tool_call>, <assistant_prose>, <user_response>, or <done> "
-            + "— no other tags are accepted at the top level.",
-          raw,
-        ),
-      ),
-      dropped: state.dropped.appending({text: raw, reason: "salvaged_as_prose"}),
+      violations: state.violations
+        + [
+          protocol_violation(
+            "unknown_tag",
+            "Unknown top-level tag "
+              + json_stringify(raw)
+              + ". Use <tool_call>, <assistant_prose>, <user_response>, or <done> "
+              + "— no other tags are accepted at the top level.",
+            raw,
+          ),
+        ],
+      dropped: state.dropped + [{text: raw, reason: "salvaged_as_prose"}],
     }
 }
 
@@ -340,24 +337,25 @@ fn __tool_parse_markup_unit(unit: dict, tools: any, state: dict) -> dict {
     const name = to_string(parsed.call?.name ?? "")
     return state
       + {
-        calls: state.calls.appending(parsed.call),
-        canonical: state.canonical.appending(call_block(parsed.call)),
-        violations: state.violations.appending(
-          protocol_violation(
-            "recovered_dialect",
-            "Tool call `"
-              + name
-              + "` was emitted as chat-template function markup instead of "
-              + tool_call_syntax_named(to_string(state?.tool_format ?? ""), name)
-              + ". Recovered this turn so work moves forward; "
-              + "emit the canonical form on subsequent turns.",
-          ),
-        ),
+        calls: state.calls + [parsed.call],
+        canonical: state.canonical + [call_block(parsed.call)],
+        violations: state.violations
+          + [
+            protocol_violation(
+              "recovered_dialect",
+              "Tool call `"
+                + name
+                + "` was emitted as chat-template function markup instead of "
+                + tool_call_syntax_named(to_string(state?.tool_format ?? ""), name)
+                + ". Recovered this turn so work moves forward; "
+                + "emit the canonical form on subsequent turns.",
+            ),
+          ],
       }
   }
   if parsed?.matched ?? false {
     return state
-      + {errors: state.errors.appending(to_string(parsed?.error ?? "function-markup parse failed"))}
+      + {errors: state.errors + [to_string(parsed?.error ?? "function-markup parse failed")]}
   }
   return __tool_parse_consume_stray(unit, tools, state)
 }
@@ -386,14 +384,15 @@ fn __tool_parse_tagged_unit(unit: dict, tools: any, state: dict, candidates: any
     }
     return next
       + {
-        calls: next.calls.appending(call),
-        canonical: next.canonical.appending(call_block(call)),
-        violations: next.violations.appending(
-          protocol_violation(
-            "recovered_dialect",
-            "Recovered angle-wrapped tool call; emit it inside <tool_call>...</tool_call>.",
-          ),
-        ),
+        calls: next.calls + [call],
+        canonical: next.canonical + [call_block(call)],
+        violations: next.violations
+          + [
+            protocol_violation(
+              "recovered_dialect",
+              "Recovered angle-wrapped tool call; emit it inside <tool_call>...</tool_call>.",
+            ),
+          ],
       }
   }
   if kind == "markup" {
@@ -506,14 +505,12 @@ fn __tool_parse_stray_fast(unit: dict, candidates: any, state: dict) -> dict {
     const prose = if sniffed_prose == "" {
       state.prose
     } else {
-      state.prose.appending(sniffed_prose)
+      state.prose + [sniffed_prose]
     }
     return state
       + {
         calls: state.calls + sniffed.calls,
-        canonical: state.canonical.appending(
-          {kind: "bare", calls: sniffed.calls, prose: sniffed_prose},
-        ),
+        canonical: state.canonical + [{kind: "bare", calls: sniffed.calls, prose: sniffed_prose}],
         prose: prose,
         // A unit that produced a call can still have produced a diagnostic
         // beside it — an unknown name, or arguments that did not decode. Reading
@@ -525,38 +522,39 @@ fn __tool_parse_stray_fast(unit: dict, candidates: any, state: dict) -> dict {
   }
   // No call in the taught grammar, but a fence that names itself a tool block.
   if __tool_parse_has_canonical_tool_fence(stray_text) {
-    return state + {fenced: state.fenced.appending(stray_text)}
+    return state + {fenced: state.fenced + [stray_text]}
   }
   if len(sniffed?.errors ?? []) > 0 {
     return state
       + {
         errors: state.errors + sniffed.errors,
-        dropped: state.dropped.appending({text: stray_text, reason: drop_reason}),
+        dropped: state.dropped + [{text: stray_text, reason: drop_reason}],
       }
   }
   if has_response_protocol_fragment(stray_text) {
     return state
       + {
-        violations: state.violations.appending(
-          protocol_violation(
-            "stray_text",
-            "Stray text outside response tags: "
-              + json_stringify(stray_text)
-              + ". Wrap all prose in <assistant_prose>...</assistant_prose> or "
-              + "<user_response>...</user_response>, and every tool call in "
-              + "<tool_call>...</tool_call>.",
-            stray_text,
-          ),
-        ),
+        violations: state.violations
+          + [
+            protocol_violation(
+              "stray_text",
+              "Stray text outside response tags: "
+                + json_stringify(stray_text)
+                + ". Wrap all prose in <assistant_prose>...</assistant_prose> or "
+                + "<user_response>...</user_response>, and every tool call in "
+                + "<tool_call>...</tool_call>.",
+              stray_text,
+            ),
+          ],
         recovered: state.recovered + 1,
-        dropped: state.dropped.appending({text: stray_text, reason: drop_reason}),
+        dropped: state.dropped + [{text: stray_text, reason: drop_reason}],
       }
   }
   return state
     + {
-      prose: state.prose.appending(stray_text),
-      canonical: state.canonical.appending({kind: "prose", text: stray_text}),
-      dropped: state.dropped.appending({text: stray_text, reason: drop_reason}),
+      prose: state.prose + [stray_text],
+      canonical: state.canonical + [{kind: "prose", text: stray_text}],
+      dropped: state.dropped + [{text: stray_text, reason: drop_reason}],
     }
 }
 
@@ -585,21 +583,22 @@ fn __tool_parse_recover_fenced_calls(blocks: list<string>, tools: dict?, state: 
   if len(fenced_calls) > 0 {
     let canonical = state.canonical
     for call in fenced_calls {
-      canonical = canonical.appending(call_block(call))
+      canonical.push(call_block(call))
     }
     return state
       + {
         calls: state.calls + fenced_calls,
         canonical: canonical,
         recovered: state.recovered + len(fenced_calls),
-        violations: state.violations.appending(
-          protocol_violation(
-            "recovered_dialect",
-            "Recovered a tool call from a ```tool fence while `tool_format` is `text`; "
-              + "accepted this turn, but emit it inside <tool_call>...</tool_call> "
-              + "next turn.",
-          ),
-        ),
+        violations: state.violations
+          + [
+            protocol_violation(
+              "recovered_dialect",
+              "Recovered a tool call from a ```tool fence while `tool_format` is `text`; "
+                + "accepted this turn, but emit it inside <tool_call>...</tool_call> "
+                + "next turn.",
+            ),
+          ],
       }
   }
   const reason = if already_called {
@@ -609,17 +608,18 @@ fn __tool_parse_recover_fenced_calls(blocks: list<string>, tools: dict?, state: 
   }
   return state
     + {
-      prose: state.prose.appending(fenced_text),
-      canonical: state.canonical.appending({kind: "prose", text: fenced_text}),
-      dropped: state.dropped.appending({text: fenced_text, reason: "fenced_narration"}),
-      violations: state.violations.appending(
-        protocol_violation(
-          "wrong_tool_format",
-          "A ```tool fence was present while `tool_format` is `text` but was not dispatched"
-            + reason
-            + "; emit calls inside <tool_call>...</tool_call>.",
-        ),
-      ),
+      prose: state.prose + [fenced_text],
+      canonical: state.canonical + [{kind: "prose", text: fenced_text}],
+      dropped: state.dropped + [{text: fenced_text, reason: "fenced_narration"}],
+      violations: state.violations
+        + [
+          protocol_violation(
+            "wrong_tool_format",
+            "A ```tool fence was present while `tool_format` is `text` but was not dispatched"
+              + reason
+              + "; emit calls inside <tool_call>...</tool_call>.",
+          ),
+        ],
     }
 }
 
@@ -736,15 +736,15 @@ fn __tool_parse_tagged(text: string, tools: any, tool_format: string? = "") -> d
       const body = trim(unit?.body ?? "")
       if assistant_tags.contains(tag) {
         if body != "" {
-          prose_parts = prose_parts.appending(body)
-          canonical = canonical.appending({kind: "prose", text: body})
+          prose_parts.push(body)
+          canonical.push({kind: "prose", text: body})
         }
         continue
       }
       if response_tags.contains(tag) {
-        answers = answers.appending(body)
+        answers.push(body)
         if body != "" {
-          canonical = canonical.appending({kind: "answer", text: body})
+          canonical.push({kind: "answer", text: body})
         }
         continue
       }
@@ -758,10 +758,8 @@ fn __tool_parse_tagged(text: string, tools: any, tool_format: string? = "") -> d
             name: head_name,
             arguments: direct.arguments ?? direct.value ?? {},
           }
-          calls = calls.appending(call)
-          canonical = canonical.appending(
-            {kind: "call", name: call.name, arguments: call.arguments ?? {}},
-          )
+          calls.push(call)
+          canonical.push({kind: "call", name: call.name, arguments: call.arguments ?? {}})
           continue
         }
       }
@@ -984,7 +982,7 @@ fn __tool_parse_json(text: string, tools: dict? = nil, recover_heredoc: bool = t
     )
     if len(recovered?.calls ?? []) > 0 {
       return recovered
-        + {protocol_violations: (recovered?.protocol_violations ?? []).appending(violation)}
+        + {protocol_violations: (recovered?.protocol_violations ?? []) + [violation]}
     }
     return empty_parse()
       + {
@@ -1009,9 +1007,9 @@ fn __tool_parse_json(text: string, tools: dict? = nil, recover_heredoc: bool = t
     for row in stream?.values ?? [] {
       const normalized = json_call(row?.value, false)
       if normalized?.ok ?? false {
-        body_calls = body_calls.appending(normalized.call)
+        body_calls.push(normalized.call)
       } else {
-        errors = errors.appending(normalized.error)
+        errors.push(normalized.error)
       }
     }
     const trailing = trim(source.slice(stream?.end ?? 0, len(source)))
@@ -1023,7 +1021,7 @@ fn __tool_parse_json(text: string, tools: dict? = nil, recover_heredoc: bool = t
         body_calls = bound.calls
       } else {
         body_calls = []
-        errors = errors.appending(bound.error)
+        errors.push(bound.error)
       }
     }
     calls = calls + body_calls
@@ -1040,9 +1038,9 @@ fn __tool_parse_json(text: string, tools: dict? = nil, recover_heredoc: bool = t
             + "`)",
         )
       }
-      errors = errors.appending(missing_error)
+      errors.push(missing_error)
     } else if stream?.error != nil && !starts_with(trailing, "<<") {
-      errors = errors.appending(
+      errors.push(
         tool_call_json_error(
           to_string(stream.error)
             + " (near `"
@@ -1051,7 +1049,7 @@ fn __tool_parse_json(text: string, tools: dict? = nil, recover_heredoc: bool = t
         ),
       )
     } else if stream?.eof ?? false {
-      errors = errors.appending(
+      errors.push(
         "Unterminated ```tool fence opened on line 1 (1-based): the block reached "
           + "end-of-output with an incomplete JSON object. Re-emit the whole call inside "
           + "a ```tool ... ``` block and close it with a line that is exactly ```.",

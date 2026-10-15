@@ -131,6 +131,17 @@ The dispatcher uses the shared `EventLog` instead of a parallel queue layer:
 
 `trigger.inbox.envelopes` is the dispatcher's durable ingress stream.
 `trigger.inbox.claims` stores TTL-bound dedupe claims for `InboxIndex`.
+For a routed or polled connector event, the dispatcher checks the named
+binding's provider and event selectors, then selects matching persona subscriptions.
+Selector mismatches and duplicate subscription deliveries produce `dispatch_skipped`
+outbox records with `ingress_selector` or `inbox_dedupe` stages. Recovery treats those
+deliveries as settled rather than stranded.
+It doesn't dispatch to other routed bindings. Each subscription claims the
+connector's delivery key independently, scoped by tenant and binding id.
+Duplicate deliveries across routes or dispatcher restarts don't run that subscription again
+within its retention period. Claims record admission before handler execution;
+handler retries remain owned by the dispatcher. Explicit replay bypasses these claims.
+Cron envelopes keep their named schedule target.
 Harn v0.7.23 also soft-reads the legacy mixed `trigger.inbox` topic on
 startup so older event logs keep working while new writes go only to the
 split topics.

@@ -24,8 +24,8 @@ impl super::super::Vm {
                 || (expected_type == "float" && actual_type == "int")
                 || (expected_type == "int" && actual_type == "float");
             if !compatible {
-                return Err(VmError::Runtime(format!(
-                    "TypeError: function '{}' parameter '{}' expected {}, got {} ({})",
+                return Err(VmError::TypeError(format!(
+                    "function '{}' parameter '{}' expected {}, got {} ({})",
                     function_name,
                     var_name,
                     expected_type,

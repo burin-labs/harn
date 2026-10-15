@@ -414,6 +414,10 @@ pub enum AgentEvent {
         /// both the value and the fact that it had been recorded.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         terminal_evidence_preserved: Option<bool>,
+        /// The report validated by the Harn completion boundary, preserved
+        /// unchanged for hosts and replay. Absence is not a successful report.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        requirement_report: Option<serde_json::Value>,
     },
     /// Per-step critique decision emitted by `agent_step_judge`.
     /// Sibling of [`JudgeDecision`] but fired BEFORE tool dispatch on

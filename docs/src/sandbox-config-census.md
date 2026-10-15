@@ -4,8 +4,8 @@ The `package_manager_config` preset admits named tool paths under `~/.config`
 and `~/.cache`. Other siblings aren't readable unless you grant them explicitly.
 The [credential denylist](./sandbox-read-deny-reference.md) overrides every grant.
 
-The owning list is `package_manager_config_read_roots_for_home` in
-`crates/harn-vm/src/stdlib/sandbox/read_roots.rs`. Linux and macOS use that same
+The owning list is `[package_config]` in the path registry,
+`crates/harn-vm/src/known_paths/known_paths.toml`. Linux and macOS use that same
 list. Windows doesn't confine child processes; these roots don't provide a
 security boundary there.
 

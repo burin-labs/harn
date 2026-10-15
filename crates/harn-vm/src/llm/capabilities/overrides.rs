@@ -13,7 +13,7 @@ thread_local! {
     static LLM_CAPABILITY_OVERRIDES_CONTEXT: RefCell<Option<CapabilitiesFile>> = const { RefCell::new(None) };
 }
 
-pub(super) fn current_user_overrides() -> Option<CapabilitiesFile> {
+pub(crate) fn current_user_overrides() -> Option<CapabilitiesFile> {
     LLM_CAPABILITY_OVERRIDES_CONTEXT.with(|cell| cell.borrow().clone())
 }
 

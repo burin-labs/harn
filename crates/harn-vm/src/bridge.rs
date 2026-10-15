@@ -6,12 +6,16 @@ mod correlation;
 mod injection_lifecycle;
 mod pending_call;
 mod remind;
+mod response_deadline;
 pub use authority::leading_authority_param_count;
 pub use authority::{inject_leading_authorities, inject_leading_authority};
 pub use control::HostBridgeControlState;
 use control::{handle_cancel_tool_call_notification, DaemonIdleState};
 pub use injection_lifecycle::UserMessageDeliveryOwner;
 use remind::queued_session_remind_from_params;
+#[cfg(test)]
+use response_deadline::bridge_call_timeout;
+pub use response_deadline::wait_for_bridge_call_timeout;
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::future::Future;
 use std::io::Write;
@@ -31,25 +35,6 @@ use crate::vm::Vm;
 
 /// Default timeout for non-interactive bridge calls (5 minutes).
 const DEFAULT_TIMEOUT: Duration = Duration::from_mins(5);
-
-fn bridge_call_timeout(method: &str) -> Option<Duration> {
-    match method {
-        // A human approval is intentionally open-ended. Cancellation and host
-        // disconnects still wake the waiter, but a slow approver must not be
-        // converted into a terminal denial by the transport watchdog.
-        crate::llm::acp_permission::METHOD_REQUEST_PERMISSION => None,
-        _ => Some(DEFAULT_TIMEOUT),
-    }
-}
-
-async fn wait_for_bridge_call_timeout(method: &str) -> Duration {
-    if let Some(timeout) = bridge_call_timeout(method) {
-        tokio::time::sleep(timeout).await;
-        timeout
-    } else {
-        std::future::pending::<Duration>().await
-    }
-}
 
 pub type HostBridgeWriter = Arc<dyn Fn(&str) -> Result<(), String> + Send + Sync>;
 
@@ -868,7 +853,8 @@ impl HostBridge {
             return Err(VmError::Runtime("Bridge: operation cancelled".into()));
         }
 
-        let timeout_wait = wait_for_bridge_call_timeout(method);
+        let timeout_wait =
+            wait_for_bridge_call_timeout(method, &request["params"], DEFAULT_TIMEOUT);
         tokio::pin!(timeout_wait);
 
         let response = tokio::select! {

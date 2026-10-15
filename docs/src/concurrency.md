@@ -895,7 +895,7 @@ fn collect_pages(net: HarnessNet, stdio: HarnessStdio, cursors) {
   let pages = []
   for result in outcome.results {
     if is_ok(result) {
-      pages = pages.appending(unwrap(result).items)
+      pages.push(unwrap(result).items)
     } else {
       stdio.log("page fetch failed: ${unwrap_err(result)}")
     }

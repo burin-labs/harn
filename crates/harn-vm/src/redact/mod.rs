@@ -217,8 +217,11 @@ impl RedactionPolicy {
     /// userinfo. Returns the input unchanged if nothing matches or the
     /// URL fails to parse.
     pub fn redact_url(&self, url: &str) -> String {
+        // Not `redact_string`: that routes an `http(s)://` string without
+        // whitespace back here, so an unparseable URL recursed until the stack
+        // overflowed (harn#9816).
         let Ok(mut parsed) = Url::parse(url) else {
-            return self.redact_string(url).into_owned();
+            return scan_secret_patterns(url, REDACTED_PLACEHOLDER).into_owned();
         };
         let mut changed = false;
 
@@ -693,6 +696,17 @@ mod tests {
             ("User-Agent".to_string(), "Harn/1.0".to_string()),
             ("X-GitHub-Delivery".to_string(), "delivery-123".to_string()),
         ])
+    }
+
+    /// harn#9816: an `http(s)://` string that fails to parse used to bounce
+    /// between `redact_url` and `redact_string` until the stack overflowed.
+    #[test]
+    fn unparseable_url_is_scanned_not_recursed() {
+        let policy = RedactionPolicy::default();
+        for value in ["http://[::1", "https://exa mple.com/x", "https://%zz"] {
+            let _ = policy.redact_url(value);
+            let _ = policy.redact_string(value);
+        }
     }
 
     #[test]

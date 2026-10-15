@@ -126,7 +126,7 @@ pub enum NodeSemantics {
 #[derive(Debug, Clone)]
 pub struct AssignmentSemantics {
     pub target: Option<String>,
-    pub op: Option<String>,
+    pub op: Option<harn_parser::BinaryOperator>,
     pub value: ExprSummary,
 }
 
@@ -135,7 +135,7 @@ pub enum ExprSummary {
     Reference(String),
     Call(String),
     Binary {
-        op: String,
+        op: harn_parser::BinaryOperator,
         left: Box<ExprSummary>,
         right: Box<ExprSummary>,
     },

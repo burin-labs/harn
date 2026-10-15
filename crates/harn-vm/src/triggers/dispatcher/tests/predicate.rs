@@ -561,6 +561,7 @@ pub fn local_fn(harness: Harness, event: TriggerEvent) -> dict {
     install_manifest_triggers(vec![TriggerBindingSpec {
         id: "github-new-issue".to_string(),
         source: TriggerBindingSource::Manifest,
+        ingress_subscription: false,
         kind: "webhook".to_string(),
         provider: ProviderId::from("github"),
         autonomy_tier: crate::AutonomyTier::ActAuto,
@@ -672,6 +673,7 @@ pub fn local_fn(harness: Harness, event: TriggerEvent) {
     install_manifest_triggers(vec![TriggerBindingSpec {
         id: "github-new-issue".to_string(),
         source: TriggerBindingSource::Manifest,
+        ingress_subscription: false,
         kind: "webhook".to_string(),
         provider: ProviderId::from("github"),
         autonomy_tier: crate::AutonomyTier::Suggest,

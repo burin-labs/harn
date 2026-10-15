@@ -5,6 +5,8 @@
  * This is the one owner of the release fold. `release_ship.sh --prepare` runs
  * it before the version bump, so the `Release vX.Y.Z` pull request carries the
  * folded notes and the fragment deletions in the same commit.
+ * List updates use concatenation because these tools also run on the release
+ * orchestrator's pinned runtime, whose `push` returns a copy.
  *
  * The fold has three steps. Fragments are parsed and assembled into `###`
  * category blocks by `std/changelog`. Those blocks merge into `## Unreleased`,
@@ -115,9 +117,8 @@ fn changelog_heading_offsets(text: string) -> list<HeadingOffset> {
     const version = changelog_entry_heading(line)?.version
     const heading = trim(line)
     if version != nil || heading == "## Unreleased" {
-      headings = headings.push(
-        {heading: heading, version: version, start: offset, end: offset + len(line)},
-      )
+      headings = headings
+        + [{heading: heading, version: version, start: offset, end: offset + len(line)}]
     }
     offset = offset + len(line) + 1
   }
@@ -164,14 +165,14 @@ fn changelog_subsections(body: string) -> list<Subsection> {
   let current_lines: list<string> = []
   for line in split(trim(body), "\n") {
     if starts_with(trim(line), "### ") {
-      sections = sections.push({heading: current_heading, body: trim(current_lines.join("\n"))})
+      sections = sections + [{heading: current_heading, body: trim(current_lines.join("\n"))}]
       current_heading = trim(line)
       current_lines = []
     } else {
-      current_lines = current_lines.push(line)
+      current_lines = current_lines + [line]
     }
   }
-  sections = sections.push({heading: current_heading, body: trim(current_lines.join("\n"))})
+  sections = sections + [{heading: current_heading, body: trim(current_lines.join("\n"))}]
   return sections.filter({ section -> section.heading != "" || section.body != "" }).to_list()
 }
 
@@ -183,9 +184,9 @@ fn changelog_render_subsections(sections: list<Subsection>) -> string {
       continue
     }
     if section.heading == "" {
-      parts = parts.push(body)
+      parts = parts + [body]
     } else {
-      parts = parts.push(section.heading + "\n\n" + body)
+      parts = parts + [section.heading + "\n\n" + body]
     }
   }
   return parts.join("\n\n")
@@ -202,16 +203,16 @@ fn changelog_merge_release_bodies(unreleased_body: string, release_body: string)
       if !merged && pending_section.heading != ""
         && pending_section.heading == release_section.heading {
         const merged_body = trim(pending_section.body) + "\n\n" + trim(release_section.body)
-        next_sections = next_sections.push({heading: release_section.heading, body: merged_body})
+        next_sections = next_sections + [{heading: release_section.heading, body: merged_body}]
         merged = true
       } else {
-        next_sections = next_sections.push(release_section)
+        next_sections = next_sections + [release_section]
       }
     }
     if merged {
       release_sections = next_sections
     } else {
-      prepend = prepend.push(pending_section)
+      prepend = prepend + [pending_section]
     }
   }
   return changelog_render_subsections(prepend + release_sections)
@@ -413,7 +414,7 @@ pub fn fold_release_changelog(
         fragments,
       )
     }
-    fragments = fragments.push(unwrap(parsed))
+    fragments = fragments + [unwrap(parsed)]
   }
   let merged_text = original
   let merged_changed = false
@@ -473,7 +474,7 @@ pub fn read_fragment_files(fs: HarnessFs, root: string) -> list<ReleaseFragmentF
     if !is_release_changelog_fragment_name(name) {
       continue
     }
-    files = files.push({name: name, body: fs.read_text(path_join(dir, name))})
+    files = files + [{name: name, body: fs.read_text(path_join(dir, name))}]
   }
   return files
 }

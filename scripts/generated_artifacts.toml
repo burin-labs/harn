@@ -289,8 +289,38 @@ gen = "gen-prompt-grammar"
 check = "check-prompt-grammar"
 outputs = ["editors/vscode/syntaxes/harn-prompt.tmLanguage.json"]
 sources = [
-  "crates/harn-vm/src/stdlib/template/vocabulary.rs",
+  "crates/harn-prompt-syntax/src/vocabulary.rs",
+  "crates/harn-prompt-syntax/src/filters.rs",
   "crates/harn-cli/src/commands/dump_prompt_grammar.rs",
+]
+ci = true
+make_all = true
+
+[[artifact]]
+id = "operator-precedence"
+description = "Operator precedence tables in the spec and the language guide, and the tree-sitter grammar's PREC constants, generated from the parser's typed precedence table so the parser, formatter, editor grammar, and docs agree on binding order."
+gen = "gen-operator-precedence"
+check = "check-operator-precedence"
+# The precedence tables are marked regions inside hand-written Markdown, so
+# only the wholly generated constants file is a registered output; the check
+# still verifies both table regions.
+outputs = ["tree-sitter-harn/grammar/precedence.js"]
+sources = [
+  "crates/harn-parser/src/operators.rs",
+  "crates/harn-cli/src/commands/dump_operator_precedence.rs",
+]
+ci = true
+make_all = true
+
+[[artifact]]
+id = "builtin-methods"
+description = "The builtin value-method reference region of docs/src/builtins.md, rendered from the method registry (harn_parser::builtin_methods) that also drives the typechecker, linter, language server, and VM drift checks."
+gen = "gen-builtin-methods"
+check = "check-builtin-methods"
+outputs = ["docs/src/builtins.md"]
+sources = [
+  "crates/harn-parser/src/builtin_methods/",
+  "crates/harn-cli/src/commands/dump_builtin_methods.rs",
 ]
 ci = true
 make_all = true
@@ -499,8 +529,8 @@ description = "Checked-in provider/model catalog TOML, capability TOML, JSON, sc
 gen = "gen-provider-catalog"
 check = "check-provider-catalog"
 outputs = [
-  "crates/harn-vm/src/llm/providers.toml",
-  "crates/harn-vm/src/llm/capabilities.toml",
+  "crates/harn-provider-catalog/src/providers.toml",
+  "crates/harn-provider-catalog/src/capabilities.toml",
   "spec/provider-catalog/provider-catalog.json",
   "spec/provider-catalog/provider-catalog.schema.json",
   "spec/provider-catalog/harn-provider-catalog.d.ts",
@@ -592,6 +622,7 @@ sources = [
   "crates/harn-cli/src/commands/dump_trigger_quickref.rs",
   "crates/harn-vm/src/llm/",
   "crates/harn-vm/src/provider_catalog.rs",
+  "crates/harn-provider-catalog/src/",
 ]
 ci = true
 make_all = true
@@ -730,7 +761,7 @@ make_all = false  # excluded from `make all` for the same reason (no sibling che
 "check-turn-end-boundary" = "source"
 "check-tree-sitter-keywords" = "source"
 "check-grammar-keywords" = "source"
-"check-grammar-fitness" = "excluded"
+"check-grammar-fitness" = "source"
 "check-generated-registry" = "source"
 "check-release-contract" = "source"
 "check-release-audit-contract" = "source"
@@ -751,6 +782,8 @@ make_all = false  # excluded from `make all` for the same reason (no sibling che
 "check-portable-benchmark-schema" = "binary"
 "check-portable-demo-package" = "binary"
 "check-prompt-grammar" = "binary"
+"check-builtin-methods" = "binary"
+"check-operator-precedence" = "binary"
 "check-protocol-artifacts" = "binary"
 "check-connector-schemas" = "binary"
 # The table is read out of the linked runtime registry, so a stale executable

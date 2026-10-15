@@ -114,7 +114,7 @@ fn __tt_child_spans(audit: dict?) {
     if len(attrs.keys()) > 0 {
       span = span + {attributes: attrs}
     }
-    spans = spans.appending(span)
+    spans.push(span)
   }
   return spans
 }
@@ -126,7 +126,7 @@ fn __tt_events(result: dict, start_ms: any, end_ms: any) {
   ]
   const category = to_string(result?.error_category ?? "")
   if category == "scope_violation" || category == "policy_blocked" {
-    events = events.appending(
+    events.push(
       {
         name: "tool_call.scope_violation",
         time_ms: end_ms,
@@ -460,7 +460,7 @@ pub fn resolve_telemetry_sink(harness: Harness, value: unknown) {
   if type_of(cfg?.sinks) == "list" {
     let resolved = []
     for item in cfg.sinks {
-      resolved = resolved.appending(__tt_resolve_one(harness, item, cfg))
+      resolved.push(__tt_resolve_one(harness, item, cfg))
     }
     return __tt_compose_sinks(resolved)
   }
@@ -595,7 +595,7 @@ fn __tt_otel_events(events: list) {
     if type_of(event?.attributes) == "dict" {
       record = record + {attributes: event.attributes}
     }
-    converted = converted.appending(record)
+    converted.push(record)
   }
   return converted
 }

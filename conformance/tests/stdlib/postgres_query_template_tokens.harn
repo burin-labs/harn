@@ -36,7 +36,7 @@ pipeline default(harness: Harness) {
   // two by more than an order of magnitude in each direction.
   let template = "SELECT 0"
   let values = {}
-  for i in 0 to 6400 exclusive {
+  for i in 0..6400 {
     const name = "p" + to_string(i)
     template = template + "\n  , COALESCE(column_" + to_string(i) + ", {" + name
       + "}::numeric) AS a"

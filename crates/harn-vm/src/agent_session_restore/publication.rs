@@ -17,7 +17,9 @@ pub(super) struct RestoreProjection {
 impl RestoreProjection {
     pub(super) fn from_stored(session_id: &str, stored: &StoredEvent) -> Option<Self> {
         if matches!(stored.kind, SessionEventKind::Message) {
-            if let Some(raw) = stored.payload.get("raw_message") {
+            let raw_message = crate::agent_sessions::session_event::transcript_record(stored)
+                .and_then(|record| record.raw_message);
+            if let Some(raw) = &raw_message {
                 if !is_visible(&crate::schema::json_to_vm_value(raw)) {
                     return Some(Self {
                         event: AgentSessionReplayEvent {

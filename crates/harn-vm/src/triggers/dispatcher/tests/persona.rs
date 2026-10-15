@@ -22,6 +22,7 @@ async fn persona_dispatcher(
     install_manifest_triggers(vec![TriggerBindingSpec {
         id: "persona.merge_captain.github.issues.opened".to_string(),
         source: TriggerBindingSource::Manifest,
+        ingress_subscription: false,
         kind: "webhook".to_string(),
         provider: ProviderId::from("github"),
         autonomy_tier: crate::AutonomyTier::ActAuto,

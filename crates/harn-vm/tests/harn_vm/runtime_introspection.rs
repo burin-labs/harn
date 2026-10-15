@@ -9,30 +9,8 @@
 //!   - missing metadata gracefully degrades to a `resolved: false` envelope
 //!   - the snapshot redaction allowlist holds across the wire
 
+use crate::support::run;
 use harn_vm::llm::introspection;
-use harn_vm::value::VmError;
-
-fn run(source: &str) -> Result<String, String> {
-    harn_vm::reset_thread_local_state();
-    let chunk = harn_vm::compile_source(source)?;
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .map_err(|e| e.to_string())?;
-    rt.block_on(async {
-        let local = tokio::task::LocalSet::new();
-        local
-            .run_until(async {
-                let mut vm = harn_vm::Vm::new();
-                harn_vm::register_vm_stdlib(&mut vm);
-                vm.execute(&chunk)
-                    .await
-                    .map_err(|e: VmError| format!("{e:?}"))?;
-                Ok(vm.output().to_string())
-            })
-            .await
-    })
-}
 
 fn out(source: &str) -> Vec<String> {
     let source = format!(

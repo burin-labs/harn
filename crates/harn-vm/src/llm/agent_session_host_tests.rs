@@ -1245,10 +1245,10 @@ fn final_visible_text_falls_through_reasoning_only_turns() {
     );
 }
 
-/// Multiple prose blocks in one message join as paragraphs; a provider that
-/// splits a reply across `text` blocks must not have them run together.
+/// Providers own the separators between text blocks; projection preserves
+/// those bytes without inserting a second paragraph separator.
 #[test]
-fn final_visible_text_joins_multiple_text_blocks() {
+fn final_visible_text_preserves_authored_separators_between_text_blocks() {
     let snapshot = crate::stdlib::json_to_vm_value(&json!({
         "messages": [
             {
@@ -1256,7 +1256,7 @@ fn final_visible_text_joins_multiple_text_blocks() {
                 "content": [
                     {"type": "text", "text": "First paragraph."},
                     {"type": "thinking", "thinking": "hidden", "signature": "sig"},
-                    {"type": "output_text", "text": "Second paragraph."},
+                    {"type": "output_text", "text": "\n\nSecond paragraph."},
                 ],
             }
         ]

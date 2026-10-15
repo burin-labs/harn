@@ -16,7 +16,6 @@ use crate::commands::app_host_assets::{
     host_document, portable_worker_script, sandbox_document, HARN_WASM_GZIP, HARN_WASM_SCRIPT,
 };
 use crate::commands::run::{RunFileAppServe, RunFileMcpServeMode};
-use crate::commands::serve::ScriptMcpRuntime;
 
 const MCP_APP_MIME: &str = "text/html;profile=mcp-app";
 const MCP_APP_EXTENSION: &str = "io.modelcontextprotocol/ui";
@@ -85,7 +84,7 @@ struct BrowserPermission {}
 
 #[derive(Clone)]
 struct AppHostState {
-    runtime: ScriptMcpRuntime,
+    server: Arc<harn_serve::McpServer>,
     descriptor: Arc<AppDescriptor>,
     app_tools: Arc<BTreeSet<String>>,
     host_origin: String,
@@ -93,14 +92,12 @@ struct AppHostState {
 }
 
 pub(crate) async fn run_script_app_server(
-    server: harn_vm::McpServer,
-    vm: harn_vm::Vm,
+    server: Arc<harn_serve::McpServer>,
     bind: SocketAddr,
     requested_resource: Option<String>,
     open: bool,
 ) -> Result<(), String> {
-    let runtime = ScriptMcpRuntime::start(server, vm);
-    let (descriptor, app_tools) = discover_app(&runtime, requested_resource.as_deref()).await?;
+    let (descriptor, app_tools) = discover_app(&server, requested_resource.as_deref()).await?;
     let listener = tokio::net::TcpListener::bind(bind)
         .await
         .map_err(|error| format!("failed to bind {bind}: {error}"))?;
@@ -110,7 +107,7 @@ pub(crate) async fn run_script_app_server(
     let host_origin = format!("http://{address}");
     let sandbox_origin = format!("http://localhost:{}", address.port());
     let state = AppHostState {
-        runtime,
+        server,
         descriptor: Arc::new(descriptor),
         app_tools: Arc::new(app_tools),
         host_origin: host_origin.clone(),
@@ -143,31 +140,32 @@ pub(crate) async fn run_script_app_server(
 }
 
 async fn rpc(
-    runtime: &ScriptMcpRuntime,
+    server: &Arc<harn_serve::McpServer>,
     id: i64,
     method: &str,
     params: JsonValue,
 ) -> Result<JsonValue, String> {
-    runtime
-        .call(
+    server
+        .clone()
+        .handle_request(
             json!({"jsonrpc": "2.0", "id": id, "method": method, "params": mcp_app_params(params)}),
         )
-        .await?
+        .await
         .ok_or_else(|| format!("{method} returned no response"))
 }
 
 async fn discover_app(
-    runtime: &ScriptMcpRuntime,
+    server: &Arc<harn_serve::McpServer>,
     requested_resource: Option<&str>,
 ) -> Result<(AppDescriptor, BTreeSet<String>), String> {
     rpc(
-        runtime,
+        server,
         1,
         harn_vm::mcp_protocol::METHOD_SERVER_DISCOVER,
         json!({}),
     )
     .await?;
-    let tools_response = rpc(runtime, 2, "tools/list", json!({})).await?;
+    let tools_response = rpc(server, 2, "tools/list", json!({})).await?;
     let tools = tools_response
         .pointer("/result/tools")
         .and_then(JsonValue::as_array)
@@ -189,7 +187,7 @@ async fn discover_app(
         }
     }
 
-    let resources_response = rpc(runtime, 3, "resources/list", json!({})).await?;
+    let resources_response = rpc(server, 3, "resources/list", json!({})).await?;
     let resources = resources_response
         .pointer("/result/resources")
         .and_then(JsonValue::as_array)
@@ -216,7 +214,7 @@ async fn discover_app(
         return Err(format!("app resource must use ui://, got {uri}"));
     }
 
-    let content_response = rpc(runtime, 4, "resources/read", json!({"uri": uri})).await?;
+    let content_response = rpc(server, 4, "resources/read", json!({"uri": uri})).await?;
     let content = content_response
         .pointer("/result/contents/0")
         .ok_or_else(|| format!("resources/read returned no content for {uri}"))?;
@@ -533,14 +531,9 @@ async fn app_rpc(
             .into_response();
     };
     request_object.insert("params".to_string(), params);
-    match state.runtime.call(request).await {
-        Ok(Some(response)) => Json(response).into_response(),
-        Ok(None) => StatusCode::ACCEPTED.into_response(),
-        Err(error) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": error})),
-        )
-            .into_response(),
+    match state.server.clone().handle_request(request).await {
+        Some(response) => Json(response).into_response(),
+        None => StatusCode::ACCEPTED.into_response(),
     }
 }
 

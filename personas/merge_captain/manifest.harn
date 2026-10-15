@@ -10,7 +10,7 @@ import { open_checkpoints } from "lib/checkpoint_store"
 import { fixture_adapter, live_adapter } from "lib/github_adapter"
 import { load_policies, sweep } from "lib/scheduler"
 
-@persona(name: "merge_captain", description: "Harn-native multi-repo PR queue captain.", tools: [github, ci], autonomy: act_with_approval, receipts: required, triggers: [github.pr_opened, github.pr_synchronized, github.check_failed, github.merge_group_completed])
+@persona(name: "merge_captain", description: "Harn-native multi-repo PR queue captain.", tools: [github, ci], autonomy: act_with_approval, receipts: required, triggers: [github.pull_request.opened, github.pull_request.synchronize, github.check_suite.completed, github.merge_group.checks_requested])
 /** Static persona graph used by `harn persona inspect` to expose Merge Captain's durable steps. */
 pub fn merge_captain_persona(ctx: any) {
   const resolved = resolve_input_step(ctx)

@@ -743,10 +743,7 @@ pub(super) async fn host_agent_dispatch_tool_call(
     // Install typed session context before resolving catalog/ambient path
     // annotations, but refuse malformed paths before any policy callback or
     // permission prompt. Full schema validation stays after hooks and routing.
-    if let Err(message) = crate::tool_annotations::path_inputs::validate_arguments(
-        &tool_args,
-        dispatch_annotations.as_ref(),
-    ) {
+    if let Err(message) = tools::prepare_path_args(&tool_name, &mut tool_args, tools) {
         let stop_reason = agent_primitive_option_str(options, "_stop_reason");
         let result = schema_validation_tool_result(
             &tool_name,

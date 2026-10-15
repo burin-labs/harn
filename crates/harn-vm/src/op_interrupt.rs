@@ -1,35 +1,22 @@
-//! Cooperative interrupt observation for blocking sync builtins.
+//! Cooperative interruption and process lifetime ownership.
 //!
-//! Sync builtins (including every subprocess-spawning path: the hostlib
-//! `run_command` tool family and the VM-side `process.exec`/`exec_opts`
-//! builtins) execute inline on the VM's async task. While one of them
-//! blocks — typically waiting on a child process — the interpreter's
-//! `tokio::select!` cancel/deadline race in
-//! `vm/execution.rs::execute_op_with_scope_interrupts` cannot run: the op
-//! future never yields, so scope cancellation, `deadline` expiry, and host
-//! aborts used to wait for the child to exit on its own (orphaning it on
-//! task abort / VM drop).
+//! Blocking builtin waits observe the host cancel token and innermost deadline
+//! installed by [`install`]. They poll [`requested`], terminate their process
+//! tree with SIGTERM followed by SIGKILL after [`SUBPROCESS_TERM_GRACE`], then
+//! return so the VM can surface the cancellation at its next op boundary.
+//! Spawned-task VMs share that token, covering parallel cancellation and drop.
 //!
-//! This module closes that gap cooperatively. Before invoking a sync
-//! builtin, the VM installs the *currently armed* interrupt sources — its
-//! host cancel token (`Arc<AtomicBool>`) and the innermost deadline — into
-//! a thread-local via [`install`]. Blocking wait loops poll [`requested`]
-//! (they already poll `try_wait` every ~20ms) and, when it fires,
-//! gracefully terminate their child process tree/group (SIGTERM, then SIGKILL
-//! after [`SUBPROCESS_TERM_GRACE`]) and return. The VM then surfaces the
-//! ordinary cancellation / deadline error at the next op boundary.
-//!
-//! Trigger coverage:
-//! - **Scope / `parallel` cancellation and VM drop**: spawned-task child
-//!   VMs share the `Arc<AtomicBool>` stored in their `VmTaskHandle`;
-//!   `Vm::cancel_spawned_tasks` (also called from `Drop for Vm`) sets it,
-//!   which the blocked wait loop observes.
-//! - **Host abort**: hosts cancel a VM by setting its cancel token — same
-//!   observation path.
-//! - **`deadline` expiry**: the deadline `Instant` is captured when the
-//!   builtin starts; the wait loop compares against `Instant::now()`.
+//! Async spawners register their child for out-of-band interruption. An owned
+//! guard also terminates on future drop and normal completion. Cleanup precedes
+//! reaping; afterward the root PID is cleared and only inherited tokens may
+//! identify descendants. Windows Job Object ownership is shared with hostlib.
 
 mod context;
+#[cfg(unix)]
+mod eof_cleanup;
+
+#[cfg(target_os = "windows")]
+pub mod windows;
 
 #[cfg(all(test, unix))]
 mod probe_tests;
@@ -320,10 +307,48 @@ static ACTIVE_PROCESS_CLEANUPS: LazyLock<Mutex<BTreeMap<u64, ActiveProcessCleanu
 /// cleanup hook when `harn run` is interrupted or reaches its run deadline.
 pub struct ActiveProcessCleanupGuard {
     id: u64,
+    terminate_on_drop: bool,
+}
+
+impl ActiveProcessCleanupGuard {
+    /// Own normal completion, timeout, and future cancellation through the
+    /// same process registry used by out-of-band interruption.
+    pub fn terminate_on_drop(mut self) -> Self {
+        self.terminate_on_drop = true;
+        self
+    }
+
+    /// Close the process group while its unreaped root still reserves the
+    /// PID. Call before waiting the child, then update the root identity.
+    pub fn terminate(&self) -> ProcessCleanupReport {
+        let entry = ACTIVE_PROCESS_CLEANUPS
+            .lock()
+            .expect("active process cleanup registry poisoned")
+            .get(&self.id)
+            .cloned();
+        entry.map_or_else(ProcessCleanupReport::default, |entry| {
+            signal_registered_process(&entry, 9)
+        })
+    }
+
+    /// Replace the root identity after waiting a Tokio child. Once reaped,
+    /// only the inherited cleanup token can name any surviving descendants.
+    pub fn update_root_pid(&self, pid: Option<u32>) {
+        if let Some(entry) = ACTIVE_PROCESS_CLEANUPS
+            .lock()
+            .expect("active process cleanup registry poisoned")
+            .get_mut(&self.id)
+        {
+            entry.pid = pid;
+        }
+    }
 }
 
 impl Drop for ActiveProcessCleanupGuard {
     fn drop(&mut self) {
+        if self.terminate_on_drop {
+            let _ = self.terminate();
+        }
         unregister_active_process_cleanup(self.id);
     }
 }
@@ -345,7 +370,10 @@ pub fn register_active_process_cleanup(
                 owner_cancel_token,
             },
         );
-    ActiveProcessCleanupGuard { id }
+    ActiveProcessCleanupGuard {
+        id,
+        terminate_on_drop: false,
+    }
 }
 
 fn unregister_active_process_cleanup(id: u64) {
@@ -419,15 +447,36 @@ fn signal_active_process_cleanups_matching(
         .collect::<Vec<_>>();
     let mut report = ProcessCleanupReport::default();
     for entry in entries {
-        if let Some(pid) = entry.pid {
-            report.merge(signal_pid_tree_group_and_token_with_report(
-                pid,
-                Some(&entry.cleanup_token),
-                signal,
-            ));
-        }
+        report.merge(signal_registered_process(&entry, signal));
     }
     report
+}
+
+fn signal_registered_process(entry: &ActiveProcessCleanup, signal: i32) -> ProcessCleanupReport {
+    if let Some(pid) = entry.pid {
+        return signal_pid_tree_group_and_token_with_report(
+            pid,
+            Some(&entry.cleanup_token),
+            signal,
+        );
+    }
+    #[cfg(unix)]
+    {
+        let mut report = ProcessCleanupReport::for_signal(None, signal);
+        for child in cleanup_token_processes(&entry.cleanup_token) {
+            signal_pid_and_group(child.pid, signal);
+            report.merge_child(child.with_signal(signal));
+        }
+        if signal == 9 {
+            wait_for_report_children_to_exit(&report, SUBPROCESS_KILL_SETTLE);
+        }
+        report.refresh_survivor_status();
+        report
+    }
+    #[cfg(not(unix))]
+    {
+        ProcessCleanupReport::for_signal(None, signal)
+    }
 }
 
 /// Put the child in its own session (`setsid()`), which also makes it the

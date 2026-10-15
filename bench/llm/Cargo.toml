@@ -9,6 +9,7 @@ arcstr = { version = "1", features = ["serde", "std"] }
 harn-vm = { path = "../../crates/harn-vm", features = ["llm-bench-internals"] }
 
 [dev-dependencies]
+harn-modules = { path = "../../crates/harn-modules", features = ["bundled-stdlib"] }
 criterion = "0.8"
 
 [[bench]]

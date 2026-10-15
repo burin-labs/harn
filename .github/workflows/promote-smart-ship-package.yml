@@ -1,0 +1,74 @@
+name: Promote Smart Ship package
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_run_id:
+        description: Successful Build Smart Ship package run to promote.
+        required: true
+        type: string
+      candidate_source_sha:
+        description: Exact main source packaged by that run.
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: smart-ship-package-promotion
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      tag: ${{ steps.select.outputs.tag }}
+      source: ${{ steps.select.outputs.source }}
+      run: ${{ steps.select.outputs.run }}
+    steps:
+      - name: Check out trusted current promotion policy
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Install the qualified runtime
+        uses: ./.github/actions/setup-harn
+        with:
+          version: '0.10.166'
+      - name: Install locked evidence readers
+        working-directory: scripts/package-release
+        run: harn install --frozen
+      - name: Select the verified package identity
+        id: select
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          CANDIDATE_SOURCE: ${{ inputs.candidate_source_sha }}
+          CANDIDATE_RUN: ${{ inputs.candidate_run_id }}
+        run: >-
+          harn run --environment-policy granted
+          --grant github=env:GITHUB_TOKEN,expose=GITHUB_TOKEN,to=in_process
+          --grant output=env:GITHUB_OUTPUT,expose=GITHUB_OUTPUT,to=in_process
+          --write-root "$(dirname "$GITHUB_OUTPUT")"
+          scripts/package-release/select-cli.harn --
+          "$GITHUB_REPOSITORY" "$CANDIDATE_SOURCE" "$CANDIDATE_RUN"
+
+  promote:
+    needs: plan
+    uses: burin-labs/.github/.github/workflows/promote-release.yml@7ad0bd4ea627af9a18f4d633d40e3e30975917c6
+    permissions:
+      contents: read
+      actions: read
+      attestations: read
+    with:
+      sha: ${{ needs.plan.outputs.source }}
+      run-id: ${{ needs.plan.outputs.run }}
+      tag: ${{ needs.plan.outputs.tag }}
+    secrets:
+      RELEASE_APP_CLIENT_ID: ${{ secrets.RELEASE_APP_CLIENT_ID }}
+      RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}

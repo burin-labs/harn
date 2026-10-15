@@ -379,57 +379,13 @@ fn initial_background_snapshot(
 }
 
 fn parse_sandbox_scope(map: &harn_vm::value::DictMap) -> Result<ProcessSandboxScope, HostlibError> {
-    let Some(value) = map.get("sandbox") else {
-        return Ok(ProcessSandboxScope::default());
-    };
-    match value {
-        VmValue::Nil => Ok(ProcessSandboxScope::default()),
-        VmValue::Dict(dict) => Ok(ProcessSandboxScope {
-            workspace_roots: optional_nested_string_list(dict, "workspace_roots")?
-                .unwrap_or_default(),
-        }),
-        other => Err(HostlibError::InvalidParameter {
+    ProcessSandboxScope::from_value(map.get("sandbox")).map_err(|error| {
+        HostlibError::InvalidParameter {
             builtin: NAME,
             param: "sandbox",
-            message: format!("expected dict, got {}", other.type_name()),
-        }),
-    }
-}
-
-fn optional_nested_string_list(
-    map: &harn_vm::value::DictMap,
-    key: &'static str,
-) -> Result<Option<Vec<String>>, HostlibError> {
-    let Some(value) = map.get(key) else {
-        return Ok(None);
-    };
-    match value {
-        VmValue::Nil => Ok(None),
-        VmValue::List(values) => {
-            let mut out = Vec::with_capacity(values.len());
-            for value in values.iter() {
-                match value {
-                    VmValue::String(string) => out.push(string.to_string()),
-                    other => {
-                        return Err(HostlibError::InvalidParameter {
-                            builtin: NAME,
-                            param: key,
-                            message: format!(
-                                "expected list of strings, got {} element",
-                                other.type_name()
-                            ),
-                        });
-                    }
-                }
-            }
-            Ok(Some(out))
+            message: error.to_string(),
         }
-        other => Err(HostlibError::InvalidParameter {
-            builtin: NAME,
-            param: key,
-            message: format!("expected list of strings, got {}", other.type_name()),
-        }),
-    }
+    })
 }
 
 fn sandbox_scope_error_to_hostlib(error: harn_vm::VmError) -> HostlibError {

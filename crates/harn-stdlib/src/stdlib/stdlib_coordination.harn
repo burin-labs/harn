@@ -772,7 +772,7 @@ fn __coord_envelope(
   const resolution = __coord_resolution(runtime, scope, room, opts)
   const id = __coord_validate_component(
     "message id",
-    opts?.id ?? opts?.dedupe_key ?? msg?.id ?? ("coord-" + random.uuid_v7()),
+    opts?.id ?? opts?.dedupe_key ?? msg?.id ?? "coord-" + random.uuid_v7(),
   )
   const body = __coord_body(message, opts)
   const subject = __coord_subject(msg, opts, body)
@@ -826,7 +826,7 @@ pub fn coord_request(
   const opts = __coord_dict(options)
   const request_id = __coord_validate_component(
     "request id",
-    opts?.id ?? opts?.dedupe_key ?? msg?.id ?? ("coord-" + random.uuid_v7()),
+    opts?.id ?? opts?.dedupe_key ?? msg?.id ?? "coord-" + random.uuid_v7(),
   )
   return coord_send(
     runtime,
@@ -1433,7 +1433,7 @@ pub fn coord_remember(memory: HarnessMemory, message_or_receipt: any, options: a
   if type_of(message) != "dict" || message?.schema != COORD_SCHEMA {
     throw "std/coordination: coord_remember expects a coordination message or receipt"
   }
-  const namespace = opts?.namespace ?? ("coordination/" + message.scope + "/" + message.room)
+  const namespace = opts?.namespace ?? "coordination/" + message.scope + "/" + message.room
   const key = opts?.key ?? message.id
   const tags = opts?.tags ?? ["coordination", message.kind, message.scope]
   return memory_store(memory, namespace, key, message, tags, opts?.memory_options)

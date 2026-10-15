@@ -74,7 +74,7 @@ fn __collect_samples(
   let indices = []
   let i = 0
   while i < n {
-    indices = indices.appending(i)
+    indices.push(i)
     i = i + 1
   }
   if run_parallel {
@@ -84,7 +84,7 @@ fn __collect_samples(
   }
   let out = []
   for idx in indices {
-    out = out.appending(__sample_one(llm, prompt, system, call_opts, idx))
+    out.push(__sample_one(llm, prompt, system, call_opts, idx))
   }
   return out
 }
@@ -100,9 +100,9 @@ fn __reward_filter(samples: list, reward: any) {
         reward(s.text)
       }
       if !is_err(r) {
-        scored = scored.appending(s + {reward: to_float(unwrap(r))})
+        scored.push(s + {reward: to_float(unwrap(r))})
       } else {
-        scored = scored.appending(s + {reward: 0.0})
+        scored.push(s + {reward: 0.0})
       }
     }
   }
@@ -116,7 +116,7 @@ fn __structured_judge(llm: HarnessLlm, samples: any, opts: dict) {
   while i < total {
     const s = samples[i]
     if s?.ok ?? false {
-      labelled = labelled.appending("[" + to_string(i) + "] " + to_string(s.text))
+      labelled.push("[" + to_string(i) + "] " + to_string(s.text))
     }
     i = i + 1
   }
@@ -347,11 +347,11 @@ fn __tally_samples(
   for s in samples {
     const ans = __extract_answer(s, extract, normalize)
     if ans == nil {
-      extracted = extracted.appending(nil)
+      extracted.push(nil)
     } else {
       const key = __answer_key(ans)
       if counts[key] == nil {
-        keys_in_order = keys_in_order.appending(key)
+        keys_in_order.push(key)
         counts = counts + {[key]: 0}
         first_seen = first_seen + {[key]: idx}
         weights = weights + {[key]: 0.0}
@@ -361,7 +361,7 @@ fn __tally_samples(
       if w != 0.0 {
         weights = weights + {[key]: weights[key] + w}
       }
-      extracted = extracted.appending(ans)
+      extracted.push(ans)
     }
     idx = idx + 1
   }
@@ -424,7 +424,7 @@ fn __build_distribution(keys_in_order: list, counts: any) {
   for k in keys_in_order {
     const c = counts[k]
     total = total + c
-    distribution = distribution.appending({answer: k, count: c})
+    distribution.push({answer: k, count: c})
   }
   return {distribution: distribution, total: total}
 }
@@ -490,7 +490,7 @@ pub fn self_consistency(
   const dist = __build_distribution(tally.keys_in_order, tally.counts)
   let counts_only = []
   for d in dist.distribution {
-    counts_only = counts_only.appending(d.count)
+    counts_only.push(d.count)
   }
   const session_id = to_string(cfg?._session_id ?? "")
   if winner.tie && session_id != "" {
@@ -603,7 +603,7 @@ pub fn parallel_judge(
   let indexed = []
   let i = 0
   for item in items {
-    indexed = indexed.appending({index: i, item: item})
+    indexed.push({index: i, item: item})
     i = i + 1
   }
   const cap = __clamp_int(cfg?.max_concurrent ?? 4, 1, 64)
@@ -638,7 +638,7 @@ pub fn parallel_judge(
     }
     const failed = !(record?.ok ?? false)
     if !(failed && on_error == "skip") {
-      out = out.appending(record)
+      out.push(record)
     }
   }
   return out
@@ -735,7 +735,7 @@ fn __debater_names(debaters: any) {
   let names = []
   let index = 0
   while index < len(debaters) {
-    names = names.appending(__debater_name(debaters[index], index))
+    names.push(__debater_name(debaters[index], index))
     index += 1
   }
   return names
@@ -806,13 +806,13 @@ fn __debate_llm_options(opts: dict, debater: unknown) {
 fn __debate_system(opts: dict, debater: unknown) {
   let parts = []
   if type_of(opts?.system) == "string" && trim(opts.system) != "" {
-    parts = parts.appending(trim(opts.system))
+    parts.push(trim(opts.system))
   }
   if type_of(debater) == "dict" && type_of(debater?.system) == "string"
     && trim(debater.system) != "" {
-    parts = parts.appending(trim(debater.system))
+    parts.push(trim(debater.system))
   }
-  parts = parts.appending(
+  parts.push(
     "You are participating in a multi-agent debate. Answer from your assigned perspective, revise when prior rounds change your view, and keep the response concise.",
   )
   return join(parts, "\n\n")
@@ -821,9 +821,9 @@ fn __debate_system(opts: dict, debater: unknown) {
 fn __debate_history(rounds: list) {
   let lines = []
   for round in rounds {
-    lines = lines.appending("Round " + to_string(round.round) + ":")
+    lines.push("Round " + to_string(round.round) + ":")
     for response in round.responses {
-      lines = lines.appending(response.debater + ": " + response.text)
+      lines.push(response.debater + ": " + response.text)
     }
   }
   return join(lines, "\n")
@@ -843,13 +843,13 @@ fn __debate_call_prompt(
   ]
   const instruction = __debater_instruction(debater)
   if instruction != "" {
-    parts = parts.appending("Perspective:\n" + instruction)
+    parts.push("Perspective:\n" + instruction)
   }
   const history = __debate_history(previous_rounds)
   if history != "" {
-    parts = parts.appending("Previous rounds:\n" + history)
+    parts.push("Previous rounds:\n" + history)
   }
-  parts = parts.appending("Return only this debater's next response.")
+  parts.push("Return only this debater's next response.")
   return join(parts, "\n\n")
 }
 
@@ -888,7 +888,7 @@ fn __debate_run_round(llm: HarnessLlm, opts: dict, round_number: int, previous_r
       __debate_system(opts, debater),
       __debate_llm_options(opts, debater),
     )
-    responses = responses.appending(__debate_response(name, result))
+    responses.push(__debate_response(name, result))
     index += 1
   }
   return responses
@@ -979,7 +979,7 @@ fn __round_stability(previous_round: dict, current_round: dict, threshold: float
     const current = current_round.responses[index]
     const previous = previous_round.responses[index]
     const drift = __text_drift(previous?.text ?? "", current?.text ?? "")
-    drifts = drifts.appending({debater: current.debater, drift: drift})
+    drifts.push({debater: current.debater, drift: drift})
     max_drift = max(max_drift, drift)
     index += 1
   }
@@ -1028,7 +1028,7 @@ pub fn debate(llm: HarnessLlm, obs: HarnessObs, opts: dict) -> DebateResult {
     let round = {round: round_number, responses: responses}
     if len(rounds) > 0 {
       const round_stability = __round_stability(rounds[-1], round, config.stability_threshold)
-      stability = stability.appending(round_stability)
+      stability.push(round_stability)
       round = round
         + {
           max_round_drift: round_stability.max_round_drift,
@@ -1043,7 +1043,7 @@ pub fn debate(llm: HarnessLlm, obs: HarnessObs, opts: dict) -> DebateResult {
         }
       }
     }
-    rounds = rounds.appending(round)
+    rounds.push(round)
     if config.adaptive_stop && consecutive_stable >= config.stability_patience {
       short_circuit_event_id = __emit_stability_short_circuit(obs, config, stability[-1])
       break
@@ -1188,12 +1188,12 @@ fn __tot_children(
       next_id + idx,
       parent.id,
       state,
-      parent.path.appending(state),
+      parent.path + [state],
       parent.depth + 1,
       __tot_score(evaluate, state),
       __tot_terminal(is_terminal, state),
     )
-    children = children.appending(node)
+    children.push(node)
     idx = idx + 1
   }
   return children
@@ -1257,7 +1257,7 @@ fn __tot_search_frontier(
       frontier[0]
     }
     frontier = if search == "dfs" {
-      frontier.dropping_last()
+      frontier.slice(0, -1)
     } else {
       frontier.slice(1)
     }
@@ -1267,12 +1267,12 @@ fn __tot_search_frontier(
       const children = __tot_children(current, expand, evaluate, is_terminal, k, next_id)
       next_id = next_id + len(children)
       for child in children {
-        nodes = nodes.appending(child)
+        nodes.push(child)
         best = __tot_update_best(best, child)
       }
       if search == "bfs" {
         for child in children {
-          frontier = frontier.appending(child)
+          frontier.push(child)
         }
       }
       if search == "dfs" {
@@ -1309,8 +1309,8 @@ fn __tot_search_beam(
           const children = __tot_children(current, expand, evaluate, is_terminal, k, next_id)
           next_id = next_id + len(children)
           for child in children {
-            nodes = nodes.appending(child)
-            candidates = candidates.appending(child)
+            nodes.push(child)
+            candidates.push(child)
             best = __tot_update_best(best, child)
           }
         }

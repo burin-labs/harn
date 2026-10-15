@@ -639,7 +639,7 @@ fn __ui_resource_options(options: UiAppOptions, capabilities: list<string>) -> U
   const base = {
     version: options?.version ?? "1",
     capabilities: capabilities,
-    validation: {allow_network: false}.merging(options?.validation ?? {}),
+    validation: {allow_network: false}.merge(options?.validation ?? {}),
   }
   const description = options?.description
   if description != nil {

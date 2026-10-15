@@ -15,7 +15,10 @@ id = "worker-echo"
 connector = { harn = "echo_connector.harn" }
 
 [providers.setup]
-required_secrets = [{ id = "worker-echo/api-token", direction = "outbound" }]
+required_secrets = [
+  { id = "worker-echo/api-token", direction = "outbound" },
+  { id = "worker-echo/webhook-signing-secret", direction = "inbound" },
+]
 "#,
     )
     .expect("manifest");
@@ -33,7 +36,8 @@ pub fn activate(_harness: Harness, _bindings) {}
 pub fn normalize_inbound(_harness: Harness, _raw) { throw "inbound_not_supported" }
 pub fn call(_harness: Harness, method, args) {
   const token = args.secrets.api_token
-  return {method: method, credential_resolved: len(token) > 0}
+  return {method: method, credential_resolved: len(token) > 0,
+          parent_token_matches: token == "inert-worker-canary"}
 }
 "#,
     )
@@ -72,72 +76,155 @@ async fn actual_one_shot_connector_worker_consumes_parent_grants_without_ambient
     use std::process::Stdio;
     use tokio::io::AsyncWriteExt;
 
-    let project = tempfile::tempdir().unwrap();
-    let (script, request) = write_worker_fixture(&project);
-    let id = SecretId::new("worker-echo", "api-token");
-    let parent =
-        MemorySecretProvider::new("parent").with_secret(id.clone(), b"inert-worker-canary");
-    for selected in [true, false] {
-        let ids = if selected {
-            vec![id.clone()]
-        } else {
-            Vec::new()
-        };
-        let handoff = ParentSecretHandoff::capture(&parent, ids).await.unwrap();
-        let mut bytes = Vec::new();
-        handoff.write_to(&mut bytes).unwrap();
-        let mut command = harn_e2e_command();
-        command
-            .env_clear()
-            .current_dir(project.path())
-            .env("PATH", std::env::var_os("PATH").unwrap_or_default())
-            .env("HOME", project.path())
-            .env("USERPROFILE", project.path())
-            .env("HARN_SECRET_PROVIDERS", "must-not-be-consulted")
-            .arg(format!("--{PARENT_SECRET_HANDOFF_OPTION}"))
-            .arg("run")
-            .arg(&script)
-            .args(["--as-job", "--job", "connector_smoke", "--request"])
-            .arg(&request)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
-        if let Some(system_root) = std::env::var_os("SystemRoot") {
-            command.env("SystemRoot", system_root);
+    for source in ["root", "installed", "root_override"] {
+        let project = tempfile::tempdir().unwrap();
+        let (script, request) = write_worker_fixture(&project);
+        if source != "root" {
+            let dependency = project.path().join("vendor/echo");
+            fs::create_dir_all(&dependency).unwrap();
+            fs::rename(
+                project.path().join("harn.toml"),
+                dependency.join("harn.toml"),
+            )
+            .unwrap();
+            fs::rename(
+                project.path().join("echo_connector.harn"),
+                dependency.join("echo_connector.harn"),
+            )
+            .unwrap();
+            fs::write(
+                project.path().join("harn.toml"),
+                "[package]\nname = \"consumer\"\n[dependencies]\necho = { path = \"vendor/echo\" }\n",
+            )
+            .unwrap();
+            if source == "root_override" {
+                let manifest = fs::read_to_string(dependency.join("harn.toml")).unwrap();
+                fs::write(
+                    dependency.join("harn.toml"),
+                    manifest.replace("worker-echo/api-token", "worker-echo/package-token"),
+                )
+                .unwrap();
+                fs::write(
+                    project.path().join("harn.toml"),
+                    format!(
+                        r#"{manifest}
+[dependencies]
+echo = {{ path = "vendor/echo" }}
+[[providers]]
+id = "worker-echo"
+connector = {{ harn = "echo_connector.harn" }}
+[providers.setup]
+required_secrets = [{{ id = "worker-echo/shadowed-token", direction = "outbound" }}]
+"#
+                    ),
+                )
+                .unwrap();
+                fs::copy(
+                    dependency.join("echo_connector.harn"),
+                    project.path().join("echo_connector.harn"),
+                )
+                .unwrap();
+            }
+            let workspace = harn_package::package::PackageWorkspace::for_test(
+                project.path(),
+                project.path().join(".cache"),
+            );
+            assert_eq!(
+                harn_package::package::install_packages_in(&workspace, false, None, false).unwrap(),
+                1
+            );
         }
-        let mut command = tokio::process::Command::from(command);
-        command.kill_on_drop(true);
-        let mut child = command.spawn().unwrap();
-        let mut stdin = child.stdin.take().unwrap();
-        stdin.write_all(&bytes).await.unwrap();
-        drop(stdin);
-        let output = harn_clock::test_support::within(
-            "one-shot connector worker terminates",
-            child.wait_with_output(),
-        )
-        .await
-        .unwrap();
-        assert!(!output
-            .stdout
-            .windows(b"inert-worker-canary".len())
-            .any(|window| window == b"inert-worker-canary"));
-        assert!(!output
-            .stderr
-            .windows(b"inert-worker-canary".len())
-            .any(|window| window == b"inert-worker-canary"));
-        if selected {
-            assert!(
-                output.status.success(),
-                "selected parent grant must reach the actual connector worker"
-            );
-            let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-            assert_eq!(report["method"], "ping");
-            assert_eq!(report["credential_resolved"], true);
-        } else {
-            assert!(
-                !output.status.success(),
-                "missing selected grant must not be replaced by ambient credentials"
-            );
+        let jobs = project.path().join("jobs");
+        fs::create_dir(&jobs).unwrap();
+        let nested_script = jobs.join("job.harn");
+        fs::rename(script, &nested_script).unwrap();
+        let script = nested_script;
+        // Linked discovery selects the handoff; the spawned CLI independently
+        // discovers and executes that same root or installed connector.
+        let discovered = harn_serve::try_load_provider_connectors(&script).unwrap();
+        let id = SecretId::new("worker-echo", "api-token");
+        assert_eq!(discovered.configs.len(), 1);
+        assert_eq!(
+            discovered.outbound_secret_ids(),
+            std::collections::BTreeSet::from([id.clone()])
+        );
+        let parent = MemorySecretProvider::new("parent").with_secret(id, b"inert-worker-canary");
+        for selected in [true, false] {
+            let ids = if selected {
+                discovered.outbound_secret_ids()
+            } else {
+                std::collections::BTreeSet::new()
+            };
+            let handoff = ParentSecretHandoff::capture(&parent, ids).await.unwrap();
+            let mut bytes = Vec::new();
+            handoff.write_to(&mut bytes).unwrap();
+            let mut command = harn_e2e_command();
+            command
+                .env_clear()
+                .current_dir(project.path())
+                .env("PATH", std::env::var_os("PATH").unwrap_or_default())
+                .env("HOME", project.path())
+                .env("USERPROFILE", project.path())
+                .env("HARN_SECRET_PROVIDERS", "must-not-be-consulted")
+                .arg(format!("--{PARENT_SECRET_HANDOFF_OPTION}"))
+                .arg("run")
+                .arg(&script)
+                .args(["--as-job", "--job", "connector_smoke", "--request"])
+                .arg(&request)
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped());
+            if let Some(system_root) = std::env::var_os("SystemRoot") {
+                command.env("SystemRoot", system_root);
+            }
+            let mut command = tokio::process::Command::from(command);
+            command.kill_on_drop(true);
+            let mut child = command.spawn().unwrap();
+            let mut stdin = child.stdin.take().unwrap();
+            stdin.write_all(&bytes).await.unwrap();
+            drop(stdin);
+            let output = harn_clock::test_support::within(
+                "one-shot connector worker terminates",
+                child.wait_with_output(),
+            )
+            .await
+            .unwrap();
+            assert!(!output
+                .stdout
+                .windows(b"inert-worker-canary".len())
+                .any(|window| window == b"inert-worker-canary"));
+            assert!(!output
+                .stderr
+                .windows(b"inert-worker-canary".len())
+                .any(|window| window == b"inert-worker-canary"));
+            if selected {
+                assert!(
+                    output.status.success(),
+                    "selected parent grant must reach the actual connector worker: {source}"
+                );
+                let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+                assert_eq!(report["method"], "ping");
+                assert_eq!(report["credential_resolved"], true);
+                assert_eq!(report["parent_token_matches"], true);
+            } else {
+                assert!(
+                    !output.status.success(),
+                    "missing selected grant must not be replaced by ambient credentials"
+                );
+                let error = format!(
+                    "{}{}",
+                    String::from_utf8_lossy(&output.stdout),
+                    String::from_utf8_lossy(&output.stderr)
+                );
+                assert!(
+                    error.contains("api_token"),
+                    "the connector must reach its missing credential"
+                );
+                assert!(
+                    !error.contains("must-not-be-consulted"),
+                    "ambient providers must remain closed"
+                );
+            }
         }
     }
 }

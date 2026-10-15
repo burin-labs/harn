@@ -25,6 +25,46 @@ fn sample_headers() -> BTreeMap<String, String> {
 }
 
 #[test]
+fn a2a_push_normalization_preserves_task_identity_and_semantic_kind() {
+    let provider = ProviderId::from("a2a-push");
+    for (raw, expected_kind, expected_state) in [
+        (
+            serde_json::json!({"kind": "a2a.task.received", "task": {"id": "task-123"}}),
+            "a2a.task.received",
+            None,
+        ),
+        (
+            serde_json::json!({"task": {"id": "task-123", "status": {"state": "completed"}}}),
+            "a2a.task.completed",
+            Some("completed"),
+        ),
+        (
+            serde_json::json!({"task_id": "task-123", "statusUpdate": {"status": {"state": "cancelled"}}}),
+            "a2a.task.canceled",
+            Some("canceled"),
+        ),
+    ] {
+        let payload = ProviderPayload::normalize(&provider, "push", &BTreeMap::new(), raw).unwrap();
+        let ProviderPayload::Known(KnownProviderPayload::A2aPush(task)) = &payload else {
+            panic!("A2A push must retain its typed payload");
+        };
+        assert_eq!(task.task_id.as_deref(), Some("task-123"));
+        assert_eq!(task.task_state.as_deref(), expected_state);
+        let event = TriggerEvent::new(
+            provider.clone(),
+            "push",
+            None,
+            "a2a-kind",
+            None,
+            BTreeMap::new(),
+            payload,
+            SignatureStatus::Unsigned,
+        );
+        assert_eq!(event.kind, expected_kind);
+    }
+}
+
+#[test]
 fn default_redaction_policy_keeps_safe_headers() {
     let redacted = redact_headers(&sample_headers(), &HeaderRedactionPolicy::default());
     assert_eq!(redacted.get("User-Agent").unwrap(), "GitHub-Hookshot/123");

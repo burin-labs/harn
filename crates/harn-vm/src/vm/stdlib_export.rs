@@ -44,7 +44,7 @@ pub struct StdlibArtifactBuild {
 /// import would, so a producer that wants the default keys runs without
 /// compiler-option overrides in its environment.
 pub fn compile_embedded_stdlib_artifacts(threads: usize) -> StdlibArtifactBuild {
-    let sources = harn_stdlib::STDLIB_SOURCES;
+    let sources = harn_modules::stdlib_catalog().sources;
     let next = AtomicUsize::new(0);
     let artifacts = Mutex::new(Vec::with_capacity(sources.len()));
     let failed = Mutex::new(Vec::new());

@@ -1039,7 +1039,8 @@ fn a_native_decision_after_an_unreserved_chat_call_reports_the_admission_refusal
     chat.provider_overrides = None;
     chat.budget = None;
     let request = crate::llm::api::LlmRequestPayload::from(&chat);
-    assert!(reserve(&chat, &request).unwrap().is_none());
+    let tokens = crate::llm::cost_context::LlmCallTokenProjection::for_options(&chat);
+    assert!(reserve(&chat, &request, tokens).unwrap().is_none());
 
     let (outcome, receipt, requests) = run_native();
     swap_scope(previous);

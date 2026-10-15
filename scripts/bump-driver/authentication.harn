@@ -15,7 +15,7 @@ pub fn github_bump_read_private_key(
   fs: HarnessFs,
   handoff: {path: string, temporary_root: string},
 ) -> string {
-  const root = handoff.temporary_root.trim_end("/")
+  const root = regex_replace("/+$", handoff.temporary_root, "")
   const prefix = root + "/harn-bump-app-key."
   const parts = split(handoff.path, prefix)
   if root == "" || len(parts) != 2 || parts[0] != ""

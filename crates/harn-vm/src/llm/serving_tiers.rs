@@ -12,7 +12,7 @@
 
 use crate::llm_config::{model_catalog_entry, ServingTierDef};
 
-pub(crate) const FAST_TIER_ID: &str = "fast";
+pub(crate) use harn_provider_catalog::config::FAST_TIER_ID;
 
 /// Catalog lifecycle status that disqualifies a serving tier from use:
 /// the provider has announced its removal and `param=value` either errors

@@ -1038,7 +1038,7 @@ pub(crate) fn extract_llm_options(
         &opts.provider,
         &opts.model,
         explicit_routing_policy,
-        equivalent_failover_requirements_for_options(&opts),
+        || equivalent_failover_requirements_for_options(&opts),
     )?;
     if opts.routing_policy.is_none() {
         opts.routing_policy = equivalent_failover_policy.or_else(|| {

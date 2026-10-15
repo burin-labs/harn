@@ -24,7 +24,9 @@ fn cache_test_guard() -> MutexGuard<'static, ()> {
 }
 
 fn cached_stdlib_module_ptr(module: &str) -> Option<usize> {
-    let source = harn_stdlib::get_stdlib_source(module).expect("stdlib module source exists");
+    let source = harn_modules::stdlib_catalog()
+        .source(module)
+        .expect("stdlib module source exists");
     stdlib_module_artifact_cache_ptr(module, source)
 }
 

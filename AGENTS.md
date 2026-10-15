@@ -139,7 +139,7 @@ live in [Engineering principles](docs/src/dev/engineering-principles.md):
   another parser or evaluator.
 - Preserve pre-v2 `{{name}}` missing-identifier passthrough. New constructs
   fail with parse errors. Vocabulary lives in
-  `crates/harn-vm/src/stdlib/template/vocabulary.rs`; regenerate with
+  `crates/harn-prompt-syntax/src/vocabulary.rs`; regenerate with
   `make gen-prompt-grammar`.
 - Keep stdlib registration authoritative. Register builtins with
   `#[harn_builtin]`; linter and editor awareness derive from the live stdlib.
@@ -150,8 +150,8 @@ live in [Engineering principles](docs/src/dev/engineering-principles.md):
 
 - Model rows are `crates/harn-vm/src/llm/catalog_sources/`; capability rules are
   `crates/harn-vm/src/llm/capability_sources/`. Both aggregate into
-  `crates/harn-vm/src/llm/providers.toml` and
-  `crates/harn-vm/src/llm/capabilities.toml`, which are generated along with
+  `crates/harn-provider-catalog/src/providers.toml` and
+  `crates/harn-provider-catalog/src/capabilities.toml`, which are generated along with
   everything under `spec/provider-catalog/` and the provider docs. Edit the
   source fragments only.
 - Regenerate with `make gen-provider-catalog`, `make gen-provider-matrix`, and
@@ -206,7 +206,9 @@ live in [Engineering principles](docs/src/dev/engineering-principles.md):
 - Read one head's CI check state with
   `./scripts/gh_check_state.sh --repo OWNER/NAME --sha <40-hex>`: it reports the
   latest verdict per check name, counts queued work as pending, and exits 3 when
-  an expected check never reported. Do not hand-roll a `gh pr checks` parse.
+  an expected check never reported. When the verdict is missing it also names
+  any open PR that conflicts with its base, since GitHub runs no `pull_request`
+  CI on one. Do not hand-roll a `gh pr checks` parse.
 - Do not add real-time sleeps, wall-clock polling, `SystemTime::now()`, or short
   `recv_timeout` calls to tests. Use paused Tokio time, `EventLog::subscribe()`,
   or `OrchestratorHarness`; see `docs/src/dev/testing.md`.

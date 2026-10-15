@@ -68,14 +68,18 @@ fn install_ollama_route(addr: std::net::SocketAddr, adapter: crate::llm_config::
         },
     );
     if adapter == crate::llm_config::ChatApiAdapter::ModelDefault {
-        providers.providers.get_mut("ollama").unwrap().merge_from(
-            &crate::llm_config::ProviderDef {
-                chat_endpoint: "/api/chat".to_string(),
-                // A legacy endpoint-only override must reset the compat adapter.
-                chat_api_adapter: None,
-                ..Default::default()
-            },
-        );
+        providers.merge_from(&crate::llm_config::ProvidersConfig {
+            providers: std::collections::BTreeMap::from([(
+                "ollama".to_string(),
+                crate::llm_config::ProviderDef {
+                    chat_endpoint: "/api/chat".to_string(),
+                    // A legacy endpoint-only override must reset the compat adapter.
+                    chat_api_adapter: None,
+                    ..Default::default()
+                },
+            )]),
+            ..Default::default()
+        });
     }
     // Catalog export/import must retain the adapter, or the same route falls
     // back to native NDJSON when a downstream host consumes its projection.

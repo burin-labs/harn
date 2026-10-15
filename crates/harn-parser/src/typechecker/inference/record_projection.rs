@@ -7,7 +7,7 @@ use std::ops::ControlFlow;
 
 use harn_builtin_meta::{CapabilityId, RecordProjection};
 
-use crate::ast::{Node, SNode, ShapeField, TypeExpr};
+use crate::ast::{BinaryOperator, Node, SNode, ShapeField, TypeExpr};
 use crate::diagnostic_codes::Code;
 
 use super::super::{format::format_type, scope::TypeScope, union::simplify_union, TypeChecker};
@@ -56,9 +56,11 @@ impl TypeChecker {
                         .lookup_builtin(name)
                         .is_some_and(|sig| sig.projection.is_some())
             }
-            Node::BinaryOp { op, right, .. } if op == "|>" => {
-                self.has_projection_contract(right, scope)
-            }
+            Node::BinaryOp {
+                op: BinaryOperator::Pipe,
+                right,
+                ..
+            } => self.has_projection_contract(right, scope),
             _ => false,
         }
     }

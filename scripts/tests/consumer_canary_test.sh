@@ -34,6 +34,7 @@ canary() {
   PATH="$scratch/bin:$PATH" STUB="$scratch" CANARY_REPOSITORY=acme/widget-host \
     CANARY_WORKFLOW=rehearsal.yml SOURCE_REVISION=0123456789abcdef0123456789abcdef01234567 \
     WORKSPACE_VERSION="$workspace_version" CANARY_POLL_SECONDS=0 PAIRING_TEXT="${1:-}" \
+    CONSUMER_PULL_REQUEST="${3:-${CONSUMER_PULL_REQUEST:-}}" \
     GITHUB_OUTPUT="$scratch/gho" \
     bash "$root/scripts/ci/consumer_canary.sh" > "$scratch/out" 2>&1
   local status=$?
@@ -132,8 +133,21 @@ canary $'Body\n\nPairs-with: consumer#7'
 grep -q -- '--ref fix-flag ' "$scratch/dispatched"
 grep -q "ref=pull-7" "$scratch/out"
 
+# Recovery selects the same registered open pull without changing the source
+# commit's metadata. Matching metadata agrees; conflicting metadata refuses.
+canary '' 1.2.4-dev 7
+grep -q -- '--ref fix-flag ' "$scratch/dispatched"
+grep -q "ref=pull-7" "$scratch/out"
+canary 'Pairs-with: consumer#7' 1.2.4-dev 7
+CONSUMER_PULL_REQUEST=7 refuses pairing_ambiguous 'Pairs-with: consumer#8'
+CONSUMER_PULL_REQUEST=0 refuses pairing_unrecognized
+CONSUMER_PULL_REQUEST=01 refuses pairing_unrecognized
+echo "closed acme/widget-host fix-flag" > "$scratch/pull"
+CONSUMER_PULL_REQUEST=7 refuses paired_pull_not_open
+
 # A pairing it cannot honour fails by name instead of rehearsing the default.
 echo "open someone/fork fix-flag" > "$scratch/pull"
+CONSUMER_PULL_REQUEST=7 refuses paired_pull_from_fork
 refuses paired_pull_from_fork 'Pairs-with: consumer#7'
 refuses pairing_ambiguous $'Pairs-with: consumer#7\nPairs-with: consumer#8'
 refuses pairing_unrecognized 'Pairs-with: other#7'

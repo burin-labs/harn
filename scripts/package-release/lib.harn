@@ -1,0 +1,152 @@
+import {
+  CANDIDATE_MANIFEST_VERSION,
+  CandidateArtifact,
+  CandidateManifest,
+  validate_candidate_manifest,
+} from "burin-ci-checks/candidate_manifest"
+
+/** Native package gates retain names, applicability and whether they actually ran. */
+pub type PackageCheck = {name: string, applicable: bool, reached: bool, status: string}
+
+/** The public package-verify v2 report; the original receipt is preserved separately. */
+pub type PackageReport = {
+  strict_requested: bool,
+  status: string,
+  summary: {passed: int, failed: int, skipped: int},
+  checks: list<PackageCheck>,
+}
+
+type VerifyEnvelope = {
+  schemaVersion: int,
+  ok: bool,
+  data: PackageReport?,
+  error: {details: PackageReport?}?,
+}
+
+/** A refusal never turns an absent report into a measured zero. */
+pub type PackageQualification = {
+  required: int,
+  passed: int,
+  pending: list<string>,
+  failed: list<string>,
+  invalid: list<string>,
+}
+
+/** Missing evidence stays nil; measured incomplete gates keep their counts and names. */
+pub type PackageRefusal = {reason: string, verification: PackageQualification?}
+
+/** The archive's own package identity, retained beside its native verification receipts. */
+pub type PackageRelease = {
+  schema: "harn.source-package-release.v1",
+  name: string,
+  version: string,
+  harn: string,
+  repository: string,
+  source: string,
+  run: string,
+  attempt: string,
+  archive: string,
+  digest: string,
+  tag: string,
+  test_cases: int,
+  verification: PackageQualification,
+}
+
+/** Read the native verifier's decision without accepting an empty or unreported test gate. */
+pub fn qualify_package_report(
+  raw: unknown,
+  exit_code: int,
+) -> Result<PackageQualification, PackageRefusal> {
+  const decoded = try {
+    schema_expect(raw, schema_of(VerifyEnvelope))
+  }
+  if is_err(decoded) {
+    return Err({reason: "package verification receipt is missing or malformed", verification: nil})
+  }
+  const envelope: VerifyEnvelope = unwrap(decoded)
+  const report = envelope.data ?? envelope.error?.details
+  if report == nil {
+    return Err({reason: "package verification report is absent", verification: nil})
+  }
+  const applicable = report.checks.filter({ item -> item.applicable }).to_list()
+  const missing_tests = !applicable.any({ item -> item.name == "package tests" })
+  const pending = applicable.filter({ item -> !item.reached || item.status == "skipped" }).map(
+    { item -> item.name },
+  )
+    .to_list()
+    + if missing_tests {
+      ["package tests"]
+    } else {
+      []
+    }
+  const failed = report.checks.filter({ item -> item.status == "fail" }).map({ item -> item.name })
+    .to_list()
+  let invalid: list<string> = []
+  if envelope.ok != (envelope.data != nil) || envelope.ok == (envelope.error != nil) {
+    invalid = invalid + ["verification-envelope"]
+  }
+  if envelope.schemaVersion != 2 || !report.strict_requested {
+    invalid = invalid + ["strict-verification-contract"]
+  }
+  if len(report.checks.map({ item -> item.name }).unique()) != len(report.checks) {
+    invalid = invalid + ["duplicate-checks"]
+  }
+  if report.checks.any({ item -> item.name.trim() == "" }) {
+    invalid = invalid + ["unnamed-checks"]
+  }
+  for status in ["pass", "fail", "skipped"] {
+    const observed = len(report.checks.filter({ item -> item.status == status }).to_list())
+    const declared = if status == "pass" {
+      report.summary.passed
+    } else if status == "fail" {
+      report.summary.failed
+    } else {
+      report.summary.skipped
+    }
+    if declared != observed {
+      invalid = invalid + ["summary-" + status]
+    }
+  }
+  invalid = invalid
+    + report.checks.filter({ item -> !["pass", "fail", "skipped"].contains(item.status) }).map(
+      { item -> item.name },
+    )
+      .to_list()
+  if envelope.ok != (exit_code == 0) || envelope.ok != (report.status == "pass") {
+    invalid = invalid + ["verification-verdict"]
+  }
+  const measured: PackageQualification = {
+    required: len(applicable) + if missing_tests {
+      1
+    } else {
+      0
+    },
+    passed: len(applicable.filter({ item -> item.reached && item.status == "pass" }).to_list()),
+    pending: pending,
+    failed: failed,
+    invalid: invalid,
+  }
+  if !envelope.ok || measured.required == 0 || len(pending) > 0 || len(failed) > 0
+    || len(invalid) > 0
+    || measured.passed != measured.required {
+    return Err({reason: "package verification is not complete", verification: measured})
+  }
+  return Ok(measured)
+}
+
+/** Artifact facts come from the measured files; the shared owner validates the manifest. */
+pub fn package_candidate_manifest(
+  identity: {repository: string, source: string, run: string, attempt: string},
+  artifacts: list<CandidateArtifact>,
+) -> CandidateManifest {
+  return validate_candidate_manifest(
+    {
+      schemaVersion: CANDIDATE_MANIFEST_VERSION,
+      repository: identity.repository,
+      sourceCommit: identity.source,
+      runId: identity.run,
+      runAttempt: identity.attempt,
+      artifacts: artifacts,
+    },
+  )
+}

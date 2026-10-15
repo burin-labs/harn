@@ -119,9 +119,10 @@ pub(crate) use dev::DevArgs;
 pub(crate) use doc::DocArgs;
 pub(crate) use doctor::{DoctorArgs, DoctorCommand};
 pub(crate) use dump::{
-    ConnectorSchemaCodegenArgs, DumpCliSurfaceArgs, DumpConnectorMatrixArgs,
-    DumpHarnessMigrationsArgs, DumpHighlightKeywordsArgs, DumpPortableBenchmarkSchemaArgs,
-    DumpPromptGrammarArgs, DumpProtocolArtifactsArgs, DumpTriggerQuickrefArgs,
+    ConnectorSchemaCodegenArgs, DumpBuiltinMethodsArgs, DumpCliSurfaceArgs,
+    DumpConnectorMatrixArgs, DumpHarnessMigrationsArgs, DumpHighlightKeywordsArgs,
+    DumpOperatorPrecedenceArgs, DumpPortableBenchmarkSchemaArgs, DumpPromptGrammarArgs,
+    DumpProtocolArtifactsArgs, DumpTriggerQuickrefArgs,
 };
 pub use eval::{
     EvalArgs, EvalCalibrateArgs, EvalCodingAgentArgs, EvalCommand, EvalContextArgs, EvalPromptArgs,
@@ -610,6 +611,10 @@ SCRIPTING
     /// `make gen-highlight` target.
     #[command(hide = true, name = "dump-highlight-keywords")]
     DumpHighlightKeywords(DumpHighlightKeywordsArgs),
+    /// Regenerate the spec precedence table and the tree-sitter `PREC`
+    /// constants from the parser's operator precedence table.
+    #[command(hide = true, name = "dump-operator-precedence")]
+    DumpOperatorPrecedence(DumpOperatorPrecedenceArgs),
     /// Regenerate the portable benchmark JSON Schema from the kernel-owned
     /// receipt type and validation constants.
     #[command(hide = true, name = "dump-portable-benchmark-schema")]
@@ -622,6 +627,13 @@ SCRIPTING
     /// `make gen-prompt-grammar` target.
     #[command(hide = true, name = "dump-prompt-grammar")]
     DumpPromptGrammar(DumpPromptGrammarArgs),
+    /// Regenerate the builtin method reference in docs/src/builtins.md from
+    /// the method registry.
+    ///
+    /// Dev-only. Hidden from `--help` — invoke via the
+    /// `make gen-builtin-methods` target.
+    #[command(hide = true, name = "dump-builtin-methods")]
+    DumpBuiltinMethods(DumpBuiltinMethodsArgs),
     /// Regenerate docs/llm/harn-triggers-quickref.md from the live trigger provider catalog.
     ///
     /// Dev-only. Hidden from `--help` — invoke via

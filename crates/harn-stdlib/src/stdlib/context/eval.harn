@@ -48,7 +48,7 @@ fn __context_eval_string_list(value: any, field: string) {
   for item in __context_eval_list(value, field) {
     const text = __context_eval_text(item)
     if text != "" && !out.contains(text) {
-      out = out.appending(text)
+      out.push(text)
     }
   }
   return out.sorted()

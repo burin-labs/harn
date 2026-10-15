@@ -434,7 +434,7 @@ handler = "handlers::on_task"
     assert!(
         outbox.iter().any(|(_, event)| {
             event.kind == "dispatch_succeeded"
-                && event.payload["result"] == serde_json::json!("push")
+                && event.payload["result"] == serde_json::json!("a2a.task.received")
         }),
         "outbox={outbox:?}"
     );

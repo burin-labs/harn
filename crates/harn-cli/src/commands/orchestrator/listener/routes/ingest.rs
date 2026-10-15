@@ -89,7 +89,7 @@ pub(super) async fn normalize_request(
         }
     };
 
-    let trigger_kind = core_ingress_event_kind(&provider, &normalized_body);
+    let trigger_kind = core_ingress_event_kind(&normalized_body);
     let dedupe_key = core_ingress_dedupe_key(&provider, normalized_headers, &normalized_body, body);
     let provider_payload = harn_vm::ProviderPayload::normalize(
         &provider,
@@ -102,7 +102,7 @@ pub(super) async fn normalize_request(
     Ok(NormalizedRequest::Events(vec![harn_vm::TriggerEvent {
         id: harn_vm::TriggerEventId::new(),
         provider,
-        kind: trigger_kind,
+        kind: provider_payload.event_kind(&trigger_kind),
         received_at,
         occurred_at: infer_occurred_at(&provider_payload),
         dedupe_key,
@@ -531,16 +531,12 @@ fn normalize_body(body: &[u8], headers: &BTreeMap<String, String>) -> JsonValue 
     })
 }
 
-fn core_ingress_event_kind(provider: &harn_vm::ProviderId, body: &JsonValue) -> String {
-    match provider.as_str() {
-        "a2a-push" => "push".to_string(),
-        _ => body
-            .get("type")
-            .and_then(JsonValue::as_str)
-            .or_else(|| body.get("event").and_then(JsonValue::as_str))
-            .unwrap_or("webhook")
-            .to_string(),
-    }
+fn core_ingress_event_kind(body: &JsonValue) -> String {
+    body.get("type")
+        .and_then(JsonValue::as_str)
+        .or_else(|| body.get("event").and_then(JsonValue::as_str))
+        .unwrap_or("webhook")
+        .to_string()
 }
 
 fn core_ingress_dedupe_key(

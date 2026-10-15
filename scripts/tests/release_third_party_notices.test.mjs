@@ -154,9 +154,9 @@ test('actual Unix packaging includes exact notices and refuses missing or empty 
   for (const target of ['aarch64-apple-darwin', 'x86_64-unknown-linux-gnu']) {
     const dir = mkdtempSync(join(tmpdir(), 'harn-archive-test-'));
     try {
-      mkdirSync(join(dir, `target/${target}/release`), { recursive: true });
-      writeFileSync(join(dir, `target/${target}/release/harn`), 'binary fixture');
-      writeFileSync(join(dir, `target/${target}/release/harn-container-probe`), 'probe fixture');
+      mkdirSync(join(dir, `target/${target}/dist`), { recursive: true });
+      writeFileSync(join(dir, `target/${target}/dist/harn`), 'binary fixture');
+      writeFileSync(join(dir, `target/${target}/dist/harn-container-probe`), 'probe fixture');
       mkdirSync(join(dir, 'dist/release-notices'), { recursive: true });
       const files = ['LICENSE-MIT', 'LICENSE-APACHE', 'THIRD-PARTY-NOTICES.txt'];
       for (const file of files) writeFileSync(join(dir, 'dist/release-notices', file), `${file} full fixture text\n`);

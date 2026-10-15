@@ -1053,16 +1053,16 @@ fn parse_host_tools_list_requires_tool_names() {
         .contains("host/tools/list: every tool must include a string `name`"));
 }
 
-#[test]
-fn test_timeout_duration() {
-    assert_eq!(bridge_call_timeout("host/work"), Some(DEFAULT_TIMEOUT));
-    assert_eq!(DEFAULT_TIMEOUT.as_secs(), 300);
-}
+mod human_waits;
 
 #[test]
 fn interactive_permission_requests_have_no_bridge_timeout() {
     assert_eq!(
-        bridge_call_timeout(crate::llm::acp_permission::METHOD_REQUEST_PERMISSION),
+        bridge_call_timeout(
+            crate::llm::acp_permission::METHOD_REQUEST_PERMISSION,
+            &serde_json::json!({}),
+            DEFAULT_TIMEOUT
+        ),
         None
     );
 }

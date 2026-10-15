@@ -29,10 +29,16 @@ fn event_log_defines_each_served_message_once() {
 
     let mut messages = vec![serde_json::json!({"role": "user", "content": "read the files"})];
     for turn in 0..4 {
-        messages
-            .push(serde_json::json!({"role": "assistant", "content": format!("reading {turn}")}));
-        messages
-            .push(serde_json::json!({"role": "tool_result", "content": format!("file {turn}")}));
+        messages.push(serde_json::json!({
+            "role": "assistant",
+            "content": format!("reading {turn}"),
+            "tool_calls": [{"id": format!("read-{turn}"), "name": "read", "arguments": {}}],
+        }));
+        messages.push(serde_json::json!({
+            "role": "tool_result",
+            "tool_call_id": format!("read-{turn}"),
+            "content": format!("file {turn}"),
+        }));
         super::dump_llm_request(
             turn,
             &format!("call-{turn}"),

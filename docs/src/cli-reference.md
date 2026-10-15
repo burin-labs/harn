@@ -1378,6 +1378,12 @@ harn lint src/ tests/
 harn lint prompts/system.harn.prompt
 ```
 
+Files are linted in parallel on the same worker pool as `harn check`
+(`HARN_CHECK_JOBS=<n>` pins its size) and their output is printed in file
+order. Each file is parsed and type-checked once: the lint rules read the
+import-aware type facts of that check. A file that fails to lex or parse is
+reported and the remaining files are still linted; the run exits non-zero.
+
 To ratchet strict linting onto newly added Harn source lines without making
 inherited warnings block unrelated work, let `harn lint` derive its source
 scope from two Git revisions:
@@ -1487,6 +1493,7 @@ harn fix --apply --dry-run --json --safety scope-local src/
 harn fix --apply --safety surface-changing src/
 harn fix --apply --safety surface-changing --code HARN-TYP-028 src/
 harn fix --apply --safety behavior-preserving --preserve-implicit-any --json src/
+harn fix --apply --migrate-operator-syntax --dry-run src/
 harn fix --apply --safety surface-changing --code HARN-LNT-073 src/
 ```
 
@@ -1515,6 +1522,19 @@ parameter remains unannotated, or the audited result is anything other than
 `any`. Intentionally invalid fixtures with a sibling `.error` declaration are
 listed under `excludedFiles`. Use the ordinary `--code HARN-TYP-028`
 surface-changing repair when authoring a narrower contract.
+
+`--migrate-operator-syntax` rewrites source written for the operator grammar
+before Harn 0.11. It replaces `a to b` with `a..=b` and `a to b exclusive` with
+`a..b`, and inserts parentheses wherever the current precedence of `??` and
+range formation would regroup an expression, so `b ?? 0 + 1` becomes
+`(b ?? 0) + 1`. Interpolation holes are rewritten in place. Every rewritten
+file is parsed again under the current grammar and is written only if its
+syntax tree matches the original's, so a migrated file keeps its meaning.
+Files that do not parse under the old grammar are reported as failures and
+exit nonzero; intentionally invalid fixtures with a sibling `.error` file are
+listed under `excludedFiles`. Run it once per tree: source already written for
+the current grammar can be misread as old source. No `--safety` ceiling is
+needed.
 
 Ambient-capability migrations add an explicit `harness: Harness` parameter and
 update callers. This is a surface-changing repair because Harn has no ambient
@@ -1627,6 +1647,14 @@ even though that file is not part of the import graph. A warm re-check of an
 unchanged tree replays byte-identical output without re-running the
 typechecker or linter. Set `HARN_CHECK_RESULT_CACHE=0` to disable just this
 cache; `HARN_BYTECODE_CACHE=0` disables it together with the bytecode cache.
+
+Set `HARN_CHECK_ANALYSIS_STATS=1` to print, on stderr, how many tokenizations,
+parses, and type checks a `harn check` or `harn lint` run performed, for
+example `analysis stats: files=3 lex=6 parse=3 typecheck=3`. Each target is
+type-checked once. `harn lint` also parses each target once; `harn check`
+parses it a second time in its worker rather than holding every target's
+syntax tree in memory until a worker claims it. Imported modules outside the
+targets and preflight probes add to the count.
 
 `--invariants` includes the capability-policy lattice:
 
@@ -2153,7 +2181,7 @@ The command exits non-zero and lists suggested defaults when catalog rows need
 coverage.
 
 `promote-from-eval` ingests the parity overlay emitted by
-`harn eval coding-agent` and updates `crates/harn-vm/src/llm/capabilities.toml`
+`harn eval coding-agent` and updates `crates/harn-provider-catalog/src/capabilities.toml`
 with exact-model `preferred_tool_format`, `tool_mode_parity`, and
 `tool_mode_parity_notes` rows. The edit is idempotent.
 
@@ -3305,9 +3333,14 @@ A session left `open` by a host that exited without closing it still reports its
 loop's own terminal verdict, so a finished run is not described as running.
 
 `harn runs report` follows the root record's typed child-run pointers and emits
-the versioned `harn.run_report.v1` JSON projection. The report has one row per
+the versioned `harn.run_report.v2` JSON projection. The report has one row per
 agent, checked parent/child links, LLM timing and cache/cost data recorded on
 trace spans, source hashes, redacted visible output, and structural checks.
+Each tool-call row is the run record's own tool-call fact (`tool_use_id`,
+`tool_name`, `args_hash`, `result`, `duration_ms`, `iteration`, `timestamp`, and
+`status`: `open`, `completed`, `failed`, or `rejected`) plus the `agent_id`
+that made the call. Version 2 replaced version 1's `call_id` and `is_rejected`;
+a version-1 report is refused with a schema error.
 `--events-db` adds the redacted semantic timeline from a SQLite event log.
 Canonical `subagent_join` receipts let the report count terminal children that
 the parent has not collected and report three separate worst-case intervals:
@@ -3334,7 +3367,7 @@ snapshot. Increase the timeline query's `limit` to recover more nodes. The
 topic cursor remains a subscription watermark, not a continuation token for a
 snapshot that combines sorted run spans and event topics.
 
-`harn runs review` either reads one `harn.run_report.v1` file or builds that
+`harn runs review` either reads one `harn.run_report.v2` file or builds that
 same report in memory from `--run-record`, then makes one structured model
 call. `--events-db` is available with `--run-record`; no intermediate report
 file is required. The command emits `harn.run_review.v1` JSON with the verdict, confidence,

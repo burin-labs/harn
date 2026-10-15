@@ -326,18 +326,13 @@ fn typecheck_program(
     extra_names: &HashSet<String>,
 ) -> Result<(), String> {
     let graph = harn_modules::build(&[path.to_path_buf()]);
-    let mut checker = TypeChecker::new();
-    let mut imported = graph.imported_names_for_file(path).unwrap_or_default();
+    let mut config = graph.typecheck_import_config_for_file(path);
+    let mut imported = config.imported_names.take().unwrap_or_default();
     imported.extend(extra_names.iter().cloned());
     if !imported.is_empty() {
-        checker = checker.with_imported_names(imported);
+        config.imported_names = Some(imported);
     }
-    if let Some(imported) = graph.imported_type_declarations_for_file(path) {
-        checker = checker.with_imported_type_decls(imported);
-    }
-    if let Some(imported) = graph.imported_callable_declarations_for_file(path) {
-        checker = checker.with_imported_callable_decls(imported);
-    }
+    let checker = config.apply_imports_to(TypeChecker::new());
 
     let diagnostics = checker.check(program);
     let mut rendered = String::new();

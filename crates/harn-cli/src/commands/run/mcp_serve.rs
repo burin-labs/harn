@@ -187,14 +187,22 @@ pub(crate) async fn load_file_tool_registry_local(
     })
 }
 
-pub(super) async fn run_server(
-    mut server: harn_vm::McpServer,
-    mut vm: harn_vm::Vm,
-    mode: RunFileMcpServeMode,
-) {
+/// Serve a loaded script registry through the one MCP server. Must run inside
+/// the `LocalSet` that owns the registry's VM.
+async fn run_server(loaded: LoadedMcpRuntime, mode: RunFileMcpServeMode) {
+    let LoadedMcpRuntime {
+        registry,
+        card,
+        vm,
+        connector_clients,
+        ..
+    } = loaded;
+    let runtime = harn_serve::McpScriptRuntime::spawn_local(registry, vm, connector_clients);
     let result = match mode {
         RunFileMcpServeMode::Stdio { watch: false } => {
-            server.run(&mut vm).await.map_err(|error| error.to_string())
+            script_server(runtime, card, harn_serve::AuthPolicy::default())
+                .run_stdio()
+                .await
         }
         RunFileMcpServeMode::Stdio { watch: true } => {
             unreachable!("watch mode is owned by run_file_mcp_serve")
@@ -204,7 +212,8 @@ pub(super) async fn run_server(
                 options,
                 auth_policy,
             } = *http;
-            crate::commands::serve::run_script_mcp_http_server(server, vm, options, auth_policy)
+            script_server(runtime, card, auth_policy)
+                .run_http(options)
                 .await
         }
         RunFileMcpServeMode::App(app) => {
@@ -213,13 +222,26 @@ pub(super) async fn run_server(
                 resource,
                 open,
             } = *app;
-            crate::commands::app::run_script_app_server(server, vm, bind, resource, open).await
+            let server = script_server(runtime, card, harn_serve::AuthPolicy::default());
+            crate::commands::app::run_script_app_server(server, bind, resource, open).await
         }
     };
     if let Err(error) = result {
         eprintln!("error: MCP server error: {error}");
         std::process::exit(1);
     }
+}
+
+fn script_server(
+    runtime: harn_serve::McpScriptRuntime,
+    card: Option<serde_json::Value>,
+    auth_policy: harn_serve::AuthPolicy,
+) -> std::sync::Arc<harn_serve::McpServer> {
+    let mut config = harn_serve::McpServerConfig::script(runtime).with_auth_policy(auth_policy);
+    if let Some(card) = card {
+        config = config.with_server_card(card);
+    }
+    std::sync::Arc::new(harn_serve::McpServer::new(config))
 }
 
 /// Run a .harn file as an MCP server using the script-driven surface.
@@ -237,7 +259,7 @@ pub(crate) async fn run_file_mcp_serve(
 
     let _environment = super::environment::host_environment_scope(host_boundary);
     let watch = matches!(&mode, RunFileMcpServeMode::Stdio { watch: true });
-    let loaded = match load_mcp_runtime(path, card_source, watch).await {
+    let loaded = match load_mcp_runtime(path, card_source).await {
         Ok(runtime) => runtime,
         Err(error) => {
             eprintln!("error: {}", error.message);
@@ -258,23 +280,17 @@ pub(crate) async fn run_file_mcp_serve(
     local
         .run_until(async move {
             if watch {
-                run_reloadable_stdio(path, card_source, loaded).await;
+                run_reloadable_stdio(path, loaded).await;
             } else {
-                let LoadedMcpRuntime {
-                    server,
-                    vm,
-                    connector_clients,
-                    ..
-                } = loaded;
-                run_server(server, vm, mode).await;
-                drop(connector_clients);
+                run_server(loaded, mode).await;
             }
         })
         .await;
 }
 
 struct LoadedMcpRuntime {
-    server: harn_vm::McpServer,
+    registry: harn_vm::McpScriptRegistry,
+    card: Option<serde_json::Value>,
     vm: harn_vm::Vm,
     diagnostics: String,
     server_name: String,
@@ -285,24 +301,21 @@ struct LoadedMcpRuntime {
 async fn load_mcp_runtime(
     path: &str,
     card_source: Option<&str>,
-    list_changes: bool,
 ) -> Result<LoadedMcpRuntime, ToolRegistryLoadError> {
     let loaded = load_file_tool_registry(path).await?;
-    project_mcp_runtime(path, card_source, list_changes, loaded)
+    project_mcp_runtime(path, card_source, loaded)
 }
 
-async fn load_mcp_runtime_local(
-    path: &str,
-    card_source: Option<&str>,
-) -> Result<LoadedMcpRuntime, ToolRegistryLoadError> {
+/// Reload a watched source. The server card is server configuration fixed at
+/// startup, so a reload never resolves one.
+async fn load_mcp_runtime_local(path: &str) -> Result<LoadedMcpRuntime, ToolRegistryLoadError> {
     let loaded = load_file_tool_registry_local(path).await?;
-    project_mcp_runtime(path, card_source, true, loaded)
+    project_mcp_runtime(path, None, loaded)
 }
 
 fn project_mcp_runtime(
     path: &str,
     card_source: Option<&str>,
-    list_changes: bool,
     loaded: LoadedToolRegistry,
 ) -> Result<LoadedMcpRuntime, ToolRegistryLoadError> {
     use std::path::Path;
@@ -372,28 +385,28 @@ fn project_mcp_runtime(
         ));
     }
 
-    let mut server = harn_vm::McpServer::new(
+    let mut registry = harn_vm::McpScriptRegistry::new(
         server_name.clone(),
         tools,
         resources,
         resource_templates,
         prompts,
-    )
-    .with_list_changes(list_changes);
+    );
     if let Some(metadata) = metadata {
-        server = server.with_metadata(metadata);
+        registry = registry.with_metadata(metadata);
     }
-    if let Some(source) = card_source {
-        server = server.with_server_card(resolve_card_source(source).map_err(|error| {
-            ToolRegistryLoadError {
+    let card = card_source
+        .map(|source| {
+            resolve_card_source(source).map_err(|error| ToolRegistryLoadError {
                 message: format!("--card: {error}"),
                 exit_code: 1,
-            }
-        })?);
-    }
+            })
+        })
+        .transpose()?;
 
     Ok(LoadedMcpRuntime {
-        server,
+        registry,
+        card,
         vm,
         diagnostics,
         server_name,
@@ -402,7 +415,7 @@ fn project_mcp_runtime(
     })
 }
 
-async fn run_reloadable_stdio(path: &str, card_source: Option<&str>, loaded: LoadedMcpRuntime) {
+async fn run_reloadable_stdio(path: &str, loaded: LoadedMcpRuntime) {
     use notify::{EventKind, RecursiveMode, Watcher};
     use std::path::Path;
     use std::time::Duration;
@@ -444,18 +457,24 @@ async fn run_reloadable_stdio(path: &str, card_source: Option<&str>, loaded: Loa
         std::process::exit(1);
     }
 
-    let (reload_tx, reload_rx) = tokio::sync::mpsc::unbounded_channel();
+    let LoadedMcpRuntime {
+        registry,
+        card,
+        vm,
+        connector_clients,
+        ..
+    } = loaded;
+    let (runtime, reloader) =
+        harn_serve::McpScriptRuntime::spawn_local_reloadable(registry, vm, connector_clients);
     let reload_path = path.to_string();
-    let reload_card = card_source.map(str::to_string);
     tokio::task::spawn_local(async move {
         while source_rx.recv().await.is_some() {
             // One editor save can produce create, rename, and modify events.
             // Wait for that burst, then load the final source state once.
             tokio::time::sleep(Duration::from_millis(75)).await;
             while source_rx.try_recv().is_ok() {}
-            let replacement = load_mcp_runtime_local(&reload_path, reload_card.as_deref())
-                .await
-                .map(|runtime| {
+            match load_mcp_runtime_local(&reload_path).await {
+                Ok(runtime) => {
                     if !runtime.diagnostics.is_empty() {
                         eprint!("{}", runtime.diagnostics);
                     }
@@ -463,27 +482,20 @@ async fn run_reloadable_stdio(path: &str, card_source: Option<&str>, loaded: Loa
                         "[harn] serve mcp: reloaded {} as '{}'",
                         runtime.capability_summary, runtime.server_name
                     );
-                    harn_vm::McpServerReload::new(
-                        runtime.server,
-                        runtime.vm,
-                        runtime.connector_clients,
-                    )
-                })
-                .map_err(|error| error.message);
-            if reload_tx.send(replacement).is_err() {
-                break;
+                    if !reloader.replace(runtime.registry, runtime.vm, runtime.connector_clients) {
+                        break;
+                    }
+                }
+                Err(error) => eprintln!(
+                    "[harn] serve mcp: reload failed; keeping previous registry: {}",
+                    error.message
+                ),
             }
         }
     });
 
-    let LoadedMcpRuntime {
-        server,
-        vm,
-        connector_clients,
-        ..
-    } = loaded;
-    let result = server
-        .run_reloadable(vm, connector_clients, reload_rx)
+    let result = script_server(runtime, card, harn_serve::AuthPolicy::default())
+        .run_stdio()
         .await;
     drop(watcher);
     if let Err(error) = result {

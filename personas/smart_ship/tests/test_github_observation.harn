@@ -1,0 +1,91 @@
+import { github_reviewed_change } from "../lib/github"
+import { decode_reviewed_change, review_admission } from "../lib/main"
+import { GithubPullRequestReviewCensus } from "harn-github-connector/default"
+
+const census: GithubPullRequestReviewCensus = {
+  repository: "example/project",
+  number: 17,
+  head_oid: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  base_oid: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  author: {id: "author-id", login: "author", type: "User"},
+  state: "OPEN",
+  is_draft: false,
+  head_repository: {id: "repository-id", full_name: "example/project"},
+  base_repository: {id: "repository-id", full_name: "example/project"},
+  review_decision: nil,
+  total_reviews: 1,
+  total_threads: 0,
+  pages_fetched: 2,
+  reviews: [
+    {
+      id: "review-1",
+      state: "APPROVED",
+      commit_oid: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      author: {id: "reviewer-id", login: "reviewer", type: "Bot"},
+      submitted_at: "2026-10-14T00:00:00Z",
+      updated_at: "2026-10-15T00:00:00Z",
+    },
+  ],
+  threads: [],
+}
+
+pipeline test_github_live_projection_and_archive_replay_qualify_identical_complete_facts() {
+  const observed = github_reviewed_change(census)
+  assert_eq(observed.source.author!.id, "author-id")
+  assert_eq(observed.source.head_repository_id, "repository-id")
+  assert_eq(observed.source.base_repository_id, "repository-id")
+  assert_eq(observed.reviews.reviews[0]!.submitted_at, "2026-10-14T00:00:00Z")
+  assert_eq(observed.reviews.reviews[0]!.updated_at, "2026-10-15T00:00:00Z")
+  const archived = decode_reviewed_change(json_parse(json_stringify(observed)))
+  assert_eq(archived, observed)
+  const policy = {minimum_approvals: 1, trusted_actor_ids: ["reviewer-id"], allow_forks: false}
+  const live = review_admission(observed.source, policy, observed.reviews)
+  assert_eq(live.status, "approved")
+  assert_eq(review_admission(archived.source, policy, archived.reviews), live)
+  assert_eq(
+    review_admission(observed.source + {head_repository_id: "other-id"}, policy, observed.reviews)
+      .status,
+    "failed",
+  )
+  assert(
+    is_err(
+      try {
+        github_reviewed_change(census + {total_reviews: 2})
+      },
+    ),
+  )
+  assert(
+    is_err(
+      try {
+        decode_reviewed_change(archived + {source: archived.source + {head: census.base_oid}})
+      },
+    ),
+  )
+}
+
+pipeline test_github_missing_actor_repository_and_submission_facts_stay_unknown() {
+  const observed = github_reviewed_change(
+    census
+      + {
+        author: nil,
+        head_repository: nil,
+        reviews: [census.reviews[0]! + {author: nil, commit_oid: nil, submitted_at: nil}],
+      },
+  )
+  assert_eq(observed.source.author, nil)
+  assert_eq(observed.source.head_repository, nil)
+  assert_eq(observed.source.head_repository_id, nil)
+  assert_eq(observed.reviews.reviews[0]!.actor, nil)
+  assert_eq(observed.reviews.reviews[0]!.head, nil)
+  assert_eq(observed.reviews.reviews[0]!.submitted_at, nil)
+  const held = review_admission(
+    observed.source,
+    {minimum_approvals: 1, trusted_actor_ids: ["reviewer-id"], allow_forks: false},
+    observed.reviews,
+  )
+  assert_eq(held.status, "pending")
+  assert_eq(held.observed_reviews, 1)
+  assert(held.pending.contains("change-author"))
+  assert(held.pending.contains("change-repositories"))
+  assert(held.pending.contains("change-repository-identities"))
+}

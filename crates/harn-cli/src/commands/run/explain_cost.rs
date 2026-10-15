@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
 
-use harn_parser::{DictEntry, Node, SNode};
+use harn_parser::{BinaryOperator, DictEntry, Node, SNode, UnaryOperator};
 
 const DEFAULT_AGENT_ITERATIONS: i64 = 50;
 
@@ -597,15 +597,21 @@ fn eval_static(node: &SNode) -> StaticValue {
             index,
             matches!(&node.node, Node::OptionalSubscriptAccess { .. }),
         ),
-        Node::BinaryOp { op, left, right } if op == "+" => {
-            match (eval_static(left), eval_static(right)) {
-                (StaticValue::String(left), StaticValue::String(right)) => {
-                    StaticValue::String(format!("{left}{right}"))
-                }
-                _ => StaticValue::Unknown,
+        Node::BinaryOp {
+            op: BinaryOperator::Add,
+            left,
+            right,
+        } => match (eval_static(left), eval_static(right)) {
+            (StaticValue::String(left), StaticValue::String(right)) => {
+                StaticValue::String(format!("{left}{right}"))
             }
-        }
-        Node::BinaryOp { op, left, right } if op == "??" => match eval_static(left) {
+            _ => StaticValue::Unknown,
+        },
+        Node::BinaryOp {
+            op: BinaryOperator::NilCoalesce,
+            left,
+            right,
+        } => match eval_static(left) {
             StaticValue::Nil => eval_static(right),
             StaticValue::Unknown => StaticValue::Unknown,
             value => value,
@@ -619,7 +625,7 @@ fn eval_static(node: &SNode) -> StaticValue {
             StaticValue::Bool(false) => eval_static(false_expr),
             _ => StaticValue::Unknown,
         },
-        Node::UnaryOp { op, operand } if op == "-" => match eval_static(operand) {
+        Node::UnaryOp { op, operand } if *op == UnaryOperator::Neg => match eval_static(operand) {
             StaticValue::Int(value) => StaticValue::Int(value.saturating_neg()),
             StaticValue::Float(value) => StaticValue::Float(-value),
             _ => StaticValue::Unknown,

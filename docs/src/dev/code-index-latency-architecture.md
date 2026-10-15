@@ -62,9 +62,10 @@ in parallel sections, and graph nodes decode in parallel runs. The
 restart at about 0.65 seconds on a loaded host, from 2.09 for the same host's
 baseline, with peak memory down by about 29%.
 
-Read, decode, and restore are now of similar size. Decoding is dominated by
-node strings, so the next cut is either storing each file's path and language
-once rather than on every node, or reading archived nodes in place. A
+Read, decode, and restore are now of similar size. Graph nodes share their
+file's path and use the registry's static language name, and the snapshot
+stores both once per file. The next decoding cut is reading archived nodes in
+place. A
 [validated zero-copy archive](https://rkyv.org/validation.html) remains the
 candidate for the latter. Safe archive access checks pointer bounds,
 alignment, and ownership ranges, but not graph identities, edge integrity, or

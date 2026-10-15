@@ -436,7 +436,7 @@ fn summarize_node(node: &SNode) -> String {
         Node::Assignment { target, value, op } => format!(
             "{} {} {}",
             inline_label(target),
-            op.as_deref().unwrap_or("="),
+            op.map_or("=", harn_parser::BinaryOperator::symbol),
             inline_label(value)
         ),
         Node::ThrowStmt { value } => format!("throw {}", inline_label(value)),
@@ -466,9 +466,9 @@ fn summarize_node(node: &SNode) -> String {
             inclusive,
         } => {
             if *inclusive {
-                format!("{} to {}", inline_label(start), inline_label(end))
+                format!("{}..={}", inline_label(start), inline_label(end))
             } else {
-                format!("{} to {} exclusive", inline_label(start), inline_label(end))
+                format!("{}..{}", inline_label(start), inline_label(end))
             }
         }
         Node::Pipeline { name, .. } => format!("pipeline {name}"),
@@ -597,9 +597,9 @@ fn inline_label(node: &SNode) -> String {
             inclusive,
         } => {
             if *inclusive {
-                format!("{} to {}", inline_label(start), inline_label(end))
+                format!("{}..={}", inline_label(start), inline_label(end))
             } else {
-                format!("{} to {} exclusive", inline_label(start), inline_label(end))
+                format!("{}..{}", inline_label(start), inline_label(end))
             }
         }
         _ => summarize_node(node),

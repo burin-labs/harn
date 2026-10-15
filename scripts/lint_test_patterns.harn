@@ -68,6 +68,9 @@ const THREAD_SLEEP_ALLOWLIST: list<string> = [
 //   - `executor_tests.rs`: pre-existing budget, fairness, and finish-order
 //     tests extracted from executor.rs's inline test module.
 const TOKIO_SLEEP_ALLOWLIST: list<string> = [
+  // Credential capture probes real OS descendant death against a calibrated
+  // unmanaged writer. Virtual Tokio time cannot advance that subprocess.
+  "crates/harn-vm/src/harness_methods/cli_credential.rs",
   // `sse_telemetry_tests.rs`: one virtual-time test measures the wait before
   // a provider's first stream frame. Under `start_paused` the runtime
   // auto-advances only when every task is idle, so `sleep` is the
@@ -206,6 +209,8 @@ const CONFORMANCE_REAL_TIME_ALLOWLIST: list<string> = [
 // are the intended surface. `crates/harn-cli/tests/harn_cli_fast/orchestrator_http/`
 // is a prefix match; other files require an explicit entry.
 const E2E_SUBPROCESS_PATHS: list<string> = [
+  // Release process smoke must cross the real CLI and its measured host confinement or typed refusal.
+  "crates/harn-cli/tests/harn_cli_e2e/process_smoke_cli.rs",
   // Shared checkpoint mutations must retain keys and one initial value across real CLI processes.
   "crates/harn-cli/tests/harn_cli_e2e/checkpoint_concurrency.rs",
   // Durable credential grants and revocation must cross fresh CLI processes.
@@ -285,6 +290,9 @@ const E2E_SUBPROCESS_PATHS: list<string> = [
   // Changed-line linting needs a real Git repository and CLI process to prove
   // revision selection, filtering, output, and exit-status behavior together.
   "crates/harn-cli/tests/harn_cli_e2e/lint_changed_cli.rs",
+  // The operator-syntax migration is proven on the product path: the real
+  // binary refuses legacy source, rewrites it, and runs the result.
+  "crates/harn-cli/tests/harn_cli_e2e/operator_syntax_migration_cli.rs",
   "crates/harn-cli/tests/harn_cli_e2e/demo_cli_e2e.rs",
   "crates/harn-cli/tests/harn_cli_e2e/doctor_dispatch.rs",
   // Startup environment validation must run before clap or sidecar dispatch;

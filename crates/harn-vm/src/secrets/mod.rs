@@ -207,6 +207,14 @@ pub fn secret_ref_is_present(raw: &str) -> Result<Option<bool>, SecretError> {
     Ok(Some(present))
 }
 
+/// The secret provider scoped onto the current task, if a host installed one.
+///
+/// Subtask preparation reads this so a branch of `parallel` resolves
+/// credentials through the same session view as the task that created it.
+pub(crate) fn active_secret_provider() -> Option<Arc<dyn SecretProvider>> {
+    ACTIVE_SECRET_PROVIDER.try_with(Arc::clone).ok()
+}
+
 /// Resolve secret references through `provider` for one async operation.
 ///
 /// Hosts scope the complete session execution so model discovery, routing,
@@ -696,6 +704,12 @@ impl From<&[u8]> for SecretBytes {
 
 #[async_trait]
 pub trait SecretProvider: Send + Sync {
+    /// Local stores may consult the host's CLI. Closed memory, environment,
+    /// remote, and scoped providers deny this source unless they opt in.
+    fn allows_local_cli_reads(&self) -> bool {
+        false
+    }
+
     async fn get(&self, id: &SecretId) -> Result<SecretBytes, SecretError>;
     async fn put(&self, id: &SecretId, value: SecretBytes) -> Result<(), SecretError>;
     async fn rotate(&self, id: &SecretId) -> Result<RotationHandle, SecretError>;
@@ -929,6 +943,12 @@ impl ChainSecretProvider {
 
 #[async_trait]
 impl SecretProvider for ChainSecretProvider {
+    fn allows_local_cli_reads(&self) -> bool {
+        self.providers
+            .iter()
+            .any(|provider| provider.allows_local_cli_reads())
+    }
+
     async fn get(&self, id: &SecretId) -> Result<SecretBytes, SecretError> {
         if self.providers.is_empty() {
             return Err(SecretError::NoProviders {

@@ -2,8 +2,9 @@
 //!
 //! Every language with a tree-sitter grammar goes through the same
 //! extractor as `ast.symbols`. [`regex_fallback_symbols`] is the one
-//! line-oriented fallback, used only for languages the registry knows but
-//! no grammar covers in this build (Dart, Objective-C, Vue, …). Section
+//! line-oriented fallback, used for languages the registry knows but no
+//! grammar covers in this build (Dart, Objective-C, Vue, …) and for files
+//! over the tree-sitter size bound. Section
 //! pragmas (`// MARK:`, `# TODO:`, `#pragma mark`) are comment conventions
 //! rather than syntax, so they are matched per line for every language.
 //!
@@ -30,8 +31,14 @@ pub fn extract_symbols(content: &str, language: Language, file_path: &str) -> Ve
     symbols
 }
 
+/// Files larger than this skip the tree-sitter pass. They are almost always
+/// generated (a grammar's `parser.c` runs to tens of megabytes), and one of
+/// them can cost more than the rest of a repository combined.
+#[cfg(feature = "ast")]
+const MAX_STRUCTURAL_BYTES: usize = 1024 * 1024;
+
 /// Tree-sitter symbols, or `None` when no grammar is bound for `language`
-/// in this build.
+/// in this build or the file is too large to parse.
 #[cfg(feature = "ast")]
 fn structural_symbols(
     content: &str,
@@ -40,6 +47,9 @@ fn structural_symbols(
 ) -> Option<Vec<SymbolRecord>> {
     use crate::ast::SymbolKind as AstKind;
 
+    if content.len() > MAX_STRUCTURAL_BYTES {
+        return None;
+    }
     let grammar = crate::ast::Language::from_registry(language)?;
     grammar.ts_language()?;
     let symbols = crate::ast::api::symbols_from_source(content, grammar).ok()?;
@@ -540,6 +550,28 @@ mod tests {
     fn data_grammars_have_no_symbols_and_skip_the_fallback() {
         let symbols = extract_symbols("{\"type Foo\": 1}\n", Language::Json, "a.json");
         assert!(symbols.is_empty(), "{symbols:?}");
+    }
+
+    #[cfg(feature = "grammars-all")]
+    #[test]
+    fn oversized_files_take_the_line_fallback() {
+        // The line matcher reads a keyword inside a string literal as a
+        // declaration; tree-sitter does not. That difference shows which
+        // path ran.
+        let small = "fn huge() {\n    let s = \" struct Ghost\";\n}\n";
+        let names = |src: &str| -> Vec<String> {
+            extract_symbols(src, Language::Rust, "gen.rs")
+                .into_iter()
+                .map(|s| s.name)
+                .collect()
+        };
+        assert_eq!(names(small), vec!["huge"]);
+        let large = format!(
+            "{small}{}",
+            "// padding\n".repeat(MAX_STRUCTURAL_BYTES / 10)
+        );
+        assert!(large.len() > MAX_STRUCTURAL_BYTES);
+        assert_eq!(names(&large), vec!["huge", "Ghost"]);
     }
 
     #[test]

@@ -13,6 +13,11 @@
 # becomes a zero is worse than one that names itself absent.
 set -euo pipefail
 
+if [[ "$(basename -- "${RUSTC_WRAPPER:-}")" == kache ]]; then
+  echo "::notice::Kache reports a checkout session; no sccache baseline is needed."
+  exit 0
+fi
+
 baseline_path="${SCCACHE_BASELINE_PATH:-${RUNNER_TEMP:?RUNNER_TEMP must name a writable directory}/sccache-baseline.json}"
 sccache_bin="${SCCACHE_PATH:-sccache}"
 

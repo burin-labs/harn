@@ -284,7 +284,7 @@ pipeline t(task) {
   }
   let names: list<string> = ["Ada"]
   log(names?.[0])
-  log("Ada"?.lowercase())
+  log("Ada"?.lower())
 }
 "#,
     );
@@ -438,7 +438,7 @@ type User = {name: string}
 pipeline t(task) {
   let maybe: User? = nil
   let name: string? = maybe?.name
-  let lowered: string? = maybe?.name?.lowercase()
+  let lowered: string? = maybe?.name?.lower()
   let contains_a: bool? = maybe?.name?.contains("a")
 }
 "#,
@@ -1125,7 +1125,7 @@ fn test_aliased_dict_receiver_keeps_value_type_across_methods() {
 
 fn f(e: Env) -> int {
   let m: dict<string, string> = e.map_values(fn(v) { return v })
-  return m.count()
+  return m.len()
 }",
     );
     assert!(errs.is_empty(), "map_values lost the alias types: {errs:?}");
