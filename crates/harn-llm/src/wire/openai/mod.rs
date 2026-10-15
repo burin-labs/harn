@@ -5,8 +5,16 @@ pub mod openrouter;
 pub mod reasoning;
 mod tools;
 
+#[cfg(any(test, feature = "test-support"))]
+pub mod test_support;
+
+#[cfg(test)]
+mod openrouter_tests;
+#[cfg(test)]
+mod tests;
+
 use crate::request::{LlmRequestPayload, ThinkingConfig};
-use crate::schema_compat::{SchemaCompatProfile, SchemaProjection, SchemaSurface};
+use crate::schema_compat::{SchemaCompatProfile, SchemaSurface};
 use harn_provider_catalog::capabilities::Capabilities;
 use harn_provider_catalog::ServingTierRequestDef;
 use messages::{
@@ -40,15 +48,14 @@ fn sanitize_schema_for_provider(
     profile: SchemaCompatProfile,
     surface: SchemaSurface,
     schema: &serde_json::Value,
-    projections: &mut Vec<SchemaProjection>,
+    audits: &mut Vec<std::collections::BTreeMap<String, serde_json::Value>>,
 ) -> serde_json::Value {
-    let mut projection =
+    let projection =
         crate::schema_compat::sanitize_schema(provider, model, profile, surface, schema);
-    let schema = std::mem::take(&mut projection.schema);
-    if !projection.receipts.is_empty() {
-        projections.push(projection);
+    if let Some(metadata) = projection.audit_metadata() {
+        audits.push(metadata);
     }
-    schema
+    projection.schema
 }
 
 /// Encode without reading ambient catalog state or publishing native events.
@@ -57,7 +64,7 @@ pub fn encode_request(
     context: &OpenAiWireContext<'_>,
 ) -> super::EncodedRequest {
     let caps = context.capabilities;
-    let mut projections = Vec::new();
+    let mut audits = Vec::new();
     // Models that reserve `<tool_call>` as a special token collapse when
     // they meet it as instructional/wrapper text. Remap the colliding
     // delimiters to a non-special wire form on every outgoing message
@@ -267,7 +274,7 @@ pub fn encode_request(
                 schema_profile,
                 SchemaSurface::StructuredOutput,
                 schema,
-                &mut projections,
+                &mut audits,
             );
             body["response_format"] = serde_json::json!({
                 "type": "json_schema",
@@ -318,7 +325,7 @@ pub fn encode_request(
                 opts,
                 tools,
                 context.tool_search_extensions,
-                &mut projections,
+                &mut audits,
             ));
         }
     }
@@ -381,7 +388,7 @@ pub fn encode_request(
     }
     super::EncodedRequest {
         body,
-        schema_projections: projections,
+        schema_audits: audits,
     }
 }
 

@@ -7,7 +7,7 @@
 //! the modes the capability row says the route accepts.
 
 use crate::request::LlmRequestPayload;
-use crate::schema_compat::{SchemaCompatProfile, SchemaProjection, SchemaSurface};
+use crate::schema_compat::{SchemaCompatProfile, SchemaSurface};
 
 pub(super) fn normalize_tool_choice_for_capabilities(
     tool_choice: &serde_json::Value,
@@ -91,7 +91,7 @@ pub(super) fn provider_request_tools(
     opts: &LlmRequestPayload,
     tools: &[serde_json::Value],
     supports_openai_tool_search_extensions: bool,
-    projections: &mut Vec<SchemaProjection>,
+    audits: &mut Vec<std::collections::BTreeMap<String, serde_json::Value>>,
 ) -> Vec<serde_json::Value> {
     tools
         .iter()
@@ -101,7 +101,7 @@ pub(super) fn provider_request_tools(
                 &opts.model,
                 tool,
                 supports_openai_tool_search_extensions,
-                projections,
+                audits,
             )
         })
         .collect()
@@ -112,7 +112,7 @@ fn sanitize_openai_tool_for_request(
     model: &str,
     tool: &serde_json::Value,
     supports_openai_tool_search_extensions: bool,
-    projections: &mut Vec<SchemaProjection>,
+    audits: &mut Vec<std::collections::BTreeMap<String, serde_json::Value>>,
 ) -> serde_json::Value {
     let mut tool = tool.clone();
     let Some(object) = tool.as_object_mut() else {
@@ -152,7 +152,7 @@ fn sanitize_openai_tool_for_request(
                     schema_profile,
                     SchemaSurface::ToolParameters,
                     &parameters,
-                    projections,
+                    audits,
                 ),
             );
         }

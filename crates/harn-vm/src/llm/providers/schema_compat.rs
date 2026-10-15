@@ -34,8 +34,8 @@ pub(crate) fn project_output_schema_for_provider(
 }
 
 pub(crate) fn publish_wire_request(request: harn_llm::wire::EncodedRequest) -> Value {
-    for projection in request.schema_projections {
-        publish_projection(projection, true);
+    for metadata in request.schema_audits {
+        publish_audit(metadata);
     }
     request.body
 }
@@ -43,19 +43,68 @@ pub(crate) fn publish_wire_request(request: harn_llm::wire::EncodedRequest) -> V
 fn publish_projection(projection: SchemaProjection, emit_receipts: bool) -> Value {
     if emit_receipts {
         if let Some(metadata) = projection.audit_metadata() {
-            crate::events::log_debug_meta(
-                "llm.schema_compat",
-                "sanitized provider-facing JSON Schema",
-                metadata,
-            );
+            publish_audit(metadata);
         }
     }
     projection.schema
 }
 
+fn publish_audit(metadata: std::collections::BTreeMap<String, Value>) {
+    crate::events::log_debug_meta(
+        "llm.schema_compat",
+        "sanitized provider-facing JSON Schema",
+        metadata,
+    );
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn openai_builder_publishes_the_shared_encoder_audit_once() {
+        let mut request = harn_llm::wire::openai::test_support::base_request_payload();
+        request.provider = "openai".into();
+        request.model = "gpt-4o".into();
+        request.output_format = crate::llm::api::OutputFormat::JsonSchema {
+            schema: serde_json::json!({"type": "string", "default": "removed"}),
+            strict: true,
+        };
+        let sink = std::rc::Rc::new(crate::events::CollectorSink::new());
+        crate::events::clear_event_sinks();
+        crate::events::add_event_sink(sink.clone());
+        let body =
+            super::super::openai_compat::OpenAiCompatibleProvider::build_request_body(&request);
+        assert!(body["response_format"]["json_schema"]["schema"]
+            .get("default")
+            .is_none());
+        {
+            let logs = sink.logs.borrow();
+            let audits: Vec<_> = logs
+                .iter()
+                .filter(|event| event.category == "llm.schema_compat")
+                .collect();
+            assert_eq!(audits.len(), 1);
+            assert_eq!(audits[0].metadata["model"], "gpt-4o");
+            assert_eq!(audits[0].metadata["surface"], "structured_output");
+            assert!(audits[0].metadata["changes"]
+                .as_array()
+                .is_some_and(|changes| !changes.is_empty()));
+        }
+        request.output_format = crate::llm::api::OutputFormat::Text;
+        let plain =
+            super::super::openai_compat::OpenAiCompatibleProvider::build_request_body(&request);
+        assert!(plain.get("response_format").is_none());
+        assert_eq!(
+            sink.logs
+                .borrow()
+                .iter()
+                .filter(|event| event.category == "llm.schema_compat")
+                .count(),
+            1
+        );
+        crate::events::reset_event_sinks();
+    }
 
     #[test]
     fn native_adapter_emits_the_lower_projection_receipt_once() {

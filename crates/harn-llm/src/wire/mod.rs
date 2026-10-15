@@ -8,5 +8,5 @@ pub mod thinking;
 /// Encoded wire body and schema changes for the host's audit sink.
 pub struct EncodedRequest {
     pub body: serde_json::Value,
-    pub schema_projections: Vec<crate::schema_compat::SchemaProjection>,
+    pub schema_audits: Vec<std::collections::BTreeMap<String, serde_json::Value>>,
 }

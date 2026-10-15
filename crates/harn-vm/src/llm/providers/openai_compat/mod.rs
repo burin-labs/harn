@@ -17,10 +17,7 @@ pub(crate) use harn_provider_catalog::capabilities::gpt_generation;
 
 use self::streaming::canonicalizing_delta_tx;
 
-pub(crate) use harn_llm::wire::openai::{
-    apply_openrouter_provider_order, apply_openrouter_route_denylist,
-    ensure_openrouter_require_parameters,
-};
+pub(crate) use harn_llm::wire::openai::ensure_openrouter_require_parameters;
 
 /// True for GPT models that expose OpenAI's Responses-API `tool_search` meta-tool
 /// and the `defer_loading: true` flag on user tool definitions. Per OpenAI's
