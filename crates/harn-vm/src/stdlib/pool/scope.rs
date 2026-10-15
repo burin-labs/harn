@@ -36,7 +36,7 @@ fn fallback_pool_registry() -> Arc<PoolRegistry> {
         .clone()
 }
 
-pub(super) fn current_pool_registry() -> Arc<PoolRegistry> {
+pub(crate) fn current_pool_registry() -> Arc<PoolRegistry> {
     ACTIVE_POOL_REGISTRY
         .try_with(Arc::clone)
         .unwrap_or_else(|_| fallback_pool_registry())

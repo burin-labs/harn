@@ -16,22 +16,44 @@ pub(crate) trait VmExecutionScope: Send {
     ) -> Poll<()>;
 }
 
-pin_project_lite::pin_project! {
-    pub(crate) struct RuntimeScoped<F> {
-        #[pin]
-        inner: F,
-        scope: Box<dyn VmExecutionScope>,
+impl<S: VmExecutionScope + ?Sized> VmExecutionScope for Box<S> {
+    fn poll(
+        &mut self,
+        cx: &mut Context<'_>,
+        continuation: &mut dyn FnMut(&mut Context<'_>) -> Poll<()>,
+    ) -> Poll<()> {
+        (**self).poll(cx, continuation)
     }
 }
 
-pub(crate) fn scope_runtime<F: Future>(
-    scope: Box<dyn VmExecutionScope>,
+pub(crate) struct BuiltinExecutionScope(pub(crate) std::sync::Arc<dyn super::VmRuntime>);
+
+impl VmExecutionScope for BuiltinExecutionScope {
+    fn poll(
+        &mut self,
+        cx: &mut Context<'_>,
+        continuation: &mut dyn FnMut(&mut Context<'_>) -> Poll<()>,
+    ) -> Poll<()> {
+        self.0.poll_async_builtin(cx, continuation)
+    }
+}
+
+pin_project_lite::pin_project! {
+    pub(crate) struct RuntimeScoped<F, S> {
+        #[pin]
+        inner: F,
+        scope: S,
+    }
+}
+
+pub(crate) fn scope_runtime<F: Future, S: VmExecutionScope>(
+    scope: S,
     inner: F,
-) -> RuntimeScoped<F> {
+) -> RuntimeScoped<F, S> {
     RuntimeScoped { inner, scope }
 }
 
-impl<F: Future> Future for RuntimeScoped<F> {
+impl<F: Future, S: VmExecutionScope> Future for RuntimeScoped<F, S> {
     type Output = F::Output;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {

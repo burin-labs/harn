@@ -6,6 +6,8 @@ use std::{any::Any, path::Path, sync::Arc};
 use std::{future::Future, pin::Pin};
 
 mod bridge;
+mod context;
+mod execution_evidence;
 mod lifecycle;
 pub(crate) mod subtask;
 mod task_cleanup;
@@ -103,6 +105,14 @@ impl VmRuntime for NativeExecutionState {
 
     fn subtask_scope(&self) -> Box<dyn crate::vm::VmExecutionScope> {
         subtask::capture_inline(Arc::clone(&self.pool_registry))
+    }
+
+    fn poll_async_builtin(
+        &self,
+        cx: &mut std::task::Context<'_>,
+        continuation: &mut dyn FnMut(&mut std::task::Context<'_>) -> std::task::Poll<()>,
+    ) -> std::task::Poll<()> {
+        crate::stdlib::pool::with_pool_registry_poll(&self.pool_registry, || continuation(cx))
     }
 
     fn start_span(&self, kind: crate::vm::VmSpanKind, name: String) -> crate::vm::ScopeSpan {

@@ -2,7 +2,6 @@ use std::future::Future;
 use std::sync::Arc;
 
 use super::Vm;
-use crate::native_vm::NativeVmState;
 
 /// Source identity of the Harn frame invoking an asynchronous host operation.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -43,34 +42,8 @@ impl AsyncBuiltinCtx {
         Self::new(vm)
     }
 
-    pub(crate) fn record_evaluation_receipt(
-        &self,
-        receipt: crate::llm::decision::receipt::EvaluationReceipt,
-    ) {
-        self.child
-            .lock()
-            .native()
-            .evaluation
-            .journal
-            .lock()
-            .record(receipt);
-    }
-
-    pub(crate) fn evaluation_invocation_id(&self) -> String {
-        let vm = self.child.lock();
-        let id = vm
-            .native()
-            .evaluation
-            .journal
-            .lock()
-            .invocation_id(vm.execution_id().as_ref());
-        id
-    }
-
-    pub(crate) fn evaluation_replay(
-        &self,
-    ) -> Option<crate::llm::decision::replay::EvaluationReplayScope> {
-        self.child.lock().native().evaluation.replay.clone()
+    pub(crate) fn with_child_vm<R>(&self, read: impl FnOnce(&Vm) -> R) -> R {
+        read(&self.child.lock())
     }
 
     /// Construct a context for host work that the current VM awaits inline.
@@ -90,22 +63,6 @@ impl AsyncBuiltinCtx {
 
     pub(crate) fn host_call_site(&self) -> Option<VmCallSite> {
         self.caller.clone()
-    }
-
-    /// Construct a standalone ctx around `vm` for tests that drive an async
-    /// builtin directly. Reuse the fixture's active execution registries just
-    /// as the production dispatch scope would; production never calls this.
-    #[cfg(test)]
-    pub fn for_test(mut vm: Vm) -> Self {
-        let native = vm.native_mut();
-        native.worker_registry = crate::stdlib::agents::agents_workers::active_worker_registry();
-        native.daemon_registry = crate::stdlib::agents_daemon::active_daemon_registry();
-        native.trigger_registry = crate::triggers::registry::active_trigger_registry();
-        native.session_runtime = crate::agent_sessions::active_session_runtime();
-        native.tracing_runtime = crate::tracing::active_tracing_runtime();
-        native.agent_host_session_runtime =
-            crate::llm::agent_session_host::active_agent_host_session_runtime();
-        Self::new(vm)
     }
 
     /// Clone a fresh child VM from this context. The returned `Vm` shares the
@@ -131,30 +88,8 @@ impl AsyncBuiltinCtx {
         self.child.lock().runtime_context.task_id.clone()
     }
 
-    /// Pool tasks may execute on any Tokio worker thread, so pool lookup state
-    /// is shared through the VM context rather than thread-local storage.
-    pub(crate) fn pool_registry(&self) -> Arc<crate::stdlib::pool::PoolRegistry> {
-        self.child.lock().native().pool_registry.clone()
-    }
-
     pub(crate) fn wait_for_graph(&self) -> Arc<crate::wait_for_graph::VmWaitForGraph> {
         self.child.lock().wait_for_graph.clone()
-    }
-
-    pub(crate) fn package_snapshot_registry(&self) -> Arc<crate::stdlib::PackageSnapshotRegistry> {
-        self.child.lock().native().package_snapshot_registry.clone()
-    }
-
-    /// Resolve a connector client from this VM tree's eager projection or its
-    /// execution-owned lazy resolver. The runtime handle is cloned before the
-    /// await so no VM lock crosses user/provider initialization work.
-    pub(crate) async fn connector_client(
-        &self,
-        provider: &str,
-    ) -> Result<Option<Arc<dyn crate::connectors::ConnectorClient>>, crate::connectors::ClientError>
-    {
-        let runtime = self.child.lock().native().connector_clients.clone();
-        runtime.resolve(provider).await
     }
 
     /// Create an independent context rooted at a fresh child VM. Long-lived
@@ -243,55 +178,13 @@ where
     // its first await, and that bloat propagates into every caller's stack
     // frame, which can trip clippy::large_stack_frames in large dispatch
     // functions.
+    let scope = super::runtime_scope::BuiltinExecutionScope(Arc::clone(&child.runtime));
     let ctx = AsyncBuiltinCtx::new(child);
-    let registry = ctx.pool_registry();
     let sink = Arc::clone(&ctx.child);
     let fut = make_fut(ctx);
     async move {
-        let output = crate::stdlib::pool::with_pool_registry_scope(registry, fut).await;
+        let output = super::scope_runtime(scope, fut).await;
         let captured = sink.lock().take_output();
         (output, captured)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::Vm;
-
-    #[tokio::test]
-    async fn explicit_ctx_mints_child_and_captures_forwarded_output() {
-        let (present, captured) = run_async_builtin_with(Vm::new(), |ctx| async move {
-            // The handler holds the explicit ctx — no ambient lookup needed.
-            let _child = ctx.child_vm();
-            ctx.forward_output("hello ");
-            ctx.forward_output("world");
-            true
-        })
-        .await;
-        assert!(present);
-        // `forward_output` appends into the same buffer the dispatch loop drains.
-        assert_eq!(captured, "hello world");
-    }
-
-    #[tokio::test]
-    async fn child_context_has_independent_output_buffer() {
-        let (_result, captured) = run_async_builtin_with(Vm::new(), |ctx| async move {
-            let child = ctx.child_ctx();
-            child.forward_output("child");
-            ctx.forward_output("parent");
-        })
-        .await;
-        assert_eq!(captured, "parent");
-    }
-
-    #[tokio::test]
-    async fn cancelled_scope_strands_nothing() {
-        use std::future::pending;
-        // Build a future that never completes, then drop it without polling to
-        // completion. The ctx is owned by that future, so dropping it releases
-        // the child VM without any ambient cleanup.
-        let never = run_async_builtin_with(Vm::new(), |_ctx| pending::<()>());
-        drop(never);
     }
 }

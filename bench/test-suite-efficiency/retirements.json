@@ -3,6 +3,13 @@
   "baselineRevision": "7deefa6d8215dc5ce0bac2705624516d17c89392",
   "removedCases": [
     {
+      "path": "crates/harn-vm/src/vm/async_builtin.rs",
+      "name": "cancelled_scope_strands_nothing",
+      "reason": "SUBSUMED: the removed case dropped an unpolled future without assertions. The replacement polls the actual async builtin seam, proves that it installed the child's distinct pool, and verifies restoration both before and after cancellation.",
+      "retainedPath": "crates/harn-vm/src/native_vm/context/tests.rs",
+      "retainedName": "pending_builtin_restores_the_callers_pool_before_cancellation"
+    },
+    {
       "path": "crates/harn-lint/src/tests/unused.rs",
       "name": "test_unused_variable",
       "reason": "SUBSUMED: Same unused const-in-pipeline construct; the retained test asserts the unused-variable diagnostic plus its autofix and rewritten text.",

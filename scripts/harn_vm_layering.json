@@ -20,13 +20,13 @@
     "triggers->stdlib": 34,
     "value->stdlib": 1,
     "value->vm": 6,
-    "vm->agent_sessions": 12,
-    "vm->connectors": 3,
-    "vm->llm": 11,
-    "vm->native_vm": 7,
-    "vm->orchestration": 60,
-    "vm->stdlib": 49,
-    "vm->triggers": 5
+    "vm->agent_sessions": 11,
+    "vm->connectors": 1,
+    "vm->llm": 4,
+    "vm->native_vm": 4,
+    "vm->orchestration": 52,
+    "vm->stdlib": 44,
+    "vm->triggers": 4
   },
   "layers": [
     [

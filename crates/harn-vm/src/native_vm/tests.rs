@@ -49,6 +49,13 @@ impl VmRuntime for RefusingRuntime {
     fn subtask_scope(&self) -> Box<dyn crate::vm::VmExecutionScope> {
         self.native.subtask_scope()
     }
+    fn poll_async_builtin(
+        &self,
+        cx: &mut std::task::Context<'_>,
+        continuation: &mut dyn FnMut(&mut std::task::Context<'_>) -> std::task::Poll<()>,
+    ) -> std::task::Poll<()> {
+        self.native.poll_async_builtin(cx, continuation)
+    }
     fn start_span(&self, kind: crate::vm::VmSpanKind, name: String) -> crate::vm::ScopeSpan {
         self.native.start_span(kind, name)
     }
