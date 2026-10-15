@@ -3799,6 +3799,7 @@ dependencies = [
  "arcstr",
  "harn-provider-catalog",
  "harn-vm-core",
+ "proptest",
  "regex",
  "serde",
  "serde_json",
