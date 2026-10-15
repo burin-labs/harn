@@ -61,6 +61,19 @@ pub(crate) trait VmRuntime: Any + Send + Sync {
     fn set_source_dir(&self, dir: &Path);
     fn enter_source_dir(&self, dir: Option<&Path>) -> Option<std::path::PathBuf>;
     fn is_step_function(&self, name: &str) -> bool;
+    fn take_active_step(&self, frame_depth: usize) -> Option<super::step_context::ActiveStep>;
+    fn before_step<'a>(
+        &self,
+        vm: &'a mut super::Vm,
+        closure: &'a crate::value::VmClosure,
+        args: Vec<VmValue>,
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<VmValue>, VmError>> + Send + 'a>>;
+    fn finish_step<'a>(
+        &self,
+        vm: &'a mut super::Vm,
+        step: super::step_context::ActiveStep,
+        output: VmValue,
+    ) -> Pin<Box<dyn Future<Output = Result<VmValue, VmError>> + Send + 'a>>;
     fn is_tracked_function(&self, name: &str) -> bool;
     fn enter_function(&self, name: &str, frame_depth: usize, args: &[VmValue]);
     fn prune_frames(&self, frame_depth: usize);

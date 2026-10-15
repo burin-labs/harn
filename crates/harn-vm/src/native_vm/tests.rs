@@ -103,6 +103,25 @@ impl VmRuntime for RefusingRuntime {
     fn is_step_function(&self, name: &str) -> bool {
         self.native.is_step_function(name)
     }
+    fn take_active_step(&self, frame_depth: usize) -> Option<crate::vm::step_context::ActiveStep> {
+        self.native.take_active_step(frame_depth)
+    }
+    fn before_step<'a>(
+        &self,
+        vm: &'a mut Vm,
+        closure: &'a crate::value::VmClosure,
+        args: Vec<VmValue>,
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<VmValue>, VmError>> + Send + 'a>> {
+        self.native.before_step(vm, closure, args)
+    }
+    fn finish_step<'a>(
+        &self,
+        vm: &'a mut Vm,
+        step: crate::vm::step_context::ActiveStep,
+        output: VmValue,
+    ) -> Pin<Box<dyn Future<Output = Result<VmValue, VmError>> + Send + 'a>> {
+        self.native.finish_step(vm, step, output)
+    }
     fn is_tracked_function(&self, name: &str) -> bool {
         self.native.is_tracked_function(name)
     }

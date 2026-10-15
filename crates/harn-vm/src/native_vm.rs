@@ -9,6 +9,7 @@ mod bridge;
 mod context;
 mod execution_evidence;
 mod lifecycle;
+mod step_hooks;
 mod step_lifecycle;
 pub(crate) mod subtask;
 mod task_cleanup;
@@ -160,6 +161,28 @@ impl VmRuntime for NativeExecutionState {
 
     fn is_step_function(&self, name: &str) -> bool {
         crate::step_runtime::is_step_function(name)
+    }
+
+    fn take_active_step(&self, frame_depth: usize) -> Option<crate::vm::step_context::ActiveStep> {
+        crate::step_runtime::take_active_step(frame_depth)
+    }
+
+    fn before_step<'a>(
+        &self,
+        vm: &'a mut Vm,
+        closure: &'a crate::value::VmClosure,
+        args: Vec<VmValue>,
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<VmValue>, VmError>> + Send + 'a>> {
+        Box::pin(step_hooks::before(vm, closure, args))
+    }
+
+    fn finish_step<'a>(
+        &self,
+        vm: &'a mut Vm,
+        step: crate::vm::step_context::ActiveStep,
+        output: VmValue,
+    ) -> Pin<Box<dyn Future<Output = Result<VmValue, VmError>> + Send + 'a>> {
+        Box::pin(step_hooks::finish(vm, step, output))
     }
 
     fn is_tracked_function(&self, name: &str) -> bool {

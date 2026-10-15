@@ -1,15 +1,11 @@
-use crate::value::VmDictExt;
-use std::future::Future;
-use std::pin::Pin;
 use std::sync::Arc;
 
 use crate::chunk::{DirectCallState, DirectCallTarget, InlineCacheEntry};
-use crate::orchestration::HookEvent;
 use crate::value::{DeadlockError, VmClosure, VmError, VmValue};
 use crate::BuiltinId;
 
 use super::super::{CallArgs, CallFrame};
-use super::call_support::{AwaitingTask, StepPreHookAction};
+use super::call_support::AwaitingTask;
 
 const DIRECT_CALL_QUICKEN_THRESHOLD: u8 = 3;
 
@@ -29,212 +25,18 @@ impl super::super::Vm {
         Ok(true)
     }
 
-    fn step_domain_args(args: &[VmValue]) -> &[VmValue] {
-        match args.first() {
-            Some(VmValue::Harness(handle))
-                if handle.kind() == crate::harness::HarnessKind::Root =>
-            {
-                &args[1..]
-            }
-            _ => args,
-        }
-    }
-
-    fn step_hook_payload(
-        event: HookEvent,
-        persona: Option<&str>,
-        step_name: &str,
-        function_name: &str,
-        args: &[VmValue],
-        output: Option<VmValue>,
-    ) -> VmValue {
-        let mut step = std::collections::BTreeMap::new();
-        step.put_str("name", step_name);
-        step.put_str("function", function_name);
-        step.insert(
-            "args".to_string(),
-            VmValue::List(std::sync::Arc::new(Self::step_domain_args(args).to_vec())),
-        );
-        let mut payload = std::collections::BTreeMap::new();
-        payload.put_str("event", event.as_str());
-        payload.put_str(
-            "target",
-            match persona {
-                Some(persona) if !persona.is_empty() => format!("{persona}.{step_name}"),
-                _ => step_name.to_string(),
-            },
-        );
-        payload.put_str("persona", persona.unwrap_or(""));
-        payload.insert("step".to_string(), VmValue::dict(step));
-        if let Some(output) = output {
-            payload.insert("output".to_string(), output);
-        }
-        VmValue::dict(payload)
-    }
-
-    fn parse_step_pre_hook_result(
-        value: VmValue,
-        current_args: Vec<VmValue>,
-    ) -> Result<StepPreHookAction, VmError> {
-        match value {
-            VmValue::Nil => Ok(StepPreHookAction::Allow(current_args)),
-            VmValue::String(text) if text.as_str() == "Allow" => {
-                Ok(StepPreHookAction::Allow(current_args))
-            }
-            VmValue::Dict(map) => {
-                if let Some(reason) = map.get("deny").or_else(|| map.get("reason")) {
-                    return Ok(StepPreHookAction::Deny(reason.display()));
-                }
-                if matches!(
-                    map.get("action").map(|value| value.display()).as_deref(),
-                    Some("deny" | "Deny")
-                ) {
-                    return Ok(StepPreHookAction::Deny(
-                        map.get("reason")
-                            .map(|value| value.display())
-                            .unwrap_or_else(|| "step hook denied execution".to_string()),
-                    ));
-                }
-                if let Some(VmValue::List(args)) = map.get("args").or_else(|| map.get("modify")) {
-                    let mut modified = Vec::with_capacity(
-                        args.len()
-                            + usize::from(
-                                Self::step_domain_args(&current_args).len() < current_args.len(),
-                            ),
-                    );
-                    if Self::step_domain_args(&current_args).len() < current_args.len() {
-                        modified.push(current_args[0].clone());
-                    }
-                    modified.extend((**args).clone());
-                    return Ok(StepPreHookAction::Allow(modified));
-                }
-                Ok(StepPreHookAction::Allow(current_args))
-            }
-            other => Err(VmError::Runtime(format!(
-                "PreStep hook must return nil, Allow, or {{deny|args}}, got {}",
-                other.type_name()
-            ))),
-        }
-    }
-
-    fn parse_step_post_hook_result(
-        value: VmValue,
-        current_output: VmValue,
-    ) -> Result<VmValue, VmError> {
-        match value {
-            VmValue::Nil => Ok(current_output),
-            VmValue::String(text) if text.as_str() == "Pass" => Ok(current_output),
-            VmValue::Dict(map) => Ok(map
-                .get("output")
-                .or_else(|| map.get("result"))
-                .or_else(|| map.get("modify"))
-                .cloned()
-                .unwrap_or(current_output)),
-            other => Err(VmError::Runtime(format!(
-                "PostStep hook must return nil, Pass, or {{output}}, got {}",
-                other.type_name()
-            ))),
-        }
-    }
-
     async fn run_step_pre_hooks(
         &mut self,
         closure: &VmClosure,
-        mut args: Vec<VmValue>,
+        args: Vec<VmValue>,
     ) -> Result<Vec<VmValue>, VmError> {
-        let Some(definition) =
-            crate::step_runtime::step_definition_for_function(&closure.func.name)
-        else {
+        if !self.runtime.is_step_function(&closure.func.name) {
             return Ok(args);
-        };
-        let persona = crate::step_runtime::current_persona_name();
-        let match_payload = Self::step_hook_payload(
-            HookEvent::PreStep,
-            persona.as_deref(),
-            &definition.name,
-            &definition.function,
-            &args,
-            None,
-        );
-        let manifest_hooks = crate::orchestration::matching_vm_lifecycle_hooks(
-            HookEvent::PreStep,
-            &crate::value::json::vm_value_to_json(&match_payload),
-        );
-        for hook in manifest_hooks {
-            let payload = Self::step_hook_payload(
-                HookEvent::PreStep,
-                persona.as_deref(),
-                &definition.name,
-                &definition.function,
-                &args,
-                None,
-            );
-            let closure = hook.resolve(self).await?;
-            let raw = self.call_lifecycle_hook(&closure, payload).await?;
-            let (raw, effects) = crate::orchestration::collect_hook_effects_and_action(
-                HookEvent::PreStep,
-                raw,
-                VmValue::Nil,
-            )?;
-            crate::orchestration::inject_hook_effects_into_current_session(effects)?;
-            match Self::parse_step_pre_hook_result(raw, args)? {
-                StepPreHookAction::Allow(next_args) => args = next_args,
-                StepPreHookAction::Deny(reason) => {
-                    return Err(Self::step_hook_denied(&definition.name, reason));
-                }
-            }
         }
-        let hooks = crate::step_runtime::matching_hooks(
-            HookEvent::PreStep,
-            persona.as_deref(),
-            Some(&definition.name),
-            None,
-        );
-        for hook in hooks {
-            let payload = Self::step_hook_payload(
-                hook.event,
-                persona.as_deref(),
-                &definition.name,
-                &definition.function,
-                &args,
-                None,
-            );
-            let raw = self.call_lifecycle_hook(&hook.handler, payload).await?;
-            let (raw, effects) = crate::orchestration::collect_hook_effects_and_action(
-                HookEvent::PreStep,
-                raw,
-                VmValue::Nil,
-            )?;
-            crate::orchestration::inject_hook_effects_into_current_session(effects)?;
-            match Self::parse_step_pre_hook_result(raw, args)? {
-                StepPreHookAction::Allow(next_args) => args = next_args,
-                StepPreHookAction::Deny(reason) => {
-                    return Err(Self::step_hook_denied(&definition.name, reason));
-                }
-            }
-        }
-        Ok(args)
-    }
-
-    fn step_hook_denied(step_name: &str, reason: String) -> VmError {
-        VmError::Thrown(VmValue::dict(std::collections::BTreeMap::from([
-            (
-                "category".to_string(),
-                VmValue::String(arcstr::ArcStr::from("hook_denied")),
-            ),
-            (
-                "event".to_string(),
-                VmValue::String(arcstr::ArcStr::from("PreStep")),
-            ),
-            (
-                "reason".to_string(),
-                VmValue::String(arcstr::ArcStr::from(reason)),
-            ),
-            (
-                "step".to_string(),
-                VmValue::String(arcstr::ArcStr::from(step_name.to_string())),
-            ),
-        ])))
+        let runtime = Arc::clone(&self.runtime);
+        let call = runtime.before_step(self, closure, args);
+        drop(runtime);
+        call.await
     }
 
     pub(crate) async fn run_step_post_hooks_for_current_frame(
@@ -242,79 +44,13 @@ impl super::super::Vm {
         output: VmValue,
     ) -> Result<VmValue, VmError> {
         let depth = self.frames.len();
-        let Some(step) = crate::step_runtime::take_active_step(depth) else {
+        let Some(step) = self.runtime.take_active_step(depth) else {
             return Ok(output);
         };
-        let persona = step.persona.clone();
-        let mut current = output;
-        let hooks = crate::step_runtime::matching_hooks(
-            HookEvent::PostStep,
-            persona.as_deref(),
-            Some(&step.definition.name),
-            None,
-        );
-        let result = async {
-            let manifest_hooks = crate::orchestration::matching_vm_lifecycle_hooks(
-                HookEvent::PostStep,
-                &crate::value::json::vm_value_to_json(&Self::step_hook_payload(
-                    HookEvent::PostStep,
-                    persona.as_deref(),
-                    &step.definition.name,
-                    &step.definition.function,
-                    &step.args,
-                    Some(current.clone()),
-                )),
-            );
-            for hook in manifest_hooks {
-                let payload = Self::step_hook_payload(
-                    HookEvent::PostStep,
-                    persona.as_deref(),
-                    &step.definition.name,
-                    &step.definition.function,
-                    &step.args,
-                    Some(current.clone()),
-                );
-                let closure = hook.resolve(self).await?;
-                let raw = self.call_lifecycle_hook(&closure, payload).await?;
-                let (raw, effects) = crate::orchestration::collect_hook_effects_and_action(
-                    HookEvent::PostStep,
-                    raw,
-                    VmValue::Nil,
-                )?;
-                crate::orchestration::inject_hook_effects_into_current_session(effects)?;
-                current = Self::parse_step_post_hook_result(raw, current)?;
-            }
-            for hook in hooks {
-                let payload = Self::step_hook_payload(
-                    hook.event,
-                    persona.as_deref(),
-                    &step.definition.name,
-                    &step.definition.function,
-                    &step.args,
-                    Some(current.clone()),
-                );
-                let raw = self.call_lifecycle_hook(&hook.handler, payload).await?;
-                let (raw, effects) = crate::orchestration::collect_hook_effects_and_action(
-                    HookEvent::PostStep,
-                    raw,
-                    VmValue::Nil,
-                )?;
-                crate::orchestration::inject_hook_effects_into_current_session(effects)?;
-                current = Self::parse_step_post_hook_result(raw, current)?;
-            }
-            Ok::<VmValue, VmError>(current)
-        }
-        .await;
-        match result {
-            Ok(value) => {
-                crate::step_runtime::finish_active_step(step, "completed", None);
-                Ok(value)
-            }
-            Err(error) => {
-                crate::step_runtime::finish_active_step(step, "failed", Some(error.to_string()));
-                Err(error)
-            }
-        }
+        let runtime = Arc::clone(&self.runtime);
+        let call = runtime.finish_step(self, step, output);
+        drop(runtime);
+        call.await
     }
 
     pub(in crate::vm) async fn call_user_closure(
@@ -330,28 +66,6 @@ impl super::super::Vm {
             self.push_closure_frame(&closure, &args)?;
         }
         Ok(())
-    }
-
-    /// Box-pin'd to break the static recursion between `drive_until_frame_depth`
-    /// (the hot dispatch loop) and `call_closure` (the hot per-callback path):
-    /// a step's lifecycle hook is itself a closure, which re-enters the
-    /// dispatch loop, which may again pop a step frame and fire post-hooks.
-    /// Indirecting at this slow-path hook boundary keeps the recursion
-    /// satisfied while the per-element dispatch path stays free of
-    /// per-invocation heap allocation.
-    fn call_lifecycle_hook<'a>(
-        &'a mut self,
-        handler: &'a Arc<VmClosure>,
-        payload: VmValue,
-    ) -> Pin<Box<dyn Future<Output = Result<VmValue, VmError>> + Send + 'a>> {
-        Box::pin(async move {
-            let active_context = self.runtime.suspend_active_context();
-            let result = self
-                .call_closure_args(handler, CallArgs::One(&payload))
-                .await;
-            drop(active_context);
-            result
-        })
     }
 
     pub(in crate::vm::ops) fn stack_arg_start(&self, argc: usize) -> Result<usize, VmError> {
