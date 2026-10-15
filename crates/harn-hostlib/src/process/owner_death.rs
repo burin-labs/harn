@@ -174,7 +174,7 @@ pub(crate) fn prepare_guardian(
     payload_spec.configure_process_group = false;
     payload_spec.owner_death = super::OwnerDeathPolicy::None;
     #[cfg(target_os = "linux")]
-    let pinned = super::program_lookup::pinned_verifier(&payload_spec)?;
+    let pinned = super::program_lookup::pinned_verifier(&payload_spec, &[RULESET_FD])?;
     #[cfg(target_os = "linux")]
     let (prepared, confinement) = {
         let (command, env_closed, confinement) = harn_vm::process_sandbox::command_for_reexec(

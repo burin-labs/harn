@@ -35,10 +35,11 @@ impl SourceFixture {
 
     fn declaration(&self) -> (RunIntent, HostFacts) {
         let mut intent = intent();
-        intent.isolated_source_verifiers = vec![self.request.clone()];
+        intent.verifier_loaders = vec![self.request.clone().into()];
         let mut host = host_facts();
         host.approval_policy = unattended_policy(WorkspaceTrust::HostMaterialized);
-        host.admitted_source_verifiers.insert(self.request.clone());
+        host.admitted_verifier_loaders
+            .insert(self.request.clone().into());
         (intent, host)
     }
 }
@@ -147,6 +148,318 @@ fn ready(
 
 struct MultipleSourceExecutor(Vec<IsolatedPythonSourceVerifier>);
 
+#[derive(Clone)]
+struct ModuleExecutor {
+    request: crate::verifier_provenance::IsolatedPythonModuleVerifier,
+    background: bool,
+}
+
+impl ModuleExecutor {
+    async fn invoke(&self) -> Result<serde_json::Value, String> {
+        let mut command = vec![self.request.interpreter.display().to_string()];
+        command.extend(self.request.invocation_args());
+        let params = json_to_vm_value(&json!({
+            "mode": "argv", "argv": command,
+            "cwd": self.request.workspace, "env_mode": "replace", "env": {}, "timeout_ms": 10000,
+        }));
+        let operation = if self.background { "spawn" } else { "exec" };
+        let mut result = crate::stdlib::host::dispatch_host_operation(
+            "process",
+            operation,
+            params.as_dict().unwrap(),
+        )
+        .await
+        .map_err(|error| format!("{error:?}"))?;
+        if self.background {
+            let handle = result.as_dict().unwrap().get("handle_id").unwrap().clone();
+            let mut wait = crate::value::DictMap::new();
+            wait.insert("handle_id".into(), handle);
+            let completed =
+                crate::stdlib::host::dispatch_host_operation("process", "wait", &wait).await;
+            crate::stdlib::host::dispatch_host_operation("process", "release", &wait)
+                .await
+                .map_err(|error| format!("{error:?}"))?;
+            result = completed.map_err(|error| format!("{error:?}"))?;
+        }
+        Ok(vm_value_to_json(&result))
+    }
+}
+
+#[async_trait::async_trait]
+impl PreparedRunExecutor for ModuleExecutor {
+    type Output = serde_json::Value;
+    type Error = String;
+    async fn execute(&self, _: &AuthorityUse) -> Result<Self::Output, Self::Error> {
+        self.invoke().await
+    }
+}
+
+#[tokio::test]
+async fn module_and_package_verifiers_execute_the_baseline_through_the_real_process_builtin() {
+    use crate::verifier_provenance::{IsolatedPythonModuleVerifier, VerifierLoaderSpec};
+    for package in [false, true] {
+        for background in [false, true] {
+            let fixture = SourceFixture::new();
+            let root = &fixture.request.workspace;
+            let modules = root.join("modules");
+            std::fs::create_dir(&modules).unwrap();
+            let (runner, original) = if package {
+                let package = modules.join("runner");
+                std::fs::create_dir(&package).unwrap();
+                std::fs::write(package.join("__init__.py"), "VALUE = 'BASELINE_PACKAGE'\n")
+                    .unwrap();
+                (package.join("__main__.py"), "from . import VALUE\nimport runpy, sys\nprint(VALUE)\nrunpy.run_path(sys.argv[1], run_name='__main__')\n")
+            } else {
+                (modules.join("runner.py"), "import runpy, sys\nprint('BASELINE_MODULE')\nrunpy.run_path(sys.argv[1], run_name='__main__')\n")
+            };
+            std::fs::write(&runner, original).unwrap();
+            let declaration = IsolatedPythonModuleVerifier {
+                id: "module-runner".into(),
+                interpreter: fixture.request.interpreter.clone(),
+                module: "runner".into(),
+                search_roots: vec![root.clone(), modules],
+                dependencies: Vec::new(),
+                workspace: root.clone(),
+                args: fixture.request.args.clone(),
+            };
+            let spec = VerifierLoaderSpec::PythonModule(declaration.clone());
+            let (mut intent, mut host) = fixture.declaration();
+            intent.verifier_loaders = vec![spec.clone()];
+            host.admitted_verifier_loaders = BTreeSet::from([spec]);
+            let run = PreparedRun::with_clock(
+                ModuleExecutor {
+                    request: declaration,
+                    background,
+                },
+                Arc::new(MemoryAuthorityReceiptSink::default()),
+                Arc::new(|| NOW_MS),
+            );
+            let prepare = || match run.prepare(intent.clone(), host.clone()) {
+                PreparationOutcome::Ready {
+                    authority_lease, ..
+                } => authority_lease,
+                other => panic!("module preparation failed: {other:?}"),
+            };
+            let first = prepare();
+            // Both a changed selected runner and a newly introduced earlier shadow
+            // exit zero normally. Neither can replace the captured execution.
+            std::fs::write(&runner, "print('CHANGED_RUNNER')\n").unwrap();
+            std::fs::write(root.join("runner.py"), "print('NEW_RUNNER')\n").unwrap();
+            let control = std::process::Command::new(&fixture.request.interpreter)
+                .args(["-S", "-m", "runner"])
+                .env_clear()
+                .current_dir(root)
+                .output()
+                .unwrap();
+            assert!(control.status.success());
+            assert!(String::from_utf8_lossy(&control.stdout).contains("NEW_RUNNER"));
+            let output = match run.execute(first).await {
+                ExecutionOutcome::Completed { output, .. } => output,
+                other => panic!("baseline execution failed: {other:?}"),
+            };
+            assert_eq!(
+                output["status"],
+                if background { "exited" } else { "completed" }
+            );
+            assert_eq!(output["exit_code"], 1);
+            assert!(output["stderr"]
+                .as_str()
+                .unwrap()
+                .contains("KNOWN_FAILING_ASSERTION"));
+            assert!(output["stdout"].as_str().unwrap().contains("BASELINE_"));
+            assert_eq!(
+                output["verifier_receipt"]["executed_material"]["disposition"],
+                "unchanged"
+            );
+            let digest = output["verifier_receipt"]["baseline_sha256"].clone();
+            std::fs::write(&fixture.request.args[0], "assert 2 + 2 == 4\n").unwrap();
+            let second = match run.execute(prepare()).await {
+                ExecutionOutcome::Completed { output, .. } => output,
+                other => panic!("refreshed baseline execution failed: {other:?}"),
+            };
+            assert_eq!(second["exit_code"], 0);
+            assert_eq!(second["verifier_receipt"]["baseline_sha256"], digest);
+            assert!(!second["stdout"].as_str().unwrap().contains("RUNNER"));
+        }
+    }
+}
+
+#[test]
+fn absent_baseline_cannot_be_recaptured_after_goal_refresh() {
+    let fixture = SourceFixture::new();
+    std::fs::remove_file(&fixture.request.source).unwrap();
+    let run = source_run(fixture.request.clone());
+    let (intent, host) = fixture.declaration();
+    let first = run.prepare(intent.clone(), host.clone());
+    assert!(matches!(first, PreparationOutcome::Blocked { .. }));
+    std::fs::write(&fixture.request.source, "print('NEW_RUNNER')\n").unwrap();
+    assert!(matches!(
+        run.prepare(intent, host),
+        PreparationOutcome::Blocked { .. }
+    ));
+}
+
+#[test]
+fn identical_invocations_with_different_material_have_different_authority() {
+    let fixture = SourceFixture::new();
+    let (intent, host) = fixture.declaration();
+    let first_run = source_run(fixture.request.clone());
+    let first = ready(&first_run, intent.clone(), host.clone());
+    std::fs::write(
+        &fixture.request.source,
+        "print('DIFFERENT_ADMITTED_RUNNER')\n",
+    )
+    .unwrap();
+    let second_run = source_run(fixture.request.clone());
+    let second = ready(&second_run, intent.clone(), host.clone());
+    assert_eq!(first.plan_fingerprint(), second.plan_fingerprint());
+    assert_ne!(first.fingerprint(), second.fingerprint());
+    assert_ne!(first.verifier_baselines(), second.verifier_baselines());
+    let refreshed = ready(&first_run, intent, host);
+    assert_eq!(first.fingerprint(), refreshed.fingerprint());
+    assert_eq!(first.verifier_baselines(), refreshed.verifier_baselines());
+}
+
+#[test]
+fn loader_observations_distinguish_workspace_changes_from_execution_material() {
+    use crate::verifier_provenance::{PreparedVerifier, VerifierLoaderObservation};
+    let fixture = SourceFixture::new();
+    let captured = PreparedVerifier::capture(fixture.request.clone().into()).unwrap();
+    assert_eq!(
+        captured.observe_workspace(),
+        VerifierLoaderObservation::Unchanged
+    );
+    std::fs::write(&fixture.request.source, "print('REPLACEMENT')\n").unwrap();
+    assert_eq!(
+        captured.observe_workspace(),
+        VerifierLoaderObservation::Changed {
+            paths: vec![fixture.request.source.clone()]
+        }
+    );
+    std::fs::remove_file(&fixture.request.source).unwrap();
+    assert_eq!(
+        captured.observe_workspace(),
+        VerifierLoaderObservation::Absent {
+            paths: vec![fixture.request.source.clone()]
+        }
+    );
+    assert!(matches!(
+        PreparedVerifier::capture(fixture.request.into()),
+        Err(VerifierLoaderObservation::Absent { .. })
+    ));
+}
+
+#[tokio::test]
+async fn canonical_exec_and_spawn_refuse_exit_zero_without_the_declared_entrypoint() {
+    use crate::verifier_provenance::{IsolatedPythonModuleVerifier, VerifierLoaderSpec};
+    for background in [false, true] {
+        for exits_in_package in [false, true] {
+            let fixture = SourceFixture::new();
+            let root = &fixture.request.workspace;
+            let package = root.join("runner");
+            std::fs::create_dir(&package).unwrap();
+            std::fs::write(
+                package.join("__init__.py"),
+                if exits_in_package {
+                    "raise SystemExit(0)\n"
+                } else {
+                    ""
+                },
+            )
+            .unwrap();
+            std::fs::write(
+                package.join("__main__.py"),
+                "assert False, 'ENTRYPOINT_MUST_RUN'\n",
+            )
+            .unwrap();
+            let declaration = IsolatedPythonModuleVerifier {
+                id: "missing-witness".into(),
+                interpreter: if exits_in_package {
+                    fixture.request.interpreter.clone()
+                } else {
+                    Path::new("/usr/bin/true").canonicalize().unwrap()
+                },
+                module: "runner".into(),
+                search_roots: vec![root.clone()],
+                dependencies: Vec::new(),
+                workspace: root.clone(),
+                args: Vec::new(),
+            };
+            let spec = VerifierLoaderSpec::PythonModule(declaration.clone());
+            let (mut intent, mut host) = fixture.declaration();
+            intent.verifier_loaders = vec![spec.clone()];
+            host.admitted_verifier_loaders = BTreeSet::from([spec]);
+            let run = PreparedRun::with_clock(
+                ModuleExecutor {
+                    request: declaration,
+                    background,
+                },
+                Arc::new(MemoryAuthorityReceiptSink::default()),
+                Arc::new(|| NOW_MS),
+            );
+            let lease = match run.prepare(intent, host) {
+                PreparationOutcome::Ready {
+                    authority_lease, ..
+                } => authority_lease,
+                other => panic!("negative control must reach execution: {other:?}"),
+            };
+            match run.execute(lease).await {
+                ExecutionOutcome::ExecutorFailed { error, .. } => {
+                    assert!(error.contains("execution is unmeasured"), "{error}")
+                }
+                other => panic!("exit zero without the entrypoint cannot qualify: {other:?}"),
+            }
+        }
+    }
+}
+
+#[test]
+fn module_capture_does_not_execute_workspace_import_or_startup_code() {
+    use crate::verifier_provenance::{
+        IsolatedPythonModuleVerifier, PreparedVerifier, VerifierLoaderSpec,
+    };
+    let fixture = SourceFixture::new();
+    let root = &fixture.request.workspace;
+    let marker = root.join("startup-executed");
+    let startup = format!(
+        "open({:?}, 'w').write('startup')\n",
+        marker.display().to_string()
+    );
+    std::fs::write(root.join("sitecustomize.py"), startup).unwrap();
+    std::fs::write(root.join("runner.py"), "assert False\n").unwrap();
+    let request = IsolatedPythonModuleVerifier {
+        id: "startup-control".into(),
+        interpreter: fixture.request.interpreter.clone(),
+        module: "runner".into(),
+        search_roots: vec![root.clone()],
+        dependencies: Vec::new(),
+        workspace: root.clone(),
+        args: Vec::new(),
+    };
+    let captured = PreparedVerifier::capture(VerifierLoaderSpec::PythonModule(request)).unwrap();
+    assert_eq!(
+        captured.observe_workspace(),
+        crate::verifier_provenance::VerifierLoaderObservation::Unchanged
+    );
+    assert!(!marker.exists());
+    let probe = std::process::Command::new(&fixture.request.interpreter)
+        .args([
+            "-c",
+            "import importlib.util; print(importlib.util.find_spec('runner').origin)",
+        ])
+        .env_clear()
+        .env("PYTHONPATH", root)
+        .current_dir(root)
+        .output()
+        .unwrap();
+    assert!(probe.status.success());
+    assert!(
+        marker.exists(),
+        "the independent-probe control must execute startup code"
+    );
+    assert!(String::from_utf8_lossy(&probe.stdout).contains("runner.py"));
+}
+
 #[async_trait::async_trait]
 impl PreparedRunExecutor for MultipleSourceExecutor {
     type Output = Vec<serde_json::Value>;
@@ -177,8 +490,8 @@ async fn two_admitted_invocations_sharing_a_source_execute_their_own_arguments()
     std::fs::write(&second_test, "print('SECOND_ADMITTED_SOURCE_REACHED')\n").unwrap();
     second.args = vec![second_test.display().to_string()];
     let (mut intent, mut host) = fixture.declaration();
-    intent.isolated_source_verifiers = vec![first.clone(), second.clone()];
-    host.admitted_source_verifiers = BTreeSet::from([first.clone(), second.clone()]);
+    intent.verifier_loaders = vec![first.clone().into(), second.clone().into()];
+    host.admitted_verifier_loaders = BTreeSet::from([first.clone().into(), second.clone().into()]);
     let run = PreparedRun::with_clock(
         MultipleSourceExecutor(vec![first, second]),
         Arc::new(MemoryAuthorityReceiptSink::default()),
@@ -193,13 +506,13 @@ async fn two_admitted_invocations_sharing_a_source_execute_their_own_arguments()
     match run.execute(lease).await {
         ExecutionOutcome::Completed { output, .. } => {
             assert_eq!(output.len(), 2);
-            assert_eq!(output[0]["source_verifier_id"], "a-first");
+            assert_eq!(output[0]["verifier_receipt"]["verifier_id"], "a-first");
             assert_eq!(output[0]["status"], 1);
             assert!(output[0]["stderr"]
                 .as_str()
                 .unwrap()
                 .contains("KNOWN_FAILING_ASSERTION"));
-            assert_eq!(output[1]["source_verifier_id"], "z-second");
+            assert_eq!(output[1]["verifier_receipt"]["verifier_id"], "z-second");
             assert_eq!(output[1]["status"], 0);
             assert!(output[1]["stdout"]
                 .as_str()
@@ -294,7 +607,7 @@ async fn prepared_source_verifier_executes_original_bytes_after_interpreter_and_
         ExecutionOutcome::Completed { output, receipt } => {
             assert!(receipt.executor_invoked);
             let first = &output["first"];
-            assert_eq!(first["source_verifier_id"], "calculation");
+            assert_eq!(first["verifier_receipt"]["verifier_id"], "calculation");
             assert_eq!(first["status"], 1);
             assert!(first["stderr"]
                 .as_str()
@@ -302,7 +615,7 @@ async fn prepared_source_verifier_executes_original_bytes_after_interpreter_and_
                 .contains("KNOWN_FAILING_ASSERTION"));
             assert!(!first["stdout"].as_str().unwrap().contains("SHIM_BYPASS"));
             let second = &output["second"];
-            assert_eq!(second["source_verifier_id"], "calculation");
+            assert_eq!(second["verifier_receipt"]["verifier_id"], "calculation");
             assert_eq!(second["status"], 0);
             assert_eq!(second["success"], true);
         }
@@ -318,7 +631,7 @@ fn prepared_source_verifier_refuses_missing_host_admission_and_forged_baseline_f
     let fixture = SourceFixture::new();
     let run = source_run(fixture.request.clone());
     let (intent, mut host) = fixture.declaration();
-    host.admitted_source_verifiers.clear();
+    host.admitted_verifier_loaders.clear();
     assert!(
         matches!(run.prepare(intent, host), PreparationOutcome::Blocked { diagnostics, .. }
         if diagnostics.iter().any(|item| item.code == "verifier_unmeasured"))
@@ -347,9 +660,15 @@ async fn concurrent_prepared_verifiers_keep_their_own_native_material_across_wor
     for result in <[_; 2]>::from(results) {
         match result {
             ExecutionOutcome::Completed { output, .. } => {
-                assert_eq!(output["first"]["source_verifier_id"], "calculation");
+                assert_eq!(
+                    output["first"]["verifier_receipt"]["verifier_id"],
+                    "calculation"
+                );
                 assert_eq!(output["first"]["status"], 1);
-                assert_eq!(output["second"]["source_verifier_id"], "calculation");
+                assert_eq!(
+                    output["second"]["verifier_receipt"]["verifier_id"],
+                    "calculation"
+                );
                 assert_eq!(output["second"]["status"], 0);
             }
             ExecutionOutcome::ExecutorFailed { error, .. }
@@ -390,7 +709,12 @@ async fn prepared_source_verifier_session_turns_keep_original_material_and_resta
         consumer: binding.consumer,
     };
     let mut forged = lease.clone();
-    forged.intent.isolated_source_verifiers[0].args = vec!["forged-target.py".to_string()];
+    let crate::verifier_provenance::VerifierLoaderSpec::PythonSource(request) =
+        &mut forged.intent.verifier_loaders[0]
+    else {
+        panic!("source loader fixture");
+    };
+    request.args = vec!["forged-target.py".to_string()];
     assert!(
         matches!(session.attach(forged, host.clone(), attachment.clone()), Err(PreparedSessionUpdate::Blocked { diagnostics, .. })
         if diagnostics.iter().any(|item| item.code == "prepared_session_intent_drift"))

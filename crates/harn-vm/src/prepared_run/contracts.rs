@@ -382,7 +382,7 @@ pub enum AuthorityRequirement {
 pub struct RunIntent {
     pub intent_id: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub isolated_source_verifiers: Vec<crate::verifier_provenance::IsolatedPythonSourceVerifier>,
+    pub verifier_loaders: Vec<crate::verifier_provenance::VerifierLoaderSpec>,
     pub capability_policy: CapabilityPolicy,
     #[serde(default)]
     pub network: Vec<NetworkRequirement>,
@@ -408,8 +408,7 @@ pub struct RunIntent {
 #[derive(Clone, Debug)]
 pub struct HostFacts {
     pub capability_ceiling: CapabilityPolicy,
-    pub admitted_source_verifiers:
-        BTreeSet<crate::verifier_provenance::IsolatedPythonSourceVerifier>,
+    pub admitted_verifier_loaders: BTreeSet<crate::verifier_provenance::VerifierLoaderSpec>,
     pub approval_policy: RunApprovalPolicy,
     pub approved_batches: BTreeMap<String, AuthorityDecider>,
     pub net_policy: crate::harness_net::NetPolicy,
@@ -429,7 +428,7 @@ pub struct RunAuthorityPlanV1 {
     pub schema: String,
     pub intent_id: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub isolated_source_verifiers: Vec<crate::verifier_provenance::IsolatedPythonSourceVerifier>,
+    pub verifier_loaders: Vec<crate::verifier_provenance::VerifierLoaderSpec>,
     pub capability_policy: CapabilityPolicy,
     pub requirements: Vec<AuthorityRequirement>,
     pub budget: RunBudget,
@@ -550,6 +549,27 @@ pub struct AuthorityLease {
 }
 
 impl AuthorityLease {
+    pub fn verifier_baselines(&self) -> BTreeMap<String, String> {
+        self.source_verifiers
+            .iter()
+            .map(|(id, verifier)| (id.clone(), verifier.baseline_sha256().to_string()))
+            .collect()
+    }
+
+    pub(crate) fn verifier_observations(
+        &self,
+    ) -> BTreeMap<String, crate::verifier_provenance::VerifierLoaderObservation> {
+        self.source_verifiers
+            .keys()
+            .map(|id| {
+                (
+                    id.clone(),
+                    crate::verifier_provenance::VerifierLoaderObservation::Unchanged,
+                )
+            })
+            .collect()
+    }
+
     pub fn fingerprint(&self) -> &str {
         &self.lease_fingerprint
     }

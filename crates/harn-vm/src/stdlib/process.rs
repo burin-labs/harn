@@ -731,7 +731,7 @@ struct CapturedSpawn<'a> {
 
 /// Result of [`run_captured_spawn`].
 struct CapturedRun {
-    source_verifier_id: Option<String>,
+    verifier_receipt: Option<crate::verifier_provenance::VerifierExecutionReceipt>,
     output: std::process::Output,
     timed_out: bool,
     interrupted: bool,
@@ -784,7 +784,6 @@ fn run_captured_spawn(spec: CapturedSpawn<'_>) -> Result<CapturedRun, VmError> {
     let verifier =
         crate::prepared_run::prepared_source_verifier(&resolved_cmd, spec.args, &actual_cwd)
             .map_err(|error| VmError::Thrown(VmValue::string(format!("{label}: {error}"))))?;
-    let mut source_verifier_id = verifier.as_ref().map(|value| value.request().id.clone());
     #[cfg(target_os = "linux")]
     let pinned = verifier
         .as_ref()
@@ -798,7 +797,10 @@ fn run_captured_spawn(spec: CapturedSpawn<'_>) -> Result<CapturedRun, VmError> {
             (&launch.program, launch.args.as_slice())
         });
     #[cfg(not(target_os = "linux"))]
-    let (program, arguments) = (&resolved_cmd, spec.args);
+    let (program, arguments) = {
+        let _ = verifier;
+        (&resolved_cmd, spec.args)
+    };
     let mut command = std::process::Command::new(program);
     command.args(arguments);
     if let Some(cwd) = spec.cwd {
@@ -908,18 +910,19 @@ fn run_captured_spawn(spec: CapturedSpawn<'_>) -> Result<CapturedRun, VmError> {
         .map(|rx| crate::op_interrupt::drain_captured_pipe(&rx, killed, child_pid))
         .unwrap_or_default();
 
-    if timed_out || interrupted {
-        source_verifier_id = None;
+    #[cfg(target_os = "linux")]
+    let verifier_receipt = if timed_out || interrupted {
+        None
     } else {
-        #[cfg(target_os = "linux")]
-        if let Some(witness) = witness {
-            witness
-                .validate()
-                .map_err(|error| VmError::Thrown(VmValue::string(format!("{label}: {error}"))))?;
-        }
-    }
+        witness
+            .map(|witness| witness.receipt())
+            .transpose()
+            .map_err(|error| VmError::Thrown(VmValue::string(format!("{label}: {error}"))))?
+    };
+    #[cfg(not(target_os = "linux"))]
+    let verifier_receipt = None;
     Ok(CapturedRun {
-        source_verifier_id,
+        verifier_receipt,
         output: std::process::Output {
             status,
             stdout,

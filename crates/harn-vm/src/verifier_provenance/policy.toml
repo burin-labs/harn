@@ -1,0 +1,5 @@
+# Resource ceilings for native capture, independent of loader implementation.
+interpreter_bytes = 67108864
+source_bytes = 1048576
+module_count = 1024
+bundle_bytes = 16777216

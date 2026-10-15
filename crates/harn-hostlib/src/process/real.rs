@@ -228,7 +228,7 @@ pub(crate) fn prepare_command(
 ) -> Result<PreparedSpawn, ProcessError> {
     validate_program(spec)?;
     #[cfg(target_os = "linux")]
-    let pinned = super::program_lookup::pinned_verifier(spec)?;
+    let pinned = super::program_lookup::pinned_verifier(spec, &[])?;
     #[cfg(target_os = "linux")]
     let (program, args) = pinned
         .as_ref()
@@ -565,7 +565,14 @@ pub fn replace_current_process(spec: SpawnSpec) -> Result<std::convert::Infallib
     let inherited_cleanup_token = std::env::var(harn_vm::op_interrupt::PROCESS_CLEANUP_TOKEN_ENV)
         .ok()
         .filter(|token| !token.is_empty());
-    let mut command = prepare_command(&spec, inherited_cleanup_token)?.command;
+    let prepared = prepare_command(&spec, inherited_cleanup_token)?;
+    if prepared.verifier_witness.is_some() {
+        return Err(ProcessError::InvalidArgv(
+            "prepared verifier completion cannot be observed after replacing its owner process"
+                .into(),
+        ));
+    }
+    let mut command = prepared.command;
     // `exec` replaces this process on success, so the only value it can return
     // is an error. It loses the same race for the same reason, so it crosses
     // the window the same way.
@@ -579,6 +586,7 @@ pub fn replace_current_process(spec: SpawnSpec) -> Result<std::convert::Infallib
 }
 
 struct RealProcess {
+    verifier_receipt: Option<harn_vm::verifier_provenance::VerifierExecutionReceipt>,
     verifier_witness: Option<harn_vm::verifier_provenance::VerifierExecutionWitness>,
     missing_program: Option<String>,
     pid: u32,
@@ -618,6 +626,7 @@ fn real_process(
     });
     RealProcess {
         verifier_witness: None,
+        verifier_receipt: None,
         missing_program: None,
         pid,
         pgid,
@@ -638,6 +647,13 @@ fn real_process(
 }
 
 impl RealProcess {
+    fn witnessed_exit(&mut self, status: std::process::ExitStatus) -> io::Result<ExitStatus> {
+        if let Some(witness) = self.verifier_witness.as_ref() {
+            self.verifier_receipt = Some(witness.receipt()?);
+        }
+        Ok(decode_status(status))
+    }
+
     fn ensure_pipes_taken(&mut self) {
         if let Some(child) = self.child.as_mut() {
             if self.owner_liveness.is_none() && self.stdin.is_none() && !self.stdin_taken {
@@ -654,6 +670,12 @@ impl RealProcess {
 }
 
 impl ProcessHandle for RealProcess {
+    fn verifier_execution_receipt(
+        &self,
+    ) -> Option<harn_vm::verifier_provenance::VerifierExecutionReceipt> {
+        self.verifier_receipt.clone()
+    }
+
     fn missing_program(&self) -> Option<&str> {
         self.missing_program.as_deref()
     }
@@ -712,10 +734,7 @@ impl ProcessHandle for RealProcess {
         loop {
             match child.try_wait()? {
                 Some(status) => {
-                    if let Some(witness) = self.verifier_witness.as_ref() {
-                        witness.validate()?;
-                    }
-                    return Ok(WaitOutcome::Exited(decode_status(status)));
+                    return self.witnessed_exit(status).map(WaitOutcome::Exited);
                 }
                 None => {
                     if interrupt() {
@@ -779,7 +798,7 @@ impl ProcessHandle for RealProcess {
             .as_mut()
             .ok_or_else(|| io::Error::other("child already reaped"))?;
         let status = child.wait()?;
-        Ok(decode_status(status))
+        self.witnessed_exit(status)
     }
 }
 

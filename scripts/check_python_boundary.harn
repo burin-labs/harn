@@ -29,6 +29,14 @@ const PYTHON_ALLOWLIST = [
   },
   {
     kind: "exact",
+    pattern: "crates/harn-vm/src/verifier_provenance/python_bootstrap.py",
+    category: "foreign-runtime-adapter",
+    owner: "Prepared verifier loader",
+    reason:
+      "Python import protocol adapter executes host-captured source bytes in the prepared child.",
+  },
+  {
+    kind: "exact",
     pattern: "scripts/tests/fixtures/release_publication_github.py",
     category: "subprocess-fixture",
     owner: "Published release correction tag reader",

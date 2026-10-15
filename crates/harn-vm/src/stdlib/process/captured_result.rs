@@ -24,8 +24,13 @@ pub(super) fn captured_run_to_value(run: &CapturedRun) -> VmValue {
     result.insert("success".to_string(), VmValue::Bool(success));
     result.insert("timed_out".to_string(), VmValue::Bool(run.timed_out));
     result.insert("duration_ms".to_string(), VmValue::Int(run.duration_ms));
-    if let Some(id) = &run.source_verifier_id {
-        result.put_str("source_verifier_id", id);
+    if let Some(receipt) = &run.verifier_receipt {
+        result.insert(
+            "verifier_receipt".into(),
+            crate::stdlib::json_to_vm_value(
+                &serde_json::to_value(receipt).expect("typed verifier receipt"),
+            ),
+        );
     }
     VmValue::dict(result)
 }

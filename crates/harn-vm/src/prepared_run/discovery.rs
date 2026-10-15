@@ -358,6 +358,8 @@ fn discovery_receipt(lease: &AuthorityLease, observed_at_ms: u64) -> RunAuthorit
         .cloned()
         .collect::<Vec<_>>();
     RunAuthorityReceipt {
+        verifier_baselines: lease.verifier_baselines(),
+        verifier_observations: lease.verifier_observations(),
         schema: RUN_AUTHORITY_RECEIPT_SCHEMA.to_string(),
         stage: AuthorityReceiptStage::Discovery,
         status: AuthorityReceiptStatus::Ready,

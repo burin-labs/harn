@@ -363,4 +363,36 @@ mod tests {
                 .requires_clean_shell_environment
         );
     }
+
+    #[test]
+    fn literal_loader_inspection_does_not_authorize_shell_conversion() {
+        for source in [
+            "PYTHONPATH=/workspace python -m pytest test_calc.py",
+            "env PYTHONPATH=/workspace python -m pytest test_calc.py",
+        ] {
+            let plan = plan_posix_command(source).unwrap();
+            assert_eq!(plan.program, "python");
+            assert_eq!(plan.environment["PYTHONPATH"], "/workspace");
+            assert_eq!(
+                plan.literal_argv.as_deref(),
+                Some(
+                    ["python", "-m", "pytest", "test_calc.py"]
+                        .map(String::from)
+                        .as_slice()
+                ),
+            );
+            assert!(
+                plan.argv.is_none(),
+                "inspection cannot authorize conversion: {source}"
+            );
+        }
+        for source in ["python -m pytest > output", "python -m $MODULE"] {
+            let plan = plan_posix_command(source).unwrap();
+            assert!(
+                plan.literal_argv.is_none(),
+                "ambiguous loader invocation: {source}"
+            );
+            assert!(plan.argv.is_none());
+        }
+    }
 }

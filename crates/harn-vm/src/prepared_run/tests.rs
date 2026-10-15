@@ -195,7 +195,7 @@ fn capability_policy() -> CapabilityPolicy {
 fn intent() -> RunIntent {
     RunIntent {
         intent_id: "steel-thread".to_string(),
-        isolated_source_verifiers: Vec::new(),
+        verifier_loaders: Vec::new(),
         capability_policy: capability_policy(),
         network: vec![network("api.example.test")],
         secrets: vec![provider_secret("openai")],
@@ -262,7 +262,7 @@ fn net_policy() -> NetPolicy {
 fn host_facts() -> HostFacts {
     HostFacts {
         capability_ceiling: capability_policy(),
-        admitted_source_verifiers: BTreeSet::new(),
+        admitted_verifier_loaders: BTreeSet::new(),
         approval_policy: run_approval_policy(
             RunInteractivity::NonInteractive,
             ApprovalAvailability::Available,

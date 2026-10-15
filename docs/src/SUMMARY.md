@@ -217,6 +217,7 @@
 - [Portable workflow bundles](./workflow-bundles.md)
 - [Typed task-plan IR (experimental)](./task-plan-ir.md)
 - [Prepared-run authority](./prepared-run.md)
+  - [Prepared verifier loaders](./verifier-loaders.md)
 - [Local workflow supervisor](./workflow-supervisor.md)
 - [Governed Code Mode](./code-mode.md)
 - [Team learning and context packs](./team-learning.md)

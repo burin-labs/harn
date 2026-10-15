@@ -588,7 +588,7 @@ impl<E> PreparedSession<E> {
         let authority_lease = if let Some(authority_lease) = local {
             authority_lease
         } else {
-            if !lease.intent.isolated_source_verifiers.is_empty() {
+            if !lease.intent.verifier_loaders.is_empty() {
                 return Err(blocked_update(
                     &lease.session_id,
                     "verifier_baseline_unmeasured",

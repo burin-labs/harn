@@ -31,6 +31,7 @@ pub trait PreparedRunExecutor: Send + Sync {
 }
 
 pub struct PreparedRun<E> {
+    verifier_baselines: crate::verifier_provenance::VerifierBaselineRegistry,
     pub(super) executor: E,
     pub(super) receipts: Arc<dyn AuthorityReceiptSink>,
     pub(super) now_ms: Arc<dyn Fn() -> u64 + Send + Sync>,
@@ -41,6 +42,7 @@ pub struct PreparedRun<E> {
 impl<E> PreparedRun<E> {
     pub fn new(executor: E, receipts: Arc<dyn AuthorityReceiptSink>) -> Self {
         Self {
+            verifier_baselines: Default::default(),
             executor,
             receipts,
             now_ms: Arc::new(|| crate::clock_mock::now_ms().max(0) as u64),
@@ -60,6 +62,7 @@ impl<E> PreparedRun<E> {
         now_ms: Arc<dyn Fn() -> u64 + Send + Sync>,
     ) -> Self {
         Self {
+            verifier_baselines: Default::default(),
             executor,
             receipts,
             now_ms,
@@ -116,7 +119,7 @@ impl<E> PreparedRun<E> {
             }
         }
         let requested = receipted_requirements(&plan.requirements);
-        let startup = RunAuthorityReceipt::startup(
+        let mut startup = RunAuthorityReceipt::startup(
             plan.intent_id.clone(),
             plan_fingerprint.clone(),
             requested.clone(),
@@ -136,15 +139,27 @@ impl<E> PreparedRun<E> {
 
         let mut diagnostics = validate_host_facts(&plan, &host_facts, now_ms);
         let mut source_verifiers = BTreeMap::new();
-        for request in &plan.isolated_source_verifiers {
-            let captured = if !host_facts.admitted_source_verifiers.contains(request) {
-                Err("isolated source verifier has no exact host admission".to_string())
+        for request in &plan.verifier_loaders {
+            let captured = if !host_facts.admitted_verifier_loaders.contains(request) {
+                Err(
+                    crate::verifier_provenance::VerifierLoaderObservation::Refused {
+                        reason: "verifier has no exact host admission".to_string(),
+                    },
+                )
             } else {
-                crate::verifier_provenance::PreparedVerifier::capture(request.clone())
+                self.verifier_baselines.capture(request.clone())
             };
             match captured {
-                Ok(verifier) if !source_verifiers.contains_key(&request.id) => {
-                    source_verifiers.insert(request.id.clone(), Arc::new(verifier));
+                Ok(verifier) if !source_verifiers.contains_key(request.id()) => {
+                    startup.verifier_baselines.insert(
+                        request.id().to_string(),
+                        verifier.baseline_sha256().to_string(),
+                    );
+                    startup.verifier_observations.insert(
+                        request.id().to_string(),
+                        crate::verifier_provenance::VerifierLoaderObservation::Unchanged,
+                    );
+                    source_verifiers.insert(request.id().to_string(), verifier);
                 }
                 Ok(_) => diagnostics.push(diagnostic(
                     "verifier_duplicate_id",
@@ -152,12 +167,17 @@ impl<E> PreparedRun<E> {
                     None,
                     "Declare each host-admitted verifier exactly once.",
                 )),
-                Err(error) => diagnostics.push(diagnostic(
-                    "verifier_unmeasured",
-                    error,
-                    None,
-                    "Admit a supported isolated source verifier before executor mutation.",
-                )),
+                Err(error) => {
+                    startup
+                        .verifier_observations
+                        .insert(request.id().to_string(), error.clone());
+                    diagnostics.push(diagnostic(
+                        "verifier_unmeasured",
+                        format!("{error:?}"),
+                        None,
+                        "Admit a supported isolated source verifier before executor mutation.",
+                    ));
+                }
             }
         }
         let mut policy_decisions = Vec::new();
@@ -286,6 +306,15 @@ impl<E> PreparedRun<E> {
             ),
         )
         .expect("authority lease inputs are serializable");
+        let lease_fingerprint = if startup.verifier_baselines.is_empty() {
+            lease_fingerprint
+        } else {
+            fingerprint(
+                "harn verifier authority lease v1",
+                &(&lease_fingerprint, &startup.verifier_baselines),
+            )
+            .expect("verifier baseline identities are serializable")
+        };
         let lease = AuthorityLease {
             source_verifiers,
             lease_fingerprint: lease_fingerprint.clone(),
@@ -631,15 +660,18 @@ impl AuthorityUse {
         args: &[String],
         cwd: &Path,
     ) -> Result<Option<Arc<crate::verifier_provenance::PreparedVerifier>>, String> {
-        if (self.now_ms)() > self.lease.expires_at_ms {
-            return Err("prepared verifier authority expired".to_string());
+        if self.lease.source_verifiers.is_empty() {
+            return Ok(None);
         }
         if let Some(verifier) = self
             .lease
             .source_verifiers
             .values()
-            .find(|verifier| verifier.request().matches(program, args, cwd))
+            .find(|verifier| verifier.matches(program, args, cwd))
         {
+            if (self.now_ms)() > self.lease.expires_at_ms {
+                return Err("prepared verifier authority expired".to_string());
+            }
             return Ok(Some(verifier.clone()));
         }
         let plan = crate::shells::plan_invocation(program, args);
@@ -762,6 +794,8 @@ impl AuthorityUse {
             .cloned()
             .collect::<Vec<_>>();
         let mut receipt = RunAuthorityReceipt {
+            verifier_baselines: self.lease.verifier_baselines(),
+            verifier_observations: self.lease.verifier_observations(),
             schema: RUN_AUTHORITY_RECEIPT_SCHEMA.to_string(),
             stage: AuthorityReceiptStage::Terminal,
             status: if completed {
@@ -798,7 +832,7 @@ impl AuthorityUse {
 }
 
 pub(super) fn plan_from_intent(mut intent: RunIntent) -> RunAuthorityPlanV1 {
-    intent.isolated_source_verifiers.sort();
+    intent.verifier_loaders.sort();
     normalize_policy(&mut intent.capability_policy);
     intent.network.sort();
     intent.network.dedup();
@@ -873,7 +907,7 @@ pub(super) fn plan_from_intent(mut intent: RunIntent) -> RunAuthorityPlanV1 {
     RunAuthorityPlanV1 {
         schema: RUN_AUTHORITY_PLAN_SCHEMA.to_string(),
         intent_id: intent.intent_id.trim().to_string(),
-        isolated_source_verifiers: intent.isolated_source_verifiers,
+        verifier_loaders: intent.verifier_loaders,
         capability_policy: intent.capability_policy,
         requirements,
         budget: intent.budget,
