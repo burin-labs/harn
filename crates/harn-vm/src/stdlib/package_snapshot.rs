@@ -1,4 +1,4 @@
-use crate::native_vm::NativeBuiltinCtxExt;
+use crate::NativeBuiltinCtxExt;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};

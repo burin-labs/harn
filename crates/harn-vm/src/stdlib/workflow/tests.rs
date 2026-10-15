@@ -1,13 +1,13 @@
 use super::artifact::{load_run_tree, snapshot_trace_spans};
 use super::stage::{execute_stage_attempts, replay_stage};
 use super::state::{prepare_workflow_state, reset_workflow_run_states, workflow_run_state_count};
-use crate::native_vm::NativeBuiltinCtxExt;
 use crate::orchestration::{
     save_run_record, stage_verification_contracts, verification_contract_from_verify,
     workflow_verification_contracts, RunChildRecord, RunExecutionRecord, RunRecord, RunStageRecord,
     VerificationContract, WorkflowGraph, WorkflowNode,
 };
 use crate::tracing::{set_tracing_enabled, span_end, span_start, SpanKind};
+use crate::NativeBuiltinCtxExt;
 
 #[test]
 fn load_run_tree_recurses_into_child_runs() {

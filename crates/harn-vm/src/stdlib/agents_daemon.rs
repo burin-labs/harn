@@ -1,6 +1,6 @@
-use crate::native_vm::NativeBuiltinCtxExt;
 use crate::native_vm::NativeVmState;
 use crate::value::VmDictExt;
+use crate::NativeBuiltinCtxExt;
 use crate::NativeVmExt;
 use std::cell::RefCell;
 use std::collections::{BTreeMap, VecDeque};

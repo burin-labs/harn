@@ -1,5 +1,5 @@
 use super::{agent_primitive_denied_tool, host_agent_dispatch_tool_call};
-use crate::native_vm::NativeBuiltinCtxExt;
+use crate::NativeBuiltinCtxExt;
 
 #[test]
 fn approval_unavailable_names_terminal_risk_class() {

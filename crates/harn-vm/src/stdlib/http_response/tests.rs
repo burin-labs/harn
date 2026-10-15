@@ -1,6 +1,6 @@
 use super::*;
 use crate::llm::helpers::vm_value_to_json;
-use crate::native_vm::NativeBuiltinCtxExt;
+use crate::NativeBuiltinCtxExt;
 
 fn dict(value: &VmValue) -> &crate::value::DictMap {
     value.as_dict().expect("envelope is a dict")

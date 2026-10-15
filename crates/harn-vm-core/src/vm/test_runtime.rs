@@ -235,6 +235,8 @@ impl VmTaskCleanup for TestRuntime {
         Box::pin(async { Ok(()) })
     }
     fn schedule(&self, _task_id: String, before_cleanup: Pin<Box<dyn Future<Output = ()> + Send>>) {
-        tokio::spawn(before_cleanup);
+        if let Ok(runtime) = tokio::runtime::Handle::try_current() {
+            runtime.spawn(before_cleanup);
+        }
     }
 }

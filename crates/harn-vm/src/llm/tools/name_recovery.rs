@@ -4,7 +4,7 @@
 //! normal policy and approval path.
 
 #[cfg(test)]
-use crate::native_vm::NativeBuiltinCtxExt;
+use crate::NativeBuiltinCtxExt;
 use std::collections::BTreeSet;
 
 use super::collect::ToolSchema;

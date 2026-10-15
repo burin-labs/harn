@@ -1,4 +1,4 @@
-use crate::native_vm::NativeBuiltinCtxExt;
+use crate::NativeBuiltinCtxExt;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 

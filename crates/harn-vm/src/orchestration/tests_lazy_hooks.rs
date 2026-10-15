@@ -1,7 +1,7 @@
-use crate::native_vm::NativeBuiltinCtxExt;
 use crate::orchestration::{
     clear_runtime_hooks, register_vm_hook_lazy, run_lifecycle_hooks_with_ctx, HookEvent,
 };
+use crate::NativeBuiltinCtxExt;
 use crate::{register_vm_stdlib, AsyncBuiltinCtx, LazyVmCallable};
 
 #[tokio::test(flavor = "current_thread")]

@@ -17,15 +17,7 @@
     "provider_catalog->llm": 8,
     "provider_catalog->stdlib": 1,
     "triggers->native_vm": 2,
-    "triggers->stdlib": 34,
-    "value->stdlib": 1,
-    "value->vm": 6,
-    "vm->agent_sessions": 11,
-    "vm->llm": 4,
-    "vm->native_vm": 1,
-    "vm->orchestration": 38,
-    "vm->stdlib": 30,
-    "vm->triggers": 4
+    "triggers->stdlib": 34
   },
   "layers": [
     [

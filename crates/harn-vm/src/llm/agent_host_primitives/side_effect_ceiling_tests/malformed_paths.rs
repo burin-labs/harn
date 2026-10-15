@@ -1,9 +1,9 @@
 //! Model path-shape mistakes are retryable before policy callbacks or prompts.
 
 use super::*;
-use crate::native_vm::NativeBuiltinCtxExt;
 use crate::orchestration::ToolInterceptionScope;
 use crate::value::{VmDictExt, VmValue};
+use crate::NativeBuiltinCtxExt;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 struct Calls {

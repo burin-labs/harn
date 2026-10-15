@@ -5,7 +5,7 @@
 //! retired per-session JSONL data on reads, and imports it on the first write.
 
 #[cfg(test)]
-use crate::native_vm::NativeBuiltinCtxExt;
+use crate::NativeBuiltinCtxExt;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};

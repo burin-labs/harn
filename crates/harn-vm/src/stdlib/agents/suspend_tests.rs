@@ -1,7 +1,7 @@
 use super::*;
 use super::{resume::*, resume_conditions::*};
-use crate::native_vm::NativeBuiltinCtxExt;
 use crate::native_vm::NativeVmState;
+use crate::NativeBuiltinCtxExt;
 
 mod resume_conditions_parse_tests;
 use crate::orchestration::MutationSessionRecord;

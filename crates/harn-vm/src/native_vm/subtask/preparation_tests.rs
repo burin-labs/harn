@@ -1,6 +1,6 @@
 //! Reach the canonical consent dispatcher and actual prepared process effect.
 
-use crate::native_vm::NativeBuiltinCtxExt;
+use crate::NativeBuiltinCtxExt;
 use std::collections::HashMap;
 use std::sync::{atomic::AtomicBool, Arc, Mutex as StdMutex};
 

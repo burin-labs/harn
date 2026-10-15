@@ -1,6 +1,6 @@
 use super::host_agent_parse_tool_calls_impl;
-use crate::native_vm::NativeBuiltinCtxExt;
 use crate::value::VmValue;
+use crate::NativeBuiltinCtxExt;
 
 fn vm_str(value: &str) -> VmValue {
     VmValue::String(arcstr::ArcStr::from(value))

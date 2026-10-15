@@ -8,7 +8,7 @@
 #[path = "replay_tests.rs"]
 mod replay_tests;
 
-use crate::native_vm::NativeBuiltinCtxExt;
+use crate::NativeBuiltinCtxExt;
 use crate::NativeVmExt;
 use std::collections::BTreeMap;
 use std::sync::Arc;

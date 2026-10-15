@@ -3,8 +3,8 @@ use crate::event_log::{
     install_active_event_log, install_memory_for_current_thread, reset_active_event_log,
     AnyEventLog, SqliteEventLog,
 };
-use crate::native_vm::NativeBuiltinCtxExt;
 use crate::observability::execution_scope::{enter_execution_scope, mint_execution_scope};
+use crate::NativeBuiltinCtxExt;
 
 fn string(value: &str) -> VmValue {
     VmValue::String(arcstr::ArcStr::from(value))

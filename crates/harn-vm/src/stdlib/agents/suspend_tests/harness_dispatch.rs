@@ -1,5 +1,5 @@
 use super::*;
-use crate::native_vm::NativeBuiltinCtxExt;
+use crate::NativeBuiltinCtxExt;
 
 #[tokio::test(flavor = "current_thread")]
 async fn auto_resume_timeout_dispatches_synthetic_resume_input() {

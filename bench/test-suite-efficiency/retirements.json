@@ -48,21 +48,21 @@
       "path": "crates/harn-vm/src/stdlib/args/drift_tests.rs",
       "name": "stdlib_diagnostics_name_types_the_runtime_has",
       "reason": "REMOVED: scanning Rust source prose with a regex coupled argument validation to the native source tree and required exemptions for legitimate JSON terminology. Typed Args/Options errors and their canonical runtime vocabulary retain executable checks; arbitrary handwritten diagnostic prose is no longer linted by this unit test.",
-      "retainedPath": "crates/harn-vm/src/value/args/tests.rs",
+      "retainedPath": "crates/harn-vm-core/src/value/args/tests.rs",
       "retainedName": "missing_and_wrong_type_read_differently"
     },
     {
       "path": "crates/harn-vm/src/stdlib/args/drift_tests.rs",
       "name": "recommended_spellings_are_canonical",
       "reason": "SUBSUMED: the recommendation table existed only for the retired source-prose regex. The retained test checks the type tags actually emitted by the typed argument validator against the canonical runtime vocabulary.",
-      "retainedPath": "crates/harn-vm/src/value/args/tag.rs",
+      "retainedPath": "crates/harn-vm-core/src/value/args/tag.rs",
       "retainedName": "every_variant_names_a_tag_type_of_returns"
     },
     {
       "path": "crates/harn-vm/src/stdlib/args/drift_tests.rs",
       "name": "the_pattern_matches_claims_and_not_identifiers",
       "reason": "REMOVED: this tested the retired source-prose regex rather than a Harn argument boundary. Typed argument failure checks remain at the owning validator.",
-      "retainedPath": "crates/harn-vm/src/value/args/tests.rs",
+      "retainedPath": "crates/harn-vm-core/src/value/args/tests.rs",
       "retainedName": "a_dict_is_not_a_string"
     },
     {
@@ -956,7 +956,7 @@
       "path": "crates/harn-vm/src/vm/tests_runtime/optimizer.rs",
       "name": "monomorphic_counter_loop_result_is_correct",
       "reason": "Identical program and output; retained owner also compares optimized and unoptimized execution.",
-      "retainedPath": "crates/harn-vm/src/vm/tests_typed_op_fallback.rs",
+      "retainedPath": "crates/harn-vm/src/vm_tests/tests_typed_op_fallback.rs",
       "retainedName": "monomorphic_fast_path_still_correct"
     },
     {
@@ -1807,7 +1807,7 @@
       "path": "crates/harn-vm/src/chunk_tests.rs",
       "name": "get_var_flags_outer_name_reference",
       "reason": "The retained case emits the same GetVar into a fresh chunk and asserts the same references_outer_names flag before checking stickiness.",
-      "retainedPath": "crates/harn-vm/src/chunk_tests.rs",
+      "retainedPath": "crates/harn-vm-core/src/chunk_tests.rs",
       "retainedName": "references_outer_names_is_monotonic"
     },
     {
@@ -2036,7 +2036,7 @@
       "path": "crates/harn-vm/src/vm/harness_seam.rs",
       "name": "an_uninstalled_seam_is_an_error",
       "reason": "STRUCTURAL: the process-global optional slot was deleted. Vm construction requires VmRuntime, whose harness_methods method must provide a dispatcher and has no default implementation or absent state.",
-      "retainedPath": "crates/harn-vm/src/vm/runtime.rs"
+      "retainedPath": "crates/harn-vm-core/src/vm/runtime.rs"
     },
     {
       "path": "crates/harn-vm/src/vm/harness_seam.rs",
@@ -2072,7 +2072,7 @@
       "path": "crates/harn-vm/src/vm/tests_runtime/smoke.rs",
       "name": "test_function_call_new",
       "reason": "SUBSUMED: the retained native test makes the same untyped add-function call; functions/fn_decl.harn also proves the public typed CLI path.",
-      "retainedPath": "crates/harn-vm/src/vm/tests_runtime/language.rs",
+      "retainedPath": "crates/harn-vm/src/vm_tests/tests_runtime/language.rs",
       "retainedName": "test_fn_decl_and_call"
     },
     {

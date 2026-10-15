@@ -1,5 +1,5 @@
 use super::*;
-use crate::native_vm::NativeBuiltinCtxExt;
+use crate::NativeBuiltinCtxExt;
 
 #[path = "describe_tests.rs"]
 mod describe_tests;

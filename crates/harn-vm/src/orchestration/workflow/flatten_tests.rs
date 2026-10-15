@@ -1,6 +1,6 @@
 use super::*;
-use crate::native_vm::NativeBuiltinCtxExt;
 use crate::orchestration::{CapabilityPolicy, WorkflowNode};
+use crate::NativeBuiltinCtxExt;
 use std::collections::BTreeMap;
 
 fn ceiling_with_tools(tools: &[&str]) -> CapabilityPolicy {

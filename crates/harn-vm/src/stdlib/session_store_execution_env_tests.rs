@@ -1,5 +1,5 @@
 use super::*;
-use crate::native_vm::NativeBuiltinCtxExt;
+use crate::NativeBuiltinCtxExt;
 
 async fn exercise_execution_env_store(
     label: &'static str,

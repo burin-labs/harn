@@ -520,7 +520,8 @@ mod tests {
     fn test_workspace(version: &str, compiler_source: &str) -> tempfile::TempDir {
         let workspace = tempfile::tempdir().expect("temp workspace");
         fs::create_dir_all(workspace.path().join("crates/harn-cli")).expect("create harn-cli");
-        fs::create_dir_all(workspace.path().join("crates/harn-vm/src")).expect("create harn-vm");
+        fs::create_dir_all(workspace.path().join("crates/harn-vm-core/src"))
+            .expect("create harn-vm-core");
         fs::create_dir_all(workspace.path().join("crates/harn-kernel/src"))
             .expect("create harn-kernel");
         let mut manifest = fs::File::create(workspace.path().join("Cargo.toml"))

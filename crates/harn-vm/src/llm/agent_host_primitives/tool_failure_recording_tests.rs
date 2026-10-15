@@ -2,7 +2,7 @@
 //! observation. These tests compile real Harn closures and exercise the public
 //! dispatch primitive, including successful outcomes and host-call boundaries.
 
-use crate::native_vm::NativeBuiltinCtxExt;
+use crate::NativeBuiltinCtxExt;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 

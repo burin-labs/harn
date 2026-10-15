@@ -1,5 +1,5 @@
 use super::*;
-use crate::native_vm::NativeBuiltinCtxExt;
+use crate::NativeBuiltinCtxExt;
 
 fn durable_inventory(root: &Path) -> Vec<(PathBuf, u64, String)> {
     fn visit(root: &Path, path: &Path, out: &mut Vec<(PathBuf, u64, String)>) {

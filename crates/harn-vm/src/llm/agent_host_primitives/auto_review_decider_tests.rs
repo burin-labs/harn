@@ -14,7 +14,7 @@
 //! `host_unavailable`. Asserting only the first would pass on a build that
 //! stamped `auto_reviewer` on everything.
 
-use crate::native_vm::NativeBuiltinCtxExt;
+use crate::NativeBuiltinCtxExt;
 use std::sync::Arc;
 
 use super::host_agent_dispatch_tool_call;

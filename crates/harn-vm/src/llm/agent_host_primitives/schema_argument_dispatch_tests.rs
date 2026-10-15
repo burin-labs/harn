@@ -1,5 +1,5 @@
 use super::host_agent_dispatch_tool_call;
-use crate::native_vm::NativeBuiltinCtxExt;
+use crate::NativeBuiltinCtxExt;
 
 #[tokio::test]
 async fn dispatch_flattens_schema_declared_discriminator_envelope() {

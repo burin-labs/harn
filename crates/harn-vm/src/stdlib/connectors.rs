@@ -1,4 +1,4 @@
-use crate::native_vm::NativeBuiltinCtxExt;
+use crate::NativeBuiltinCtxExt;
 use jsonwebtoken::jwk::JwkSet;
 use serde_json::{json, Value as JsonValue};
 

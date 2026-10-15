@@ -1,6 +1,6 @@
 use super::*;
 #[cfg(test)]
-use crate::native_vm::NativeBuiltinCtxExt;
+use crate::NativeBuiltinCtxExt;
 
 const HOST_CAPABILITY: &str = "hypothesis";
 const HOST_OPERATION: &str = "attest_event";

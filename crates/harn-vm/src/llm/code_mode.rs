@@ -42,7 +42,7 @@
 //!    the same gated dispatch.
 
 #[cfg(test)]
-use crate::native_vm::NativeBuiltinCtxExt;
+use crate::NativeBuiltinCtxExt;
 use std::collections::BTreeSet;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;

@@ -1,7 +1,7 @@
 use super::*;
-use crate::native_vm::NativeBuiltinCtxExt;
 use crate::stdlib::pool::{current_pool_registry, new_pool_registry, with_pool_registry_poll};
 use crate::vm::run_async_builtin_with;
+use crate::NativeBuiltinCtxExt;
 use std::{
     future::{poll_fn, Future},
     sync::atomic::{AtomicUsize, Ordering},

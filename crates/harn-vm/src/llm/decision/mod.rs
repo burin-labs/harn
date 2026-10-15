@@ -28,7 +28,7 @@ pub(crate) mod transport;
 #[cfg(test)]
 mod tests;
 
-use crate::native_vm::NativeBuiltinCtxExt;
+use crate::NativeBuiltinCtxExt;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 

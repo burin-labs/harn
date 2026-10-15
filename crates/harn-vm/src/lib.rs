@@ -90,6 +90,9 @@ mod native_vm;
 mod vm_tests;
 pub(crate) use harn_vm_core::runtime_effects;
 use harn_vm_core::source_compile;
+pub(crate) use native_vm::NativeBuiltinCtxExt;
+#[cfg(test)]
+pub(crate) use native_vm::NativeCleanupTestExt;
 pub use native_vm::{new_vm, NativeVmExt};
 pub mod task_retry;
 pub(crate) mod tool_call_mutations;

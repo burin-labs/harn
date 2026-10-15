@@ -1,7 +1,7 @@
 use super::*;
 use crate::event_log::EventLog;
 use crate::llm::mock::{push_llm_mock, reset_llm_mock_state, LlmMock};
-use crate::native_vm::NativeBuiltinCtxExt;
+use crate::NativeBuiltinCtxExt;
 
 fn assistant_message(text: &str) -> VmValue {
     VmValue::dict(crate::value::DictMap::from_iter([

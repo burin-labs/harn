@@ -1,6 +1,6 @@
 use super::*;
 use crate::llm::decision::replay::{EvaluationFixture, EvaluationReplayScope, FixtureAnswer};
-use crate::native_vm::NativeBuiltinCtxExt;
+use crate::NativeBuiltinCtxExt;
 use crate::NativeVmExt;
 
 fn args(state: &str) -> Vec<VmValue> {
