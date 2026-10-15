@@ -239,14 +239,13 @@ pub fn lookup_with_source_config(
     base: &CapabilitiesFile,
     config: &crate::llm_config::ProvidersConfig,
 ) -> Capabilities {
-    let model = crate::llm_config::capability_model_id_for_config(provider, model, config);
-    let responses = config.providers.get(provider).is_some_and(|provider| {
-        provider
-            .features
-            .iter()
-            .any(|feature| feature == "responses_api")
-    });
-    resolve_with_features(provider, &model, base, None, responses).capabilities()
+    let resolved =
+        harn_provider_catalog::CatalogView::new(config, base, None).capabilities(provider, model);
+    if provider != "mock" && !resolved.matched() && !resolved.has_defaults() {
+        let model = crate::llm_config::capability_model_id_for_config(provider, model, config);
+        super::diagnostics::warn_unmatched_route_once(provider, &model);
+    }
+    resolved.capabilities()
 }
 
 #[cfg(test)]

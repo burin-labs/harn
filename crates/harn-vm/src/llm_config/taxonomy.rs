@@ -71,16 +71,7 @@ pub(crate) fn infer_provider_with_config(
     )
 }
 
-pub(super) fn configured_provider_selector<'a>(
-    config: &ProvidersConfig,
-    selector: &'a str,
-) -> Option<&'a str> {
-    let (provider, model) = selector.split_once(':')?;
-    if model.is_empty() {
-        return None;
-    }
-    config.providers.contains_key(provider).then_some(provider)
-}
+pub(super) use harn_provider_catalog::configured_provider_selector;
 
 pub fn default_provider() -> String {
     let config = effective_config();

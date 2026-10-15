@@ -644,26 +644,7 @@ pub(crate) fn capability_model_id(provider: &str, model_id: &str) -> String {
     capability_model_id_for_config(provider, model_id, &effective_config())
 }
 
-pub(crate) fn capability_model_id_for_config(
-    provider: &str,
-    model_id: &str,
-    config: &ProvidersConfig,
-) -> String {
-    if !config.providers.get(provider).is_some_and(|provider| {
-        provider
-            .features
-            .iter()
-            .any(|feature| feature == "wire_model_capabilities")
-    }) {
-        return model_id.to_string();
-    }
-    config
-        .models
-        .get(model_id)
-        .filter(|model| model.provider == provider)
-        .and_then(|model| model.wire_model.clone())
-        .unwrap_or_else(|| model_id.to_string())
-}
+pub(crate) use harn_provider_catalog::capability_model_id_for_config;
 
 pub fn provider_rate_limits(provider: &str) -> Option<RateLimitsDef> {
     provider_config(provider).and_then(|provider| {
