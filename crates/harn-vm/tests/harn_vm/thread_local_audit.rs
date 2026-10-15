@@ -150,26 +150,6 @@ fn thread_local_audit_tracks_every_vm_thread_local_site() {
     }
 }
 
-#[test]
-fn pool_worker_boundary_uses_task_local_registry_not_thread_local_registry() {
-    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let pool_source =
-        fs::read_to_string(manifest_dir.join("src/stdlib/pool/mod.rs")).expect("read pool module");
-
-    assert!(
-        thread_local_blocks(&pool_source).is_empty(),
-        "pool workers run on tokio::spawn; pool registry state must not regress to thread_local!"
-    );
-    assert!(
-        pool_source.contains("tokio::task_local!") && pool_source.contains("ACTIVE_POOL_REGISTRY"),
-        "pool registry must be scoped through a Tokio task-local so it follows spawned work"
-    );
-    assert!(
-        pool_source.contains("subtask::spawn_child"),
-        "pool worker spawning should stay behind the typed child-interpreter boundary"
-    );
-}
-
 fn parse_audit(path: &Path) -> ThreadLocalAudit {
     let contents = fs::read_to_string(path).expect("read thread_local_audit.toml");
     toml::from_str(&contents).expect("parse thread_local_audit.toml")

@@ -3,6 +3,13 @@
   "baselineRevision": "7deefa6d8215dc5ce0bac2705624516d17c89392",
   "removedCases": [
     {
+      "path": "crates/harn-vm/tests/harn_vm/thread_local_audit.rs",
+      "name": "pool_worker_boundary_uses_task_local_registry_not_thread_local_registry",
+      "reason": "SUBSUMED: source-substring checks failed when the task-local moved into its owning module. The retained test drives the real worker boundary, requires a different OS thread, and compares the actual inherited pool registry identity against a distinct parent fallback.",
+      "retainedPath": "crates/harn-vm/src/native_vm/subtask/cross_thread_tests.rs",
+      "retainedName": "subtask_inherits_budget_session_and_event_log_across_threads"
+    },
+    {
       "path": "crates/harn-vm/src/vm/async_builtin.rs",
       "name": "cancelled_scope_strands_nothing",
       "reason": "SUBSUMED: the removed case dropped an unpolled future without assertions. The replacement polls the actual async builtin seam, proves that it installed the child's distinct pool, and verifies restoration both before and after cancellation.",

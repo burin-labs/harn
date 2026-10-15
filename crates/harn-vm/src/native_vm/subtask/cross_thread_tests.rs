@@ -9,7 +9,7 @@
 //!   installed "on the same OS thread the VM runs on";
 //! - the agent session id, which the filesystem write chokepoint reads to
 //!   attribute `files_written`;
-//! - the event log handle, which must be the SAME log, not a per-thread copy.
+//! - the event log and pool registry handles, which must retain their identity.
 //!
 //! The test drives the production seam: [`prepare`] and [`spawn_into`] are the
 //! exact functions `parallel`, `parallel each`, `parallel settle`, `spawn`,
@@ -21,7 +21,7 @@ use std::thread::ThreadId;
 
 use crate::call_budget::{charge_mcp_call, install_mcp_call_budget, mcp_calls_spent};
 use crate::native_vm::subtask::{prepare, scope_placement};
-use crate::stdlib::pool::PoolRegistry;
+use crate::stdlib::pool::{current_pool_registry, PoolRegistry};
 use crate::vm::subtask::{spawn_into, SubtaskPlacement};
 
 /// What one subtask saw about itself and its inherited context.
@@ -29,6 +29,7 @@ struct Observation {
     thread: ThreadId,
     session: Option<String>,
     event_log: Option<usize>,
+    pool_registry: usize,
 }
 
 /// One branch is sufficient: `Runtime::block_on` polls the parent on this test
@@ -39,6 +40,7 @@ struct Measured {
     parent_thread: ThreadId,
     parent_session: Option<String>,
     parent_log: usize,
+    parent_pool: usize,
     observations: Vec<Observation>,
     spent: Option<u64>,
 }
@@ -66,6 +68,8 @@ fn subtask_inherits_budget_session_and_event_log_across_threads() {
         let parent_log = Arc::as_ptr(&log) as usize;
 
         let registry = Arc::new(PoolRegistry::default());
+        assert!(!Arc::ptr_eq(&registry, &current_pool_registry()));
+        let parent_pool = Arc::as_ptr(&registry) as usize;
         let mut set: tokio::task::JoinSet<Observation> = tokio::task::JoinSet::new();
         for _ in 0..BRANCHES {
             let branch = prepare(Arc::clone(&registry), async {
@@ -75,6 +79,7 @@ fn subtask_inherits_budget_session_and_event_log_across_threads() {
                     session: crate::agent_sessions::current_session_id(),
                     event_log: crate::event_log::active_event_log()
                         .map(|log| Arc::as_ptr(&log) as usize),
+                    pool_registry: Arc::as_ptr(&current_pool_registry()) as usize,
                 }
             });
             spawn_into(&mut set, branch);
@@ -88,6 +93,7 @@ fn subtask_inherits_budget_session_and_event_log_across_threads() {
             parent_thread,
             parent_session,
             parent_log,
+            parent_pool,
             observations,
             spent: mcp_calls_spent(),
         }
@@ -120,6 +126,11 @@ fn subtask_inherits_budget_session_and_event_log_across_threads() {
             observed.event_log,
             Some(measured.parent_log),
             "a branch on {:?} wrote to a different event log than its parent",
+            observed.thread
+        );
+        assert_eq!(
+            observed.pool_registry, measured.parent_pool,
+            "a branch on {:?} lost the execution-owned pool registry",
             observed.thread
         );
     }
