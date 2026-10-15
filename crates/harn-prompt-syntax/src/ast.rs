@@ -78,7 +78,7 @@ pub enum UnOp {
     Not,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BinOp {
     Eq,
     Neq,
