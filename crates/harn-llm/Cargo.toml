@@ -8,6 +8,9 @@ repository.workspace = true
 homepage.workspace = true
 description = "Provider-neutral message and wire contracts for Harn LLM execution"
 
+[features]
+test-support = []
+
 [dependencies]
 harn-provider-catalog = { path = "../harn-provider-catalog", version = "=0.10.167" }
 harn-vm-core = { path = "../harn-vm-core", version = "=0.10.167" }

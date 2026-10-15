@@ -7,12 +7,12 @@
 //! OpenAI-compatible providers.
 
 use crate::llm::api::{DeltaSender, LlmRequestPayload, LlmResult, OutputFormat, ThinkingConfig};
-#[cfg(test)]
-use crate::llm::providers::schema_compat::tests::closed_discriminated_union_schema;
 use crate::llm::providers::schema_compat::{
     sanitize_schema_for_provider, SchemaCompatProfile, SchemaSurface,
 };
 use crate::value::{VmError, VmValue};
+#[cfg(test)]
+use harn_llm::schema_compat::test_support::closed_discriminated_union_schema;
 
 const RESPONSES_ENDPOINT: &str = "/responses";
 const RESPONSES_COMPACT_ENDPOINT: &str = "/responses/compact";
