@@ -13,7 +13,14 @@ pipeline test_replay_requires_measured_complete_inventory_and_preserves_unknown_
     declared_reviews: 1,
     declared_threads: 1,
     reviews: [
-      {id: "r1", state: "approved", head: nil, actor: nil, updated_at: "2026-10-14T00:00:00Z"},
+      {
+        id: "r1",
+        state: "approved",
+        head: nil,
+        actor: nil,
+        submitted_at: nil,
+        updated_at: "2026-10-14T00:00:00Z",
+      },
     ],
     threads: [{id: "t1", resolved: false, outdated: true}],
   }

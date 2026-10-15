@@ -540,6 +540,7 @@ pub type Review = {
   state: "approved" | "changes_requested" | "commented" | "dismissed" | "pending",
   head: string?,
   actor: ReviewActor?,
+  submitted_at: string?,
   updated_at: string,
 }
 ```
@@ -550,6 +551,23 @@ Stable review identity is separate from a display name or an installation's trus
 
 ```harn
 pub type ReviewActor = {id: string, name: string, kind: string}
+```
+
+### type `ReviewAdmission`
+
+Counts and named refusals stay visible even when the review census is absent.
+
+```harn
+pub type ReviewAdmission = {
+  status: "approved" | "pending" | "failed" | "invalid",
+  required: int,
+  observed_reviews: int,
+  observed_threads: int,
+  approvers: list<string>,
+  pending: list<string>,
+  failed: list<string>,
+  invalid: list<string>,
+}
 ```
 
 ### type `ReviewObservation`
@@ -571,12 +589,38 @@ pub type ReviewObservation = {
 }
 ```
 
+### type `ReviewPolicy`
+
+An installation declares independent reviewers by stable identity, never display name.
+
+```harn
+pub type ReviewPolicy = {minimum_approvals: int, trusted_actor_ids: list<string>, allow_forks: bool}
+```
+
 ### type `ReviewThread`
 
 Thread resolution remains distinct from whether its source is outdated.
 
 ```harn
 pub type ReviewThread = {id: string, resolved: bool, outdated: bool}
+```
+
+### type `ReviewedSource`
+
+Forge facts remain unknown until the adapter actually observes them.
+
+```harn
+pub type ReviewedSource = {
+  repository: string,
+  change: string,
+  head: string,
+  base: string,
+  author: ReviewActor?,
+  state: "open" | "closed" | "merged" | nil,
+  draft: bool?,
+  head_repository: string?,
+  base_repository: string?,
+}
 ```
 
 ### type `SignedCheckpoint`
@@ -1097,6 +1141,20 @@ pub fn reserve_effect(
   request: EffectRequest,
   policy: Policy,
 ) -> Result<Controller, string> {
+}
+```
+
+### fn `review_admission`
+
+Judge complete archived or live facts through one deterministic boundary.
+This decision qualifies review only; scope, CI, and signed admission are separate obligations.
+
+```harn
+pub fn review_admission(
+  source: ReviewedSource,
+  policy: ReviewPolicy,
+  observation: unknown,
+) -> ReviewAdmission {
 }
 ```
 

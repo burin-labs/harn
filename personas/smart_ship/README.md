@@ -17,7 +17,17 @@ The `github` export reads complete reviews and threads for one exact pull-reques
 head through the published GitHub connector. Live observations and archived
 replay enter the same source and inventory contract. Missing actors, review
 commits, and platform decisions remain unknown. This read-only interface does
-not derive review trust, admit a change, or perform a forge mutation.
+not admit a change or perform a forge mutation.
+
+`review_admission` qualifies complete live or archived review facts against an
+installation's stable reviewer identities. Approval requires an independent
+reviewer on the exact head, an open non-draft change, and resolved threads.
+Missing facts remain pending; incomplete or differently bound evidence is
+invalid. The result retains observed counts and named refusals. This qualifies
+review only; job selection, required checks, and signed admission remain separate
+obligations before integration.
+The current connector leaves submission chronology unknown, so its observations
+alone cannot qualify review until the owning connector exposes that fact.
 
 ## Verify the package
 

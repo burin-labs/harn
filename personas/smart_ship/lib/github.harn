@@ -47,6 +47,8 @@ pub fn github_review_observation(census: GithubPullRequestReviewCensus) -> Revie
         {id: actor.id, name: actor.login, kind: actor.type}
       },
       updated_at: row.updated_at,
+      // Connector 0.10 observes edits but not submission chronology.
+      submitted_at: nil,
     }
     reviews = reviews + [review]
   }
