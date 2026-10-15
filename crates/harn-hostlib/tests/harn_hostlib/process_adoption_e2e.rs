@@ -86,8 +86,7 @@ fn adoption_fixture() {
     ]);
     assert_eq!(
         std::fs::read_dir("/proc")
-            .err()
-            .expect("inherited confinement must deny enumeration")
+            .expect_err("inherited confinement must deny enumeration")
             .kind(),
         std::io::ErrorKind::PermissionDenied
     );
