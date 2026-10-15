@@ -50,6 +50,38 @@
         {"id": 38685107867, "sha": "48600d47d010b9c968d303245e4dca0ce0495acd", "seconds": 1162},
         {"id": 38683841160, "sha": "6416f00fc8e838f0a71617d7659480484f966ca9", "seconds": 1189}
       ]
+    },
+    {
+      "name": "Latest successful main merge groups while native runtime PR awaits integration",
+      "sampleCount": 5,
+      "nearestRankP90Seconds": 1225,
+      "runs": [
+        {
+          "id": 38770059702,
+          "sha": "82fd5af783eb7771b24e458085943719d45410b3",
+          "seconds": 1193
+        },
+        {
+          "id": 38768084904,
+          "sha": "d30f61eb7c7ced3b9d039c11acf776f6f5eaa39e",
+          "seconds": 1024
+        },
+        {
+          "id": 38762676039,
+          "sha": "92fb8aa56973128b1ca1db2a8dd9d981203ce64a",
+          "seconds": 1225
+        },
+        {
+          "id": 38758129430,
+          "sha": "d1a269edfc43caa9d79b3426920c75ce0491ab5d",
+          "seconds": 1170
+        },
+        {
+          "id": 38753771080,
+          "sha": "def96604d495bd3167b7dfe1028199625a88d933",
+          "seconds": 1180
+        }
+      ]
     }
   ],
   "latestSuccessfulWorkflowPhases": {
@@ -86,6 +118,47 @@
       "GitHub step timestamps measure complete script phases; the 860-second build phase is not a rustc unit duration.",
       "This run used the hosted fallback. The measured Kache experiment and the deployed persistent Kache store apply to owned runners, so their timings do not describe this producer.",
       "Only one workflow was decomposed into phases. These observations identify a live bottleneck, not a controlled causal comparison."
+    ]
+  },
+  "nativeRuntimePrPhases": {
+    "runId": 38767828241,
+    "headRevision": "78283823a1b281057e56cf91715a6921b1515d95",
+    "pullRequest": 9950,
+    "runnerGroup": "GitHub Actions",
+    "runnerLabels": [
+      "ubuntu-24.04"
+    ],
+    "cliProducer": {
+      "jobId": 116535755542,
+      "elapsedSeconds": 942,
+      "rustCacheSetupSeconds": 78,
+      "portableCliBuildSeconds": 819
+    },
+    "workspaceProducer": {
+      "jobId": 116535755778,
+      "elapsedSeconds": 662,
+      "rustCacheSetupSeconds": 59,
+      "securityArchiveBuildSeconds": 537,
+      "testRunSeconds": 41
+    },
+    "packageVerification": {
+      "jobId": 116535732339,
+      "elapsedSeconds": 868,
+      "packageChecksSeconds": 814
+    },
+    "releaseResidualAudit": {
+      "jobId": 116535732405,
+      "elapsedSeconds": 1016,
+      "aotGenerationSeconds": 226,
+      "sharedCliWaitSeconds": 697,
+      "auditSeconds": 59
+    },
+    "interpretation": "The hosted CLI producer still exceeds the 600-second target by itself. Its dependents wait for the same artifact; the owned-runner Kache trial does not describe this hosted target-archive path.",
+    "limitations": [
+      "This is a pull-request run, not a successful merge-group latency sample.",
+      "No physical core, LLM, or orchestration extraction was present in this head.",
+      "Source changes, cache contents and runner load differ from previous runs; these phases are observations, not a controlled speedup.",
+      "The macOS workspace job failed because required sandbox mechanisms were unavailable, and review approval remained pending. This head was not integrated when recorded."
     ]
   },
   "workflowMethod": {
