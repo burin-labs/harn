@@ -12,7 +12,7 @@ mod capability_lattice;
 pub use capability_invocation::enforce_current_policy_for_capability;
 pub(crate) use capability_invocation::scope_read_only_invocation;
 mod consent_capability;
-pub(crate) use consent_capability::is_policy_machinery_consent_call;
+pub(crate) use consent_capability::{is_policy_machinery_consent_call, CONSENT_CAPABILITY};
 mod effect_call_cache;
 mod effects;
 mod external_roots;
