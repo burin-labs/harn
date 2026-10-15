@@ -4,6 +4,7 @@ import {
   GithubCiJob,
   assess_github_ci,
   github_ci_identities,
+  replay_github_ci,
 } from "../lib/github_ci"
 import {
   AdmissionRequest,
@@ -47,6 +48,8 @@ type CiFixture = {
   artifacts: list<GithubCiArtifact>,
   private_key: string,
 }
+
+type ArtifactPage = {total_count: int, artifacts: list<{id: int, name: string}>}
 
 fn ci_fixture(random: HarnessRandom) -> CiFixture {
   const f = fixture(random)
@@ -178,7 +181,7 @@ fn source(f: CiFixture, declared: int = 2) -> ProofSource {
     json: fn(endpoint) {
       if endpoint == "/repos/acme/product/actions/runs/10/artifacts?per_page=100&page=1" {
         return {
-          total_count: 1,
+          total_count: 2,
           artifacts: [
             {
               id: 200,
@@ -187,6 +190,15 @@ fn source(f: CiFixture, declared: int = 2) -> ProofSource {
               expired: false,
               digest: digest("registration archive"),
               created_at: "1970-01-01T00:00:03Z",
+              workflow_run: {id: 10, head_sha: f.producer.head_sha},
+            },
+            {
+              id: 201,
+              name: "python-result",
+              size_in_bytes: 300,
+              expired: false,
+              digest: digest("archive bytes"),
+              created_at: "1970-01-01T00:00:05Z",
               workflow_run: {id: 10, head_sha: f.producer.head_sha},
             },
           ],
@@ -230,6 +242,30 @@ pipeline test_original_ci_retains_actual_tested_source_and_job_then_signs_same_a
     7000,
   )
   assert_eq(replay, actual)
+}
+
+pipeline test_archive_replays_complete_measured_artifact_census_without_invented_pages(
+  harness: Harness,
+) {
+  const f = ci_fixture(harness.random)
+  const actual = assess_github_ci(source(f), POLICY, f.producer, f.request, JOBS, f.artifacts, 7000)
+  assert_eq(len(actual.source_reads), 2)
+  const measured = schema_expect(actual.source_reads[0]!.response, schema_of(ArtifactPage))
+  assert_eq(measured.total_count, 2)
+  assert_eq(
+    measured.artifacts.map({ artifact -> artifact.name }),
+    ["ci-job-inputs-10-2", "python-result"],
+  )
+  assert_eq(replay_github_ci(actual, POLICY, JOBS), actual)
+  for reads in [[], actual.source_reads.slice(1), actual.source_reads + actual.source_reads] {
+    assert(
+      is_err(
+        try {
+          replay_github_ci(actual + {source_reads: reads}, POLICY, JOBS)
+        },
+      ),
+    )
+  }
 }
 
 pipeline test_green_provider_job_without_structured_execution_stays_pending(harness: Harness) {

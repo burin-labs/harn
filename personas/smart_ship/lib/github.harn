@@ -18,7 +18,10 @@ pub import {
   GithubCiIdentity,
   GithubCiJob,
   GithubCiLeg,
+  GithubCiProducerPolicy,
+  GithubCiRead,
   assess_github_ci,
   github_ci_identities,
   read_github_ci_artifacts,
+  replay_github_ci,
 } from "./github_ci"

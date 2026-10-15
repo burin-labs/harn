@@ -133,6 +133,7 @@ The complete original provider census and downloaded-byte receipts accompany qua
 ```harn
 pub type GithubCiAssessment = {
   inspection: OriginalRunInspection,
+  source_reads: list<GithubCiRead>,
   artifacts: list<GithubCiArtifact>,
   record: AdmissionRecord,
   assessment: AdmissionVerification,
@@ -166,6 +167,22 @@ pub type GithubCiLeg = {
   artifact_name: string,
   member_name: string,
 }
+```
+
+### type `GithubCiProducerPolicy`
+
+The original observer's policy remains owned by the shared CI contract.
+
+```harn
+pub type GithubCiProducerPolicy = ProducerPolicy
+```
+
+### type `GithubCiRead`
+
+Preserve actual bounded provider responses, including the complete artifact-list pages.
+
+```harn
+pub type GithubCiRead = {endpoint: string, response: unknown}
 ```
 
 ### fn `assess_github_ci`
@@ -240,6 +257,19 @@ pub fn read_github_reviewed_change(
   harness: Harness,
   request: GithubPullRequestReviewCensusRequest,
 ) -> GithubConnectorResult<ReviewedChangeObservation> {
+}
+```
+
+### fn `replay_github_ci`
+
+Requalify recorded observations without inventing provider pages or granting live authority.
+
+```harn
+pub fn replay_github_ci(
+  archive: GithubCiAssessment,
+  policy: GithubCiProducerPolicy,
+  jobs: list<GithubCiJob>,
+) -> GithubCiAssessment {
 }
 ```
 

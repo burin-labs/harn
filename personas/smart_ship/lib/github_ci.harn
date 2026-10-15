@@ -30,6 +30,12 @@ pub type GithubCiJob = {id: string, legs: list<GithubCiLeg>}
 /** This projection is used by registration before execution and observation afterward. */
 pub type GithubCiIdentity = {id: string, names: list<string>, digest: string}
 
+/** The original observer's policy remains owned by the shared CI contract. */
+pub type GithubCiProducerPolicy = ProducerPolicy
+
+/** Preserve actual bounded provider responses, including the complete artifact-list pages. */
+pub type GithubCiRead = {endpoint: string, response: unknown}
+
 /** Failed artifact reads remain inspectable; an absent execution never becomes an empty pass. */
 pub type GithubCiArtifact = {
   requirement: string,
@@ -39,6 +45,7 @@ pub type GithubCiArtifact = {
 /** The complete original provider census and downloaded-byte receipts accompany qualification. */
 pub type GithubCiAssessment = {
   inspection: OriginalRunInspection,
+  source_reads: list<GithubCiRead>,
   artifacts: list<GithubCiArtifact>,
   record: AdmissionRecord,
   assessment: AdmissionVerification,
@@ -104,7 +111,16 @@ pub fn assess_github_ci(
   const wanted = github_ci_identities(request, jobs)
   require policy.repository == request.scope.scope.source.repository,
     "GitHub CI producer policy differs from the trusted source repository"
-  const inspection = inspect_original_run(source, policy, producer, wanted)
+  let reads: list<GithubCiRead> = []
+  const measured: ProofSource = {
+    json: fn(endpoint) {
+      const response = source.json(endpoint)
+      reads = reads + [{endpoint: endpoint, response: response}]
+      return response
+    },
+    registration: source.registration,
+  }
+  const inspection = inspect_original_run(measured, policy, producer, wanted)
   const tested = inspection.registered.registration.tested_source
   require tested.commit == request.scope.scope.source.commit
     && tested.tree == request.scope.scope.source.tree,
@@ -171,10 +187,45 @@ pub fn assess_github_ci(
     + {schema: "smart-ship.admission.v1", proofs: proofs, admitted_at_ms: at_ms}
   return {
     inspection: inspection,
+    source_reads: reads,
     artifacts: artifacts,
     record: record,
     assessment: assess_admission(record, request.policy),
   }
+}
+
+/** Requalify recorded observations without inventing provider pages or granting live authority. */
+pub fn replay_github_ci(
+  archive: GithubCiAssessment,
+  policy: GithubCiProducerPolicy,
+  jobs: list<GithubCiJob>,
+) -> GithubCiAssessment {
+  let index = 0
+  const source: ProofSource = {
+    json: fn(endpoint) {
+      const read = archive.source_reads[index]
+      require read != nil && read.endpoint == endpoint,
+        "archived GitHub read is missing or reordered"
+      index += 1
+      return read.response
+    },
+    registration: fn(repository, artifact) {
+      require repository == policy.repository && artifact == archive.inspection.registered.artifact,
+        "archived registration differs from the selected original artifact"
+      return archive.inspection.registered.registration
+    },
+  }
+  const result = assess_github_ci(
+    source,
+    policy,
+    archive.inspection.producer,
+    archive.record,
+    jobs,
+    archive.artifacts,
+    archive.record.admitted_at_ms,
+  )
+  require index == len(archive.source_reads), "archived GitHub reads contain unused observations"
+  return result
 }
 
 /** Download actual stock results through the connector's bounded, digest-checked archive reader. */

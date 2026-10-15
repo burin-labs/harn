@@ -164,3 +164,10 @@ Missing stock results stay pending even when GitHub reports success.
 Pending or failed assessment prints the evidence and exits nonzero; a
 structural or identity refusal produces no signed receipt. Keep the full
 result for audit and replay through `assess_github_ci`.
+
+The observation's `source_reads` retains the actual artifact-list and job-list
+responses, including unrelated artifacts and every measured page.
+`replay_github_ci(observation, producer_policy, jobs)` requalifies those exact
+observations through the same shared reader. Missing, reordered or unused
+responses refuse. Replay checks the archived decision; it does not claim a
+fresh provider read or grant permission to issue a live admission.
