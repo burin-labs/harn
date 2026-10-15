@@ -64,6 +64,10 @@ It is either `{kind: "snapshot", snapshot: <frozen Snapshot>}` or
 selection outside candidate code. The command verifies that the prepared job
 matches this dispatch; it does not establish the controller's authority or
 qualify reviews and policy on its behalf.
+For admission, the dispatch binds the signed scope and exact test inputs.
+Reviews may finish later without rerunning the same verified command. The
+admission issuer must qualify and sign the current reviews before admitting
+the change. A changed scope, source or policy cannot borrow that execution.
 
 Assemble `execute.json` with these fields:
 

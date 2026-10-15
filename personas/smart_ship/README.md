@@ -34,6 +34,10 @@ signature. Snapshots retain that complete record and requalify it during
 checkpoint validation. A digest-shaped string cannot stand in for admission.
 `prepare_admission` freezes precheck requests before execution; stock jobs with
 reuse disabled must execute against those requests.
+The request binds the signed scope, exact source and job inputs. An approval
+that arrives after CI does not change that execution identity. The admission
+issuer still signs the current complete review facts; a changed source, scope
+or policy requires fresh qualification.
 
 ## Verify the package
 

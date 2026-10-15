@@ -51,6 +51,58 @@ pipeline test_signed_admission_retains_nonempty_review_and_original_ci_through_r
   assert_eq(verify(f.snapshot, [proof(f, execution(f))], f.policy).status, "verified")
 }
 
+pipeline test_approval_after_ci_preserves_exact_execution_without_enabling_reuse(harness: Harness) {
+  const f = fixture(harness.random)
+  const base = f.snapshot.changes[0]!.admission.record
+  const scope = base.scope.scope
+    + {requirements: base.scope.scope.requirements.map({ job -> job + {reuse_allowed: false} })}
+  const initial = base
+    + {
+      scope: sign_scope(f, scope),
+      reviews: base.reviews
+        + {declared_reviews: 0, reviews: [], platform_decision: "review_required"},
+    }
+  const required = prepare_admission(initial).requirements[0]!
+  const executed = base.proofs[0]!.original
+    + {requirement: required, started_at_ms: 1000, completed_at_ms: 2000}
+  const original = {
+    requirement: required.id,
+    mode: "executed",
+    original: executed,
+    signer: "executor",
+    signature: proof(f, executed).signature,
+  }
+  const waiting = initial + {proofs: [original], admitted_at_ms: 2500}
+  assert_eq(verify_admission(sign(f, waiting), f.policy).status, "pending")
+  const approval = base.reviews.reviews[0]!
+    + {submitted_at: "1970-01-01T00:00:03Z", updated_at: "1970-01-01T00:00:03Z"}
+  const complete = waiting + {reviews: base.reviews + {reviews: [approval]}, admitted_at_ms: 4000}
+  const decision = verify_admission(sign(f, complete), f.policy)
+  assert_eq(decision.status, "admitted")
+  assert_eq(decision.checks.executed, 1)
+  assert_eq(decision.checks.reused, 0)
+  assert_eq(decision.checks.pending, [])
+  assert_eq(complete.proofs[0]!.original, executed)
+  assert_eq(prepare_admission(initial).frontier, prepare_admission(complete).frontier)
+  assert(admission_bytes(waiting) != admission_bytes(complete))
+  const unsigned_update = sign(f, waiting) + {record: complete}
+  assert(verify_admission(unsigned_update, f.policy).invalid.contains("admission-signature"))
+  for changed in [
+    scope + {source: scope.source + {commit: sha256_hex("new tested merge")}},
+    scope
+      + {
+        requirements: scope.requirements.map(
+          { job -> job + {input_digest: digest("changed command")} },
+        ),
+      },
+    scope + {reviewed_head: sha256_hex("new head")},
+    scope + {policy_digest: digest("new policy")},
+  ] {
+    const altered = complete + {scope: sign_scope(f, changed)}
+    assert_eq(verify_admission(sign(f, altered), f.policy).status, "invalid")
+  }
+}
+
 pipeline test_valid_admission_signature_cannot_hide_missing_or_invalid_original_ci(
   harness: Harness,
 ) {
