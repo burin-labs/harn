@@ -41,8 +41,12 @@ impl ProcessSpawner for RealSpawner {
                 ));
             }
             let cleanup_token = harn_vm::op_interrupt::new_process_cleanup_token();
-            let (mut command, request, missing_program) =
-                super::owner_death::prepare_guardian(&spec, cleanup_token.clone())?;
+            let super::owner_death::PreparedGuardian {
+                mut command,
+                request,
+                missing_program,
+                verifier_witness,
+            } = super::owner_death::prepare_guardian(&spec, cleanup_token.clone())?;
             let mut child = match spawn_retrying_executable_busy(|| command.spawn(), thread::sleep)
             {
                 Ok(child) => child,
@@ -132,6 +136,7 @@ impl ProcessSpawner for RealSpawner {
             );
             process.missing_program = missing_program;
             process.payload_stdin = payload_stdin;
+            process.verifier_witness = verifier_witness;
             return Ok(Box::new(process));
         }
 
@@ -140,6 +145,7 @@ impl ProcessSpawner for RealSpawner {
             cleanup_token,
             env_cleared,
             source_verifier_bound,
+            verifier_witness,
         } = prepare_command(&spec, None)?;
         let missing_program = if source_verifier_bound {
             None
@@ -197,6 +203,7 @@ impl ProcessSpawner for RealSpawner {
 
         let mut process = real_process(child, cleanup_token, None, None, None, None, owner_job);
         process.missing_program = missing_program;
+        process.verifier_witness = verifier_witness;
         Ok(Box::new(process))
     }
 }
@@ -205,6 +212,7 @@ impl ProcessSpawner for RealSpawner {
 /// report back: whether its environment was cleared, so that `get_envs()` is
 /// the child's WHOLE environment rather than a patch over an inherited one.
 pub(crate) struct PreparedSpawn {
+    pub(crate) verifier_witness: Option<harn_vm::verifier_provenance::VerifierExecutionWitness>,
     pub(crate) source_verifier_bound: bool,
     pub(crate) command: Command,
     pub(crate) cleanup_token: String,
@@ -248,6 +256,7 @@ pub(crate) fn prepare_command(
         .map_err(ProcessError::Spawn)?;
         pinned.descriptors.attach(&mut prepared.command);
         prepared.source_verifier_bound = true;
+        prepared.verifier_witness = Some(pinned.witness);
     }
     Ok(prepared)
 }
@@ -433,6 +442,7 @@ pub(crate) fn prepare_command_from(
         .map_err(ProcessError::sandbox_setup)?;
 
     Ok(PreparedSpawn {
+        verifier_witness: None,
         source_verifier_bound: false,
         command,
         cleanup_token,
@@ -569,6 +579,7 @@ pub fn replace_current_process(spec: SpawnSpec) -> Result<std::convert::Infallib
 }
 
 struct RealProcess {
+    verifier_witness: Option<harn_vm::verifier_provenance::VerifierExecutionWitness>,
     missing_program: Option<String>,
     pid: u32,
     pgid: Option<u32>,
@@ -606,6 +617,7 @@ fn real_process(
         owner_job,
     });
     RealProcess {
+        verifier_witness: None,
         missing_program: None,
         pid,
         pgid,
@@ -699,7 +711,12 @@ impl ProcessHandle for RealProcess {
         let deadline = timeout.map(|timeout| Instant::now() + timeout);
         loop {
             match child.try_wait()? {
-                Some(status) => return Ok(WaitOutcome::Exited(decode_status(status))),
+                Some(status) => {
+                    if let Some(witness) = self.verifier_witness.as_ref() {
+                        witness.validate()?;
+                    }
+                    return Ok(WaitOutcome::Exited(decode_status(status)));
+                }
                 None => {
                     if interrupt() {
                         if owner_death_contained {
