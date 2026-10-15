@@ -3793,6 +3793,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "harn-llm"
+version = "0.10.167"
+dependencies = [
+ "arcstr",
+ "harn-provider-catalog",
+ "harn-vm-core",
+ "regex",
+ "serde",
+ "serde_json",
+ "tiktoken-rs",
+]
+
+[[package]]
 name = "harn-llm-perf"
 version = "0.0.0"
 dependencies = [
@@ -4182,6 +4195,7 @@ dependencies = [
  "harn-kernel",
  "harn-languages",
  "harn-lexer",
+ "harn-llm",
  "harn-modules",
  "harn-parser",
  "harn-prompt-syntax",
@@ -4247,7 +4261,6 @@ dependencies = [
  "tar",
  "tempfile",
  "thiserror 2.0.21",
- "tiktoken-rs",
  "time",
  "tokio",
  "tokio-stream",
@@ -4289,6 +4302,7 @@ dependencies = [
  "arcstr",
  "base64 0.23.1",
  "blake3",
+ "harn-builtin-macros",
  "harn-builtin-meta",
  "harn-builtin-registry",
  "harn-capability-contracts",
