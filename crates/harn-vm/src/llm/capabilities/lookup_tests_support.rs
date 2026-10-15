@@ -3,7 +3,10 @@
 //! These helpers are used by more than one themed module, so they live here
 //! rather than being duplicated or reached for across sibling test modules.
 
-use super::{clear_user_overrides, lookup};
+use super::{
+    admit_portable_option_for_thinking, clear_user_overrides, lookup, PortableOption,
+    ReasoningEffort,
+};
 
 /// Drop any user overrides a previous test installed.
 ///
@@ -50,4 +53,72 @@ anthropic_beta_features = ["fine-grained-tool-streaming-2025-05-14"]
         .anthropic_beta_features
         .is_empty());
     reset();
+}
+
+#[test]
+fn gpt6_sampling_condition_is_direct_and_not_inherited_by_unforwarded_routes() {
+    reset();
+    let none = crate::llm::api::ThinkingConfig::Effort {
+        level: ReasoningEffort::None,
+    };
+    let low = crate::llm::api::ThinkingConfig::Effort {
+        level: ReasoningEffort::Low,
+    };
+    for (provider, model) in [("openai", "gpt-6-luna"), ("openai", "gpt-6-sol")] {
+        for thinking in [&crate::llm::api::ThinkingConfig::Disabled, &low] {
+            assert!(
+                admit_portable_option_for_thinking(
+                    provider,
+                    model,
+                    thinking,
+                    PortableOption::Temperature,
+                    None
+                )
+                .is_err(),
+                "{provider}:{model}"
+            );
+        }
+        admit_portable_option_for_thinking(
+            provider,
+            model,
+            &none,
+            PortableOption::Temperature,
+            None,
+        )
+        .expect("explicit none admits temperature");
+    }
+    for model in ["openai/gpt-6-luna", "openai/gpt-6-sol"] {
+        admit_portable_option_for_thinking(
+            "openrouter",
+            model,
+            &none,
+            PortableOption::Temperature,
+            None,
+        )
+        .expect_err("an unforwarded option must not inherit direct conditional support");
+    }
+    admit_portable_option_for_thinking(
+        "openai",
+        "gpt-6-astra",
+        &none,
+        PortableOption::Temperature,
+        None,
+    )
+    .expect_err("Astra must not inherit a condition for Sol and Luna");
+}
+
+#[test]
+fn mistral_large_4_direct_route_sends_the_card_api_name() {
+    assert_eq!(
+        crate::llm_config::wire_model_id("mistral-large-4-0"),
+        "mistral-large-4"
+    );
+    assert_eq!(
+        crate::llm_config::wire_model_id("mistralai/mistral-large-4-0"),
+        "mistralai/mistral-large-4-0"
+    );
+    assert_eq!(
+        crate::llm_config::wire_model_id("mistral-small-2603"),
+        "mistral-small-2603"
+    );
 }
