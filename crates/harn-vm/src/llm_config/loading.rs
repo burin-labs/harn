@@ -397,25 +397,6 @@ fn merge_config_overlays(
     merged
 }
 
-/// Provider config built purely from the compiled-in `EMBEDDED_PROVIDERS_TOML`
-/// snapshot, ignoring every ambient layer: the developer's
-/// `~/.config/harn/providers.toml`, `HARN_PROVIDERS_CONFIG`, the process
-/// runtime-catalog overlay, and thread-local user overrides.
-///
-/// This is the hermetic source of truth for *generating* the checked-in
-/// `spec/provider-catalog/*` artifacts. Artifact generation must be a pure
-/// function of the source tree so a developer's personal aliases/providers
-/// never leak into shipped artifacts (which then makes clean CI flag drift).
-/// Runtime catalog presentation must keep using [`effective_config`] /
-/// [`effective_config_with_user_overrides`], which legitimately reflect the
-/// host's live configuration.
-///
-/// An optional explicit overlay (e.g. a `--overlay` file named on the command
-/// line) is merged on top of the embedded base. Unlike the home file and env
-/// layers, that overlay is a declared, reproducible input rather than ambient
-/// machine state, so it is safe to honor while staying hermetic.
-pub use harn_provider_catalog::config::embedded_config;
-
 pub(crate) fn effective_config_with_user_overrides(
     user_overrides: Option<&ProvidersConfig>,
 ) -> ProvidersConfig {
