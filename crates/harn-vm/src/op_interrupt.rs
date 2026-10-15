@@ -15,20 +15,6 @@ pub(crate) use harn_vm_core::op_interrupt::{
     operation_budget_expired, requested_error, with_operation_budget,
 };
 
-#[cfg(test)]
-fn install_for_vm(
-    cancel: Option<Arc<AtomicBool>>,
-    scope_deadline: Option<Instant>,
-    handler_deadline: Option<Instant>,
-) -> OpInterruptGuard {
-    InterruptSources {
-        cancel,
-        scope_deadline,
-        handler_deadline,
-    }
-    .install()
-}
-
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, LazyLock, Mutex};
