@@ -9,6 +9,7 @@ homepage.workspace = true
 description = "Bytecode interpreter and compiler contracts for Harn execution backends"
 
 [features]
+vm-test-support = []
 vm-bench-internals = []
 
 [dependencies]
@@ -62,6 +63,7 @@ windows-sys = { version = "0.61.2", features = [
 ] }
 
 [dev-dependencies]
+walkdir = "2"
 harn-modules = { path = "../harn-modules", version = "=0.10.167", features = ["bundled-stdlib"] }
 proptest = "1"
 static_assertions = "1.1"

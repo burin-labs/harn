@@ -1,6 +1,12 @@
 //! Interpreter behavior exercised with the native execution runtime.
 
 use crate::*;
+mod task_cleanup;
+mod timed_execution;
+
+mod baseline_native;
+mod modules_native;
+mod modules_tool_registry;
 
 mod depth_regression_tests;
 mod tests_debug;

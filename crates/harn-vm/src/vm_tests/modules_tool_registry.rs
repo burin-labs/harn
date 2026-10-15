@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use super::*;
+use std::path::PathBuf;
 
 #[test]
 fn stdlib_tool_registry_from_carries_cli_metadata_through_import_abi() {
@@ -9,7 +10,7 @@ fn stdlib_tool_registry_from_carries_cli_metadata_through_import_abi() {
         .build()
         .expect("runtime builds");
     runtime.block_on(async {
-        let mut vm = Vm::new();
+        let mut vm = crate::new_vm();
         crate::register_vm_stdlib(&mut vm);
         let exports = vm
             .load_module_exports_from_import("std/tools")

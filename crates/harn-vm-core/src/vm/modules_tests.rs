@@ -9,8 +9,6 @@ mod lifecycle;
 mod shared_instances;
 #[path = "modules_tests/stdlib_warm.rs"]
 mod stdlib_warm;
-#[path = "modules_tests/tool_registry.rs"]
-mod tool_registry;
 #[path = "modules_tests/user_interface_warm.rs"]
 mod user_interface_warm;
 
@@ -30,119 +28,6 @@ fn cached_stdlib_module_ptr(module: &str) -> Option<usize> {
     stdlib_module_artifact_cache_ptr(module, source)
 }
 
-struct TrustedHostDispatchBridge;
-
-impl crate::HostCallBridge for TrustedHostDispatchBridge {
-    fn dispatch<'a>(
-        &'a self,
-        capability: &'a str,
-        operation: &'a str,
-        _params: &'a crate::value::DictMap,
-    ) -> crate::stdlib::host::HostCallDispatchFuture<'a> {
-        assert_eq!(capability, "cloud");
-        assert_eq!(operation, "echo");
-        crate::host_call_ready(Ok(Some(VmValue::String(arcstr::ArcStr::from("bridged")))))
-    }
-}
-
-#[test]
-fn trusted_host_dispatch_is_explicit_transitive_and_executable() {
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .expect("runtime builds");
-    let temp = tempfile::tempdir().expect("tempdir");
-    let helper = temp.path().join("helper.harn");
-    let entry = temp.path().join("entry.harn");
-    std::fs::write(
-        &helper,
-        "pub fn dispatch(payload) { return host_call(\"cloud.echo\", payload) }\n",
-    )
-    .expect("write helper");
-    std::fs::write(
-        &entry,
-        "import { dispatch } from \"./helper\"\npub fn route(payload) { return dispatch(payload) }\n",
-    )
-    .expect("write entry");
-
-    runtime.block_on(async {
-        let mut ordinary = Vm::new();
-        crate::stdlib::register_vm_stdlib(&mut ordinary);
-        let error = ordinary
-            .load_module_exports(&entry)
-            .await
-            .expect_err("ordinary module graph must reject host_call while compiling");
-        assert!(error.to_string().contains("host_call"), "{error}");
-
-        let local = tokio::task::LocalSet::new();
-        local
-            .run_until(async {
-                crate::set_host_call_bridge(Arc::new(TrustedHostDispatchBridge));
-                let mut trusted = Vm::new();
-                crate::stdlib::register_vm_stdlib(&mut trusted);
-                trusted
-                    .enable_trusted_host_dispatch()
-                    .expect("fresh VM accepts explicit authority");
-                let exports = trusted
-                    .load_module_exports(&entry)
-                    .await
-                    .expect("trusted graph loads transitively");
-                let route = exports.get("route").expect("route exported");
-                let value = trusted
-                    .call_closure_pub(route, &[VmValue::dict(crate::value::DictMap::default())])
-                    .await
-                    .expect("host-selected callable executes");
-                crate::clear_host_call_bridge();
-                assert_eq!(value.display(), "bridged");
-            })
-            .await;
-    });
-}
-
-#[test]
-fn unregistered_host_fixtures_require_explicit_test_local_authority() {
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .expect("runtime builds");
-
-    runtime.block_on(async {
-        let mut vm = Vm::new();
-        let VmValue::Harness(root) = crate::Harness::real().into_vm_value() else {
-            panic!("real harness lowers to a VM handle");
-        };
-        let testing = root.sub_handle("testing").expect("testing sub-handle");
-        let mut args = vec![
-            VmValue::String(arcstr::ArcStr::from("cloud")),
-            VmValue::String(arcstr::ArcStr::from("echo")),
-            VmValue::String(arcstr::ArcStr::from("fixture")),
-            VmValue::Nil,
-            VmValue::Bool(false),
-        ];
-
-        let error = vm
-            .call_harness_method(&testing, "respond", &args)
-            .await
-            .expect_err("unknown host operation fails closed by default");
-        assert!(
-            error.to_string().contains("unregistered_ok=true"),
-            "{error}"
-        );
-
-        args.push(VmValue::Bool(true));
-        vm.call_harness_method(&testing, "respond", &args)
-            .await
-            .expect("explicit test-local host fixture is accepted");
-        let result = crate::harness::native_harness(&root)
-            .unwrap()
-            .fixtures()
-            .dispatch_host("cloud", "echo", &crate::value::DictMap::default())
-            .expect("fixture matches")
-            .expect("fixture succeeds");
-        assert_eq!(result.display(), "fixture");
-    });
-}
-
 #[test]
 fn child_cow_module_cache_reuses_loaded_module_arcs_but_fresh_roots_do_not() {
     let runtime = tokio::runtime::Builder::new_current_thread()
@@ -153,7 +38,7 @@ fn child_cow_module_cache_reuses_loaded_module_arcs_but_fresh_roots_do_not() {
     runtime.block_on(async {
         let primary_key = PathBuf::from("<test>/primary.harn");
         let primary_source = "pub fn primary() { return 1 }\n";
-        let mut parent = Vm::new();
+        let mut parent = super::super::test_runtime::new_vm();
         let parent_loaded = parent
             .load_module_from_source(primary_key.clone(), primary_source)
             .await
@@ -195,7 +80,7 @@ fn child_cow_module_cache_reuses_loaded_module_arcs_but_fresh_roots_do_not() {
                 .expect("child COW cache retains primary"),
         ));
 
-        let mut fresh = Vm::new();
+        let mut fresh = super::super::test_runtime::new_vm();
         let fresh_loaded = fresh
             .load_module_from_source(primary_key, primary_source)
             .await
@@ -215,7 +100,7 @@ fn module_phase_timing_counts_successful_unique_module_work() {
         .expect("runtime builds");
 
     runtime.block_on(async {
-        let mut vm = Vm::new();
+        let mut vm = super::super::test_runtime::new_vm();
         let recorder = vm.enable_module_phase_timing();
         let mut child = vm.child_vm();
         let path = PathBuf::from("<test>/timed_module.harn");
@@ -246,7 +131,7 @@ fn module_phase_timing_does_not_count_failed_compile() {
         .expect("runtime builds");
 
     runtime.block_on(async {
-        let mut vm = Vm::new();
+        let mut vm = super::super::test_runtime::new_vm();
         let recorder = vm.enable_module_phase_timing();
 
         let result = vm
@@ -274,7 +159,7 @@ fn failed_read_does_not_leak_module_counts_to_next_vm() {
     std::fs::write(&valid, "pub fn answer() { return 42 }\n").expect("write valid module");
 
     runtime.block_on(async {
-        let mut failed_vm = Vm::new();
+        let mut failed_vm = super::super::test_runtime::new_vm();
         failed_vm.set_source_dir(temp.path());
         let failed_recorder = failed_vm.enable_module_phase_timing();
 
@@ -282,7 +167,7 @@ fn failed_read_does_not_leak_module_counts_to_next_vm() {
         assert_eq!(failed_recorder.snapshot().modules_loaded, 0);
         drop(failed_vm);
 
-        let mut next_vm = Vm::new();
+        let mut next_vm = super::super::test_runtime::new_vm();
         let next_recorder = next_vm.enable_module_phase_timing();
         next_vm
             .load_module_exports(&valid)
@@ -290,281 +175,6 @@ fn failed_read_does_not_leak_module_counts_to_next_vm() {
             .expect("next VM load succeeds");
         assert_eq!(next_recorder.snapshot().modules_loaded, 1);
         assert_eq!(failed_recorder.snapshot().modules_loaded, 0);
-    });
-}
-
-#[test]
-fn module_function_can_use_local_type_alias_as_schema_value() {
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .expect("runtime builds");
-
-    let result = runtime.block_on(async {
-        let mut vm = Vm::new();
-        crate::stdlib::register_vm_stdlib(&mut vm);
-        let loaded = vm
-            .load_module_from_source(
-                PathBuf::from("<test>/schema_alias_module.harn"),
-                r#"
-fn accepts_schema(schema) {
-  return schema_report({name: "Ada"}, schema).ok
-}
-
-type UserShape = {name: string}
-
-pub fn works() {
-  return accepts_schema(UserShape)
-}
-"#,
-            )
-            .await
-            .expect("module loads");
-        let closure = Arc::clone(loaded.functions.get("works").expect("works export exists"));
-        vm.call_closure_pub(&closure, &[])
-            .await
-            .expect("module closure executes")
-    });
-
-    assert!(matches!(result, VmValue::Bool(true)), "{result:?}");
-}
-
-#[test]
-fn large_public_type_surface_loads_every_schema() {
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .expect("runtime builds");
-    let mut source = String::new();
-    for alias in 0..400 {
-        source.push_str(&format!("pub type Contract{alias} = {{"));
-        for field in 0..12 {
-            source.push_str(&format!("field_{field}: string,"));
-        }
-        source.push_str("}\n");
-    }
-
-    runtime.block_on(async {
-        let mut vm = Vm::new();
-        crate::stdlib::register_vm_stdlib(&mut vm);
-        let loaded = vm
-            .load_module_from_source(PathBuf::from("<test>/large_facade.harn"), &source)
-            .await
-            .expect("large typed facade loads");
-
-        assert_eq!(loaded.public_type_schemas.len(), 400);
-        let mut fields = crate::value::DictMap::default();
-        for field in 0..12 {
-            fields.insert(
-                format!("field_{field}").into(),
-                VmValue::String(arcstr::ArcStr::from("value")),
-            );
-        }
-        let value = VmValue::dict(fields);
-        for name in ["Contract0", "Contract399"] {
-            let schema = loaded
-                .public_type_schemas
-                .get(name)
-                .unwrap_or_else(|| panic!("missing schema {name}"));
-            assert!(crate::schema::schema_is_value(&value, schema).expect("schema validates"));
-        }
-    });
-}
-
-#[test]
-fn imported_public_struct_exports_its_runtime_constructor() {
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .expect("runtime builds");
-    let temp = tempfile::tempdir().expect("tempdir");
-    let types = temp.path().join("types.harn");
-    let consumer = temp.path().join("consumer.harn");
-    std::fs::write(&types, "pub struct Decision { allowed: bool }\n").expect("write type module");
-    std::fs::write(
-        &consumer,
-        r#"
-import { Decision } from "./types"
-
-pub fn decide() -> Decision {
-  return Decision({allowed: true})
-}
-"#,
-    )
-    .expect("write consumer module");
-
-    runtime.block_on(async {
-        let mut vm = Vm::new();
-        crate::register_vm_stdlib(&mut vm);
-        let exports = vm
-            .load_module_exports(&consumer)
-            .await
-            .expect("consumer module loads");
-        let decide = exports.get("decide").expect("decide export");
-        let result = vm
-            .call_closure_pub(decide, &[])
-            .await
-            .expect("imported constructor executes");
-
-        assert_eq!(result.struct_name(), Some("Decision"));
-        let fields = result.struct_fields_map().expect("struct fields");
-        let Some(VmValue::Bool(allowed)) = fields.get("allowed") else {
-            panic!(
-                "expected bool field `allowed`, got {:?}",
-                fields.get("allowed")
-            );
-        };
-        assert!(*allowed, "expected `allowed` to be true");
-    });
-}
-
-#[test]
-fn wildcard_imported_source_callable_shadows_legacy_parser_builtin() {
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .expect("runtime builds");
-    let temp = tempfile::tempdir().expect("tempdir");
-    let library = temp.path().join("library.harn");
-    let consumer = temp.path().join("consumer.harn");
-    std::fs::write(
-        &library,
-        r"pub fn context(value: string) -> string { return value }",
-    )
-    .expect("write library module");
-    std::fs::write(
-        &consumer,
-        r#"
-import "./library"
-
-pub fn exercise() -> string {
-  return context("wildcard")
-}
-"#,
-    )
-    .expect("write consumer module");
-
-    runtime.block_on(async {
-        let mut vm = Vm::new();
-        crate::register_vm_stdlib(&mut vm);
-        let exports = vm
-            .load_module_exports(&consumer)
-            .await
-            .expect("wildcard source callable resolves before builtin policy");
-        let exercise = exports.get("exercise").expect("exercise export");
-        let result = vm
-            .call_closure_pub(exercise, &[])
-            .await
-            .expect("wildcard source callable executes");
-        assert!(matches!(
-            result,
-            VmValue::String(value) if value.as_str() == "wildcard"
-        ));
-    });
-}
-
-#[test]
-fn imported_public_enum_exports_namespace_and_preserves_source_context() {
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .expect("runtime builds");
-    let temp = tempfile::tempdir().expect("tempdir");
-    let library = temp.path().join("library.harn");
-    let facade = temp.path().join("facade.harn");
-    let consumer = temp.path().join("consumer.harn");
-    let wildcard_consumer = temp.path().join("wildcard_consumer.harn");
-    std::fs::write(
-        &library,
-        r"
-pub enum Color {
-  Ready(message: string)
-  Empty
-}
-
-pub fn from_library(message: string) -> Color {
-  return Color.Ready(message)
-}
-",
-    )
-    .expect("write enum module");
-    std::fs::write(
-        &facade,
-        r#"
-pub import { Color, from_library } from "./library"
-"#,
-    )
-    .expect("write enum facade");
-    std::fs::write(
-        &consumer,
-        r#"
-import { Color, from_library } from "./facade"
-
-pub fn exercise() -> string {
-  const direct = Color.Ready("direct")
-  const indirect = from_library("indirect")
-  match direct {
-    Color.Ready(message) -> {
-      match indirect {
-        Color.Ready(other) -> { return message + ":" + other }
-        _ -> { return "indirect-mismatch" }
-      }
-    }
-    _ -> { return "direct-mismatch" }
-  }
-}
-"#,
-    )
-    .expect("write consumer module");
-    std::fs::write(
-        &wildcard_consumer,
-        r#"
-import "./facade"
-
-pub fn exercise() -> string {
-  const direct = Color.Ready("wildcard")
-  match direct {
-    Color.Ready(message) -> { return message }
-    _ -> { return "wildcard-mismatch" }
-  }
-}
-"#,
-    )
-    .expect("write wildcard consumer module");
-
-    runtime.block_on(async {
-        let mut vm = Vm::new();
-        crate::register_vm_stdlib(&mut vm);
-        let exports = vm
-            .load_module_exports(&consumer)
-            .await
-            .expect("consumer module loads");
-        let exercise = exports.get("exercise").expect("exercise export");
-        let result = vm
-            .call_closure_pub(exercise, &[])
-            .await
-            .expect("imported enum namespace and function execute");
-
-        assert!(matches!(
-            result,
-            VmValue::String(value) if value.as_str() == "direct:indirect"
-        ));
-
-        let wildcard_exports = vm
-            .load_module_exports(&wildcard_consumer)
-            .await
-            .expect("wildcard consumer module loads");
-        let wildcard_exercise = wildcard_exports
-            .get("exercise")
-            .expect("wildcard exercise export");
-        let wildcard_result = vm
-            .call_closure_pub(wildcard_exercise, &[])
-            .await
-            .expect("wildcard imported enum namespace executes");
-        assert!(matches!(
-            wildcard_result,
-            VmValue::String(value) if value.as_str() == "wildcard"
-        ));
     });
 }
 
@@ -579,7 +189,7 @@ fn stdlib_artifact_cache_reuses_compilation_with_fresh_vm_state() {
 
     let (first_exports, second_exports, first_state_weak, second_state_weak) =
         runtime.block_on(async {
-            let mut first_vm = Vm::new();
+            let mut first_vm = super::super::test_runtime::new_vm();
             let first_exports = first_vm
                 .load_module_exports_from_import("std/agent/prompts")
                 .await
@@ -592,7 +202,7 @@ fn stdlib_artifact_cache_reuses_compilation_with_fresh_vm_state() {
             let first_state_weak = Arc::downgrade(&first_state);
             let first_state_ptr = Arc::as_ptr(&first_state);
 
-            let mut second_vm = Vm::new();
+            let mut second_vm = super::super::test_runtime::new_vm();
             let second_exports = second_vm
                 .load_module_exports_from_import("std/agent/prompts")
                 .await
@@ -654,7 +264,7 @@ fn warm_stdlib_disk_hit_resolves_no_imported_interface() {
     let load_once = || {
         reset_stdlib_module_artifact_cache();
         runtime.block_on(async {
-            Vm::new()
+            super::super::test_runtime::new_vm()
                 .load_module_exports_from_import("std/agent/prompts")
                 .await
                 .expect("stdlib import succeeds");
@@ -814,7 +424,7 @@ pub fn increment() {
     let cache = crate::PreparedModuleCache::default();
 
     runtime.block_on(async {
-        let mut first_vm = Vm::new();
+        let mut first_vm = super::super::test_runtime::new_vm();
         first_vm.set_prepared_module_cache(cache.clone());
         let first_recorder = first_vm.enable_module_phase_timing();
         let first_exports = first_vm
@@ -832,7 +442,7 @@ pub fn increment() {
         ));
         assert_eq!(first_recorder.snapshot().modules_loaded, 1);
 
-        let mut second_vm = Vm::new();
+        let mut second_vm = super::super::test_runtime::new_vm();
         second_vm.set_prepared_module_cache(cache.clone());
         let second_recorder = second_vm.enable_module_phase_timing();
         let second_exports = second_vm
@@ -882,7 +492,7 @@ fn prepared_importer_reloads_changed_dependency() {
     let cache = crate::PreparedModuleCache::default();
 
     runtime.block_on(async {
-        let mut first_vm = Vm::new();
+        let mut first_vm = super::super::test_runtime::new_vm();
         first_vm.set_prepared_module_cache(cache.clone());
         let first_exports = first_vm
             .load_module_exports(&module)
@@ -897,7 +507,7 @@ fn prepared_importer_reloads_changed_dependency() {
 
         std::fs::write(&dependency, "pub fn value() { return 2 }\n").expect("rewrite dependency");
 
-        let mut second_vm = Vm::new();
+        let mut second_vm = super::super::test_runtime::new_vm();
         second_vm.set_prepared_module_cache(cache.clone());
         let second_exports = second_vm
             .load_module_exports(&module)
@@ -930,7 +540,7 @@ fn stdlib_artifact_cache_is_process_wide_across_threads() {
                 .build()
                 .expect("runtime builds");
             runtime.block_on(async {
-                let mut vm = Vm::new();
+                let mut vm = super::super::test_runtime::new_vm();
                 vm.load_module_exports_from_import("std/agent/prompts")
                     .await
                     .expect("thread stdlib import succeeds");
@@ -946,7 +556,7 @@ fn stdlib_artifact_cache_is_process_wide_across_threads() {
         .build()
         .expect("runtime builds");
     runtime.block_on(async {
-        let mut vm = Vm::new();
+        let mut vm = super::super::test_runtime::new_vm();
         vm.load_module_exports_from_import("std/agent/prompts")
             .await
             .expect("main-thread stdlib import succeeds");
@@ -965,7 +575,7 @@ fn module_closures_release_state_after_vm_drop() {
         .expect("runtime builds");
 
     let (closure_weak, registry_weak, state_weak) = runtime.block_on(async {
-        let mut vm = Vm::new();
+        let mut vm = super::super::test_runtime::new_vm();
         let loaded = vm
             .load_module_from_source(
                 PathBuf::from("<test>/module_cycle.harn"),
@@ -1020,8 +630,7 @@ fn namespace_import_binds_alias_dict_not_flattened_members() {
     .expect("write lib");
 
     let result = runtime.block_on(async {
-        let mut vm = Vm::new();
-        crate::stdlib::register_vm_stdlib(&mut vm);
+        let mut vm = super::super::test_runtime::new_vm();
         vm.set_source_dir(temp.path());
         vm.execute_namespace_import_bind("./lib", "lib", None)
             .await
@@ -1054,8 +663,7 @@ pipeline default(harness: Harness) {
         let disassembly = chunk.disassemble("escaped namespace import");
         assert!(disassembly.contains("NAMESPACE_IMPORT"));
         assert!(!disassembly.contains("NAMESPACE_IMPORT_MEMBERS"));
-        let mut run_vm = Vm::new();
-        crate::stdlib::register_vm_stdlib(&mut run_vm);
+        let mut run_vm = super::super::test_runtime::new_vm();
         run_vm.set_source_dir(temp.path());
         run_vm
             .execute(&chunk)
@@ -1095,7 +703,7 @@ fn namespace_member_projection_keeps_target_complete_and_nested_dict_narrow() {
     .expect("write wrapper");
 
     runtime.block_on(async {
-        let mut vm = Vm::new();
+        let mut vm = super::super::test_runtime::new_vm();
         let recorder = vm.enable_module_phase_timing();
         vm.set_source_dir(temp.path());
         let exports = vm
@@ -1193,7 +801,7 @@ pub fn spare() { return 9 }
     .expect("write b");
 
     runtime.block_on(async {
-        let mut vm = Vm::new();
+        let mut vm = super::super::test_runtime::new_vm();
         vm.set_source_dir(temp.path());
         let exports = vm.load_module_exports(&a).await.expect("cycle loads");
         let result = vm
@@ -1243,7 +851,7 @@ fn module_loading_reuses_the_bytes_the_entry_cache_key_already_read() {
     let walked = crate::module_source::read(&dependency).expect("dependency was read by the walk");
 
     runtime.block_on(async {
-        let mut vm = Vm::new();
+        let mut vm = super::super::test_runtime::new_vm();
         vm.load_module_exports(&entry)
             .await
             .expect("module load succeeds");
@@ -1281,7 +889,7 @@ fn an_edited_dependency_is_re_read_rather_than_served_from_the_shared_owner() {
     std::fs::write(&dependency, "pub fn value() { return 1 }\n").expect("write dependency");
 
     runtime.block_on(async {
-        let mut first_vm = Vm::new();
+        let mut first_vm = super::super::test_runtime::new_vm();
         let first = first_vm
             .load_module_exports(&entry)
             .await
@@ -1296,7 +904,7 @@ fn an_edited_dependency_is_re_read_rather_than_served_from_the_shared_owner() {
 
         std::fs::write(&dependency, "pub fn value() { return 2 }\n").expect("rewrite dependency");
 
-        let mut second_vm = Vm::new();
+        let mut second_vm = super::super::test_runtime::new_vm();
         let second = second_vm
             .load_module_exports(&entry)
             .await
@@ -1380,7 +988,7 @@ fn a_linked_module_resolves_its_artifact_without_reading_the_source() {
     let (dep, table) = seed_linked_module(temp.path(), "pub fn value() { return 1 }\n");
 
     runtime.block_on(async {
-        let mut linked = Vm::new();
+        let mut linked = super::super::test_runtime::new_vm();
         linked.set_graph_link_table(Some(table));
         let before = source_reads();
         let exports = linked
@@ -1397,7 +1005,7 @@ fn a_linked_module_resolves_its_artifact_without_reading_the_source() {
             "a module the link table names must resolve without reading its source"
         );
 
-        let mut unlinked = Vm::new();
+        let mut unlinked = super::super::test_runtime::new_vm();
         let before = source_reads();
         unlinked
             .load_module_exports(&dep)
@@ -1449,7 +1057,7 @@ fn a_link_table_naming_an_evicted_artifact_falls_back_to_reading() {
     }
 
     runtime.block_on(async {
-        let mut vm = Vm::new();
+        let mut vm = super::super::test_runtime::new_vm();
         vm.set_graph_link_table(Some(table));
         let before = source_reads();
         let exports = vm

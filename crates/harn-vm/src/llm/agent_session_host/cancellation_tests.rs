@@ -1114,3 +1114,4 @@ async fn a_cancel_mid_tool_persists_an_answer_for_the_open_call() {
     );
     crate::agent_sessions::reset_session_store();
 }
+use crate::native_vm::NativeCleanupTestExt;

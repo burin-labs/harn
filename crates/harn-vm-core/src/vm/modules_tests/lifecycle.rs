@@ -26,7 +26,7 @@ pub fn value() {
     let cache = crate::PreparedModuleCache::default();
 
     runtime.block_on(async {
-        let mut vm = Vm::new();
+        let mut vm = super::super::super::test_runtime::new_vm();
         vm.set_prepared_module_cache(cache);
         let exports = vm
             .load_module_exports(&module)
@@ -48,7 +48,7 @@ fn successful_module_initializer_commits_interrupt_and_parallel_identity_state()
         .expect("runtime builds");
 
     runtime.block_on(async {
-        let mut vm = Vm::new();
+        let mut vm = super::super::super::test_runtime::new_vm();
         vm.load_module_from_source(
             PathBuf::from("<test>/stateful_initializer.harn"),
             r#"
@@ -79,7 +79,7 @@ fn failed_module_initializer_discards_interrupt_and_parallel_identity_state() {
         .expect("runtime builds");
 
     runtime.block_on(async {
-        let mut vm = Vm::new();
+        let mut vm = super::super::super::test_runtime::new_vm();
         let result = vm
             .load_module_from_source(
                 PathBuf::from("<test>/failed_stateful_initializer.harn"),
@@ -109,7 +109,7 @@ fn failed_module_initializer_restores_the_calling_vm_scope() {
         .expect("runtime builds");
 
     runtime.block_on(async {
-        let mut vm = Vm::new();
+        let mut vm = super::super::super::test_runtime::new_vm();
         vm.env
             .define("caller_value", VmValue::Int(7), false)
             .expect("caller binding");
@@ -127,7 +127,7 @@ fn failed_module_initializer_restores_the_calling_vm_scope() {
                 frame_depth: 1,
                 env_scope_depth: 1,
             });
-        vm.task_scopes.push(super::super::super::TaskScope {
+        vm.task_scopes.push(crate::vm::TaskScope {
             task_ids: Vec::new(),
             frame_depth: 1,
             env_scope_depth: 1,
@@ -171,13 +171,13 @@ fn cancelled_module_initializer_never_displaces_the_calling_vm_state() {
         .expect("runtime builds");
 
     runtime.block_on(async {
-        let mut vm = Vm::new();
+        let mut vm = super::super::super::test_runtime::new_vm();
         vm.env
             .define("caller_value", VmValue::Int(9), false)
             .expect("caller binding");
         let caller_dir = PathBuf::from("<test>/caller");
         vm.source_dir = Some(caller_dir.clone());
-        vm.task_scopes.push(super::super::super::TaskScope {
+        vm.task_scopes.push(crate::vm::TaskScope {
             task_ids: Vec::new(),
             frame_depth: 0,
             env_scope_depth: vm.env.scope_depth(),
@@ -250,7 +250,7 @@ pub fn through_a() { return a_value() }
     .expect("write module b");
 
     runtime.block_on(async {
-        let mut vm = Vm::new();
+        let mut vm = super::super::super::test_runtime::new_vm();
         let first = vm.load_module_exports(&module_a).await;
         assert!(matches!(first, Err(VmError::Thrown(_))));
         assert!(vm.imported_paths.is_empty());

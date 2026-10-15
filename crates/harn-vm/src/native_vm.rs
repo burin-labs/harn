@@ -17,6 +17,8 @@ mod step_lifecycle;
 pub(crate) use stdlib_registration::install_shared_stdlib_registration;
 pub(crate) mod subtask;
 mod task_cleanup;
+#[cfg(test)]
+pub(crate) use task_cleanup::NativeCleanupTestExt;
 mod timed_execution;
 mod tracing;
 

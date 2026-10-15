@@ -11,7 +11,9 @@ struct TestRuntime {
 }
 
 pub(super) fn new_vm() -> super::Vm {
-    super::Vm::with_runtime(Arc::new(TestRuntime::default()))
+    let mut vm = super::Vm::with_runtime(Arc::new(TestRuntime::default()));
+    vm.set_harness(crate::value::VmHarness::from_host(Arc::new(())));
+    vm
 }
 
 fn unsupported() -> VmError {
@@ -63,25 +65,25 @@ impl VmRuntime for TestRuntime {
     }
     fn poll_async_builtin(
         &self,
-        cx: &mut std::_task::Context<'_>,
-        continuation: &mut dyn FnMut(&mut std::_task::Context<'_>) -> std::_task::Poll<()>,
-    ) -> std::_task::Poll<()> {
+        cx: &mut std::task::Context<'_>,
+        continuation: &mut dyn FnMut(&mut std::task::Context<'_>) -> std::task::Poll<()>,
+    ) -> std::task::Poll<()> {
         continuation(cx)
     }
     fn execute_timed<'a>(
         &'a self,
         _vm: &'a mut super::Vm,
         _entry: super::TopLevelEntry,
-        _deadline: std::_time::Instant,
+        _deadline: std::time::Instant,
     ) -> Pin<Box<dyn Future<Output = Result<VmValue, VmError>> + Send + 'a>> {
         Box::pin(async { Err(unsupported()) })
     }
     fn poll_source_dir(
         &self,
-        _source_dir: &mut Option<std::_path::PathBuf>,
-        cx: &mut std::_task::Context<'_>,
-        continuation: &mut dyn FnMut(&mut std::_task::Context<'_>) -> std::_task::Poll<()>,
-    ) -> std::_task::Poll<()> {
+        _source_dir: &mut Option<std::path::PathBuf>,
+        cx: &mut std::task::Context<'_>,
+        continuation: &mut dyn FnMut(&mut std::task::Context<'_>) -> std::task::Poll<()>,
+    ) -> std::task::Poll<()> {
         continuation(cx)
     }
     fn task_cleanup(&self, _execution_id: &crate::ExecutionId) -> Arc<dyn VmTaskCleanup> {
@@ -103,7 +105,7 @@ impl VmRuntime for TestRuntime {
     fn clear_pipeline_finish(&self) {}
     fn rebind_execution_state(&self, _vm: &mut super::Vm) {}
     fn set_source_dir(&self, _dir: &Path) {}
-    fn enter_source_dir(&self, _dir: Option<&Path>) -> Option<std::_path::PathBuf> {
+    fn enter_source_dir(&self, _dir: Option<&Path>) -> Option<std::path::PathBuf> {
         None
     }
     fn is_step_function(&self, _name: &str) -> bool {
@@ -118,13 +120,13 @@ impl VmRuntime for TestRuntime {
     fn warn(&self, category: &str, message: &str) {
         panic!("unexpected runtime warning: {category}: {message}")
     }
-    fn take_active_step(&self, _frame_depth: usize) -> Option<super::_step_context::ActiveStep> {
+    fn take_active_step(&self, _frame_depth: usize) -> Option<super::step_context::ActiveStep> {
         None
     }
     fn before_step<'a>(
         &self,
         _vm: &'a mut super::Vm,
-        _closure: &'a crate::_value::VmClosure,
+        _closure: &'a crate::value::VmClosure,
         _args: Vec<VmValue>,
     ) -> Pin<Box<dyn Future<Output = Result<Vec<VmValue>, VmError>> + Send + 'a>> {
         Box::pin(async { Err(unsupported()) })
@@ -132,7 +134,7 @@ impl VmRuntime for TestRuntime {
     fn finish_step<'a>(
         &self,
         _vm: &'a mut super::Vm,
-        _step: super::_step_context::ActiveStep,
+        _step: super::step_context::ActiveStep,
         _output: VmValue,
     ) -> Pin<Box<dyn Future<Output = Result<VmValue, VmError>> + Send + 'a>> {
         Box::pin(async { Err(unsupported()) })
@@ -161,8 +163,8 @@ impl VmRuntime for TestRuntime {
     }
     fn denied_builtin_family(
         &self,
-        denied: std::_collections::HashSet<String>,
-    ) -> std::_collections::HashSet<String> {
+        denied: std::collections::HashSet<String>,
+    ) -> std::collections::HashSet<String> {
         denied
     }
     fn requires_async_builtin_gate(&self, _name: &str) -> bool {

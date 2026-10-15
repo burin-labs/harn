@@ -8,6 +8,9 @@ mod callable_entry;
 mod debug;
 mod dispatch;
 mod execution;
+#[cfg(feature = "vm-test-support")]
+#[doc(hidden)]
+pub use execution::{reset_scope_interrupt_async_dispatches, scope_interrupt_async_dispatches};
 mod execution_deadline;
 mod execution_evidence;
 pub mod flight_recorder;
@@ -32,6 +35,8 @@ mod stdlib_export;
 pub mod step_context;
 pub mod subtask;
 mod task_cleanup;
+#[cfg(feature = "vm-test-support")]
+mod test_support;
 mod tool_callable;
 mod work;
 

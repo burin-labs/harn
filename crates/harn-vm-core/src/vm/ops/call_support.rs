@@ -128,7 +128,3 @@ impl Drop for AwaitingTask {
         }
     }
 }
-
-#[cfg(test)]
-#[path = "task_cleanup_tests.rs"]
-mod tests;
