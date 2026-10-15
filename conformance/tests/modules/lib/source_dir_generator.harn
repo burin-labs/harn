@@ -1,9 +1,9 @@
 /** count_to. A generator body that lives in this module, not the caller's. */
-pub gen fn count_to(harness: Harness, limit: int) -> Stream<int> {
+pub gen fn count_to(fs: HarnessFs, limit: int) -> Stream<int> {
   let i = 0
   while i < limit {
     assert(
-      harness.fs.read_text(harness.fs.source_dir() + "/source_dir_marker.txt").trim()
+      fs.read_text(fs.source_dir() + "/source_dir_marker.txt").trim()
         == "generator reached",
     )
     emit i

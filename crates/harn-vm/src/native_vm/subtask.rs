@@ -40,6 +40,8 @@ impl VmExecutionScope for NativeSubtaskScope {
             preparation,
         } = self;
         ambient.poll_scoped(false, || {
+            #[cfg(windows)]
+            let _locks = crate::conditional_replace::scope_native_lock_root();
             crate::secrets::with_secret_provider_poll(provider, || {
                 preparation.poll(|| {
                     crate::stdlib::pool::with_pool_registry_poll(pools, || continuation(cx))

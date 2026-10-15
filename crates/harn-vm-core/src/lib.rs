@@ -12,6 +12,7 @@ pub mod cancellation;
 pub mod canonical_json;
 pub mod chunk;
 pub mod compiler;
+pub mod conditional_replace;
 pub mod context_manifest;
 pub mod coverage;
 pub mod execution_scope;

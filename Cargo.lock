@@ -4304,6 +4304,7 @@ dependencies = [
  "harn-session-store",
  "harn-stdlib",
  "harn-stdlib-catalog",
+ "hex",
  "imbl",
  "jsonschema",
  "linkme",

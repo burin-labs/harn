@@ -63,8 +63,7 @@ impl SourceExecutor {
             ),
         ];
         let builtin = vm
-            .builtins
-            .get("exec_opts")
+            .builtin_handler_for_test("exec_opts")
             .expect("canonical process builtin registered");
         builtin(&values, &mut String::new())
             .map(|value| vm_value_to_json(&value))

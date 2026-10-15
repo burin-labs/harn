@@ -334,6 +334,8 @@ impl crate::vm::VmExecutionScope for NativeExecutionScope {
         continuation: &mut dyn FnMut(&mut std::task::Context<'_>) -> std::task::Poll<()>,
     ) -> std::task::Poll<()> {
         self.ambient.poll_scoped(false, || {
+            #[cfg(windows)]
+            let _locks = crate::conditional_replace::scope_native_lock_root();
             crate::stdlib::pool::with_pool_registry_poll(&self.pools, || continuation(cx))
         })
     }

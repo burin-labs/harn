@@ -30,6 +30,7 @@ harn-stdlib-catalog = { path = "../harn-stdlib-catalog", version = "=0.10.167" }
 arcstr = { version = "1", features = ["serde", "std"] }
 base64 = "0.23"
 blake3 = "1.8.7"
+hex = "0.4"
 imbl = { version = "7", features = ["serde"] }
 jsonschema.workspace = true
 linkme = "0.3"

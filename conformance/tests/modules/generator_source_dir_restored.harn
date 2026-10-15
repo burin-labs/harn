@@ -11,7 +11,7 @@ pipeline test(harness: Harness) {
   const before = harness.fs.source_dir()
   assert(len(before) > 0)
   assert(!harness.fs.exists(before + "/source_dir_marker.txt"))
-  const created = count_to(harness, 3)
+  const created = count_to(harness.fs, 3)
   harness.stdio.log(harness.fs.source_dir() == before)
   let total = 0
   for value in created {
@@ -20,7 +20,7 @@ pipeline test(harness: Harness) {
   harness.stdio.log(harness.fs.source_dir() == before)
   // An abandoned generator leaves a live task parked on its channel; it must
   // not leak either.
-  const abandoned = count_to(harness, 3)
+  const abandoned = count_to(harness.fs, 3)
   for value in abandoned {
     break
   }

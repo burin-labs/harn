@@ -37,7 +37,7 @@ pub mod agent_session_spend;
 mod agent_session_terminal_evidence_tests;
 pub mod agent_sessions;
 pub mod agent_transcript_budget;
-pub use harn_vm_core::atomic_io;
+pub mod atomic_io;
 pub mod autonomy;
 #[cfg(feature = "cloud-aws")]
 pub(crate) mod aws_sigv4;
