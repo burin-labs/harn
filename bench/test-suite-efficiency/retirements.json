@@ -2,6 +2,13 @@
   "issue": 9649,
   "baselineRevision": "7deefa6d8215dc5ce0bac2705624516d17c89392",
   "removedCases": [
+    {
+      "path": "crates/harn-vm/src/llm/usage_tests.rs",
+      "name": "public_usage_projections_do_not_recompute_accounting",
+      "reason": "REMOVED: scanning four Rust files for forbidden call spellings coupled the test to file layout and could miss recomputation behind an imported helper. The retained test compares actual VM, event, trace and tool-probe projections of a nonempty usage ledger; exhaustive caller architecture is not a runtime coverage claim.",
+      "retainedPath": "crates/harn-vm/src/llm/usage_tests.rs",
+      "retainedName": "one_ledger_projects_matching_vm_event_and_trace_accounting"
+    },
   {
     "path": "crates/harn-vm/tests/acp_host_call_parity.rs",
     "name": "every_call_in_the_canonical_dispatch_is_classified",
@@ -26,7 +33,7 @@
   {
     "path": "crates/harn-vm/tests/acp_host_call_parity.rs",
     "name": "the_per_turn_memo_is_observed_over_acp",
-    "reason": "SUBSUMED: asserting a handwritten acp_observes boolean cannot prove cache admission. The retained ACP test counts actual host bridge calls across repeated reads, and its non-turn-stable sibling is the bypass control.",
+    "reason": "SUBSUMED: asserting a handwritten acp_observes boolean cannot prove cache admission. The retained ACP test dispatches a prewarmed read without an HTTP wire event; sibling tests exercise mutation invalidation and non-turn-stable bypass.",
     "retainedPath": "crates/harn-serve/src/adapters/acp/tests/host_call_turn_cache.rs",
     "retainedName": "turn_stable_read_is_served_without_an_acp_round_trip"
   },
