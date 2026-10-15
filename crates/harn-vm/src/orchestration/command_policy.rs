@@ -1036,6 +1036,7 @@ pub fn blocked_command_response(
     result.insert("stderr_utf8_valid".to_string(), VmValue::Bool(true));
     result.put_str("combined", message);
     result.insert("success".to_string(), VmValue::Bool(false));
+    result.insert("verifier_receipt".to_string(), VmValue::Nil);
     result.put_str("error", "permission_denied");
     result.put_str("reason", message);
     result.put_str("audit_id", format!("audit_{command_id}"));

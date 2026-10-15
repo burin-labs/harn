@@ -77,6 +77,11 @@ serialized contract contains secret references and exact consumer bindings,
 never secret values. `AuthorityLease` is deliberately not serializable;
 receipts are evidence, not reusable authority.
 
+Hosts can also declare [prepared verifier loaders](./verifier-loaders.md).
+Their native baselines are captured before task mutation and retained across
+goal refresh. A verifier completion receipt binds the actual child to that
+material; ordinary command success supplies no loader qualification.
+
 Non-interactive hosts must advertise only secret brokers that both support
 non-interactive access and cannot invoke GUI-capable keyring APIs. Environment
 and dotenv credentials should be moved into a zeroizing process-local provider

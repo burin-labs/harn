@@ -1,0 +1,202 @@
+import { Checkpoint, Execution, Policy, Requirement, Snapshot, Source, VerifierKey } from "./types"
+
+/**
+ * Closed records are projected into arrays so JSON object insertion order cannot change identity.
+ */
+pub fn source_identity(source: Source) -> string {
+  return json_stringify([source.repository, source.commit, source.tree])
+}
+
+/** Complete semantic inputs must match before an original job can be reused. */
+pub fn requirement_identity(requirement: Requirement) -> string {
+  return json_stringify(
+    [
+      requirement.id,
+      requirement.kind,
+      requirement.repository,
+      requirement.input_digest,
+      requirement.runtime_digest,
+      requirement.environment_digest,
+      requirement.coverage_digest,
+      requirement.trust_domain,
+      requirement.reuse_allowed,
+      requirement.artifacts.sorted(),
+    ],
+  )
+}
+
+/** Signing bytes bind execution provenance, result, logs, artifacts, and timing. */
+pub fn execution_bytes(execution: Execution) -> string {
+  return "smart-ship.execution.v1\n"
+    + json_stringify(
+      [
+        execution.installation,
+        requirement_identity(execution.requirement),
+        execution.requirement.execution_request,
+        source_identity(execution.source),
+        execution.run,
+        execution.attempt,
+        execution.job,
+        execution.result,
+        execution.log_digest,
+        execution.artifacts.map({ artifact -> json_stringify([artifact.name, artifact.digest]) })
+          .sorted(),
+        if execution.tests == nil {
+          nil
+        } else {
+          [
+            execution.tests.report_digest,
+            execution.tests.total,
+            execution.tests.passed,
+            execution.tests.failed,
+            execution.tests.skipped,
+          ]
+        },
+        execution.started_at_ms,
+        execution.completed_at_ms,
+      ],
+    )
+}
+
+/** Policy identity contains every decision input and every allowed verification key. */
+pub fn policy_digest(policy: Policy) -> string {
+  const keys = { key: VerifierKey -> json_stringify([key.id, key.public_key, key.trust_domain]) }
+  return "sha256:"
+    + sha256_hex(
+      "smart-ship.policy.v1\n"
+        + json_stringify(
+          [
+            policy.installation,
+            policy.repositories.sorted(),
+            policy.verifier_keys.map(keys).sorted(),
+            policy.checkpoint_keys.map(keys).sorted(),
+            policy.max_changes,
+            policy.max_unverified_ms,
+            policy.max_repair_attempts,
+            policy.max_repair_usd,
+          ],
+        ),
+    )
+}
+
+fn snapshot_frontier(snapshot: Snapshot) -> list {
+  return [
+    snapshot.installation,
+    snapshot.sequence,
+    snapshot.generation,
+    snapshot.policy_digest,
+    snapshot.previous_checkpoint,
+    snapshot.created_at_ms,
+    snapshot.sources.map({ source -> source_identity(source) }).sorted(),
+    snapshot.changes.map(
+      { change ->
+        json_stringify(
+          [
+            change.id,
+            change.repository,
+            change.head,
+            change.integrated_commit,
+            change.review_receipt,
+            change.admission_receipt,
+          ],
+        )
+      },
+    )
+      .sorted(),
+    snapshot.requirements.map({ requirement -> requirement_identity(requirement) }).sorted(),
+    snapshot.inventory_complete,
+  ]
+}
+
+/**
+ * The verification frontier excludes dispatch bindings so requests can be derived without a cycle.
+ */
+pub fn snapshot_verification_id(snapshot: Snapshot) -> string {
+  return "sha256:"
+    + sha256_hex(
+      "smart-ship.verification-frontier.v1\n" + json_stringify(snapshot_frontier(snapshot)),
+    )
+}
+
+/** Bind one required job to the complete immutable frontier, not just to its source tree. */
+pub fn verification_request(frontier: string, requirement: string) -> string {
+  require is_digest(frontier) && requirement != "", "verification request identity is incomplete"
+  return "sha256:"
+    + sha256_hex("smart-ship.verification-request.v1\n" + json_stringify([frontier, requirement]))
+}
+
+/**
+ * Freeze the request for every declared job before dispatch. Incomplete inventories stay incomplete.
+ */
+pub fn freeze_snapshot(snapshot: Snapshot) -> Snapshot {
+  const frontier = snapshot_verification_id(snapshot)
+  return snapshot
+    + {
+      requirements: snapshot.requirements.map(
+        { requirement ->
+          requirement + {execution_request: verification_request(frontier, requirement.id)}
+        },
+      ),
+    }
+}
+
+/** Snapshot identity covers the immutable frontier and its derived verification requests. */
+pub fn snapshot_bytes(snapshot: Snapshot) -> string {
+  return "smart-ship.snapshot.v1\n"
+    + json_stringify(
+      [
+        snapshot_frontier(snapshot),
+        snapshot.requirements.map(
+          { requirement -> json_stringify([requirement.id, requirement.execution_request]) },
+        )
+          .sorted(),
+      ],
+    )
+}
+
+/** Stable name for an exact frozen frontier. */
+pub fn snapshot_id(snapshot: Snapshot) -> string {
+  return "sha256:" + sha256_hex(snapshot_bytes(snapshot))
+}
+
+/** Checkpoint identity includes original proofs, their signatures, and how each was used. */
+pub fn checkpoint_bytes(checkpoint: Checkpoint) -> string {
+  return "smart-ship.checkpoint.v1\n"
+    + json_stringify(
+      [
+        policy_digest(checkpoint.policy),
+        snapshot_bytes(checkpoint.snapshot),
+        checkpoint.proofs.map(
+          { proof ->
+            json_stringify(
+              [
+                proof.requirement,
+                proof.mode,
+                execution_bytes(proof.original),
+                proof.signer,
+                proof.signature,
+              ],
+            )
+          },
+        )
+          .sorted(),
+      ],
+    )
+}
+
+/** Immutable checkpoint name; a convenience branch or tag is only a projection. */
+pub fn checkpoint_id(checkpoint: Checkpoint) -> string {
+  return "sha256:" + sha256_hex(checkpoint_bytes(checkpoint))
+}
+
+/**
+ * Git supports SHA-1 and SHA-256 object names. Neither an empty nor symbolic name is a source identity.
+ */
+pub fn is_git_id(value: string) -> bool {
+  return (len(value) == 40 || len(value) == 64) && regex_match("^[0-9a-f]+$", value) != nil
+}
+
+/** Content evidence uses an explicitly named hash algorithm. */
+pub fn is_digest(value: string) -> bool {
+  return regex_match("^sha256:[0-9a-f]{64}$", value) != nil
+}

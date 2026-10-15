@@ -72,6 +72,10 @@ snapshot with a matching typed result.
 approval availability, and workspace trust used to construct one run approval
 policy before execution.
 
+**Prepared verifier.** A host-admitted runner captured before task mutation,
+whose actual child execution produces a receipt bound to that baseline. See
+[Prepared verifier loaders](../verifier-loaders.md).
+
 **Host-materialized workspace.** An isolated workspace created by the host for
 one run. Its trust is a run fact and is not written to a durable per-path trust
 store.

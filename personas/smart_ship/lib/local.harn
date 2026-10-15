@@ -1,0 +1,416 @@
+import {
+  execution_bytes,
+  freeze_snapshot,
+  is_digest,
+  is_git_id,
+  requirement_identity,
+  source_identity,
+} from "./identity"
+import {
+  Artifact,
+  Change,
+  Execution,
+  Proof,
+  Requirement,
+  Snapshot,
+  Source,
+  TestEvidence,
+} from "./types"
+
+/** One stock command and its toolchain probe. Arguments never pass through a shell. */
+pub type Command = {
+  kind: "tests" | "check",
+  program: string,
+  args: list<string>,
+  version_args: list<string>,
+  timeout_ms: int,
+  environment: dict<string, string>,
+  test_report: string?,
+}
+
+/** An expected artifact is an installation-owned relative path. */
+pub type Output = {name: string, path: string}
+
+/** Local verification uses the full Git tree until an owning coverage adapter is supplied. */
+pub type LocalJob = {
+  installation: string,
+  id: string,
+  repository: string,
+  workspace: string,
+  command: Command,
+  outputs: list<Output>,
+  trust_domain: string,
+  run: string,
+  attempt: int,
+}
+
+/** Signing authority stays inside the controller and never enters the child environment. */
+pub type SigningIdentity = {id: string, private_key: string}
+
+/** A measured job preserves its diagnostic output alongside its signed original proof. */
+pub type JobRun = {proof: Proof, stdout: string, stderr: string, exit_code: int}
+
+/** Preparation leaves an empty request; bind it to a frozen snapshot before managed execution. */
+pub type JobPlan = {job: LocalJob, source: Source, requirement: Requirement}
+
+/** Measured Git ancestry preserves admitted work across later forward repairs. */
+pub type LineageEvidence = {
+  source: Source,
+  required: int,
+  checked: int,
+  missing: list<string>,
+  unknown: list<string>,
+}
+
+/** Check every integrated change against the exact clean source that verification executed. */
+pub fn local_lineage(
+  process: HarnessProcess,
+  workspace: string,
+  source: Source,
+  changes: list<Change>,
+) -> LineageEvidence {
+  require local_source(process, source.repository, workspace) == source,
+    "lineage checkout differs from verified source"
+  let checked = 0
+  let missing: list<string> = []
+  let unknown: list<string> = []
+  for change in changes {
+    if change.repository != source.repository || !is_git_id(change.integrated_commit) {
+      unknown = unknown + [change.id]
+      continue
+    }
+    const observed = try {
+      process.run(
+        {
+          program: "git",
+          args: ["merge-base", "--is-ancestor", change.integrated_commit, source.commit],
+          cwd: workspace,
+          timeout_ms: 10000,
+        },
+      )
+    }
+    if !is_ok(observed) {
+      unknown = unknown + [change.id]
+      continue
+    }
+    const result = unwrap(observed)
+    if result.exit_code == 0 && result.success {
+      checked += 1
+    } else if result.exit_code == 1 {
+      checked += 1
+      missing = missing + [change.id]
+    } else {
+      unknown = unknown + [change.id]
+    }
+  }
+  return {
+    source: source,
+    required: len(changes),
+    checked: checked,
+    missing: missing,
+    unknown: unknown,
+  }
+}
+
+type LocalHarness = {
+  clock: HarnessClock,
+  fs: HarnessFs,
+  process: HarnessProcess,
+  random: HarnessRandom,
+  system: HarnessSystem,
+}
+
+fn valid_output(output: Output) -> bool {
+  return output.name != "" && output.path != "" && !output.path.starts_with("/")
+    && !output.path.contains("\\")
+    && !output.path.split("/").contains("..")
+    && !output.path.split("/").contains("")
+    && regex_match("^[A-Za-z]:", output.path) == nil
+}
+
+fn check_job(job: LocalJob) {
+  require job.installation != "" && job.id != "" && job.repository != ""
+    && job.workspace != ""
+    && job.command.program != ""
+    && job.trust_domain != ""
+    && job.run != ""
+    && job.attempt > 0
+    && job.command.timeout_ms > 0,
+    "job identity, command, and bounded execution are required"
+  require len(job.command.version_args) > 0, "a toolchain version probe is required"
+  const report = job.command.test_report
+  require job.command.kind != "tests"
+    || (report != nil && valid_output({name: "report", path: report})),
+    "test jobs require a relative JUnit report path"
+  require job.outputs.all({ output -> valid_output(output) }), "artifact paths must be relative"
+  require job.outputs.all(
+    { output -> len(job.outputs.filter({ other -> other.name == output.name })) == 1 },
+  ),
+    "artifact names must be unique"
+}
+
+/** Measure an actual clean Git checkout. A failed read never becomes an empty source identity. */
+pub fn local_source(process: HarnessProcess, repository: string, workspace: string) -> Source {
+  const status = process.run(
+    {program: "git", args: ["status", "--porcelain", "--untracked-files=all"], cwd: workspace},
+  )
+  require status.success && status.exit_code == 0 && status.stdout == "",
+    "verification checkout has modified or untracked files"
+  const result = process.run(
+    {program: "git", args: ["rev-parse", "HEAD", "HEAD^{tree}"], cwd: workspace},
+  )
+  require result.success && result.exit_code == 0, "cannot measure verification checkout"
+  const lines = result.stdout.trim().split("\n")
+  const commit = lines[0]
+  const tree = lines[1]
+  if len(lines) != 2 || commit == nil || tree == nil || !is_git_id(commit) || !is_git_id(tree) {
+    throw "Git did not report one complete commit and tree identity"
+  }
+  return {repository: repository, commit: commit, tree: tree}
+}
+
+fn execute(process: HarnessProcess, job: LocalJob, args: list<string>) {
+  return process.run(
+    {
+      program: job.command.program,
+      args: args,
+      cwd: job.workspace,
+      env: job.command.environment,
+      env_mode: "replace",
+      timeout_ms: job.command.timeout_ms,
+      sandbox_profile: "os_hardened",
+      sandbox: {workspace_roots: [job.workspace]},
+    },
+  )
+}
+
+/** Derive conservative input identity from the actual tree, command, toolchain, and environment. */
+fn measure_requirement(
+  harness: LocalHarness,
+  job: LocalJob,
+  source: Source,
+  execution_request: string,
+) -> Requirement {
+  const version = execute(harness.process, job, job.command.version_args)
+  require version.success && version.exit_code == 0
+    && (version.stdout.trim() != "" || version.stderr.trim() != ""),
+    "toolchain version is unmeasured"
+  const platform = harness.system.platform()
+  const runtime = "sha256:"
+    + sha256_hex(
+      json_stringify(
+        [
+          job.command.program,
+          job.command.version_args,
+          version.stdout,
+          version.stderr,
+          platform.os,
+          platform.arch,
+        ],
+      ),
+    )
+  const environment = "sha256:" + sha256_hex(json_stringify(job.command.environment.entries()))
+  const output_identity = job.outputs.map({ output -> json_stringify([output.name, output.path]) })
+    .sorted()
+  const inputs = "sha256:"
+    + sha256_hex(
+      json_stringify(
+        [source.repository, source.tree, job.command.program, job.command.args, output_identity],
+      ),
+    )
+  return {
+    id: job.id,
+    execution_request: execution_request,
+    kind: job.command.kind,
+    repository: job.repository,
+    input_digest: inputs,
+    runtime_digest: runtime,
+    environment_digest: environment,
+    // Coverage describes the frozen command selection. Source bytes are already
+    // bound by input_digest; including them here prevents repaired source from
+    // ever satisfying the failed job's unchanged verification plan.
+    coverage_digest: "sha256:"
+      + sha256_hex(
+        json_stringify(
+          [
+            "full-git-tree.v1",
+            job.command.kind,
+            job.command.program,
+            job.command.args,
+            job.command.test_report,
+          ],
+        ),
+      ),
+    trust_domain: job.trust_domain,
+    // Tool version and the full Git tree do not identify all external dependencies.
+    // Sound reuse belongs to an installation's qualified scope adapter.
+    reuse_allowed: false,
+    artifacts: job.outputs.map({ output -> output.name }),
+  }
+}
+
+/** Measure one complete command plan and issue a fresh dispatch identity before execution. */
+pub fn prepare_job(harness: LocalHarness, job: LocalJob) -> JobPlan {
+  check_job(job)
+  const source = local_source(harness.process, job.repository, job.workspace)
+  const requirement = measure_requirement(harness, job, source, "")
+  require local_source(harness.process, job.repository, job.workspace) == source,
+    "toolchain preparation changed the verification source"
+  return {job: job, source: source, requirement: requirement}
+}
+
+/** A prepared job cannot borrow a request from another frontier or verification plan. */
+pub fn bind_job(plan: JobPlan, snapshot: Snapshot) -> JobPlan {
+  require snapshot.inventory_complete && snapshot.installation == plan.job.installation
+    && freeze_snapshot(snapshot) == snapshot,
+    "job requires a complete frozen verification frontier"
+  const requirements = snapshot.requirements.filter(
+    { requirement -> requirement.id == plan.job.id },
+  )
+  const required = requirements[0]
+  require len(requirements) == 1 && required != nil
+    && requirement_identity(required) == requirement_identity(plan.requirement)
+    && snapshot.sources.contains(plan.source),
+    "prepared job differs from the frozen source or required inputs"
+  return plan + {requirement: required}
+}
+
+type TestRead = {evidence: TestEvidence?, error: string}
+
+fn read_tests(fs: HarnessFs, path: string) -> TestRead {
+  if !fs.exists(path) {
+    return {evidence: nil, error: "test report is missing"}
+  }
+  const bytes = fs.read_bytes(path)
+  const parsed = parse_junit_xml_result(bytes)
+  return match parsed {
+    Ok(cases) -> {
+      const evidence: TestEvidence = {
+        report_digest: "sha256:" + sha256_hex(bytes),
+        total: len(cases),
+        passed: len(cases.filter({ case -> case.status == "passed" })),
+        failed: len(cases.filter({ case -> ["failed", "errored"].contains(case.status) })),
+        skipped: len(cases.filter({ case -> case.status == "skipped" })),
+      }
+      {
+        evidence: evidence,
+        error: if evidence.passed + evidence.failed == 0 {
+          "test report contains no executed cases"
+        } else {
+          ""
+        },
+      }
+    }
+    Err(error) -> { return {evidence: nil, error: error.kind + ": " + error.message} }
+  }
+}
+
+fn prepare_report(harness: {fs: HarnessFs, process: HarnessProcess}, job: LocalJob) {
+  const report = job.command.test_report
+  if job.command.kind != "tests" || report == nil {
+    return
+  }
+  const ignored = harness.process.run(
+    {program: "git", args: ["check-ignore", "--quiet", "--", report], cwd: job.workspace},
+  )
+  require ignored.success && ignored.exit_code == 0,
+    "test report must be an ignored build artifact, not a source file"
+  const path = path_join(job.workspace, report)
+  if harness.fs.exists(path) {
+    harness.fs.delete(path)
+  }
+}
+
+fn artifacts(fs: HarnessFs, job: LocalJob) -> list<Artifact> {
+  return job.outputs.map(
+    { output ->
+      const path = path_join(job.workspace, output.path)
+      require fs.exists(path), "required artifact is missing: " + output.name
+      {name: output.name, digest: "sha256:" + sha256_hex(fs.read_bytes(path))}
+    },
+  )
+    .to_list()
+}
+
+/**
+ * Execute the frozen request; changed source or toolchain refuses before the verification command.
+ */
+pub fn execute_job(harness: LocalHarness, plan: JobPlan, signer: SigningIdentity) -> JobRun {
+  const job = plan.job
+  check_job(job)
+  require is_digest(plan.requirement.execution_request), "verification dispatch identity is missing"
+  const source = local_source(harness.process, job.repository, job.workspace)
+  require source == plan.source, "verification source differs from the frozen plan"
+  const requirement = measure_requirement(harness, job, source, plan.requirement.execution_request)
+  require requirement == plan.requirement, "verification inputs differ from the frozen plan"
+  prepare_report(pick(harness, ["fs", "process"]), job)
+  const started = harness.clock.now_ms()
+  const result = execute(harness.process, job, job.command.args)
+  const completed = harness.clock.now_ms()
+  const after = local_source(harness.process, job.repository, job.workspace)
+  require source_identity(after) == source_identity(source),
+    "verification checkout changed during execution"
+  const report = job.command.test_report
+  const tests = if job.command.kind == "tests" && report != nil {
+    read_tests(harness.fs, path_join(job.workspace, report))
+  } else {
+    {evidence: nil, error: ""}
+  }
+  const stderr = result.stderr + if tests.error == "" {
+    ""
+  } else {
+    "\n" + tests.error
+  }
+  const passed = result.success && result.exit_code == 0 && tests.error == ""
+    && (tests.evidence == nil || tests.evidence.failed == 0)
+  const original: Execution = {
+    schema: "smart-ship.execution.v1",
+    installation: job.installation,
+    requirement: requirement,
+    source: source,
+    run: job.run,
+    attempt: job.attempt,
+    job: job.id,
+    result: if result.timed_out || (result.exit_code == 0 && tests.error != "") {
+      "infrastructure_failed"
+    } else if passed {
+      "passed"
+    } else {
+      "failed"
+    },
+    log_digest: "sha256:"
+      + sha256_hex(json_stringify([result.stdout, stderr, result.exit_code])),
+    artifacts: if passed {
+      artifacts(harness.fs, job)
+    } else {
+      []
+    },
+    tests: tests.evidence,
+    started_at_ms: started,
+    completed_at_ms: completed,
+  }
+  require signer.id != "", "executor signing identity is required"
+  return {
+    proof: {
+      requirement: job.id,
+      mode: "executed",
+      original: original,
+      signer: signer.id,
+      signature: ed25519_sign(signer.private_key, execution_bytes(original)),
+    },
+    stdout: result.stdout,
+    stderr: stderr,
+    exit_code: result.exit_code,
+  }
+}
+
+/** One-shot diagnostic checks are signed but cannot masquerade as a snapshot-bound dispatch. */
+pub fn run_job(harness: LocalHarness, job: LocalJob, signer: SigningIdentity) -> JobRun {
+  const prepared = prepare_job(harness, job)
+  const standalone = prepared
+    + {
+      requirement: prepared.requirement
+        + {execution_request: "sha256:" + sha256_hex(harness.random.uuid())},
+    }
+  return execute_job(harness, standalone, signer)
+}

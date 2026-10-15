@@ -1,0 +1,570 @@
+import { checkpoint_id, is_digest, is_git_id, requirement_identity, snapshot_id } from "./identity"
+import { fence_matches, promote } from "./promotion"
+import { Authority, Checkpoint, Fence, Policy, Proof, Snapshot, Verification } from "./types"
+import { policy_errors, verify } from "./verification"
+
+/** An unreported attempt retains its full allowance, even after revocation or expiry. */
+pub type RepairAttempt = {
+  owner: string,
+  lease_until_ms: int,
+  max_usd: float,
+  spent_usd: float?,
+  status: "active" | "unknown" | "settled",
+}
+
+/** One incident retains the failed immutable source, original evidence, and all repair attempts. */
+pub type Incident = {
+  id: string,
+  snapshot: Snapshot,
+  proofs: list<Proof>,
+  verification: Verification,
+  attempts: list<RepairAttempt>,
+  resolved: bool,
+}
+
+/** Charged allowances are distinct from completely measured actual spend. */
+pub type RepairSpend = {committed_usd: float, spent_usd: float?, unreported_attempts: list<int>}
+
+/** Derive the budget projection from the one authoritative attempt ledger. */
+pub fn repair_spend(incident: Incident) -> RepairSpend {
+  let committed = 0.0
+  let measured = 0.0
+  let unreported: list<int> = []
+  let number = 0
+  for attempt in incident.attempts {
+    number += 1
+    if attempt.spent_usd == nil {
+      committed += attempt.max_usd
+      unreported.push(number)
+    } else {
+      committed += attempt.spent_usd
+      measured += attempt.spent_usd
+    }
+  }
+  return {
+    committed_usd: committed,
+    spent_usd: if len(unreported) == 0 {
+      measured
+    } else {
+      nil
+    },
+    unreported_attempts: unreported,
+  }
+}
+
+fn revoke_attempts(incident: Incident) -> Incident {
+  return incident
+    + {
+      attempts: incident.attempts.map(
+        { attempt ->
+          if attempt.status == "active" {
+            attempt + {status: "unknown"}
+          } else {
+            attempt
+          }
+        },
+      ),
+    }
+}
+
+/** An installation adapter's exact external action, retained through uncertain results. */
+pub type EffectRequest = {
+  kind: "admission" | "release" | "rerun",
+  repository: string,
+  source: string,
+  input_digest: string,
+}
+
+/** An unresolved request blocks authority transfer until the adapter reconciles it. */
+pub type Effect = {
+  installation: string,
+  request: EffectRequest,
+  generation: int,
+  controller: string,
+  status: "reserved" | "dispatching" | "unknown" | "confirmed" | "refused",
+  dispatch_id: string?,
+  receipt: string?,
+}
+
+fn unresolved_effect(effect: Effect) -> bool {
+  return ["reserved", "dispatching", "unknown"].contains(effect.status)
+}
+
+/** Persist this whole record with compare-and-swap before executing any returned work. */
+pub type Controller = {
+  schema: "smart-ship.controller.v1",
+  authority: Authority,
+  active: Snapshot?,
+  pending: Snapshot?,
+  checkpoint: Checkpoint?,
+  incidents: list<Incident>,
+  effects: list<Effect>,
+  unverified_since_ms: int?,
+}
+
+/** A repair worker's claim is bound to the controller that issued it. */
+pub type RepairPermit = {
+  installation: string,
+  generation: int,
+  controller: string,
+  incident: string,
+  owner: string,
+  attempt: int,
+}
+
+/** Check against freshly read durable state immediately before a repair effect. */
+pub fn repair_authorized(state: Controller, permit: RepairPermit, now_ms: int) -> bool {
+  const incident = state.incidents.find({ item -> item.id == permit.incident })
+  if incident == nil || len(incident.attempts) == 0 {
+    return false
+  }
+  const attempt = incident.attempts[len(incident.attempts) - 1]
+  return ["active", "draining"].contains(state.authority.mode)
+    && state.authority.installation == permit.installation
+    && state.authority.generation == permit.generation
+    && state.authority.controller == permit.controller
+    && !incident.resolved
+    && attempt != nil
+    && attempt.status == "active"
+    && attempt.owner == permit.owner
+    && len(incident.attempts) == permit.attempt
+    && attempt.max_usd > 0.0
+    && attempt.lease_until_ms > now_ms
+    && !state.authority.held_repositories.any(
+      { repository ->
+        incident.snapshot.sources.any({ source -> source.repository == repository })
+      },
+    )
+}
+
+/** Fresh authority exposes only the spend already reserved for this exact attempt. */
+pub fn repair_allowance(state: Controller, permit: RepairPermit, now_ms: int) -> float? {
+  if !repair_authorized(state, permit, now_ms) {
+    return nil
+  }
+  const incident = state.incidents.find({ item -> item.id == permit.incident })
+  if incident == nil {
+    return nil
+  }
+  return incident.attempts[permit.attempt - 1]?.max_usd
+}
+
+fn authorized(state: Controller, fence: Fence) -> bool {
+  return fence_matches(state.authority, fence)
+}
+
+fn advance(state: Controller) -> Controller {
+  let next = state
+  next.authority.revision += 1
+  return next
+}
+
+/** Persist the reservation with CAS before starting an idempotent, source-guarded forge action. */
+pub fn reserve_effect(
+  state: Controller,
+  fence: Fence,
+  request: EffectRequest,
+  policy: Policy,
+) -> Result<Controller, string> {
+  if !authorized(state, fence) || state.authority.mode != "active"
+    || len(policy_errors(policy)) > 0
+    || policy.installation != state.authority.installation
+    || !policy.repositories.contains(request.repository)
+    || request.repository == ""
+    || !is_git_id(request.source)
+    || !is_digest(request.input_digest)
+    || state.authority.held_repositories.contains(request.repository) {
+    return Err("external effect authority or source identity is invalid")
+  }
+  if request.kind == "release"
+    && (state.checkpoint == nil
+      || !state.checkpoint.snapshot.sources.any(
+        { source -> source.repository == request.repository && source.commit == request.source },
+      )) {
+    return Err("release source is not in the proven checkpoint")
+  }
+  if state.effects.any({ effect -> effect.request == request }) {
+    return Err("external effect is already recorded; reconcile its original request")
+  }
+  if state.effects.any(
+    { effect ->
+      effect.request.repository == request.repository
+        && unresolved_effect(effect)
+    },
+  ) {
+    return Err("repository already has an unresolved external effect")
+  }
+  let next = advance(state)
+  next.effects = next.effects
+    + [
+      {
+        installation: state.authority.installation,
+        request: request,
+        generation: state.authority.generation,
+        controller: state.authority.controller,
+        status: "reserved",
+        dispatch_id: nil,
+        receipt: nil,
+      },
+    ]
+  return Ok(next)
+}
+
+/** Re-read durable state before dispatch. A reservation is not perpetual permission. */
+pub fn effect_authorized(state: Controller, effect: Effect) -> bool {
+  return ["active", "draining"].contains(state.authority.mode)
+    && state.authority.installation == effect.installation
+    && state.authority.generation == effect.generation
+    && state.authority.controller == effect.controller
+    && !state.authority.held_repositories.contains(effect.request.repository)
+    && state.effects.contains(effect)
+    && effect.status == "reserved"
+}
+
+/** Commit this transition with CAS at the privileged owner before contacting the provider. */
+pub fn begin_effect(
+  state: Controller,
+  fence: Fence,
+  request: EffectRequest,
+  dispatch_id: string,
+) -> Result<Controller, string> {
+  const effect = state.effects.find({ item -> item.request == request })
+  if !authorized(state, fence) || effect == nil || !effect_authorized(state, effect)
+    || !is_digest(dispatch_id)
+    || effect.dispatch_id != nil {
+    return Err("external dispatch authority is stale, stopped, or already consumed")
+  }
+  let next = advance(state)
+  next.effects = state.effects.map(
+    { item ->
+      if item == effect {
+        item + {status: "dispatching", dispatch_id: dispatch_id}
+      } else {
+        item
+      }
+    },
+  )
+  return Ok(next)
+}
+
+/** Only a measured terminal receipt settles a request; timeout remains a transfer barrier. */
+pub fn settle_effect(
+  state: Controller,
+  fence: Fence,
+  request: EffectRequest,
+  status: "unknown" | "confirmed" | "refused",
+  receipt: string?,
+) -> Result<Controller, string> {
+  if !authorized(state, fence)
+    || (status != "unknown" && (receipt == nil || !is_digest(receipt)))
+    || (status == "unknown" && receipt != nil) {
+    return Err("effect settlement requires current authority and an observed receipt")
+  }
+  const effect = state.effects.find({ item -> item.request == request })
+  if effect == nil || effect.installation != state.authority.installation
+    || effect.generation != state.authority.generation
+    || effect.controller != state.authority.controller
+    || !["reserved", "dispatching", "unknown"].contains(effect.status) {
+    return Err("effect settlement is stale or does not match the reserved request")
+  }
+  let next = advance(state)
+  next.effects = next.effects.map(
+    { item ->
+      if item.request == request {
+        item + {status: status, receipt: receipt}
+      } else {
+        item
+      }
+    },
+  )
+  return Ok(next)
+}
+
+/** Freeze the newest cumulative frontier without cancelling the running verification. */
+pub fn offer(
+  state: Controller,
+  fence: Fence,
+  snapshot: Snapshot,
+  policy: Policy,
+  now_ms: int,
+) -> Result<Controller, string> {
+  if !authorized(state, fence) || state.authority.mode != "active" {
+    return Err("admission authority unavailable")
+  }
+  if snapshot.installation != state.authority.installation
+    || snapshot.generation != state.authority.generation
+    || snapshot.previous_checkpoint != state.authority.previous_checkpoint
+    || !snapshot.inventory_complete
+    || len(snapshot.requirements) == 0 {
+    return Err("snapshot identity or inventory is incomplete")
+  }
+  const latest = state.pending ?? state.active
+  if len(verify(snapshot, [], policy).invalid) > 0
+    || snapshot.sources.any(
+      { source -> state.authority.held_repositories.contains(source.repository) },
+    ) {
+    return Err("snapshot policy is invalid or a repository is held")
+  }
+  if snapshot.sequence <= (latest?.sequence ?? state.authority.promoted_sequence) {
+    return Err("snapshot is duplicate or obsolete")
+  }
+  if latest != nil {
+    for change in latest.changes {
+      const checkpoint = state.checkpoint
+      const verified = checkpoint != nil
+        && checkpoint.snapshot.changes.any({ item -> item == change })
+      if !verified && !snapshot.changes.any({ item -> item == change }) {
+        return Err("coalescing would lose admitted work")
+      }
+    }
+  }
+  const since = state.unverified_since_ms ?? now_ms
+  if now_ms < since || now_ms - since >= policy.max_unverified_ms
+    || len(snapshot.changes) > policy.max_changes {
+    return Err("unverified work budget exhausted")
+  }
+  let next = advance(state)
+  next.pending = snapshot
+  next.unverified_since_ms = since
+  return Ok(next)
+}
+
+/** Claim exactly one frozen snapshot; newer offers occupy only the pending slot. */
+pub fn start(state: Controller, fence: Fence) -> Result<Controller, string> {
+  if !authorized(state, fence) || !["active", "draining"].contains(state.authority.mode) {
+    return Err("verification authority unavailable")
+  }
+  if state.active != nil || state.pending == nil {
+    return Err("verification is busy or no snapshot is pending")
+  }
+  if state.pending.previous_checkpoint != state.authority.previous_checkpoint
+    || state.pending.generation != state.authority.generation {
+    return Err("pending work must be frozen against current authority and checkpoint")
+  }
+  let next = advance(state)
+  next.active = state.pending
+  next.pending = nil
+  return Ok(next)
+}
+
+/** Complete only the claimed snapshot; a failure preserves the previous release checkpoint. */
+pub fn complete(
+  state: Controller,
+  fence: Fence,
+  completed: Snapshot,
+  proofs: list<Proof>,
+  policy: Policy,
+) -> Result<Controller, string> {
+  if !authorized(state, fence) || state.active == nil
+    || snapshot_id(state.active) != snapshot_id(completed) {
+    return Err("verification completion is stale or unclaimed")
+  }
+  const decision = promote(completed, proofs, policy, state.authority, fence)
+  if decision.verification.status == "pending" {
+    return Err("verification still has pending jobs")
+  }
+  if decision.verification.status == "verified" && decision.status != "promote" {
+    return Err(decision.reason)
+  }
+  let next = advance(state)
+  next.active = nil
+  if decision.status == "promote" && decision.checkpoint != nil {
+    next.checkpoint = decision.checkpoint
+    next.authority.previous_checkpoint = checkpoint_id(decision.checkpoint)
+    next.authority.promoted_sequence = completed.sequence
+    // Resolve only incidents whose admitted work and required jobs remain in
+    // this independently verified checkpoint. A newer sequence alone is not proof.
+    next.incidents = next.incidents.map(
+      { incident ->
+        if incident.snapshot.changes.all({ change -> completed.changes.contains(change) })
+          && incident.snapshot.requirements.all(
+            { required ->
+              completed.requirements.any(
+                { job ->
+                  requirement_identity(job)
+                    == requirement_identity(required + {input_digest: job.input_digest})
+                },
+              )
+            },
+          ) {
+          revoke_attempts(incident) + {resolved: true}
+        } else {
+          incident
+        }
+      },
+    )
+    // A pending snapshot is still bound to the old checkpoint. The adapter must
+    // re-freeze it against the newly published checkpoint before starting it.
+    next.unverified_since_ms = if next.pending == nil {
+      nil
+    } else {
+      next.unverified_since_ms
+    }
+  } else {
+    const id = snapshot_id(completed)
+    if !next.incidents.any({ incident -> incident.id == id }) {
+      next.incidents = next.incidents
+        + [
+          {
+            id: id,
+            snapshot: completed,
+            proofs: proofs,
+            verification: decision.verification,
+            attempts: [],
+            resolved: false,
+          },
+        ]
+    }
+  }
+  return Ok(next)
+}
+
+/** Reserve one bounded repair attempt. Stale workers retain no mutation authority. */
+pub fn claim_repair(
+  state: Controller,
+  fence: Fence,
+  id: string,
+  owner: string,
+  now_ms: int,
+  lease_ms: int,
+  max_usd: float,
+  policy: Policy,
+) -> Result<Controller, string> {
+  if !authorized(state, fence) || state.authority.mode != "active"
+    || owner == ""
+    || lease_ms <= 0
+    || lease_ms > policy.max_unverified_ms {
+    return Err("repair authority or lease is invalid")
+  }
+  const incident = state.incidents.find({ item -> item.id == id })
+  if incident == nil || incident.resolved || len(incident.attempts) >= policy.max_repair_attempts
+    || is_nan(max_usd)
+    || is_infinite(max_usd)
+    || max_usd <= 0.0
+    || max_usd > policy.max_repair_usd - repair_spend(incident).committed_usd {
+    return Err("incident is absent, resolved, or over budget")
+  }
+  if incident.attempts.any(
+    { attempt -> attempt.status == "active" && attempt.lease_until_ms > now_ms },
+  ) {
+    return Err("incident already has a live repair owner")
+  }
+  let next = advance(state)
+  next.incidents = state.incidents.map(
+    { item ->
+      if item.id != id {
+        item
+      } else {
+        const revoked = revoke_attempts(item)
+        revoked
+          + {
+            attempts: revoked.attempts
+              + [
+                {
+                  owner: owner,
+                  lease_until_ms: now_ms + lease_ms,
+                  max_usd: max_usd,
+                  spent_usd: nil,
+                  status: "active",
+                },
+              ],
+          }
+      }
+    },
+  )
+  return Ok(next)
+}
+
+/** Drain preserves claimed work; stop and shadow revoke outstanding repair claims. */
+pub fn control(
+  state: Controller,
+  fence: Fence,
+  mode: "shadow" | "active" | "draining" | "stopped",
+) -> Result<Controller, string> {
+  if !authorized(state, fence) {
+    return Err("control authority changed")
+  }
+  let next = advance(state)
+  next.authority.mode = mode
+  if mode == "stopped" || mode == "shadow" {
+    next.incidents = next.incidents.map(revoke_attempts)
+    next.effects = next.effects.map(
+      { effect ->
+        if unresolved_effect(effect) {
+          effect + {status: "unknown"}
+        } else {
+          effect
+        }
+      },
+    )
+  }
+  return Ok(next)
+}
+
+/** Record the measured attempt cost; only later verified source can resolve the incident. */
+pub fn finish_repair(
+  state: Controller,
+  fence: Fence,
+  id: string,
+  owner: string,
+  attempt: int,
+  spent_usd: float?,
+) -> Result<Controller, string> {
+  if !authorized(state, fence)
+    || (spent_usd != nil && (is_nan(spent_usd) || is_infinite(spent_usd) || spent_usd < 0.0)) {
+    return Err("repair completion authority or measured cost is invalid")
+  }
+  const incident = state.incidents.find({ item -> item.id == id })
+  if incident == nil || len(incident.attempts) != attempt || attempt <= 0 {
+    return Err("repair completion belongs to a stale attempt")
+  }
+  const claimed = incident.attempts[attempt - 1]
+  if claimed == nil || claimed.owner != owner || claimed.status != "active" {
+    return Err("repair completion belongs to a stale attempt")
+  }
+  let next = advance(state)
+  next.incidents = state.incidents.map(
+    { item ->
+      if item.id != id {
+        item
+      } else {
+        item
+          + {
+            attempts: item.attempts.map(
+              { record ->
+                if record == claimed {
+                  record
+                    + {
+                      spent_usd: spent_usd,
+                      status: if spent_usd == nil {
+                        "unknown"
+                      } else {
+                        "settled"
+                      },
+                    }
+                } else {
+                  record
+                }
+              },
+            ),
+          }
+      }
+    },
+  )
+  return Ok(next)
+}
+
+/** A verified transfer invalidates old controllers even when their local leases remain live. */
+pub fn transfer(state: Controller, fence: Fence, controller: string) -> Result<Controller, string> {
+  if !authorized(state, fence) || state.authority.mode != "draining" || controller == ""
+    || state.active != nil
+    || state.effects.any(unresolved_effect)
+    || state.incidents.any({ item -> item.attempts.any({ attempt -> attempt.status == "active" }) }) {
+    return Err("old mutation owners have not drained")
+  }
+  let next = advance(state)
+  next.authority.generation += 1
+  next.authority.controller = controller
+  next.authority.mode = "shadow"
+  return Ok(next)
+}

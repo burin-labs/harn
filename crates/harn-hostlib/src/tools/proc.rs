@@ -63,6 +63,7 @@ pub(crate) struct SpawnRequest {
 /// Result of running a subprocess to completion (or to the deadline).
 #[derive(Debug, Clone)]
 pub(crate) struct SpawnOutcome {
+    pub(crate) verifier_receipt: Option<harn_vm::verifier_provenance::VerifierExecutionReceipt>,
     pub(crate) command_id: String,
     pub(crate) cwd: PathBuf,
     pub(crate) status: CommandStatus,
@@ -124,6 +125,7 @@ pub(crate) enum CommandStatus {
     Running,
     TimedOut,
     Killed,
+    Blocked,
 }
 
 impl CommandStatus {
@@ -133,6 +135,7 @@ impl CommandStatus {
             CommandStatus::Running => "running",
             CommandStatus::TimedOut => "timed_out",
             CommandStatus::Killed => "killed",
+            CommandStatus::Blocked => "blocked",
         }
     }
 }
@@ -348,6 +351,9 @@ pub(crate) fn run(req: SpawnRequest) -> Result<SpawnOutcome, HostlibError> {
     let inline = inline_output(&stdout_bytes, &stderr_bytes, req.capture);
 
     Ok(SpawnOutcome {
+        verifier_receipt: (!timed_out && !drain_interrupted)
+            .then(|| handle.verifier_execution_receipt())
+            .flatten(),
         command_id,
         cwd: effective_cwd,
         status: command_status,
@@ -638,6 +644,14 @@ pub(crate) fn build_response(
         .str("audit_id", format!("audit_{}", outcome.command_id));
     if let Some(program) = outcome.missing_program {
         builder = builder.str("missing_program", program);
+    }
+    if let Some(receipt) = outcome.verifier_receipt {
+        builder = builder.value(
+            "verifier_receipt",
+            harn_vm::value::json::json_to_vm_value(
+                &serde_json::to_value(receipt).expect("typed verifier receipt"),
+            ),
+        );
     }
     builder = match outcome.ended_at {
         Some(ended_at) => builder.str("ended_at", ended_at),

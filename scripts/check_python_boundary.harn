@@ -20,12 +20,36 @@ const SKIP_SEGMENTS = [
 
 const PYTHON_ALLOWLIST = [
   {
+    kind: "prefix",
+    pattern: "personas/smart_ship/fixtures/python/",
+    category: "subprocess-fixture",
+    owner: "Smart Ship neutral-stack verification",
+    reason:
+      "Ordinary Python project and stock unittest runner prove foreign-stack verification and combined-change repair; controller orchestration remains Harn.",
+  },
+  {
+    kind: "exact",
+    pattern: "crates/harn-vm/src/verifier_provenance/python_bootstrap.py",
+    category: "foreign-runtime-adapter",
+    owner: "Prepared verifier loader",
+    reason:
+      "Python import protocol adapter executes host-captured source bytes in the prepared child.",
+  },
+  {
     kind: "exact",
     pattern: "scripts/tests/fixtures/release_publication_github.py",
     category: "subprocess-fixture",
     owner: "Published release correction tag reader",
     reason:
       "Strict GitHub CLI transport fixture for durable publication proof and refusal controls.",
+  },
+  {
+    kind: "exact",
+    pattern: "crates/harn-vm/tests/fixtures/source_verifier_unittest.py",
+    category: "fixture",
+    owner: "Prepared source verifier",
+    reason:
+      "VM and hostlib execute this shared Python unittest fixture to prove source-loader test discovery and module identity.",
   },
   {
     kind: "prefix",

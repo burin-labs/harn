@@ -52,14 +52,16 @@ fn required_pr_e2e_inventory_is_selected_by_every_pr_profile() {
         .expect("nextest configuration must parse");
     assert_eq!(
         required_pr_e2e::CASES.len(),
-        17,
+        18,
         "required PR E2E inventory must remain explicit",
     );
 
     for profile in ["default", "ci"] {
-        let filter = nextest["profile"][profile]["default-filter"]
-            .as_str()
-            .unwrap_or_else(|| panic!("{profile} must define a default filter"));
+        let filter = nextest["profile"][profile]
+            .get("default-filter")
+            .or_else(|| nextest["profile"]["default"].get("default-filter"))
+            .and_then(toml::Value::as_str)
+            .unwrap_or_else(|| panic!("{profile} must define or inherit a default filter"));
         assert!(
             filter.contains("binary(harn_cli_e2e)"),
             "{profile} must select required cases from harn_cli_e2e",

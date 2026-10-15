@@ -19,6 +19,9 @@ use crate::vm::Vm;
 
 const HARN_REPLAY_ENV: &str = "HARN_REPLAY";
 
+mod captured_result;
+use captured_result::captured_run_to_value;
+
 thread_local! {
     pub(crate) static VM_SOURCE_DIR: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
 }
@@ -728,6 +731,7 @@ struct CapturedSpawn<'a> {
 
 /// Result of [`run_captured_spawn`].
 struct CapturedRun {
+    verifier_receipt: Option<crate::verifier_provenance::VerifierExecutionReceipt>,
     output: std::process::Output,
     timed_out: bool,
     interrupted: bool,
@@ -768,8 +772,36 @@ fn run_captured_spawn(spec: CapturedSpawn<'_>) -> Result<CapturedRun, VmError> {
     // the child is about to receive, searched here in the parent (harn#7993).
     let resolved_cmd =
         resolve_program_path(spec.cmd, &resolved_environment, spec.env_clear, spec.env);
-    let mut command = std::process::Command::new(&resolved_cmd);
-    command.args(spec.args);
+    let actual_cwd = spec
+        .cwd
+        .map(PathBuf::from)
+        .map_or_else(std::env::current_dir, Ok)
+        .map_err(|error| {
+            VmError::Thrown(VmValue::string(format!(
+                "{label}: verifier cwd unavailable: {error}"
+            )))
+        })?;
+    let verifier = crate::prepared_run::prepared_verifier(&resolved_cmd, spec.args, &actual_cwd)
+        .map_err(|error| VmError::Thrown(VmValue::string(format!("{label}: {error}"))))?;
+    #[cfg(target_os = "linux")]
+    let pinned = verifier
+        .as_ref()
+        .map(|value| value.launch())
+        .transpose()
+        .map_err(|error| VmError::Thrown(VmValue::string(format!("{label}: {error}"))))?;
+    #[cfg(target_os = "linux")]
+    let (program, arguments) = pinned
+        .as_ref()
+        .map_or((&resolved_cmd, spec.args), |launch| {
+            (&launch.program, launch.args.as_slice())
+        });
+    #[cfg(not(target_os = "linux"))]
+    let (program, arguments) = {
+        let _ = verifier;
+        (&resolved_cmd, spec.args)
+    };
+    let mut command = std::process::Command::new(program);
+    command.args(arguments);
     if let Some(cwd) = spec.cwd {
         // Every child-process seam starts the child through `child_process_cwd`
         // so a canonicalized (verbatim-prefixed) directory from `cwd()` or
@@ -798,6 +830,19 @@ fn run_captured_spawn(spec: CapturedSpawn<'_>) -> Result<CapturedRun, VmError> {
         &cleanup_token,
     );
     crate::op_interrupt::preserve_process_owner_token(&mut command);
+
+    #[cfg(target_os = "linux")]
+    let witness = if let Some(pinned) = pinned {
+        crate::verifier_provenance::validate_pinned_environment(
+            &command,
+            spec.env_clear || resolved_environment.is_some(),
+        )
+        .map_err(|error| VmError::Thrown(VmValue::string(format!("{label}: {error}"))))?;
+        pinned.descriptors.attach(&mut command);
+        Some(pinned.witness)
+    } else {
+        None
+    };
 
     let started = Instant::now();
     let cmd = spec.cmd;
@@ -864,7 +909,19 @@ fn run_captured_spawn(spec: CapturedSpawn<'_>) -> Result<CapturedRun, VmError> {
         .map(|rx| crate::op_interrupt::drain_captured_pipe(&rx, killed, child_pid))
         .unwrap_or_default();
 
+    #[cfg(target_os = "linux")]
+    let verifier_receipt = if timed_out || interrupted {
+        None
+    } else {
+        witness
+            .map(|witness| witness.receipt())
+            .transpose()
+            .map_err(|error| VmError::Thrown(VmValue::string(format!("{label}: {error}"))))?
+    };
+    #[cfg(not(target_os = "linux"))]
+    let verifier_receipt = None;
     Ok(CapturedRun {
+        verifier_receipt,
         output: std::process::Output {
             status,
             stdout,
@@ -948,32 +1005,6 @@ fn exec_options(label: &str, options: Option<&VmValue>) -> Result<ExecOptions, V
         cwd,
         timeout,
     })
-}
-
-/// Build the `exec`-shaped result dict (`stdout`/`stderr`/`status`/`success`)
-/// and additionally surface `timed_out` so options-form callers can detect a
-/// timeout kill without inspecting the exit status.
-fn captured_run_to_value(run: &CapturedRun) -> VmValue {
-    let status = if run.timed_out || run.interrupted {
-        -1
-    } else {
-        run.output.status.code().unwrap_or(-1) as i64
-    };
-    let success = !run.timed_out && !run.interrupted && run.output.status.success();
-    let mut result = BTreeMap::new();
-    result.put_str(
-        "stdout",
-        String::from_utf8_lossy(&run.output.stdout).as_ref(),
-    );
-    result.put_str(
-        "stderr",
-        String::from_utf8_lossy(&run.output.stderr).as_ref(),
-    );
-    result.insert("status".to_string(), VmValue::Int(status));
-    result.insert("success".to_string(), VmValue::Bool(success));
-    result.insert("timed_out".to_string(), VmValue::Bool(run.timed_out));
-    result.insert("duration_ms".to_string(), VmValue::Int(run.duration_ms));
-    VmValue::dict(result)
 }
 
 #[harn_builtin(

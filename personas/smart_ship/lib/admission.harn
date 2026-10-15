@@ -1,0 +1,222 @@
+import { is_git_id } from "./identity"
+import { ReviewActor, ReviewObservation, decode_review_observation } from "./review"
+
+/** Forge facts remain unknown until the adapter actually observes them. */
+pub type ReviewedSource = {
+  repository: string,
+  change: string,
+  head: string,
+  base: string,
+  author: ReviewActor?,
+  state: "open" | "closed" | "merged" | nil,
+  draft: bool?,
+  head_repository: string?,
+  base_repository: string?,
+}
+
+/** An installation declares independent reviewers by stable identity, never display name. */
+pub type ReviewPolicy = {minimum_approvals: int, trusted_actor_ids: list<string>, allow_forks: bool}
+
+/** Counts and named refusals stay visible even when the review census is absent. */
+pub type ReviewAdmission = {
+  status: "approved" | "pending" | "failed" | "invalid",
+  required: int,
+  observed_reviews: int,
+  observed_threads: int,
+  approvers: list<string>,
+  pending: list<string>,
+  failed: list<string>,
+  invalid: list<string>,
+}
+
+type Refusals = {pending: list<string>, failed: list<string>, invalid: list<string>}
+
+type Votes = {
+  approvers: list<string>,
+  pending: list<string>,
+  failed: list<string>,
+  invalid: list<string>,
+}
+
+fn source_refusals(source: ReviewedSource, policy: ReviewPolicy) -> Refusals {
+  let pending: list<string> = []
+  let failed: list<string> = []
+  let invalid: list<string> = []
+  if policy.minimum_approvals < 1
+    || len(policy.trusted_actor_ids) < policy.minimum_approvals
+    || len(unique(policy.trusted_actor_ids)) != len(policy.trusted_actor_ids)
+    || policy.trusted_actor_ids.contains("") {
+    invalid = invalid + ["review-policy"]
+  }
+  if source.repository == "" || source.change == ""
+    || !is_git_id(source.head)
+    || !is_git_id(source.base) {
+    invalid = invalid + ["review-source"]
+  }
+  if source.author == nil {
+    pending = pending + ["change-author"]
+  } else if source.author.id == "" || source.author.name == "" || source.author.kind == "" {
+    invalid = invalid + ["change-author"]
+  }
+  if source.state == nil {
+    pending = pending + ["change-state"]
+  } else if source.state != "open" {
+    failed = failed + ["change-not-open"]
+  }
+  if source.draft == nil {
+    pending = pending + ["change-draft-state"]
+  } else if source.draft {
+    pending = pending + ["change-is-draft"]
+  }
+  if source.head_repository == nil || source.base_repository == nil {
+    pending = pending + ["change-repositories"]
+  } else if source.head_repository == "" || source.base_repository != source.repository {
+    invalid = invalid + ["change-repositories"]
+  } else if !policy.allow_forks && source.head_repository != source.base_repository {
+    failed = failed + ["fork-not-allowed"]
+  }
+  return {pending: pending, failed: failed, invalid: invalid}
+}
+
+fn census_refusals(source: ReviewedSource, reviews: ReviewObservation) -> Refusals {
+  let pending: list<string> = []
+  let failed: list<string> = []
+  let invalid: list<string> = []
+  if reviews.repository != source.repository || reviews.change != source.change
+    || reviews.head != source.head
+    || reviews.base != source.base {
+    invalid = invalid + ["review-source-binding"]
+  }
+  if reviews.platform_decision == "changes_requested" {
+    failed = failed + ["platform-changes-requested"]
+  } else if reviews.platform_decision == "review_required" {
+    pending = pending + ["platform-review-required"]
+  }
+  for thread in reviews.threads {
+    if !thread.resolved {
+      failed = failed + ["unresolved-thread:" + thread.id]
+    }
+  }
+  return {pending: pending, failed: failed, invalid: invalid}
+}
+
+fn judge_votes(source: ReviewedSource, policy: ReviewPolicy, reviews: ReviewObservation) -> Votes {
+  let pending: list<string> = []
+  let failed: list<string> = []
+  let invalid: list<string> = []
+  let approvers: list<string> = []
+  // Comments and unfinished reviews do not retract a submitted decision.
+  const votes = reviews.reviews.filter(
+    { row -> row.state != "commented" && row.state != "pending" },
+  )
+  for row in votes {
+    if row.actor == nil || row.head == nil || row.submitted_at == nil {
+      pending = pending + ["review-identity:" + row.id]
+    }
+    if row.submitted_at != nil
+      && is_err(
+        try {
+          date_parse(row.submitted_at)
+        },
+      ) {
+      invalid = invalid + ["review-time:" + row.id]
+    }
+  }
+  if len(invalid) == 0 {
+    for actor_id in policy.trusted_actor_ids {
+      const actor_votes = votes.filter(
+        { row -> row.actor != nil && row.actor.id == actor_id && row.submitted_at != nil },
+      )
+      if len(actor_votes) == 0 {
+        continue
+      }
+      const vote_times = actor_votes.map({ row -> date_parse(row.submitted_at) }).sorted()
+      const latest_time = vote_times[len(vote_times) - 1]!
+      const latest = actor_votes.filter({ row -> date_parse(row.submitted_at) == latest_time })
+      if len(latest) != 1 {
+        pending = pending + ["ambiguous-review:" + actor_id]
+        continue
+      }
+      const vote = latest[0]!
+      if vote.state == "changes_requested" {
+        failed = failed + ["changes-requested:" + actor_id]
+      } else if vote.state == "approved" && vote.head == source.head
+        && source.author != nil
+        && actor_id != source.author.id {
+        approvers = approvers + [actor_id]
+      }
+    }
+  }
+  return {approvers: approvers, pending: pending, failed: failed, invalid: invalid}
+}
+
+/**
+ * Judge complete archived or live facts through one deterministic boundary.
+ * This decision qualifies review only; scope, CI, and signed admission are separate obligations.
+ */
+pub fn review_admission(
+  source: ReviewedSource,
+  policy: ReviewPolicy,
+  observation: unknown,
+) -> ReviewAdmission {
+  const source_checks = source_refusals(source, policy)
+  let pending = source_checks.pending
+  let failed = source_checks.failed
+  let invalid = source_checks.invalid
+  let approvers: list<string> = []
+  let reviews: ReviewObservation? = nil
+  if observation == nil {
+    pending = pending + ["review-census"]
+  } else {
+    const decoded = try {
+      decode_review_observation(observation)
+    }
+    if is_err(decoded) {
+      invalid = invalid + ["review-census"]
+    } else {
+      reviews = unwrap(decoded)
+    }
+  }
+  if reviews != nil {
+    const census = census_refusals(source, reviews)
+    const votes = judge_votes(source, policy, reviews)
+    pending = pending + census.pending + votes.pending
+    failed = failed + census.failed + votes.failed
+    invalid = invalid + census.invalid + votes.invalid
+    // Malformed or differently bound evidence never contributes an approval.
+    approvers = if len(invalid) == 0 {
+      votes.approvers
+    } else {
+      []
+    }
+  }
+  if len(approvers) < policy.minimum_approvals {
+    pending = pending + ["independent-exact-head-approvals"]
+  }
+  return {
+    status: if len(invalid) > 0 {
+      "invalid"
+    } else if len(failed) > 0 {
+      "failed"
+    } else if len(pending) > 0 {
+      "pending"
+    } else {
+      "approved"
+    },
+    required: policy.minimum_approvals,
+    observed_reviews: if reviews == nil {
+      0
+    } else {
+      reviews.declared_reviews
+    },
+    observed_threads: if reviews == nil {
+      0
+    } else {
+      reviews.declared_threads
+    },
+    approvers: approvers.sorted(),
+    pending: unique(pending).sorted(),
+    failed: unique(failed).sorted(),
+    invalid: unique(invalid).sorted(),
+  }
+}

@@ -1,0 +1,190 @@
+import { git } from "../fixtures/neutral"
+import { Fixture, digest, fixture } from "../fixtures/support"
+import {
+  Controller,
+  EffectRequest,
+  Fence,
+  GitStore,
+  begin_effect,
+  commit_state,
+  control,
+  dispatch_reserved_effect,
+  prepare_state,
+  read_state,
+  reserve_effect,
+  transfer,
+} from "../lib/main"
+
+type Setup = {root: string, store: GitStore, f: Fixture, request: EffectRequest, state: Controller}
+
+fn fence(state: Controller) -> Fence {
+  return pick(state.authority, ["installation", "generation", "revision", "controller"])
+}
+
+fn setup(harness: Harness) -> Setup {
+  const root = harness.fs.mkdtemp_in_workspace("smart-ship-effect-owner-")
+  const remote = path_join(root, "remote.git")
+  const workspace = path_join(root, "owner.git")
+  git(harness.process, root, ["init", "--bare", "--quiet", remote])
+  git(harness.process, root, ["init", "--bare", "--quiet", workspace])
+  git(harness.process, workspace, ["config", "user.name", "Smart Ship Fixture"])
+  git(harness.process, workspace, ["config", "user.email", "fixture@example.invalid"])
+  const store: GitStore = {
+    workspace: workspace,
+    remote: remote,
+    ref: "refs/heads/authority",
+    timeout_ms: 10000,
+    signed_commits: false,
+  }
+  const f = fixture(harness.random)
+  const initial: Controller = {
+    schema: "smart-ship.controller.v1",
+    authority: f.authority,
+    active: nil,
+    pending: nil,
+    checkpoint: nil,
+    incidents: [],
+    effects: [],
+    unverified_since_ms: nil,
+  }
+  const source = f.snapshot.sources[0]!
+  const request: EffectRequest = {
+    kind: "admission",
+    repository: source.repository,
+    source: source.commit,
+    input_digest: digest("observed request"),
+  }
+  const state = unwrap(reserve_effect(initial, fence(initial), request, f.policy))
+  const write = prepare_state(harness.process, store, read_state(harness.process, store), state)
+  assert_eq(commit_state(harness.process, store, write).status, "committed")
+  return {root: root, store: store, f: f, request: request, state: state}
+}
+
+pipeline test_only_one_concurrent_owner_dispatches_and_a_prior_stop_refuses(harness: Harness) {
+  const s = setup(harness)
+  defer {
+    harness.fs.delete(s.root)
+  }
+  const marker = path_join(s.root, "effects.txt")
+  harness.fs.write_text(marker, "")
+  const callback = { request ->
+    assert_eq(request, s.request)
+    harness.fs.append_locked(marker, "executed\n")
+    return {status: "confirmed", receipt: digest("measured provider receipt")}
+  }
+  const outcomes = parallel settle [1, 2] with { max_concurrent: 2 } { actor ->
+    dispatch_reserved_effect(
+      pick(harness, ["process", "random"]),
+      s.store,
+      fence(s.state),
+      s.request,
+      callback,
+    )
+  }
+  assert_eq(outcomes.failed, 0)
+  const results = outcomes.results.map({ result -> unwrap(result) })
+  assert_eq(results.filter({ result -> result.dispatch_started }).len(), 1)
+  assert_eq(
+    harness.fs.read_text(marker),
+    "executed\n",
+    "the provider callback must fire exactly once",
+  )
+  assert_eq(results.filter({ result -> result.status == "settled" }).len(), 1)
+  const completed = read_state(harness.process, s.store).state!
+  assert_eq(completed.effects[0]?.status, "confirmed")
+  assert(completed.effects[0]?.dispatch_id != nil)
+  const replayed = dispatch_reserved_effect(
+    pick(harness, ["process", "random"]),
+    s.store,
+    fence(s.state),
+    s.request,
+    callback,
+  )
+  assert(!replayed.dispatch_started)
+  const next_request = s.request + {input_digest: digest("second reviewed request")}
+  const reserved = unwrap(reserve_effect(completed, fence(completed), next_request, s.f.policy))
+  const reservation = prepare_state(
+    harness.process,
+    s.store,
+    read_state(harness.process, s.store),
+    reserved,
+  )
+  assert_eq(commit_state(harness.process, s.store, reservation).status, "committed")
+  const stopped = unwrap(control(reserved, fence(reserved), "stopped"))
+  const stop = prepare_state(
+    harness.process,
+    s.store,
+    read_state(harness.process, s.store),
+    stopped,
+  )
+  assert_eq(commit_state(harness.process, s.store, stop).status, "committed")
+  const refused = dispatch_reserved_effect(
+    pick(harness, ["process", "random"]),
+    s.store,
+    fence(reserved),
+    next_request,
+    callback,
+  )
+  assert_eq(refused.status, "not_started")
+  assert(!refused.dispatch_started)
+  assert_eq(harness.fs.read_text(marker), "executed\n")
+}
+
+pipeline test_distinct_dispatch_claims_race_at_the_remote_and_uncertain_effects_do_not_retry(
+  harness: Harness,
+) {
+  const s = setup(harness)
+  defer {
+    harness.fs.delete(s.root)
+  }
+  const previous = read_state(harness.process, s.store)
+  const first = unwrap(begin_effect(s.state, fence(s.state), s.request, digest("actor one")))
+  const second = unwrap(begin_effect(s.state, fence(s.state), s.request, digest("actor two")))
+  assert(first.effects[0]?.dispatch_id != second.effects[0]?.dispatch_id)
+  const a = prepare_state(harness.process, s.store, previous, first)
+  const b = prepare_state(harness.process, s.store, previous, second)
+  assert(a.commit != b.commit, "two actors cannot share an idempotent claim commit")
+  assert_eq(commit_state(harness.process, s.store, a).status, "committed")
+  const raced = harness.process.run(
+    {
+      program: "git",
+      cwd: s.store.workspace,
+      args: ["push", "--porcelain", "--", s.store.remote, b.commit + ":" + s.store.ref],
+      timeout_ms: 10000,
+    },
+  )
+  assert(raced.exit_code != 0, "the remote must reject the competing dispatch claim")
+  const draining = unwrap(control(first, fence(first), "draining"))
+  assert(is_err(transfer(draining, fence(draining), "replacement")))
+  const uncertain = setup(harness)
+  defer {
+    harness.fs.delete(uncertain.root)
+  }
+  const marker = path_join(uncertain.root, "effects.txt")
+  harness.fs.write_text(marker, "")
+  const callback = { request ->
+    assert_eq(request, uncertain.request)
+    harness.fs.append_locked(marker, "started\n")
+    throw "provider reply was lost after the effect"
+  }
+  const result = dispatch_reserved_effect(
+    pick(harness, ["process", "random"]),
+    uncertain.store,
+    fence(uncertain.state),
+    uncertain.request,
+    callback,
+  )
+  assert_eq(result.status, "reconciliation_required")
+  assert(result.dispatch_started)
+  const recovered = read_state(harness.process, uncertain.store).state!
+  assert_eq(recovered.effects[0]?.status, "unknown")
+  const repeated = dispatch_reserved_effect(
+    pick(harness, ["process", "random"]),
+    uncertain.store,
+    fence(recovered),
+    uncertain.request,
+    callback,
+  )
+  assert(!repeated.dispatch_started)
+  assert_eq(harness.fs.read_text(marker), "started\n", "unknown results cannot redispatch")
+}

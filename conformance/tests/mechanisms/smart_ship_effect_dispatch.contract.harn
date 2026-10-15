@@ -1,0 +1,80 @@
+import { digest, fixture } from "../../../personas/smart_ship/fixtures/support"
+import {
+  Controller,
+  EffectRequest,
+  Fence,
+  begin_effect,
+  control,
+  reserve_effect,
+  settle_effect,
+  transfer,
+} from "../../../personas/smart_ship/lib/main"
+import { contract_effect, contract_negative } from "./lib/mechanism_contract"
+
+fn fence(state: Controller) -> Fence {
+  return pick(state.authority, ["installation", "generation", "revision", "controller"])
+}
+
+/**
+ * Deterministic controller guard contract. The package's owning effect-owner
+ * regressions additionally reach remote Git CAS and real callbacks.
+ */
+pipeline default(harness: Harness) {
+  const f = fixture(harness.random)
+  const initial: Controller = {
+    schema: "smart-ship.controller.v1",
+    authority: f.authority,
+    active: nil,
+    pending: nil,
+    checkpoint: nil,
+    incidents: [],
+    effects: [],
+    unverified_since_ms: nil,
+  }
+  const source = f.snapshot.sources[0]!
+  const request: EffectRequest = {
+    kind: "admission",
+    repository: source.repository,
+    source: source.commit,
+    input_digest: digest("reviewed request"),
+  }
+  const reserved = unwrap(reserve_effect(initial, fence(initial), request, f.policy))
+  const claimed = unwrap(begin_effect(reserved, fence(reserved), request, digest("actor one")))
+  contract_effect(
+    harness.stdio,
+    "dispatch_claim_bound",
+    claimed.effects[0]?.status == "dispatching"
+      && claimed.effects[0]?.dispatch_id == digest("actor one"),
+  )
+  contract_negative(
+    harness.stdio,
+    "duplicate_dispatch_refused",
+    is_ok(begin_effect(claimed, fence(claimed), request, digest("actor two"))),
+  )
+  const stopped = unwrap(control(reserved, fence(reserved), "stopped"))
+  contract_negative(
+    harness.stdio,
+    "prior_stop_refuses_dispatch",
+    is_ok(begin_effect(stopped, fence(stopped), request, digest("actor three"))),
+  )
+  const draining = unwrap(control(claimed, fence(claimed), "draining"))
+  contract_effect(
+    harness.stdio,
+    "inflight_effect_blocks_transfer",
+    is_err(transfer(draining, fence(draining), "replacement")),
+  )
+  const uncertain = unwrap(settle_effect(draining, fence(draining), request, "unknown", nil))
+  contract_effect(
+    harness.stdio,
+    "unknown_effect_blocks_transfer",
+    is_err(transfer(uncertain, fence(uncertain), "replacement")),
+  )
+  const settled = unwrap(
+    settle_effect(uncertain, fence(uncertain), request, "confirmed", digest("measured receipt")),
+  )
+  contract_negative(
+    harness.stdio,
+    "settled_effect_releases_transfer",
+    is_err(transfer(settled, fence(settled), "replacement")),
+  )
+}

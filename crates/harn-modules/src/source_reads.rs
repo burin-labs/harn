@@ -47,6 +47,7 @@ pub fn build_with_source(file: &Path, source: &str) -> ModuleGraph {
         ParsedSourceRetention::None,
         Some(&source_overrides),
         PackageContext::Project,
+        None,
     )
     .graph
 }
@@ -65,6 +66,7 @@ pub fn build_with_sources(file: &Path, sources: &HashMap<PathBuf, String>) -> Mo
         ParsedSourceRetention::None,
         Some(&source_overrides),
         PackageContext::Project,
+        None,
     )
     .graph
 }

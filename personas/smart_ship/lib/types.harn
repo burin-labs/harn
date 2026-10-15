@@ -1,0 +1,139 @@
+/** One immutable Git source identity. Repository names are installation data. */
+pub type Source = {repository: string, commit: string, tree: string}
+
+/** Reviewed work retains its original head even after integration changes its SHA. */
+pub type Change = {
+  id: string,
+  repository: string,
+  head: string,
+  integrated_commit: string,
+  review_receipt: string,
+  admission_receipt: string,
+}
+
+/** A required job's complete execution inputs, independent of runner placement. */
+pub type Requirement = {
+  id: string,
+  execution_request: string,
+  kind: "tests" | "check",
+  repository: string,
+  input_digest: string,
+  runtime_digest: string,
+  environment_digest: string,
+  coverage_digest: string,
+  trust_domain: string,
+  reuse_allowed: bool,
+  artifacts: list<string>,
+}
+
+/** An executor key has one declared trust domain; another installation cannot borrow it. */
+pub type VerifierKey = {id: string, public_key: string, trust_domain: string}
+
+/** Release consumers need issuer trust, while the checkpoint retains its qualification policy. */
+pub type CheckpointTrust = {installation: string, checkpoint_keys: list<VerifierKey>}
+
+/** Immutable policy used to judge a candidate, including candidates that change policy. */
+pub type Policy = {
+  schema: "smart-ship.policy.v1",
+  installation: string,
+  repositories: list<string>,
+  verifier_keys: list<VerifierKey>,
+  checkpoint_keys: list<VerifierKey>,
+  max_changes: int,
+  max_unverified_ms: int,
+  max_repair_attempts: int,
+  max_repair_usd: float,
+}
+
+/** A frozen frontier and the complete job census derived by the owning scope adapter. */
+pub type Snapshot = {
+  schema: "smart-ship.snapshot.v1",
+  installation: string,
+  sequence: int,
+  generation: int,
+  policy_digest: string,
+  previous_checkpoint: string,
+  created_at_ms: int,
+  sources: list<Source>,
+  changes: list<Change>,
+  requirements: list<Requirement>,
+  inventory_complete: bool,
+}
+
+/** Artifacts name both their logical output and their immutable content. */
+pub type Artifact = {name: string, digest: string}
+
+/** A complete producer report distinguishes observed cases from an absent report. */
+pub type TestEvidence = {report_digest: string, total: int, passed: int, failed: int, skipped: int}
+
+/** Original execution provenance survives every later reuse. */
+pub type Execution = {
+  schema: "smart-ship.execution.v1",
+  installation: string,
+  requirement: Requirement,
+  source: Source,
+  run: string,
+  attempt: int,
+  job: string,
+  result: "passed" | "failed" | "infrastructure_failed" | "cancelled",
+  log_digest: string,
+  artifacts: list<Artifact>,
+  tests: TestEvidence?,
+  started_at_ms: int,
+  completed_at_ms: int,
+}
+
+/** A signature covers the original execution, never an intermediary's green slot. */
+pub type Proof = {
+  requirement: string,
+  mode: "executed" | "reused",
+  original: Execution,
+  signer: string,
+  signature: string,
+}
+
+/** Complete counts and names prevent a missing census from looking green. */
+pub type Verification = {
+  status: "verified" | "pending" | "failed" | "invalid",
+  required: int,
+  executed: int,
+  reused: int,
+  pending: list<string>,
+  failed: list<string>,
+  infrastructure_failed: list<string>,
+  invalid: list<string>,
+}
+
+/** Authority is read from the effect owner immediately before an effect. */
+pub type Authority = {
+  installation: string,
+  generation: int,
+  revision: int,
+  controller: string,
+  mode: "shadow" | "active" | "draining" | "stopped",
+  previous_checkpoint: string,
+  promoted_sequence: int,
+  held_repositories: list<string>,
+}
+
+/** A worker carries only an expected fence, never durable mutation credentials. */
+pub type Fence = {installation: string, generation: int, revision: int, controller: string}
+
+/** Proven source, job inventory, and signed original evidence form one release fact. */
+pub type Checkpoint = {
+  schema: "smart-ship.checkpoint.v1",
+  policy: Policy,
+  snapshot: Snapshot,
+  proofs: list<Proof>,
+}
+
+/** Publication is independently signed by a key authorized for checkpoints. */
+pub type SignedCheckpoint = {checkpoint: Checkpoint, signer: string, signature: string}
+
+/** A refusal preserves the last checkpoint and names the failed condition. */
+pub type Promotion = {
+  status: "promote" | "refused",
+  reason: string,
+  verification: Verification,
+  checkpoint: Checkpoint?,
+}
