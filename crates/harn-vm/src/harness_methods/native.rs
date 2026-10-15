@@ -1,6 +1,6 @@
 async fn call_harness_root_method(
     vm: &mut Vm,
-    handle: &VmHarness,
+    handle: &VmHarness<'_>,
     method: &str,
     args: &[VmValue],
 ) -> Result<VmValue, VmError> {
@@ -105,7 +105,7 @@ async fn call_harness_root_method(
 
 fn call_harness_stdio_method(
     vm: &mut Vm,
-    handle: &VmHarness,
+    handle: &VmHarness<'_>,
     method: &str,
     args: &[VmValue],
 ) -> Result<VmValue, VmError> {
@@ -114,7 +114,7 @@ fn call_harness_stdio_method(
 }
 
 fn call_harness_term_method(
-    handle: &VmHarness,
+    handle: &VmHarness<'_>,
     method: &str,
     args: &[VmValue],
 ) -> Result<VmValue, VmError> {
@@ -124,7 +124,7 @@ fn call_harness_term_method(
 
 async fn call_harness_clock_method(
     vm: &mut Vm,
-    handle: &VmHarness,
+    handle: &VmHarness<'_>,
     method: &str,
     args: &[VmValue],
 ) -> Result<VmValue, VmError> {
@@ -176,7 +176,7 @@ async fn call_harness_clock_method(
 /// single canonical copy in `stdlib::fs`.
 async fn call_harness_fs_method(
     vm: &mut Vm,
-    handle: &VmHarness,
+    handle: &VmHarness<'_>,
     method: &str,
     args: &[VmValue],
 ) -> Result<VmValue, VmError> {
@@ -278,7 +278,7 @@ async fn call_harness_fs_method(
 /// in policy, not language surface, so there is intentionally no
 /// `set` method.
 fn call_harness_env_method(
-    handle: &VmHarness,
+    handle: &VmHarness<'_>,
     method: &str,
     args: &[VmValue],
 ) -> Result<VmValue, VmError> {
@@ -291,7 +291,7 @@ fn call_harness_env_method(
 /// remain available via the ambient `Rng.*` surface for replay
 /// tests that need a seeded stream.
 fn call_harness_random_method(
-    handle: &VmHarness,
+    handle: &VmHarness<'_>,
     method: &str,
     args: &[VmValue],
 ) -> Result<VmValue, VmError> {
@@ -303,7 +303,7 @@ fn call_harness_random_method(
 /// implementation, preserving its egress allowlist and retry policy.
 async fn call_harness_net_method(
     vm: &mut Vm,
-    handle: &VmHarness,
+    handle: &VmHarness<'_>,
     method: &str,
     args: &[VmValue],
 ) -> Result<VmValue, VmError> {
@@ -414,7 +414,7 @@ async fn call_harness_net_method(
 
 async fn call_harness_process_method(
     vm: &mut Vm,
-    handle: &VmHarness,
+    handle: &VmHarness<'_>,
     method: &str,
     args: &[VmValue],
 ) -> Result<VmValue, VmError> {
@@ -587,7 +587,7 @@ async fn call_harness_process_method(
 
 async fn call_runtime_capability_method(
     vm: &mut Vm,
-    handle: &VmHarness,
+    handle: &VmHarness<'_>,
     method: &str,
     args: &[VmValue],
 ) -> Result<VmValue, VmError> {
@@ -644,7 +644,7 @@ async fn call_runtime_capability_method(
 
 async fn call_interaction_capability_method(
     vm: &mut Vm,
-    handle: &VmHarness,
+    handle: &VmHarness<'_>,
     method: &str,
     args: &[VmValue],
 ) -> Result<VmValue, VmError> {
@@ -675,7 +675,7 @@ async fn call_interaction_capability_method(
 
 async fn call_tools_capability_method(
     vm: &mut Vm,
-    handle: &VmHarness,
+    handle: &VmHarness<'_>,
     method: &str,
     args: &[VmValue],
 ) -> Result<VmValue, VmError> {
@@ -698,7 +698,7 @@ async fn call_tools_capability_method(
 
 async fn call_dict_host_capability_method(
     vm: &Vm,
-    handle: &VmHarness,
+    handle: &VmHarness<'_>,
     capability: &str,
     method: &str,
     args: &[VmValue],
@@ -727,7 +727,7 @@ async fn dispatch_host_from_vm(
 
 async fn call_project_capability_method(
     vm: &mut Vm,
-    handle: &VmHarness,
+    handle: &VmHarness<'_>,
     method: &str,
     args: &[VmValue],
 ) -> Result<VmValue, VmError> {
@@ -821,7 +821,7 @@ async fn call_project_capability_method(
 
 async fn call_testing_capability_method(
     vm: &mut Vm,
-    handle: &VmHarness,
+    handle: &VmHarness<'_>,
     method: &str,
     args: &[VmValue],
 ) -> Result<VmValue, VmError> {
@@ -1072,7 +1072,7 @@ async fn call_testing_capability_method(
 
 async fn call_harness_channels_method(
     vm: &mut Vm,
-    handle: &VmHarness,
+    handle: &VmHarness<'_>,
     method: &str,
     args: &[VmValue],
 ) -> Result<VmValue, VmError> {
@@ -1090,7 +1090,7 @@ async fn call_harness_channels_method(
 
 async fn call_mock_harness_method(
     vm: &mut Vm,
-    handle: &VmHarness,
+    handle: &VmHarness<'_>,
     method: &str,
     args: &[VmValue],
 ) -> Result<VmValue, VmError> {

@@ -2,6 +2,14 @@ use harn_lexer::Span;
 
 use super::{VmDictExt, VmValue};
 
+/// Uncatchable control flow carrying the next stable MCP input round.
+#[derive(Clone, Debug)]
+pub struct McpInputRequired {
+    pub key: String,
+    pub request: serde_json::Value,
+    pub request_state: String,
+}
+
 /// Bound expressing how many arguments a callable accepts. Used in
 /// [`VmError::ArityMismatch`] so error messages can render the exact
 /// signature contract the caller violated.
@@ -155,7 +163,7 @@ pub enum VmError {
     /// A stable MCP handler needs client input before it can complete. The MCP
     /// server boundary converts this uncatchable control signal into an
     /// `input_required` result and re-enters the handler on retry.
-    McpInputRequired(Box<crate::mcp_input::McpInputRequired>),
+    McpInputRequired(Box<McpInputRequired>),
     Thrown(VmValue),
     /// A source-authored throw in a callable with a declared `throws` channel.
     DeclaredThrown(VmValue),

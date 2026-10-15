@@ -226,7 +226,9 @@ async fn schedule_auto_resume_timeout(
     let base_vm = ctx.child_vm();
     let worker_registry = base_vm.native().worker_registry.clone();
     let pool_registry = base_vm.native().pool_registry.clone();
-    let harness_inner = base_vm.harness().map(|harness| Arc::clone(harness.inner()));
+    let harness_inner = base_vm
+        .harness()
+        .and_then(|harness| harness.host_state_arc::<crate::harness::HarnessInner>());
     let duration = Duration::from_secs(timeout.duration_minutes.saturating_mul(60));
     let harness_inner =
         harness_inner.expect("auto-resume timeout requires Harness clock authority");

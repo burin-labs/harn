@@ -486,7 +486,7 @@ pub fn register_mcp_builtins(vm: &mut Vm) {
         "mcp_list_tools",
         |_ctx, args| async move {
             let client = match args.first() {
-                Some(VmValue::McpClient(c)) => c.clone(),
+                Some(VmValue::McpClient(c)) => native_client(c)?,
                 _ => {
                     return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                         "mcp_list_tools: argument must be an MCP client",
@@ -526,7 +526,7 @@ pub fn register_mcp_builtins(vm: &mut Vm) {
         "mcp_call",
         |_ctx, args| async move {
             let client = match args.first() {
-                Some(VmValue::McpClient(c)) => c.clone(),
+                Some(VmValue::McpClient(c)) => native_client(c)?,
                 _ => {
                     return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                         "mcp_call: first argument must be an MCP client",
@@ -563,7 +563,7 @@ pub fn register_mcp_builtins(vm: &mut Vm) {
         "mcp_server_info",
         |_ctx, args| async move {
             let client = match args.first() {
-                Some(VmValue::McpClient(c)) => c.clone(),
+                Some(VmValue::McpClient(c)) => native_client(c)?,
                 _ => {
                     return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                         "mcp_server_info: argument must be an MCP client",
@@ -617,7 +617,7 @@ pub fn register_mcp_builtins(vm: &mut Vm) {
         "mcp_disconnect",
         |_ctx, args| async move {
             let client = match args.first() {
-                Some(VmValue::McpClient(c)) => c.clone(),
+                Some(VmValue::McpClient(c)) => native_client(c)?,
                 _ => {
                     return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                         "mcp_disconnect: argument must be an MCP client",
@@ -635,7 +635,7 @@ pub fn register_mcp_builtins(vm: &mut Vm) {
         "mcp_list_resources",
         |_ctx, args| async move {
             let client = match args.first() {
-                Some(VmValue::McpClient(c)) => c.clone(),
+                Some(VmValue::McpClient(c)) => native_client(c)?,
                 _ => {
                     return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                         "mcp_list_resources: argument must be an MCP client",
@@ -661,7 +661,7 @@ pub fn register_mcp_builtins(vm: &mut Vm) {
         "mcp_read_resource",
         |_ctx, args| async move {
             let client = match args.first() {
-                Some(VmValue::McpClient(c)) => c.clone(),
+                Some(VmValue::McpClient(c)) => native_client(c)?,
                 _ => {
                     return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                         "mcp_read_resource: first argument must be an MCP client",
@@ -708,7 +708,7 @@ pub fn register_mcp_builtins(vm: &mut Vm) {
         "mcp_list_resource_templates",
         |_ctx, args| async move {
             let client = match args.first() {
-                Some(VmValue::McpClient(c)) => c.clone(),
+                Some(VmValue::McpClient(c)) => native_client(c)?,
                 _ => {
                     return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                         "mcp_list_resource_templates: argument must be an MCP client",
@@ -739,7 +739,7 @@ pub fn register_mcp_builtins(vm: &mut Vm) {
         "mcp_list_prompts",
         |_ctx, args| async move {
             let client = match args.first() {
-                Some(VmValue::McpClient(c)) => c.clone(),
+                Some(VmValue::McpClient(c)) => native_client(c)?,
                 _ => {
                     return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                         "mcp_list_prompts: argument must be an MCP client",
@@ -766,7 +766,7 @@ pub fn register_mcp_builtins(vm: &mut Vm) {
         "mcp_get_prompt",
         |_ctx, args| async move {
             let client = match args.first() {
-                Some(VmValue::McpClient(c)) => c.clone(),
+                Some(VmValue::McpClient(c)) => native_client(c)?,
                 _ => {
                     return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                         "mcp_get_prompt: first argument must be an MCP client",

@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use parking_lot::Mutex;
 
-use super::{VmError, VmValue};
+use super::{VmError, VmHostObject, VmValue};
 
 /// An unforgeable, host-owned capability value.
 ///
@@ -15,7 +15,7 @@ use super::{VmError, VmValue};
 #[derive(Clone)]
 pub struct VmResourceHandle {
     label: Arc<str>,
-    payload: Arc<dyn Any + Send + Sync>,
+    payload: VmHostObject,
 }
 
 impl VmResourceHandle {
@@ -25,7 +25,7 @@ impl VmResourceHandle {
     {
         Self {
             label: label.into(),
-            payload: Arc::new(payload),
+            payload: VmHostObject::from_arc(Arc::new(payload)),
         }
     }
 
@@ -35,7 +35,7 @@ impl VmResourceHandle {
     {
         Self {
             label: label.into(),
-            payload,
+            payload: VmHostObject::from_arc(payload),
         }
     }
 
@@ -49,15 +49,15 @@ impl VmResourceHandle {
     where
         T: Any + Send + Sync,
     {
-        Arc::clone(&self.payload).downcast::<T>().ok()
+        self.payload.downcast()
     }
 
     pub fn ptr_eq(&self, other: &Self) -> bool {
-        Arc::ptr_eq(&self.payload, &other.payload)
+        self.payload.ptr_eq(&other.payload)
     }
 
     pub(super) fn identity_ptr(&self) -> *const () {
-        Arc::as_ptr(&self.payload).cast::<()>()
+        self.payload.identity_ptr()
     }
 }
 

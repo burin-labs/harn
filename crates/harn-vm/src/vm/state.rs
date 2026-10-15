@@ -1187,8 +1187,8 @@ impl Vm {
     /// Install the script's root authority for the compiler-generated
     /// `main(harness: Harness)` call. It is kept out of all source-visible
     /// namespaces.
-    pub fn set_harness(&mut self, harness: crate::harness::Harness) {
-        self.root_harness = Some(harness.into_vm_value());
+    pub fn set_harness(&mut self, harness: impl Into<crate::value::VmHarness>) {
+        self.root_harness = Some(VmValue::harness(harness.into()));
     }
 
     /// Install the connector projection owned by this VM execution tree.
@@ -1197,7 +1197,7 @@ impl Vm {
         self.native_mut().connector_clients = Arc::new(clients);
     }
 
-    pub(crate) fn harness(&self) -> Option<&crate::harness::VmHarness> {
+    pub(crate) fn harness(&self) -> Option<&crate::value::VmHarness> {
         match self.root_harness.as_ref() {
             Some(VmValue::Harness(handle)) => Some(handle),
             _ => None,

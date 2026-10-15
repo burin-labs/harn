@@ -5,7 +5,7 @@
 /// caller-side allowlist in `call_harness_method` to be updated
 /// at the same time.
 async fn call_harness_root_capability_method(
-    handle: &VmHarness,
+    handle: &VmHarness<'_>,
     method: &str,
     args: &[VmValue],
 ) -> Result<VmValue, VmError> {
@@ -23,7 +23,7 @@ async fn call_harness_root_capability_method(
                 ))
             })?;
             let policy = crate::harness_net::parse::policy_from_dict(dict)?;
-            let source = crate::harness::Harness::from_inner(handle.inner().clone());
+            let source = crate::harness::Harness::from_inner(handle.clone_inner());
             Ok(source.with_net_policy(policy).into_vm_value())
         }
         "is_quarantined" => Ok(VmValue::Bool(handle.inner().is_quarantined())),
@@ -38,7 +38,7 @@ async fn call_harness_root_capability_method(
 /// request must be blocked.
 async fn evaluate_net_policy_for_method(
     vm: &mut Vm,
-    handle: &VmHarness,
+    handle: &VmHarness<'_>,
     method: &str,
     args: &[VmValue],
 ) -> Result<Option<NetPolicyOutcome>, VmError> {
@@ -116,7 +116,7 @@ async fn evaluate_net_policy_for_method(
 }
 
 async fn apply_callback_outcome(
-    handle: &VmHarness,
+    handle: &VmHarness<'_>,
     mut audit: NetPolicyAudit,
     outcome: OnViolation,
 ) -> Result<Option<NetPolicyOutcome>, VmError> {
@@ -144,7 +144,7 @@ async fn apply_callback_outcome(
 }
 
 fn call_harness_system_method(
-    handle: &VmHarness,
+    handle: &VmHarness<'_>,
     method: &str,
     _args: &[VmValue],
 ) -> Result<VmValue, VmError> {
@@ -164,7 +164,7 @@ fn call_harness_system_method(
 
 async fn call_harness_secrets_method(
     vm: &mut Vm,
-    handle: &VmHarness,
+    handle: &VmHarness<'_>,
     method: &str,
     args: &[VmValue],
 ) -> Result<VmValue, VmError> {
@@ -333,7 +333,7 @@ async fn call_harness_secrets_method(
 
 async fn call_harness_llm_method(
     vm: &mut Vm,
-    handle: &VmHarness,
+    handle: &VmHarness<'_>,
     method: &str,
     args: &[VmValue],
 ) -> Result<VmValue, VmError> {
@@ -347,7 +347,7 @@ async fn call_harness_llm_method(
 
 async fn call_harness_llm_method_with_session_secrets(
     vm: &mut Vm,
-    handle: &VmHarness,
+    handle: &VmHarness<'_>,
     method: &str,
     args: &[VmValue],
 ) -> Result<VmValue, VmError> {
@@ -447,7 +447,7 @@ async fn call_harness_llm_method_with_session_secrets(
 }
 
 fn call_harness_tenant_method(
-    handle: &VmHarness,
+    handle: &VmHarness<'_>,
     method: &str,
     args: &[VmValue],
 ) -> Result<VmValue, VmError> {
@@ -457,7 +457,7 @@ fn call_harness_tenant_method(
 
 async fn call_harness_auth_method(
     vm: &mut Vm,
-    handle: &VmHarness,
+    handle: &VmHarness<'_>,
     method: &str,
     args: &[VmValue],
 ) -> Result<VmValue, VmError> {
@@ -585,7 +585,7 @@ fn call_harness_auth_method_sync_fast(
 
 async fn call_harness_obs_method(
     vm: &mut Vm,
-    handle: &VmHarness,
+    handle: &VmHarness<'_>,
     method: &str,
     args: &[VmValue],
 ) -> Result<VmValue, VmError> {

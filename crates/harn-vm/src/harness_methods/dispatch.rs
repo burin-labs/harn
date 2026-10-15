@@ -7,10 +7,14 @@ fn harness_profile_name(kind: HarnessKind, method: &str) -> String {
 
 fn call_harness_method<'a>(
     vm: &'a mut Vm,
-    handle: &'a VmHarness,
+    handle: &'a crate::value::VmHarness,
     method: &'a str,
     args: &'a [VmValue],
 ) -> HarnessMethodFuture<'a> {
+    let handle = match VmHarness::from_handle(handle) {
+        Ok(handle) => handle,
+        Err(error) => return Box::pin(async move { Err(error) }),
+    };
     let clock = std::sync::Arc::clone(handle.inner().clock());
     // Harness methods can re-enter Harn through agent/tool callbacks.
     // Keep the large, capability-wide dispatch future behind one pointer
@@ -18,10 +22,13 @@ fn call_harness_method<'a>(
     // executor stack. This is the capability analogue of the boxed
     // builtin observation guard in `vm::dispatch` and keeps the ordinary
     // 2 MiB worker-thread stack sufficient for nested effectful agents.
-    Box::pin(crate::clock_mock::scope_capability_clock(
-        clock,
-        call_harness_method_in_scope(vm, handle, method, args),
-    ))
+    Box::pin(async move {
+        crate::clock_mock::scope_capability_clock(
+            clock,
+            call_harness_method_in_scope(vm, &handle, method, args),
+        )
+        .await
+    })
 }
 
 /// Dispatch after installing receiver-owned runtime context.
@@ -30,7 +37,7 @@ fn call_harness_method<'a>(
 /// builtin-backed and native methods share identical capability semantics.
 async fn call_harness_method_in_scope(
     vm: &mut Vm,
-    handle: &VmHarness,
+    handle: &VmHarness<'_>,
     method: &str,
     args: &[VmValue],
 ) -> Result<VmValue, VmError> {
@@ -368,12 +375,16 @@ async fn call_harness_method_in_scope(
 fn call_harness_method_sync_fast(
     output: &mut String,
     runtime_effects: &mut crate::orchestration::RuntimeEffectState,
-    handle: &VmHarness,
+    handle: &crate::value::VmHarness,
     method: &str,
     args: &[VmValue],
 ) -> Option<Result<VmValue, VmError>> {
+    let handle = match VmHarness::from_handle(handle) {
+        Ok(handle) => handle,
+        Err(error) => return Some(Err(error)),
+    };
     let started = crate::builtin_profile::is_enabled().then(std::time::Instant::now);
-    let result = call_harness_method_sync_fast_inner(output, runtime_effects, handle, method, args);
+    let result = call_harness_method_sync_fast_inner(output, runtime_effects, &handle, method, args);
     if result.is_some() {
         if let Some(started) = started {
             crate::builtin_profile::record(
@@ -388,7 +399,7 @@ fn call_harness_method_sync_fast(
 fn call_harness_method_sync_fast_inner(
     output: &mut String,
     runtime_effects: &mut crate::orchestration::RuntimeEffectState,
-    handle: &VmHarness,
+    handle: &VmHarness<'_>,
     method: &str,
     args: &[VmValue],
 ) -> Option<Result<VmValue, VmError>> {
@@ -444,7 +455,7 @@ fn call_harness_method_sync_fast_inner(
 }
 
 fn call_harness_clock_method_sync_fast(
-    handle: &VmHarness,
+    handle: &VmHarness<'_>,
     method: &str,
 ) -> Option<Result<VmValue, VmError>> {
     let clock = handle.inner().clock();
@@ -670,7 +681,7 @@ fn call_harness_tenant_method_sync_fast(
 }
 
 fn call_mock_harness_method_sync_fast(
-    handle: &VmHarness,
+    handle: &VmHarness<'_>,
     method: &str,
     args: &[VmValue],
 ) -> Option<Result<VmValue, VmError>> {

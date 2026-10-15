@@ -323,6 +323,13 @@ threads.
 
 ## Host callback surface
 
+`VmHarness` carries state owned by the runtime that created it. For native
+state access, replace `handle.inner()` with
+`handle.host_state::<harn_vm::harness::HarnessInner>()` and handle `None` when
+the handle belongs to another backend. `host_state_arc` returns a shared
+native owner when an embedder needs to retain it. Sub-handles retain the same
+owner; reading their names does not grant access to that owner's state.
+
 During `session/prompt`, Harn may call back into the host over ACP JSON-RPC.
 Hosts should be prepared to answer these methods:
 

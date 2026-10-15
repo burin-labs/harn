@@ -3,8 +3,8 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::{future::Future, pin::Pin};
 
-use crate::harness::VmHarness;
-use crate::mcp::VmMcpClientHandle;
+use super::VmHarness;
+use super::VmMcpClientHandle;
 use crate::BuiltinId;
 
 use super::{
@@ -510,8 +510,8 @@ impl VmValue {
         VmValue::ResourceGuard(Shared::new(handle))
     }
 
-    pub fn mcp_client(handle: VmMcpClientHandle) -> Self {
-        VmValue::McpClient(Shared::new(handle))
+    pub fn mcp_client(handle: impl Into<VmMcpClientHandle>) -> Self {
+        VmValue::McpClient(Shared::new(handle.into()))
     }
 
     /// Mint a verdict receipt value. Intentionally the ONLY constructor, and it

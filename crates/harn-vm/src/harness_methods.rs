@@ -14,7 +14,7 @@
 use crate::value::VmDictExt;
 use std::time::Duration;
 
-use crate::harness::{vm_string, HarnessKind, HarnessMode, VmHarness};
+use crate::harness::{vm_string, HarnessKind, HarnessMode, NativeVmHarness as VmHarness};
 use crate::harness_net::{
     self, record_audit, violation_request_value, violation_vm_error, NetPolicyAudit,
     NetPolicyDecision, NetPolicyMethodContract, OnViolation,
@@ -39,7 +39,7 @@ impl HarnessMethods for StdHarnessMethods {
     fn call<'a>(
         &self,
         vm: &'a mut Vm,
-        handle: &'a VmHarness,
+        handle: &'a crate::value::VmHarness,
         method: &'a str,
         args: &'a [VmValue],
     ) -> HarnessMethodFuture<'a> {
@@ -50,7 +50,7 @@ impl HarnessMethods for StdHarnessMethods {
         &self,
         output: &mut String,
         runtime_effects: &mut RuntimeEffectState,
-        handle: &VmHarness,
+        handle: &crate::value::VmHarness,
         method: &str,
         args: &[VmValue],
     ) -> Option<Result<VmValue, VmError>> {

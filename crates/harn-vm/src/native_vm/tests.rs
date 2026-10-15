@@ -1,6 +1,57 @@
 use super::*;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+#[tokio::test]
+async fn native_harness_dispatch_rejects_another_backend_before_output() {
+    let chunk = crate::compile_source(
+        "fn main(harness: Harness) { harness.stdio.print(\"native reached\") }",
+    )
+    .unwrap();
+    let mut vm = Vm::new();
+    vm.set_harness(crate::value::VmHarness::from_host(Arc::new(())));
+    let error = vm.execute(&chunk).await.unwrap_err();
+    assert!(
+        error.to_string().contains("different runtime backend"),
+        "{error}"
+    );
+    assert!(vm.output().is_empty());
+
+    let mut vm = Vm::new();
+    vm.set_harness(crate::harness::Harness::real());
+    vm.execute(&chunk).await.unwrap();
+    assert_eq!(vm.output(), "native reached");
+}
+
+#[tokio::test]
+async fn native_mcp_builtins_reject_another_backend_before_transport() {
+    let mut vm = Vm::new();
+    crate::mcp::register_mcp_builtins(&mut vm);
+    let client = VmValue::mcp_client(crate::value::VmMcpClientHandle::from_host(
+        "foreign".to_string(),
+        Arc::new(()),
+    ));
+    for builtin in [
+        "mcp_list_tools",
+        "mcp_call",
+        "mcp_server_info",
+        "mcp_disconnect",
+        "mcp_list_resources",
+        "mcp_read_resource",
+        "mcp_list_resource_templates",
+        "mcp_list_prompts",
+        "mcp_get_prompt",
+    ] {
+        let error = vm
+            .call_named_builtin(builtin, vec![client.clone()])
+            .await
+            .unwrap_err();
+        assert!(
+            error.to_string().contains("different runtime backend"),
+            "{builtin}: {error}"
+        );
+    }
+}
+
 #[derive(Clone)]
 struct RefusingRuntime {
     native: NativeExecutionState,

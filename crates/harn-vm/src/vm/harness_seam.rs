@@ -10,8 +10,8 @@ use std::future::Future;
 use std::pin::Pin;
 
 use super::Vm;
-use crate::harness::VmHarness;
 use crate::runtime_effects::RuntimeEffectState;
+use crate::value::VmHarness;
 use crate::value::{VmError, VmValue};
 
 /// The boxed future of one asynchronous harness method call. It is boxed so

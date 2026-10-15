@@ -4,9 +4,12 @@ mod diff;
 mod env;
 mod error;
 mod handles;
+mod harness;
+mod host_object;
 mod io_error;
 mod isolate;
 pub mod json;
+mod mcp_client;
 pub(crate) mod recursion;
 mod set;
 mod storage_json;
@@ -30,7 +33,7 @@ pub(crate) use error::error_category_for_http_status;
 pub use error::{
     categorized_error, classify_error_message, error_to_category, ArgTypeMismatchError,
     ArityExpect, ArityMismatchError, BindingTypeMismatchError, DeadlockError, ErrorCategory,
-    ProviderStreamDeadline, ProviderStreamFailure, ProviderStreamFailureReason,
+    McpInputRequired, ProviderStreamDeadline, ProviderStreamFailure, ProviderStreamFailureReason,
     ProviderStreamPhase, SchemaStreamAbort, SchemaValidationReasonKind, ValueByteLimitError,
     VmError,
 };
@@ -39,10 +42,13 @@ pub use handles::{
     VmResourceGuardHandle, VmResourceHandle, VmRngHandle, VmStream, VmStreamCancel,
     VmSyncPermitHandle, VmTaskHandle, VmVerdictReceipt,
 };
+pub use harness::VmHarness;
+pub use host_object::VmHostObject;
 pub use io_error::{
     environment_io_error_thrown, io_error_kind_str, io_error_thrown, io_error_value,
 };
 pub use isolate::IsolateValue;
+pub use mcp_client::VmMcpClientHandle;
 pub use set::VmSet;
 pub(crate) use storage_json::vm_to_storage_json;
 pub use structural::{
