@@ -118,16 +118,16 @@ pub(super) fn collect_static_tool_surface_from_node(
                 prompt_targets.push(target);
             }
         }
-        Node::FunctionCall { name, args, .. } if name == "agent_loop" || name == "llm_call" => {
-            if args
-                .get(2)
-                .and_then(|options| dict_literal_field(options, "tool_search"))
-                .is_some_and(|value| {
-                    !matches!(value.node, Node::BoolLiteral(false) | Node::NilLiteral)
-                })
-            {
-                *tool_search_active = true;
-            }
+        Node::FunctionCall { name, args, .. }
+            if (name == "agent_loop" || name == "llm_call")
+                && args
+                    .get(2)
+                    .and_then(|options| dict_literal_field(options, "tool_search"))
+                    .is_some_and(|value| {
+                        !matches!(value.node, Node::BoolLiteral(false) | Node::NilLiteral)
+                    }) =>
+        {
+            *tool_search_active = true;
         }
         _ => {}
     });
