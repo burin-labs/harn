@@ -196,7 +196,7 @@ pub(super) fn is_bare_import(import: &str) -> bool {
 
 pub(super) fn seed_entry_context_hasher(hasher: &mut Sha256, codegen_fingerprint: &str) {
     hasher.update(b"stdlib-digest\0");
-    hasher.update(crate::runtime_content::embedded_stdlib_digest_bytes());
+    hasher.update(super::embedded_stdlib_digest_bytes());
     hasher.update(b"\0");
     // Fold in the compiler's code-generation fingerprint so a compiler change
     // that alters emitted bytecode for unchanged source busts stale cache

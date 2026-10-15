@@ -46,6 +46,9 @@ pub use harn_kernel::BuiltinId;
 pub use prepared_module::{
     PreparedModuleCache, PreparedModuleCacheStats, PreparedModuleGenerationStats,
 };
+pub use runtime_limits::{
+    RuntimeLimitDescription, RuntimeLimitEntry, RuntimeLimits, RuntimeLimitsReport,
+};
 pub use runtime_stack::{on_vm_stack, RUNTIME_STACK_SIZE};
 pub use value::*;
 pub use vm::flight_recorder;
