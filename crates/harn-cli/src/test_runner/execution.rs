@@ -74,13 +74,12 @@ pub(super) async fn execute_case(
     let (entry, compile_ms) = if let Some(entry) = case.compiled_entry.as_deref() {
         (entry, 0)
     } else {
-        let imported_enums = case.imported_enum_candidates.iter().cloned();
         let compiler = if case.trusted_host_dispatch {
             harn_vm::Compiler::new_trusted_host_dispatch()
-                .with_imported_enum_candidates(imported_enums)
         } else {
-            crate::compiler_with_imported_enum_candidates(imported_enums)
+            harn_vm::Compiler::new()
         };
+        let compiler = case.compilation_context.configure_compiler(compiler);
         let case_fixture = case
             .fixture
             .as_ref()
@@ -147,13 +146,12 @@ pub(super) async fn execute_file_fixture(
             }
         }
     } else {
-        let imported_enums = case.imported_enum_candidates.iter().cloned();
         let compiler = if case.trusted_host_dispatch {
             harn_vm::Compiler::new_trusted_host_dispatch()
-                .with_imported_enum_candidates(imported_enums)
         } else {
-            crate::compiler_with_imported_enum_candidates(imported_enums)
+            harn_vm::Compiler::new()
         };
+        let compiler = case.compilation_context.configure_compiler(compiler);
         owned_entry = match compiler.compile_named_function_entry(&case.program, &fixture.name) {
             Ok(entry) => entry,
             Err(error) => {

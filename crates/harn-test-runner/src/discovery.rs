@@ -43,7 +43,7 @@ pub fn extract_cases_from_program(
                 pipeline_name: meta.name,
                 source: Arc::clone(source),
                 program: Arc::clone(program),
-                imported_enum_candidates: Arc::new(Vec::new()),
+                compilation_context: Arc::new(Default::default()),
                 serial_group: meta.serial_group,
                 weight,
                 args: meta.default_args,
@@ -65,7 +65,7 @@ pub fn extract_cases_from_program(
                     pipeline_name: meta.name.clone(),
                     source: Arc::clone(source),
                     program: Arc::clone(program),
-                    imported_enum_candidates: Arc::new(Vec::new()),
+                    compilation_context: Arc::new(Default::default()),
                     serial_group: meta.serial_group.clone(),
                     weight,
                     args: row.args,
@@ -81,20 +81,19 @@ pub fn extract_cases_from_program(
     Ok(cases)
 }
 
-pub fn seed_imported_enum_candidates(file: &Path, source: &str, cases: &mut [TestCase]) {
-    if cases.is_empty() || !harn_parser::visit::contains_identifier_enum_pattern(&cases[0].program)
-    {
+pub fn seed_compilation_context(file: &Path, source: &str, cases: &mut [TestCase]) {
+    use harn_vm::module_artifact::ModuleCompilationContext;
+    if cases.is_empty() || !ModuleCompilationContext::needs_imported_symbols(&cases[0].program) {
         return;
     }
-    let mut candidates = harn_modules::build_with_source(file, source)
-        .imported_names_by_kind_for_file(file, harn_modules::DefKind::Enum)
-        .unwrap_or_default()
-        .into_iter()
-        .collect::<Vec<_>>();
-    candidates.sort_unstable();
-    let candidates = Arc::new(candidates);
+    let graph = harn_modules::build_with_source(file, source);
+    let context = Arc::new(ModuleCompilationContext::for_program_in_graph(
+        &graph,
+        file,
+        &cases[0].program,
+    ));
     for case in cases {
-        case.imported_enum_candidates = Arc::clone(&candidates);
+        case.compilation_context = Arc::clone(&context);
     }
 }
 

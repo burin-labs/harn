@@ -128,8 +128,25 @@ fn serialize_public_names<S: serde::Serializer>(
 pub fn specialize_module_artifact(
     program: &[harn_parser::SNode],
     source_file: Option<String>,
+    artifact: ModuleArtifact,
+    demand: &harn_modules::ExportDemand,
+) -> Result<ModuleArtifact, VmError> {
+    specialize_module_artifact_with_context(
+        program,
+        source_file,
+        artifact,
+        demand,
+        &ModuleCompilationContext::default(),
+    )
+}
+
+/// Specialize with the import interface that produced the module artifact.
+pub fn specialize_module_artifact_with_context(
+    program: &[harn_parser::SNode],
+    source_file: Option<String>,
     mut artifact: ModuleArtifact,
     demand: &harn_modules::ExportDemand,
+    context: &ModuleCompilationContext,
 ) -> Result<ModuleArtifact, VmError> {
     use harn_parser::Node;
     use std::collections::{BTreeSet, HashMap};
@@ -218,12 +235,9 @@ pub fn specialize_module_artifact(
         .iter()
         .cloned()
         .collect::<BTreeSet<_>>();
-    artifact.type_schema_init_chunks =
-        crate::Compiler::compile_selected_public_type_schema_initializers(
-            program,
-            source_file,
-            Some(&selected_type_names),
-        )
+    artifact.type_schema_init_chunks = context
+        .configure_compiler(crate::Compiler::new())
+        .compile_type_schema_initializers(program, source_file, Some(&selected_type_names))
         .map_err(|error| VmError::Runtime(format!("Import schema compile error: {error}")))?
         .into_iter()
         .map(|chunk| chunk.freeze_for_cache())
@@ -300,25 +314,18 @@ pub fn compile_module_artifact(
             sorted_imported_symbol_projection(&graph, Path::new(path))
         })
         .unwrap_or_default();
-    compile_module_artifact_with_imported_symbols(
-        program,
-        module_source_file,
-        imported_symbols.enum_candidates(),
-        imported_symbols.source_callable_names(),
-    )
+    compile_module_artifact_with_imported_symbols(program, module_source_file, &imported_symbols)
 }
 
 fn compile_module_artifact_with_imported_symbols(
     program: &[harn_parser::SNode],
     module_source_file: Option<String>,
-    imported_enum_candidates: &[String],
-    imported_source_callable_names: &[String],
+    imported: &ModuleCompilationContext,
 ) -> Result<ModuleArtifact, VmError> {
     compile_module_artifact_with_provenance(
         program,
         module_source_file,
-        imported_enum_candidates,
-        imported_source_callable_names,
+        imported,
         ModuleProvenance::User,
     )
 }
@@ -326,8 +333,7 @@ fn compile_module_artifact_with_imported_symbols(
 fn compile_module_artifact_with_provenance(
     program: &[harn_parser::SNode],
     module_source_file: Option<String>,
-    imported_enum_candidates: &[String],
-    imported_source_callable_names: &[String],
+    imported: &ModuleCompilationContext,
     provenance: ModuleProvenance,
 ) -> Result<ModuleArtifact, VmError> {
     let options = match provenance {
@@ -337,21 +343,13 @@ fn compile_module_artifact_with_provenance(
             crate::CompilerOptions::privileged_wire()
         }
     };
-    compile_module_artifact_with_options(
-        program,
-        module_source_file,
-        imported_enum_candidates,
-        imported_source_callable_names,
-        provenance,
-        options,
-    )
+    compile_module_artifact_with_options(program, module_source_file, imported, provenance, options)
 }
 
 fn compile_module_artifact_with_options(
     program: &[harn_parser::SNode],
     module_source_file: Option<String>,
-    imported_enum_candidates: &[String],
-    imported_source_callable_names: &[String],
+    imported: &ModuleCompilationContext,
     provenance: ModuleProvenance,
     options: crate::CompilerOptions,
 ) -> Result<ModuleArtifact, VmError> {
@@ -396,7 +394,7 @@ fn compile_module_artifact_with_options(
         validate_privileged_wire_surface(program, &imports)?;
     }
 
-    let compiler = || crate::Compiler::with_options(options);
+    let compiler = || imported.configure_compiler(crate::Compiler::with_options(options));
 
     let init_nodes: Vec<harn_parser::SNode> = program
         .iter()
@@ -432,8 +430,8 @@ fn compile_module_artifact_with_options(
                 .compile_module_init(
                     program,
                     &init_nodes,
-                    imported_enum_candidates,
-                    imported_source_callable_names,
+                    imported.enum_candidates(),
+                    imported.source_callable_names(),
                 )
                 .map_err(|e| VmError::Runtime(format!("Import init compile error: {e}")))?
                 .freeze_for_cache(),
@@ -496,10 +494,7 @@ fn compile_module_artifact_with_options(
             ..
         } = &inner.node
         {
-            let mut compiler = compiler();
-            compiler.add_imported_enum_candidates(imported_enum_candidates.iter().cloned());
-            compiler
-                .add_imported_source_callable_names(imported_source_callable_names.iter().cloned());
+            let compiler = compiler();
             let pipeline = compiler
                 .compile_pipeline_callable(
                     program,
@@ -526,8 +521,6 @@ fn compile_module_artifact_with_options(
         };
 
         let mut compiler = compiler();
-        compiler.add_imported_enum_candidates(imported_enum_candidates.iter().cloned());
-        compiler.add_imported_source_callable_names(imported_source_callable_names.iter().cloned());
         compiler.prepare_module_context(program);
         let func_chunk = compiler
             .compile_named_fn_body(
@@ -542,12 +535,12 @@ fn compile_module_artifact_with_options(
         functions.insert(name.clone(), func_chunk.freeze_for_cache());
     }
 
-    let type_schema_init_chunks =
-        crate::Compiler::compile_public_type_schema_initializers(program, module_source_file)
-            .map_err(|error| VmError::Runtime(format!("Import schema compile error: {error}")))?
-            .into_iter()
-            .map(|chunk| chunk.freeze_for_cache())
-            .collect();
+    let type_schema_init_chunks = compiler()
+        .compile_type_schema_initializers(program, module_source_file, None)
+        .map_err(|error| VmError::Runtime(format!("Import schema compile error: {error}")))?
+        .into_iter()
+        .map(|chunk| chunk.freeze_for_cache())
+        .collect();
 
     Ok(ModuleArtifact {
         provenance,
@@ -602,8 +595,7 @@ pub fn compile_module_artifact_from_source(
     compile_module_artifact_with_imported_symbols(
         &program,
         Some(source_path.display().to_string()),
-        imported_symbols.enum_candidates(),
-        imported_symbols.source_callable_names(),
+        &imported_symbols,
     )
 }
 
@@ -620,8 +612,7 @@ pub(crate) fn compile_embedded_stdlib_module_artifact_from_source(
     compile_module_artifact_with_provenance(
         &program,
         Some(source_path.display().to_string()),
-        imported_symbols.enum_candidates(),
-        imported_symbols.source_callable_names(),
+        &imported_symbols,
         ModuleProvenance::EmbeddedStdlib,
     )
 }
@@ -674,8 +665,7 @@ pub fn compile_privileged_wire_module_artifact_from_source(
     compile_module_artifact_with_provenance(
         &program,
         Some(source_path.display().to_string()),
-        imported_symbols.enum_candidates(),
-        imported_symbols.source_callable_names(),
+        &imported_symbols,
         ModuleProvenance::PrivilegedWire,
     )
 }
@@ -693,8 +683,7 @@ pub fn compile_trusted_host_dispatch_module_artifact_from_source(
     compile_module_artifact_with_provenance(
         &program,
         Some(source_path.display().to_string()),
-        imported_symbols.enum_candidates(),
-        imported_symbols.source_callable_names(),
+        &imported_symbols,
         ModuleProvenance::TrustedHostDispatch,
     )
 }
@@ -709,13 +698,12 @@ pub fn compile_trusted_host_dispatch_module_artifact_from_source_with_imported_e
     imported_enum_candidates: impl IntoIterator<Item = String>,
 ) -> Result<ModuleArtifact, VmError> {
     let program = parse_module_source(source_path, source)?;
-    let imported_enum_candidates = imported_enum_candidates.into_iter().collect::<Vec<_>>();
-    let imported_symbols = imported_symbol_projection_for_program(source_path, source, &program);
+    let imported_symbols = imported_symbol_projection_for_program(source_path, source, &program)
+        .with_enum_candidates(imported_enum_candidates);
     compile_module_artifact_with_provenance(
         &program,
         Some(source_path.display().to_string()),
-        &imported_enum_candidates,
-        imported_symbols.source_callable_names(),
+        &imported_symbols,
         ModuleProvenance::TrustedHostDispatch,
     )
 }
@@ -726,12 +714,15 @@ pub fn compile_trusted_host_dispatch_module_artifact_from_source_with_imported_s
     imported_enum_candidates: impl IntoIterator<Item = String>,
     imported_source_callable_names: impl IntoIterator<Item = String>,
 ) -> Result<ModuleArtifact, VmError> {
-    let context =
-        ModuleCompilationContext::new(imported_enum_candidates, imported_source_callable_names);
-    compile_trusted_host_dispatch_module_artifact_from_source_with_context(
-        source_path,
-        source,
+    let program = parse_module_source(source_path, source)?;
+    let context = imported_symbol_projection_for_program(source_path, source, &program)
+        .with_enum_candidates(imported_enum_candidates)
+        .with_source_callable_names(imported_source_callable_names);
+    compile_module_artifact_with_provenance(
+        &program,
+        Some(source_path.display().to_string()),
         &context,
+        ModuleProvenance::TrustedHostDispatch,
     )
 }
 
@@ -744,8 +735,7 @@ pub fn compile_trusted_host_dispatch_module_artifact_from_source_with_context(
     compile_module_artifact_with_provenance(
         &program,
         Some(source_path.display().to_string()),
-        context.enum_candidates(),
-        context.source_callable_names(),
+        context,
         ModuleProvenance::TrustedHostDispatch,
     )
 }
@@ -835,18 +825,27 @@ fn needs_imported_enum_candidates(program: &[harn_parser::SNode]) -> bool {
 }
 
 fn needs_imported_symbol_projection(program: &[harn_parser::SNode]) -> bool {
-    needs_imported_enum_candidates(program) || needs_imported_source_callable_names(program)
+    needs_imported_enum_candidates(program)
+        || needs_imported_source_callable_names(program)
+        || (has_wildcard_import(program)
+            && program.iter().any(|node| {
+                let (_, node) = harn_parser::peel_attributes(node);
+                matches!(&node.node, harn_parser::Node::TypeDecl { .. })
+            }))
 }
 
-fn needs_imported_source_callable_names(program: &[harn_parser::SNode]) -> bool {
-    let has_wildcard_import = program.iter().any(|node| match &node.node {
+fn has_wildcard_import(program: &[harn_parser::SNode]) -> bool {
+    program.iter().any(|node| match &node.node {
         harn_parser::Node::ImportDecl { .. } => true,
         harn_parser::Node::AttributedDecl { inner, .. } => {
             matches!(&inner.node, harn_parser::Node::ImportDecl { .. })
         }
         _ => false,
-    });
-    if !has_wildcard_import {
+    })
+}
+
+fn needs_imported_source_callable_names(program: &[harn_parser::SNode]) -> bool {
+    if !has_wildcard_import(program) {
         return false;
     }
     let mut needs_projection = false;
@@ -890,28 +889,33 @@ pub fn compile_module_artifact_from_source_with_imported_enums(
     imported_enum_candidates: impl IntoIterator<Item = String>,
 ) -> Result<ModuleArtifact, VmError> {
     let program = parse_module_source(source_path, source)?;
-    let imported_enum_candidates = imported_enum_candidates.into_iter().collect::<Vec<_>>();
-    let imported_symbols = imported_symbol_projection_for_program(source_path, source, &program);
+    let imported_symbols = imported_symbol_projection_for_program(source_path, source, &program)
+        .with_enum_candidates(imported_enum_candidates);
     compile_module_artifact_with_imported_symbols(
         &program,
         Some(source_path.display().to_string()),
-        &imported_enum_candidates,
-        imported_symbols.source_callable_names(),
+        &imported_symbols,
     )
 }
 
-/// Compile a source-backed module from one already-resolved module-graph
-/// projection. Closed-program linkers use this entry point because their
-/// runtime paths need not exist on the host filesystem.
+/// Compile source with caller-selected enum and callable names. Type bindings
+/// come from the same source graph; callers carrying the complete interface
+/// use `compile_module_artifact_from_source_with_context`.
 pub fn compile_module_artifact_from_source_with_imported_symbols(
     source_path: &Path,
     source: &str,
     imported_enum_candidates: impl IntoIterator<Item = String>,
     imported_source_callable_names: impl IntoIterator<Item = String>,
 ) -> Result<ModuleArtifact, VmError> {
-    let context =
-        ModuleCompilationContext::new(imported_enum_candidates, imported_source_callable_names);
-    compile_module_artifact_from_source_with_context(source_path, source, &context)
+    let program = parse_module_source(source_path, source)?;
+    let context = imported_symbol_projection_for_program(source_path, source, &program)
+        .with_enum_candidates(imported_enum_candidates)
+        .with_source_callable_names(imported_source_callable_names);
+    compile_module_artifact_with_imported_symbols(
+        &program,
+        Some(source_path.display().to_string()),
+        &context,
+    )
 }
 
 pub fn compile_module_artifact_from_source_with_context(
@@ -923,8 +927,7 @@ pub fn compile_module_artifact_from_source_with_context(
     compile_module_artifact_with_imported_symbols(
         &program,
         Some(source_path.display().to_string()),
-        context.enum_candidates(),
-        context.source_callable_names(),
+        context,
     )
 }
 
@@ -943,8 +946,7 @@ pub(crate) fn compile_embedded_stdlib_module_artifact_from_source_with_context(
     compile_module_artifact_with_options(
         &program,
         Some(source_path.display().to_string()),
-        context.enum_candidates(),
-        context.source_callable_names(),
+        context,
         ModuleProvenance::EmbeddedStdlib,
         crate::CompilerOptions::embedded_stdlib(),
     )
@@ -1056,7 +1058,7 @@ pub pipeline dead_pipeline(harness: Harness) { return DeadConfig({value: "dead"}
         let parsed = parse_module_source(source_path, source).expect("module parses");
         let full = compile_module_artifact(&parsed, Some(source_path.display().to_string()))
             .expect("module compiles");
-        let selected = super::specialize_module_artifact(
+        let selected = super::specialize_module_artifact_with_context(
             &parsed,
             Some(source_path.display().to_string()),
             full,
@@ -1065,6 +1067,7 @@ pub pipeline dead_pipeline(harness: Harness) { return DeadConfig({value: "dead"}
                 "KeptConfig".to_string(),
                 "kept_pipeline".to_string(),
             ])),
+            &ModuleCompilationContext::default(),
         )
         .expect("specialization succeeds");
 

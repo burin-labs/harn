@@ -1,0 +1,15 @@
+import "pub_generic_schema_wildcard_facade"
+
+type Stored = Box<Item>
+
+fn matches(value: unknown) -> bool {
+  return schema_is(value, Stored)
+}
+
+pipeline default(harness: Harness) {
+  const value: unknown = json_parse("{\"payload\":{\"name\":\"measured\"}}")
+  assert(matches(value))
+  assert(!matches({payload: {name: 42}}))
+  assert(!matches({payload: {}}))
+  harness.stdio.println("wildcard generic schema reached")
+}

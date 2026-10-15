@@ -24,8 +24,8 @@ mod tests;
 
 use execution::{execute_case, execute_file_fixture};
 use harn_test_runner::{
-    extract_cases_from_program, parse_program, prepare_callable_entries,
-    seed_imported_enum_candidates, FixtureScope, TestCase, TestFixture,
+    extract_cases_from_program, parse_program, prepare_callable_entries, seed_compilation_context,
+    FixtureScope, TestCase, TestFixture,
 };
 pub use harn_test_runner::{
     AggregateTimings, CostRegression, DominantCase, PhaseTimings, ShardPlan,
@@ -556,7 +556,7 @@ async fn run_test_file_with_session_impl(
     let program = Arc::new(program);
 
     let mut cases = extract_cases_from_program(path, &source, &program, filter, usize::MAX)?;
-    seed_imported_enum_candidates(path, &source, &mut cases);
+    seed_compilation_context(path, &source, &mut cases);
     let trusted_host_dispatch = package::load_check_config(Some(path)).trusted_host_dispatch;
     for case in &mut cases {
         case.trusted_host_dispatch = trusted_host_dispatch;
@@ -808,7 +808,7 @@ fn discover_test_cases(files: &[PathBuf], filter: Option<&str>, workers: usize) 
         match extract_cases_from_program(file, &source, &program, filter, workers) {
             Ok(mut file_cases) => {
                 if !file_cases.is_empty() {
-                    seed_imported_enum_candidates(file, &source, &mut file_cases);
+                    seed_compilation_context(file, &source, &mut file_cases);
                     files_with_tests += 1;
                     cases.extend(file_cases);
                 }

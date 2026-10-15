@@ -16,6 +16,7 @@ use crate::VmError;
 pub struct ModuleCompilationContext {
     enum_candidates: Vec<String>,
     source_callable_names: Vec<String>,
+    type_alias_names: Vec<String>,
 }
 
 /// Syntax-dependent work captured before the graph finishes resolving imports.
@@ -38,6 +39,10 @@ impl ModuleCompilationContextProjection {
 }
 
 impl ModuleCompilationContext {
+    pub fn needs_imported_symbols(program: &[harn_parser::SNode]) -> bool {
+        needs_imported_symbol_projection(program)
+    }
+
     pub fn new(
         enum_candidates: impl IntoIterator<Item = String>,
         source_callable_names: impl IntoIterator<Item = String>,
@@ -51,18 +56,27 @@ impl ModuleCompilationContext {
         Self {
             enum_candidates,
             source_callable_names,
+            type_alias_names: Vec::new(),
         }
     }
 
     pub fn from_graph(graph: &harn_modules::ModuleGraph, source_path: &Path) -> Self {
-        Self::new(
+        let mut context = Self::new(
             graph
                 .imported_names_by_kind_for_file(source_path, DefKind::Enum)
                 .unwrap_or_default(),
             graph
                 .imported_callable_names_for_file(source_path)
                 .unwrap_or_default(),
-        )
+        );
+        context.type_alias_names = graph
+            .imported_names_by_kind_for_file(source_path, DefKind::Type)
+            .unwrap_or_default()
+            .into_iter()
+            .collect();
+        context.type_alias_names.sort_unstable();
+        context.type_alias_names.dedup();
+        context
     }
 
     /// Project only names that this source's syntax can consult during
@@ -104,17 +118,49 @@ impl ModuleCompilationContext {
         &self.source_callable_names
     }
 
+    /// Configure one compiler from the complete resolved import interface.
+    /// Every source projection uses this boundary instead of selecting a
+    /// subset of names and silently dropping another lowering dependency.
+    pub fn configure_compiler(&self, compiler: crate::Compiler) -> crate::Compiler {
+        compiler
+            .with_imported_enum_candidates(self.enum_candidates.iter().cloned())
+            .with_imported_source_callable_names(self.source_callable_names.iter().cloned())
+            .with_imported_type_alias_names(self.type_alias_names.iter().cloned())
+    }
+
+    pub fn type_alias_names(&self) -> &[String] {
+        &self.type_alias_names
+    }
+
+    pub(super) fn with_enum_candidates(mut self, names: impl IntoIterator<Item = String>) -> Self {
+        self.enum_candidates = names.into_iter().collect();
+        self.enum_candidates.sort_unstable();
+        self.enum_candidates.dedup();
+        self
+    }
+
+    pub(super) fn with_source_callable_names(
+        mut self,
+        names: impl IntoIterator<Item = String>,
+    ) -> Self {
+        self.source_callable_names = names.into_iter().collect();
+        self.source_callable_names.sort_unstable();
+        self.source_callable_names.dedup();
+        self
+    }
+
     /// Stable, framed identity for cache keys. The domain tag makes future
     /// context families non-aliasing without coupling callers to this layout.
     pub fn digest(&self) -> [u8; 32] {
         let mut hasher = Sha256::new();
-        hasher.update(b"harn-module-compilation-context-v1\0");
+        hasher.update(b"harn-module-compilation-context-v2\0");
         hash_names(&mut hasher, b"enum\0", &self.enum_candidates);
         hash_names(
             &mut hasher,
             b"source-callable\0",
             &self.source_callable_names,
         );
+        hash_names(&mut hasher, b"type-alias\0", &self.type_alias_names);
         hasher.finalize().into()
     }
 }
@@ -139,7 +185,7 @@ mod tests {
         let root = dir.path().join("main.harn");
         std::fs::write(
             &library,
-            "pub enum Color { Ready(message: string) Empty }\npub fn context() { return 42 }\n",
+            "pub enum Color { Ready(message: string) Empty }\npub type Box<T> = {payload: T}\npub fn context() { return 42 }\n",
         )
         .unwrap();
         std::fs::write(
@@ -169,6 +215,16 @@ pub fn describe(value: any) -> string {
         );
         assert_eq!(from_program.enum_candidates(), ["Color"]);
         assert_eq!(from_program.source_callable_names(), ["context"]);
+        assert_eq!(from_program.type_alias_names(), ["Box"]);
+        let without_types = ModuleCompilationContext::new(
+            from_program.enum_candidates().to_vec(),
+            from_program.source_callable_names().to_vec(),
+        );
+        assert_ne!(
+            from_program.digest(),
+            without_types.digest(),
+            "an imported type changes the compilation cache identity"
+        );
         let from_source =
             ModuleCompilationContext::for_source_in_graph(&build.graph, &root, &parsed.source)
                 .unwrap();

@@ -81,6 +81,12 @@ impl Compiler {
         }
     }
 
+    pub fn with_imported_type_alias_names(self, names: impl IntoIterator<Item = String>) -> Self {
+        Self {
+            inner: self.inner.with_imported_type_alias_names(names),
+        }
+    }
+
     pub fn compile(self, program: &[harn_parser::SNode]) -> Result<Chunk, CompileError> {
         self.inner.compile(program).map(Chunk::from_portable)
     }
@@ -256,6 +262,17 @@ impl Compiler {
             selected_names,
         )
         .map(|chunks| chunks.into_iter().map(Chunk::from_portable).collect())
+    }
+
+    pub fn compile_type_schema_initializers(
+        self,
+        program: &[harn_parser::SNode],
+        source_file: Option<String>,
+        selected_names: Option<&std::collections::BTreeSet<String>>,
+    ) -> Result<Vec<Chunk>, CompileError> {
+        self.inner
+            .compile_type_schema_initializers(program, source_file, selected_names)
+            .map(|chunks| chunks.into_iter().map(Chunk::from_portable).collect())
     }
 
     pub fn collect_type_aliases(&mut self, program: &[harn_parser::SNode]) {

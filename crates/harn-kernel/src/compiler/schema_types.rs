@@ -1,11 +1,11 @@
 use std::collections::BTreeMap;
 
-use harn_parser::{substitute_type_expr, ShapeField, TypeExpr};
+use harn_parser::{substitute_type_expr, Node, SNode, ShapeField, TypeExpr};
 
-use crate::chunk::Op;
+use crate::chunk::{Chunk, Op};
 use crate::value::VmValue;
 
-use super::Compiler;
+use super::{peel_node, CompileError, Compiler};
 
 /// Backstop bound on how deeply alias materialization may nest before giving
 /// up. Ordinary cycles are caught structurally by the `visiting` stack; this
@@ -200,6 +200,71 @@ pub(super) enum SchemaFragment {
 }
 
 impl Compiler {
+    /// Compile each exported type schema into an independently addressable
+    /// module initializer. Running these after imports makes referenced
+    /// imported schemas ordinary lexical inputs while keeping the cached
+    /// artifact immutable and relocatable. A module may export more schema
+    /// bytecode than one u16-addressed chunk can hold; declaration-sized
+    /// chunks remove that package-wide limit without weakening any schema.
+    pub fn compile_public_type_schema_initializers(
+        program: &[SNode],
+        source_file: Option<String>,
+    ) -> Result<Vec<Chunk>, CompileError> {
+        Self::new().compile_type_schema_initializers(program, source_file, None)
+    }
+
+    /// Compile the selected exported type schemas. `None` preserves the
+    /// caller-independent full-module behavior; a closed-program linker passes
+    /// the exact runtime type names its consumers can observe.
+    pub fn compile_selected_public_type_schema_initializers(
+        program: &[SNode],
+        source_file: Option<String>,
+        selected_names: Option<&std::collections::BTreeSet<String>>,
+    ) -> Result<Vec<Chunk>, CompileError> {
+        Self::new().compile_type_schema_initializers(program, source_file, selected_names)
+    }
+
+    /// Materialize schemas with this compiler's resolved import catalog and
+    /// options. The source-only entry points delegate to the same lowering.
+    pub fn compile_type_schema_initializers(
+        mut self,
+        program: &[SNode],
+        source_file: Option<String>,
+        selected_names: Option<&std::collections::BTreeSet<String>>,
+    ) -> Result<Vec<Chunk>, CompileError> {
+        let compiler = &mut self;
+        compiler.collect_type_aliases(program);
+        let mut chunks = Vec::new();
+        for sn in program {
+            let Node::TypeDecl {
+                name, is_pub: true, ..
+            } = peel_node(sn)
+            else {
+                continue;
+            };
+            if selected_names.is_some_and(|selected| !selected.contains(name)) {
+                continue;
+            }
+            compiler.chunk = Chunk::new();
+            compiler.string_constants.clear();
+            compiler.chunk.source_file.clone_from(&source_file);
+            if compiler.emit_schema_for_alias(name)
+                || compiler.emit_generic_schema_factory(name, source_file.clone())?
+            {
+                compiler.emit_define_binding(name, false);
+                compiler.chunk.emit(Op::Nil, compiler.line);
+                compiler.chunk.emit(Op::Return, compiler.line);
+                super::ensure_chunk_addressable(
+                    &compiler.chunk,
+                    &format!("the public type-schema initializer for `{name}`"),
+                    compiler.line,
+                )?;
+                chunks.push(std::mem::take(&mut compiler.chunk));
+            }
+        }
+        Ok(chunks)
+    }
+
     pub(super) fn schema_fragment_for_alias(&self, name: &str) -> Option<SchemaFragment> {
         self.unbounded_schema_fragment_for_alias(name)
             .map(SchemaFragment::bounded)

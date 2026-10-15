@@ -50,9 +50,7 @@ pub fn compile_source_at_path(
     }
     let imported =
         crate::module_artifact::ModuleCompilationContext::from_graph(&graph, source_path);
-    let compiler = Compiler::new()
-        .with_imported_enum_candidates(imported.enum_candidates().iter().cloned())
-        .with_imported_source_callable_names(imported.source_callable_names().iter().cloned());
+    let compiler = imported.configure_compiler(Compiler::new());
     let facts = graph
         .typecheck_import_config_for_file(source_path)
         .check_with_facts(&program, source);
