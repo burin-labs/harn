@@ -14,6 +14,8 @@ const source: ReviewedSource = {
   draft: false,
   head_repository: "example/project",
   base_repository: "example/project",
+  head_repository_id: nil,
+  base_repository_id: nil,
 }
 
 const policy: ReviewPolicy = {

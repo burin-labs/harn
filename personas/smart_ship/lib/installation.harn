@@ -1,6 +1,6 @@
 import { Controller, Effect, Incident } from "./controller"
 import { GitStore, StateRead, commit_state, prepare_state, read_state } from "./git_store"
-import { checkpoint_id, is_digest, snapshot_id } from "./identity"
+import { checkpoint_id, is_digest, policy_digest, snapshot_id } from "./identity"
 import { Authority, Policy, Verification } from "./types"
 import { policy_errors, verify } from "./verification"
 
@@ -52,12 +52,16 @@ pub fn initialize_installation(process: HarnessProcess, config: Installation) ->
   if previous.state != nil {
     require previous.state.authority.installation == config.policy.installation,
       "state ref belongs to another installation"
+    require previous.state.authority.policy_digest == policy_digest(config.policy),
+      "installation policy changed without a fenced generation transfer"
     return previous
   }
   const state: Controller = {
     schema: "smart-ship.controller.v1",
     authority: {
       installation: config.policy.installation,
+      policy: config.policy,
+      policy_digest: policy_digest(config.policy),
       generation: 1,
       revision: 1,
       controller: config.controller,

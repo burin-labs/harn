@@ -24,7 +24,8 @@ harn provider admission --request '{"provider":"ollama","model":"selected-model"
 The request accepts `provider`, `model`, an optional `boundary`, and optional
 `data_controls`. The boundary meets the process and inherited inference
 ceilings; it cannot widen them. Data controls use the selected chat transport's
-actual control plan.
+actual control plan under default API routing, including models that require
+Responses. Live preflight also checks an explicitly selected API mode.
 
 Read the required `status` field: `admitted`, `denied`, or `unknown`. A valid
 snapshot exits successfully for all three decisions. Missing catalog facts or
@@ -1430,8 +1431,12 @@ a remote base URL is refused. `hosted_open_weight` also admits hosted routes
 whose model row explicitly declares `open_weight = true`; `any_hosted` admits
 other hosted routes. Hosted routes still need a cataloged no-training default,
 an applied per-request no-training control, or explicit permission for a
-cataloged training route. Unknown training behavior is refused under a supplied
-boundary. Every allowed live call includes the governing rule and the catalog
+cataloged training route. A no-training ceiling selects the route's declared
+training restriction even when the caller requests `default`. It doesn't add
+retention restrictions; `strictest_available` still selects all declared controls.
+Unknown training behavior without an applied training control is refused.
+Native adapters can't credit controls they don't apply. Every allowed live call
+includes the governing rule and the catalog
 locality and open-weight declarations in its data-controls receipt.
 
 ## Provider resolution order

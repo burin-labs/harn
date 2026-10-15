@@ -1,6 +1,7 @@
 import { git_env_remove, git_noninteractive_env } from "std/git"
-import { Controller } from "./controller"
-import { is_git_id } from "./identity"
+import { Controller, transfer_ready } from "./controller"
+import { is_git_id, policy_digest } from "./identity"
+import { policy_errors } from "./verification"
 
 /**
  * A private bare object workspace and a configured remote; credentials stay in Git's host store.
@@ -96,6 +97,30 @@ pub fn read_state(process: HarnessProcess, store: GitStore) -> StateRead {
   return {commit: commit, state: state}
 }
 
+fn check_transition(previous: Controller?, next: Controller) {
+  require next.authority.policy.installation == next.authority.installation
+    && len(policy_errors(next.authority.policy)) == 0
+    && next.authority.policy_digest == policy_digest(next.authority.policy),
+    "authority requires its complete valid policy and matching identity"
+  if previous != nil {
+    require next.authority.installation == previous.authority.installation
+      && next.authority.revision == previous.authority.revision + 1,
+      "state transition must advance one revision in the same installation"
+    if next.authority.generation == previous.authority.generation {
+      require next.authority.policy_digest == previous.authority.policy_digest,
+        "policy cannot change within an authority generation"
+      require next.authority.controller == previous.authority.controller,
+        "controller cannot change within an authority generation"
+    } else {
+      require next.authority.generation == previous.authority.generation + 1
+        && next.authority.mode == "shadow"
+        && transfer_ready(previous, next.authority.policy_digest)
+        && next == previous + {authority: next.authority},
+        "generation transfer requires drained owners and preserved work"
+    }
+  }
+}
+
 /** Prepare immutable objects without moving a ref. Git's configured signing policy applies. */
 pub fn prepare_state(
   process: HarnessProcess,
@@ -106,11 +131,7 @@ pub fn prepare_state(
   check_store(process, store)
   const old = previous.state
   require previous.commit == nil == (old == nil), "state source is incomplete"
-  if old != nil {
-    require next.authority.installation == old.authority.installation
-      && next.authority.revision == old.authority.revision + 1,
-      "state transition must advance one revision in the same installation"
-  }
+  check_transition(old, next)
   const blob = run(process, store, ["hash-object", "-w", "--stdin"], json_stringify(next))
   require is_git_id(blob), "state blob identity is malformed"
   const tree = run(process, store, ["mktree"], "100644 blob " + blob + "\tstate.json\n")
@@ -152,6 +173,16 @@ pub fn commit_state(process: HarnessProcess, store: GitStore, write: StateWrite)
     "prepared state must have exactly the expected parent"
   const payload = run(process, store, ["show", write.commit + ":state.json"])
   require payload == json_stringify(write.state), "prepared state payload changed"
+  const parent = write.expected
+  const previous = if parent == nil {
+    nil
+  } else {
+    schema_expect(
+      json_parse(run(process, store, ["show", parent + ":state.json"])),
+      schema_of(Controller),
+    )
+  }
+  check_transition(previous, write.state)
   const before = try {
     remote_commit(process, store)
   }

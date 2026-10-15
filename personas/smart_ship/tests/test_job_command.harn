@@ -1,0 +1,40 @@
+type CommandEvidence = {status: "passed"}
+
+pipeline test_public_job_command_executes_bound_jobs_and_retains_reached_failures(
+  harness: Harness,
+) {
+  const root = harness.fs.mkdtemp_in_workspace("smart-ship-job-command-")
+  defer {
+    harness.fs.delete(root)
+  }
+  const assets = path_join(harness.fs.runtime_paths().asset_root, "../fixtures")
+  const binary = harness.env.get("HARN_BIN") ?? "harn"
+  const artifact = path_join(root, "package")
+  const packed = harness.process.run(
+    {
+      program: binary,
+      args: ["package", "pack", path_join(assets, ".."), "--output", artifact],
+      timeout_ms: 30000,
+    },
+  )
+  assert(packed.success && packed.exit_code == 0, packed.stderr)
+  const result = harness.process.run(
+    {
+      program: "node",
+      args: [
+        path_join(assets, "job-command-test.mjs"),
+        binary,
+        path_join(artifact, "job-cli.harn"),
+        path_join(assets, "job-dispatch.harn"),
+        path_join(root, "project"),
+      ],
+      timeout_ms: 180000,
+    },
+  )
+  assert(result.success && result.exit_code == 0, result.stderr)
+  const evidence: CommandEvidence = schema_expect(
+    json_parse(result.stdout),
+    schema_of(CommandEvidence),
+  )
+  assert_eq(evidence.status, "passed")
+}

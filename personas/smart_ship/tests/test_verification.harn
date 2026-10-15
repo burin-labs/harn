@@ -88,7 +88,12 @@ pipeline test_missing_and_empty_inventory_never_advance_checkpoint(harness: Harn
     f.policy,
   )
   assert_eq(partial.status, "invalid")
-  const broader = f.policy + {repositories: ["project", "unchecked"]}
+  const broader = f.policy
+    + {
+      repositories: ["project", "unchecked"],
+      admission_rules: f.policy.admission_rules
+        + [f.policy.admission_rules[0]! + {id: "unchecked", repository: "unchecked"}],
+    }
   const uncovered = f.snapshot
     + {
       policy_digest: policy_digest(broader),
@@ -101,7 +106,9 @@ pipeline test_missing_and_empty_inventory_never_advance_checkpoint(harness: Harn
           },
         ],
     }
-  assert_eq(verify(uncovered, [proof(f, execution(f))], broader).status, "invalid")
+  const uncovered_result = verify(uncovered, [proof(f, execution(f))], broader)
+  assert_eq(uncovered_result.status, "invalid")
+  assert(uncovered_result.invalid.contains("uncovered source: unchecked"))
 }
 
 pipeline test_reuse_requires_original_signature_and_all_semantic_inputs(harness: Harness) {

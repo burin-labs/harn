@@ -1,3 +1,5 @@
+unsigned_admission_refused=true
+invalid_admission_signature_refused=true
 dispatch_claim_bound=true
 duplicate_dispatch_refused=true
 prior_stop_refuses_dispatch=true

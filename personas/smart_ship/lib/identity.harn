@@ -1,4 +1,18 @@
-import { Checkpoint, Execution, Policy, Requirement, Snapshot, Source, VerifierKey } from "./types"
+pub import { is_digest, is_git_id } from "./identifiers"
+import { ReviewActor, ReviewObservation, ReviewedSource } from "./review"
+import {
+  AdmissionRecord,
+  AdmissionRequest,
+  AdmissionScope,
+  Checkpoint,
+  Execution,
+  JobInputs,
+  Policy,
+  Snapshot,
+  Source,
+  VerificationPlan,
+  VerifierKey,
+} from "./types"
 
 /**
  * Closed records are projected into arrays so JSON object insertion order cannot change identity.
@@ -8,7 +22,7 @@ pub fn source_identity(source: Source) -> string {
 }
 
 /** Complete semantic inputs must match before an original job can be reused. */
-pub fn requirement_identity(requirement: Requirement) -> string {
+pub fn requirement_identity(requirement: JobInputs) -> string {
   return json_stringify(
     [
       requirement.id,
@@ -70,6 +84,24 @@ pub fn policy_digest(policy: Policy) -> string {
             policy.repositories.sorted(),
             policy.verifier_keys.map(keys).sorted(),
             policy.checkpoint_keys.map(keys).sorted(),
+            policy.scope_keys.map(keys).sorted(),
+            policy.admission_keys.map(keys).sorted(),
+            policy.admission_rules.map(
+              { rule ->
+                json_stringify(
+                  [
+                    rule.id,
+                    rule.repository,
+                    rule.repository_id,
+                    rule.scope_trust_domain,
+                    rule.review.minimum_approvals,
+                    rule.review.trusted_actor_ids.sorted(),
+                    rule.review.allow_forks,
+                  ],
+                )
+              },
+            )
+              .sorted(),
             policy.max_changes,
             policy.max_unverified_ms,
             policy.max_repair_attempts,
@@ -96,8 +128,9 @@ fn snapshot_frontier(snapshot: Snapshot) -> list {
             change.repository,
             change.head,
             change.integrated_commit,
-            change.review_receipt,
-            change.admission_receipt,
+            admission_bytes(change.admission.record),
+            change.admission.signer,
+            change.admission.signature,
           ],
         )
       },
@@ -138,6 +171,17 @@ pub fn freeze_snapshot(snapshot: Snapshot) -> Snapshot {
         },
       ),
     }
+}
+
+/** Project a grouped frontier onto the same job contract used by admission. */
+pub fn snapshot_plan(snapshot: Snapshot) -> VerificationPlan {
+  return {
+    installation: snapshot.installation,
+    frontier: snapshot_verification_id(snapshot),
+    sources: snapshot.sources,
+    requirements: snapshot.requirements,
+    inventory_complete: snapshot.inventory_complete,
+  }
 }
 
 /** Snapshot identity covers the immutable frontier and its derived verification requests. */
@@ -189,14 +233,130 @@ pub fn checkpoint_id(checkpoint: Checkpoint) -> string {
   return "sha256:" + sha256_hex(checkpoint_bytes(checkpoint))
 }
 
-/**
- * Git supports SHA-1 and SHA-256 object names. Neither an empty nor symbolic name is a source identity.
- */
-pub fn is_git_id(value: string) -> bool {
-  return (len(value) == 40 || len(value) == 64) && regex_match("^[0-9a-f]+$", value) != nil
+fn actor_identity(actor: ReviewActor?) {
+  return if actor == nil {
+    nil
+  } else {
+    [actor.id, actor.name, actor.kind]
+  }
 }
 
-/** Content evidence uses an explicitly named hash algorithm. */
-pub fn is_digest(value: string) -> bool {
-  return regex_match("^sha256:[0-9a-f]{64}$", value) != nil
+fn reviewed_source_identity(source: ReviewedSource) -> string {
+  return json_stringify(
+    [
+      source.repository,
+      source.change,
+      source.head,
+      source.base,
+      actor_identity(source.author),
+      source.state,
+      source.draft,
+      source.head_repository,
+      source.base_repository,
+      source.head_repository_id,
+      source.base_repository_id,
+    ],
+  )
+}
+
+fn review_identity(reviews: ReviewObservation) -> string {
+  return json_stringify(
+    [
+      reviews.repository,
+      reviews.change,
+      reviews.head,
+      reviews.base,
+      reviews.platform_decision,
+      reviews.declared_reviews,
+      reviews.declared_threads,
+      reviews.reviews.map(
+        { row ->
+          json_stringify(
+            [
+              row.id,
+              row.state,
+              row.head,
+              actor_identity(row.actor),
+              row.submitted_at,
+              row.updated_at,
+            ],
+          )
+        },
+      )
+        .sorted(),
+      reviews.threads.map({ row -> json_stringify([row.id, row.resolved, row.outdated]) }).sorted(),
+    ],
+  )
+}
+
+/** Signing bytes authenticate the owning scope adapter's complete semantic selection. */
+pub fn scope_bytes(scope: AdmissionScope) -> string {
+  return "smart-ship.admission-scope.v1\n"
+    + json_stringify(
+      [
+        scope.installation,
+        scope.policy_digest,
+        scope.rule,
+        scope.reviewed_head,
+        scope.reviewed_base,
+        source_identity(scope.source),
+        scope.requirements.map({ requirement -> requirement_identity(requirement) }).sorted(),
+        scope.inventory_complete,
+      ],
+    )
+}
+
+fn admission_request_bytes(request: AdmissionRequest) -> string {
+  return "smart-ship.admission-request.v1\n"
+    + json_stringify(
+      [
+        request.installation,
+        request.policy_digest,
+        policy_digest(request.policy),
+        reviewed_source_identity(request.source),
+        review_identity(request.reviews),
+        scope_bytes(request.scope.scope),
+        request.scope.signer,
+        request.scope.signature,
+      ],
+    )
+}
+
+/** Derive every precheck request before dispatch; absent or incomplete scope remains visible. */
+pub fn prepare_admission(request: AdmissionRequest) -> VerificationPlan {
+  const frontier = "sha256:" + sha256_hex(admission_request_bytes(request))
+  return {
+    installation: request.installation,
+    frontier: frontier,
+    sources: [request.scope.scope.source],
+    requirements: request.scope.scope.requirements.map(
+      { inputs -> inputs + {execution_request: verification_request(frontier, inputs.id)} },
+    ),
+    inventory_complete: request.scope.scope.inventory_complete,
+  }
+}
+
+/** The admission issuer signs inspectable review, scope, original execution, and timing facts. */
+pub fn admission_bytes(record: AdmissionRecord) -> string {
+  return "smart-ship.admission.v1\n"
+    + json_stringify(
+      [
+        admission_request_bytes(record),
+        record.proofs.map(
+          { proof ->
+            json_stringify(
+              [
+                proof.requirement,
+                proof.mode,
+                execution_bytes(proof.original),
+                proof.signer,
+                proof.signature,
+              ],
+            )
+          },
+        )
+          .sorted(),
+        record.admitted_at_ms,
+      ],
+    )
 }

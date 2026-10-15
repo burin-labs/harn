@@ -343,7 +343,12 @@ impl AcpBridge {
             self.write_line(&line);
         }
 
-        let timeout = host_call_timeout(method);
+        let timeout_wait = harn_vm::bridge::wait_for_bridge_call_timeout(
+            method,
+            &request["params"],
+            host_call_timeout(method),
+        );
+        tokio::pin!(timeout_wait);
         let cancellation = self.cancellation.clone();
         let wait_cancelled = async move {
             loop {
@@ -373,7 +378,7 @@ impl AcpBridge {
                 pending.remove(&id);
                 Err(harn_vm::VmError::Runtime("Cancelled".into()))
             }
-            _ = tokio::time::sleep(timeout) => {
+            timeout = &mut timeout_wait => {
                 let mut pending = self.pending.lock().await;
                 pending.remove(&id);
                 Err(harn_vm::VmError::Runtime(format!(
@@ -430,3 +435,7 @@ mod prompt_correlation_tests;
 #[cfg(test)]
 #[path = "bridge/event_transport_tests.rs"]
 mod event_transport_tests;
+
+#[cfg(test)]
+#[path = "bridge/human_wait_tests.rs"]
+mod human_wait_tests;

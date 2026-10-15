@@ -1,0 +1,9 @@
+/** Git object names are immutable SHA-1 or SHA-256 identities, never symbolic refs. */
+pub fn is_git_id(value: string) -> bool {
+  return (len(value) == 40 || len(value) == 64) && regex_match("^[0-9a-f]+$", value) != nil
+}
+
+/** Content evidence names its hash algorithm. */
+pub fn is_digest(value: string) -> bool {
+  return regex_match("^sha256:[0-9a-f]{64}$", value) != nil
+}
