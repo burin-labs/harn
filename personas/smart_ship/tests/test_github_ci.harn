@@ -10,6 +10,7 @@ import {
   admission_bytes,
   execution_bytes,
   prepare_admission,
+  scope_bytes,
   verify_admission,
 } from "../lib/main"
 import { ProducerPolicy, ProofSource, Run } from "burin-ci-checks/ci_job_proof"
@@ -256,6 +257,89 @@ pipeline test_current_review_and_head_remain_required_after_original_ci_passes(h
   const invalid = assess_github_ci(source(f), POLICY, f.producer, moved, JOBS, f.artifacts, 7000)
   assert_eq(invalid.assessment.status, "invalid")
   assert(invalid.assessment.invalid.contains("admission-source-or-policy"))
+}
+
+pipeline test_every_matrix_leg_requires_its_own_original_execution(harness: Harness) {
+  const f = ci_fixture(harness.random)
+  const required = f.request.scope.scope.requirements[0]!
+  const scope = f.request.scope.scope
+    + {
+      requirements: [
+        required,
+        required + {id: "typescript", input_digest: digest("typescript command")},
+      ],
+    }
+  const request = f.request
+    + {
+      scope: {
+        scope: scope,
+        signer: "scope",
+        signature: ed25519_sign(f.private_key, scope_bytes(scope)),
+      },
+    }
+  const jobs: list<GithubCiJob> = [
+    {
+      id: "stock-matrix",
+      legs: [
+        JOBS[0]!.legs[0]!,
+        {
+          requirement: "typescript",
+          name: "Test TypeScript",
+          artifact_name: "typescript-result",
+          member_name: "result.json",
+        },
+      ],
+    },
+  ]
+  const ids = github_ci_identities(request, jobs)
+  assert_eq(ids[0]!.names, ["Test Python", "Test TypeScript"])
+  const receipt = unwrap(f.artifacts[0]!.result)
+  const original = receipt.data.proof.original
+    + {requirement: prepare_admission(request).requirements[0]!}
+  const rebound = receipt
+    + {
+      data: receipt.data
+        + {
+          proof: receipt.data.proof
+            + {
+              original: original,
+              signature: ed25519_sign(f.private_key, execution_bytes(original)),
+            },
+        },
+    }
+  const matrix = f
+    + {
+      request: request,
+      registration: f.registration + {jobs: ids.map({ identity -> identity + {provenance: nil} })},
+      census: f.census + [f.census[1]! + {id: 102, name: "Test TypeScript"}],
+    }
+  const artifacts = [{requirement: "tests", result: Ok(rebound)}]
+  const partial = assess_github_ci(
+    source(matrix, 3),
+    POLICY,
+    matrix.producer,
+    request,
+    jobs,
+    artifacts,
+    7000,
+  )
+  assert_eq(partial.inspection.admission.admitted[0]!.jobIds, [101, 102])
+  assert_eq(partial.assessment.status, "pending")
+  assert_eq(partial.assessment.checks.required, 2)
+  assert_eq(partial.assessment.checks.executed, 1)
+  assert_eq(partial.assessment.checks.pending, ["typescript"])
+  const missing_leg = assess_github_ci(
+    source(matrix + {census: f.census}),
+    POLICY,
+    matrix.producer,
+    request,
+    jobs,
+    artifacts,
+    7000,
+  )
+  assert_eq(missing_leg.inspection.admission.admitted, [])
+  assert_eq(missing_leg.assessment.checks.executed, 0)
+  assert_eq(missing_leg.assessment.checks.pending, ["tests", "typescript"])
 }
 
 pipeline test_actual_result_signature_and_exact_provider_attempt_are_required(harness: Harness) {

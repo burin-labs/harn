@@ -115,6 +115,76 @@ pub type GithubAdmissionUnknown = {
 }
 ```
 
+### type `GithubCiArtifact`
+
+Failed artifact reads remain inspectable; an absent execution never becomes an empty pass.
+
+```harn
+pub type GithubCiArtifact = {
+  requirement: string,
+  result: GithubConnectorResult<GithubWorkflowJsonArtifactReceipt<JobRun>>,
+}
+```
+
+### type `GithubCiAssessment`
+
+The complete original provider census and downloaded-byte receipts accompany qualification.
+
+```harn
+pub type GithubCiAssessment = {
+  inspection: OriginalRunInspection,
+  artifacts: list<GithubCiArtifact>,
+  record: AdmissionRecord,
+  assessment: AdmissionVerification,
+}
+```
+
+### type `GithubCiIdentity`
+
+This projection is used by registration before execution and observation afterward.
+
+```harn
+pub type GithubCiIdentity = {id: string, names: list<string>, digest: string}
+```
+
+### type `GithubCiJob`
+
+A shared logical CI job may contain several independently measured matrix legs.
+
+```harn
+pub type GithubCiJob = {id: string, legs: list<GithubCiLeg>}
+```
+
+### type `GithubCiLeg`
+
+One actual matrix leg executes one complete stock requirement.
+
+```harn
+pub type GithubCiLeg = {
+  requirement: string,
+  name: string,
+  artifact_name: string,
+  member_name: string,
+}
+```
+
+### fn `assess_github_ci`
+
+Live reads and archived replay enter this same original-run and signed-execution boundary.
+
+```harn
+pub fn assess_github_ci(
+  source: ProofSource,
+  policy: ProducerPolicy,
+  producer: Run,
+  request: AdmissionRequest,
+  jobs: list<GithubCiJob>,
+  artifacts: list<GithubCiArtifact>,
+  at_ms: int,
+) -> GithubCiAssessment {
+}
+```
+
 ### fn `github_admission_binding`
 
 Bind recovery to effective nonsecret provider settings; secret values never enter state.
@@ -124,12 +194,40 @@ pub fn github_admission_binding(configuration: GithubAdmissionConfiguration) -> 
 }
 ```
 
+### fn `github_ci_identities`
+
+Derive shared CI identities from the full trusted stock inventory, including every matrix leg.
+
+```harn
+pub fn github_ci_identities(
+  request: AdmissionRequest,
+  jobs: list<GithubCiJob>,
+) -> list<GithubCiIdentity> {
+}
+```
+
 ### fn `github_reviewed_change`
 
 Normalize the connector's complete exact-head census for live reads and deterministic replay.
 
 ```harn
 pub fn github_reviewed_change(census: GithubPullRequestReviewCensus) -> ReviewedChangeObservation {
+}
+```
+
+### fn `read_github_ci_artifacts`
+
+Download actual stock results through the connector's bounded, digest-checked archive reader.
+
+```harn
+pub fn read_github_ci_artifacts(
+  harness: Harness,
+  request: AdmissionRequest,
+  jobs: list<GithubCiJob>,
+  producer: Run,
+  run_name: string,
+  options: GithubClientOptions,
+) -> list<GithubCiArtifact> {
 }
 ```
 
@@ -1039,6 +1137,15 @@ pub fn admission_effect(signed: SignedAdmission) -> AdmissionEffect {
 }
 ```
 
+### fn `assess_admission`
+
+Assess current review and original CI evidence before reading an issuer key. This grants no authority.
+
+```harn
+pub fn assess_admission(record: AdmissionRecord, policy: Policy) -> AdmissionVerification {
+}
+```
+
 ### fn `begin_effect`
 
 Commit this transition with CAS at the privileged owner before contacting the provider.
@@ -1364,7 +1471,7 @@ pub fn policy_errors(policy: Policy) -> list<string> {
 
 ### fn `prepare_admission`
 
-Derive every precheck request before dispatch; absent or incomplete scope remains visible.
+Bind prechecks to signed scope; current reviews are authenticated by the admission receipt.
 
 ```harn
 pub fn prepare_admission(request: AdmissionRequest) -> VerificationPlan {

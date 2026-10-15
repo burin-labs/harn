@@ -108,3 +108,59 @@ required before widening that policy.
 This command does not merge a change, advance a checkpoint, publish a release,
 or prove that GitHub ran a job. A GitHub workflow must retain its provider run
 and job observations through the shared CI evidence adapter as well.
+
+## Inspect original GitHub CI and issue admission
+
+Use `admission-cli.harn` from a trusted workflow. Keep its request file,
+installation policy, scope signer and job selection outside the candidate
+checkout. The command reads GitHub and signs evidence; it does not change
+branches, rules or releases.
+
+Before running stock commands, call `github_ci_identities(request, jobs)` from
+the package's GitHub export. Pass that exact identity list to the shared CI
+registration action. Register the clean tested commit and tree before the
+job legs start. Each leg must use `job-cli.harn` with its actual numeric
+GitHub run ID as a string and its actual attempt number. Upload each complete
+`JobRun` as a single JSON member using the declared artifact name.
+
+Save a public JSON request file with these fields:
+
+| Field | Value |
+| --- | --- |
+| `action` | `"inspect"` or `"issue"` |
+| `request` | The complete `AdmissionRequest` with its signed scope |
+| `producer.run_id` | The original executing GitHub run ID |
+| `producer.attempt` | Its original attempt number |
+| `producer_policy` | Trusted repository, workflow filename, allowed events, registrar job and step |
+| `run_name` | The trusted workflow's display name |
+| `jobs` | Logical job IDs and their complete list of exact leg bindings |
+| `token_secret` | A read-only GitHub credential reference |
+| `issuer` | For `issue`, the enrolled issuer's `{id, secret}` reference |
+
+A job binding contains `id` and `legs`. Each leg names its `requirement`,
+exact GitHub job `name`, `artifact_name`, and JSON `member_name`. Bind every
+scope requirement once. A logical matrix job requires every declared leg;
+one successful leg cannot stand in for the rest.
+
+```sh
+harn run --allow-process-network vendor/smart-ship/admission-cli.harn -- admission.json > admission-result.json
+```
+
+Grant the request file as a read root and a scratch directory as a write
+root when they are outside the runner's workspace. Supply credentials through
+the host secret store or bounded parent-secret stdin channel. Candidate
+commands must never receive the GitHub token or admission issuer key.
+
+The result retains `observation` with the provider's complete job census,
+registration receipt, downloaded artifact receipts, signed stock results,
+and assessment. The API workflow head stays separate from the tested commit
+and tree. Original run, attempt, job IDs, source and input identities must
+agree. The command reads current exact-head reviews after downloading the
+stock results. A changed head or base refuses the old signed scope.
+
+`inspect` returns `admission: null`. `issue` reads the issuer key only after
+all checks pass, then returns the signed admission alongside its observation.
+Missing stock results stay pending even when GitHub reports success.
+Pending or failed assessment prints the evidence and exits nonzero; a
+structural or identity refusal produces no signed receipt. Keep the full
+result for audit and replay through `assess_github_ci`.
