@@ -38,3 +38,7 @@ pipeline test_github_effect_definite_refusal_and_uncertain_outcomes(harness: Har
 pipeline test_github_effect_resumes_a_reserved_but_undispatched_admission(harness: Harness) {
   run_case(harness, "reservation")
 }
+
+pipeline test_github_effect_refreshes_trusted_review_before_mutation(harness: Harness) {
+  run_case(harness, "review-withdrawal")
+}

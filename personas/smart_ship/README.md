@@ -92,9 +92,14 @@ committed for dispatch may finish; stop preserves its uncertain outcome until
 an actual provider receipt is recorded. Unknown results block transfer and are
 never redispatched from the original reservation.
 
-The GitHub effect adapter reserves signed admissions through this same owner
-and calls the published connector with the verified head. GitHub enforces its
-effective branch rules. Durable effect receipts retain canonical provider JSON
+The GitHub effect adapter reserves signed admissions through this same owner,
+reads the current complete review and thread census, and applies the installation's
+review policy before committing dispatch. A dismissed trusted approval, unresolved
+thread, or missing census refuses the admission. The dispatch commitment rechecks
+authority after those reads. The published connector binds the merge to the verified
+head; GitHub enforces its effective branch rules. Review reads and the merge are
+separate API operations, so GitHub's branch rules govern changes after the final read.
+Durable effect receipts retain the fresh review decision, canonical provider JSON,
 and its checked hash, including the actual integrated commit. Duplicate
 submissions return that recorded outcome without another provider call;
 uncertain responses remain a transfer barrier. Configure and activate this

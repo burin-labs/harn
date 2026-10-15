@@ -1,10 +1,13 @@
+import { review_admission } from "./admission"
 import { Controller, Effect, EffectRefusal, reserve_effect } from "./controller"
 import { AdmissionEffect, admission_effect, effect_receipt } from "./effect_contract"
 import { EffectDispatch, EffectOutcome, dispatch_reserved_effect } from "./effect_owner"
 import { StateRead, commit_state, prepare_state, read_state } from "./git_store"
+import { read_github_reviewed_change } from "./github_review"
 import { policy_digest } from "./identity"
 import { Installation } from "./installation"
 import { fence_matches } from "./promotion"
+import { ReviewAdmission, ReviewedChangeObservation } from "./review"
 import { Fence, SignedAdmission } from "./types"
 import {
   GithubConnectorError,
@@ -23,12 +26,24 @@ pub type GithubAdmissionConfiguration = {
 /** A complete signed witness and the authority revision the submitter observed. */
 pub type GithubAdmissionSubmission = {fence: Fence, admission: SignedAdmission}
 
+/** The complete fresh review census and the installation's decision travel with the result. */
+pub type GithubAdmissionReview = {observation: ReviewedChangeObservation, decision: ReviewAdmission}
+
 /** A confirmed provider result retains the actual integrated commit, not a guessed tree. */
 pub type GithubAdmissionConfirmed = {
   schema: "smart-ship.github-admission-result.v1",
   status: "confirmed",
   request: AdmissionEffect,
+  review: GithubAdmissionReview,
   provider: GithubPullRequestMergeReceipt,
+}
+
+/** Policy withdrawal is a measured decision, not a provider transport error. */
+pub type GithubAdmissionReviewRefused = {
+  schema: "smart-ship.github-admission-result.v1",
+  status: "refused",
+  request: AdmissionEffect,
+  review: GithubAdmissionReview,
 }
 
 /** A definite refusal is different from losing a response after a possible mutation. */
@@ -36,6 +51,7 @@ pub type GithubAdmissionRefused = {
   schema: "smart-ship.github-admission-result.v1",
   status: "refused",
   request: AdmissionEffect,
+  review: GithubAdmissionReview?,
   error: GithubConnectorError,
 }
 
@@ -44,11 +60,13 @@ pub type GithubAdmissionUnknown = {
   schema: "smart-ship.github-admission-result.v1",
   status: "unknown",
   request: AdmissionEffect,
+  review: GithubAdmissionReview,
   error: GithubConnectorError,
 }
 
 /** Closed wire evidence preserves confirmed, refused and uncertain provider outcomes. */
 pub type GithubAdmissionEvidence = GithubAdmissionConfirmed \
+  | GithubAdmissionReviewRefused \
   | GithubAdmissionRefused \
   | GithubAdmissionUnknown
 
@@ -97,7 +115,17 @@ fn github_outcome(
   configuration: GithubAdmissionConfiguration,
   request: AdmissionEffect,
   target: GithubTarget,
+  review: GithubAdmissionReview,
 ) -> EffectOutcome {
+  if review.decision.status != "approved" {
+    const refusal: GithubAdmissionReviewRefused = {
+      schema: "smart-ship.github-admission-result.v1",
+      status: "refused",
+      request: request,
+      review: review,
+    }
+    return {status: "refused", receipt: effect_receipt(json_stringify(refusal))}
+  }
   const merged = pulls_merge_safe(
     harness,
     {
@@ -121,6 +149,7 @@ fn github_outcome(
       schema: "smart-ship.github-admission-result.v1",
       status: "confirmed",
       request: request,
+      review: review,
       provider: provider,
     } }
     Err(error) -> {
@@ -133,6 +162,7 @@ fn github_outcome(
           schema: "smart-ship.github-admission-result.v1",
           status: "refused",
           request: request,
+          review: review,
           error: error,
         }
       } else {
@@ -140,6 +170,7 @@ fn github_outcome(
           schema: "smart-ship.github-admission-result.v1",
           status: "unknown",
           request: request,
+          review: review,
           error: error,
         }
       }
@@ -213,17 +244,50 @@ pub fn submit_github_admission(
       }
     }
   }
+  // Read mutable review policy before the dispatch CAS. A stop or authority change during
+  // these reads makes that claim stale, so the callback cannot reach a merge.
+  const observed = read_github_reviewed_change(
+    harness,
+    {
+      owner: target.owner,
+      repo: target.repo,
+      pull_number: target.pull_number,
+      expected_head_oid: request.source,
+      options: {
+        installation_token: harness.secrets.read(configuration.token_reference),
+        api_base_url: configuration.api_base_url ?? "https://api.github.com",
+        allow_gh_auth_fallback: false,
+        retry: {max_attempts: 1},
+      },
+    },
+  )
+  const rule = config.policy.admission_rules.find({ row -> row.repository == request.repository })!
   const dispatch = dispatch_reserved_effect(
     pick(harness, ["process", "random"]),
     config.store,
     pick(next.authority, ["installation", "generation", "revision", "controller"]),
     request,
     { effect ->
+      if is_err(observed) {
+        const refusal: GithubAdmissionRefused = {
+          schema: "smart-ship.github-admission-result.v1",
+          status: "refused",
+          request: request,
+          review: nil,
+          error: unwrap_err(observed),
+        }
+        return {status: "refused", receipt: effect_receipt(json_stringify(refusal))}
+      }
+      const observation = unwrap(observed)
       github_outcome(
         harness,
         configuration,
         schema_expect(effect, schema_of(AdmissionEffect)),
         target,
+        {
+          observation: observation,
+          decision: review_admission(observation.source, rule.review, observation.reviews),
+        },
       )
     },
   )

@@ -8,27 +8,6 @@ Version: `0.1.0`
 
 `lib/github.harn`
 
-### fn `github_reviewed_change`
-
-Normalize the connector's complete exact-head census for live reads and deterministic replay.
-
-```harn
-pub fn github_reviewed_change(census: GithubPullRequestReviewCensus) -> ReviewedChangeObservation {
-}
-```
-
-### fn `read_github_reviewed_change`
-
-Read-only initial forge adapter. Errors retain the connector's structured refusal.
-
-```harn
-pub fn read_github_reviewed_change(
-  harness: Harness,
-  request: GithubPullRequestReviewCensusRequest,
-) -> GithubConnectorResult<ReviewedChangeObservation> {
-}
-```
-
 ### type `GithubAdmissionConfiguration`
 
 Trusted installation settings; submissions cannot choose authentication or transport.
@@ -51,6 +30,7 @@ pub type GithubAdmissionConfirmed = {
   schema: "smart-ship.github-admission-result.v1",
   status: "confirmed",
   request: AdmissionEffect,
+  review: GithubAdmissionReview,
   provider: GithubPullRequestMergeReceipt,
 }
 ```
@@ -73,6 +53,7 @@ Closed wire evidence preserves confirmed, refused and uncertain provider outcome
 
 ```harn
 pub type GithubAdmissionEvidence = GithubAdmissionConfirmed \
+  | GithubAdmissionReviewRefused \
   | GithubAdmissionRefused \
   | GithubAdmissionUnknown
 ```
@@ -86,7 +67,29 @@ pub type GithubAdmissionRefused = {
   schema: "smart-ship.github-admission-result.v1",
   status: "refused",
   request: AdmissionEffect,
+  review: GithubAdmissionReview?,
   error: GithubConnectorError,
+}
+```
+
+### type `GithubAdmissionReview`
+
+The complete fresh review census and the installation's decision travel with the result.
+
+```harn
+pub type GithubAdmissionReview = {observation: ReviewedChangeObservation, decision: ReviewAdmission}
+```
+
+### type `GithubAdmissionReviewRefused`
+
+Policy withdrawal is a measured decision, not a provider transport error.
+
+```harn
+pub type GithubAdmissionReviewRefused = {
+  schema: "smart-ship.github-admission-result.v1",
+  status: "refused",
+  request: AdmissionEffect,
+  review: GithubAdmissionReview,
 }
 ```
 
@@ -107,7 +110,29 @@ pub type GithubAdmissionUnknown = {
   schema: "smart-ship.github-admission-result.v1",
   status: "unknown",
   request: AdmissionEffect,
+  review: GithubAdmissionReview,
   error: GithubConnectorError,
+}
+```
+
+### fn `github_reviewed_change`
+
+Normalize the connector's complete exact-head census for live reads and deterministic replay.
+
+```harn
+pub fn github_reviewed_change(census: GithubPullRequestReviewCensus) -> ReviewedChangeObservation {
+}
+```
+
+### fn `read_github_reviewed_change`
+
+Read-only initial forge adapter. Errors retain the connector's structured refusal.
+
+```harn
+pub fn read_github_reviewed_change(
+  harness: Harness,
+  request: GithubPullRequestReviewCensusRequest,
+) -> GithubConnectorResult<ReviewedChangeObservation> {
 }
 ```
 

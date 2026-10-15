@@ -5,6 +5,7 @@ import {
   GithubAdmissionConfiguration,
   GithubAdmissionConfirmed,
   GithubAdmissionEvidence,
+  GithubAdmissionReviewRefused,
   GithubAdmissionSubmission,
   submit_github_admission,
 } from "../lib/github_effect"
@@ -37,6 +38,8 @@ fn main(harness: Harness) {
     check_refusal_and_uncertainty(harness)
   } else if argv[1] == "reservation" {
     check_reserved_admission_resumes(harness)
+  } else if argv[1] == "review-withdrawal" {
+    check_review_withdrawal(harness)
   } else {
     throw "unknown effect scenario"
   }
@@ -121,9 +124,78 @@ fn setup(harness: Harness) -> Setup {
   }
 }
 
-fn mock_merge(testing: HarnessTesting, s: Setup, status: int = 200, changed_head: bool = false) {
+fn mock_merge(
+  testing: HarnessTesting,
+  s: Setup,
+  status: int = 200,
+  changed_head: bool = false,
+  review_mode: "approved" | "withdrawn" | "unresolved" | "missing" = "approved",
+) {
   testing.http_mock_clear()
   const source = s.submission.admission.record.source
+  const identity = {
+    number: 7,
+    headRefOid: source.head,
+    baseRefOid: source.base,
+    reviewDecision: "APPROVED",
+    author: {id: "fixture-author", login: "author", type: "User"},
+    state: "OPEN",
+    isDraft: false,
+    headRepository: {id: "fixture-repository", nameWithOwner: REPOSITORY},
+    baseRepository: {id: "fixture-repository", nameWithOwner: REPOSITORY},
+  }
+  const reviews = [
+    {
+      id: "trusted-review",
+      state: if review_mode == "withdrawn" {
+        "DISMISSED"
+      } else {
+        "APPROVED"
+      },
+      commit: {oid: source.head},
+      author: {id: "fixture-reviewer", login: "trusted", type: "Bot"},
+      updatedAt: "2026-10-15T12:00:00Z",
+      submittedAt: "2026-10-15T11:00:00Z",
+    },
+    {
+      id: "untrusted-review",
+      state: "APPROVED",
+      commit: {oid: source.head},
+      author: {id: "untrusted-reviewer", login: "untrusted", type: "User"},
+      updatedAt: "2026-10-15T12:00:00Z",
+      submittedAt: "2026-10-15T11:00:00Z",
+    },
+  ]
+  const page_info = {hasNextPage: false, endCursor: nil}
+  const review_page = identity
+    + {inventory: {totalCount: 2, nodes: reviews, pageInfo: page_info}}
+  const threads = if review_mode == "unresolved" {
+    [{id: "new-thread", isResolved: false, isOutdated: false}]
+  } else {
+    []
+  }
+  const thread_page = identity
+    + {inventory: {totalCount: len(threads), nodes: threads, pageInfo: page_info}}
+  const final_page = identity
+    + {reviews: {totalCount: 2}, reviewThreads: {totalCount: len(threads)}}
+  testing.http_mock(
+    "POST",
+    BASE + "/graphql",
+    {
+      responses: [review_page, thread_page, final_page].map(
+        { page ->
+          {
+            status: 200,
+            body: if review_mode == "missing" {
+              "{}"
+            } else {
+              json_stringify({data: {repository: {pullRequest: page}}})
+            },
+          }
+        },
+      ),
+    },
+  )
   testing.http_mock(
     "GET",
     BASE + "/repos/" + REPOSITORY + "/pulls/7",
@@ -172,6 +244,46 @@ fn mock_merge(testing: HarnessTesting, s: Setup, status: int = 200, changed_head
       ),
     },
   )
+}
+
+fn check_review_withdrawal(harness: Harness) {
+  for mode in ["withdrawn", "unresolved", "missing"] {
+    const s = setup(harness)
+    defer {
+      harness.fs.delete(s.root)
+    }
+    require verify_admission(s.submission.admission, s.configuration.installation.policy).status
+      == "admitted",
+      "the older signed admission must be valid"
+    mock_merge(harness.testing, s, 200, false, mode)
+    const result = submit_github_admission(harness, s.configuration, s.submission)
+    const calls = harness.testing.http_mock_calls()
+    require len(calls.filter({ call -> call.method == "PUT" })) == 0
+      && result.dispatch.outcome?.status == "refused",
+      "an older signed admission merged after its trusted review changed: "
+      + mode
+    const durable = read_state(harness.process, s.configuration.installation.store).state!
+    require durable.effects[0]!.receipt == result.dispatch.outcome!.receipt,
+      "fresh refusal did not survive the durable state read"
+    if mode != "missing" {
+      const evidence: GithubAdmissionReviewRefused = schema_expect(
+        json_parse(durable.effects[0]!.receipt!.body),
+        schema_of(GithubAdmissionReviewRefused),
+      )
+      require evidence.review.decision.observed_reviews == 2
+        && len(calls.filter({ call -> call.method == "POST" })) == 3,
+        "fresh refusal lost the measured review census"
+      require if mode == "withdrawn" {
+        evidence.review.decision.pending.contains("independent-exact-head-approvals")
+      } else {
+        evidence.review.decision.failed.contains("unresolved-thread:new-thread")
+      },
+        "fresh refusal lost its named policy reason"
+    }
+    const repeated = submit_github_admission(harness, s.configuration, s.submission)
+    require !repeated.dispatch.dispatch_started && harness.testing.http_mock_calls() == calls,
+      "refused review was silently requalified on duplicate delivery"
+  }
 }
 
 fn save(process: HarnessProcess, s: Setup, state: Controller) {
