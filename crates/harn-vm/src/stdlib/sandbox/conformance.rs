@@ -58,9 +58,9 @@ pub enum ConformanceCase {
     /// for the refusal: a probe that could never connect would pass it.
     NetworkConnectAdmitted,
     /// An atomic write into the workspace through the platform's replacement
-    /// API lands. On macOS Foundation stages it outside the workspace, in a
-    /// directory it takes from the OS rather than `TMPDIR`; SwiftPM writes its
-    /// build files this way.
+    /// API lands. On macOS Foundation takes its staging directory from the OS
+    /// rather than `TMPDIR`; the native lookup must resolve to private storage.
+    /// SwiftPM writes its build files this way.
     AtomicReplaceAdmitted,
     /// A child re-created by the process-owner guardian is confined like a
     /// direct child. The guardian rebuilds the payload from serialized data,

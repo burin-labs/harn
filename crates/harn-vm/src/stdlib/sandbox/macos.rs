@@ -28,6 +28,7 @@ use crate::value::VmError;
 
 mod nested;
 mod parent_environment;
+pub(super) mod private_temp;
 mod self_confinement;
 pub(super) mod swiftpm;
 mod toolchain_roots;
@@ -567,16 +568,16 @@ fn preset_write_roots(policy: &CapabilityPolicy) -> Vec<std::path::PathBuf> {
 }
 
 /// The session's own temp dir, which the child's `TMPDIR`, `TMP`, and `TEMP`
-/// name, and Foundation's atomic-replacement staging dir. Not the host's
+/// name, including Foundation's native temporary-directory lookup. Not the host's
 /// shared temp dirs: `/tmp` and `/var/folders` hold every other process's
 /// files, so granting them lets a confined child read and overwrite its
 /// neighbours'. Caches that default there are moved into the workspace by
 /// the child's environment instead.
 fn user_temp_roots(policy: &CapabilityPolicy) -> Vec<std::path::PathBuf> {
-    super::workspace_local_tmpdir(policy)
-        .into_iter()
-        .chain(toolchain_roots::foundation_replacement_root())
-        .collect()
+    // Provision before a server confines itself: subsequent spawns can read
+    // the existing alias without modifying the ungranted shared parent.
+    let _ = private_temp::prepare(policy);
+    super::workspace_local_tmpdir(policy).into_iter().collect()
 }
 
 /// Socket-file roots the profile will admit: the explicit grant, plus the

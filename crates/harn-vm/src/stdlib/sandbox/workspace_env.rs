@@ -28,7 +28,10 @@ fn create_self_ignored_dir(
     }
     let root = normalized_workspace_roots(policy).into_iter().next()?;
     let path = root.join(name);
-    if let Err(error) = std::fs::create_dir_all(&path) {
+    if let Err(error) = super::create_dir_all_scoped_target(&super::ScopedMutationTarget {
+        root,
+        relative: PathBuf::from(name),
+    }) {
         warn_once(
             warning_key,
             &format!(
@@ -399,6 +402,8 @@ pub(crate) fn inject_workspace_process_env(
     policy: &CapabilityPolicy,
 ) {
     inject_workspace_tmpdir(env, policy);
+    #[cfg(target_os = "macos")]
+    super::macos::private_temp::inject_env(env, policy);
     for (key, value) in workspace_toolchain_env(policy) {
         if !env.iter().any(|(existing, _)| existing == &key) {
             env.push((key, value));

@@ -339,14 +339,14 @@ fn sandbox_profile_allows_tmp_write_only_with_workspace_write() {
         )),
         "writable profile should grant the session temp dir: {writable}"
     );
-    let replacement = super::toolchain_roots::foundation_replacement_root()
-        .expect("the per-user temp dir resolves");
     assert!(
-        writable.contains(&format!(
-            "(allow file-read* (subpath \"{}\"))",
-            replacement.display()
-        )),
-        "writable profile should grant Foundation's replacement staging dir: {writable}"
+        super::private_temp::prepare(&macos_policy_with_workspace_ops(&["write_text"]))
+            .expect("native temporary mapping")
+            .is_some()
+    );
+    assert!(
+        !writable.contains("TemporaryItems"),
+        "shared replacement storage must not be granted: {writable}"
     );
     // The host's shared temp dirs hold every other process's files.
     for shared in [
