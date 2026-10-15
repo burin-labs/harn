@@ -1,13 +1,11 @@
 //! Native policy enforcement and workflow policies carrying interpreter values.
 
-mod runtime_policies;
-
 pub use harn_execution_policy::{
     default_read_deny_home_paths, CapabilityPolicy, LoopbackEnforcement, ProcessNetworkProxy,
     ProcessSandboxPolicy, ProcessSandboxPreset, SandboxProfile, ToolArgConstraint,
     UnixSocketEnforcement,
 };
-pub use runtime_policies::*;
+pub use harn_orchestration::policies::*;
 
 use super::super::glob_match;
 use super::{reject_tool, PolicyDenial};

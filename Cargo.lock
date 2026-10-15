@@ -3887,6 +3887,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "harn-orchestration"
+version = "0.10.167"
+dependencies = [
+ "harn-clock",
+ "harn-llm",
+ "harn-vm-core",
+ "serde",
+ "serde_json",
+ "time",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "harn-orchestration-perf"
 version = "0.0.0"
 dependencies = [
@@ -4197,6 +4211,7 @@ dependencies = [
  "harn-lexer",
  "harn-llm",
  "harn-modules",
+ "harn-orchestration",
  "harn-parser",
  "harn-prompt-syntax",
  "harn-provider-catalog",

@@ -1,6 +1,6 @@
-//! Workflow policies whose callbacks belong to the native interpreter.
+//! Workflow policies with callback values owned by the interpreter.
 
-use crate::value::VmValue;
+use harn_vm_core::VmValue;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]

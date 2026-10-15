@@ -59,7 +59,7 @@ use harn_clock::{Clock, RealClock};
 use serde::{Deserialize, Serialize};
 use tokio::sync::Notify;
 
-use crate::agent_events::InjectionDelivery;
+use harn_llm::agent_control::InjectionDelivery;
 
 /// A single inbox entry. Producers fill in `kind`, `content`, and
 /// `source`; the inbox stamps `sequence` and `ts_ms`.
@@ -105,14 +105,14 @@ fn registry() -> &'static InboxRegistry {
     REGISTRY.get_or_init(InboxRegistry::new)
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 fn reset_gate() -> &'static Mutex<()> {
     static RESET_GATE: OnceLock<Mutex<()>> = OnceLock::new();
     RESET_GATE.get_or_init(|| Mutex::new(()))
 }
 
-#[cfg(test)]
-pub(crate) fn lock_reset_for_test() -> MutexGuard<'static, ()> {
+#[cfg(any(test, feature = "test-support"))]
+pub fn lock_reset_for_test() -> MutexGuard<'static, ()> {
     reset_gate().lock().unwrap_or_else(PoisonError::into_inner)
 }
 
@@ -273,7 +273,7 @@ pub fn clear_session(session_id: &str) {
 /// reused worker thread does not accumulate one [`InboxState`] per
 /// session id across the suite.
 pub fn reset() {
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     let _reset_guard = lock_reset_for_test();
     let reg = registry();
     let mut map = lock_map(reg);
@@ -281,7 +281,7 @@ pub fn reset() {
 }
 
 /// Number of sessions with a live inbox. Test-only.
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub fn session_count() -> usize {
     let reg = registry();
     let map = lock_map(reg);
@@ -383,7 +383,7 @@ pub async fn wait_async(session_id: &str, timeout: Duration, clock: &dyn Clock) 
 
 /// Snapshot a session's queue without draining. Test/observability
 /// helper.
-#[cfg(any(test, feature = "vm-bench-internals"))]
+#[cfg(any(test, feature = "test-support", feature = "vm-bench-internals"))]
 pub fn snapshot(session_id: &str) -> Vec<InboxEntry> {
     let reg = registry();
     let map = lock_map(reg);

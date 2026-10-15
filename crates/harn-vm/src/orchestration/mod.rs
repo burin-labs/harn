@@ -76,7 +76,7 @@ pub use compaction_receipt::*;
 mod compaction_policy_registry;
 pub use compaction_policy_registry::*;
 
-pub mod agent_inbox;
+pub use harn_orchestration::agent_inbox;
 
 mod artifact_files;
 mod artifacts;

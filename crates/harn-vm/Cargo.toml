@@ -42,7 +42,7 @@ default = ["full"]
 # families are sliced out of the VM.
 full = ["postgres", "sqlite", "content", "compression", "http-compression", "cloud-aws", "native-keyring"]
 llm-bench-internals = []
-vm-bench-internals = ["harn-vm-core/vm-bench-internals"]
+vm-bench-internals = ["harn-vm-core/vm-bench-internals", "harn-orchestration/vm-bench-internals"]
 # Document extraction and HTML querying builtins. Kept in the default product
 # surface; lean embedders and the test engine can omit their parser/PDF graph.
 content = ["dep:lopdf", "dep:scraper"]
@@ -93,6 +93,7 @@ testbench-wasi = ["dep:wasmtime", "dep:wasmtime-wasi", "dep:wat", "dep:tempfile"
 [dependencies]
 harn-vm-core = { path = "../harn-vm-core", version = "=0.10.167" }
 harn-llm = { path = "../harn-llm", version = "=0.10.167" }
+harn-orchestration = { path = "../harn-orchestration", version = "=0.10.167" }
 harn-builtin-meta = { path = "../harn-builtin-meta", version = "=0.10.167" }
 harn-builtin-registry = { path = "../harn-builtin-registry", version = "=0.10.167" }
 harn-capability-contracts = { path = "../harn-capability-contracts", version = "=0.10.167" }
@@ -279,6 +280,7 @@ async-io = { version = "2.6", optional = true }
 zbus = { version = "5.17", default-features = false, features = ["async-io"], optional = true }
 
 [dev-dependencies]
+harn-orchestration = { path = "../harn-orchestration", version = "=0.10.167", features = ["test-support"] }
 harn-llm = { path = "../harn-llm", version = "=0.10.167", features = ["test-support"] }
 harn-vm-core = { path = "../harn-vm-core", version = "=0.10.167", features = ["vm-test-support"] }
 criterion = "0.8"

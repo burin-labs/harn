@@ -36,6 +36,7 @@ members = [
     "crates/harn-vm",
     "crates/harn-vm-core",
     "crates/harn-llm",
+    "crates/harn-orchestration",
     "crates/harn-wasm",
     "crates/harn-dap",
     "crates/harn-fmt",
