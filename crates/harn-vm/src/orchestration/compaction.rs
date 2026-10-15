@@ -19,9 +19,8 @@ pub use config::{
 #[cfg(test)]
 pub(crate) use harn_orchestration::compaction::RECAP_HEADER_SENTINEL;
 use harn_orchestration::compaction::{
-    apply_model_visible_policy, find_prev_user_boundary, is_pinned_content, is_prior_recap,
-    is_reasoning_or_tool_turn_message, latest_pinned_indices, message_content_bytes,
-    observation_mask_compaction_with_callback, snap_split_off_tool_results,
+    apply_model_visible_policy, is_pinned_content, is_prior_recap, latest_pinned_indices,
+    message_content_bytes, observation_mask_compaction_with_callback, select_compaction_window,
     truncate_compaction_summary, truncate_compaction_summary_with_context, CompactionSummary,
     CLASSIFIED_RECAP_HEADER_SENTINEL,
 };
@@ -427,50 +426,10 @@ pub(crate) async fn prepare_compaction_messages_with_ctx(
     if config.token_threshold > 0 && estimate_message_tokens(messages) <= config.token_threshold {
         return Ok(None);
     }
-    if messages.len() <= config.keep_first.saturating_add(config.keep_last) {
+    let Some(window) = select_compaction_window(messages, config.keep_first, config.keep_last)
+    else {
         return Ok(None);
-    }
-    let compact_start = config.keep_first.min(messages.len());
-    let original_split = messages.len().saturating_sub(config.keep_last);
-    let mut split_at = original_split;
-    // Snap back to a user-role boundary so the kept suffix begins at a clean
-    // turn. OpenAI-compatible APIs reject tool results orphaned from their
-    // assistant request, so splitting mid-turn corrupts the transcript.
-    while split_at > compact_start
-        && split_at < messages.len()
-        && messages[split_at]
-            .get("role")
-            .and_then(|r| r.as_str())
-            .is_none_or(|r| r != "user")
-    {
-        split_at -= 1;
-    }
-    // Fall back to the naive split (e.g. tool-heavy transcripts with the sole
-    // user message at index 0) rather than skipping compaction entirely.
-    if split_at == compact_start {
-        split_at = original_split;
-    }
-    if let Some(volatile_start) = messages[split_at..]
-        .iter()
-        .position(is_reasoning_or_tool_turn_message)
-        .map(|offset| split_at + offset)
-    {
-        if let Some(boundary) = volatile_start
-            .checked_sub(1)
-            .and_then(|idx| find_prev_user_boundary(messages, idx))
-            .filter(|boundary| *boundary > compact_start)
-        {
-            split_at = boundary;
-        }
-    }
-    // The naive fallback (and, in tool-heavy transcripts with no interior
-    // user boundary, the volatile-start correction too) can still leave the
-    // split pointing at a tool_result whose tool_use request would be
-    // drained. Final pass: snap off any request/result pair.
-    split_at = snap_split_off_tool_results(messages, split_at, compact_start);
-    if split_at <= compact_start {
-        return Ok(None);
-    }
+    };
     // Mutating the caller before an awaited strategy succeeds loses source
     // context on refusal, cancellation, or a dropped future. Allocate only
     // after compaction is admitted, then publish the complete candidate once.
@@ -480,8 +439,8 @@ pub(crate) async fn prepare_compaction_messages_with_ctx(
         &mut candidate,
         config,
         llm_opts,
-        compact_start,
-        split_at,
+        window.start,
+        window.end,
     ))
     .await?;
     Ok(Some((result, candidate)))

@@ -67,7 +67,7 @@ fn estimate_content_chars(value: &serde_json::Value) -> usize {
     }
 }
 
-pub fn is_reasoning_or_tool_turn_message(message: &serde_json::Value) -> bool {
+fn is_reasoning_or_tool_turn_message(message: &serde_json::Value) -> bool {
     let role = message
         .get("role")
         .and_then(|value| value.as_str())
@@ -80,7 +80,7 @@ pub fn is_reasoning_or_tool_turn_message(message: &serde_json::Value) -> bool {
             .unwrap_or(false)
 }
 
-pub fn find_prev_user_boundary(messages: &[serde_json::Value], start: usize) -> Option<usize> {
+fn find_prev_user_boundary(messages: &[serde_json::Value], start: usize) -> Option<usize> {
     (0..=start)
         .rev()
         .find(|idx| messages[*idx].get("role").and_then(|value| value.as_str()) == Some("user"))
@@ -115,7 +115,7 @@ fn is_tool_result_message(message: &serde_json::Value) -> bool {
 /// request together with its results); when that would consume the whole
 /// compactable window, walk forward past the run instead so compaction still
 /// makes progress.
-pub fn snap_split_off_tool_results(
+fn snap_split_off_tool_results(
     messages: &[serde_json::Value],
     split_at: usize,
     compact_start: usize,
@@ -135,6 +135,50 @@ pub fn snap_split_off_tool_results(
         forward += 1;
     }
     forward
+}
+
+/// Select a reducible window while keeping tool calls with their results and
+/// preserving the requested leading and recent context.
+pub fn select_compaction_window(
+    messages: &[serde_json::Value],
+    keep_first: usize,
+    keep_last: usize,
+) -> Option<std::ops::Range<usize>> {
+    if messages.len() <= keep_first.saturating_add(keep_last) {
+        return None;
+    }
+    let compact_start = keep_first.min(messages.len());
+    let original_split = messages.len().saturating_sub(keep_last);
+    let mut split_at = original_split;
+    // The kept suffix starts at a clean turn whenever the window permits it.
+    while split_at > compact_start
+        && split_at < messages.len()
+        && messages[split_at]
+            .get("role")
+            .and_then(|r| r.as_str())
+            .is_none_or(|r| r != "user")
+    {
+        split_at -= 1;
+    }
+    // Tool-heavy transcripts may have only one user message, at index zero.
+    if split_at == compact_start {
+        split_at = original_split;
+    }
+    if let Some(volatile_start) = messages[split_at..]
+        .iter()
+        .position(is_reasoning_or_tool_turn_message)
+        .map(|offset| split_at + offset)
+    {
+        if let Some(boundary) = volatile_start
+            .checked_sub(1)
+            .and_then(|idx| find_prev_user_boundary(messages, idx))
+            .filter(|boundary| *boundary > compact_start)
+        {
+            split_at = boundary;
+        }
+    }
+    split_at = snap_split_off_tool_results(messages, split_at, compact_start);
+    (split_at > compact_start).then_some(compact_start..split_at)
 }
 
 /// True when `trimmed` (an already-trimmed line) begins with `file:line` —
