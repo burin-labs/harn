@@ -15,11 +15,9 @@ fn captured_policy_controls_encoding_and_returns_audit_records() {
         schema: json!({"type": "string", "default": "removed"}),
         strict: true,
     };
-    let caps = Capabilities {
-        reasoning_effort_supported: false,
-        reasoning_none_supported: false,
-        ..Capabilities::default()
-    };
+    let mut caps = Capabilities::default();
+    caps.reasoning_effort_supported = false;
+    caps.reasoning_none_supported = false;
     let mut context = OpenAiWireContext {
         capabilities: &caps,
         wire_model: "resolved-wire-id",
