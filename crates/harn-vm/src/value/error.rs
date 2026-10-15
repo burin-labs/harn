@@ -186,7 +186,7 @@ pub enum VmError {
     /// supply. Carries the mechanism, the requested profile, and the
     /// unsatisfied requirement structurally, so an embedder renders its own
     /// remedy sentence instead of Harn guessing which control its operator has.
-    SandboxMechanismUnavailable(Box<crate::process_sandbox::SandboxMechanismUnavailable>),
+    SandboxMechanismUnavailable(Box<super::SandboxMechanismUnavailable>),
     DaemonQueueFull {
         daemon_id: String,
         capacity: usize,
@@ -292,9 +292,7 @@ impl VmError {
 
     /// The typed sandbox-mechanism refusal, when a spawn was refused because
     /// the platform mechanism could not be attached.
-    pub fn sandbox_mechanism_unavailable(
-        &self,
-    ) -> Option<&crate::process_sandbox::SandboxMechanismUnavailable> {
+    pub fn sandbox_mechanism_unavailable(&self) -> Option<&super::SandboxMechanismUnavailable> {
         match self {
             Self::SandboxMechanismUnavailable(refusal) => Some(refusal),
             _ => None,

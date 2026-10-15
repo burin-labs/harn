@@ -180,7 +180,7 @@ async fn host_agent_session_await_inbox(
                 "{HOST_SESSION_AWAIT_INBOX}: VM harness is required so command deadlines and inbox waits share one clock"
             ))
         })?;
-        handle.inner().clock().clone()
+        crate::harness::native_harness(handle)?.clock().clone()
     };
     let woke = crate::orchestration::agent_inbox::wait_async(
         &session_id,

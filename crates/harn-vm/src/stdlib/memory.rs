@@ -1224,18 +1224,14 @@ async fn embed_cached(
     params.put_str("text", text);
     params.put_str("model_hint", hint);
     params.put_str("root", root.to_string_lossy());
-    let fixture_result = ctx
-        .and_then(|ctx| ctx.child_vm().root_harness_value())
-        .and_then(|root| match root {
-            VmValue::Harness(root) => root.inner().fixtures().dispatch(
-                harn_builtin_meta::CapabilityId::Embed,
-                "text_response",
-                &[VmValue::dict(params.clone())],
-            ),
-            _ => None,
-        });
+    let fixture_result = crate::harness::context_fixture(
+        ctx,
+        harn_builtin_meta::CapabilityId::Embed,
+        "text_response",
+        &[VmValue::dict(params.clone())],
+    )?;
     let result = match fixture_result {
-        Some(result) => result?,
+        Some(result) => result,
         None => dispatch_host_operation("memory", "embed", &params).await?,
     };
     let cached = parse_embedding_response(result, hint)?;

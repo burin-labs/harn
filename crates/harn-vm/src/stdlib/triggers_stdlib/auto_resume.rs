@@ -9,7 +9,6 @@
 
 use crate::native_vm::NativeVmState;
 use std::collections::BTreeMap;
-use std::sync::Arc;
 use std::time::Duration;
 
 use harn_builtin_meta::shapes::{

@@ -11,6 +11,7 @@ mod isolate;
 pub mod json;
 mod mcp_client;
 pub(crate) mod recursion;
+mod sandbox_refusal;
 mod set;
 mod storage_json;
 mod structural;
@@ -49,6 +50,11 @@ pub use io_error::{
 };
 pub use isolate::IsolateValue;
 pub use mcp_client::VmMcpClientHandle;
+pub(crate) use sandbox_refusal::NO_OS_SANDBOX;
+pub use sandbox_refusal::{
+    ConfinementDimension, SandboxMechanism, SandboxMechanismAvailability,
+    SandboxMechanismUnavailable, SandboxRequirement,
+};
 pub use set::VmSet;
 pub(crate) use storage_json::vm_to_storage_json;
 pub use structural::{

@@ -1717,10 +1717,7 @@ async fn host_mcp_bootstrap_impl(
     let mut tools_added: Vec<serde_json::Value> = Vec::new();
     let mut server_infos: Vec<serde_json::Value> = Vec::new();
     let mut errors: Vec<serde_json::Value> = Vec::new();
-    let fixtures = ctx
-        .child_vm()
-        .harness()
-        .map(|harness| harness.inner().fixtures_arc());
+    let fixtures = crate::harness::context_fixtures(&ctx)?;
 
     for spec in &specs_list {
         let server_name = spec

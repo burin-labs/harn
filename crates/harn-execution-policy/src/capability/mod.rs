@@ -315,6 +315,15 @@ pub(super) fn is_false(value: &bool) -> bool {
 }
 
 impl CapabilityPolicy {
+    /// Whether the side-effect ceiling admits ordinary network operations.
+    pub fn allows_network(&self) -> bool {
+        use crate::tool_annotations::SideEffectLevel;
+        self.side_effect_level
+            .as_ref()
+            .map(|level| SideEffectLevel::rank_str(level) >= SideEffectLevel::Network.rank())
+            .unwrap_or(true)
+    }
+
     /// The identity element under [`CapabilityPolicy::intersect`]: a policy
     /// that expresses no opinion on any axis.
     ///

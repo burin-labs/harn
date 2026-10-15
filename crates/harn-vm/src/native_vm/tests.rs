@@ -26,6 +26,10 @@ async fn native_harness_dispatch_rejects_another_backend_before_output() {
 async fn native_mcp_builtins_reject_another_backend_before_transport() {
     let mut vm = Vm::new();
     crate::mcp::register_mcp_builtins(&mut vm);
+    let VmValue::Harness(root) = crate::harness::Harness::real().into_vm_value() else {
+        unreachable!()
+    };
+    let tools = root.sub_handle("tools").unwrap();
     let client = VmValue::mcp_client(crate::value::VmMcpClientHandle::from_host(
         "foreign".to_string(),
         Arc::new(()),
@@ -41,8 +45,8 @@ async fn native_mcp_builtins_reject_another_backend_before_transport() {
         "mcp_list_prompts",
         "mcp_get_prompt",
     ] {
-        let error = vm
-            .call_named_builtin(builtin, vec![client.clone()])
+        let error = crate::harness_methods::runtime_methods()
+            .call(&mut vm, &tools, builtin, &[client.clone()])
             .await
             .unwrap_err();
         assert!(

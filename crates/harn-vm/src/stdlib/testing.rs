@@ -119,7 +119,7 @@ async fn testing_with_evaluation_fixtures_impl(
     let active_harness = vm
         .harness()
         .ok_or_else(|| VmError::TypeError("evaluation fixtures require a root Harness".into()))?;
-    if !std::sync::Arc::ptr_eq(supplied_harness.inner(), active_harness.inner()) {
+    if !supplied_harness.shares_owner(active_harness) {
         return Err(VmError::TypeError(
             "evaluation fixtures received a different Harness".into(),
         ));

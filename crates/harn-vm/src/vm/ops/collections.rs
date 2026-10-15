@@ -176,8 +176,8 @@ impl super::super::Vm {
                 "fields" => Some(PropertyCacheTarget::EnumFields),
                 _ => None,
             },
-            VmValue::Harness(handle) if handle.kind() == crate::harness::HarnessKind::Root => {
-                crate::harness::HarnessKind::from_field_name(name)
+            VmValue::Harness(handle) if handle.kind() == harn_builtin_meta::HarnessKind::Root => {
+                harn_builtin_meta::HarnessKind::from_field_name(name)
                     .map(PropertyCacheTarget::HarnessSubHandle)
             }
             VmValue::Harness(_) => None,

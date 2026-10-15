@@ -37,6 +37,11 @@ impl VmHarness {
         self.kind.type_name()
     }
 
+    /// Whether both handles derive their authority from the same root owner.
+    pub fn shares_owner(&self, other: &Self) -> bool {
+        self.state.ptr_eq(&other.state)
+    }
+
     pub fn sub_handle(&self, field: &str) -> Option<Self> {
         self.sub_handle_kind(HarnessKind::from_field_name(field)?)
     }

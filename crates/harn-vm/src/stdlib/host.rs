@@ -803,13 +803,9 @@ pub async fn dispatch_host_operation_with_ctx(
 ) -> Result<VmValue, VmError> {
     let _invalidation = turn_cache::invalidation_scope(capability, operation);
     if let Some(ctx) = ctx {
-        let vm = ctx.child_vm();
-        if let Some(fixtured) = vm.harness().and_then(|harness| {
-            harness
-                .inner()
-                .fixtures()
-                .dispatch_host(capability, operation, params)
-        }) {
+        if let Some(fixtured) = crate::harness::context_fixtures(ctx)?
+            .and_then(|fixtures| fixtures.dispatch_host(capability, operation, params))
+        {
             return fixtured;
         }
     }

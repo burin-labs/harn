@@ -71,9 +71,13 @@ pub(crate) fn vm_to_storage_json(val: &VmValue) -> Result<serde_json::Value, VmE
 mod tests {
     use super::*;
 
+    fn root_harness() -> VmValue {
+        VmValue::harness(crate::value::VmHarness::from_host(std::sync::Arc::new(())))
+    }
+
     #[test]
     fn root_harness_cannot_be_persisted_directly_or_nested() {
-        let harness = crate::harness::Harness::null().into_vm_value();
+        let harness = root_harness();
         let direct = vm_to_storage_json(&harness).unwrap_err().to_string();
         assert!(
             direct.contains("Harness is runtime authority")
@@ -88,7 +92,7 @@ mod tests {
             "{nested_error}"
         );
 
-        let VmValue::Harness(root) = crate::harness::Harness::null().into_vm_value() else {
+        let VmValue::Harness(root) = root_harness() else {
             unreachable!("Harness lowers to VmValue::Harness")
         };
         let fs = VmValue::Harness(root.sub_handle("fs").expect("root exposes fs").into());
@@ -135,7 +139,7 @@ mod tests {
 
         // Authority must not become domain state just because it was wrapped
         // in a struct.
-        let harness = crate::harness::Harness::null().into_vm_value();
+        let harness = root_harness();
         let smuggled = VmValue::struct_instance(
             "Holder",
             crate::value::DictMap::new().update("h".into(), harness),

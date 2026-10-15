@@ -133,8 +133,8 @@ fn unregistered_host_fixtures_require_explicit_test_local_authority() {
         vm.call_harness_method(&testing, "respond", &args)
             .await
             .expect("explicit test-local host fixture is accepted");
-        let result = root
-            .inner()
+        let result = crate::harness::native_harness(&root)
+            .unwrap()
             .fixtures()
             .dispatch_host("cloud", "echo", &crate::value::DictMap::default())
             .expect("fixture matches")

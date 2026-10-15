@@ -113,10 +113,10 @@ mod tests {
             &first.shared_state_runtime,
             &sibling.shared_state_runtime
         ));
-        assert!(!Arc::ptr_eq(
-            first.harness().unwrap().inner(),
-            sibling.harness().unwrap().inner()
-        ));
+        assert!(!first
+            .harness()
+            .unwrap()
+            .shares_owner(sibling.harness().unwrap()));
 
         // The handler is actually reached on each VM, before and after a host
         // override forces one registration table to detach from the cache.

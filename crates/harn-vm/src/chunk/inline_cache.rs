@@ -6,7 +6,7 @@
 
 use std::sync::Arc;
 
-use crate::harness::HarnessKind;
+use harn_builtin_meta::HarnessKind;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum InlineCacheEntry {

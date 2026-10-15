@@ -1,3 +1,4 @@
+use harn_builtin_meta::HarnessKind;
 use std::sync::Arc;
 
 use crate::chunk::{InlineCacheEntry, MethodCacheTarget};
@@ -70,7 +71,7 @@ impl super::super::Vm {
         name_idx: u16,
         argc: usize,
         obj: &VmValue,
-    ) -> Option<Arc<crate::harness::VmHarness>> {
+    ) -> Option<Arc<crate::value::VmHarness>> {
         let (cached_name_idx, cached_argc, target) = cache?;
         if cached_name_idx != name_idx || cached_argc != argc {
             return None;
@@ -140,30 +141,30 @@ impl super::super::Vm {
     }
 
     fn harness_sync_method_cache_target(
-        handle: &crate::harness::VmHarness,
+        handle: &crate::value::VmHarness,
         method: &str,
     ) -> Option<MethodCacheTarget> {
         let cacheable = match handle.kind() {
-            crate::harness::HarnessKind::Stdio => matches!(
+            HarnessKind::Stdio => matches!(
                 method,
                 "print" | "println" | "eprint" | "eprintln" | "read_line" | "prompt"
             ),
-            crate::harness::HarnessKind::Term => {
+            HarnessKind::Term => {
                 matches!(method, "width" | "height" | "is_tty" | "read_password")
             }
-            crate::harness::HarnessKind::Clock => {
+            HarnessKind::Clock => {
                 matches!(
                     method,
                     "now_ms" | "timestamp" | "monotonic_ms" | "elapsed" | "date_iso"
                 )
             }
-            crate::harness::HarnessKind::Env => matches!(method, "get" | "get_or"),
-            crate::harness::HarnessKind::Random => matches!(
+            HarnessKind::Env => matches!(method, "get" | "get_or"),
+            HarnessKind::Random => matches!(
                 method,
                 "f64" | "u64" | "range" | "choice" | "shuffle" | "uuid" | "uuid_v7"
             ),
-            crate::harness::HarnessKind::Tenant => matches!(method, "id" | "try_id"),
-            crate::harness::HarnessKind::Auth => matches!(
+            HarnessKind::Tenant => matches!(method, "id" | "try_id"),
+            HarnessKind::Auth => matches!(
                 method,
                 "is_authenticated"
                     | "subject"
@@ -174,15 +175,15 @@ impl super::super::Vm {
                     | "scopes"
                     | "has_scope"
             ),
-            crate::harness::HarnessKind::Root
-            | crate::harness::HarnessKind::Fs
-            | crate::harness::HarnessKind::Net
-            | crate::harness::HarnessKind::Process
-            | crate::harness::HarnessKind::System
-            | crate::harness::HarnessKind::Secrets
-            | crate::harness::HarnessKind::Llm
-            | crate::harness::HarnessKind::Obs
-            | crate::harness::HarnessKind::Verdict => false,
+            HarnessKind::Root
+            | HarnessKind::Fs
+            | HarnessKind::Net
+            | HarnessKind::Process
+            | HarnessKind::System
+            | HarnessKind::Secrets
+            | HarnessKind::Llm
+            | HarnessKind::Obs
+            | HarnessKind::Verdict => false,
             _ => false,
         };
         cacheable.then_some(MethodCacheTarget::Harness(handle.kind()))
