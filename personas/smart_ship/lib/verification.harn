@@ -332,12 +332,14 @@ fn admission_time_errors(record: AdmissionRecord) -> list<string> {
     invalid = invalid + ["admission-time"]
   }
   for row in record.reviews.reviews {
-    if row.submitted_at != nil {
-      const submitted = try {
-        date_parse(row.submitted_at)
-      }
-      if is_err(submitted) || unwrap(submitted) * 1000 > record.admitted_at_ms {
-        invalid = invalid + ["review-after-admission:" + row.id]
+    for value in [row.submitted_at, row.updated_at] {
+      if value != nil {
+        const observed = try {
+          date_parse(value)
+        }
+        if is_err(observed) || unwrap(observed) * 1000 > record.admitted_at_ms {
+          invalid = invalid + ["review-after-admission:" + row.id]
+        }
       }
     }
   }

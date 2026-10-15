@@ -135,6 +135,7 @@ pipeline test_signed_receipt_must_still_satisfy_review_policy(harness: Harness) 
     record.reviews + {reviews: [observed + {head: nil}]},
     record.reviews + {reviews: [observed + {submitted_at: nil}]},
     record.reviews + {reviews: [observed + {submitted_at: "2026-10-15T00:00:00Z"}]},
+    record.reviews + {reviews: [observed + {updated_at: "2026-10-15T00:00:00Z"}]},
     record.reviews
       + {declared_threads: 1, threads: [{id: "unresolved", resolved: false, outdated: true}]},
   ] {
