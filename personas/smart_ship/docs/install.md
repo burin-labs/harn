@@ -127,13 +127,15 @@ Retain remote state and signed checkpoint history for release consumers and reco
 
 Before integrating a change, obtain a `SignedScope` from the trusted owner of
 job selection. Match its rule to your frozen policy's `admission_rules`; each
-rule binds a repository, optional immutable repository ID, scope trust domain,
+rule binds a repository, optional immutable repository ID, destination
+`base_branch`, scope trust domain,
 and independent review policy. Configure GitHub rules with the observed base
 repository ID. Plain Git installations may explicitly use `repository_id: null`.
 Candidate code must not choose the scope inventory or receive scope/admission
 signing credentials.
-The scope owner binds `reviewed_head` and `reviewed_base` to the actual tested
-`source`. Keep GitHub's generated test merge commit there; it must not be
+The scope owner binds `reviewed_head`, `reviewed_base` and
+`reviewed_base_branch` to the actual tested `source` and destination branch.
+Keep GitHub's generated test merge commit there; it must not be
 relabelled as the reviewed PR head or the workflow run's API head field.
 
 Build an `AdmissionRequest` from that scope and the complete reviewed source

@@ -43,14 +43,22 @@ fn main(harness: Harness) {
     check_connector_merge_receipt_restart_duplicate(harness)
   } else if argv[1] == "controls" {
     check_controls_after_positive(harness)
+  } else if ["stopped", "stale", "invalid-signature"].contains(argv[1]) {
+    check_controls_after_positive(harness, argv[1])
   } else if argv[1] == "uncertainty" {
     check_refusal_and_uncertainty(harness)
+  } else if ["changed-head", "protected", "uncertain"].contains(argv[1]) {
+    check_refusal_and_uncertainty(harness, argv[1])
   } else if argv[1] == "reservation" {
     check_reserved_admission_resumes(harness)
   } else if argv[1] == "review-withdrawal" {
     check_review_withdrawal(harness)
+  } else if ["withdrawn", "unresolved", "missing"].contains(argv[1]) {
+    check_review_withdrawal(harness, argv[1])
   } else if argv[1] == "source-binding" {
     check_signed_source_binding(harness)
+  } else if ["changed-base", "changed-repository", "changed-target"].contains(argv[1]) {
+    check_signed_source_binding(harness, argv[1])
   } else if argv[1] == "rule-binding" {
     check_signed_rule_binding(harness)
   } else if argv[1] == "configuration-binding" {
@@ -188,6 +196,7 @@ fn mock_merge(
     | "unresolved" \
     | "missing" \
     | "changed-base" \
+    | "changed-target" \
     | "changed-repository" = "approved",
 ) {
   testing.http_mock_clear()
@@ -195,6 +204,11 @@ fn mock_merge(
   const identity = {
     number: 7,
     headRefOid: source.head,
+    baseRefName: if review_mode == "changed-target" {
+      "release"
+    } else {
+      "main"
+    },
     baseRefOid: if review_mode == "changed-base" {
       "d".repeat(40)
     } else {
@@ -323,8 +337,10 @@ fn mock_merge(
   )
 }
 
-fn check_review_withdrawal(harness: Harness) {
-  for mode in ["withdrawn", "unresolved", "missing"] {
+fn check_review_withdrawal(harness: Harness, selected: string? = nil) {
+  const modes = ["withdrawn", "unresolved", "missing"]
+  require selected == nil || modes.contains(selected), "review variant is unknown"
+  for mode in modes.filter({ mode -> selected == nil || mode == selected }) {
     const s = setup(harness)
     defer {
       harness.fs.delete(s.root)
@@ -363,8 +379,10 @@ fn check_review_withdrawal(harness: Harness) {
   }
 }
 
-fn check_signed_source_binding(harness: Harness) {
-  for mode in ["changed-base", "changed-repository"] {
+fn check_signed_source_binding(harness: Harness, selected: string? = nil) {
+  const modes = ["changed-base", "changed-repository", "changed-target"]
+  require selected == nil || modes.contains(selected), "source-binding variant is unknown"
+  for mode in modes.filter({ mode -> selected == nil || mode == selected }) {
     const s = setup(harness)
     defer {
       harness.fs.delete(s.root)
@@ -579,7 +597,9 @@ fn check_reserved_admission_resumes(harness: Harness) {
     "stopped reservation reached a provider"
 }
 
-fn check_controls_after_positive(harness: Harness) {
+fn check_controls_after_positive(harness: Harness, selected: string? = nil) {
+  const modes = ["stopped", "stale", "invalid-signature"]
+  require selected == nil || modes.contains(selected), "control variant is unknown"
   const positive = setup(harness)
   defer {
     harness.fs.delete(positive.root)
@@ -589,7 +609,7 @@ fn check_controls_after_positive(harness: Harness) {
     .dispatch_started,
     "positive dispatch was not reached"
   require len(harness.testing.http_mock_calls()) >= 3, "provider observation was not primed"
-  for mode in ["stopped", "stale", "invalid-signature"] {
+  for mode in modes.filter({ mode -> selected == nil || mode == selected }) {
     const s = setup(harness)
     defer {
       harness.fs.delete(s.root)
@@ -624,8 +644,10 @@ fn check_controls_after_positive(harness: Harness) {
   }
 }
 
-fn check_refusal_and_uncertainty(harness: Harness) {
-  for mode in ["changed-head", "protected", "uncertain"] {
+fn check_refusal_and_uncertainty(harness: Harness, selected: string? = nil) {
+  const modes = ["changed-head", "protected", "uncertain"]
+  require selected == nil || modes.contains(selected), "refusal variant is unknown"
+  for mode in modes.filter({ mode -> selected == nil || mode == selected }) {
     const s = setup(harness)
     defer {
       harness.fs.delete(s.root)

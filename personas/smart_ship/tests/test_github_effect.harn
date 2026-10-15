@@ -23,34 +23,56 @@ fn run_case(harness: Harness, scenario: string) {
     "scenario did not report its terminal result"
 }
 
+// Each case starts a child Harn runtime and its worker pool.
+@heavy(threads: 8)
 pipeline test_github_effect_receipt_survives_restart_without_redispatch(harness: Harness) {
   run_case(harness, "receipt")
 }
 
-pipeline test_github_effect_stop_stale_and_signature_controls_after_positive(harness: Harness) {
-  run_case(harness, "controls")
+@heavy(threads: 8)
+@test(cases: [{name: "stopped", args: ["stopped"]}, {name: "stale", args: ["stale"]}, {name: "invalid-signature", args: ["invalid-signature"]}])
+pipeline test_github_effect_stop_stale_and_signature_controls_after_positive(
+  harness: Harness,
+  variation: string,
+) {
+  run_case(harness, variation)
 }
 
-pipeline test_github_effect_definite_refusal_and_uncertain_outcomes(harness: Harness) {
-  run_case(harness, "uncertainty")
+@heavy(threads: 8)
+@test(cases: [{name: "changed-head", args: ["changed-head"]}, {name: "protected", args: ["protected"]}, {name: "uncertain", args: ["uncertain"]}])
+pipeline test_github_effect_definite_refusal_and_uncertain_outcomes(
+  harness: Harness,
+  variation: string,
+) {
+  run_case(harness, variation)
 }
 
+@heavy(threads: 8)
 pipeline test_github_effect_resumes_a_reserved_but_undispatched_admission(harness: Harness) {
   run_case(harness, "reservation")
 }
 
-pipeline test_github_effect_refreshes_trusted_review_before_mutation(harness: Harness) {
-  run_case(harness, "review-withdrawal")
+@heavy(threads: 8)
+@test(cases: [{name: "withdrawn", args: ["withdrawn"]}, {name: "unresolved", args: ["unresolved"]}, {name: "missing", args: ["missing"]}])
+pipeline test_github_effect_refreshes_trusted_review_before_mutation(
+  harness: Harness,
+  variation: string,
+) {
+  run_case(harness, variation)
 }
 
-pipeline test_github_effect_rejects_changed_signed_source(harness: Harness) {
-  run_case(harness, "source-binding")
+@heavy(threads: 8)
+@test(cases: [{name: "changed-base", args: ["changed-base"]}, {name: "changed-repository", args: ["changed-repository"]}, {name: "changed-target", args: ["changed-target"]}])
+pipeline test_github_effect_rejects_changed_signed_source(harness: Harness, variation: string) {
+  run_case(harness, variation)
 }
 
+@heavy(threads: 8)
 pipeline test_github_effect_uses_the_signed_scope_review_rule(harness: Harness) {
   run_case(harness, "rule-binding")
 }
 
+@heavy(threads: 8)
 pipeline test_github_effect_reservation_binds_the_provider_configuration(harness: Harness) {
   run_case(harness, "configuration-binding")
 }

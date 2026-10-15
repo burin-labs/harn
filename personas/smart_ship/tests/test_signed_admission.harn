@@ -14,6 +14,7 @@ import {
   SignedScope,
   admission_bytes,
   freeze_snapshot,
+  policy_digest,
   prepare_admission,
   scope_bytes,
   verify,
@@ -203,6 +204,46 @@ pipeline test_observed_repository_identity_must_match_the_frozen_installation_ru
     assert_eq(result.status, "invalid")
     assert(result.invalid.contains("admission-repository-binding"))
   }
+}
+
+pipeline test_destination_branch_is_bound_by_scope_review_policy_and_both_signatures(
+  harness: Harness,
+) {
+  const f = fixture(harness.random)
+  const original = f.snapshot.changes[0]!.admission
+  const record = original.record
+  assert_eq(verify_admission(original, f.policy).status, "admitted")
+  const other_policy = f.policy
+    + {admission_rules: f.policy.admission_rules.map({ rule -> rule + {base_branch: "release"} })}
+  assert(policy_digest(other_policy) != policy_digest(f.policy))
+  assert_eq(verify_admission(original, other_policy).status, "invalid")
+  const retargeted = record
+    + {
+      source: record.source + {base_branch: "release"},
+      reviews: record.reviews + {base_branch: "release"},
+    }
+  const stale_scope = verify_admission(sign(f, retargeted), f.policy)
+  assert_eq(stale_scope.status, "invalid")
+  assert(stale_scope.invalid.contains("admission-source-or-policy"))
+  const stale_scope_signature = retargeted
+    + {
+      scope: record.scope
+        + {scope: record.scope.scope + {reviewed_base_branch: "release"}},
+    }
+  assert(
+    verify_admission(sign(f, stale_scope_signature), f.policy).invalid.contains("scope-signature"),
+    "changing the target must invalidate the original scope signature",
+  )
+  const signed_scope = retargeted
+    + {scope: sign_scope(f, record.scope.scope + {reviewed_base_branch: "release"})}
+  const wrong_target = verify_admission(sign(f, signed_scope), f.policy)
+  assert_eq(wrong_target.status, "invalid")
+  assert(wrong_target.invalid.contains("admission-target-binding"))
+  const stale_admission_signature = original + {record: retargeted}
+  assert(
+    verify_admission(stale_admission_signature, f.policy).invalid.contains("admission-signature"),
+    "changing source and review targets must invalidate the original admission signature",
+  )
 }
 
 pipeline test_full_admission_record_is_bound_into_group_dispatch_and_checkpoint_qualification(

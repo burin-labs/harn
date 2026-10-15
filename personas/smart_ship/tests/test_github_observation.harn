@@ -7,6 +7,7 @@ const census: GithubPullRequestReviewCensus = {
   number: 17,
   head_oid: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
   base_oid: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  base_branch: "main",
   author: {id: "author-id", login: "author", type: "User"},
   state: "OPEN",
   is_draft: false,
@@ -34,6 +35,8 @@ pipeline test_github_live_projection_and_archive_replay_qualify_identical_comple
   assert_eq(observed.source.author!.id, "author-id")
   assert_eq(observed.source.head_repository_id, "repository-id")
   assert_eq(observed.source.base_repository_id, "repository-id")
+  assert_eq(observed.source.base_branch, "main")
+  assert_eq(observed.reviews.base_branch, "main")
   assert_eq(observed.reviews.reviews[0]!.submitted_at, "2026-10-14T00:00:00Z")
   assert_eq(observed.reviews.reviews[0]!.updated_at, "2026-10-15T00:00:00Z")
   const archived = decode_reviewed_change(json_parse(json_stringify(observed)))

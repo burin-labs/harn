@@ -1,5 +1,6 @@
 type CommandEvidence = {status: "passed"}
 
+@heavy(threads: 8)
 pipeline test_public_job_command_executes_bound_jobs_and_retains_reached_failures(
   harness: Harness,
 ) {
