@@ -360,7 +360,20 @@ fn identical_invocations_with_different_material_have_different_authority() {
     assert_eq!(first.plan_fingerprint(), second.plan_fingerprint());
     assert_ne!(first.fingerprint(), second.fingerprint());
     assert_ne!(first.verifier_baselines(), second.verifier_baselines());
-    let refreshed = ready(&first_run, intent, host);
+    let refreshed = match first_run.prepare(intent, host) {
+        PreparationOutcome::Ready {
+            authority_lease,
+            receipt,
+            ..
+        } => {
+            assert!(matches!(
+                receipt.verifier_observations.get("calculation"),
+                Some(crate::verifier_provenance::VerifierLoaderObservation::Changed { .. })
+            ));
+            authority_lease
+        }
+        _ => panic!("refresh must retain the original baseline"),
+    };
     assert_eq!(first.fingerprint(), refreshed.fingerprint());
     assert_eq!(first.verifier_baselines(), refreshed.verifier_baselines());
 }

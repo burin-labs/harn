@@ -42,10 +42,9 @@ pub(super) fn capture(
                     request.id().to_string(),
                     verifier.baseline_sha256().to_string(),
                 );
-                receipt.verifier_observations.insert(
-                    request.id().to_string(),
-                    VerifierLoaderObservation::Unchanged,
-                );
+                receipt
+                    .verifier_observations
+                    .insert(request.id().to_string(), verifier.observe_workspace());
                 verifiers.insert(request.id().to_string(), verifier);
             }
             Ok(_) => diagnostics.push(diagnostic(
