@@ -105,3 +105,57 @@ pub type PackageRelease = {
   verification: PackageQualification,
 }
 ```
+
+## Export `selection`
+
+`select.harn`
+
+### type `PackageSelectionRequest`
+
+Requested immutable build identity; version and tag come only from its archive metadata.
+
+```harn
+pub type PackageSelectionRequest = {repository: string, source: string, run: int}
+```
+
+### type `PackageSelection`
+
+Original provider receipts remain available for inspection after selection.
+
+```harn
+pub type PackageSelection = {
+  tag: string,
+  source: string,
+  run: string,
+  release: PackageRelease,
+  manifest: GithubWorkflowJsonArtifactReceipt<CandidateManifest>,
+  metadata: GithubWorkflowJsonArtifactReceipt<PackageRelease>,
+}
+```
+
+### fn `qualify_package_selection`
+
+Qualify live or replayed provider evidence through the same immutable selection rules.
+
+```harn
+pub fn qualify_package_selection(
+  request: PackageSelectionRequest,
+  run: GithubWorkflowRun,
+  manifest_receipt: GithubWorkflowJsonArtifactReceipt<CandidateManifest>,
+  metadata: GithubWorkflowJsonArtifactReceipt<PackageRelease>,
+) -> PackageSelection {
+}
+```
+
+### fn `select_package_candidate`
+
+Read bounded single-member artifacts through the published connector, without release authority.
+
+```harn
+pub fn select_package_candidate(
+  harness: Harness,
+  request: PackageSelectionRequest,
+  options: GithubClientOptions,
+) -> PackageSelection {
+}
+```

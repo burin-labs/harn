@@ -658,6 +658,7 @@ audit-fmt-harn-tokens:
 test-harn-scripts:
 	@echo "=== Running Harn script test suite ==="
 	@$(HARN_SCRIPT_TEST_ENV) $(HARN_CMD) package verify personas/smart_ship --strict
+	@$(HARN_SCRIPT_TEST_ENV) $(HARN_CMD) package verify scripts/package-release --strict
 	@$(HARN_SCRIPT_TEST_ENV) $(HARN_CMD) test scripts/tests/ --parallel
 # The denial arm of path_visibility cannot live in the suite above: `harn test`
 # runs without the worktree filesystem sandbox, so nothing is refusable in-process

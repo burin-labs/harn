@@ -9,6 +9,7 @@ docs_url = "README.md"
 
 [exports]
 lib = "build.harn"
+selection = "select.harn"
 
 [tests]
 roots = ["tests"]

@@ -1,0 +1,28 @@
+import { gha_write_output } from "std/gha"
+import { select_package_candidate } from "./select"
+
+fn main(harness: Harness) {
+  require len(argv) == 3, "pass repository source run"
+  const run = to_int(argv[2])
+  require run != nil && run > 0, "candidate run must be a positive integer"
+  const token = harness.env.get_or("GITHUB_TOKEN", "")
+  require token.trim() != "", "package selection requires the explicit read-only GitHub token"
+  const selection = select_package_candidate(
+    harness,
+    {repository: argv[0], source: argv[1], run: run},
+    {token: token},
+  )
+  const tag = harness.process.run(
+    {
+      program: "git",
+      args: ["check-ref-format", "refs/tags/" + selection.tag],
+      env_mode: "replace",
+      env: {PATH: harness.env.get_or("PATH", "")},
+    },
+  )
+  require tag.success && tag.exit_code == 0, "package version does not form a valid release tag"
+  require gha_write_output(harness, "tag", selection.tag), "GitHub output path is absent"
+  require gha_write_output(harness, "source", selection.source), "GitHub output path is absent"
+  require gha_write_output(harness, "run", selection.run), "GitHub output path is absent"
+  harness.stdio.println(json_stringify(selection))
+}
