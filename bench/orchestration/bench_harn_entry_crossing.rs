@@ -85,7 +85,7 @@ fn runtime() -> Runtime {
 
 fn vm_with_stdlib() -> Vm {
     reset_thread_local_state();
-    let mut vm = Vm::new();
+    let mut vm = harn_vm::new_vm();
     register_vm_stdlib(&mut vm);
     vm
 }
