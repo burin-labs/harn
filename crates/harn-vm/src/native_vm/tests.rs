@@ -155,54 +155,51 @@ async fn required_runtime_denial_reaches_every_builtin_dispatch_and_survives_for
     let mut child = vm.child_vm();
     let mut baseline = vm.baseline().instantiate();
 
-    assert!(vm.call_named_builtin("probe_denied", vec![]).await.is_err());
-    assert!(vm
-        .call_builtin_id_or_name(id, "probe_denied", vec![])
-        .await
-        .is_err());
-    assert!(vm
-        .try_call_sync_builtin_id_or_name_args(
+    let refused = |result: Result<VmValue, VmError>, expected_gates| {
+        assert!(
+            matches!(&result, Err(VmError::UndefinedBuiltin(message)) if message == "required runtime refused"),
+            "dispatch must return the required runtime's refusal: {result:?}"
+        );
+        assert_eq!(gates.load(Ordering::SeqCst), expected_gates);
+    };
+    refused(vm.call_named_builtin("probe_denied", vec![]).await, 1);
+    refused(
+        vm.call_builtin_id_or_name(id, "probe_denied", vec![]).await,
+        2,
+    );
+    refused(
+        vm.try_call_sync_builtin_id_or_name_args(
             Some(id),
             "probe_denied",
-            &crate::vm::CallArgs::Slice(&[])
+            &crate::vm::CallArgs::Slice(&[]),
         )
-        .unwrap()
-        .is_err());
-    assert!(vm
-        .try_call_sync_builtin_id_or_name_from_stack_args(Some(id), "probe_denied", 0)
-        .unwrap()
-        .is_err());
-    assert!(vm
-        .call_callable_args(
-            &VmValue::BuiltinRef("probe_denied".into()),
-            crate::vm::CallArgs::Slice(&[])
-        )
-        .await
-        .is_err());
-    assert!(vm
-        .call_callable_args(
-            &VmValue::builtin_ref_id(id, "probe_denied"),
-            crate::vm::CallArgs::Slice(&[])
-        )
-        .await
-        .is_err());
-    assert!(vm
-        .call_named_builtin("probe_denied_async", vec![])
-        .await
-        .is_err());
-    assert!(child
-        .call_named_builtin("probe_denied", vec![])
-        .await
-        .is_err());
-    assert!(baseline
-        .call_named_builtin("probe_denied", vec![])
-        .await
-        .is_err());
-    assert_eq!(
-        gates.load(Ordering::SeqCst),
-        9,
-        "all dispatches reached the required runtime"
+        .unwrap(),
+        3,
     );
+    refused(
+        vm.try_call_sync_builtin_id_or_name_from_stack_args(Some(id), "probe_denied", 0)
+            .unwrap(),
+        4,
+    );
+    refused(
+        vm.call_callable_args(
+            &VmValue::BuiltinRef("probe_denied".into()),
+            crate::vm::CallArgs::Slice(&[]),
+        )
+        .await,
+        5,
+    );
+    refused(
+        vm.call_callable_args(
+            &VmValue::builtin_ref_id(id, "probe_denied"),
+            crate::vm::CallArgs::Slice(&[]),
+        )
+        .await,
+        6,
+    );
+    refused(vm.call_named_builtin("probe_denied_async", vec![]).await, 7);
+    refused(child.call_named_builtin("probe_denied", vec![]).await, 8);
+    refused(baseline.call_named_builtin("probe_denied", vec![]).await, 9);
     assert_eq!(
         handlers.load(Ordering::SeqCst),
         0,
