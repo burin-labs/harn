@@ -122,3 +122,30 @@ native_tools = true
         "unset field filled from provider defaults"
     );
 }
+
+#[test]
+fn extends_never_reopens_an_explicitly_disabled_alias_group() {
+    for (higher, lower) in [
+        (
+            "vision_supported = false\nthinking = false\njson_schema = 'none'",
+            "vision = true\nthinking_modes = ['enabled']\nstructured_output = 'native'",
+        ),
+        (
+            "vision = false\nthinking_modes = []\nstructured_output = 'none'",
+            "vision_supported = true\nthinking = true\njson_schema = 'native'",
+        ),
+    ] {
+        let caps = extends_caps(&format!(
+            "[[provider.testprov]]\nmodel_match = 'test-*'\nextends = true\n{higher}\n\n[[provider.testprov]]\nmodel_match = 'test-*'\n{lower}\n"
+        ));
+        assert!(!caps.vision, "explicit vision denial wins: {higher}");
+        assert!(
+            caps.thinking_modes.is_empty(),
+            "explicit thinking denial wins: {higher}"
+        );
+        assert_eq!(
+            caps.structured_output, None,
+            "explicit structured-output denial wins: {higher}"
+        );
+    }
+}

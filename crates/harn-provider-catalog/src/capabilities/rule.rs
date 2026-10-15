@@ -19,551 +19,598 @@ use super::model::{
 };
 use super::pattern::{rule_matches, ModelPatterns};
 
-/// One row of the capability matrix.
-#[derive(Debug, Clone, Deserialize)]
-#[non_exhaustive]
-pub struct ProviderRule {
-    /// One glob pattern, or a list of aliases that share one contract.
-    pub model_match: ModelPatterns,
-    /// Optional `[major, minor]` lower bound. When set, the model ID
-    /// must parse via the provider's version extractor AND compare ≥
-    /// this tuple. Rules with an unparseable `version_min` for the
-    /// given model are skipped, not merged.
-    #[serde(default)]
-    pub version_min: Option<Vec<u32>>,
-    /// Per-rule fall-through. A matching rule with `extends = true`
-    /// contributes ONLY the fields it explicitly sets; resolution then
-    /// continues to later matching rules (user rules before built-in rules,
-    /// then the `provider_family` chain) and ultimately to provider /
-    /// built-in defaults to fill the rest. A matching rule without
-    /// `extends` (or with `extends = false`) terminates resolution exactly
-    /// as before this flag existed. This lets an overlay tweak one field of
-    /// a shipped row without copying the whole row verbatim (which drifts).
-    #[serde(default)]
-    pub extends: bool,
-    #[serde(default)]
-    pub native_tools: Option<bool>,
-    /// Message/request/response wire format used by shared helpers.
-    /// Known values are `openai`, `anthropic`, `gemini`, and `ollama`.
-    #[serde(default)]
-    pub message_wire_format: Option<String>,
-    /// Which synchronous endpoint family this route dispatches to when its
-    /// dialect serves more than one. Unset on a Gemini-dialect row resolves to
-    /// `gemini_generate_content`; unset elsewhere stays `None`. Independent of
-    /// `batch_wire_format` — Gemini Batch is `generateContent`-only regardless.
-    /// See [`LiveEndpointFamily`].
-    #[serde(default)]
-    pub live_endpoint_family: Option<LiveEndpointFamily>,
-    /// Wire protocol this route serves the `decision` operation over. Typed
-    /// and closed: an unknown value fails the capability load rather than
-    /// falling back to the structured-output chat backend. The catalog
-    /// `operations` set stays the admission owner; this says how an admitted
-    /// route is dialled. See [`DecisionProtocol`].
-    #[serde(default)]
-    pub decision_protocol: Option<DecisionProtocol>,
-    /// Question kinds this decision route accepts.
-    #[serde(default)]
-    pub decision_question_kinds: Option<Vec<DecisionQuestionKind>>,
-    /// Declared request ceilings for this decision route. See
-    /// [`DecisionLimits`].
-    #[serde(default)]
-    pub decision_limits: Option<DecisionLimits>,
-    /// Native tool definition wire shape. Known values are `openai`
-    /// and `anthropic`.
-    #[serde(default)]
-    pub native_tool_wire_format: Option<String>,
-    #[serde(default)]
-    pub defer_loading: Option<bool>,
-    #[serde(default)]
-    pub tool_search: Option<Vec<String>>,
-    /// Whether Harn supports this route through the provider's native
-    /// Responses-style API instead of generic chat completions.
-    #[serde(default)]
-    pub responses_api: Option<bool>,
-    /// Provider-hosted tools Harn can pass through without local execution.
-    #[serde(default)]
-    pub hosted_tools: Option<Vec<String>>,
-    /// Whether provider-hosted remote MCP connectors can be mediated by the
-    /// provider for this route.
-    #[serde(default)]
-    pub remote_mcp: Option<bool>,
-    /// Whether provider-managed previous-response conversation state is
-    /// available.
-    #[serde(default)]
-    pub conversation_state: Option<bool>,
-    /// Whether provider-side truncation/compaction controls are available.
-    #[serde(default)]
-    pub compaction: Option<bool>,
-    /// Whether provider-side background Responses jobs are available.
-    #[serde(default)]
-    pub background_mode: Option<bool>,
-    /// Whether this provider/model route can be submitted through an
-    /// asynchronous provider Batch API for offline, non-interactive work.
-    #[serde(default)]
-    pub batch_api: Option<bool>,
-    /// Provider batch request/result family. Known values are `openai`,
-    /// `anthropic_messages`, `gemini`, `mistral`, `fireworks`, `xai`, and
-    /// `bedrock`.
-    #[serde(default)]
-    pub batch_wire_format: Option<String>,
-    /// How a batch accepts work: `jsonl_file`, `inline_requests`, or
-    /// `jsonl_or_inline`.
-    #[serde(default)]
-    pub batch_input_mode: Option<String>,
-    /// Published percent discount versus synchronous inference for equivalent
-    /// model traffic, when known.
-    #[serde(default)]
-    pub batch_discount_percent: Option<u32>,
-    /// Target or maximum turnaround window in hours, when the provider
-    /// publishes one.
-    #[serde(default)]
-    pub batch_turnaround_hours: Option<u32>,
-    /// Maximum requests/items per provider batch, when published.
-    #[serde(default)]
-    pub batch_max_requests: Option<u64>,
-    /// Maximum submitted request-file/body bytes per provider batch, when
-    /// published.
-    #[serde(default)]
-    pub batch_max_input_bytes: Option<u64>,
-    /// Number of days provider-side result artifacts remain available, when
-    /// published.
-    #[serde(default)]
-    pub batch_result_retention_days: Option<u32>,
-    /// Result ordering contract. Known values: `custom_id_rejoin`,
-    /// `provider_ordered`, `unknown`.
-    #[serde(default)]
-    pub batch_result_ordering: Option<String>,
-    /// Partial-failure semantics. Known values: `per_request`, `whole_batch`,
-    /// `unknown`.
-    #[serde(default)]
-    pub batch_partial_failure: Option<String>,
-    /// Cancellation support. Known values: `supported`, `not_supported`,
-    /// `unknown`.
-    #[serde(default)]
-    pub batch_cancellation: Option<String>,
-    /// Provider-published storage/security notes safe to surface in catalogs
-    /// and receipts. Never store secrets here.
-    #[serde(default)]
-    pub batch_security_notes: Option<Vec<String>>,
-    /// Provider-published operational constraints for submit/retry/rejoin
-    /// behavior. Keep these non-secret and capability-level, not caller
-    /// branches.
-    #[serde(default)]
-    pub batch_operational_notes: Option<Vec<String>>,
-    /// Explicit provider regions where this model's batch API is available.
-    #[serde(default)]
-    pub batch_regions: Option<Vec<String>>,
-    /// Approval policy modes available when provider-hosted tools execute.
-    #[serde(default)]
-    pub tool_approval_policy: Option<String>,
-    #[serde(default)]
-    pub max_tools: Option<u32>,
-    #[serde(default)]
-    pub prompt_caching: Option<bool>,
-    /// Explicit prompt-cache TTL values this rule can honor on request.
-    /// Empty means the route may cache, but Harn has no explicit TTL knob for
-    /// it. Known values today: `5m`, `1h`.
-    #[serde(default)]
-    pub prompt_cache_ttls: Option<Vec<String>>,
-    /// Shortest prefix this route will actually cache, in tokens. Below this
-    /// length a `cache_control` breakpoint is accepted and then silently
-    /// ignored — no error, no `cache_creation_input_tokens`, just a full-price
-    /// prompt every request. The floor is a *per-model* fact, not a wire-dialect
-    /// one: on the Anthropic dialect it is 512 (Opus 5, Fable 5, Mythos 5),
-    /// 1024 (Opus 4.8, Sonnet 5/4.6/4.5), 2048 (Opus 4.7, Mythos Preview), or
-    /// 4096 (Opus 4.6/4.5, Haiku 4.5), and it is not monotonic across
-    /// generations. `None` falls back to the dialect default in
-    /// the runtime's cache-control profile.
-    #[serde(default)]
-    pub prompt_cache_min_prefix_tokens: Option<u32>,
-    /// Request-side cache breakpoint strategy for routes that require
-    /// `cache_control` to opt into provider prompt caching. Known values are
-    /// `none`, `top_level`, and `last_block`.
-    #[serde(default)]
-    pub cache_breakpoint_style: Option<CacheBreakpointStyle>,
-    /// Whether this provider/model route accepts image or other visual
-    /// input blocks through Harn's LLM message path.
-    #[serde(default)]
-    pub vision: Option<bool>,
-    /// Whether this provider/model route accepts audio input blocks
-    /// through Harn's LLM message path.
-    #[serde(default, alias = "audio_supported")]
-    pub audio: Option<bool>,
-    /// Whether this provider/model route accepts PDF/document input blocks
-    /// through Harn's LLM message path.
-    #[serde(default, alias = "pdf_supported")]
-    pub pdf: Option<bool>,
-    /// Whether this provider/model route accepts video input blocks
-    /// through Harn's LLM message path.
-    #[serde(default, alias = "video_supported")]
-    pub video: Option<bool>,
-    /// Whether uploaded file references can be reused in message content.
-    #[serde(default)]
-    pub files_api_supported: Option<bool>,
-    /// File-upload transport used by `std/files.upload`. Known values
-    /// are `anthropic` and `gemini`.
-    #[serde(default)]
-    pub file_upload_wire_format: Option<String>,
-    /// Structured-output transport strategy. Known values are:
-    /// `native`, `tool_use`, `format_kw`, and `none`.
-    #[serde(default)]
-    pub structured_output: Option<String>,
-    /// Legacy name retained for project overrides written before
-    /// `structured_output` became the canonical capability.
-    #[serde(default)]
-    pub json_schema: Option<String>,
-    /// Whether prompt sections should prefer XML-style tags such as
-    /// `<task>` / `<examples>` over Markdown headings.
-    #[serde(default)]
-    pub prefers_xml_scaffolding: Option<bool>,
-    /// Whether this model's tokenizer reserves `<tool_call>` / `</tool_call>`
-    /// as single special tokens (the native Hermes tool-call markers). When
-    /// true, harn remaps those delimiters to a non-special bracket form on the
-    /// wire to avoid degenerate opener repetition.
-    #[serde(default)]
-    pub reserved_tool_call_token: Option<bool>,
-    /// Whether prompt sections should prefer Markdown headings such as
-    /// `## Task` / `## Examples`.
-    #[serde(default)]
-    pub prefers_markdown_scaffolding: Option<bool>,
-    /// Preferred logical structured-output prompt shape. This is separate
-    /// from the transport-level `structured_output` strategy above.
-    /// Known values are `native_json`, `delimited`, and `xml_tagged`.
-    #[serde(default)]
-    pub structured_output_mode: Option<String>,
-    /// Whether the route accepts an assistant-role prefill message.
-    #[serde(default)]
-    pub supports_assistant_prefill: Option<bool>,
-    /// Whether durable instructions should use OpenAI's `developer` role
-    /// instead of `system`.
-    #[serde(default)]
-    pub prefers_role_developer: Option<bool>,
-    /// Whether text-rendered tool specifications should use XML wrappers
-    /// instead of JSON-schema prose.
-    #[serde(default)]
-    pub prefers_xml_tools: Option<bool>,
-    /// Preferred representation for model thinking/reasoning blocks in
-    /// transcript-like prompt context. Known values are `none`,
-    /// `thinking_blocks`, `reasoning_summary`, and `inline`.
-    #[serde(default)]
-    pub thinking_block_style: Option<String>,
-    /// Supported thinking/reasoning modes for this rule. Values are
-    /// script-facing mode names: `enabled`, `adaptive`, and `effort`.
-    #[serde(default)]
-    pub thinking_modes: Option<Vec<String>>,
-    /// Whether Anthropic interleaved thinking is supported for this
-    /// provider/model route.
-    #[serde(default)]
-    pub interleaved_thinking_supported: Option<bool>,
-    /// Anthropic beta features that should be requested for this route.
-    #[serde(default)]
-    pub anthropic_beta_features: Option<Vec<String>>,
-    /// Legacy override compatibility. New built-in rules should use
-    /// `thinking_modes` so the capability matrix preserves mode detail.
-    #[serde(default)]
-    pub thinking: Option<bool>,
-    /// Whether the model accepts image inputs in chat content.
-    #[serde(default)]
-    pub vision_supported: Option<bool>,
-    /// Whether image content blocks may reference remote URLs.
-    #[serde(default)]
-    pub image_url_input_supported: Option<bool>,
-    /// Carry `<think>...</think>` blocks in assistant history across turns.
-    /// Qwen3.6 exposes this as `chat_template_kwargs.preserve_thinking`;
-    /// Alibaba recommends enabling it for long-horizon agent loops so the
-    /// model doesn't re-derive context it already worked out in prior turns.
-    /// Anthropic's adaptive-thinking signature contract is stricter but plays
-    /// the same role there.
-    #[serde(default)]
-    pub preserve_thinking: Option<bool>,
-    /// Whether this transport honors `preserve_thinking` in chat-template options.
-    #[serde(default)]
-    pub honors_preserve_thinking_kwarg: Option<bool>,
-    /// Provider-visible replay policy for prior assistant reasoning. Typed so
-    /// unknown or misspelled policies fail capability loading.
-    #[serde(default)]
-    pub reasoning_round_trip: Option<ReasoningRoundTripPolicy>,
-    /// Provider-specific field that must receive Harn's private reasoning on
-    /// replayed assistant history. Typed so catalog typos fail at load time.
-    #[serde(default)]
-    pub reasoning_history_wire_field: Option<ReasoningHistoryWireField>,
-    /// Name of any server-side response parser that can transform model
-    /// bytes before Harn sees them. `none` means the provider returns the
-    /// model text/tool channel without an implicit parser.
-    #[serde(default)]
-    pub server_parser: Option<String>,
-    /// Whether provider-specific chat-template options are honored. Most
-    /// OpenAI-compatible servers call this `chat_template_kwargs`; Baseten's
-    /// Model APIs spell the same concept `chat_template_args`.
-    #[serde(default)]
-    pub honors_chat_template_kwargs: Option<bool>,
-    /// Request body field for provider-specific chat-template options when it
-    /// differs from the default `chat_template_kwargs`.
-    #[serde(default)]
-    pub chat_template_options_field: Option<String>,
-    /// Whether this route requires OpenAI's `max_completion_tokens`
-    /// request field instead of legacy `max_tokens`.
-    #[serde(default)]
-    pub requires_completion_tokens: Option<bool>,
-    /// Whether this route is served ONLY by the provider's Responses-style
-    /// API and rejects `/v1/chat/completions` (OpenAI `*-codex` models
-    /// return HTTP 404 "Use the v1/responses endpoint instead" on the chat
-    /// endpoint). When set, Harn routes the call through the Responses
-    /// provider even when the caller did not explicitly request
-    /// `api_mode: "responses"`.
-    #[serde(default)]
-    pub chat_completions_unsupported: Option<bool>,
-    /// Whether function tools combined with enabled reasoning must use the
-    /// Responses API even though reasoning-off calls remain compatible with
-    /// Chat Completions.
-    #[serde(default)]
-    pub reasoning_tools_require_responses: Option<bool>,
-    /// Whether this route rejects non-streaming chat-completion requests.
-    /// Harn forces streaming for such routes so callers can keep provider-
-    /// neutral `stream` preferences.
-    #[serde(default)]
-    pub requires_streaming: Option<bool>,
-    /// Legacy spelling of "this route accepts Harn's provider-neutral reasoning
-    /// effort control". Prefer `thinking_modes = [..., "effort"]`, which owns
-    /// the answer; `true` here is absorbed into the modes by
-    /// `rule_thinking_modes`, and `false` is not a way to remove `effort` that
-    /// the modes declare. Providers project the capability to their native
-    /// field (for example OpenAI `reasoning_effort` or Anthropic
-    /// `output_config.effort`).
-    #[serde(default)]
-    pub reasoning_effort_supported: Option<bool>,
-    /// Accepted effort values for routes that expose a narrower subset than
-    /// Harn's provider-neutral enum. Empty means "unknown/all". A non-empty
-    /// ladder also asserts that the route takes effort at all, so it is
-    /// absorbed into `thinking_modes` the same way the legacy flag is --
-    /// declaring rungs a route is not allowed to be asked for was the original
-    /// contradiction this absorption removes.
-    ///
-    /// Verify a ladder with `harn provider effort-probe` rather than asserting
-    /// it; the rungs are a claim about a live route, not a schema choice.
-    #[serde(default)]
-    pub reasoning_effort_levels: Option<Vec<String>>,
-    /// Whether this route accepts effort "none" as a true reasoning-off
-    /// setting. Older GPT-5 variants support effort but only floor at
-    /// `minimal`.
-    #[serde(default)]
-    pub reasoning_none_supported: Option<bool>,
-    /// Maximum thinking-budget tokens this model accepts for its high/xhigh/max
-    /// reasoning levels, when the provider takes an explicit token budget rather
-    /// than an effort enum. The canonical case is the native Gemini API
-    /// `generationConfig.thinkingConfig.thinkingBudget` field, whose ceiling
-    /// differs by model (Gemini 2.5 Flash caps at 24576, Pro at 32768).
-    /// Declared alongside the model's other wire capabilities instead of a
-    /// hard-coded `model.contains("flash")` branch in the provider.
-    #[serde(default)]
-    pub max_thinking_budget: Option<i64>,
-    /// Whether this route accepts an explicit disabled/off reasoning switch.
-    /// Some routes require reasoning and reject the provider's disabled shape.
-    #[serde(default)]
-    pub reasoning_disable_supported: Option<bool>,
-    /// The Anthropic `thinking.type` that turns thinking off where
-    /// `reasoning_disable_supported` is true. Unset means `disabled`.
-    #[serde(default)]
-    pub thinking_off_type: Option<ThinkingOffType>,
-    /// Whether this model performs *tool calls inside its reasoning channel*,
-    /// so disabling reasoning silently breaks tool calling. The canonical case
-    /// is the OpenAI gpt-oss (Harmony) family: with reasoning disabled it emits
-    /// 0 tool_calls and a tiny billed-noncommittal completion; with reasoning
-    /// enabled (even `low`) it emits clean native tool calls. This is the
-    /// *opposite* of the Qwen3 quirk (Qwen narrates tool intent in the
-    /// reasoning trace and emits zero `tool_calls`, so Qwen needs reasoning
-    /// OFF for tools). When set, `reasoning_policy` refuses to downgrade the
-    /// auto reasoning level to `off` for tool-bearing tasks (agent/code/verify)
-    /// — flooring instead to the lowest supported effort — so no future
-    /// auto-policy default or session pin can re-introduce the
-    /// billed-noncommittal failure at the data layer.
-    #[serde(default)]
-    pub reasoning_required_for_tools: Option<bool>,
-    /// Whether reasoning-only clean stops may be promoted into visible text.
-    /// Disable this for providers whose `reasoning` field is always private
-    /// trace, even when `content` is empty.
-    #[serde(default)]
-    pub reasoning_text_promotable: Option<bool>,
-    /// Provider-specific reasoning request shape for OpenAI-compatible
-    /// transports. Known values are `openrouter`, `enabled`, and `minimax`.
-    #[serde(default)]
-    pub reasoning_wire_format: Option<String>,
-    /// Caller-selected portable generation options this route permits normally
-    /// but rejects while reasoning is enabled; `*_supported` remains route-wide.
-    #[serde(default)]
-    pub reasoning_excluded_portable_options: Option<Vec<super::PortableOption>>,
-    /// Options admitted only with an explicitly selected, supported effort.
-    /// This overrides route-wide support for the listed options; an unset
-    /// request never satisfies the condition, even when its default is off.
-    #[serde(default)]
-    pub portable_option_effort_support:
-        Option<std::collections::BTreeMap<super::PortableOption, Vec<super::ReasoningEffort>>>,
-    /// A changing pool admits options by routing to currently compatible
-    /// backends; one controlled refusal does not establish stable non-support.
-    #[serde(default)]
-    pub portable_option_qualification: Option<super::PortableOptionQualification>,
-    #[serde(default)]
-    pub seed_supported: Option<bool>,
-    #[serde(default)]
-    pub top_k_supported: Option<bool>,
-    #[serde(default)]
-    pub temperature_supported: Option<bool>,
-    #[serde(default)]
-    pub top_p_supported: Option<bool>,
-    #[serde(default)]
-    pub frequency_penalty_supported: Option<bool>,
-    #[serde(default)]
-    pub presence_penalty_supported: Option<bool>,
-    /// Whether the route accepts OpenAI `stop` sequences. `false` strips the
-    /// field before dispatch (xAI's Grok models reject it with HTTP 400).
-    #[serde(default)]
-    pub stop_supported: Option<bool>,
-    #[serde(default)]
-    pub advanced_generation_options: Option<Vec<super::PortableOption>>,
-    /// Accepted provider-native `tool_choice` modes. Empty means unrestricted
-    /// or unknown. Use this for routes whose native tools work, but whose API
-    /// rejects forced/specified tool choices.
-    #[serde(default)]
-    pub allowed_tool_choice_modes: Option<Vec<String>>,
-    /// Whether a single assistant message may contain multiple tool calls.
-    /// Some OpenAI-compatible providers reject replayed history with more than
-    /// one `tool_calls[]` entry even when the calls were parsed from Harn's text
-    /// tool protocol, so the request builder must serialize history as
-    /// one-call assistant turns for those routes.
-    #[serde(default)]
-    pub supports_parallel_tool_calls: Option<bool>,
-    /// Whether this route requires `parallel_tool_calls: false` on the wire.
-    #[serde(default)]
-    pub requires_parallel_tool_calls_false: Option<bool>,
-    /// Whether the route rejects `response_format` when native `tools` are
-    /// present. Strict OpenAI-compatible servers such as Cerebras accept each
-    /// feature alone but reject the pair together.
-    #[serde(default)]
-    pub tools_exclude_response_format: Option<bool>,
-    /// Preferred endpoint family for this provider/model route. Values
-    /// are descriptive labels consumed by providers, e.g.
-    /// `/api/generate-raw` for Ollama raw prompt bypass.
-    #[serde(default)]
-    pub recommended_endpoint: Option<String>,
-    /// Whether Harn's text-tool protocol (`<tool_call>name({...})`) can
-    /// survive the provider route and return in the visible response body.
-    #[serde(default)]
-    pub text_tool_wire_format_supported: Option<bool>,
-    /// Preferred tool-calling mode for this provider/model route when
-    /// callers do not explicitly choose `tool_format`. This lets the
-    /// capability matrix route around known provider-native regressions
-    /// without making presets branch on model names.
-    #[serde(default)]
-    pub preferred_tool_format: Option<String>,
-    /// Empirical native/text interchangeability status for this route.
-    /// Known values are descriptive, not gates: `interchangeable`,
-    /// `native_unreliable`, `text_unreliable`, `native_only`,
-    /// `text_only`, and `unknown`.
-    #[serde(default)]
-    pub tool_mode_parity: Option<String>,
-    /// Short human-readable note explaining `tool_mode_parity`.
-    #[serde(default)]
-    pub tool_mode_parity_notes: Option<String>,
-    /// Receipt or structural sibling link for this row's native/text
-    /// decision. Required on self-hosted rows that set `native_tools` or
-    /// `preferred_tool_format` (#6829).
-    #[serde(default)]
-    pub tool_format_justification: Option<ToolFormatJustification>,
-    /// In-prompt directive that disables this model's "thinking" mode when
-    /// the API doesn't expose a first-class field (or exposes it
-    /// inconsistently across templates / quantizations). For Qwen3 family
-    /// chat templates this is `/no_think`. When `thinking: false` is
-    /// requested and this is set, Harn auto-prepends the directive to the
-    /// system message so script authors don't need to know it exists.
-    #[serde(default)]
-    pub thinking_disable_directive: Option<String>,
-    /// Per-task auto-policy reasoning-level overrides for this route.
-    /// Keys are task labels (`agent`, `verify`, `chat`, `summarize`,
-    /// `code`); values are reasoning levels (`off`, `minimal`, `low`,
-    /// `medium`, `high`, `xhigh`, `max`). Consulted by `reasoning_policy` only
-    /// when policy resolves to `auto` — explicit policies always win.
-    ///
-    /// Use this to declare known per-model regressions that should
-    /// flip the auto-policy default, instead of hard-coding the model/
-    /// provider pattern in resolver code. The canonical example is the
-    /// Qwen3 tool-call regression — `{ agent = "off" }` disables
-    /// reasoning whenever a script registers tools with that route,
-    /// matching Qwen's own published guidance.
-    #[serde(default)]
-    pub auto_reasoning_overrides: Option<BTreeMap<String, String>>,
-    /// OpenRouter upstream provider names that must be excluded from routing
-    /// for this `(provider, model)` row. Materialized into the request body's
-    /// `provider.ignore` array (see
-    /// the runtime's OpenRouter route-denylist adapter).
-    /// This is a data-driven route-around for upstreams that serve a route
-    /// incorrectly while still advertising the model — the canonical case is
-    /// OpenRouter's `Ambient` upstream billing reasoning tokens for
-    /// `qwen/qwen3.6-35b-a3b` and then finishing with empty `tool_calls`,
-    /// while Parasail / AtlasCloud / AkashML serve the identical request
-    /// natively. Only consulted for the `openrouter` provider.
-    #[serde(default)]
-    pub provider_route_denylist: Option<Vec<String>>,
-    /// OpenRouter upstream provider names this `(provider, model)` row is
-    /// PINNED to, in preference order. Materialized into the request body's
-    /// `provider.order` array with `allow_fallbacks = false` (see
-    /// the runtime's OpenRouter provider-order adapter),
-    /// so OpenRouter only ever routes the model to these known-clean upstreams
-    /// and never silently falls back to a sketchier one. This is the
-    /// *allowlist* counterpart to [`Self::provider_route_denylist`]: prefer it
-    /// when the bad upstreams are intermittent / hard to enumerate but the
-    /// clean ones are few and stable. The canonical case is OpenRouter's
-    /// `openai/gpt-oss-*` route, which fans out across ~17 upstreams in a
-    /// sub-provider lottery; some mis-serialize the Harmony tool call even with
-    /// reasoning ON (billed-noncommittal: 0 tool_calls), while Cerebras and
-    /// Groq serve it cleanly. Only consulted for the `openrouter` provider. An
-    /// empty / unset list means "no pin" (free OpenRouter routing). When both a
-    /// pin and a denylist are present the pin wins (a closed allowlist already
-    /// excludes everything not on it). Validated by the footgun gate in
-    /// the runtime's capability audit.
-    #[serde(default)]
-    pub openrouter_provider_order: Option<Vec<String>>,
-    /// Serving-quality / precision trust verdict for this `(provider, model)`
-    /// route. A provider can be live and fast yet still serve a model at
-    /// DEGRADED quality (e.g. an undocumented quantization) or reject otherwise
-    /// valid requests, silently contaminating any eval/meter that trusts its
-    /// numbers. This is the data-driven sibling of [`Self::provider_route_denylist`]
-    /// / [`Self::openrouter_provider_order`]: instead of routing *around* a bad
-    /// upstream, it labels the route's measured precision so tooling (the
-    /// meter precision canary) can refuse to trust a `degraded` route and flag a
-    /// `throttled` one. Known values are `trusted` (full-precision verified
-    /// against a reference), `degraded` (proven to serve at reduced quality),
-    /// `throttled` (full-precision but rate-limited to unusable timing), and
-    /// `unverified` (no verdict — treated the same as unset). Unset means
-    /// `unverified`.
-    #[serde(default)]
-    pub serving_precision: Option<String>,
-    /// How the neutral `computer` tool projects onto this route's native
-    /// computer-use surface. `harn-vm` reads this to decide whether to inject
-    /// a provider-native computer tool (and suppress the plain function copy)
-    /// or leave the function-schema tool untouched. Known values are
-    /// `native_anthropic` (Anthropic `computer_20251124`), `native_openai`
-    /// (OpenAI Responses `computer`), `grounded` (element/mark addressing
-    /// resolved locally), and `function` (generic function-schema fallback).
-    /// Unset means the route has no computer-use surface.
-    #[serde(default)]
-    pub computer_use_style: Option<ComputerUseStyle>,
-    /// Screenshot downscaling policy applied before the image reaches the
-    /// model. `xga` fits within 1024x768 preserving aspect (Anthropic);
-    /// `original` is identity (OpenAI). Unset means unset.
-    #[serde(default)]
-    pub screenshot_scaling: Option<ScreenshotScaling>,
-    /// Whether this route requires echoing acknowledged safety checks on the
-    /// computer-use follow-up turn (OpenAI Responses surfaces
-    /// `pending_safety_checks` that must be echoed as
-    /// `acknowledged_safety_checks`). Unset resolves to `false`.
-    #[serde(default)]
-    pub safety_ack_flow: Option<bool>,
-    /// How this route carries an interleaved `system`/`developer` message:
-    /// `inline`, `native_directive`, or `fold`. Unset derives from the wire
-    /// dialect (OpenAI/Ollama → inline, else fold). See
-    /// [`SystemMessagePlacement`].
-    #[serde(default)]
-    pub system_message_placement: Option<SystemMessagePlacement>,
+/// The declaration owns merging and the empty projection. Identity fields
+/// are retained; alias groups fill together so a lower-priority spelling can
+/// never override an explicitly set alias.
+macro_rules! provider_rule {
+    (
+        identity { $($(#[$ia:meta])* pub $identity:ident: $it:ty,)* }
+        fields { $($(#[$fa:meta])* pub $field:ident: $ft:ty,)* }
+        aliases { $( { $($(#[$aa:meta])* pub $alias:ident: $at:ty,)* } )* }
+    ) => {
+        #[derive(Debug, Clone, Deserialize)]
+        #[non_exhaustive]
+        pub struct ProviderRule {
+            $($(#[$ia])* pub $identity: $it,)*
+            $($(#[$fa])* pub $field: $ft,)*
+            $($($(#[$aa])* pub $alias: $at,)*)*
+        }
+
+        impl ProviderRule {
+            pub(super) fn for_defaults() -> Self {
+                Self {
+                    model_match: ModelPatterns::One("*".to_string()),
+                    version_min: None,
+                    extends: false,
+                    $($field: None,)*
+                    $($($alias: None,)*)*
+                }
+            }
+
+            fn fill_missing_from(&mut self, other: &Self) {
+                $(fill_opt(&mut self.$field, &other.$field);)*
+                $(if $(self.$alias.is_none())&&* {
+                    $(self.$alias.clone_from(&other.$alias);)*
+                })*
+            }
+        }
+    };
+}
+
+provider_rule! {
+    identity {
+        /// One glob pattern, or a list of aliases that share one contract.
+        pub model_match: ModelPatterns,
+        /// Optional `[major, minor]` lower bound. When set, the model ID
+        /// must parse via the provider's version extractor AND compare ≥
+        /// this tuple. Rules with an unparseable `version_min` for the
+        /// given model are skipped, not merged.
+        #[serde(default)]
+        pub version_min: Option<Vec<u32>>,
+        /// Per-rule fall-through. A matching rule with `extends = true`
+        /// contributes ONLY the fields it explicitly sets; resolution then
+        /// continues to later matching rules (user rules before built-in rules,
+        /// then the `provider_family` chain) and ultimately to provider /
+        /// built-in defaults to fill the rest. A matching rule without
+        /// `extends` (or with `extends = false`) terminates resolution exactly
+        /// as before this flag existed. This lets an overlay tweak one field of
+        /// a shipped row without copying the whole row verbatim (which drifts).
+        #[serde(default)]
+        pub extends: bool,
+    }
+    fields {
+        #[serde(default)]
+        pub native_tools: Option<bool>,
+        /// Message/request/response wire format used by shared helpers.
+        /// Known values are `openai`, `anthropic`, `gemini`, and `ollama`.
+        #[serde(default)]
+        pub message_wire_format: Option<String>,
+        /// Which synchronous endpoint family this route dispatches to when its
+        /// dialect serves more than one. Unset on a Gemini-dialect row resolves to
+        /// `gemini_generate_content`; unset elsewhere stays `None`. Independent of
+        /// `batch_wire_format` — Gemini Batch is `generateContent`-only regardless.
+        /// See [`LiveEndpointFamily`].
+        #[serde(default)]
+        pub live_endpoint_family: Option<LiveEndpointFamily>,
+        /// Wire protocol this route serves the `decision` operation over. Typed
+        /// and closed: an unknown value fails the capability load rather than
+        /// falling back to the structured-output chat backend. The catalog
+        /// `operations` set stays the admission owner; this says how an admitted
+        /// route is dialled. See [`DecisionProtocol`].
+        #[serde(default)]
+        pub decision_protocol: Option<DecisionProtocol>,
+        /// Question kinds this decision route accepts.
+        #[serde(default)]
+        pub decision_question_kinds: Option<Vec<DecisionQuestionKind>>,
+        /// Declared request ceilings for this decision route. See
+        /// [`DecisionLimits`].
+        #[serde(default)]
+        pub decision_limits: Option<DecisionLimits>,
+        /// Native tool definition wire shape. Known values are `openai`
+        /// and `anthropic`.
+        #[serde(default)]
+        pub native_tool_wire_format: Option<String>,
+        #[serde(default)]
+        pub defer_loading: Option<bool>,
+        #[serde(default)]
+        pub tool_search: Option<Vec<String>>,
+        /// Whether Harn supports this route through the provider's native
+        /// Responses-style API instead of generic chat completions.
+        #[serde(default)]
+        pub responses_api: Option<bool>,
+        /// Provider-hosted tools Harn can pass through without local execution.
+        #[serde(default)]
+        pub hosted_tools: Option<Vec<String>>,
+        /// Whether provider-hosted remote MCP connectors can be mediated by the
+        /// provider for this route.
+        #[serde(default)]
+        pub remote_mcp: Option<bool>,
+        /// Whether provider-managed previous-response conversation state is
+        /// available.
+        #[serde(default)]
+        pub conversation_state: Option<bool>,
+        /// Whether provider-side truncation/compaction controls are available.
+        #[serde(default)]
+        pub compaction: Option<bool>,
+        /// Whether provider-side background Responses jobs are available.
+        #[serde(default)]
+        pub background_mode: Option<bool>,
+        /// Whether this provider/model route can be submitted through an
+        /// asynchronous provider Batch API for offline, non-interactive work.
+        #[serde(default)]
+        pub batch_api: Option<bool>,
+        /// Provider batch request/result family. Known values are `openai`,
+        /// `anthropic_messages`, `gemini`, `mistral`, `fireworks`, `xai`, and
+        /// `bedrock`.
+        #[serde(default)]
+        pub batch_wire_format: Option<String>,
+        /// How a batch accepts work: `jsonl_file`, `inline_requests`, or
+        /// `jsonl_or_inline`.
+        #[serde(default)]
+        pub batch_input_mode: Option<String>,
+        /// Published percent discount versus synchronous inference for equivalent
+        /// model traffic, when known.
+        #[serde(default)]
+        pub batch_discount_percent: Option<u32>,
+        /// Target or maximum turnaround window in hours, when the provider
+        /// publishes one.
+        #[serde(default)]
+        pub batch_turnaround_hours: Option<u32>,
+        /// Maximum requests/items per provider batch, when published.
+        #[serde(default)]
+        pub batch_max_requests: Option<u64>,
+        /// Maximum submitted request-file/body bytes per provider batch, when
+        /// published.
+        #[serde(default)]
+        pub batch_max_input_bytes: Option<u64>,
+        /// Number of days provider-side result artifacts remain available, when
+        /// published.
+        #[serde(default)]
+        pub batch_result_retention_days: Option<u32>,
+        /// Result ordering contract. Known values: `custom_id_rejoin`,
+        /// `provider_ordered`, `unknown`.
+        #[serde(default)]
+        pub batch_result_ordering: Option<String>,
+        /// Partial-failure semantics. Known values: `per_request`, `whole_batch`,
+        /// `unknown`.
+        #[serde(default)]
+        pub batch_partial_failure: Option<String>,
+        /// Cancellation support. Known values: `supported`, `not_supported`,
+        /// `unknown`.
+        #[serde(default)]
+        pub batch_cancellation: Option<String>,
+        /// Provider-published storage/security notes safe to surface in catalogs
+        /// and receipts. Never store secrets here.
+        #[serde(default)]
+        pub batch_security_notes: Option<Vec<String>>,
+        /// Provider-published operational constraints for submit/retry/rejoin
+        /// behavior. Keep these non-secret and capability-level, not caller
+        /// branches.
+        #[serde(default)]
+        pub batch_operational_notes: Option<Vec<String>>,
+        /// Explicit provider regions where this model's batch API is available.
+        #[serde(default)]
+        pub batch_regions: Option<Vec<String>>,
+        /// Approval policy modes available when provider-hosted tools execute.
+        #[serde(default)]
+        pub tool_approval_policy: Option<String>,
+        #[serde(default)]
+        pub max_tools: Option<u32>,
+        #[serde(default)]
+        pub prompt_caching: Option<bool>,
+        /// Explicit prompt-cache TTL values this rule can honor on request.
+        /// Empty means the route may cache, but Harn has no explicit TTL knob for
+        /// it. Known values today: `5m`, `1h`.
+        #[serde(default)]
+        pub prompt_cache_ttls: Option<Vec<String>>,
+        /// Shortest prefix this route will actually cache, in tokens. Below this
+        /// length a `cache_control` breakpoint is accepted and then silently
+        /// ignored — no error, no `cache_creation_input_tokens`, just a full-price
+        /// prompt every request. The floor is a *per-model* fact, not a wire-dialect
+        /// one: on the Anthropic dialect it is 512 (Opus 5, Fable 5, Mythos 5),
+        /// 1024 (Opus 4.8, Sonnet 5/4.6/4.5), 2048 (Opus 4.7, Mythos Preview), or
+        /// 4096 (Opus 4.6/4.5, Haiku 4.5), and it is not monotonic across
+        /// generations. `None` falls back to the dialect default in
+        /// the runtime's cache-control profile.
+        #[serde(default)]
+        pub prompt_cache_min_prefix_tokens: Option<u32>,
+        /// Request-side cache breakpoint strategy for routes that require
+        /// `cache_control` to opt into provider prompt caching. Known values are
+        /// `none`, `top_level`, and `last_block`.
+        #[serde(default)]
+        pub cache_breakpoint_style: Option<CacheBreakpointStyle>,
+        /// Whether this provider/model route accepts audio input blocks
+        /// through Harn's LLM message path.
+        #[serde(default, alias = "audio_supported")]
+        pub audio: Option<bool>,
+        /// Whether this provider/model route accepts PDF/document input blocks
+        /// through Harn's LLM message path.
+        #[serde(default, alias = "pdf_supported")]
+        pub pdf: Option<bool>,
+        /// Whether this provider/model route accepts video input blocks
+        /// through Harn's LLM message path.
+        #[serde(default, alias = "video_supported")]
+        pub video: Option<bool>,
+        /// Whether uploaded file references can be reused in message content.
+        #[serde(default)]
+        pub files_api_supported: Option<bool>,
+        /// File-upload transport used by `std/files.upload`. Known values
+        /// are `anthropic` and `gemini`.
+        #[serde(default)]
+        pub file_upload_wire_format: Option<String>,
+        /// Whether prompt sections should prefer XML-style tags such as
+        /// `<task>` / `<examples>` over Markdown headings.
+        #[serde(default)]
+        pub prefers_xml_scaffolding: Option<bool>,
+        /// Whether this model's tokenizer reserves `<tool_call>` / `</tool_call>`
+        /// as single special tokens (the native Hermes tool-call markers). When
+        /// true, harn remaps those delimiters to a non-special bracket form on the
+        /// wire to avoid degenerate opener repetition.
+        #[serde(default)]
+        pub reserved_tool_call_token: Option<bool>,
+        /// Whether prompt sections should prefer Markdown headings such as
+        /// `## Task` / `## Examples`.
+        #[serde(default)]
+        pub prefers_markdown_scaffolding: Option<bool>,
+        /// Preferred logical structured-output prompt shape. This is separate
+        /// from the transport-level `structured_output` strategy above.
+        /// Known values are `native_json`, `delimited`, and `xml_tagged`.
+        #[serde(default)]
+        pub structured_output_mode: Option<String>,
+        /// Whether the route accepts an assistant-role prefill message.
+        #[serde(default)]
+        pub supports_assistant_prefill: Option<bool>,
+        /// Whether durable instructions should use OpenAI's `developer` role
+        /// instead of `system`.
+        #[serde(default)]
+        pub prefers_role_developer: Option<bool>,
+        /// Whether text-rendered tool specifications should use XML wrappers
+        /// instead of JSON-schema prose.
+        #[serde(default)]
+        pub prefers_xml_tools: Option<bool>,
+        /// Preferred representation for model thinking/reasoning blocks in
+        /// transcript-like prompt context. Known values are `none`,
+        /// `thinking_blocks`, `reasoning_summary`, and `inline`.
+        #[serde(default)]
+        pub thinking_block_style: Option<String>,
+        /// Whether Anthropic interleaved thinking is supported for this
+        /// provider/model route.
+        #[serde(default)]
+        pub interleaved_thinking_supported: Option<bool>,
+        /// Anthropic beta features that should be requested for this route.
+        #[serde(default)]
+        pub anthropic_beta_features: Option<Vec<String>>,
+        /// Whether image content blocks may reference remote URLs.
+        #[serde(default)]
+        pub image_url_input_supported: Option<bool>,
+        /// Carry `<think>...</think>` blocks in assistant history across turns.
+        /// Qwen3.6 exposes this as `chat_template_kwargs.preserve_thinking`;
+        /// Alibaba recommends enabling it for long-horizon agent loops so the
+        /// model doesn't re-derive context it already worked out in prior turns.
+        /// Anthropic's adaptive-thinking signature contract is stricter but plays
+        /// the same role there.
+        #[serde(default)]
+        pub preserve_thinking: Option<bool>,
+        /// Whether this transport honors `preserve_thinking` in chat-template options.
+        #[serde(default)]
+        pub honors_preserve_thinking_kwarg: Option<bool>,
+        /// Provider-visible replay policy for prior assistant reasoning. Typed so
+        /// unknown or misspelled policies fail capability loading.
+        #[serde(default)]
+        pub reasoning_round_trip: Option<ReasoningRoundTripPolicy>,
+        /// Provider-specific field that must receive Harn's private reasoning on
+        /// replayed assistant history. Typed so catalog typos fail at load time.
+        #[serde(default)]
+        pub reasoning_history_wire_field: Option<ReasoningHistoryWireField>,
+        /// Name of any server-side response parser that can transform model
+        /// bytes before Harn sees them. `none` means the provider returns the
+        /// model text/tool channel without an implicit parser.
+        #[serde(default)]
+        pub server_parser: Option<String>,
+        /// Whether provider-specific chat-template options are honored. Most
+        /// OpenAI-compatible servers call this `chat_template_kwargs`; Baseten's
+        /// Model APIs spell the same concept `chat_template_args`.
+        #[serde(default)]
+        pub honors_chat_template_kwargs: Option<bool>,
+        /// Request body field for provider-specific chat-template options when it
+        /// differs from the default `chat_template_kwargs`.
+        #[serde(default)]
+        pub chat_template_options_field: Option<String>,
+        /// Whether this route requires OpenAI's `max_completion_tokens`
+        /// request field instead of legacy `max_tokens`.
+        #[serde(default)]
+        pub requires_completion_tokens: Option<bool>,
+        /// Whether this route is served ONLY by the provider's Responses-style
+        /// API and rejects `/v1/chat/completions` (OpenAI `*-codex` models
+        /// return HTTP 404 "Use the v1/responses endpoint instead" on the chat
+        /// endpoint). When set, Harn routes the call through the Responses
+        /// provider even when the caller did not explicitly request
+        /// `api_mode: "responses"`.
+        #[serde(default)]
+        pub chat_completions_unsupported: Option<bool>,
+        /// Whether function tools combined with enabled reasoning must use the
+        /// Responses API even though reasoning-off calls remain compatible with
+        /// Chat Completions.
+        #[serde(default)]
+        pub reasoning_tools_require_responses: Option<bool>,
+        /// Whether this route rejects non-streaming chat-completion requests.
+        /// Harn forces streaming for such routes so callers can keep provider-
+        /// neutral `stream` preferences.
+        #[serde(default)]
+        pub requires_streaming: Option<bool>,
+        /// Legacy spelling of "this route accepts Harn's provider-neutral reasoning
+        /// effort control". Prefer `thinking_modes = [..., "effort"]`, which owns
+        /// the answer; `true` here is absorbed into the modes by
+        /// `rule_thinking_modes`, and `false` is not a way to remove `effort` that
+        /// the modes declare. Providers project the capability to their native
+        /// field (for example OpenAI `reasoning_effort` or Anthropic
+        /// `output_config.effort`).
+        #[serde(default)]
+        pub reasoning_effort_supported: Option<bool>,
+        /// Accepted effort values for routes that expose a narrower subset than
+        /// Harn's provider-neutral enum. Empty means "unknown/all". A non-empty
+        /// ladder also asserts that the route takes effort at all, so it is
+        /// absorbed into `thinking_modes` the same way the legacy flag is --
+        /// declaring rungs a route is not allowed to be asked for was the original
+        /// contradiction this absorption removes.
+        ///
+        /// Verify a ladder with `harn provider effort-probe` rather than asserting
+        /// it; the rungs are a claim about a live route, not a schema choice.
+        #[serde(default)]
+        pub reasoning_effort_levels: Option<Vec<String>>,
+        /// Whether this route accepts effort "none" as a true reasoning-off
+        /// setting. Older GPT-5 variants support effort but only floor at
+        /// `minimal`.
+        #[serde(default)]
+        pub reasoning_none_supported: Option<bool>,
+        /// Maximum thinking-budget tokens this model accepts for its high/xhigh/max
+        /// reasoning levels, when the provider takes an explicit token budget rather
+        /// than an effort enum. The canonical case is the native Gemini API
+        /// `generationConfig.thinkingConfig.thinkingBudget` field, whose ceiling
+        /// differs by model (Gemini 2.5 Flash caps at 24576, Pro at 32768).
+        /// Declared alongside the model's other wire capabilities instead of a
+        /// hard-coded `model.contains("flash")` branch in the provider.
+        #[serde(default)]
+        pub max_thinking_budget: Option<i64>,
+        /// Whether this route accepts an explicit disabled/off reasoning switch.
+        /// Some routes require reasoning and reject the provider's disabled shape.
+        #[serde(default)]
+        pub reasoning_disable_supported: Option<bool>,
+        /// The Anthropic `thinking.type` that turns thinking off where
+        /// `reasoning_disable_supported` is true. Unset means `disabled`.
+        #[serde(default)]
+        pub thinking_off_type: Option<ThinkingOffType>,
+        /// Whether this model performs *tool calls inside its reasoning channel*,
+        /// so disabling reasoning silently breaks tool calling. The canonical case
+        /// is the OpenAI gpt-oss (Harmony) family: with reasoning disabled it emits
+        /// 0 tool_calls and a tiny billed-noncommittal completion; with reasoning
+        /// enabled (even `low`) it emits clean native tool calls. This is the
+        /// *opposite* of the Qwen3 quirk (Qwen narrates tool intent in the
+        /// reasoning trace and emits zero `tool_calls`, so Qwen needs reasoning
+        /// OFF for tools). When set, `reasoning_policy` refuses to downgrade the
+        /// auto reasoning level to `off` for tool-bearing tasks (agent/code/verify)
+        /// — flooring instead to the lowest supported effort — so no future
+        /// auto-policy default or session pin can re-introduce the
+        /// billed-noncommittal failure at the data layer.
+        #[serde(default)]
+        pub reasoning_required_for_tools: Option<bool>,
+        /// Whether reasoning-only clean stops may be promoted into visible text.
+        /// Disable this for providers whose `reasoning` field is always private
+        /// trace, even when `content` is empty.
+        #[serde(default)]
+        pub reasoning_text_promotable: Option<bool>,
+        /// Provider-specific reasoning request shape for OpenAI-compatible
+        /// transports. Known values are `openrouter`, `enabled`, and `minimax`.
+        #[serde(default)]
+        pub reasoning_wire_format: Option<String>,
+        /// Caller-selected portable generation options this route permits normally
+        /// but rejects while reasoning is enabled; `*_supported` remains route-wide.
+        #[serde(default)]
+        pub reasoning_excluded_portable_options: Option<Vec<super::PortableOption>>,
+        /// Options admitted only with an explicitly selected, supported effort.
+        /// This overrides route-wide support for the listed options; an unset
+        /// request never satisfies the condition, even when its default is off.
+        #[serde(default)]
+        pub portable_option_effort_support:
+            Option<std::collections::BTreeMap<super::PortableOption, Vec<super::ReasoningEffort>>>,
+        /// A changing pool admits options by routing to currently compatible
+        /// backends; one controlled refusal does not establish stable non-support.
+        #[serde(default)]
+        pub portable_option_qualification: Option<super::PortableOptionQualification>,
+        #[serde(default)]
+        pub seed_supported: Option<bool>,
+        #[serde(default)]
+        pub top_k_supported: Option<bool>,
+        #[serde(default)]
+        pub temperature_supported: Option<bool>,
+        #[serde(default)]
+        pub top_p_supported: Option<bool>,
+        #[serde(default)]
+        pub frequency_penalty_supported: Option<bool>,
+        #[serde(default)]
+        pub presence_penalty_supported: Option<bool>,
+        /// Whether the route accepts OpenAI `stop` sequences. `false` strips the
+        /// field before dispatch (xAI's Grok models reject it with HTTP 400).
+        #[serde(default)]
+        pub stop_supported: Option<bool>,
+        #[serde(default)]
+        pub advanced_generation_options: Option<Vec<super::PortableOption>>,
+        /// Accepted provider-native `tool_choice` modes. Empty means unrestricted
+        /// or unknown. Use this for routes whose native tools work, but whose API
+        /// rejects forced/specified tool choices.
+        #[serde(default)]
+        pub allowed_tool_choice_modes: Option<Vec<String>>,
+        /// Whether a single assistant message may contain multiple tool calls.
+        /// Some OpenAI-compatible providers reject replayed history with more than
+        /// one `tool_calls[]` entry even when the calls were parsed from Harn's text
+        /// tool protocol, so the request builder must serialize history as
+        /// one-call assistant turns for those routes.
+        #[serde(default)]
+        pub supports_parallel_tool_calls: Option<bool>,
+        /// Whether this route requires `parallel_tool_calls: false` on the wire.
+        #[serde(default)]
+        pub requires_parallel_tool_calls_false: Option<bool>,
+        /// Whether the route rejects `response_format` when native `tools` are
+        /// present. Strict OpenAI-compatible servers such as Cerebras accept each
+        /// feature alone but reject the pair together.
+        #[serde(default)]
+        pub tools_exclude_response_format: Option<bool>,
+        /// Preferred endpoint family for this provider/model route. Values
+        /// are descriptive labels consumed by providers, e.g.
+        /// `/api/generate-raw` for Ollama raw prompt bypass.
+        #[serde(default)]
+        pub recommended_endpoint: Option<String>,
+        /// Whether Harn's text-tool protocol (`<tool_call>name({...})`) can
+        /// survive the provider route and return in the visible response body.
+        #[serde(default)]
+        pub text_tool_wire_format_supported: Option<bool>,
+        /// Preferred tool-calling mode for this provider/model route when
+        /// callers do not explicitly choose `tool_format`. This lets the
+        /// capability matrix route around known provider-native regressions
+        /// without making presets branch on model names.
+        #[serde(default)]
+        pub preferred_tool_format: Option<String>,
+        /// Empirical native/text interchangeability status for this route.
+        /// Known values are descriptive, not gates: `interchangeable`,
+        /// `native_unreliable`, `text_unreliable`, `native_only`,
+        /// `text_only`, and `unknown`.
+        #[serde(default)]
+        pub tool_mode_parity: Option<String>,
+        /// Short human-readable note explaining `tool_mode_parity`.
+        #[serde(default)]
+        pub tool_mode_parity_notes: Option<String>,
+        /// Receipt or structural sibling link for this row's native/text
+        /// decision. Required on self-hosted rows that set `native_tools` or
+        /// `preferred_tool_format` (#6829).
+        #[serde(default)]
+        pub tool_format_justification: Option<ToolFormatJustification>,
+        /// In-prompt directive that disables this model's "thinking" mode when
+        /// the API doesn't expose a first-class field (or exposes it
+        /// inconsistently across templates / quantizations). For Qwen3 family
+        /// chat templates this is `/no_think`. When `thinking: false` is
+        /// requested and this is set, Harn auto-prepends the directive to the
+        /// system message so script authors don't need to know it exists.
+        #[serde(default)]
+        pub thinking_disable_directive: Option<String>,
+        /// Per-task auto-policy reasoning-level overrides for this route.
+        /// Keys are task labels (`agent`, `verify`, `chat`, `summarize`,
+        /// `code`); values are reasoning levels (`off`, `minimal`, `low`,
+        /// `medium`, `high`, `xhigh`, `max`). Consulted by `reasoning_policy` only
+        /// when policy resolves to `auto` — explicit policies always win.
+        ///
+        /// Use this to declare known per-model regressions that should
+        /// flip the auto-policy default, instead of hard-coding the model/
+        /// provider pattern in resolver code. The canonical example is the
+        /// Qwen3 tool-call regression — `{ agent = "off" }` disables
+        /// reasoning whenever a script registers tools with that route,
+        /// matching Qwen's own published guidance.
+        #[serde(default)]
+        pub auto_reasoning_overrides: Option<BTreeMap<String, String>>,
+        /// OpenRouter upstream provider names that must be excluded from routing
+        /// for this `(provider, model)` row. Materialized into the request body's
+        /// `provider.ignore` array (see
+        /// the runtime's OpenRouter route-denylist adapter).
+        /// This is a data-driven route-around for upstreams that serve a route
+        /// incorrectly while still advertising the model — the canonical case is
+        /// OpenRouter's `Ambient` upstream billing reasoning tokens for
+        /// `qwen/qwen3.6-35b-a3b` and then finishing with empty `tool_calls`,
+        /// while Parasail / AtlasCloud / AkashML serve the identical request
+        /// natively. Only consulted for the `openrouter` provider.
+        #[serde(default)]
+        pub provider_route_denylist: Option<Vec<String>>,
+        /// OpenRouter upstream provider names this `(provider, model)` row is
+        /// PINNED to, in preference order. Materialized into the request body's
+        /// `provider.order` array with `allow_fallbacks = false` (see
+        /// the runtime's OpenRouter provider-order adapter),
+        /// so OpenRouter only ever routes the model to these known-clean upstreams
+        /// and never silently falls back to a sketchier one. This is the
+        /// *allowlist* counterpart to [`Self::provider_route_denylist`]: prefer it
+        /// when the bad upstreams are intermittent / hard to enumerate but the
+        /// clean ones are few and stable. The canonical case is OpenRouter's
+        /// `openai/gpt-oss-*` route, which fans out across ~17 upstreams in a
+        /// sub-provider lottery; some mis-serialize the Harmony tool call even with
+        /// reasoning ON (billed-noncommittal: 0 tool_calls), while Cerebras and
+        /// Groq serve it cleanly. Only consulted for the `openrouter` provider. An
+        /// empty / unset list means "no pin" (free OpenRouter routing). When both a
+        /// pin and a denylist are present the pin wins (a closed allowlist already
+        /// excludes everything not on it). Validated by the footgun gate in
+        /// the runtime's capability audit.
+        #[serde(default)]
+        pub openrouter_provider_order: Option<Vec<String>>,
+        /// Serving-quality / precision trust verdict for this `(provider, model)`
+        /// route. A provider can be live and fast yet still serve a model at
+        /// DEGRADED quality (e.g. an undocumented quantization) or reject otherwise
+        /// valid requests, silently contaminating any eval/meter that trusts its
+        /// numbers. This is the data-driven sibling of [`Self::provider_route_denylist`]
+        /// / [`Self::openrouter_provider_order`]: instead of routing *around* a bad
+        /// upstream, it labels the route's measured precision so tooling (the
+        /// meter precision canary) can refuse to trust a `degraded` route and flag a
+        /// `throttled` one. Known values are `trusted` (full-precision verified
+        /// against a reference), `degraded` (proven to serve at reduced quality),
+        /// `throttled` (full-precision but rate-limited to unusable timing), and
+        /// `unverified` (no verdict — treated the same as unset). Unset means
+        /// `unverified`.
+        #[serde(default)]
+        pub serving_precision: Option<String>,
+        /// How the neutral `computer` tool projects onto this route's native
+        /// computer-use surface. `harn-vm` reads this to decide whether to inject
+        /// a provider-native computer tool (and suppress the plain function copy)
+        /// or leave the function-schema tool untouched. Known values are
+        /// `native_anthropic` (Anthropic `computer_20251124`), `native_openai`
+        /// (OpenAI Responses `computer`), `grounded` (element/mark addressing
+        /// resolved locally), and `function` (generic function-schema fallback).
+        /// Unset means the route has no computer-use surface.
+        #[serde(default)]
+        pub computer_use_style: Option<ComputerUseStyle>,
+        /// Screenshot downscaling policy applied before the image reaches the
+        /// model. `xga` fits within 1024x768 preserving aspect (Anthropic);
+        /// `original` is identity (OpenAI). Unset means unset.
+        #[serde(default)]
+        pub screenshot_scaling: Option<ScreenshotScaling>,
+        /// Whether this route requires echoing acknowledged safety checks on the
+        /// computer-use follow-up turn (OpenAI Responses surfaces
+        /// `pending_safety_checks` that must be echoed as
+        /// `acknowledged_safety_checks`). Unset resolves to `false`.
+        #[serde(default)]
+        pub safety_ack_flow: Option<bool>,
+        /// How this route carries an interleaved `system`/`developer` message:
+        /// `inline`, `native_directive`, or `fold`. Unset derives from the wire
+        /// dialect (OpenAI/Ollama → inline, else fold). See
+        /// [`SystemMessagePlacement`].
+        #[serde(default)]
+        pub system_message_placement: Option<SystemMessagePlacement>,
+    }
+    aliases {
+        {
+            /// Structured-output transport strategy. Known values are:
+            /// `native`, `tool_use`, `format_kw`, and `none`.
+            #[serde(default)]
+            pub structured_output: Option<String>,
+            /// Legacy name retained for project overrides written before
+            /// `structured_output` became the canonical capability.
+            #[serde(default)]
+            pub json_schema: Option<String>,
+        }
+        {
+            /// Supported thinking/reasoning modes for this rule. Values are
+            /// script-facing mode names: `enabled`, `adaptive`, and `effort`.
+            #[serde(default)]
+            pub thinking_modes: Option<Vec<String>>,
+            /// Legacy override compatibility. New built-in rules should use
+            /// `thinking_modes` so the capability matrix preserves mode detail.
+            #[serde(default)]
+            pub thinking: Option<bool>,
+        }
+        {
+            /// Whether this provider/model route accepts image or other visual
+            /// input blocks through Harn's LLM message path.
+            #[serde(default)]
+            pub vision: Option<bool>,
+            /// Whether the model accepts image inputs in chat content.
+            #[serde(default)]
+            pub vision_supported: Option<bool>,
+        }
+    }
 }
 
 impl ProviderRule {
@@ -573,343 +620,6 @@ impl ProviderRule {
 
     pub fn match_label(&self) -> String {
         self.match_patterns().collect::<Vec<_>>().join(" | ")
-    }
-
-    /// Fill every capability field that `self` (the accumulated `extends`
-    /// fall-through chain so far) has NOT explicitly set from `other`, a
-    /// later matching rule with lower precedence. "Explicitly set" is the
-    /// serde `Option` raw-deserialization state — never inferred from a
-    /// field's value equaling the default.
-    ///
-    /// The destructure of `other` is deliberately exhaustive (no `..`
-    /// catch-all): adding a new capability field to [`ProviderRule`] fails
-    /// to compile here until the merge handles it.
-    fn fill_missing_from(&mut self, other: &ProviderRule) {
-        let ProviderRule {
-            // Rule-matching metadata, not capability payload: the merged
-            // chain keeps the first (highest-precedence) rule's identity.
-            model_match: _,
-            version_min: _,
-            extends: _,
-            native_tools,
-            message_wire_format,
-            live_endpoint_family,
-            decision_protocol,
-            decision_question_kinds,
-            decision_limits,
-            native_tool_wire_format,
-            defer_loading,
-            tool_search,
-            responses_api,
-            hosted_tools,
-            remote_mcp,
-            conversation_state,
-            compaction,
-            background_mode,
-            batch_api,
-            batch_wire_format,
-            batch_input_mode,
-            batch_discount_percent,
-            batch_turnaround_hours,
-            batch_max_requests,
-            batch_max_input_bytes,
-            batch_result_retention_days,
-            batch_result_ordering,
-            batch_partial_failure,
-            batch_cancellation,
-            batch_security_notes,
-            batch_operational_notes,
-            batch_regions,
-            tool_approval_policy,
-            max_tools,
-            prompt_caching,
-            prompt_cache_ttls,
-            prompt_cache_min_prefix_tokens,
-            cache_breakpoint_style,
-            vision,
-            audio,
-            pdf,
-            video,
-            files_api_supported,
-            file_upload_wire_format,
-            structured_output,
-            json_schema,
-            prefers_xml_scaffolding,
-            reserved_tool_call_token,
-            prefers_markdown_scaffolding,
-            structured_output_mode,
-            supports_assistant_prefill,
-            prefers_role_developer,
-            prefers_xml_tools,
-            thinking_block_style,
-            thinking_modes,
-            interleaved_thinking_supported,
-            anthropic_beta_features,
-            thinking,
-            vision_supported,
-            image_url_input_supported,
-            preserve_thinking,
-            honors_preserve_thinking_kwarg,
-            reasoning_round_trip,
-            reasoning_history_wire_field,
-            server_parser,
-            honors_chat_template_kwargs,
-            chat_template_options_field,
-            requires_completion_tokens,
-            chat_completions_unsupported,
-            reasoning_tools_require_responses,
-            requires_streaming,
-            reasoning_effort_supported,
-            reasoning_effort_levels,
-            reasoning_none_supported,
-            max_thinking_budget,
-            reasoning_disable_supported,
-            thinking_off_type,
-            reasoning_required_for_tools,
-            reasoning_text_promotable,
-            reasoning_wire_format,
-            reasoning_excluded_portable_options,
-            portable_option_effort_support,
-            portable_option_qualification,
-            seed_supported,
-            top_k_supported,
-            temperature_supported,
-            top_p_supported,
-            frequency_penalty_supported,
-            presence_penalty_supported,
-            stop_supported,
-            advanced_generation_options,
-            allowed_tool_choice_modes,
-            supports_parallel_tool_calls,
-            requires_parallel_tool_calls_false,
-            tools_exclude_response_format,
-            recommended_endpoint,
-            text_tool_wire_format_supported,
-            preferred_tool_format,
-            tool_mode_parity,
-            tool_mode_parity_notes,
-            tool_format_justification,
-            thinking_disable_directive,
-            auto_reasoning_overrides,
-            provider_route_denylist,
-            openrouter_provider_order,
-            serving_precision,
-            computer_use_style,
-            screenshot_scaling,
-            safety_ack_flow,
-            system_message_placement,
-        } = other;
-        fill_opt(&mut self.native_tools, native_tools);
-        fill_opt(&mut self.message_wire_format, message_wire_format);
-        fill_opt(&mut self.live_endpoint_family, live_endpoint_family);
-        fill_opt(&mut self.decision_protocol, decision_protocol);
-        fill_opt(&mut self.decision_question_kinds, decision_question_kinds);
-        fill_opt(&mut self.decision_limits, decision_limits);
-        fill_opt(&mut self.native_tool_wire_format, native_tool_wire_format);
-        fill_opt(&mut self.defer_loading, defer_loading);
-        fill_opt(&mut self.tool_search, tool_search);
-        fill_opt(&mut self.responses_api, responses_api);
-        fill_opt(&mut self.hosted_tools, hosted_tools);
-        fill_opt(&mut self.remote_mcp, remote_mcp);
-        fill_opt(&mut self.conversation_state, conversation_state);
-        fill_opt(&mut self.compaction, compaction);
-        fill_opt(&mut self.background_mode, background_mode);
-        fill_opt(&mut self.batch_api, batch_api);
-        fill_opt(&mut self.batch_wire_format, batch_wire_format);
-        fill_opt(&mut self.batch_input_mode, batch_input_mode);
-        fill_opt(&mut self.batch_discount_percent, batch_discount_percent);
-        fill_opt(&mut self.batch_turnaround_hours, batch_turnaround_hours);
-        fill_opt(&mut self.batch_max_requests, batch_max_requests);
-        fill_opt(&mut self.batch_max_input_bytes, batch_max_input_bytes);
-        fill_opt(
-            &mut self.batch_result_retention_days,
-            batch_result_retention_days,
-        );
-        fill_opt(&mut self.batch_result_ordering, batch_result_ordering);
-        fill_opt(&mut self.batch_partial_failure, batch_partial_failure);
-        fill_opt(&mut self.batch_cancellation, batch_cancellation);
-        fill_opt(&mut self.batch_security_notes, batch_security_notes);
-        fill_opt(&mut self.batch_operational_notes, batch_operational_notes);
-        fill_opt(&mut self.batch_regions, batch_regions);
-        fill_opt(&mut self.tool_approval_policy, tool_approval_policy);
-        fill_opt(&mut self.max_tools, max_tools);
-        fill_opt(&mut self.prompt_caching, prompt_caching);
-        fill_opt(&mut self.prompt_cache_ttls, prompt_cache_ttls);
-        fill_opt(
-            &mut self.prompt_cache_min_prefix_tokens,
-            prompt_cache_min_prefix_tokens,
-        );
-        fill_opt(&mut self.cache_breakpoint_style, cache_breakpoint_style);
-        fill_opt(&mut self.audio, audio);
-        fill_opt(&mut self.pdf, pdf);
-        fill_opt(&mut self.video, video);
-        fill_opt(&mut self.files_api_supported, files_api_supported);
-        fill_opt(&mut self.file_upload_wire_format, file_upload_wire_format);
-        fill_opt(&mut self.prefers_xml_scaffolding, prefers_xml_scaffolding);
-        fill_opt(&mut self.reserved_tool_call_token, reserved_tool_call_token);
-        fill_opt(
-            &mut self.prefers_markdown_scaffolding,
-            prefers_markdown_scaffolding,
-        );
-        fill_opt(&mut self.structured_output_mode, structured_output_mode);
-        fill_opt(
-            &mut self.supports_assistant_prefill,
-            supports_assistant_prefill,
-        );
-        fill_opt(&mut self.prefers_role_developer, prefers_role_developer);
-        fill_opt(&mut self.prefers_xml_tools, prefers_xml_tools);
-        fill_opt(&mut self.thinking_block_style, thinking_block_style);
-        fill_opt(
-            &mut self.interleaved_thinking_supported,
-            interleaved_thinking_supported,
-        );
-        fill_opt(&mut self.anthropic_beta_features, anthropic_beta_features);
-        fill_opt(
-            &mut self.image_url_input_supported,
-            image_url_input_supported,
-        );
-        fill_opt(&mut self.preserve_thinking, preserve_thinking);
-        fill_opt(
-            &mut self.honors_preserve_thinking_kwarg,
-            honors_preserve_thinking_kwarg,
-        );
-        fill_opt(&mut self.reasoning_round_trip, reasoning_round_trip);
-        fill_opt(
-            &mut self.reasoning_history_wire_field,
-            reasoning_history_wire_field,
-        );
-        fill_opt(&mut self.server_parser, server_parser);
-        fill_opt(
-            &mut self.honors_chat_template_kwargs,
-            honors_chat_template_kwargs,
-        );
-        fill_opt(
-            &mut self.chat_template_options_field,
-            chat_template_options_field,
-        );
-        fill_opt(
-            &mut self.requires_completion_tokens,
-            requires_completion_tokens,
-        );
-        fill_opt(
-            &mut self.chat_completions_unsupported,
-            chat_completions_unsupported,
-        );
-        fill_opt(
-            &mut self.reasoning_tools_require_responses,
-            reasoning_tools_require_responses,
-        );
-        fill_opt(&mut self.requires_streaming, requires_streaming);
-        fill_opt(
-            &mut self.reasoning_effort_supported,
-            reasoning_effort_supported,
-        );
-        fill_opt(&mut self.reasoning_effort_levels, reasoning_effort_levels);
-        fill_opt(&mut self.reasoning_none_supported, reasoning_none_supported);
-        fill_opt(&mut self.max_thinking_budget, max_thinking_budget);
-        fill_opt(
-            &mut self.reasoning_disable_supported,
-            reasoning_disable_supported,
-        );
-        fill_opt(&mut self.thinking_off_type, thinking_off_type);
-        fill_opt(
-            &mut self.reasoning_required_for_tools,
-            reasoning_required_for_tools,
-        );
-        fill_opt(
-            &mut self.reasoning_text_promotable,
-            reasoning_text_promotable,
-        );
-        fill_opt(&mut self.reasoning_wire_format, reasoning_wire_format);
-        fill_opt(
-            &mut self.reasoning_excluded_portable_options,
-            reasoning_excluded_portable_options,
-        );
-        fill_opt(
-            &mut self.portable_option_effort_support,
-            portable_option_effort_support,
-        );
-        fill_opt(&mut self.seed_supported, seed_supported);
-        fill_opt(&mut self.top_k_supported, top_k_supported);
-        fill_opt(
-            &mut self.portable_option_qualification,
-            portable_option_qualification,
-        );
-        fill_opt(&mut self.temperature_supported, temperature_supported);
-        fill_opt(&mut self.top_p_supported, top_p_supported);
-        fill_opt(
-            &mut self.frequency_penalty_supported,
-            frequency_penalty_supported,
-        );
-        fill_opt(
-            &mut self.presence_penalty_supported,
-            presence_penalty_supported,
-        );
-        fill_opt(&mut self.stop_supported, stop_supported);
-        fill_opt(
-            &mut self.advanced_generation_options,
-            advanced_generation_options,
-        );
-        fill_opt(
-            &mut self.allowed_tool_choice_modes,
-            allowed_tool_choice_modes,
-        );
-        fill_opt(
-            &mut self.supports_parallel_tool_calls,
-            supports_parallel_tool_calls,
-        );
-        fill_opt(
-            &mut self.requires_parallel_tool_calls_false,
-            requires_parallel_tool_calls_false,
-        );
-        fill_opt(
-            &mut self.tools_exclude_response_format,
-            tools_exclude_response_format,
-        );
-        fill_opt(&mut self.recommended_endpoint, recommended_endpoint);
-        fill_opt(
-            &mut self.text_tool_wire_format_supported,
-            text_tool_wire_format_supported,
-        );
-        fill_opt(&mut self.preferred_tool_format, preferred_tool_format);
-        fill_opt(&mut self.tool_mode_parity, tool_mode_parity);
-        fill_opt(&mut self.tool_mode_parity_notes, tool_mode_parity_notes);
-        fill_opt(
-            &mut self.tool_format_justification,
-            tool_format_justification,
-        );
-        fill_opt(
-            &mut self.thinking_disable_directive,
-            thinking_disable_directive,
-        );
-        fill_opt(&mut self.auto_reasoning_overrides, auto_reasoning_overrides);
-        fill_opt(&mut self.provider_route_denylist, provider_route_denylist);
-        fill_opt(
-            &mut self.openrouter_provider_order,
-            openrouter_provider_order,
-        );
-        fill_opt(&mut self.serving_precision, serving_precision);
-        fill_opt(&mut self.computer_use_style, computer_use_style);
-        fill_opt(&mut self.screenshot_scaling, screenshot_scaling);
-        fill_opt(&mut self.safety_ack_flow, safety_ack_flow);
-        fill_opt(&mut self.system_message_placement, system_message_placement);
-        // Legacy alias pairs resolve as ONE logical capability
-        // (`rule_structured_output`, `rule_thinking_modes`, `rule_vision`),
-        // so they fill as a unit: when the accumulated chain has explicitly
-        // set either spelling, the later rule's pair must not leak through
-        // the other spelling and override that explicit choice.
-        if self.structured_output.is_none() && self.json_schema.is_none() {
-            self.structured_output.clone_from(structured_output);
-            self.json_schema.clone_from(json_schema);
-        }
-        if self.thinking_modes.is_none() && self.thinking.is_none() {
-            self.thinking_modes.clone_from(thinking_modes);
-            self.thinking.clone_from(thinking);
-        }
-        if self.vision.is_none() && self.vision_supported.is_none() {
-            self.vision.clone_from(vision);
-            self.vision_supported.clone_from(vision_supported);
-        }
     }
 }
 

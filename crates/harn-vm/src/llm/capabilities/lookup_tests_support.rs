@@ -28,3 +28,26 @@ pub(super) fn assert_cerebras_effort_reasoning(model: &str, thinking_block_style
     assert_eq!(caps.structured_output_mode, "native_json");
     assert_eq!(caps.thinking_block_style, thinking_block_style);
 }
+
+#[test]
+fn override_can_supply_anthropic_beta_features() {
+    reset();
+    super::set_user_overrides_toml(
+        r#"
+[[provider.anthropic]]
+model_match = "claude-custom-*"
+native_tools = true
+anthropic_beta_features = ["fine-grained-tool-streaming-2025-05-14"]
+"#,
+    )
+    .unwrap();
+    let caps = lookup("anthropic", "claude-custom-1");
+    assert_eq!(
+        caps.anthropic_beta_features,
+        ["fine-grained-tool-streaming-2025-05-14"]
+    );
+    assert!(lookup("anthropic", "unmatched-custom-model")
+        .anthropic_beta_features
+        .is_empty());
+    reset();
+}
