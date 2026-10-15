@@ -364,55 +364,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn private_capture_reaps_descendants_on_completion_and_timeout() {
-        let temp = tempfile::tempdir().unwrap();
-        let survivor = temp.path().join("survivor");
-        let ready = temp.path().join("ready");
-        let descendant = format!(
-            "import pathlib,time;time.sleep(2);pathlib.Path({:?}).write_text('alive')",
-            survivor.to_str().unwrap()
-        );
-        let parent = |finish: &str| {
-            format!(
-            "import pathlib,subprocess,sys,time;child=subprocess.Popen([sys.executable,'-c',{:?}],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL);pathlib.Path({:?}).write_text(str(child.pid));print('synthetic-cli-token',flush=True);{}",
-            descendant, ready.to_str().unwrap(), finish
-        )
-        };
-        let mut control = tokio::process::Command::new("python3");
-        control.args(["-c", &parent("pass")]);
-        assert!(control.status().await.unwrap().success());
-        tokio::time::sleep(Duration::from_millis(2500)).await;
-        assert!(
-            survivor.exists(),
-            "the known unmanaged child must reach the same sentinel path"
-        );
-        for (finish, refuses) in [
-            ("pass", false),
-            (
-                "sys.stdout.close();__import__('os').close(1);time.sleep(0.4)",
-                false,
-            ),
-            ("time.sleep(20)", true),
-        ] {
-            std::fs::remove_file(&survivor).ok();
-            std::fs::remove_file(&ready).ok();
-            let mut command = tokio::process::Command::new("python3");
-            command.args(["-c", &parent(finish)]);
-            let result = capture(command, Duration::from_secs(1)).await;
-            assert_eq!(result.is_err(), refuses);
-            assert!(
-                ready.exists(),
-                "the negative must have spawned its descendant"
-            );
-            tokio::time::sleep(Duration::from_millis(2500)).await;
-            assert!(
-                !survivor.exists(),
-                "no credential helper survives the private capture"
-            );
-        }
-    }
-
-    #[tokio::test]
     async fn private_capture_accepts_only_one_complete_credential() {
         let mut success = tokio::process::Command::new("python3");
         success.args(["-c", "print('synthetic-cli-token')"]);
@@ -479,6 +430,11 @@ mod tests {
         ));
     }
 }
+
+#[cfg(test)]
+#[path = "cli_credential_capture_tests.rs"]
+mod capture_tests;
+
 #[cfg(windows)]
 #[test]
 fn windows_installer_roots_ignore_caller_environment() {

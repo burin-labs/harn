@@ -148,7 +148,9 @@ auth_style = "none"
             .iter()
             .filter(|event| event.kind.discriminator() == "reasoning_receipt")
             .count(),
-        1
+        1,
+        "cancelled={cancelled}; durable journal: {:?}",
+        journal.events
     );
     let path =
         harn_vm::orchestration::materialize_session_run_record(dir.path(), &session_id, None)

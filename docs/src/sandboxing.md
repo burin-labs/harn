@@ -375,10 +375,17 @@ those paths unless they are also in `workspace_roots` or `read_only_roots`.
   [credential denials](./sandbox-read-deny-reference.md).
 - `user_temp`: the session's own temp dir, `.harn-tmp` in the first
   workspace root, which the child's `TMPDIR`, `TMP`, and `TEMP` name. On macOS
-  Darwin's user-directory suffix maps Foundation's temporary-directory lookup
-  to that same storage through an exclusive symlink in the native temp root.
-  Foundation's replacement files and Swift Build scratch directories therefore
-  stay inside `.harn-tmp`. The host's shared temp dirs (`/tmp`, `/var/folders`) are never
+  Harn supplies a Darwin user-directory suffix that maps ordinary native tools'
+  Foundation temporary-directory lookup to the same storage through an exclusive
+  symlink in the native temp root. Apple platform executables such as
+  `/usr/bin/osascript` ignore that startup environment setting. A cooperating
+  platform client must initialize the supplied suffix with
+  `_set_user_dir_suffix` before using Foundation's native temporary storage;
+  an unmodified platform client can still have an atomic write refused. The
+  sandbox conformance probe initializes this binding explicitly and checks that
+  the native path resolves to `.harn-tmp`. The separate SwiftPM product test
+  exercises ordinary compiler and XCTest descendants without that probe setup.
+  The host's shared temp dirs (`/tmp`, `/var/folders`) are never
   granted: they hold every other process's files. Caches that default there,
   such as clang's module cache and xcrun's lookup cache, are pointed into the
   workspace by the child's environment instead. Writable only when the active
