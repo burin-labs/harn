@@ -121,7 +121,7 @@ impl PreparedRunExecutor for SourceExecutor {
         std::fs::write(&self.request.args[0], "assert 2 + 2 == 4\n").unwrap();
         let executor = self.clone();
         let registry = Arc::new(crate::stdlib::pool::PoolRegistry::default());
-        let child = crate::vm::subtask::prepare(registry, async move {
+        let child = crate::native_vm::subtask::prepare(registry, async move {
             assert_ne!(std::thread::current().id(), parent_thread);
             executor.invoke(json!({}))
         });

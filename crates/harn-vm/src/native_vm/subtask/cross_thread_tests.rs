@@ -19,9 +19,10 @@
 use std::sync::Arc;
 use std::thread::ThreadId;
 
-use super::{prepare, scope_placement, spawn_into, SubtaskPlacement};
 use crate::call_budget::{charge_mcp_call, install_mcp_call_budget, mcp_calls_spent};
+use crate::native_vm::subtask::{prepare, scope_placement};
 use crate::stdlib::pool::PoolRegistry;
+use crate::vm::subtask::{spawn_into, SubtaskPlacement};
 
 /// What one subtask saw about itself and its inherited context.
 struct Observation {

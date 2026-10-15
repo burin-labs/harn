@@ -46,6 +46,9 @@ impl VmRuntime for RefusingRuntime {
     fn task_cleanup(&self, execution_id: &crate::ExecutionId) -> Arc<dyn crate::vm::VmTaskCleanup> {
         self.native.task_cleanup(execution_id)
     }
+    fn subtask_scope(&self) -> Box<dyn crate::vm::VmExecutionScope> {
+        self.native.subtask_scope()
+    }
     fn start_span(&self, kind: crate::vm::VmSpanKind, name: String) -> crate::vm::ScopeSpan {
         self.native.start_span(kind, name)
     }

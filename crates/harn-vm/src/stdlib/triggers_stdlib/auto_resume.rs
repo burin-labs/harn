@@ -251,7 +251,7 @@ async fn schedule_auto_resume_timeout(
         }
         let _ = completion_tx.send(true);
     };
-    let task = crate::vm::subtask::spawn_inherited_child(
+    let task = crate::native_vm::subtask::spawn_inherited_child(
         pool_registry,
         crate::stdlib::agents::agents_workers::scope_worker_registry(worker_registry, timeout_task),
     );

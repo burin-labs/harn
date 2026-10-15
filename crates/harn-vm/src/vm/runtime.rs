@@ -36,6 +36,7 @@ pub(crate) trait VmRuntime: Any + Send + Sync {
         &self,
         execution_id: &crate::ExecutionId,
     ) -> Box<dyn super::VmExecutionScope>;
+    fn subtask_scope(&self) -> Box<dyn super::VmExecutionScope>;
     fn task_cleanup(&self, execution_id: &crate::ExecutionId) -> Arc<dyn VmTaskCleanup>;
     fn start_span(&self, kind: VmSpanKind, name: String) -> super::ScopeSpan;
     fn builtin_span(&self, name: &str) -> Option<super::ScopeSpan>;

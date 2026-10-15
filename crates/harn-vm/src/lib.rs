@@ -97,9 +97,9 @@ pub(crate) mod tool_call_mutations;
 /// single-threaded host may scope an execution tree to current-thread
 /// placement explicitly.
 pub mod subtask {
+    pub use crate::native_vm::subtask::scope_placement;
     pub use crate::vm::subtask::{
-        placement, scope_placement, SubtaskPlacement, SubtaskPlacementParseError, PLACEMENT_ENV,
-        PLACEMENT_VALUES,
+        placement, SubtaskPlacement, SubtaskPlacementParseError, PLACEMENT_ENV, PLACEMENT_VALUES,
     };
 }
 mod http;

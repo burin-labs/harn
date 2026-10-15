@@ -30,11 +30,8 @@
 //! changing the default cannot turn a compiling program into a broken one.
 
 use std::future::Future;
-use std::sync::Arc;
 use std::task::{Context, Poll};
 
-use crate::orchestration::{scope_ambient, AmbientExecutionScope};
-use crate::stdlib::pool::{with_pool_registry_scope, PoolRegistry};
 use pin_project_lite::pin_project;
 
 pin_project! {
@@ -153,7 +150,7 @@ fn placement_from_environment() -> SubtaskPlacement {
 
 thread_local! {
     /// An execution-scoped placement override. It is captured by
-    /// [`AmbientExecutionScope`], so a nested subtask keeps the placement its
+    /// the native execution scope, so a nested subtask keeps the placement its
     /// execution tree was started with instead of falling back to the process
     /// default on a worker thread.
     static SUBTASK_PLACEMENT_CONTEXT: std::cell::RefCell<Option<SubtaskPlacement>> =
@@ -161,7 +158,7 @@ thread_local! {
 }
 
 /// Swap the execution-scoped placement override. Paired with
-/// [`AmbientExecutionScope`]'s per-poll swap.
+/// the native execution scope's per-poll swap.
 pub(crate) fn swap_subtask_placement_context(
     next: Option<SubtaskPlacement>,
 ) -> Option<SubtaskPlacement> {
@@ -175,18 +172,6 @@ pub fn placement() -> SubtaskPlacement {
         .unwrap_or_else(placement_from_environment)
 }
 
-/// Run `inner` with `placement` installed for every subtask its execution tree
-/// creates. The override rides [`AmbientExecutionScope`], so it survives the
-/// awaits and thread migrations inside `inner`.
-pub fn scope_placement<F: Future>(
-    placement: SubtaskPlacement,
-    inner: F,
-) -> impl Future<Output = F::Output> {
-    let mut scope = AmbientExecutionScope::capture_for_inline_subtask();
-    scope.set_subtask_placement(Some(placement));
-    scope_ambient(scope, inner)
-}
-
 /// Wrap a child-interpreter body so it carries its parent's ambient execution
 /// scope and pool registry.
 ///
@@ -196,26 +181,11 @@ pub fn scope_placement<F: Future>(
 /// context: subtasks are independent runtime tasks, not nested inside the
 /// parent's poll.
 pub(crate) fn prepare<F: Future>(
-    registry: Arc<PoolRegistry>,
+    scope: Box<dyn super::VmExecutionScope>,
     future: F,
 ) -> PreparedSubtask<impl Future<Output = F::Output>> {
-    // The host's secret provider is a task-local, so a subtask is a new task
-    // that would otherwise resolve credentials through the configured chain
-    // instead of its session's view: a `sub_agent_run` inside `parallel` then
-    // failed to find a provider key its creator held (harn#9816).
     PreparedSubtask {
-        inner: scope_ambient(
-            AmbientExecutionScope::capture_for_inline_subtask(),
-            // Boxed so the provider scope adds a pointer, not a nested state
-            // machine, to the frame of every `parallel` branch.
-            crate::secrets::with_active_secret_provider(
-                crate::secrets::active_secret_provider(),
-                Box::pin(crate::tool_registry::preparation_scope::scope_subtask(
-                    with_pool_registry_scope(registry, future),
-                    true,
-                )),
-            ),
-        ),
+        inner: super::scope_runtime(scope, future),
     }
 }
 
@@ -262,14 +232,14 @@ where
 /// Prepare and spawn in one step, for callers that do not hold the future
 /// between the two.
 pub(crate) fn spawn_child<F>(
-    registry: Arc<PoolRegistry>,
+    scope: Box<dyn super::VmExecutionScope>,
     future: F,
 ) -> tokio::task::JoinHandle<F::Output>
 where
     F: Future + Send + 'static,
     F::Output: Send + 'static,
 {
-    spawn(prepare(registry, future))
+    spawn(prepare(scope, future))
 }
 
 /// Run lifecycle cleanup independently of the caller's Tokio runtime.
@@ -327,31 +297,6 @@ pub(crate) fn lifecycle_cleanup_spawn_count() -> u64 {
     LIFECYCLE_CLEANUP_SPAWNS.with(std::cell::Cell::get)
 }
 
-/// Spawn a long-lived child that inherits execution policy but owns an
-/// independent session lifecycle.
-pub(crate) fn spawn_inherited_child<F>(
-    registry: Arc<PoolRegistry>,
-    future: F,
-) -> tokio::task::JoinHandle<F::Output>
-where
-    F: Future + Send + 'static,
-    F::Output: Send + 'static,
-{
-    spawn(PreparedSubtask {
-        inner: scope_ambient(
-            AmbientExecutionScope::capture_inherited(),
-            crate::tool_registry::preparation_scope::scope_subtask(
-                with_pool_registry_scope(registry, future),
-                false,
-            ),
-        ),
-    })
-}
-
-#[cfg(test)]
-#[path = "subtask/cross_thread_tests.rs"]
-mod cross_thread_tests;
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -373,50 +318,5 @@ mod tests {
             "invalid HARN_VM_SUBTASK_PLACEMENT value \"sideways\"; expected one of worker, current_thread"
         );
         assert_eq!(SubtaskPlacement::Worker.to_string(), "worker");
-    }
-
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn scoped_placement_reaches_the_spawn_seam() {
-        assert_eq!(placement(), SubtaskPlacement::Worker);
-        let observed =
-            scope_placement(SubtaskPlacement::CurrentThread, async { placement() }).await;
-        assert_eq!(observed, SubtaskPlacement::CurrentThread);
-        assert_eq!(placement(), SubtaskPlacement::Worker);
-    }
-
-    #[test]
-    fn placement_selects_the_executor_thread() {
-        fn observed_thread(
-            runtime: &tokio::runtime::Runtime,
-            placement: SubtaskPlacement,
-        ) -> std::thread::ThreadId {
-            runtime.block_on(async {
-                tokio::task::LocalSet::new()
-                    .run_until(scope_placement(placement, async {
-                        spawn(PreparedSubtask {
-                            inner: async { std::thread::current().id() },
-                        })
-                        .await
-                        .expect("subtask completes")
-                    }))
-                    .await
-            })
-        }
-
-        let runtime = tokio::runtime::Builder::new_multi_thread()
-            .worker_threads(2)
-            .enable_all()
-            .build()
-            .expect("test runtime");
-        let creating_thread = std::thread::current().id();
-
-        assert_ne!(
-            observed_thread(&runtime, SubtaskPlacement::Worker),
-            creating_thread
-        );
-        assert_eq!(
-            observed_thread(&runtime, SubtaskPlacement::CurrentThread),
-            creating_thread
-        );
     }
 }

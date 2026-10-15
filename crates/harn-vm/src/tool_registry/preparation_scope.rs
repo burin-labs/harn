@@ -59,23 +59,29 @@ pub(crate) fn current_invocation() -> Option<Arc<PreparedInvocation>> {
     INVOCATION.try_with(Clone::clone).ok().flatten()
 }
 
-/// Capture synchronously before the parent's scope is swapped out. Separate
-/// sessions carry restrictions but never another invocation's authority.
-pub(crate) fn scope_subtask<F: Future>(
-    future: F,
-    inherit_invocation: bool,
-) -> impl Future<Output = F::Output> {
-    let preparing = PREPARING.try_with(|()| true).unwrap_or(false);
-    let invocation = inherit_invocation.then(current_invocation).flatten();
-    async move {
-        scope(invocation, async move {
-            if preparing {
-                PREPARING.scope((), future).await
+/// Captured restrictions cross worker boundaries; independent sessions receive
+/// no authority from another invocation. Capture before the parent's poll ends.
+pub(crate) struct SubtaskPreparationScope {
+    preparing: bool,
+    invocation: Option<Arc<PreparedInvocation>>,
+}
+
+impl SubtaskPreparationScope {
+    pub(crate) fn capture(inherit_invocation: bool) -> Self {
+        Self {
+            preparing: PREPARING.try_with(|()| true).unwrap_or(false),
+            invocation: inherit_invocation.then(current_invocation).flatten(),
+        }
+    }
+
+    pub(crate) fn poll<T>(&self, poll: impl FnOnce() -> T) -> T {
+        INVOCATION.sync_scope(self.invocation.clone(), || {
+            if self.preparing {
+                PREPARING.sync_scope((), poll)
             } else {
-                future.await
+                poll()
             }
         })
-        .await
     }
 }
 

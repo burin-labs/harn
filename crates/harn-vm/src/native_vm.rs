@@ -7,6 +7,7 @@ use std::{future::Future, pin::Pin};
 
 mod bridge;
 mod lifecycle;
+pub(crate) mod subtask;
 mod task_cleanup;
 mod tracing;
 
@@ -98,6 +99,10 @@ impl VmRuntime for NativeExecutionState {
 
     fn task_cleanup(&self, execution_id: &crate::ExecutionId) -> Arc<dyn crate::vm::VmTaskCleanup> {
         self.retained_cleanup_runtimes(execution_id)
+    }
+
+    fn subtask_scope(&self) -> Box<dyn crate::vm::VmExecutionScope> {
+        subtask::capture_inline(Arc::clone(&self.pool_registry))
     }
 
     fn start_span(&self, kind: crate::vm::VmSpanKind, name: String) -> crate::vm::ScopeSpan {
