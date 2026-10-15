@@ -1,5 +1,72 @@
 use super::*;
 
+#[tokio::test]
+async fn mixed_capacity_shards_execute_every_discovered_case_once() {
+    let _state = crate::tests::common::harn_state_lock::lock_harn_state_async().await;
+    let temp = TempTestDir::new();
+    temp.write(
+        "cases.harn",
+        r#"
+@heavy(threads: 2)
+pipeline test_b_medium() { require true, "medium" }
+@heavy(threads: 3)
+pipeline test_c_heavy() { require true, "heavy" }
+pipeline test_a_light() { require true, "light" }
+pipeline test_d_light() { require true, "light" }
+pipeline test_e_light() { require true, "light" }
+pipeline test_f_light() { require true, "light" }
+"#,
+    );
+    let expected = BTreeSet::from([
+        "test_a_light".to_string(),
+        "test_b_medium".to_string(),
+        "test_c_heavy".to_string(),
+        "test_d_light".to_string(),
+        "test_e_light".to_string(),
+        "test_f_light".to_string(),
+    ]);
+    let mut plans = BTreeMap::new();
+    for workers in [2, 3] {
+        let mut census = Vec::new();
+        for index in 1..=2 {
+            let summary = run_tests_with_options(
+                temp.path(),
+                &RunOptions {
+                    parallel: true,
+                    jobs: Some(workers),
+                    shard: Some(TestShard::new(index, 2).unwrap()),
+                    timeout_ms: 5000,
+                    ..RunOptions::default()
+                },
+            )
+            .await;
+            assert_eq!(summary.failed, 0, "{:#?}", summary.results);
+            assert_eq!(summary.skipped, 0);
+            assert!(summary.total > 0, "each shard must reach real cases");
+            let names = summary
+                .results
+                .into_iter()
+                .map(|case| case.name)
+                .collect::<BTreeSet<_>>();
+            census.extend(names.iter().cloned());
+            plans.insert((workers, index), names);
+        }
+        // This also proves a declared three-permit case runs on a two-worker host.
+        assert_eq!(census.len(), expected.len());
+        assert_eq!(census.into_iter().collect::<BTreeSet<_>>(), expected);
+    }
+    let mixed = plans[&(2, 1)]
+        .iter()
+        .chain(plans[&(3, 2)].iter())
+        .cloned()
+        .collect::<Vec<_>>();
+    assert_eq!(mixed.len(), expected.len());
+    assert_eq!(mixed.into_iter().collect::<BTreeSet<_>>(), expected);
+    for index in 1..=2 {
+        assert_eq!(plans[&(2, index)], plans[&(3, index)]);
+    }
+}
+
 #[test]
 fn test_shard_validation_rejects_invalid_selection() {
     assert!(TestShard::new(1, 1).is_ok());

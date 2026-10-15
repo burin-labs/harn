@@ -341,7 +341,7 @@ async fn run_tests_with_session_impl(
         .map(|baseline| baseline.weights_ms.clone())
         .unwrap_or_default();
 
-    let mut discovery = discover_test_cases(&files, options.filter.as_deref(), workers);
+    let mut discovery = discover_test_cases(&files, options.filter.as_deref());
     // `[check].trusted_host_dispatch` is the project's declaration that it is a
     // privileged embedder. `harn check` and `harn lint` both read it and OR the
     // CLI flag on top; `harn test` used to read only the flag, so a project
@@ -555,7 +555,7 @@ async fn run_test_file_with_session_impl(
     let source = Arc::new(source);
     let program = Arc::new(program);
 
-    let mut cases = extract_cases_from_program(path, &source, &program, filter, usize::MAX)?;
+    let mut cases = extract_cases_from_program(path, &source, &program, filter)?;
     seed_compilation_context(path, &source, &mut cases);
     let trusted_host_dispatch = package::load_check_config(Some(path)).trusted_host_dispatch;
     for case in &mut cases {
@@ -757,7 +757,7 @@ struct Discovery {
     discovery_errors: Vec<TestResult>,
 }
 
-fn discover_test_cases(files: &[PathBuf], filter: Option<&str>, workers: usize) -> Discovery {
+fn discover_test_cases(files: &[PathBuf], filter: Option<&str>) -> Discovery {
     let mut cases = Vec::new();
     let mut files_with_tests = 0usize;
     let mut discovery_errors = Vec::new();
@@ -805,7 +805,7 @@ fn discover_test_cases(files: &[PathBuf], filter: Option<&str>, workers: usize) 
 
         let source = Arc::new(source);
         let program = Arc::new(program);
-        match extract_cases_from_program(file, &source, &program, filter, workers) {
+        match extract_cases_from_program(file, &source, &program, filter) {
             Ok(mut file_cases) => {
                 if !file_cases.is_empty() {
                     seed_compilation_context(file, &source, &mut file_cases);

@@ -148,6 +148,11 @@ the suite is assigned alone and named in the shard plan. The same baseline
 also enforces the absolute per-case regression threshold, so moving a slower
 case into a less-loaded shard cannot turn the regression green.
 
+Shard ownership depends on the selected source, shard count, and timing baseline,
+including declared heavy weights for unmeasured cases. Local worker capacity does
+not change that partition. Scheduling bounds each selected case's permits to the
+host's worker count, so the same matrix can use runners with different capacities.
+
 Aggregate phase totals are cumulative worker-time. They reconcile with serial
 case work, but parallel cases overlap, so aggregate setup/compile/execute/
 teardown can exceed suite wall time. Discovery and worker-start failures remain

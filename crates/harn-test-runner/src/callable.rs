@@ -153,7 +153,6 @@ mod tests {
             &source,
             &program,
             None,
-            usize::MAX,
         )
         .unwrap();
         let session = TestRunSession::default();
