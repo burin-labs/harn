@@ -2,11 +2,10 @@
 use crate::NativeVmExt;
 
 #[cfg(test)]
-use crate::Vm;
-
 #[cfg(test)]
 mod tests {
     use crate::native_vm::NativeVmState;
+    use crate::NativeVmExt;
     struct TracingRuntimeGuard(std::sync::Arc<crate::tracing::TracingRuntime>);
 
     impl Drop for TracingRuntimeGuard {

@@ -33,17 +33,16 @@ mod tests {
         let mut sibling = crate::new_vm();
         crate::stdlib::register_vm_stdlib(&mut first);
         crate::stdlib::register_vm_stdlib(&mut sibling);
-        assert!(first.builtins.len() > 100, "empty registry is not sharing");
-        assert!(Arc::ptr_eq(&first.builtins, &sibling.builtins));
-        assert!(Arc::ptr_eq(
-            &first.builtin_metadata,
-            &sibling.builtin_metadata
-        ));
-        assert!(!Arc::ptr_eq(&first.sync_runtime, &sibling.sync_runtime));
+        assert!(
+            first.builtin_names().len() > 100,
+            "empty registry is not sharing"
+        );
+        assert!(first.shares_builtin_tables_for_test(&sibling));
         assert!(!Arc::ptr_eq(
-            &first.shared_state_runtime,
-            &sibling.shared_state_runtime
+            first.synchronization(),
+            sibling.synchronization()
         ));
+        assert!(!Arc::ptr_eq(first.shared_state(), sibling.shared_state()));
         assert!(!first
             .harness()
             .unwrap()

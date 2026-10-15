@@ -305,37 +305,28 @@ async fn required_runtime_denial_reaches_every_builtin_dispatch_and_survives_for
     };
     refused(vm.call_named_builtin("probe_denied", vec![]).await, 1);
     refused(
-        vm.call_builtin_id_or_name(id, "probe_denied", vec![]).await,
+        vm.call_builtin_id_for_test(id, "probe_denied", vec![])
+            .await,
         2,
     );
     refused(
-        vm.try_call_sync_builtin_id_or_name_args(
-            Some(id),
-            "probe_denied",
-            &crate::vm::CallArgs::Slice(&[]),
-        )
-        .unwrap(),
+        vm.try_call_sync_builtin_for_test(Some(id), "probe_denied", &[])
+            .unwrap(),
         3,
     );
     refused(
-        vm.try_call_sync_builtin_id_or_name_from_stack_args(Some(id), "probe_denied", 0)
+        vm.try_call_stack_builtin_for_test(Some(id), "probe_denied", 0)
             .unwrap(),
         4,
     );
     refused(
-        vm.call_callable_args(
-            &VmValue::BuiltinRef("probe_denied".into()),
-            crate::vm::CallArgs::Slice(&[]),
-        )
-        .await,
+        vm.call_callable_value(&VmValue::BuiltinRef("probe_denied".into()), &[])
+            .await,
         5,
     );
     refused(
-        vm.call_callable_args(
-            &VmValue::builtin_ref_id(id, "probe_denied"),
-            crate::vm::CallArgs::Slice(&[]),
-        )
-        .await,
+        vm.call_callable_value(&VmValue::builtin_ref_id(id, "probe_denied"), &[])
+            .await,
         6,
     );
     refused(vm.call_named_builtin("probe_denied_async", vec![]).await, 7);

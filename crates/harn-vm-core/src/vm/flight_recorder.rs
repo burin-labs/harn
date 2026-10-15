@@ -204,3 +204,7 @@ impl FlightRecorder {
         });
     }
 }
+
+#[cfg(test)]
+#[path = "flight_recorder_tests.rs"]
+mod tests;

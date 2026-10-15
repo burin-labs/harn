@@ -125,8 +125,8 @@ fn module_function_can_use_local_type_alias_as_schema_value() {
         let mut vm = crate::new_vm();
         crate::stdlib::register_vm_stdlib(&mut vm);
         let loaded = vm
-            .load_module_from_source(
-                PathBuf::from("<test>/schema_alias_module.harn"),
+            .load_module_exports_from_source(
+                "<test>/schema_alias_module.harn",
                 r#"
 fn accepts_schema(schema) {
   return schema_report({name: "Ada"}, schema).ok
@@ -169,7 +169,7 @@ fn large_public_type_surface_loads_every_schema() {
         let mut vm = crate::new_vm();
         crate::stdlib::register_vm_stdlib(&mut vm);
         let loaded = vm
-            .load_module_from_source(PathBuf::from("<test>/large_facade.harn"), &source)
+            .load_module_exports_from_source("<test>/large_facade.harn", &source)
             .await
             .expect("large typed facade loads");
 

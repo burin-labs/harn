@@ -702,3 +702,33 @@ impl Vm {
         })
     }
 }
+
+#[cfg(test)]
+mod breakpoint_tests {
+    use super::*;
+    #[test]
+    fn test_breakpoints_wildcard_matches_any_file() {
+        let mut vm = crate::vm::test_runtime::new_vm();
+        vm.set_breakpoints(vec![3, 7]);
+        assert!(vm.breakpoint_matches(3));
+        assert!(vm.breakpoint_matches(7));
+        assert!(!vm.breakpoint_matches(4));
+    }
+
+    #[test]
+    fn test_breakpoints_per_file_does_not_leak_to_wildcard() {
+        let mut vm = crate::vm::test_runtime::new_vm();
+        vm.set_breakpoints_for_file("auto.harn", vec![10]);
+        // Without an active frame, only the empty-string key matches; a
+        // file-scoped breakpoint must NOT fire when no frame is active.
+        assert!(!vm.breakpoint_matches(10));
+    }
+
+    #[test]
+    fn test_breakpoints_per_file_clear_on_empty() {
+        let mut vm = crate::vm::test_runtime::new_vm();
+        vm.set_breakpoints_for_file("a.harn", vec![1, 2]);
+        vm.set_breakpoints_for_file("a.harn", vec![]);
+        assert!(!vm.breakpoints.contains_key("a.harn"));
+    }
+}

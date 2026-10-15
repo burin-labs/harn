@@ -288,7 +288,7 @@ async fn pending_cleanup_after_vm_reuse(drop_instead_of_retry: bool) {
                  BEGIN SELECT RAISE(FAIL, 'pending cleanup append fault'); END;",
                 )
                 .unwrap();
-            vm.register_spawned_task(
+            vm.register_spawned_task_for_test(
                 public_id.into(),
                 crate::value::VmTaskHandle {
                     handle: tokio::spawn(std::future::pending()),
@@ -301,8 +301,8 @@ async fn pending_cleanup_after_vm_reuse(drop_instead_of_retry: bool) {
                 .await
                 .expect_err("actual cancel must observe the canonical append failure");
             assert!(error.to_string().contains("pending cleanup append fault"));
-            assert!(!vm.spawned_tasks.contains_key(public_id));
-            assert!(vm.pending_task_cleanups.contains_key(public_id));
+            assert!(!vm.has_spawned_task_for_test(public_id));
+            assert!(vm.has_pending_cleanup_for_test(public_id));
             assert!(crate::agent_sessions::has_journal(&session));
             assert!(crate::agent_sessions::next_journal_event(&session)
                 .unwrap()
@@ -321,7 +321,7 @@ async fn pending_cleanup_after_vm_reuse(drop_instead_of_retry: bool) {
         crate::llm::agent_session_host::fresh_agent_host_session_runtime();
     new.scope(vm.execute(&chunk)).await.unwrap();
     assert_ne!(vm.execution_id().to_string(), original_execution);
-    assert!(vm.pending_task_cleanups.contains_key(public_id));
+    assert!(vm.has_pending_cleanup_for_test(public_id));
     let current = vm.agent_cleanup_runtimes();
     let new_before = new_count.load(Ordering::SeqCst);
     let mut progress = subscribe_cleanup_progress();
@@ -333,7 +333,7 @@ async fn pending_cleanup_after_vm_reuse(drop_instead_of_retry: bool) {
             } else {
                 assert!(vm.cancel_task_for_test(public_id).await
                     .expect("retry commits the original pending terminal"));
-                assert!(!vm.pending_task_cleanups.contains_key(public_id));
+                assert!(!vm.has_pending_cleanup_for_test(public_id));
                 ScopedCleanup {
                     runtimes: original.clone(),
                     inner: async {
@@ -432,7 +432,7 @@ async fn active_child_cancel_after_same_runtime_vm_reuse_retains_original_owner(
             )
             .unwrap();
             let (started_tx, started_rx) = tokio::sync::oneshot::channel();
-            vm.register_spawned_task(
+            vm.register_spawned_task_for_test(
                 public_id.into(),
                 crate::value::VmTaskHandle {
                     handle: tokio::spawn(async move {
@@ -447,7 +447,7 @@ async fn active_child_cancel_after_same_runtime_vm_reuse_retains_original_owner(
                 .await
                 .expect("the original child actually started");
             assert!(crate::agent_sessions::has_journal(&session));
-            assert!(!vm.spawned_tasks[public_id].task.handle.is_finished());
+            assert!(!vm.spawned_task_finished_for_test(public_id));
             store
         },
     }
@@ -461,7 +461,7 @@ async fn active_child_cancel_after_same_runtime_vm_reuse_retains_original_owner(
     assert_ne!(current_key.execution_id, original_key.execution_id);
     assert_eq!(current_key.session_runtime, original_key.session_runtime);
     assert_eq!(current_key.host_runtime, original_key.host_runtime);
-    assert!(vm.spawned_tasks.contains_key(public_id));
+    assert!(vm.has_spawned_task_for_test(public_id));
     assert!(!cancelled.load(Ordering::SeqCst));
     let new_before = new_count.load(Ordering::SeqCst);
     ScopedCleanup {
@@ -471,8 +471,8 @@ async fn active_child_cancel_after_same_runtime_vm_reuse_retains_original_owner(
             assert_eq!(new_count.load(Ordering::SeqCst), new_before + 1);
             assert!(vm.cancel_task_for_test(public_id).await.unwrap());
             assert!(cancelled.load(Ordering::SeqCst));
-            assert!(!vm.spawned_tasks.contains_key(public_id));
-            assert!(!vm.pending_task_cleanups.contains_key(public_id));
+            assert!(!vm.has_spawned_task_for_test(public_id));
+            assert!(!vm.has_pending_cleanup_for_test(public_id));
             ScopedCleanup {
                 runtimes: original,
                 inner: async {

@@ -61,16 +61,16 @@ pipeline main(harness: Harness) {
     let error = result.expect_err("non-tail recursion must hit VM frame limit");
     assert_stack_overflow(&error);
     assert!(
-        vm.error_stack_trace.len() <= limits.max_vm_frames,
+        vm.error_stack_trace_for_test().len() <= limits.max_vm_frames,
         "stack trace grew past VM frame limit: {:?}",
-        vm.error_stack_trace
+        vm.error_stack_trace_for_test()
     );
     assert!(
-        vm.error_stack_trace
+        vm.error_stack_trace_for_test()
             .iter()
             .any(|(name, _, _, _)| name == "dive"),
         "stack trace should identify the recursive function: {:?}",
-        vm.error_stack_trace
+        vm.error_stack_trace_for_test()
     );
 }
 
@@ -117,11 +117,11 @@ pipeline main(harness: Harness) {
     let error = result.expect_err("tracked functions must preserve lifecycle frame boundaries");
     assert_stack_overflow(&error);
     assert!(
-        vm.error_stack_trace
+        vm.error_stack_trace_for_test()
             .iter()
             .any(|(name, _, _, _)| name == "tracked_countdown"),
         "stack trace should identify the tracked recursive function: {:?}",
-        vm.error_stack_trace
+        vm.error_stack_trace_for_test()
     );
 }
 

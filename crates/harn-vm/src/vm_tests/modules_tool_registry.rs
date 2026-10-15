@@ -1,7 +1,6 @@
 use std::sync::Arc;
 
 use super::*;
-use std::path::PathBuf;
 
 #[test]
 fn stdlib_tool_registry_from_carries_cli_metadata_through_import_abi() {

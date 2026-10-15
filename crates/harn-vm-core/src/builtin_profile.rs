@@ -206,8 +206,9 @@ pub fn reset() {
 /// does NOT disarm an in-flight profiled run — and both sides must hold the
 /// SAME lock or they race each other's `enable`/`reset` under cargo's test
 /// threads.
-#[cfg(test)]
-pub(crate) fn test_lock() -> &'static Mutex<()> {
+#[cfg(any(test, feature = "vm-test-support"))]
+#[doc(hidden)]
+pub fn test_lock() -> &'static Mutex<()> {
     static TEST_LOCK: Mutex<()> = Mutex::new(());
     &TEST_LOCK
 }

@@ -323,8 +323,7 @@ fn runtime_paths_uses_configurable_state_roots() {
     register_process_builtins(&mut vm);
     let mut out = String::new();
     let builtin = vm
-        .builtins
-        .get("runtime_paths")
+        .builtin_handler_for_test("runtime_paths")
         .expect("runtime_paths builtin");
     let paths = match builtin(&[], &mut out).unwrap() {
         VmValue::Dict(map) => map,

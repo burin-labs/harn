@@ -10,8 +10,9 @@ use super::call_support::AwaitingTask;
 const DIRECT_CALL_QUICKEN_THRESHOLD: u8 = 3;
 
 impl super::super::Vm {
-    #[cfg(test)]
-    pub(crate) async fn cancel_task_for_test(&mut self, task_id: &str) -> Result<bool, VmError> {
+    #[cfg(any(test, feature = "vm-test-support"))]
+    #[doc(hidden)]
+    pub async fn cancel_task_for_test(&mut self, task_id: &str) -> Result<bool, VmError> {
         self.try_call_special_name("cancel", &[VmValue::task_handle(task_id)])
             .await
     }

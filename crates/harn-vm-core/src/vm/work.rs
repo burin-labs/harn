@@ -51,7 +51,6 @@ impl Vm {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::{Chunk, Constant, Op, VmError, VmValue};
 
     fn four_steps() -> Chunk {

@@ -16,7 +16,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use super::harness::*;
-use crate::vm::*;
 
 #[test]
 fn test_parallel_no_variable() {
@@ -445,12 +444,12 @@ fn test_host_signal_token_dispatches_matching_signal() {
                 arcstr::ArcStr::from("SIGINT"),
             )])),
         )]));
-        vm.register_interrupt_handler(
+        vm.register_interrupt_handler_for_test(
             VmValue::BuiltinRef(arcstr::ArcStr::from("term_marker")),
             Some(&term_options),
         )
         .unwrap();
-        vm.register_interrupt_handler(
+        vm.register_interrupt_handler_for_test(
             VmValue::BuiltinRef(arcstr::ArcStr::from("int_marker")),
             Some(&int_options),
         )
@@ -461,7 +460,7 @@ fn test_host_signal_token_dispatches_matching_signal() {
         vm.install_interrupt_signal_token(signal_token);
         vm.install_cancel_token(cancel_token);
 
-        assert!(vm.pending_scope_interrupt().await.is_none());
+        assert!(vm.pending_scope_interrupt_for_test().await.is_none());
         assert_eq!(vm.output().trim_end(), "[harn] term");
     });
 }
@@ -550,7 +549,7 @@ pipeline t(harness: Harness) {
                 arcstr::ArcStr::from("SIGTERM"),
             )])),
         )]));
-        vm.register_interrupt_handler(
+        vm.register_interrupt_handler_for_test(
             VmValue::BuiltinRef(arcstr::ArcStr::from("term_marker")),
             Some(&term_options),
         )
@@ -609,7 +608,7 @@ pipeline t(harness: Harness) {
                 arcstr::ArcStr::from("SIGTERM"),
             )])),
         )]));
-        vm.register_interrupt_handler(
+        vm.register_interrupt_handler_for_test(
             VmValue::BuiltinRef(arcstr::ArcStr::from("term_marker")),
             Some(&term_options),
         )
@@ -658,7 +657,7 @@ pipeline t(harness: Harness) {
             Ok(VmValue::Nil)
         });
         // No options: no filter.
-        vm.register_interrupt_handler(
+        vm.register_interrupt_handler_for_test(
             VmValue::BuiltinRef(arcstr::ArcStr::from("cleanup_marker")),
             None,
         )
@@ -709,7 +708,7 @@ pipeline t(harness: Harness) {
                 arcstr::ArcStr::from("SIGINT"),
             )])),
         )]));
-        vm.register_interrupt_handler(
+        vm.register_interrupt_handler_for_test(
             VmValue::BuiltinRef(arcstr::ArcStr::from("int_only_marker")),
             Some(&int_options),
         )
@@ -916,7 +915,7 @@ pipeline t(harness: Harness) {
             continued_counter.fetch_add(1, Ordering::SeqCst);
             Ok(VmValue::Nil)
         });
-        vm.register_interrupt_handler(
+        vm.register_interrupt_handler_for_test(
             VmValue::BuiltinRef(arcstr::ArcStr::from("cancel_marker")),
             None,
         )
@@ -984,7 +983,7 @@ fn test_a_child_machine_carries_the_cancel_token_and_no_handlers() {
                     Ok(VmValue::Nil)
                 });
                 parent
-                    .register_interrupt_handler(
+                    .register_interrupt_handler_for_test(
                         VmValue::BuiltinRef(arcstr::ArcStr::from("never_runs")),
                         None,
                     )
@@ -994,17 +993,17 @@ fn test_a_child_machine_carries_the_cancel_token_and_no_handlers() {
                 ));
 
                 assert!(
-                    parent.has_unfiltered_interrupt_handler(),
+                    parent.has_unfiltered_interrupt_handler_for_test(),
                     "the parent is the machine the handler is registered on"
                 );
 
-                let mut child = parent.child_vm_inline();
+                let mut child = parent.child_vm_for_host();
                 assert!(
                     child.is_cancel_requested(),
                     "a child observes the cancellation perfectly well"
                 );
                 assert!(
-                    !child.has_unfiltered_interrupt_handler(),
+                    !child.has_unfiltered_interrupt_handler_for_test(),
                     "a child carries no handlers, which is why the builtin cannot dispatch"
                 );
 
@@ -1076,7 +1075,7 @@ pipeline t(harness: Harness) {
                     out.push_str("[harn] handler ran\n");
                     Ok(VmValue::Nil)
                 });
-                vm.register_interrupt_handler(
+                vm.register_interrupt_handler_for_test(
                     VmValue::BuiltinRef(arcstr::ArcStr::from("replay_marker")),
                     None,
                 )

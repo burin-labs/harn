@@ -107,7 +107,6 @@ mod tests {
     use crate::chunk::{
         AdaptiveBinaryOp, AdaptiveBinaryState, BinaryShape, Chunk, InlineCacheEntry, Op,
     };
-    use crate::Vm;
 
     #[test]
     fn cache_set_index_reuses_chunk_identity() {

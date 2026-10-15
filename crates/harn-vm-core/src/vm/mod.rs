@@ -37,13 +37,16 @@ pub mod subtask;
 mod task_cleanup;
 #[cfg(feature = "vm-test-support")]
 mod test_support;
+#[cfg(feature = "vm-test-support")]
+#[doc(hidden)]
+pub use test_support::{abort_task_for_test, VmDeadlineProbe};
 mod tool_callable;
 mod work;
 
 #[cfg(test)]
-mod test_runtime;
+pub(crate) mod test_runtime;
 
-pub(crate) use async_builtin::run_async_builtin_with;
+pub use async_builtin::run_async_builtin_with;
 pub use async_builtin::{AsyncBuiltinCtx, VmCallSite};
 pub use builtin::{VmBuiltinArity, VmBuiltinKind, VmBuiltinMetadata};
 pub use builtin_def::{

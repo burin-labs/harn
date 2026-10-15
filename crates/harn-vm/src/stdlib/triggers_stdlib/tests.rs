@@ -16,7 +16,7 @@ use crate::triggers::{
     TriggerRegistryError, TriggerRetryConfig,
 };
 use crate::value::VmValue;
-use crate::vm::Vm;
+
 use crate::{install_manifest_triggers, register_vm_stdlib, ProviderId, ProviderPayload};
 
 use super::journal::{DispatchHandleRecord, TriggerEventRecord};
