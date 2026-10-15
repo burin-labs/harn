@@ -333,7 +333,7 @@ pub struct LlmRequestPayload {
     pub previous_response_id: Option<String>,
     pub store: Option<bool>,
     /// Effective posture, already merged with the catalog policy default.
-    pub data_controls: harn_provider_catalog::DataPosture,
+    pub data_controls: harn_provider_catalog::config::DataPosture,
     #[serde(skip_serializing)]
     pub inference_boundary: Option<crate::inference::InferenceBoundary>,
     pub background: Option<bool>,
