@@ -255,12 +255,17 @@ Windows, which has none, those tools are refused. Direct scripts and
 process calls keep the `worktree` default unless their caller selects a
 stricter profile.
 
-The strictness ladder is `unrestricted < workspace_paths < worktree <
-wasi < os_hardened`. `CapabilityPolicy::intersect` always picks the
+The strictness ladder is `unrestricted < workspace_paths < wasi <
+worktree < os_hardened`. `CapabilityPolicy::intersect` always picks the
 strictest of the two profiles when a parent ceiling is composed with a
 child request — so a lenient parent cannot weaken a child's
 `os_hardened` ask, and a child asking for `workspace_paths` cannot shed
 an OS sandbox its parent imposed.
+
+The `wasi` profile describes testbench execution, not host-process isolation.
+A child requesting it under `worktree` or `os_hardened` keeps the parent's
+host-confinement profile; the testbench's process interceptor selects the
+WebAssembly runner separately.
 
 `HARN_HANDLER_SANDBOX=off` skips OS confinement for `worktree`. On Linux,
 `warn` and `enforce` both require usable Landlock or bubblewrap confinement.
@@ -397,6 +402,10 @@ a denial would widen authority. See the
 nor erase an outer host grant. `unix_socket_roots` follows the same rule: a
 nested policy keeps only the roots the outer grant already covers. Stage-policy validation also rejects a flattened
 child that tries to introduce it beyond its ceiling.
+
+Flattened stages retain every host `read_deny_roots` entry. They also preserve
+`netns_launcher_path`, the host-selected network-namespace launcher, exactly:
+a stage cannot replace or remove it, or introduce one when the host set none.
 
 #### Child writes for read-only roles
 

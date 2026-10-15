@@ -130,8 +130,8 @@ impl SandboxProfile {
         &[
             SandboxProfile::Unrestricted,
             SandboxProfile::WorkspacePaths,
-            SandboxProfile::Worktree,
             SandboxProfile::Wasi,
+            SandboxProfile::Worktree,
             SandboxProfile::OsHardened,
         ]
     }
@@ -779,6 +779,22 @@ impl CapabilityPolicy {
                 ));
             }
         }
+        let dropped_read_denials = ceiling_ps
+            .read_deny_roots
+            .iter()
+            .filter(|root| !requested_ps.read_deny_roots.contains(root))
+            .collect::<Vec<_>>();
+        if !dropped_read_denials.is_empty() {
+            return Err(format!(
+                "flattened stage policy dropped process_sandbox read denials: {dropped_read_denials:?}"
+            ));
+        }
+        if requested_ps.netns_launcher_path != ceiling_ps.netns_launcher_path {
+            return Err(
+                "flattened stage policy changed the host-owned process_sandbox namespace helper"
+                    .to_string(),
+            );
+        }
         // Presets compose through `effective_presets()` (None resolves to the
         // defaults), so compare the effective sets: any preset the request would
         // enable that the ceiling does not is a widening.
@@ -947,8 +963,8 @@ fn sandbox_profile_strictness(profile: SandboxProfile) -> u8 {
     match profile {
         SandboxProfile::Unrestricted => 0,
         SandboxProfile::WorkspacePaths => 1,
-        SandboxProfile::Worktree => 2,
-        SandboxProfile::Wasi => 3,
+        SandboxProfile::Wasi => 2,
+        SandboxProfile::Worktree => 3,
         SandboxProfile::OsHardened => 4,
     }
 }
