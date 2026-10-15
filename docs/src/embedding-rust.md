@@ -135,6 +135,11 @@ backend constructs `harn_vm_core::Vm::with_runtime` with its required
 execution scopes, deadlines, tracing, and task cleanup. Native embeddings
 should use `harn_vm::new_vm()` to install those services together.
 
+Use `harn_vm::bytecode_cache::compiler_fingerprint()` for artifact compatibility.
+It covers compiler inputs and builtin authority contracts. Construct cache keys
+with `CacheKey::from_source` or `CacheKey::from_module_source` so those contracts
+enter the key and artifact header.
+
 ## Resolve connector credentials
 
 Use `harn_serve::try_load_provider_connectors` with the project directory or
