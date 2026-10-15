@@ -396,7 +396,26 @@ pub fn snapshot(session_id: &str) -> Vec<InboxEntry> {
 mod tests {
     use super::*;
     use harn_clock::PausedClock;
+    use std::future::Future;
+    use std::sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    };
+    use std::task::{Context, Wake, Waker};
     use time::OffsetDateTime;
+
+    #[derive(Default)]
+    struct WakeSignal(AtomicBool);
+
+    impl Wake for WakeSignal {
+        fn wake(self: Arc<Self>) {
+            self.wake_by_ref();
+        }
+
+        fn wake_by_ref(self: &Arc<Self>) {
+            self.0.store(true, Ordering::SeqCst);
+        }
+    }
 
     fn fresh_session_id() -> String {
         // Each test owns its own session id, so the global registry
@@ -474,48 +493,21 @@ mod tests {
         assert_eq!(again[0].content, "first");
     }
 
-    // `current_thread` keeps everything on a single OS thread so the
-    // waiter and producer can't race across threads — the test
-    // task and any spawned tasks share the same scheduler and are
-    // serialized by tokio. The cross-thread race is exercised by the
-    // `inbox_survives_concurrent_pushes_during_awaited_future` end-to-
-    // end test in `crates/harn-vm/tests/agent_inbox_e2e.rs`, and the
-    // `wait_async` cross-thread safety is documented inline.
-    #[tokio::test]
-    async fn wait_async_returns_when_push_happens() {
-        let sid = fresh_session_id();
-        let clock = PausedClock::new(OffsetDateTime::UNIX_EPOCH);
-        let waiter_sid = sid.clone();
-        let waiter_clock = clock.clone();
-        let waiter = tokio::spawn(async move {
-            wait_async(&waiter_sid, Duration::from_mins(1), &*waiter_clock).await
-        });
-        // Yield once so the waiter installs its notify watch before we push.
-        tokio::task::yield_now().await;
-        push(&sid, "tool_result", "hello", "test");
-        assert!(waiter.await.expect("join"));
-        // Push side wrote one entry — verify it's still drainable.
-        let entries = drain(&sid);
-        assert_eq!(entries.len(), 1);
-    }
-
     #[tokio::test]
     async fn wait_async_times_out_when_silent() {
         let sid = fresh_session_id();
         let clock = PausedClock::new(OffsetDateTime::UNIX_EPOCH);
-        // Drive the timeout to completion by advancing logical time.
-        // On `current_thread`, the test task yields when wait_async
-        // parks on the clock notify; the spawned advancer then runs
-        // synchronously after wait_async has registered its waiter, so
-        // the deadline computation and the advance can't race.
-        let clock_advance = clock.clone();
-        let advancer = tokio::spawn(async move {
-            tokio::task::yield_now().await;
-            clock_advance.advance(Duration::from_millis(50));
-        });
-        let result = wait_async(&sid, Duration::from_millis(50), &*clock).await;
-        advancer.await.ok();
-        assert!(!result);
+        let signal = Arc::new(WakeSignal::default());
+        let waker = Waker::from(Arc::clone(&signal));
+        let mut context = Context::from_waker(&waker);
+        let mut waiter = std::pin::pin!(wait_async(&sid, Duration::from_millis(50), &*clock));
+        assert!(waiter.as_mut().poll(&mut context).is_pending());
+        clock.advance(Duration::from_millis(50));
+        assert!(
+            signal.0.load(Ordering::SeqCst),
+            "deadline must wake the registered waiter"
+        );
+        assert!(!waiter.await);
     }
 
     // Command-hold determinism proof: a partial advance below the deadline must
@@ -526,26 +518,31 @@ mod tests {
     async fn wait_async_holds_through_partial_advance_then_wakes_on_entry() {
         let sid = fresh_session_id();
         let clock = PausedClock::new(OffsetDateTime::UNIX_EPOCH);
-        let waiter_sid = sid.clone();
-        let waiter_clock = clock.clone();
-        let waiter = tokio::spawn(async move {
-            wait_async(&waiter_sid, Duration::from_millis(100), &*waiter_clock).await
-        });
-        // Yield so the waiter installs its notify watch before we drive time.
-        tokio::task::yield_now().await;
+        let signal = Arc::new(WakeSignal::default());
+        let waker = Waker::from(Arc::clone(&signal));
+        let mut context = Context::from_waker(&waker);
+        let mut waiter = std::pin::pin!(wait_async(&sid, Duration::from_millis(100), &*clock));
+        assert!(waiter.as_mut().poll(&mut context).is_pending());
         // Below-deadline advance with no entry: the park must stay parked.
         clock.advance(Duration::from_millis(40));
-        tokio::task::yield_now().await;
         assert!(
-            !waiter.is_finished(),
+            waiter.as_mut().poll(&mut context).is_pending(),
             "park must not spuriously wake before its deadline"
         );
         // An entry mid-park wakes it immediately with `true`, deadline unreached.
+        signal.0.store(false, Ordering::SeqCst);
         push(&sid, "tool_progress", "tick", "test");
         assert!(
-            waiter.await.expect("join"),
+            signal.0.load(Ordering::SeqCst),
+            "push must wake the registered waiter"
+        );
+        assert!(
+            waiter.await,
             "an inbox entry mid-park wakes the hold before the deadline"
         );
+        let entries = drain(&sid);
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].content, "tick");
     }
 
     #[test]
