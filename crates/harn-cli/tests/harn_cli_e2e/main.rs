@@ -127,6 +127,7 @@ mod runs_view_cli;
 mod scaffold_dispatch;
 mod scan_dispatch;
 mod secret_absence;
+mod shard_coverage_cli;
 #[cfg(unix)]
 mod sidecar_version_cli;
 mod skills_cli;

@@ -43,6 +43,7 @@ mod source_exec;
 mod spend_policy;
 pub mod test_report;
 pub mod test_runner;
+mod test_shard_coverage;
 pub mod test_timing {
     pub use harn_test_runner::DurationSummary;
 }

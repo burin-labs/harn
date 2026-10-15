@@ -364,7 +364,11 @@ async fn run_tests_with_session_impl(
     }
     let mut shard_plan = None;
     if let Some(shard) = options.shard {
-        let selection = select_shard_cases(discovery.cases, &timings, shard);
+        let source = crate::test_shard_coverage::tracked_source(&files);
+        let mut selection = select_shard_cases(discovery.cases, &timings, shard);
+        if let Some(matrix) = selection.plan.matrix.as_mut() {
+            matrix.source = source;
+        }
         discovery.cases = selection.cases;
         shard_plan = Some(selection.plan);
         if shard.index() > 1 {
@@ -867,6 +871,9 @@ fn select_shard_cases(
     timings: &BTreeMap<String, u64>,
     shard: TestShard,
 ) -> ShardSelection {
+    // Retain discovery's inventory before moving anything into a partition.
+    // Missing assignment remains shard zero, so the verifier refuses it.
+    let mut matrix = matrix_inventory(&[cases.as_slice()], timings);
     if shard.total() <= 1 {
         let estimated_duration_ms = cases
             .iter()
@@ -877,14 +884,15 @@ fn select_shard_cases(
             .filter(|case| !timings.contains_key(&timings_key(&case.file, &case.name)))
             .count();
         return ShardSelection {
-            cases,
             plan: ShardPlan {
                 index: shard.index(),
                 total: shard.total(),
                 estimated_duration_ms,
                 unknown_cases,
                 dominant_case: None,
+                matrix: Some(matrix),
             },
+            cases,
         };
     }
 
@@ -951,6 +959,24 @@ fn select_shard_cases(
     }
 
     let selected_index = shard.index() - 1;
+    let assignments = buckets
+        .iter()
+        .enumerate()
+        .flat_map(|(index, bucket)| {
+            bucket.iter().map(move |case| {
+                (
+                    (case.file.to_string_lossy().into_owned(), case.name.clone()),
+                    index + 1,
+                )
+            })
+        })
+        .collect::<BTreeMap<_, _>>();
+    for case in &mut matrix.cases {
+        case.shard = assignments
+            .get(&(case.file.clone(), case.name.clone()))
+            .copied()
+            .unwrap_or(0);
+    }
     let selected = buckets.swap_remove(selected_index);
     let unknown_cases = selected
         .iter()
@@ -964,7 +990,36 @@ fn select_shard_cases(
             estimated_duration_ms: costs[selected_index],
             unknown_cases,
             dominant_case,
+            matrix: Some(matrix),
         },
+    }
+}
+
+fn matrix_inventory(
+    buckets: &[&[TestCase]],
+    timings: &BTreeMap<String, u64>,
+) -> harn_test_runner::ShardMatrixPlan {
+    let cases = buckets
+        .iter()
+        .enumerate()
+        .flat_map(|(index, cases)| {
+            cases
+                .iter()
+                .map(move |case| harn_test_runner::PlannedShardCase {
+                    file: case.file.to_string_lossy().into_owned(),
+                    name: case.name.clone(),
+                    shard: index + 1,
+                    declared_weight: case.weight,
+                    estimated_ms: estimated_case_cost_ms(case, timings),
+                    known_timing: timings.contains_key(&timings_key(&case.file, &case.name)),
+                })
+        })
+        .collect::<Vec<_>>();
+    harn_test_runner::ShardMatrixPlan {
+        schema_version: 1,
+        source: None,
+        source_confirmed: false,
+        cases,
     }
 }
 
