@@ -3,50 +3,62 @@
 //!
 //! Each consumer is reached through the entry point its callers use.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
-use crate::orchestration::ToolApprovalPolicy;
+use crate::orchestration::{
+    pop_execution_policy, push_execution_policy, CapabilityPolicy, SandboxProfile,
+    ToolApprovalPolicy,
+};
+use crate::stdlib::sandbox::{check_fs_path_scope, FsAccess};
 
-struct Consumers {
-    denied: Vec<PathBuf>,
+struct ReadPolicyScope;
+
+impl ReadPolicyScope {
+    fn new(home: &Path, candidate: &Path) -> Self {
+        push_execution_policy(CapabilityPolicy {
+            sandbox_profile: SandboxProfile::Worktree,
+            // Grant the candidate too: a credential symlink may resolve outside home.
+            read_only_roots: vec![home.display().to_string(), candidate.display().to_string()],
+            ..CapabilityPolicy::default()
+        });
+        Self
+    }
 }
 
-impl Consumers {
-    fn new() -> Self {
-        Self {
-            denied: crate::stdlib::sandbox::process_sandbox_read_deny_roots(
-                &crate::orchestration::CapabilityPolicy::default(),
-            ),
-        }
+impl Drop for ReadPolicyScope {
+    fn drop(&mut self) {
+        pop_execution_policy();
     }
+}
 
-    /// Which consumers flag `path`; the sandbox only judges home paths.
-    fn misses(&self, path: &Path, home_path: bool) -> Vec<&'static str> {
-        let text = path.display().to_string();
-        let mut misses = Vec::new();
-        if home_path && !crate::stdlib::sandbox::path_is_denied(path, &self.denied) {
+/// Which consumers flag `path`; the sandbox only judges home paths.
+fn consumer_misses(path: &Path, home: Option<&Path>) -> Vec<&'static str> {
+    let text = path.display().to_string();
+    let mut misses = Vec::new();
+    if let Some(home) = home {
+        let _scope = ReadPolicyScope::new(home, path);
+        if check_fs_path_scope(path, FsAccess::Read).is_ok() {
             misses.push("sandbox denylist");
         }
-        if !crate::security::args_reference_secret(&serde_json::json!({"path": text})) {
-            misses.push("taint secret-read gate");
-        }
-        let scan = crate::orchestration::command_risk_scan_json(
-            &serde_json::json!({"request": {"command": format!("cat '{text}'")}}),
-            None,
-        );
-        if !scan["risk_labels"]
-            .as_array()
-            .is_some_and(|labels| labels.iter().any(|label| label == "credential_file_read"))
-        {
-            misses.push("command risk scan");
-        }
-        if crate::orchestration::first_sensitive_path(&ToolApprovalPolicy::default(), &[text])
-            .is_none()
-        {
-            misses.push("approval sensitive paths");
-        }
-        misses
     }
+    if !crate::security::args_reference_secret(&serde_json::json!({"path": text})) {
+        misses.push("taint secret-read gate");
+    }
+    let scan = crate::orchestration::command_risk_scan_json(
+        &serde_json::json!({"request": {"command": format!("cat '{text}'")}}),
+        None,
+    );
+    if !scan["risk_labels"]
+        .as_array()
+        .is_some_and(|labels| labels.iter().any(|label| label == "credential_file_read"))
+    {
+        misses.push("command risk scan");
+    }
+    if crate::orchestration::first_sensitive_path(&ToolApprovalPolicy::default(), &[text]).is_none()
+    {
+        misses.push("approval sensitive paths");
+    }
+    misses
 }
 
 /// A file name that each basename glob accepts.
@@ -57,17 +69,16 @@ fn example_name(glob: &str) -> String {
 #[test]
 fn every_registry_credential_trips_every_consumer() {
     let home = crate::stdlib::sandbox::sandbox_user_home_dir().expect("an absolute home");
-    let consumers = Consumers::new();
     let mut drift = Vec::new();
     for entry in crate::known_paths::credential_home_paths() {
-        let misses = consumers.misses(&home.join(entry), true);
+        let misses = consumer_misses(&home.join(entry), Some(&home));
         if !misses.is_empty() {
             drift.push(format!("~/{entry}: missed by {}", misses.join(", ")));
         }
     }
     for glob in crate::known_paths::credential_basename_globs() {
         let path = Path::new("/work/project/config").join(example_name(glob));
-        let misses = consumers.misses(&path, false);
+        let misses = consumer_misses(&path, None);
         if !misses.is_empty() {
             drift.push(format!(
                 "{}: missed by {}",
@@ -86,13 +97,12 @@ fn every_registry_credential_trips_every_consumer() {
 #[test]
 fn ordinary_paths_trip_no_consumer() {
     let home = crate::stdlib::sandbox::sandbox_user_home_dir().expect("an absolute home");
-    let consumers = Consumers::new();
     for relative in [
         ".config/git/config",
         ".docker/daemon.json",
         ".cargo/config.toml",
     ] {
-        let misses = consumers.misses(&home.join(relative), true);
+        let misses = consumer_misses(&home.join(relative), Some(&home));
         assert_eq!(
             misses.len(),
             4,
@@ -100,7 +110,7 @@ fn ordinary_paths_trip_no_consumer() {
         );
     }
     for path in ["/work/project/src/main.rs", "/work/project/.environment.ts"] {
-        let misses = consumers.misses(Path::new(path), false);
+        let misses = consumer_misses(Path::new(path), None);
         assert_eq!(
             misses.len(),
             3,
