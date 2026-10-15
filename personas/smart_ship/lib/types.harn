@@ -1,3 +1,5 @@
+import { ReviewAdmission, ReviewObservation, ReviewPolicy, ReviewedSource } from "./review"
+
 /** One immutable Git source identity. Repository names are installation data. */
 pub type Source = {repository: string, commit: string, tree: string}
 
@@ -7,14 +9,12 @@ pub type Change = {
   repository: string,
   head: string,
   integrated_commit: string,
-  review_receipt: string,
-  admission_receipt: string,
+  admission: SignedAdmission,
 }
 
 /** A required job's complete execution inputs, independent of runner placement. */
-pub type Requirement = {
+pub type JobInputs = {
   id: string,
-  execution_request: string,
   kind: "tests" | "check",
   repository: string,
   input_digest: string,
@@ -25,6 +25,9 @@ pub type Requirement = {
   reuse_allowed: bool,
   artifacts: list<string>,
 }
+
+/** A dispatch binds semantic job inputs to one immutable verification request. */
+pub type Requirement = JobInputs & {execution_request: string}
 
 /** An executor key has one declared trust domain; another installation cannot borrow it. */
 pub type VerifierKey = {id: string, public_key: string, trust_domain: string}
@@ -39,6 +42,9 @@ pub type Policy = {
   repositories: list<string>,
   verifier_keys: list<VerifierKey>,
   checkpoint_keys: list<VerifierKey>,
+  scope_keys: list<VerifierKey>,
+  admission_keys: list<VerifierKey>,
+  admission_rules: list<AdmissionRule>,
   max_changes: int,
   max_unverified_ms: int,
   max_repair_attempts: int,
@@ -90,6 +96,65 @@ pub type Proof = {
   original: Execution,
   signer: string,
   signature: string,
+}
+
+/** Trusted scope selection chooses an installation-owned review policy for one repository. */
+pub type AdmissionRule = {
+  id: string,
+  repository: string,
+  repository_id: string?,
+  scope_trust_domain: string,
+  review: ReviewPolicy,
+}
+
+/** The owning scope adapter attests the complete job census before dispatch bindings exist. */
+pub type AdmissionScope = {
+  schema: "smart-ship.admission-scope.v1",
+  installation: string,
+  policy_digest: string,
+  rule: string,
+  reviewed_head: string,
+  reviewed_base: string,
+  source: Source,
+  requirements: list<JobInputs>,
+  inventory_complete: bool,
+}
+
+/** Scope signatures authenticate selection without giving candidate code that authority. */
+pub type SignedScope = {scope: AdmissionScope, signer: string, signature: string}
+
+/** Frozen admission inputs are shared by dispatch, archived replay, and receipt validation. */
+pub type AdmissionRequest = {
+  installation: string,
+  policy_digest: string,
+  policy: Policy,
+  source: ReviewedSource,
+  reviews: ReviewObservation,
+  scope: SignedScope,
+}
+
+/** A receipt retains required CI evidence rather than replacing it with an opaque digest. */
+pub type AdmissionRecord = AdmissionRequest \
+  & {schema: "smart-ship.admission.v1", proofs: list<Proof>, admitted_at_ms: int}
+
+/** Only an installation's declared admission issuer can authorize the recorded decision. */
+pub type SignedAdmission = {record: AdmissionRecord, signer: string, signature: string}
+
+/** A nonrecursive verification plan serves admission and cumulative grouped snapshots. */
+pub type VerificationPlan = {
+  installation: string,
+  frontier: string,
+  sources: list<Source>,
+  requirements: list<Requirement>,
+  inventory_complete: bool,
+}
+
+/** Qualification exposes both decisions and their complete inventories. */
+pub type AdmissionVerification = {
+  status: "admitted" | "pending" | "failed" | "invalid",
+  review: ReviewAdmission?,
+  checks: Verification,
+  invalid: list<string>,
 }
 
 /** Complete counts and names prevent a missing census from looking green. */

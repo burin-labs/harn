@@ -1,14 +1,24 @@
 import {
+  AdmissionRecord,
+  AdmissionRequest,
+  AdmissionScope,
   Authority,
   Execution,
   Fence,
+  JobInputs,
   Policy,
   Proof,
   Requirement,
+  SignedAdmission,
+  SignedScope,
   Snapshot,
+  Source,
+  admission_bytes,
   execution_bytes,
   freeze_snapshot,
   policy_digest,
+  prepare_admission,
+  scope_bytes,
 } from "../lib/main"
 
 pub type Fixture = {
@@ -33,6 +43,17 @@ pub fn fixture(random: HarnessRandom) -> Fixture {
     repositories: ["project"],
     verifier_keys: [{id: "executor", public_key: keys.public, trust_domain: "local"}],
     checkpoint_keys: [{id: "publisher", public_key: keys.public, trust_domain: "neutral"}],
+    scope_keys: [{id: "scope", public_key: keys.public, trust_domain: "fixture-scope"}],
+    admission_keys: [{id: "admitter", public_key: keys.public, trust_domain: "neutral"}],
+    admission_rules: [
+      {
+        id: "project-default",
+        repository: "project",
+        repository_id: nil,
+        scope_trust_domain: "fixture-scope",
+        review: {minimum_approvals: 1, trusted_actor_ids: ["fixture-reviewer"], allow_forks: false},
+      },
+    ],
     max_changes: 10,
     max_unverified_ms: 600000,
     max_repair_attempts: 3,
@@ -66,8 +87,30 @@ pub fn fixture(random: HarnessRandom) -> Fixture {
         repository: "project",
         head: sha256_hex("head"),
         integrated_commit: sha256_hex("commit"),
-        review_receipt: digest("review"),
-        admission_receipt: digest("admission"),
+        admission: reviewed_admission(
+          policy,
+          keys.private,
+          {id: "change-1", base: sha256_hex("base")},
+          {
+            schema: "smart-ship.execution.v1",
+            installation: policy.installation,
+            requirement: requirement,
+            source: {
+              repository: "project",
+              commit: sha256_hex("head"),
+              tree: sha256_hex("head tree"),
+            },
+            run: "precheck-run",
+            attempt: 1,
+            job: "precheck-job",
+            result: "passed",
+            log_digest: digest("precheck output"),
+            artifacts: [{name: "binary", digest: digest("precheck binary")}],
+            tests: nil,
+            started_at_ms: 0,
+            completed_at_ms: 1000,
+          },
+        ),
       },
     ],
     requirements: [requirement],
@@ -90,6 +133,135 @@ pub fn fixture(random: HarnessRandom) -> Fixture {
     fence: {installation: "neutral", generation: 1, revision: 1, controller: "owner"},
     private_key: keys.private,
   }
+}
+
+fn job_inputs(requirement: Requirement) -> JobInputs {
+  return pick(
+    requirement,
+    [
+      "id",
+      "kind",
+      "repository",
+      "input_digest",
+      "runtime_digest",
+      "environment_digest",
+      "coverage_digest",
+      "trust_domain",
+      "reuse_allowed",
+      "artifacts",
+    ],
+  )
+}
+
+/**
+ * Build synthetic review before a real job runs, retaining its prepared source and input census.
+ */
+pub fn reviewed_request(
+  policy: Policy,
+  private_key: string,
+  change: {id: string, base: string},
+  original: {source: Source, requirement: Requirement},
+) -> AdmissionRequest {
+  const head = original.source.commit
+  const repository = original.source.repository
+  const rule = policy.admission_rules.find({ row -> row.repository == repository })!
+  const scope: AdmissionScope = {
+    schema: "smart-ship.admission-scope.v1",
+    installation: policy.installation,
+    policy_digest: policy_digest(policy),
+    rule: rule.id,
+    reviewed_head: head,
+    reviewed_base: change.base,
+    source: original.source,
+    requirements: [job_inputs(original.requirement)],
+    inventory_complete: true,
+  }
+  const signed_scope: SignedScope = {
+    scope: scope,
+    signer: "scope",
+    signature: ed25519_sign(private_key, scope_bytes(scope)),
+  }
+  return {
+    installation: policy.installation,
+    policy_digest: policy_digest(policy),
+    policy: policy,
+    source: {
+      repository: repository,
+      change: change.id,
+      head: head,
+      base: change.base,
+      author: {id: "fixture-author", name: "Fixture author", kind: "User"},
+      state: "open",
+      draft: false,
+      head_repository: repository,
+      base_repository: repository,
+      head_repository_id: nil,
+      base_repository_id: nil,
+    },
+    reviews: {
+      schema: "smart-ship.review-observation.v1",
+      repository: repository,
+      change: change.id,
+      head: head,
+      base: change.base,
+      platform_decision: nil,
+      declared_reviews: 1,
+      declared_threads: 0,
+      threads: [],
+      reviews: [
+        {
+          id: "fixture-review-" + change.id,
+          state: "approved",
+          head: head,
+          actor: {id: "fixture-reviewer", name: "Fixture reviewer", kind: "User"},
+          submitted_at: "1970-01-01T00:00:00Z",
+          updated_at: "1970-01-01T00:00:00Z",
+        },
+      ],
+    },
+    scope: signed_scope,
+  }
+}
+
+/** Retain the original execution without changing its source, request, or semantic inputs. */
+pub fn finish_reviewed_admission(
+  request: AdmissionRequest,
+  private_key: string,
+  original: Execution,
+) -> SignedAdmission {
+  const required = prepare_admission(request).requirements[0]!
+  const proof: Proof = {
+    requirement: original.requirement.id,
+    mode: if original.requirement.execution_request == required.execution_request {
+      "executed"
+    } else {
+      "reused"
+    },
+    original: original,
+    signer: "executor",
+    signature: ed25519_sign(private_key, execution_bytes(original)),
+  }
+  const record: AdmissionRecord = request
+    + {schema: "smart-ship.admission.v1", proofs: [proof], admitted_at_ms: original.completed_at_ms}
+  return {
+    record: record,
+    signer: "admitter",
+    signature: ed25519_sign(private_key, admission_bytes(record)),
+  }
+}
+
+/** Protocol fixtures explicitly permit reuse of their signed synthetic precheck. */
+pub fn reviewed_admission(
+  policy: Policy,
+  private_key: string,
+  change: {id: string, base: string},
+  original: Execution,
+) -> SignedAdmission {
+  return finish_reviewed_admission(
+    reviewed_request(policy, private_key, change, original),
+    private_key,
+    original,
+  )
 }
 
 pub fn execution(fixture: Fixture) -> Execution {

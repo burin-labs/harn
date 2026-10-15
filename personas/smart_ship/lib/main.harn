@@ -1,4 +1,4 @@
-pub import { ReviewAdmission, ReviewPolicy, ReviewedSource, review_admission } from "./admission"
+pub import { review_admission } from "./admission"
 pub import {
   Controller,
   Effect,
@@ -38,6 +38,7 @@ pub import {
   read_state,
 } from "./git_store"
 pub import {
+  admission_bytes,
   checkpoint_bytes,
   checkpoint_id,
   execution_bytes,
@@ -45,7 +46,9 @@ pub import {
   is_digest,
   is_git_id,
   policy_digest,
+  prepare_admission,
   requirement_identity,
+  scope_bytes,
   snapshot_bytes,
   snapshot_id,
   snapshot_verification_id,
@@ -67,6 +70,7 @@ pub import {
   LocalJob,
   Output,
   SigningIdentity,
+  bind_admission_job,
   bind_job,
   execute_job,
   local_lineage,
@@ -87,12 +91,22 @@ pub import { RepairContext, RepairModel, RepairRun, run_repair } from "./repair"
 pub import {
   Review,
   ReviewActor,
+  ReviewAdmission,
   ReviewObservation,
+  ReviewPolicy,
   ReviewThread,
+  ReviewedChangeObservation,
+  ReviewedSource,
   decode_review_observation,
+  decode_reviewed_change,
   validate_review_observation,
 } from "./review"
 pub import {
+  AdmissionRecord,
+  AdmissionRequest,
+  AdmissionRule,
+  AdmissionScope,
+  AdmissionVerification,
   Artifact,
   Authority,
   Change,
@@ -100,15 +114,19 @@ pub import {
   CheckpointTrust,
   Execution,
   Fence,
+  JobInputs,
   Policy,
   Promotion,
   Proof,
   Requirement,
+  SignedAdmission,
   SignedCheckpoint,
+  SignedScope,
   Snapshot,
   Source,
   TestEvidence,
   Verification,
+  VerificationPlan,
   VerifierKey,
 } from "./types"
-pub import { policy_errors, verify } from "./verification"
+pub import { policy_errors, verify, verify_admission } from "./verification"

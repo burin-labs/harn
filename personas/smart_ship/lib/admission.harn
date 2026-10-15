@@ -1,33 +1,11 @@
 import { is_git_id } from "./identity"
-import { ReviewActor, ReviewObservation, decode_review_observation } from "./review"
-
-/** Forge facts remain unknown until the adapter actually observes them. */
-pub type ReviewedSource = {
-  repository: string,
-  change: string,
-  head: string,
-  base: string,
-  author: ReviewActor?,
-  state: "open" | "closed" | "merged" | nil,
-  draft: bool?,
-  head_repository: string?,
-  base_repository: string?,
-}
-
-/** An installation declares independent reviewers by stable identity, never display name. */
-pub type ReviewPolicy = {minimum_approvals: int, trusted_actor_ids: list<string>, allow_forks: bool}
-
-/** Counts and named refusals stay visible even when the review census is absent. */
-pub type ReviewAdmission = {
-  status: "approved" | "pending" | "failed" | "invalid",
-  required: int,
-  observed_reviews: int,
-  observed_threads: int,
-  approvers: list<string>,
-  pending: list<string>,
-  failed: list<string>,
-  invalid: list<string>,
-}
+import {
+  ReviewAdmission,
+  ReviewObservation,
+  ReviewPolicy,
+  ReviewedSource,
+  decode_review_observation,
+} from "./review"
 
 type Refusals = {pending: list<string>, failed: list<string>, invalid: list<string>}
 
@@ -38,16 +16,21 @@ type Votes = {
   invalid: list<string>,
 }
 
-fn source_refusals(source: ReviewedSource, policy: ReviewPolicy) -> Refusals {
-  let pending: list<string> = []
-  let failed: list<string> = []
-  let invalid: list<string> = []
+/** Policy qualification is shared by installation and live or replayed review decisions. */
+pub fn review_policy_errors(policy: ReviewPolicy) -> list<string> {
   if policy.minimum_approvals < 1
     || len(policy.trusted_actor_ids) < policy.minimum_approvals
     || len(unique(policy.trusted_actor_ids)) != len(policy.trusted_actor_ids)
     || policy.trusted_actor_ids.contains("") {
-    invalid = invalid + ["review-policy"]
+    return ["review-policy"]
   }
+  return []
+}
+
+fn source_refusals(source: ReviewedSource, policy: ReviewPolicy) -> Refusals {
+  let pending: list<string> = []
+  let failed: list<string> = []
+  let invalid = review_policy_errors(policy)
   if source.repository == "" || source.change == ""
     || !is_git_id(source.head)
     || !is_git_id(source.base) {
@@ -68,12 +51,33 @@ fn source_refusals(source: ReviewedSource, policy: ReviewPolicy) -> Refusals {
   } else if source.draft {
     pending = pending + ["change-is-draft"]
   }
+  const repositories = repository_refusals(source, policy)
+  return {
+    pending: pending + repositories.pending,
+    failed: failed + repositories.failed,
+    invalid: invalid + repositories.invalid,
+  }
+}
+
+fn repository_refusals(source: ReviewedSource, policy: ReviewPolicy) -> Refusals {
+  let pending: list<string> = []
+  let failed: list<string> = []
+  let invalid: list<string> = []
   if source.head_repository == nil || source.base_repository == nil {
     pending = pending + ["change-repositories"]
   } else if source.head_repository == "" || source.base_repository != source.repository {
     invalid = invalid + ["change-repositories"]
   } else if !policy.allow_forks && source.head_repository != source.base_repository {
     failed = failed + ["fork-not-allowed"]
+  }
+  if source.head_repository_id == nil != (source.base_repository_id == nil) {
+    pending = pending + ["change-repository-identities"]
+  } else if source.head_repository_id != nil && source.base_repository_id != nil {
+    if source.head_repository_id == "" || source.base_repository_id == "" {
+      invalid = invalid + ["change-repository-identities"]
+    } else if !policy.allow_forks && source.head_repository_id != source.base_repository_id {
+      failed = failed + ["fork-not-allowed"]
+    }
   }
   return {pending: pending, failed: failed, invalid: invalid}
 }
