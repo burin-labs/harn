@@ -293,13 +293,12 @@ fn decide(
         }
     };
 
-    if facts.local {
+    if facts.local || facts.training_control_applied {
         return Ok(rule);
     }
     match facts.training_default {
         Some(TrainingDefault::DoesNotTrain) => Ok(rule),
         Some(TrainingDefault::Trains) if boundary.allow_training_discounts => Ok(rule),
-        Some(TrainingDefault::Trains) if facts.training_control_applied => Ok(rule),
         Some(TrainingDefault::Trains) => Err(DenialRule::TrainingDefault.refuse(format!(
             "{provider}/{model} trains on API traffic without an applied training control"
         ))),
@@ -331,7 +330,14 @@ pub(crate) fn preflight(
 pub(crate) fn preflight_chat(
     request: &super::options::LlmRequestPayload,
 ) -> Result<Option<&'static str>, VmError> {
-    let controls = chat_controls(&request.provider, &request.model, request.data_controls);
+    let boundary = effective_result(request.inference_boundary).map_err(VmError::Runtime)?;
+    let controls = chat_controls(
+        &request.provider,
+        &request.model,
+        request.data_controls,
+        boundary,
+        request.api_mode,
+    );
     preflight(
         request.inference_boundary,
         &request.provider,
@@ -344,24 +350,32 @@ fn chat_controls(
     provider: &str,
     model: &str,
     requested_posture: crate::llm_config::DataPosture,
+    boundary: Option<InferenceBoundary>,
+    api_mode: super::options::LlmApiMode,
 ) -> super::data_controls::DataControlsPlan {
     // The shared HTTP transports apply the resolved data-control plan again
-    // at send time. Native/ACP adapters do not, so never credit a planned
-    // no-training control to one of those routes.
+    // at send time. Native/ACP/Responses adapters do not, so never credit a
+    // planned no-training control to one of those routes.
     let shared_transport = !matches!(provider, "bedrock" | "azure_openai" | "vertex" | "gemini")
-        && !crate::llm::providers::AcpProvider::is_configured_acp(provider);
+        && !crate::llm::providers::AcpProvider::is_configured_acp(provider)
+        && !crate::llm::capabilities::should_use_responses_transport(
+            provider,
+            model,
+            api_mode == super::options::LlmApiMode::Responses,
+        );
     let posture = if shared_transport {
         requested_posture
     } else {
         crate::llm_config::DataPosture::Default
     };
-    super::data_controls::resolve(
+    super::data_controls::resolve_for_boundary(
         provider,
         model,
         super::data_controls::dialect_of(
             super::DialectContract::for_route(provider, model).stream_protocol(),
         ),
         posture,
+        boundary.filter(|_| shared_transport),
     )
 }
 

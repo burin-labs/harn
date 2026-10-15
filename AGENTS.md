@@ -139,7 +139,7 @@ live in [Engineering principles](docs/src/dev/engineering-principles.md):
   another parser or evaluator.
 - Preserve pre-v2 `{{name}}` missing-identifier passthrough. New constructs
   fail with parse errors. Vocabulary lives in
-  `crates/harn-vm/src/stdlib/template/vocabulary.rs`; regenerate with
+  `crates/harn-prompt-syntax/src/vocabulary.rs`; regenerate with
   `make gen-prompt-grammar`.
 - Keep stdlib registration authoritative. Register builtins with
   `#[harn_builtin]`; linter and editor awareness derive from the live stdlib.

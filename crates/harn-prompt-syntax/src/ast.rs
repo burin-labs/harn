@@ -1,5 +1,5 @@
 #[derive(Debug, Clone)]
-pub(super) enum Node {
+pub enum Node {
     Text(String),
     Expr {
         expr: Expr,
@@ -46,15 +46,15 @@ pub(super) enum Node {
 /// rules and the branch-trace recorder can point at the specific
 /// `{{ if }} / {{ elif }}` directive that fired (or didn't).
 #[derive(Debug, Clone)]
-pub(super) struct IfBranch {
-    pub(super) cond: Expr,
-    pub(super) line: usize,
-    pub(super) col: usize,
-    pub(super) body: Vec<Node>,
+pub struct IfBranch {
+    pub cond: Expr,
+    pub line: usize,
+    pub col: usize,
+    pub body: Vec<Node>,
 }
 
 #[derive(Debug, Clone)]
-pub(super) enum Expr {
+pub enum Expr {
     Nil,
     Bool(bool),
     Int(i64),
@@ -67,19 +67,19 @@ pub(super) enum Expr {
 }
 
 #[derive(Debug, Clone)]
-pub(super) enum PathSeg {
+pub enum PathSeg {
     Field(String),
     Index(i64),
     Key(String),
 }
 
 #[derive(Debug, Clone, Copy)]
-pub(super) enum UnOp {
+pub enum UnOp {
     Not,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub(super) enum BinOp {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BinOp {
     Eq,
     Neq,
     Lt,

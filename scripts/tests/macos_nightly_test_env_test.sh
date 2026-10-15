@@ -60,7 +60,7 @@ for required in '--locked' '--workspace' '--profile ci'; do
 done
 
 if ! grep -Eq \
-  'uses: actions/setup-go@[0-9a-f]{40}( |$)' \
+  'uses: actions/setup-go@[0-9a-f]{40}([[:space:]]|$)' \
   "$workflow"; then
   echo "macOS workspace tests must provision the pinned formatter used by generated Go contracts" >&2
   exit 1

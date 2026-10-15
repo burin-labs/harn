@@ -1,0 +1,12 @@
+[package]
+name = "harn-prompt-syntax"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Shared Harn prompt-template syntax, vocabulary, lint analysis, and outlines."
+
+[lints]
+workspace = true

@@ -118,6 +118,8 @@ pub fn fixture(random: HarnessRandom) -> Fixture {
   }
   const authority: Authority = {
     installation: "neutral",
+    policy: policy,
+    policy_digest: policy_digest(policy),
     generation: 1,
     revision: 1,
     controller: "owner",

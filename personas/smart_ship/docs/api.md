@@ -33,6 +33,14 @@ pub fn read_github_reviewed_change(
 
 `lib/main.harn`
 
+### type `AdmissionEffect`
+
+Admission effects retain the complete independently qualified witness.
+
+```harn
+pub type AdmissionEffect = EffectTarget & {kind: "admission", admission: SignedAdmission}
+```
+
 ### type `AdmissionRecord`
 
 A receipt retains required CI evidence rather than replacing it with an opaque digest.
@@ -117,6 +125,8 @@ Authority is read from the effect owner immediately before an effect.
 ```harn
 pub type Authority = {
   installation: string,
+  policy: Policy,
+  policy_digest: string,
   generation: int,
   revision: int,
   controller: string,
@@ -217,6 +227,7 @@ pub type Effect = {
   request: EffectRequest,
   generation: int,
   controller: string,
+  policy_digest: string,
   status: "reserved" | "dispatching" | "unknown" | "confirmed" | "refused",
   dispatch_id: string?,
   receipt: string?,
@@ -252,17 +263,32 @@ Only the effect owner receives these handles; dispatch identities come from its 
 pub type EffectOwnerHost = {process: HarnessProcess, random: HarnessRandom}
 ```
 
-### type `EffectRequest`
+### type `EffectRefusal`
 
-An installation adapter's exact external action, retained through uncertain results.
+Unmeasured evidence remains nil; measured refusals retain complete counts and names.
 
 ```harn
-pub type EffectRequest = {
-  kind: "admission" | "release" | "rerun",
-  repository: string,
-  source: string,
-  input_digest: string,
+pub type EffectRefusal = {
+  reason: string,
+  admission: AdmissionVerification?,
+  verification: Verification?,
 }
+```
+
+### type `EffectRequest`
+
+A digest cannot stand in for an admission record at the mutation boundary.
+
+```harn
+pub type EffectRequest = AdmissionEffect | ReleaseEffect | RerunEffect
+```
+
+### type `EffectTarget`
+
+An exact external target and its immutable input identity.
+
+```harn
+pub type EffectTarget = {repository: string, source: string, input_digest: string}
 ```
 
 ### type `Execution`
@@ -486,6 +512,14 @@ Original execution provenance remains attached to every selected output, includi
 pub type ReleaseArtifact = {artifact: Artifact, original: Execution, mode: "executed" | "reused"}
 ```
 
+### type `ReleaseEffect`
+
+Release input identity names the exact proven checkpoint.
+
+```harn
+pub type ReleaseEffect = EffectTarget & {kind: "release"}
+```
+
 ### type `ReleaseFile`
 
 Paths identify the actual bytes supplied to the publishing adapter.
@@ -609,6 +643,14 @@ A dispatch binds semantic job inputs to one immutable verification request.
 
 ```harn
 pub type Requirement = JobInputs & {execution_request: string}
+```
+
+### type `RerunEffect`
+
+A rerun retains the installation-selected source and input identity.
+
+```harn
+pub type RerunEffect = EffectTarget & {kind: "rerun"}
 ```
 
 ### type `Review`
@@ -843,6 +885,15 @@ The admission issuer signs inspectable review, scope, original execution, and ti
 
 ```harn
 pub fn admission_bytes(record: AdmissionRecord) -> string {
+}
+```
+
+### fn `admission_effect`
+
+Derive the external target and dispatch identity from the full signed admission.
+
+```harn
+pub fn admission_effect(signed: SignedAdmission) -> AdmissionEffect {
 }
 ```
 
@@ -1289,7 +1340,7 @@ pub fn requirement_identity(requirement: JobInputs) -> string {
 
 ### fn `reserve_effect`
 
-Persist the reservation with CAS before starting an idempotent, source-guarded forge action.
+Persist the qualified reservation with CAS; refusals retain any measured evidence.
 
 ```harn
 pub fn reserve_effect(
@@ -1297,7 +1348,7 @@ pub fn reserve_effect(
   fence: Fence,
   request: EffectRequest,
   policy: Policy,
-) -> Result<Controller, string> {
+) -> Result<Controller, EffectRefusal> {
 }
 ```
 
@@ -1413,7 +1464,12 @@ pub fn start(state: Controller, fence: Fence) -> Result<Controller, string> {
 A verified transfer invalidates old controllers even when their local leases remain live.
 
 ```harn
-pub fn transfer(state: Controller, fence: Fence, controller: string) -> Result<Controller, string> {
+pub fn transfer(
+  state: Controller,
+  fence: Fence,
+  controller: string,
+  next_policy: Policy? = nil,
+) -> Result<Controller, string> {
 }
 ```
 

@@ -7,6 +7,7 @@ execution environments, verification keys, and budgets belong to installation
 policy.
 
 [Install and control Smart Ship](docs/install.md).
+[Run stock verification in CI](docs/ci.md).
 
 The package provides signed verification and checkpoint contracts, durable Git
 controller state, bounded repair claims, and a standard Harn repair agent. Live

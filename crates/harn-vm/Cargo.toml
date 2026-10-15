@@ -102,6 +102,7 @@ parking_lot = "0.12"
 pin-project-lite = "0.2"
 harn-clock = { path = "../harn-clock", version = "=0.10.166" }
 harn-provider-catalog = { path = "../harn-provider-catalog", version = "=0.10.166" }
+harn-prompt-syntax = { path = "../harn-prompt-syntax", version = "=0.10.166" }
 harn-flock = { path = "../harn-flock", version = "=0.10.166" }
 harn-glob = { path = "../harn-glob", version = "=0.10.166" }
 harn-languages = { path = "../harn-languages", version = "=0.10.166" }

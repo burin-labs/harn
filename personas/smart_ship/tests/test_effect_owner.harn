@@ -1,10 +1,12 @@
 import { git } from "../fixtures/neutral"
-import { Fixture, digest, fixture } from "../fixtures/support"
+import { Fixture, digest, fixture, reviewed_admission } from "../fixtures/support"
 import {
+  AdmissionEffect,
   Controller,
   EffectRequest,
   Fence,
   GitStore,
+  admission_effect,
   begin_effect,
   commit_state,
   control,
@@ -47,13 +49,7 @@ fn setup(harness: Harness) -> Setup {
     effects: [],
     unverified_since_ms: nil,
   }
-  const source = f.snapshot.sources[0]!
-  const request: EffectRequest = {
-    kind: "admission",
-    repository: source.repository,
-    source: source.commit,
-    input_digest: digest("observed request"),
-  }
+  const request: EffectRequest = admission_effect(f.snapshot.changes[0]!.admission)
   const state = unwrap(reserve_effect(initial, fence(initial), request, f.policy))
   const write = prepare_state(harness.process, store, read_state(harness.process, store), state)
   assert_eq(commit_state(harness.process, store, write).status, "committed")
@@ -101,7 +97,16 @@ pipeline test_only_one_concurrent_owner_dispatches_and_a_prior_stop_refuses(harn
     callback,
   )
   assert(!replayed.dispatch_started)
-  const next_request = s.request + {input_digest: digest("second reviewed request")}
+  const original = schema_expect(s.request, schema_of(AdmissionEffect)).admission.record.proofs[0]!
+    .original
+  const next_request = admission_effect(
+    reviewed_admission(
+      s.f.policy,
+      s.f.private_key,
+      {id: "second-change", base: original.source.commit},
+      original + {source: original.source + {commit: sha256_hex("second reviewed head")}},
+    ),
+  )
   const reserved = unwrap(reserve_effect(completed, fence(completed), next_request, s.f.policy))
   const reservation = prepare_state(
     harness.process,

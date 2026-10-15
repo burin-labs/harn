@@ -341,8 +341,7 @@ fn scan_node_preflight(
                     .find(|path| super::result_cache::probe_exists(path))
                 {
                     if let Ok(body) = super::result_cache::probe_read_to_string(existing) {
-                        if let Err(err) = harn_vm::stdlib::template::validate_template_syntax(&body)
-                        {
+                        if let Err(err) = harn_prompt_syntax::validate_template_syntax(&body) {
                             diagnostics.push(PreflightDiagnostic {
                                 code: Code::PromptTemplateParse,
                                 path: file_path.display().to_string(),

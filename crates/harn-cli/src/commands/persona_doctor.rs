@@ -389,7 +389,7 @@ fn prompt_asset_check(
                 )
             }
         };
-        if let Err(error) = harn_vm::stdlib::template::validate_template_syntax(&source) {
+        if let Err(error) = harn_prompt_syntax::validate_template_syntax(&source) {
             return check(
                 "prompt-assets",
                 DoctorStatus::Red,

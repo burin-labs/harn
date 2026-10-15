@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use harn_modules::project_config::LintConfig;
 use harn_parser::{Node, SNode};
-use harn_vm::stdlib::template::outline::OutlineBlock;
+use harn_prompt_syntax::outline::OutlineBlock;
 use tower_lsp::lsp_types::*;
 
 use crate::document_kind::DocumentKind;
@@ -105,7 +105,7 @@ impl DocumentState {
             }
             DocumentKind::Prompt => {
                 self.prompt_outline =
-                    harn_vm::stdlib::template::outline::parse(&self.source).unwrap_or_default();
+                    harn_prompt_syntax::outline::parse(&self.source).unwrap_or_default();
             }
             DocumentKind::Other => {}
         }
@@ -477,8 +477,7 @@ impl DocumentState {
         ));
         // A template that doesn't parse has no trustworthy geometry, and
         // the parse failure is already among the diagnostics above.
-        self.prompt_outline =
-            harn_vm::stdlib::template::outline::parse(&self.source).unwrap_or_default();
+        self.prompt_outline = harn_prompt_syntax::outline::parse(&self.source).unwrap_or_default();
     }
 
     fn publish_lint_diagnostics(&mut self, lint_diags: Vec<harn_lint::LintDiagnostic>) {

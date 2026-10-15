@@ -172,6 +172,8 @@ pub type Verification = {
 /** Authority is read from the effect owner immediately before an effect. */
 pub type Authority = {
   installation: string,
+  policy: Policy,
+  policy_digest: string,
   generation: int,
   revision: int,
   controller: string,

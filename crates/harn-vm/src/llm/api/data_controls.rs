@@ -43,8 +43,8 @@ pub enum DataControlsOutcome {
     /// provider's server-side default applies. This is not a claim about what
     /// that default is.
     NotRequested,
-    /// The caller asked for the strictest available posture and at least one
-    /// declared control was written onto this request.
+    /// At least one declared control was written onto this request, either
+    /// explicitly requested or required by a governing inference boundary.
     Applied,
     /// The caller asked, the provider is researched, and it exposes no
     /// per-request control on this dialect. The posture was NOT achieved.
@@ -226,6 +226,18 @@ pub(crate) fn resolve(
     dialect: DataControlDialect,
     posture: DataPosture,
 ) -> DataControlsPlan {
+    resolve_for_boundary(provider, model, dialect, posture, None)
+}
+
+/// Apply only the training controls required by the host ceiling in addition
+/// to the caller's requested posture. Default without a ceiling stays empty.
+pub(crate) fn resolve_for_boundary(
+    provider: &str,
+    model: &str,
+    dialect: DataControlDialect,
+    posture: DataPosture,
+    boundary: Option<super::inference_boundary::InferenceBoundary>,
+) -> DataControlsPlan {
     let requested_posture = match posture {
         DataPosture::Default => "default",
         DataPosture::StrictestAvailable => "strictest_available",
@@ -238,12 +250,16 @@ pub(crate) fn resolve(
     // reported posture and the note a host may surface verbatim.
     let route_controls = crate::llm_config::model_data_controls(model);
     let training_default = crate::llm_config::effective_training_default(provider, model);
+    let require_training_control = boundary.is_some_and(|boundary| {
+        !boundary.allow_training_discounts
+            && training_default != Some(TrainingDefault::DoesNotTrain)
+    });
     let route_note = |provider_note: Option<String>| match &route_controls {
         Some(controls) => controls.note.clone(),
         None => provider_note,
     };
 
-    if posture == DataPosture::Default {
+    if posture == DataPosture::Default && !require_training_control {
         return DataControlsPlan {
             body_writes: Vec::new(),
             headers: Vec::new(),
@@ -285,6 +301,9 @@ pub(crate) fn resolve(
     let mut headers = Vec::new();
     let mut applied = Vec::new();
     for control in declaration.controls_for_dialect(dialect) {
+        if posture == DataPosture::Default && control.effect != DataControlEffect::Training {
+            continue;
+        }
         match control.location {
             DataControlLocation::Body => {
                 body_writes.push((control.name.clone(), control.value.as_json()));

@@ -75,7 +75,7 @@ impl RuntimeLimits {
         max_agent_sessions: 128,
         max_project_fingerprint_depth: 4,
         max_project_enrich_yaml_depth: 128,
-        max_template_ast_depth: 128,
+        max_template_ast_depth: harn_prompt_syntax::MAX_AST_DEPTH,
         max_constant_folded_collection_items: 4_096,
         max_constant_folded_string_bytes: 64 * 1024,
         max_nested_execution_depth: 8,

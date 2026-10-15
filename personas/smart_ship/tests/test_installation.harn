@@ -1,3 +1,4 @@
+import { assert_error_contains } from "std/testing"
 import { git } from "../fixtures/neutral"
 import { digest, execution, fixture, proof } from "../fixtures/support"
 import {
@@ -98,6 +99,47 @@ pipeline test_installation_starts_in_shadow_and_inspects_archived_checkpoint_pol
   assert_eq(view.verification?.status, "verified")
   assert_eq(view.verification?.required, 1)
   assert_eq(view.verification?.executed, 1)
-  assert_eq(initialize_installation(harness.process, changed).state, settled)
+  assert_error_contains(
+    fn() { initialize_installation(harness.process, changed) },
+    "policy changed without a fenced generation transfer",
+  )
+  assert_eq(initialize_installation(harness.process, config).state, settled)
   assert_eq(inspect_installation(harness.process, config).checkpoint, view.checkpoint)
+  const binary = harness.env.get("HARN_BIN") ?? "harn"
+  const command = path_join(harness.fs.runtime_paths().asset_root, "../cli.harn")
+  const controller = digest("replacement controller artifact")
+  for request in [
+    {action: "control", configuration: path, mode: "draining"},
+    {
+      action: "transfer",
+      configuration: path,
+      target_controller: controller,
+      next_policy: changed.policy,
+    },
+  ] {
+    const result = harness.process.run(
+      {program: binary, args: ["run", command, "--", json_stringify(request)], timeout_ms: 30000},
+    )
+    assert(result.success && result.exit_code == 0, result.stderr)
+  }
+  const replacement = changed + {controller: controller}
+  harness.fs.write_text(path, json_stringify(replacement))
+  const transferred = initialize_installation(harness.process, replacement).state!
+  assert_eq(transferred.authority.policy, changed.policy)
+  assert_eq(transferred.authority.generation, settled.authority.generation + 1)
+  assert_eq(transferred.authority.mode, "shadow")
+  const resumed = harness.process.run(
+    {
+      program: binary,
+      args: [
+        "run",
+        command,
+        "--",
+        json_stringify({action: "control", configuration: path, mode: "active"}),
+      ],
+      timeout_ms: 30000,
+    },
+  )
+  assert(resumed.success && resumed.exit_code == 0, resumed.stderr)
+  assert_eq(read_state(harness.process, config.store).state!.authority.mode, "active")
 }

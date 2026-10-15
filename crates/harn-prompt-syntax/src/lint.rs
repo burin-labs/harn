@@ -9,9 +9,8 @@
 use super::ast::{BinOp, Expr, Node, PathSeg};
 use super::error::TemplateParseError;
 use super::parser::parse as parse_template;
-use crate::runtime_limits::RuntimeLimits;
 
-const TEMPLATE_LINT_AST_MAX_DEPTH: usize = RuntimeLimits::DEFAULT.max_template_ast_depth;
+const TEMPLATE_LINT_AST_MAX_DEPTH: usize = crate::MAX_AST_DEPTH;
 
 /// Parse a template source string into a flat list of lintable
 /// constructs (conditionals + sections). Returns `Err` when the
@@ -471,7 +470,7 @@ mod tests {
 
     #[test]
     fn parse_reports_template_control_depth_limit() {
-        let depth = RuntimeLimits::DEFAULT.max_template_ast_depth + 1;
+        let depth = crate::MAX_AST_DEPTH + 1;
         let mut src = String::new();
         for _ in 0..depth {
             src.push_str("{{ if true }}");
@@ -484,25 +483,23 @@ mod tests {
         let err = parse(&src).expect_err("depth limit");
 
         assert!(err.message.contains("template nesting depth exceeded"));
-        assert!(err.message.contains(&format!(
-            "({} levels)",
-            RuntimeLimits::DEFAULT.max_template_ast_depth
-        )));
+        assert!(err
+            .message
+            .contains(&format!("({} levels)", crate::MAX_AST_DEPTH)));
     }
 
     #[test]
     fn parse_reports_template_expression_depth_limit() {
-        let depth = RuntimeLimits::DEFAULT.max_template_ast_depth + 1;
+        let depth = crate::MAX_AST_DEPTH + 1;
         let condition = format!("{}llm.capabilities.native_tools", "!".repeat(depth));
         let src = format!("{{{{ if {condition} }}}}x{{{{ end }}}}");
 
         let err = parse(&src).expect_err("depth limit");
 
         assert!(err.message.contains("template expression depth exceeded"));
-        assert!(err.message.contains(&format!(
-            "({} levels)",
-            RuntimeLimits::DEFAULT.max_template_ast_depth
-        )));
+        assert!(err
+            .message
+            .contains(&format!("({} levels)", crate::MAX_AST_DEPTH)));
     }
 
     #[test]

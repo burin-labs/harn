@@ -10,7 +10,7 @@
         },
         {
           "const": "applied",
-          "description": "The caller asked for the strictest available posture and at least one\ndeclared control was written onto this request.",
+          "description": "At least one declared control was written onto this request, either\nexplicitly requested or required by a governing inference boundary.",
           "type": "string"
         },
         {

@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use harn_lexer::{Lexer, Span, TokenKind};
 use harn_parser::{MatchArm, Node, SNode};
-use harn_vm::stdlib::template::outline::{OutlineBlock, OutlineBlockKind};
+use harn_prompt_syntax::outline::{OutlineBlock, OutlineBlockKind};
 use tower_lsp::lsp_types::{FoldingRange, FoldingRangeKind};
 
 use crate::source_text::SourceText;

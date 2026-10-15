@@ -59,6 +59,10 @@ external request. Invoke `action: transfer` with `target_controller` set to the
 new qualified artifact digest. The new generation starts in shadow mode. Update
 the installation's controller digest before activating it. A rollback follows
 the same transfer procedure with the prior qualified artifact and a new generation.
+For a policy change, include the complete replacement `next_policy` in the
+transfer request. The state owner validates and archives that policy alongside
+its mechanically checked digest before committing the new generation. Update
+the installation configuration after that committed transfer.
 
 ## Observe GitHub reviews
 
@@ -112,6 +116,25 @@ issuer, and require `verify_admission(...).status == admitted` before integratin
 Missing checks remain pending; incomplete scope, invalid provenance, invalid
 reuse, or mismatched source/policy/issuer cannot qualify. Store the full signed
 record in `Change.admission`; grouped snapshots and release consumers recheck it.
+
+Build external admission requests with `admission_effect(signed)`. Pass that
+request to `reserve_effect` with your current state, fence, and trusted policy.
+The reservation checks the complete record and its derived target and digest.
+Commit the returned state through the Git compare-and-swap owner before calling
+`dispatch_reserved_effect`. An unsigned digest cannot authorize admission.
+Release requests must name the exact `checkpoint_id` in `input_digest` and a
+source in that fully verified checkpoint.
+Read admission refusals through `EffectRefusal.admission` and checkpoint
+refusals through `EffectRefusal.verification`. These retain required counts,
+pending and failing job names, and invalid evidence. A nil field means that
+qualification was not measured for that stage.
+
+Each authority generation freezes `policy_digest`. To change policy, drain
+pending and active verification, reconcile external effects, and resolve work
+that still needs the old policy. Call `transfer` with the next policy, commit
+and read back the new shadow generation, then update the installation config
+before activating it. Initialization refuses an untransferred config change.
+Read-only inspection can still show a checkpoint under its archived policy.
 
 Call `prepare_job` for each declared stock command, then build the complete
 snapshot from those measured sources and requirements. Call `freeze_snapshot`

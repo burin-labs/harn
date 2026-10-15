@@ -253,6 +253,8 @@ fn preview_reports_the_posture_inference_will_send_and_the_routes_own_note() {
         "meta",
         "muse-spark-1.3-contributor",
         crate::llm_config::data_controls_default_posture(),
+        None,
+        crate::llm::api::LlmApiMode::ChatCompletions,
     )
     .receipt;
     assert_eq!(

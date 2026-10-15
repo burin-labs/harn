@@ -1,8 +1,7 @@
 use super::ast::{BinOp, Expr, PathSeg, UnOp};
 use super::error::TemplateError;
-use crate::runtime_limits::RuntimeLimits;
 
-const TEMPLATE_EXPR_MAX_DEPTH: usize = RuntimeLimits::DEFAULT.max_template_ast_depth;
+const TEMPLATE_EXPR_MAX_DEPTH: usize = crate::MAX_AST_DEPTH;
 
 pub(super) fn parse_expr(src: &str, line: usize, col: usize) -> Result<Expr, TemplateError> {
     let tokens = tokenize_expr(src, line, col)?;
