@@ -813,7 +813,7 @@ mod scheduler_tests {
     fn prepare_branches(
         branches: Vec<Branch>,
     ) -> Vec<subtask::PreparedSubtask<impl Future<Output = Result<(), VmError>>>> {
-        let vm = Vm::new();
+        let vm = crate::Vm::new();
         branches
             .into_iter()
             .map(|branch| subtask::prepare(vm.runtime.subtask_scope(), branch))

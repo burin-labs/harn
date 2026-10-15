@@ -3,6 +3,7 @@
 mod capability;
 mod capability_lattice;
 pub mod known_paths;
+mod stage;
 pub mod tool_annotations;
 
 pub use capability::{
@@ -11,3 +12,4 @@ pub use capability::{
     UnixSocketEnforcement,
 };
 pub use capability_lattice::{operation_is_covered, policy_allows_capability};
+pub use stage::{StageDecl, StageExit};

@@ -660,7 +660,7 @@ use super::agent_host_tool_dispatch::{
     ToolDispatchRequest,
 };
 
-pub(super) async fn host_agent_dispatch_tool_call(
+pub(crate) async fn host_agent_dispatch_tool_call(
     ctx: crate::vm::AsyncBuiltinCtx,
     call: VmValue,
     tools: Option<&VmValue>,

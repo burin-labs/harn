@@ -1,7 +1,7 @@
 //! Typed call-context data shared by the interpreter and its execution runtime.
 
 use crate::value::VmValue;
-use harn_modules::personas::StageDecl;
+use harn_execution_policy::StageDecl;
 use std::sync::Arc;
 
 /// Metadata registered when an annotated step declaration executes.

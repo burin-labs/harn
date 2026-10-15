@@ -620,7 +620,7 @@ impl super::super::Vm {
                 _ => return None,
             },
         };
-        if !Self::direct_call_cacheable(&closure) {
+        if !self.direct_call_cacheable(&closure) {
             return None;
         }
 
@@ -649,7 +649,7 @@ impl super::super::Vm {
         Some(self.push_closure_frame_from_stack_args(&closure, args_start, callee_idx))
     }
 
-    fn direct_call_cacheable(closure: &VmClosure) -> bool {
+    fn direct_call_cacheable(&self, closure: &VmClosure) -> bool {
         !closure.func.is_generator && !self.runtime.is_step_function(&closure.func.name)
     }
 
@@ -906,7 +906,7 @@ impl super::super::Vm {
                 }
             },
         };
-        if !Self::direct_call_cacheable(&closure) {
+        if !self.direct_call_cacheable(&closure) {
             return None;
         }
 

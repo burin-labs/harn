@@ -1,4 +1,4 @@
-- Rust embedders share capability ceilings, sandbox policy, tool annotations,
+- Rust embedders share capability ceilings, sandbox and stage policy, tool annotations,
   and credential-path classification through `harn-execution-policy`. Existing
   `harn-vm` public paths re-export the same types; serialized policy is unchanged.
 
