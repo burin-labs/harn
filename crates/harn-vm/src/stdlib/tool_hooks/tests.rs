@@ -3,7 +3,7 @@ use crate::stdlib::register_vm_stdlib;
 use crate::value::VmDictExt;
 
 fn vm_with_stdlib() -> Vm {
-    let mut vm = Vm::new();
+    let mut vm = crate::new_vm();
     register_vm_stdlib(&mut vm);
     vm
 }

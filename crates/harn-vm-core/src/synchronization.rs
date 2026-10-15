@@ -10,7 +10,7 @@ use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use crate::value::{VmError, VmSyncPermitHandle, VmValue};
 
 #[derive(Debug, Default)]
-pub(crate) struct VmSyncRuntime {
+pub struct VmSyncRuntime {
     primitives: Mutex<BTreeMap<String, Arc<VmSyncPrimitive>>>,
 }
 
@@ -113,7 +113,7 @@ impl VmSyncRuntime {
         Ok(primitive)
     }
 
-    pub(crate) async fn acquire(
+    pub async fn acquire(
         &self,
         kind: &str,
         key: &str,
@@ -213,7 +213,7 @@ impl VmSyncRuntime {
         }
     }
 
-    pub(crate) fn metrics(&self, kind: Option<&str>, key: Option<&str>) -> VmValue {
+    pub fn metrics(&self, kind: Option<&str>, key: Option<&str>) -> VmValue {
         let primitives = self
             .primitives
             .lock()

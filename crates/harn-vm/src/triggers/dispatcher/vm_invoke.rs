@@ -365,7 +365,7 @@ mod tests {
             Some(existing_cwd.path()),
             None,
         )));
-        let mut vm = crate::vm::Vm::new();
+        let mut vm = crate::new_vm();
         vm.set_source_dir(handler_source.path());
 
         {
@@ -395,7 +395,7 @@ mod tests {
     fn dispatch_context_installs_vm_root_without_existing_context() {
         crate::stdlib::process::reset_process_state();
         let handler_source = tempfile::tempdir().unwrap();
-        let mut vm = crate::vm::Vm::new();
+        let mut vm = crate::new_vm();
         vm.set_source_dir(handler_source.path());
 
         {
@@ -429,7 +429,7 @@ mod tests {
             Some(existing_cwd.path()),
             None,
         )));
-        let mut vm = crate::vm::Vm::new();
+        let mut vm = crate::new_vm();
         vm.set_source_dir(handler_source.path());
         vm.set_project_root(explicit_root.path());
 

@@ -1,3 +1,4 @@
+use crate::native_vm::NativeBuiltinCtxExt;
 use crate::orchestration::{
     clear_runtime_hooks, register_vm_hook_lazy, run_lifecycle_hooks_with_ctx, HookEvent,
 };
@@ -51,7 +52,7 @@ pub fn handle(_harness: Harness, _event: dict) {
 "#,
     )
     .expect("write hook module");
-    let mut vm = Vm::new();
+    let mut vm = crate::new_vm();
     register_vm_stdlib(&mut vm);
     vm.enable_trusted_host_dispatch()
         .expect("host-selected module authority");
@@ -148,7 +149,7 @@ pub fn handle(harness: Harness, _payload: dict) -> nil {{
         LazyVmCallable::new(module_path, "handle"),
     );
 
-    let mut vm = Vm::new();
+    let mut vm = crate::new_vm();
     register_vm_stdlib(&mut vm);
     vm.set_source_dir(dir.path());
     let ctx = AsyncBuiltinCtx::for_test(vm);
@@ -222,7 +223,7 @@ pub fn handle(harness: Harness, _payload: dict) -> nil {
         LazyVmCallable::new(module_path, "handle"),
     );
 
-    let mut vm = Vm::new();
+    let mut vm = crate::new_vm();
     register_vm_stdlib(&mut vm);
     vm.set_source_dir(dir.path());
     let ctx = AsyncBuiltinCtx::for_test(vm);

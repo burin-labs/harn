@@ -977,7 +977,7 @@ mod tests {
             let local = tokio::task::LocalSet::new();
             local
                 .run_until(async {
-                    let mut vm = crate::Vm::new();
+                    let mut vm = crate::new_vm();
                     crate::register_vm_stdlib(&mut vm);
                     vm.execute(&chunk).await.expect("execute");
                     use crate::native_vm::NativeVmState;

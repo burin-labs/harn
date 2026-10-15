@@ -105,7 +105,7 @@ pipeline main(harness: Harness, task: unknown) {{
     let local = tokio::task::LocalSet::new();
     let output = local
         .run_until(async {
-            let mut vm = crate::Vm::new();
+            let mut vm = crate::new_vm();
             crate::register_vm_stdlib(&mut vm);
             vm.execute(&chunk).await.expect("run mocked agent loop");
             vm.output().to_string()

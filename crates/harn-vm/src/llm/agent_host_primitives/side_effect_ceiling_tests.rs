@@ -1,3 +1,4 @@
+use crate::native_vm::NativeBuiltinCtxExt;
 use std::collections::HashMap;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex as StdMutex};
@@ -94,7 +95,7 @@ async fn dispatch_read_file_with_catalog(
         "arguments": {"path": path},
     }));
     let result = host_agent_dispatch_tool_call(
-        crate::vm::AsyncBuiltinCtx::for_test(crate::vm::Vm::new()),
+        crate::vm::AsyncBuiltinCtx::for_test(crate::new_vm()),
         call,
         catalog,
         options,

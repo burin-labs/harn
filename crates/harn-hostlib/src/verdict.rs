@@ -342,7 +342,7 @@ test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out\n";
     }
 
     fn overlap_vm(barrier: Arc<tokio::sync::Barrier>) -> Vm {
-        let mut vm = Vm::new();
+        let mut vm = harn_vm::new_vm();
         register_vm_stdlib(&mut vm);
         let _ = crate::install_default(&mut vm);
         vm.register_async_builtin("__test_overlap", move |_ctx, _args| {

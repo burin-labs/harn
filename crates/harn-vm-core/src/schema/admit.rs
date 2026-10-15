@@ -11,7 +11,7 @@ use serde_json::{Map, Value};
 
 /// A structured-output schema that cannot be satisfied by any JSON value.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct UnsatisfiableJsonSchema {
+pub struct UnsatisfiableJsonSchema {
     pub tool: Option<String>,
     pub path: String,
     pub keyword: &'static str,
@@ -36,9 +36,7 @@ impl std::fmt::Display for UnsatisfiableJsonSchema {
 }
 
 /// Fail when `schema` cannot be satisfied by any value.
-pub(crate) fn reject_unsatisfiable_output_schema(
-    schema: &Value,
-) -> Result<(), UnsatisfiableJsonSchema> {
+pub fn reject_unsatisfiable_output_schema(schema: &Value) -> Result<(), UnsatisfiableJsonSchema> {
     match first_unsatisfiable_node(schema, "#", None) {
         Some(error) => Err(error),
         None => Ok(()),

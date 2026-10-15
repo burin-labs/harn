@@ -859,7 +859,7 @@ async fn load_module_runtime(
     // this module's own import resolution, so keeping the thread-local pinned
     // is purely a caller-facing concern.
     let _source_dir_guard = crate::stdlib::process::SourceDirGuard::capture();
-    let mut base_vm = Vm::new();
+    let mut base_vm = crate::new_vm();
     register_vm_stdlib(&mut base_vm);
     let store_base = module_path.parent().unwrap_or_else(|| Path::new("."));
     crate::store::register_store_builtins(&mut base_vm, store_base);

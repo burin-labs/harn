@@ -33,7 +33,7 @@ fn run_harn(source: &str) -> VmValue {
                 let mut parser = Parser::new(tokens);
                 let program = parser.parse().expect("parse");
                 let chunk = Compiler::new().compile(&program).expect("compile");
-                let mut vm = Vm::new();
+                let mut vm = harn_vm::new_vm();
                 register_vm_stdlib(&mut vm);
                 let _ = harn_hostlib::install_default(&mut vm);
                 vm.set_harness(harn_vm::Harness::real());

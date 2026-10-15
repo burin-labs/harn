@@ -52,7 +52,7 @@ struct SourceExecutor {
 
 impl SourceExecutor {
     fn invoke(&self, environment: serde_json::Value) -> Result<serde_json::Value, String> {
-        let mut vm = crate::vm::Vm::new();
+        let mut vm = crate::new_vm();
         crate::stdlib::process::register_process_builtins(&mut vm);
         let mut command = vec![self.request.interpreter.display().to_string()];
         command.extend(self.request.invocation_args());

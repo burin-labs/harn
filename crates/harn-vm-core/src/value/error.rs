@@ -797,7 +797,7 @@ fn classify_by_http_status(msg: &str) -> Option<ErrorCategory> {
 /// formatting it into prose and asking [`classify_error_message`] to recover
 /// the same fact. Keeping the mapping here also prevents mock and live provider
 /// envelopes from drifting apart.
-pub(crate) fn error_category_for_http_status(status: u16) -> Option<ErrorCategory> {
+pub fn error_category_for_http_status(status: u16) -> Option<ErrorCategory> {
     match status {
         401 | 403 => Some(ErrorCategory::Auth),
         404 | 410 => Some(ErrorCategory::NotFound),

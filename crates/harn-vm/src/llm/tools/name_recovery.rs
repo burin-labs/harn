@@ -3,6 +3,7 @@
 //! never auto-dispatches: the model must reissue the named call through the
 //! normal policy and approval path.
 
+use crate::native_vm::NativeBuiltinCtxExt;
 use std::collections::BTreeSet;
 
 use super::collect::ToolSchema;
@@ -483,7 +484,7 @@ mod tests {
     ) -> serde_json::Value {
         let tools = registry(entries);
         let result = crate::llm::agent_host_primitives::host_agent_dispatch_tool_call(
-            crate::vm::AsyncBuiltinCtx::for_test(crate::vm::Vm::new()),
+            crate::vm::AsyncBuiltinCtx::for_test(crate::new_vm()),
             generic_call(arguments),
             Some(&tools),
             &dispatch_options(allowed),
@@ -556,7 +557,7 @@ mod tests {
         );
 
         let result = crate::llm::agent_host_primitives::host_agent_dispatch_tool_call(
-            crate::vm::AsyncBuiltinCtx::for_test(crate::vm::Vm::new()),
+            crate::vm::AsyncBuiltinCtx::for_test(crate::new_vm()),
             generic_call(serde_json::json!({"path": "src/main.rs"})),
             Some(&tools),
             &options,

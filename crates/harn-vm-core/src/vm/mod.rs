@@ -73,7 +73,7 @@ pub use debug::{DebugAction, DebugState};
 pub use harness_seam::{HarnessMethodFuture, HarnessMethods};
 pub use module_phase_timing::{ModulePhaseRecorder, ModulePhaseStats};
 pub use modules::resolve_module_import_path;
-pub(crate) use registration::VmBuiltinRegistration;
+pub use registration::VmBuiltinRegistration;
 pub use runtime::{
     BuiltinGateDecision, VmBuiltinBridge, VmRuntime, VmRuntimeBaseline, VmSpanKind, VmTaskCleanup,
 };

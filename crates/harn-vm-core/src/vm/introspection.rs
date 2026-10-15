@@ -3,6 +3,34 @@
 use super::{Vm, VmBuiltinMetadata};
 
 impl Vm {
+    pub fn has_builtin(&self, name: &str) -> bool {
+        self.builtins.contains_key(name) || self.async_builtins.contains_key(name)
+    }
+
+    pub fn builtin_is_denied(&self, name: &str) -> bool {
+        self.denied_builtins.contains(name)
+    }
+
+    pub fn runtime_context(&self) -> &super::RuntimeContext {
+        &self.runtime_context
+    }
+
+    pub fn output_mut(&mut self) -> &mut String {
+        &mut self.output
+    }
+
+    pub fn synchronization(&self) -> &std::sync::Arc<crate::synchronization::VmSyncRuntime> {
+        &self.sync_runtime
+    }
+
+    pub fn shared_state(&self) -> &std::sync::Arc<crate::shared_state::VmSharedStateRuntime> {
+        &self.shared_state_runtime
+    }
+
+    pub fn active_task_ids(&self) -> impl Iterator<Item = &str> {
+        self.spawned_tasks.keys().map(String::as_str)
+    }
+
     /// Return all registered builtin names (sync + async).
     pub fn builtin_names(&self) -> Vec<String> {
         let mut names: Vec<String> = self.builtins.keys().cloned().collect();

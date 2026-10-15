@@ -91,7 +91,7 @@ impl VmInlineCacheReadFixture {
     ) -> Self {
         let slot_count = chunk.inline_cache_slot_count();
         let cache_id = chunk.cache_id();
-        let mut vm = Vm::new();
+        let mut vm = crate::new_vm();
         let cache_set = vm.inline_cache_set_index_for_chunk(chunk);
         let mut hash_entries = vec![crate::chunk::InlineCacheEntry::Empty; slot_count];
         for &slot in &slots {

@@ -8,7 +8,7 @@ use super::{Vm, VmBuiltinDispatch, VmBuiltinEntry, VmBuiltinMetadata};
 
 /// Handler tables and immutable namespace constants, without invocation state.
 #[derive(Clone)]
-pub(crate) struct VmBuiltinRegistration {
+pub struct VmBuiltinRegistration {
     builtins: Arc<BTreeMap<String, VmBuiltinFn>>,
     async_builtins: Arc<BTreeMap<String, VmAsyncBuiltinFn>>,
     capability_methods:
@@ -33,7 +33,7 @@ fn immutable_namespace_value(value: &VmValue) -> bool {
 }
 
 impl Vm {
-    pub(crate) fn builtin_registration(&self) -> VmBuiltinRegistration {
+    pub fn builtin_registration(&self) -> VmBuiltinRegistration {
         for (name, value) in self.globals.iter() {
             assert!(
                 immutable_namespace_value(value),
@@ -55,7 +55,7 @@ impl Vm {
         }
     }
 
-    pub(crate) fn install_builtin_registration(
+    pub fn install_builtin_registration(
         &mut self,
         load: impl FnOnce() -> VmBuiltinRegistration,
     ) -> bool {

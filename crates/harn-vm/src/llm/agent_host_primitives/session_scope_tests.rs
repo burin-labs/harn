@@ -1,3 +1,4 @@
+use crate::native_vm::NativeBuiltinCtxExt;
 use std::collections::HashMap;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex as StdMutex};
@@ -88,7 +89,7 @@ async fn resolved_dispatch_session_owns_host_execution_and_restores_the_caller()
     );
 
     let result = host_agent_dispatch_tool_call(
-        crate::vm::AsyncBuiltinCtx::for_test(crate::vm::Vm::new()),
+        crate::vm::AsyncBuiltinCtx::for_test(crate::new_vm()),
         call,
         Some(&tools),
         &options,

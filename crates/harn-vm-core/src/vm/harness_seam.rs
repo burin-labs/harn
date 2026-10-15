@@ -44,6 +44,43 @@ pub trait HarnessMethods: Send + Sync {
 }
 
 impl Vm {
+    /// Invoke a registered capability implementation after backend policy checks.
+    pub async fn call_registered_capability_method(
+        &mut self,
+        capability: harn_builtin_meta::CapabilityId,
+        method: &str,
+        args: &[VmValue],
+    ) -> Option<Result<VmValue, VmError>> {
+        let dispatch = self
+            .capability_methods
+            .get(&capability)?
+            .get(method)?
+            .clone();
+        let name = format!("harness.{}.{method}", capability.field_name());
+        let _observe = self.observe_builtin_call(&name);
+        Some(
+            self.call_builtin_entry(&name, dispatch, args.to_vec())
+                .await,
+        )
+    }
+
+    /// Run the backend's synchronous capability path against interpreter-owned state.
+    pub fn call_harness_method_sync(
+        &mut self,
+        handle: &VmHarness,
+        method: &str,
+        args: &[VmValue],
+    ) -> Option<Result<VmValue, VmError>> {
+        let _interrupt = self.sync_builtin_interrupt_guard();
+        self.runtime.harness_methods().call_sync_fast(
+            &mut self.output,
+            &mut self.runtime_effects,
+            handle,
+            method,
+            args,
+        )
+    }
+
     pub async fn call_harness_method(
         &mut self,
         handle: &VmHarness,

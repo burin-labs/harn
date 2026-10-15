@@ -13,7 +13,7 @@
 //! fence earlier in a response swallow real content after it.
 
 /// Byte offsets of the structural positions in a piece of text.
-pub(crate) struct TextIndex {
+pub struct TextIndex {
     /// Non-overlapping ```` ``` ```` markers, ascending.
     fence_markers: Vec<usize>,
     /// `\n` bytes, ascending.
@@ -21,7 +21,7 @@ pub(crate) struct TextIndex {
 }
 
 impl TextIndex {
-    pub(crate) fn build(text: &str) -> Self {
+    pub fn build(text: &str) -> Self {
         let fence_markers = text
             .match_indices("```")
             .map(|(position, _)| position)
@@ -46,12 +46,12 @@ impl TextIndex {
     /// matched by a marker at or after it. That makes a closed example fence
     /// skippable while leaving an unbalanced *trailing* fence harmless — it has
     /// no business swallowing content that follows it.
-    pub(crate) fn inside_markdown_fence(&self, offset: usize) -> bool {
+    pub fn inside_markdown_fence(&self, offset: usize) -> bool {
         let markers_before = self.fence_markers.partition_point(|pos| *pos < offset);
         markers_before < self.fence_markers.len() && markers_before % 2 == 1
     }
 
-    pub(crate) fn markdown_fence_marker_at(&self, offset: usize) -> bool {
+    pub fn markdown_fence_marker_at(&self, offset: usize) -> bool {
         self.fence_markers.binary_search(&offset).is_ok()
     }
 
@@ -62,7 +62,7 @@ impl TextIndex {
         clippy::string_slice,
         reason = "line_start is one past an ASCII newline; offset is a search offset on text"
     )]
-    pub(crate) fn is_line_leading(&self, text: &str, offset: usize) -> bool {
+    pub fn is_line_leading(&self, text: &str, offset: usize) -> bool {
         let line_start = match self.newlines.partition_point(|pos| *pos < offset) {
             0 => 0,
             preceding => self.newlines[preceding - 1] + 1,

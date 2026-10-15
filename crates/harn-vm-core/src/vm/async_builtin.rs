@@ -42,7 +42,7 @@ impl AsyncBuiltinCtx {
         Self::new(vm)
     }
 
-    pub(crate) fn with_child_vm<R>(&self, read: impl FnOnce(&Vm) -> R) -> R {
+    pub fn with_child_vm<R>(&self, read: impl FnOnce(&Vm) -> R) -> R {
         read(&self.child.lock())
     }
 
@@ -52,16 +52,16 @@ impl AsyncBuiltinCtx {
     /// must share its execution deadline and inherited lock set. Using a plain
     /// `child_vm()` here would fork the outer deadline: admission could pause
     /// the fork while the real caller still timed out.
-    pub(crate) fn from_inline_parent(parent: &Vm) -> Self {
+    pub fn from_inline_parent(parent: &Vm) -> Self {
         Self::new(parent.child_vm_inline()).with_host_call_site(parent.host_call_site())
     }
 
-    pub(crate) fn with_host_call_site(mut self, caller: Option<VmCallSite>) -> Self {
+    pub fn with_host_call_site(mut self, caller: Option<VmCallSite>) -> Self {
         self.caller = caller;
         self
     }
 
-    pub(crate) fn host_call_site(&self) -> Option<VmCallSite> {
+    pub fn host_call_site(&self) -> Option<VmCallSite> {
         self.caller.clone()
     }
 
@@ -79,16 +79,16 @@ impl AsyncBuiltinCtx {
     }
 
     /// Harn-owned identity of the execution awaiting this builtin.
-    pub(crate) fn execution_id(&self) -> String {
+    pub fn execution_id(&self) -> String {
         self.child.lock().execution_id().to_string()
     }
 
     /// Runtime task that owns this builtin invocation.
-    pub(crate) fn task_id(&self) -> String {
+    pub fn task_id(&self) -> String {
         self.child.lock().runtime_context.task_id.clone()
     }
 
-    pub(crate) fn wait_for_graph(&self) -> Arc<crate::wait_for_graph::VmWaitForGraph> {
+    pub fn wait_for_graph(&self) -> Arc<crate::wait_for_graph::VmWaitForGraph> {
         self.child.lock().wait_for_graph.clone()
     }
 
@@ -128,7 +128,7 @@ impl AsyncBuiltinCtx {
 
     /// Pause the outer host execution rail while an embedder-owned resource is
     /// not runnable. Catchable script deadlines remain unchanged.
-    pub(crate) fn pause_execution_deadline(
+    pub fn pause_execution_deadline(
         &self,
         clock: Arc<dyn harn_clock::Clock>,
     ) -> Option<super::state::ExecutionDeadlinePauseGuard> {

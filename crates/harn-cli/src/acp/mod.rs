@@ -155,7 +155,7 @@ pub fn on_tick(_event) -> nil {
 }
 "#,
             );
-        let mut vm = harn_vm::Vm::new();
+        let mut vm = harn_vm::new_vm();
         harn_vm::register_vm_stdlib(&mut vm);
         let result = async {
             CliAcpRuntimeConfigurator

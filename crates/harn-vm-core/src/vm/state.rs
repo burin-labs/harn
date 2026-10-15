@@ -864,7 +864,7 @@ impl Vm {
         self.runtime_effects.clear();
     }
 
-    pub(crate) fn record_capability_effects(
+    pub fn record_capability_effects(
         &mut self,
         capability: harn_builtin_meta::CapabilityId,
         method: &str,
@@ -1115,7 +1115,7 @@ impl Vm {
 
     /// Create a child VM for external adapters that need to invoke Harn
     /// closures while sharing the parent's builtins, globals, and module state.
-    pub(crate) fn child_vm_for_host(&self) -> Vm {
+    pub fn child_vm_for_host(&self) -> Vm {
         self.child_vm()
     }
 
@@ -1153,7 +1153,7 @@ impl Vm {
 
     /// Get only the explicit or auto-detected project root, without falling
     /// back to `source_dir`.
-    pub(crate) fn explicit_project_root(&self) -> Option<&std::path::Path> {
+    pub fn explicit_project_root(&self) -> Option<&std::path::Path> {
         self.project_root.as_deref()
     }
 
@@ -1180,7 +1180,7 @@ impl Vm {
         self.root_harness = Some(VmValue::harness(harness.into()));
     }
 
-    pub(crate) fn harness(&self) -> Option<&crate::value::VmHarness> {
+    pub fn harness(&self) -> Option<&crate::value::VmHarness> {
         match self.root_harness.as_ref() {
             Some(VmValue::Harness(handle)) => Some(handle),
             _ => None,
@@ -1259,7 +1259,7 @@ impl Vm {
         self.cancel_task_scopes_where(|s| s.frame_depth == frame_depth);
     }
 
-    pub(crate) fn adopt_sync_permit_for_current_scope(
+    pub fn adopt_sync_permit_for_current_scope(
         &mut self,
         permit: crate::value::VmSyncPermitHandle,
     ) {
@@ -1308,7 +1308,7 @@ impl Vm {
     /// Total live permits this VM already holds for `kind:key`. The held-set is
     /// tiny (bounded by lexical nesting and explicit sync acquisitions), so this
     /// scan is cheap and only runs on the rare blocking-acquire path.
-    pub(crate) fn held_permits_for(&self, kind: &str, key: &str) -> u32 {
+    pub fn held_permits_for(&self, kind: &str, key: &str) -> u32 {
         let own: u32 = self
             .held_sync_guards
             .iter()

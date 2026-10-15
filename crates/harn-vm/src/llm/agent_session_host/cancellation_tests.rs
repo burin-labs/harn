@@ -1,3 +1,4 @@
+use crate::native_vm::NativeBuiltinCtxExt;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
@@ -344,7 +345,7 @@ fn dropping_a_top_level_vm_terminalizes_its_own_agent_lifecycle() {
         .build()
         .expect("source runtime");
     source_runtime.block_on(async {
-        let vm = crate::vm::Vm::new();
+        let vm = crate::new_vm();
         let execution_id = vm.execution_id().to_string();
         let prepared = crate::agent_session_journal::prepare(
             session_id,
@@ -427,7 +428,7 @@ fn dropping_an_inline_vm_does_not_cancel_the_parent_lifecycle() {
         .build()
         .expect("source runtime");
     source_runtime.block_on(async {
-        let parent = crate::vm::Vm::new();
+        let parent = crate::new_vm();
         let prepared = crate::agent_session_journal::prepare(
             session_id,
             &options,
@@ -483,8 +484,8 @@ fn dropping_one_execution_does_not_cancel_same_task_in_shared_runtimes() {
         .build()
         .expect("source runtime");
     source_runtime.block_on(async {
-        let first = crate::vm::Vm::new();
-        let second = crate::vm::Vm::new();
+        let first = crate::new_vm();
+        let second = crate::new_vm();
         for (session_id, run_id, execution_id) in [
             ("shared-runtime-first", "run-first", first.execution_id()),
             ("shared-runtime-second", "run-second", second.execution_id()),
@@ -545,7 +546,7 @@ fn pending_cleanup_keeps_the_execution_that_owned_the_cancelled_task() {
         .build()
         .expect("source runtime");
     source_runtime.block_on(async {
-        let mut vm = crate::vm::Vm::new();
+        let mut vm = crate::new_vm();
         let original_execution_id = vm.execution_id().to_string();
         let mut options = crate::value::DictMap::new();
         options.put_str("root", root.path().to_string_lossy().as_ref());
@@ -929,7 +930,7 @@ async fn failed_terminal_flush_retains_completed_side_effect_stages_for_retry() 
         "error": {"kind": "fixture_failure"},
     }));
     let error = super::super::lifecycle::host_agent_session_finalize(
-        crate::vm::AsyncBuiltinCtx::for_test(crate::vm::Vm::new()),
+        crate::vm::AsyncBuiltinCtx::for_test(crate::new_vm()),
         vec![
             crate::value::VmValue::String(arcstr::ArcStr::from(session_id)),
             status,
@@ -986,7 +987,7 @@ async fn failed_terminal_flush_retains_completed_side_effect_stages_for_retry() 
     let mut retry = crate::value::DictMap::new();
     retry.put_str("retry_run_id", run_id);
     let retry_error = super::super::lifecycle::host_agent_session_finalize(
-        crate::vm::AsyncBuiltinCtx::for_test(crate::vm::Vm::new()),
+        crate::vm::AsyncBuiltinCtx::for_test(crate::new_vm()),
         vec![
             crate::value::VmValue::String(arcstr::ArcStr::from(session_id)),
             crate::value::VmValue::dict(retry),

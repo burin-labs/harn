@@ -261,8 +261,8 @@ harness.stdio.println(len(harness.llm.mock_calls()))
 "#,
     )
     .expect("compile beta");
-    let mut alpha_vm = crate::Vm::new();
-    let mut beta_vm = crate::Vm::new();
+    let mut alpha_vm = crate::new_vm();
+    let mut beta_vm = crate::new_vm();
     crate::register_vm_stdlib(&mut alpha_vm);
     crate::register_vm_stdlib(&mut beta_vm);
 
@@ -284,11 +284,11 @@ harness.stdio.println(len(harness.llm.mock_calls()))
 async fn concurrent_vms_keep_distinct_cli_fixture_leases() {
     reset_llm_mock_state();
     install_cli_llm_mocks(vec![text_mock("cli-alpha")]);
-    let mut alpha_vm = crate::Vm::new();
+    let mut alpha_vm = crate::new_vm();
     crate::register_vm_stdlib(&mut alpha_vm);
 
     install_cli_llm_mocks(vec![text_mock("cli-beta")]);
-    let mut beta_vm = crate::Vm::new();
+    let mut beta_vm = crate::new_vm();
     crate::register_vm_stdlib(&mut beta_vm);
     clear_cli_llm_mock_mode();
 
@@ -756,7 +756,7 @@ async fn live_prefix_replays_k_calls_then_hands_off_to_the_configured_provider()
     ]
     .join("\n");
     let chunk = crate::compile_source(&script).expect("compile live-prefix script");
-    let mut vm = crate::Vm::new();
+    let mut vm = crate::new_vm();
     crate::register_vm_stdlib(&mut vm);
     let local = tokio::task::LocalSet::new();
     local

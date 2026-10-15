@@ -163,7 +163,7 @@ mod tests {
     use crate::vm::Vm;
 
     fn vm() -> Vm {
-        let mut vm = Vm::new();
+        let mut vm = crate::new_vm();
         register_regex_builtins(&mut vm);
         vm
     }

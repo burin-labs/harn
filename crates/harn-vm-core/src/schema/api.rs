@@ -24,7 +24,7 @@ thread_local! {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct CanonicalParamSchema {
+pub struct CanonicalParamSchema {
     schema: Arc<crate::value::DictMap>,
 }
 
@@ -32,13 +32,13 @@ pub(crate) struct CanonicalParamSchema {
 /// consumers. The validator owns all three fields so callers cannot pair an
 /// exact kind and detail with a reconstructed or fallback path.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct SchemaValidationIssue {
-    pub(crate) kind: crate::value::SchemaValidationReasonKind,
-    pub(crate) detail: String,
-    pub(crate) path: String,
+pub struct SchemaValidationIssue {
+    pub kind: crate::value::SchemaValidationReasonKind,
+    pub detail: String,
+    pub path: String,
 }
 
-pub(crate) fn canonical_param_schema(schema: &VmValue) -> Result<CanonicalParamSchema, String> {
+pub fn canonical_param_schema(schema: &VmValue) -> Result<CanonicalParamSchema, String> {
     let normalized = canonicalize_schema_value(schema)?;
     let VmValue::Dict(schema) = normalized else {
         return Err("schema must be a dict".to_string());
@@ -63,11 +63,7 @@ fn cached_canonical_param_schema(schema: &VmValue) -> Result<CanonicalParamSchem
     })
 }
 
-pub(crate) fn schema_result_value(
-    data: &VmValue,
-    schema: &VmValue,
-    apply_defaults: bool,
-) -> VmValue {
+pub fn schema_result_value(data: &VmValue, schema: &VmValue, apply_defaults: bool) -> VmValue {
     let normalized = match canonicalize_schema_value(schema) {
         Ok(schema) => schema,
         Err(error) => return result_err_value(vec![ValidationIssue::new("schema", error)], None),
@@ -83,14 +79,14 @@ pub(crate) fn schema_result_value(
 /// The `Err` that `schema_parse` returns, for a value that never reached
 /// validation. `json_decode` uses it so a malformed document and a mistyped
 /// one fail with the same record.
-pub(crate) fn schema_result_err(path: &str, message: impl Into<String>) -> VmValue {
+pub fn schema_result_err(path: &str, message: impl Into<String>) -> VmValue {
     result_err_value(vec![ValidationIssue::new(path, message)], None)
 }
 
 /// Return the first typed validation issue without projecting it through the
 /// public `Result` value. Incremental validators use this boundary so their
 /// machine-readable cause and human detail come from the same schema pass.
-pub(crate) fn first_schema_validation_issue(
+pub fn first_schema_validation_issue(
     data: &VmValue,
     schema: &VmValue,
 ) -> Option<SchemaValidationIssue> {
@@ -123,11 +119,7 @@ fn project_validation_issue(issue: ValidationIssue) -> SchemaValidationIssue {
     }
 }
 
-pub(crate) fn schema_report_value(
-    data: &VmValue,
-    schema: &VmValue,
-    apply_defaults: bool,
-) -> VmValue {
+pub fn schema_report_value(data: &VmValue, schema: &VmValue, apply_defaults: bool) -> VmValue {
     let normalized = match canonicalize_schema_value(schema) {
         Ok(schema) => schema,
         Err(error) => {
@@ -168,7 +160,7 @@ fn schema_report_from_issues(
     VmValue::dict(payload)
 }
 
-pub(crate) fn schema_is_value(data: &VmValue, schema: &VmValue) -> Result<bool, VmError> {
+pub fn schema_is_value(data: &VmValue, schema: &VmValue) -> Result<bool, VmError> {
     let normalized = canonicalize_schema_value(schema)
         .map_err(|error| VmError::Thrown(VmValue::String(arcstr::ArcStr::from(error))))?;
     Ok(validate_schema_value(
@@ -182,7 +174,7 @@ pub(crate) fn schema_is_value(data: &VmValue, schema: &VmValue) -> Result<bool, 
     .is_empty())
 }
 
-pub(crate) fn schema_expect_value(
+pub fn schema_expect_value(
     data: &VmValue,
     schema: &VmValue,
     apply_defaults: bool,
@@ -199,7 +191,7 @@ pub(crate) fn schema_expect_value(
     }
 }
 
-pub(crate) fn schema_assert_param(
+pub fn schema_assert_param(
     value: &VmValue,
     param_name: &str,
     schema: &VmValue,
@@ -209,7 +201,7 @@ pub(crate) fn schema_assert_param(
     schema_assert_canonical_param(value, param_name, &normalized)
 }
 
-pub(crate) fn schema_assert_canonical_param(
+pub fn schema_assert_canonical_param(
     value: &VmValue,
     param_name: &str,
     schema: &CanonicalParamSchema,
@@ -226,7 +218,7 @@ pub(crate) fn schema_assert_canonical_param(
     Ok(())
 }
 
-pub(crate) fn schema_to_json_schema_value(schema: &VmValue) -> Result<VmValue, VmError> {
+pub fn schema_to_json_schema_value(schema: &VmValue) -> Result<VmValue, VmError> {
     let normalized = canonicalize_schema_value(schema)
         .map_err(|error| VmError::Thrown(VmValue::String(arcstr::ArcStr::from(error))))?;
     let json_schema = canonical_to_json_schema(&normalized, false)
@@ -234,7 +226,7 @@ pub(crate) fn schema_to_json_schema_value(schema: &VmValue) -> Result<VmValue, V
     Ok(super::json_to_vm_value(&json_schema))
 }
 
-pub(crate) fn schema_to_openapi_schema_value(schema: &VmValue) -> Result<VmValue, VmError> {
+pub fn schema_to_openapi_schema_value(schema: &VmValue) -> Result<VmValue, VmError> {
     let normalized = canonicalize_schema_value(schema)
         .map_err(|error| VmError::Thrown(VmValue::String(arcstr::ArcStr::from(error))))?;
     let json_schema = canonical_to_json_schema(&normalized, true)
@@ -242,17 +234,17 @@ pub(crate) fn schema_to_openapi_schema_value(schema: &VmValue) -> Result<VmValue
     Ok(super::json_to_vm_value(&json_schema))
 }
 
-pub(crate) fn schema_from_json_schema_value(schema: &VmValue) -> Result<VmValue, VmError> {
+pub fn schema_from_json_schema_value(schema: &VmValue) -> Result<VmValue, VmError> {
     canonicalize_schema_value(schema)
         .map_err(|error| VmError::Thrown(VmValue::String(arcstr::ArcStr::from(error))))
 }
 
-pub(crate) fn schema_from_openapi_schema_value(schema: &VmValue) -> Result<VmValue, VmError> {
+pub fn schema_from_openapi_schema_value(schema: &VmValue) -> Result<VmValue, VmError> {
     canonicalize_schema_value(schema)
         .map_err(|error| VmError::Thrown(VmValue::String(arcstr::ArcStr::from(error))))
 }
 
-pub(crate) fn schema_extend_value(base: &VmValue, overrides: &VmValue) -> Result<VmValue, VmError> {
+pub fn schema_extend_value(base: &VmValue, overrides: &VmValue) -> Result<VmValue, VmError> {
     let base = canonicalize_schema_value(base)
         .map_err(|error| VmError::Thrown(VmValue::String(arcstr::ArcStr::from(error))))?;
     let overrides = canonicalize_schema_value(overrides)
@@ -270,7 +262,7 @@ pub(crate) fn schema_extend_value(base: &VmValue, overrides: &VmValue) -> Result
     Ok(VmValue::dict(merge_schema_dicts(base_dict, overrides_dict)))
 }
 
-pub(crate) fn schema_partial_value(schema: &VmValue) -> Result<VmValue, VmError> {
+pub fn schema_partial_value(schema: &VmValue) -> Result<VmValue, VmError> {
     let schema = canonicalize_schema_value(schema)
         .map_err(|error| VmError::Thrown(VmValue::String(arcstr::ArcStr::from(error))))?;
     let schema_dict = schema.as_dict().ok_or_else(|| {
@@ -281,7 +273,7 @@ pub(crate) fn schema_partial_value(schema: &VmValue) -> Result<VmValue, VmError>
     Ok(VmValue::dict(schema_partial_dict(schema_dict)))
 }
 
-pub(crate) fn schema_pick_value(schema: &VmValue, keys: &[String]) -> Result<VmValue, VmError> {
+pub fn schema_pick_value(schema: &VmValue, keys: &[String]) -> Result<VmValue, VmError> {
     let schema = canonicalize_schema_value(schema)
         .map_err(|error| VmError::Thrown(VmValue::String(arcstr::ArcStr::from(error))))?;
     let schema_dict = schema.as_dict().ok_or_else(|| {
@@ -292,7 +284,7 @@ pub(crate) fn schema_pick_value(schema: &VmValue, keys: &[String]) -> Result<VmV
     Ok(VmValue::dict(schema_pick_dict(schema_dict, keys)))
 }
 
-pub(crate) fn schema_omit_value(schema: &VmValue, keys: &[String]) -> Result<VmValue, VmError> {
+pub fn schema_omit_value(schema: &VmValue, keys: &[String]) -> Result<VmValue, VmError> {
     let schema = canonicalize_schema_value(schema)
         .map_err(|error| VmError::Thrown(VmValue::String(arcstr::ArcStr::from(error))))?;
     let schema_dict = schema.as_dict().ok_or_else(|| {

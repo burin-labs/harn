@@ -7,7 +7,7 @@ async fn native_harness_dispatch_rejects_another_backend_before_output() {
         "fn main(harness: Harness) { harness.stdio.print(\"native reached\") }",
     )
     .unwrap();
-    let mut vm = Vm::new();
+    let mut vm = crate::new_vm();
     vm.set_harness(crate::value::VmHarness::from_host(Arc::new(())));
     let error = vm.execute(&chunk).await.unwrap_err();
     assert!(
@@ -16,7 +16,7 @@ async fn native_harness_dispatch_rejects_another_backend_before_output() {
     );
     assert!(vm.output().is_empty());
 
-    let mut vm = Vm::new();
+    let mut vm = crate::new_vm();
     vm.set_harness(crate::harness::Harness::real());
     vm.execute(&chunk).await.unwrap();
     assert_eq!(vm.output(), "native reached");
@@ -24,7 +24,7 @@ async fn native_harness_dispatch_rejects_another_backend_before_output() {
 
 #[tokio::test]
 async fn native_mcp_builtins_reject_another_backend_before_transport() {
-    let mut vm = Vm::new();
+    let mut vm = crate::new_vm();
     crate::mcp::register_mcp_builtins(&mut vm);
     let VmValue::Harness(root) = crate::harness::Harness::real().into_vm_value() else {
         unreachable!()

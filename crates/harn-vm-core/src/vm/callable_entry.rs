@@ -111,10 +111,7 @@ impl Vm {
         .await
     }
 
-    pub(crate) async fn execute_top_level(
-        &mut self,
-        entry: TopLevelEntry,
-    ) -> Result<VmValue, VmError> {
+    pub async fn execute_top_level(&mut self, entry: TopLevelEntry) -> Result<VmValue, VmError> {
         self.ensure_execution_available()?;
         let scope = self.prepare_top_level_scope();
         let execution =

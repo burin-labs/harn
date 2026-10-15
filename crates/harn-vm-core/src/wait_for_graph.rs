@@ -6,7 +6,7 @@ use crate::value::{DeadlockError, VmChannelCloseState, VmChannelHandle, VmError}
 use crate::VmValue;
 
 #[derive(Debug, Default)]
-pub(crate) struct VmWaitForGraph {
+pub struct VmWaitForGraph {
     inner: Mutex<WaitForState>,
 }
 
@@ -36,7 +36,7 @@ enum WaitKind {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct ChannelTarget {
+pub struct ChannelTarget {
     id: String,
     name: String,
     sender: Arc<tokio::sync::mpsc::Sender<VmValue>>,
@@ -51,13 +51,13 @@ enum ChannelDirection {
 }
 
 #[derive(Debug)]
-pub(crate) struct TaskActivityGuard {
+pub struct TaskActivityGuard {
     graph: Arc<VmWaitForGraph>,
     task_id: String,
 }
 
 #[derive(Debug)]
-pub(crate) struct WaitGuard {
+pub struct WaitGuard {
     graph: Arc<VmWaitForGraph>,
     task_id: String,
     token: u64,
@@ -65,11 +65,11 @@ pub(crate) struct WaitGuard {
 }
 
 impl VmWaitForGraph {
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         Self::default()
     }
 
-    pub(crate) fn register_task(self: &Arc<Self>, task_id: impl Into<String>) -> TaskActivityGuard {
+    pub fn register_task(self: &Arc<Self>, task_id: impl Into<String>) -> TaskActivityGuard {
         let task_id = task_id.into();
         let mut state = self.inner.lock().expect("wait-for graph mutex poisoned");
         state.tasks.entry(task_id.clone()).or_default().active_count += 1;
@@ -79,7 +79,7 @@ impl VmWaitForGraph {
         }
     }
 
-    pub(crate) fn wait_for_tasks(
+    pub fn wait_for_tasks(
         self: &Arc<Self>,
         task_id: &str,
         task_ids: impl IntoIterator<Item = String>,
@@ -88,7 +88,7 @@ impl VmWaitForGraph {
             .map(|wait| wait.expect("task waits are always registered"))
     }
 
-    pub(crate) fn wait_for_channel_send(
+    pub fn wait_for_channel_send(
         self: &Arc<Self>,
         task_id: &str,
         target: ChannelTarget,
@@ -96,7 +96,7 @@ impl VmWaitForGraph {
         self.set_wait(task_id, WaitKind::ChannelSend(target))
     }
 
-    pub(crate) fn wait_for_channel_receive(
+    pub fn wait_for_channel_receive(
         self: &Arc<Self>,
         task_id: &str,
         targets: Vec<ChannelTarget>,
@@ -104,7 +104,7 @@ impl VmWaitForGraph {
         self.set_wait(task_id, WaitKind::ChannelReceive(targets))
     }
 
-    pub(crate) fn notify_channel_send(self: &Arc<Self>, target: &ChannelTarget) {
+    pub fn notify_channel_send(self: &Arc<Self>, target: &ChannelTarget) {
         let mut state = self.inner.lock().expect("wait-for graph mutex poisoned");
         state.clear_channel_waits(|wait| match &wait.kind {
             WaitKind::ChannelReceive(targets) => {
@@ -114,7 +114,7 @@ impl VmWaitForGraph {
         });
     }
 
-    pub(crate) fn notify_channel_receive(self: &Arc<Self>, target: &ChannelTarget) {
+    pub fn notify_channel_receive(self: &Arc<Self>, target: &ChannelTarget) {
         let mut state = self.inner.lock().expect("wait-for graph mutex poisoned");
         state.clear_channel_waits(|wait| match &wait.kind {
             WaitKind::ChannelSend(waiting) => waiting.id == target.id,
@@ -298,7 +298,7 @@ impl Drop for WaitGuard {
     }
 }
 
-pub(crate) fn channel_target(channel: &VmChannelHandle) -> ChannelTarget {
+pub fn channel_target(channel: &VmChannelHandle) -> ChannelTarget {
     ChannelTarget {
         id: format!("{:p}", Arc::as_ptr(&channel.sender)),
         name: channel.name.to_string(),

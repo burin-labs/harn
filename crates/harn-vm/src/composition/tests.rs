@@ -45,7 +45,7 @@ async fn run_composition_dispatcher_source_with_execution_id(
         .compile(&program)
         .map_err(|error| VmError::Runtime(error.to_string()))?;
 
-    let mut vm = crate::Vm::new();
+    let mut vm = crate::new_vm();
     crate::register_vm_stdlib(&mut vm);
     vm.set_harness(crate::Harness::real());
     configure(&mut vm);

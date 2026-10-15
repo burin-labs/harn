@@ -12,7 +12,7 @@ mod isolate;
 pub mod json;
 mod mcp_client;
 mod random;
-pub(crate) mod recursion;
+pub mod recursion;
 mod sandbox_refusal;
 mod semantics;
 mod set;
@@ -33,7 +33,7 @@ pub use env::{
     closest_match, LazyPipelineCallable, LazyVmCallable, ModuleFunctionRegistry, ModuleState,
     VmCallable, VmClosure, VmEnv,
 };
-pub(crate) use error::error_category_for_http_status;
+pub use error::error_category_for_http_status;
 pub use error::{
     categorized_error, classify_error_message, error_to_category, ArgTypeMismatchError,
     ArityExpect, ArityMismatchError, BindingTypeMismatchError, DeadlockError, ErrorCategory,
@@ -53,15 +53,15 @@ pub use io_error::{
 };
 pub use isolate::IsolateValue;
 pub use mcp_client::VmMcpClientHandle;
-pub(crate) use random::RandomOperation;
-pub(crate) use sandbox_refusal::NO_OS_SANDBOX;
+pub use random::RandomOperation;
+pub use sandbox_refusal::NO_OS_SANDBOX;
 pub use sandbox_refusal::{
     ConfinementDimension, SandboxMechanism, SandboxMechanismAvailability,
     SandboxMechanismUnavailable, SandboxRequirement,
 };
-pub(crate) use semantics::{char_substring, split_separator_required, string_discriminator};
+pub use semantics::{char_substring, split_separator_required, string_discriminator};
 pub use set::VmSet;
-pub(crate) use storage_json::vm_to_storage_json;
+pub use storage_json::vm_to_storage_json;
 pub use structural::{
     compare_values, dedup_values, try_compare_values, value_equality_hash_key, value_identity_key,
     value_structural_hash_key, values_equal, values_identical,

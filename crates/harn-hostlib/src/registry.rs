@@ -505,7 +505,7 @@ mod tests {
             std::env::remove_var(harn_parser::HARN_LEGACY_AMBIENT_CAPABILITIES_ENV);
         }
         harn_parser::refresh_legacy_ambient_capabilities();
-        let mut strict_vm = Vm::new();
+        let mut strict_vm = harn_vm::new_vm();
         crate::install_default(&mut strict_vm);
         assert!(
             strict_vm
@@ -518,7 +518,7 @@ mod tests {
             std::env::set_var(harn_parser::HARN_LEGACY_AMBIENT_CAPABILITIES_ENV, "1");
         }
         harn_parser::refresh_legacy_ambient_capabilities();
-        let mut ambient_vm = Vm::new();
+        let mut ambient_vm = harn_vm::new_vm();
         crate::install_default(&mut ambient_vm);
         assert!(
             ambient_vm

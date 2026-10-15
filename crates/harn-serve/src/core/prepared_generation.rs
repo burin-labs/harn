@@ -75,7 +75,7 @@ impl PreparedDispatchGeneration {
             ))
         })?;
 
-        let mut vm = Vm::new();
+        let mut vm = harn_vm::new_vm();
         if config.trusted_host_dispatch {
             vm.enable_trusted_host_dispatch()
                 .map_err(classify_vm_error)?;
