@@ -63,6 +63,13 @@ stay interpretable. Marginal vendor spend for the current routes is $0. No
 terminal release-candidate cohort has measured the slower free-only policy yet,
 so there is no replacement release-latency claim.
 
+macOS artifact smoke uses the existing `macos-arm64` host for reviewed
+candidates and explicit source runs. Its supported kernel and System Integrity
+Protection settings allow the runtime to protect the host environment before
+launching a confined child. Public pull-request sources use disposable hosted
+runners. The smoke requires the actual command markers from the manifest-bound
+archive; a protection refusal or an unconfined fallback cannot qualify execution.
+
 The v0.10.144 release is the baseline. Its candidate started at 23:01:22Z,
 completed at 00:31:15Z, and published at 00:32:37Z, for 91m15s from candidate
 start to publication. The Intel Apple job took 75m20s, the ARM Apple job took

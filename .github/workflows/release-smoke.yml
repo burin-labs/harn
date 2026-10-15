@@ -48,7 +48,10 @@ jobs:
     permissions:
       actions: read
       contents: read
-    runs-on: ${{ matrix.runner }}
+    # Confined execution needs the supported host-environment protection that
+    # hosted macOS images cannot supply. Reviewed candidates and explicit
+    # source runs use the existing native host; public PR code stays hosted.
+    runs-on: ${{ matrix.platform == 'macos' && github.event_name != 'pull_request' && 'macos-arm64' || matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
