@@ -2238,6 +2238,8 @@ jobs:
       - name: Check prompts are not embedded in Rust
         if: needs.changes.outputs.prompt_prose == 'true'
         run: make lint-no-rust-prompt-prose
+      - name: Check host cancellation has one Core owner
+        run: make lint-cancellation-owner
       # `make spec-lint` must run the repository's declared Redocly CLI, not
       # let npx fall back to an unrelated registry package. Keep this install
       # in the already-required audit lane, where the snapshot check can reuse

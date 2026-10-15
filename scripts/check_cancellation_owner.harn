@@ -33,9 +33,31 @@ const CANCELLATION_PAYLOAD = "kind:cancelled:VM cancelled by host"
  * violations. The allowed location is a path, not a pattern: a second owner is
  * the defect this gate exists to prevent.
  */
-const OWNER_PATH = "crates/harn-vm/src/cancellation.rs"
+const OWNER_PATH = "crates/harn-vm-core/src/cancellation.rs"
 
 const SCAN_ROOT = "crates"
+
+type SourceInspection = {owner: bool, payloads: int, findings: list<string>}
+
+fn inspect_source(path: string, source: string) -> SourceInspection {
+  const normalized = path.replace("\\", "/")
+  const owner = normalized == OWNER_PATH || normalized.ends_with("/${OWNER_PATH}")
+  let payloads = 0
+  let findings: list<string> = []
+  for lit in iter_literals_text(source) {
+    if lit.text == CANCELLATION_PAYLOAD {
+      payloads = payloads + 1
+      if !owner {
+        findings = findings + ["${path}:${lit.line}"]
+      }
+    }
+  }
+  return {owner: owner, payloads: payloads, findings: findings}
+}
+
+fn owner_measured(files: int, payloads: int) -> bool {
+  return files == 1 && payloads > 0
+}
 
 pipeline main(harness: Harness, task: unknown) {
   if argv.contains("--self-test") {
@@ -44,15 +66,22 @@ pipeline main(harness: Harness, task: unknown) {
   // scan-refused: scan_files is the refusal; it throws on an empty result.
   const files = scan_files(harness.fs, CHECK_NAME, SCAN_ROOT, "**/*.rs")
   let findings: list<string> = []
+  let owner_files = 0
+  let owner_payloads = 0
   for rel in files {
-    if rel.ends_with(OWNER_PATH) {
-      continue
+    const inspected = inspect_source(rel, harness.fs.read_text(rel))
+    findings = findings + inspected.findings
+    if inspected.owner {
+      owner_files = owner_files + 1
+      owner_payloads = owner_payloads + inspected.payloads
     }
-    for lit in iter_literals_text(harness.fs.read_text(rel)) {
-      if lit.text == CANCELLATION_PAYLOAD {
-        findings = findings + ["${rel}:${lit.line}"]
-      }
-    }
+  }
+  harness.stdio.println(
+    "${CHECK_NAME}: scanned ${files.count} Rust sources; owner_files=${owner_files}, owner_payloads=${owner_payloads}, findings=${findings.count}",
+  )
+  if !owner_measured(owner_files, owner_payloads) {
+    harness.stdio.eprintln("${CHECK_NAME}: canonical owner was not measured: ${OWNER_PATH}")
+    return 1
   }
   if findings.count > 0 {
     harness.stdio.eprintln(
@@ -105,6 +134,36 @@ fn run_self_test(stdio: HarnessStdio) -> int {
   if good_hits != 0 {
     stdio.eprintln("self-test failed: payload named in a comment was flagged (${good_hits})")
     return 1
+  }
+  const owned = inspect_source(OWNER_PATH, bad)
+  const copied = inspect_source("crates/harn-vm/src/cancellation.rs", bad)
+  const windows_owned = inspect_source(OWNER_PATH.replace("/", "\\"), bad)
+  const lookalike = inspect_source("else${OWNER_PATH}", bad)
+  if !owned.owner || owned.payloads != 1 || owned.findings.count != 0 {
+    stdio.eprintln("self-test failed: canonical Core owner was not measured")
+    return 1
+  }
+  if copied.owner || copied.payloads != 1 || copied.findings.count != 1 {
+    stdio.eprintln("self-test failed: payload copied into the native adapter was accepted")
+    return 1
+  }
+  if !windows_owned.owner || windows_owned.payloads != 1 || windows_owned.findings.count != 0 {
+    stdio.eprintln("self-test failed: Windows separators hid the canonical owner")
+    return 1
+  }
+  if lookalike.owner || lookalike.findings.count != 1 {
+    stdio.eprintln("self-test failed: an owner path without a directory boundary was accepted")
+    return 1
+  }
+  if !owner_measured(1, owned.payloads) {
+    stdio.eprintln("self-test failed: a measured canonical owner was refused")
+    return 1
+  }
+  for absent in [{files: 0, payloads: 0}, {files: 1, payloads: 0}, {files: 2, payloads: 1}] {
+    if owner_measured(absent.files, absent.payloads) {
+      stdio.eprintln("self-test failed: an absent, empty, or duplicated owner was accepted")
+      return 1
+    }
   }
   stdio.println("${CHECK_NAME} self-test OK")
   return 0

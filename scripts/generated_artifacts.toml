@@ -773,6 +773,7 @@ make_all = false  # excluded from `make all` for the same reason (no sibling che
 "lint-diagnostic-codes" = "source"
 "lint-no-xfail-regression" = "source"
 "lint-no-rust-prompt-prose" = "source"
+"lint-cancellation-owner" = "source"
 "lint-agent-path-normalization" = "source"
 "check-stdlib-host-neutral" = "source"
 "check-public-product-names" = "source"
