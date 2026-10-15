@@ -49,9 +49,9 @@ jobs:
       actions: read
       contents: read
     # Confined execution needs the supported host-environment protection that
-    # hosted macOS images cannot supply. Reviewed candidates and explicit
-    # source runs use the existing native host; public PR code stays hosted.
-    runs-on: ${{ matrix.platform == 'macos' && github.event_name != 'pull_request' && 'macos-arm64' || matrix.runner }}
+    # hosted macOS images cannot supply. Only main and reviewed merge groups
+    # use the native host, including for manually selected source refs.
+    runs-on: ${{ matrix.platform == 'macos' && github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.event_name == 'merge_group') && 'macos-arm64' || matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
