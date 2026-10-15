@@ -216,6 +216,7 @@ fn expand_capability_method(input: CapabilityMethodInput) -> syn::Result<TokenSt
         #[doc(hidden)]
         #[allow(non_upper_case_globals)]
         #[#support::distributed_slice(#support::ALL_BUILTIN_DEFS)]
+        #[linkme(crate = #support::linkme)]
         static #link_ident: &'static #support::VmBuiltinDef = &#def_ident;
     })
 }
@@ -555,6 +556,7 @@ fn expand(attrs: BuiltinAttrs, item_fn: ItemFn) -> syn::Result<TokenStream2> {
         #[doc(hidden)]
         #[allow(non_upper_case_globals)]
         #[#support::distributed_slice(#support::ALL_BUILTIN_DEFS)]
+        #[linkme(crate = #support::linkme)]
         static #link_ident: &'static #support::VmBuiltinDef = &#def_ident;
     };
     Ok(out)

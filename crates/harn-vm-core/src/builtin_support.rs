@@ -13,6 +13,7 @@ pub use harn_builtin_meta::{
     TY_STRING_OR_NIL,
 };
 pub use harn_builtin_registry::BuiltinDef;
+pub use linkme;
 pub use linkme::distributed_slice;
 
 /// Install definitions and aliases in their declared order.

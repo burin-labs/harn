@@ -31,7 +31,7 @@ fn downstream_builtins_link_to_core_without_a_native_module_layout() {
         .expect("the macro must link its definition into the core registry");
     assert_eq!(
         definition.contract,
-        harn_builtin_meta::BuiltinContract::PURE
+        harn_vm_core::builtin_support::BuiltinContract::PURE
     );
     let VmBuiltinHandler::Sync(handler) = definition.handler else {
         panic!("the linked definition must carry its handler");

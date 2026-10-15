@@ -22,6 +22,7 @@ tiktoken-rs = "0.12.0"
 tracing = "0.1"
 
 [dev-dependencies]
+harn-builtin-macros = { path = "../harn-builtin-macros", version = "=0.10.167" }
 proptest = "1"
 
 [lints]

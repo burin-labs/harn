@@ -23,7 +23,8 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
-pub use crate::llm::message_lineage::{MessageSemanticKind, ProjectionLineage};
+#[doc(inline)]
+pub use harn_llm::message_lineage::{MessageSemanticKind, ProjectionLineage};
 
 /// Schema name of the chained lineage carried in `served_context.message_lineage`.
 pub const MESSAGE_LINEAGE_SCHEMA: &str = "harn.llm.message_lineage.v2";

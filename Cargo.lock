@@ -3797,6 +3797,7 @@ name = "harn-llm"
 version = "0.10.167"
 dependencies = [
  "arcstr",
+ "harn-builtin-macros",
  "harn-provider-catalog",
  "harn-vm-core",
  "proptest",
@@ -4234,7 +4235,6 @@ dependencies = [
  "keyring-core",
  "landlock",
  "libc",
- "linkme",
  "lopdf",
  "md-5",
  "notify",
@@ -4319,7 +4319,6 @@ dependencies = [
  "arcstr",
  "base64 0.23.1",
  "blake3",
- "harn-builtin-macros",
  "harn-builtin-meta",
  "harn-builtin-registry",
  "harn-capability-contracts",

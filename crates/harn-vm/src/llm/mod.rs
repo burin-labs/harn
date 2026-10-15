@@ -101,9 +101,9 @@ pub mod plan;
 mod predicate;
 pub mod prompt;
 pub(crate) mod prompt_cache;
-use harn_llm::protocol_violation;
 pub mod served_lineage;
-pub use protocol_violation::{ProtocolViolation, ProtocolViolationKind};
+#[doc(inline)]
+pub use harn_llm::protocol_violation::{ProtocolViolation, ProtocolViolationKind};
 mod provider_contract_probe;
 pub use provider_contract_probe::with_portable_option_probe;
 pub mod readiness;
