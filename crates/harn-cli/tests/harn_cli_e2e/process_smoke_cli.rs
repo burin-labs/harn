@@ -2,7 +2,7 @@
 //! measured typed refusal on hosts that cannot protect their launch environment.
 
 #[test]
-fn process_smoke_matches_the_hosts_measured_confinement() {
+pub(super) fn process_smoke_matches_the_hosts_measured_confinement() {
     let fixture = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../tests/smoke/process.harn")
         .canonicalize()

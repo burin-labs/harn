@@ -159,6 +159,12 @@ const _: [(&str, fn()); 2] = [
     ),
 ];
 
+#[cfg(target_os = "macos")]
+const _: (&str, fn()) = (
+    required_pr_e2e::CASES[17],
+    process_smoke_cli::process_smoke_matches_the_hosts_measured_confinement,
+);
+
 const _: [(&str, fn()); 12] = [
     (
         required_pr_e2e::CASES[0],
