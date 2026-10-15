@@ -34,7 +34,7 @@ impl ThinkingConfig {
 }
 
 /// Provider-neutral structured-output request.
-#[derive(Clone, Debug, Default, PartialEq, serde::Serialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum OutputFormat {
     #[default]
@@ -196,7 +196,7 @@ impl ToolSearchConfig {
 }
 
 /// Cost/latency routing intent. Resolution remains with the host adapter.
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub enum LlmRoutePolicy {
     #[default]
     Manual,
@@ -246,7 +246,7 @@ pub struct LlmRoutingDecision {
     pub alternatives: Vec<LlmRouteAlternative>,
 }
 
-#[derive(Clone, Debug, serde::Serialize, PartialEq)]
+#[derive(Clone, Debug, serde::Serialize, PartialEq, Eq)]
 pub struct LlmRouteFallback {
     pub provider: String,
     pub model: String,
