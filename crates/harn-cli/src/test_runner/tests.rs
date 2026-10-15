@@ -184,7 +184,7 @@ async fn execution_budget_starts_after_setup_and_stops_cpu_bound_code() {
         &loaded_skills_for(&file),
         &harn_vm::PreparedModuleCache::default(),
         true,
-        None,
+        &execution::TestExecutionContext::capture(None),
     )
     .await;
 
@@ -238,7 +238,7 @@ async fn run_single_case(temp: &TempTestDir, name: &str, source_body: &str) -> T
         &loaded_skills_for(&file),
         &harn_vm::PreparedModuleCache::default(),
         true,
-        None,
+        &execution::TestExecutionContext::capture(None),
     )
     .await
 }
@@ -399,7 +399,7 @@ async fn execution_timeout_captures_lazy_module_load_attribution() {
         &loaded_skills_for(&temp.path().join("test_timeout_import.harn")),
         &harn_vm::PreparedModuleCache::default(),
         true,
-        None,
+        &execution::TestExecutionContext::capture(None),
     )
     .await;
 

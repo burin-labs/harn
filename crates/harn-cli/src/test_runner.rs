@@ -313,6 +313,7 @@ async fn run_tests_with_session_impl(
     operator_approval_grant: Option<&harn_vm::orchestration::OperatorApprovalGrant>,
 ) -> TestSummary {
     let _llm_environment = options.llm_policy.suite_environment();
+    let execution_context = execution::TestExecutionContext::capture(operator_approval_grant);
 
     let start = Instant::now();
 
@@ -421,14 +422,9 @@ async fn run_tests_with_session_impl(
         SuiteCallablePreparation::default()
     };
     if !options.fail_fast || all_results.is_empty() {
-        let prepared = prepare_file_fixtures(
-            cases,
-            options,
-            session,
-            &skill_contexts,
-            operator_approval_grant,
-        )
-        .await;
+        let prepared =
+            prepare_file_fixtures(cases, options, session, &skill_contexts, &execution_context)
+                .await;
         cases = prepared.cases;
         all_results.extend(prepared.failures);
     } else {
@@ -442,7 +438,7 @@ async fn run_tests_with_session_impl(
             total_tests,
             session,
             skill_contexts,
-            operator_approval_grant,
+            &execution_context,
         )
         .await
     } else {
@@ -549,6 +545,7 @@ async fn run_test_file_with_session_impl(
     cli_skill_dirs: &[PathBuf],
     session: &TestRunSession,
 ) -> Result<Vec<TestResult>, String> {
+    let execution_context = execution::TestExecutionContext::capture(None);
     let source =
         fs::read_to_string(path).map_err(|e| format!("Failed to read {}: {e}", path.display()))?;
     let program = parse_program(&source)?;
@@ -581,8 +578,14 @@ async fn run_test_file_with_session_impl(
         llm_policy: TestLlmPolicy::Live,
         ..RunOptions::default()
     };
-    let prepared =
-        prepare_file_fixtures(cases, &fixture_options, session, &skill_contexts, None).await;
+    let prepared = prepare_file_fixtures(
+        cases,
+        &fixture_options,
+        session,
+        &skill_contexts,
+        &execution_context,
+    )
+    .await;
     results.extend(prepared.failures);
     for case in prepared.cases {
         let loaded_skills = skill_contexts.for_case(&case);
@@ -594,7 +597,7 @@ async fn run_test_file_with_session_impl(
                 loaded_skills,
                 &prepared_module_cache,
                 session.stdio_available(),
-                None,
+                &execution_context,
             )
             .await,
         );
@@ -1077,7 +1080,7 @@ async fn prepare_file_fixtures(
     options: &RunOptions,
     session: &TestRunSession,
     skill_contexts: &PreparedSkillContexts,
-    operator_approval_grant: Option<&harn_vm::orchestration::OperatorApprovalGrant>,
+    execution_context: &execution::TestExecutionContext,
 ) -> PreparedFixtureCases {
     let mut values: BTreeMap<(PathBuf, String), Result<IsolateValue, TestResult>> = BTreeMap::new();
     let mut prepared = Vec::with_capacity(cases.len());
@@ -1105,7 +1108,7 @@ async fn prepare_file_fixtures(
                 skill_contexts.for_case(&case),
                 &prepared_module_cache,
                 session.stdio_available(),
-                operator_approval_grant,
+                execution_context,
             )
             .await;
             if let Err(failure) = &value {
@@ -1139,7 +1142,7 @@ async fn execute_cases(
     total_tests: usize,
     session: &TestRunSession,
     skill_contexts: PreparedSkillContexts,
-    operator_approval_grant: Option<&harn_vm::orchestration::OperatorApprovalGrant>,
+    execution_context: &execution::TestExecutionContext,
 ) -> CaseExecutionResults {
     if cases.is_empty() {
         return CaseExecutionResults::default();
@@ -1168,7 +1171,7 @@ async fn execute_cases(
                 loaded_skills,
                 &prepared_module_cache,
                 session.stdio_available(),
-                operator_approval_grant,
+                execution_context,
             )
             .await;
             let result = enforce_case_budgets(result, options.max_test_ms, options.max_execute_ms);
@@ -1199,7 +1202,7 @@ async fn execute_cases(
         .map(|worker_idx| session.prepared_module_cache(worker_idx))
         .collect::<Vec<_>>();
     let stdio_available = session.stdio_available();
-    let operator_approval_grant = operator_approval_grant.cloned();
+    let execution_context = execution_context.clone();
     let options = options.clone();
     // Process-backed tests share one typed host lane, including read-only
     // compilers and formatters. Waiting for that lane is admission time, not
@@ -1238,7 +1241,7 @@ async fn execute_cases(
                 loaded_skills,
                 &worker.1,
                 stdio_available,
-                operator_approval_grant.as_ref(),
+                &execution_context,
             ));
             let result = attribute_admission_wait(result, admission_scope.waited_ms());
             let result = enforce_case_budgets(result, options.max_test_ms, options.max_execute_ms);

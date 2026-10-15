@@ -103,6 +103,12 @@ and measure performance in a host-isolated job.
 Conformance and other non-user targets continue to apply `--timeout` to their
 whole test case or subprocess.
 
+User tests use the configured secret provider, with the default chain restricted
+to environment variables. An explicit parent-secret handoff stays closed to the
+names the parent supplied, including in parallel workers and imported helpers.
+Each case retains a fresh harness; handed-off values are not added to subprocess
+environments.
+
 Per-case top-level phases are disjoint: `compile` is zero for suite-prepared
 test entries (and covers fallback compilation for direct embedders); `setup`
 constructs and configures its fresh VM; `execute` is the

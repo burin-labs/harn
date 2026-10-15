@@ -708,6 +708,12 @@ pub(crate) fn default_harness_for_secret_namespace(
         harn_vm::secrets::configured_default_chain(secret_namespace)
             .map_err(|error| error.to_string())?,
     );
+    Ok(default_harness_with_secret_provider(secret_provider))
+}
+
+pub(crate) fn default_harness_with_secret_provider(
+    secret_provider: Arc<dyn harn_vm::secrets::SecretProvider>,
+) -> harn_vm::Harness {
     // Testbench installs its clock before entering the canonical CLI run
     // boundary. Bind that clock into the newly constructed Harness explicitly
     // so capability methods, legacy runtime internals, and tape recording all
@@ -717,7 +723,7 @@ pub(crate) fn default_harness_for_secret_namespace(
         Some(clock) => harn_vm::Harness::with_clock(clock.auto_advancing()),
         None => harn_vm::Harness::real(),
     };
-    Ok(harness.with_secret_provider(secret_provider))
+    harness.with_secret_provider(secret_provider)
 }
 
 #[cfg(test)]
