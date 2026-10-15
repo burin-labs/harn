@@ -42,33 +42,6 @@ pub(super) fn go_read_root(policy: &CapabilityPolicy, program: &str) -> Option<P
     Some(normalize_for_policy(root))
 }
 
-/// Foundation's staging directory for atomic file replacement on the boot
-/// volume: `TemporaryItems` in the per-user temp dir.
-///
-/// SwiftPM writes build files through Foundation's atomic replacement, which
-/// stages the new file here and renames it into place; without it
-/// `swift build` fails reading its own `output-file-map.json`. Foundation
-/// takes the directory from `confstr`, not `TMPDIR`, so it cannot be moved
-/// into the session. The rest of the per-user temp dir stays ungranted.
-pub(super) fn foundation_replacement_root() -> Option<PathBuf> {
-    let mut buffer = vec![0u8; libc::PATH_MAX as usize];
-    // SAFETY: the buffer is writable for its full length, which is passed.
-    let written = unsafe {
-        libc::confstr(
-            libc::_CS_DARWIN_USER_TEMP_DIR,
-            buffer.as_mut_ptr().cast(),
-            buffer.len(),
-        )
-    };
-    if written == 0 || written > buffer.len() {
-        return None;
-    }
-    buffer.truncate(written - 1);
-    let temp = PathBuf::from(String::from_utf8(buffer).ok()?);
-    temp.is_absolute()
-        .then(|| normalize_for_policy(&temp.join("TemporaryItems")))
-}
-
 #[cfg(test)]
 mod tests {
     use crate::orchestration::{CapabilityPolicy, ProcessSandboxPreset};

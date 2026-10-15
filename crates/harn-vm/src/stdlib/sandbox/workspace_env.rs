@@ -28,7 +28,7 @@ fn create_self_ignored_dir(
     }
     let root = normalized_workspace_roots(policy).into_iter().next()?;
     let path = root.join(name);
-    if let Err(error) = std::fs::create_dir_all(&path) {
+    if let Err(error) = initialize_self_ignored_dir(&root, name) {
         warn_once(
             warning_key,
             &format!(
@@ -39,8 +39,46 @@ fn create_self_ignored_dir(
         );
         return None;
     }
-    let _ = crate::runtime_paths::ensure_self_ignored_dir(&path);
     Some(path)
+}
+
+#[cfg(unix)]
+fn initialize_self_ignored_dir(root: &Path, name: &str) -> std::io::Result<()> {
+    let (parent, leaf) = super::ensure_parent_dirs_scoped(&super::ScopedMutationTarget {
+        root: root.to_path_buf(),
+        relative: Path::new(name).join(".gitignore"),
+    })?;
+    let _ = write_scoped_self_ignore(&parent, &leaf);
+    Ok(())
+}
+
+#[cfg(unix)]
+fn write_scoped_self_ignore(parent: &std::os::fd::OwnedFd, name: &str) -> std::io::Result<()> {
+    use std::io::Write;
+    use std::os::fd::AsRawFd;
+
+    // Retain the directory descriptor through publication: replacing the
+    // workspace path after mkdir-p must never create a host ignore file.
+    match super::openat_file(
+        parent.as_raw_fd(),
+        name,
+        libc::O_WRONLY | libc::O_CREAT | libc::O_EXCL | libc::O_CLOEXEC | libc::O_NOFOLLOW,
+        0o600,
+    ) {
+        Ok(mut file) => file.write_all(crate::runtime_paths::SELF_IGNORE_CONTENTS.as_bytes()),
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => Ok(()),
+        Err(error) => Err(error),
+    }
+}
+
+#[cfg(not(unix))]
+fn initialize_self_ignored_dir(root: &Path, name: &str) -> std::io::Result<()> {
+    super::create_dir_all_scoped_target(&super::ScopedMutationTarget {
+        root: root.to_path_buf(),
+        relative: PathBuf::from(name),
+    })?;
+    let _ = crate::runtime_paths::ensure_self_ignored_dir(&root.join(name));
+    Ok(())
 }
 
 /// The session's own temp dir, `.harn-tmp` in the first writable workspace
@@ -399,6 +437,8 @@ pub(crate) fn inject_workspace_process_env(
     policy: &CapabilityPolicy,
 ) {
     inject_workspace_tmpdir(env, policy);
+    #[cfg(target_os = "macos")]
+    super::macos::private_temp::inject_env(env, policy);
     for (key, value) in workspace_toolchain_env(policy) {
         if !env.iter().any(|(existing, _)| existing == &key) {
             env.push((key, value));
@@ -611,6 +651,34 @@ mod tests {
             workspace_roots: vec![root.display().to_string()],
             ..CapabilityPolicy::default()
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn runtime_ignore_uses_the_opened_directory_after_a_workspace_path_swap() {
+        let workspace = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        std::fs::write(outside.path().join("marker"), "host-unchanged").unwrap();
+        let (parent, leaf) =
+            super::super::ensure_parent_dirs_scoped(&super::super::ScopedMutationTarget {
+                root: workspace.path().to_path_buf(),
+                relative: PathBuf::from(".harn-tmp/.gitignore"),
+            })
+            .unwrap();
+        let original = workspace.path().join("original-temp");
+        std::fs::rename(workspace.path().join(".harn-tmp"), &original).unwrap();
+        std::os::unix::fs::symlink(outside.path(), workspace.path().join(".harn-tmp")).unwrap();
+
+        write_scoped_self_ignore(&parent, &leaf).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(original.join(".gitignore")).unwrap(),
+            crate::runtime_paths::SELF_IGNORE_CONTENTS
+        );
+        assert!(!outside.path().join(".gitignore").exists());
+        assert_eq!(
+            std::fs::read_to_string(outside.path().join("marker")).unwrap(),
+            "host-unchanged"
+        );
     }
 
     #[test]

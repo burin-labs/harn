@@ -375,9 +375,10 @@ those paths unless they are also in `workspace_roots` or `read_only_roots`.
   [credential denials](./sandbox-read-deny-reference.md).
 - `user_temp`: the session's own temp dir, `.harn-tmp` in the first
   workspace root, which the child's `TMPDIR`, `TMP`, and `TEMP` name. On macOS
-  it also covers Foundation's atomic-replacement staging dir
-  (`TemporaryItems` in the per-user temp dir), which SwiftPM's build-file
-  writes need. The host's shared temp dirs (`/tmp`, `/var/folders`) are never
+  Darwin's user-directory suffix maps Foundation's temporary-directory lookup
+  to that same storage through an exclusive symlink in the native temp root.
+  Foundation's replacement files and Swift Build scratch directories therefore
+  stay inside `.harn-tmp`. The host's shared temp dirs (`/tmp`, `/var/folders`) are never
   granted: they hold every other process's files. Caches that default there,
   such as clang's module cache and xcrun's lookup cache, are pointed into the
   workspace by the child's environment instead. Writable only when the active
@@ -587,6 +588,14 @@ so ordinary project scripts receive those defaults too. SDK and toolchain
 selection, explicit SwiftPM options, and arguments after `--` are preserved.
 The launchers grant no additional file or network access.
 
+On Xcode 27, Swift Build clears the environment of compiler and linker jobs.
+For the default toolchain, Harn supplies a SwiftPM `--toolset` pointing to a
+workspace-local launcher for that same installed compiler. The launcher restores
+the private temporary-directory settings before executing the compiler; adjacent
+frontend and library paths remain read-only links to the installed toolchain.
+This keeps the default build backend. An explicit `--toolset` or `--toolchain`
+takes precedence over this compiler launcher.
+
 A script that replaces `PATH` or invokes an absolute Swift path bypasses the
 launcher. This includes a path previously returned by `xcrun --find swift`;
 lookup-only commands retain their original output. Such a script must supply
@@ -753,6 +762,14 @@ already-writable workspace location fixes this for any TMPDIR-honoring
 toolchain without widening the sandbox. A `TMPDIR`/`TMP`/`TEMP` the caller
 sets explicitly (via the process call's `env`) is respected; only the
 otherwise-inherited, non-writable value is overridden.
+
+On macOS, Foundation asks Darwin for its temporary directory before consulting
+`TMPDIR`. Harn supplies `DIRHELPER_USER_DIR_SUFFIX` with an alias to `.harn-tmp`,
+so native temporary files use the same workspace storage. The alias is named
+from the canonical workspace temp path, created exclusively, and reused only
+when its stored target matches. Existing host files or different symlink targets
+are refused. No alias subtree or shared `TemporaryItems` directory receives a
+filesystem grant; the kernel still authorizes the resolved workspace path.
 
 ## Capability → kernel-knob mapping
 

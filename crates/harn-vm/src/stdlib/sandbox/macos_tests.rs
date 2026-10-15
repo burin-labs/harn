@@ -322,16 +322,20 @@ fn sandbox_profile_does_not_grant_global_file_read() {
 
 #[test]
 fn sandbox_profile_allows_tmp_write_only_with_workspace_write() {
-    let read_only = render_profile(&macos_policy_with_workspace_ops(&["read_text"]));
+    let workspace = tempfile::tempdir().unwrap();
+    let mut read_policy = macos_policy_with_workspace_ops(&["read_text"]);
+    read_policy.workspace_roots = vec![workspace.path().display().to_string()];
+    let read_only = render_profile(&read_policy);
     assert!(
         !read_only.contains("(allow file-write* (subpath \"/tmp\")"),
         "read-only profile must not grant temp writes"
     );
 
-    let writable = render_profile(&macos_policy_with_workspace_ops(&["write_text"]));
-    let session_temp =
-        super::super::workspace_local_tmpdir(&macos_policy_with_workspace_ops(&["write_text"]))
-            .expect("a writable workspace has a session temp dir");
+    let mut write_policy = macos_policy_with_workspace_ops(&["write_text"]);
+    write_policy.workspace_roots = read_policy.workspace_roots;
+    let writable = render_profile(&write_policy);
+    let session_temp = super::super::workspace_local_tmpdir(&write_policy)
+        .expect("a writable workspace has a session temp dir");
     assert!(
         writable.contains(&format!(
             "(allow file-read* (subpath \"{}\"))",
@@ -339,14 +343,12 @@ fn sandbox_profile_allows_tmp_write_only_with_workspace_write() {
         )),
         "writable profile should grant the session temp dir: {writable}"
     );
-    let replacement = super::toolchain_roots::foundation_replacement_root()
-        .expect("the per-user temp dir resolves");
+    assert!(super::private_temp::prepare(&write_policy)
+        .expect("native temporary mapping")
+        .is_some());
     assert!(
-        writable.contains(&format!(
-            "(allow file-read* (subpath \"{}\"))",
-            replacement.display()
-        )),
-        "writable profile should grant Foundation's replacement staging dir: {writable}"
+        !writable.contains("TemporaryItems"),
+        "shared replacement storage must not be granted: {writable}"
     );
     // The host's shared temp dirs hold every other process's files.
     for shared in [
