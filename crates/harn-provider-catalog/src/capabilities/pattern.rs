@@ -2,9 +2,8 @@ use std::collections::HashSet;
 
 use serde::{de, Deserialize, Deserializer};
 
+use super::generation::{claude_generation, gpt_generation};
 use super::rule::ProviderRule;
-use crate::llm::providers::anthropic::claude_generation;
-use crate::llm::providers::openai_compat::gpt_generation;
 use harn_glob::match_name as glob_match;
 
 /// Model IDs covered by one capability rule.

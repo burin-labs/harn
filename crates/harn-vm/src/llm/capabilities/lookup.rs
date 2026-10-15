@@ -7,8 +7,9 @@ use serde::Deserialize;
 
 use super::model::{Capabilities, CapabilitiesFile, ProviderLimits};
 use super::overrides::{current_user_overrides, set_user_overrides as set_context_overrides};
-use super::rule::lookup_with;
+use super::rule::resolve_with_features;
 use super::BUILTIN_TOML;
+use harn_provider_catalog::capabilities::{CapabilityRoute, CapabilityRules};
 
 static BUILTIN: OnceLock<CapabilitiesFile> = OnceLock::new();
 
@@ -179,9 +180,12 @@ pub(crate) fn effective_capability_route<'a>(
 pub fn capability_rule_provenance(provider: &str, model: &str) -> Option<String> {
     let user = current_user_overrides();
     let model = crate::llm_config::capability_model_id(provider, model);
-    let (resolution, _, _) =
-        super::route::resolve_route(user.as_ref(), builtin(), provider, &model);
-    (!resolution.matched_rules.is_empty()).then(|| resolution.matched_rules.join(", then "))
+    let resolution = CapabilityRules::new(builtin(), user.as_ref()).resolve(CapabilityRoute {
+        provider,
+        model: &model,
+        responses_api: false,
+    });
+    (!resolution.provenance.is_empty()).then(|| resolution.provenance.join(", then "))
 }
 
 /// [`lookup`] through [`effective_capability_route`].
@@ -213,23 +217,26 @@ pub fn lookup_with_user_overrides(
     user_overrides: Option<&CapabilitiesFile>,
 ) -> Capabilities {
     let model = crate::llm_config::capability_model_id(provider, model);
-    finish_lookup(
+    resolve_with_features(
         provider,
-        lookup_with(provider, &model, builtin(), user_overrides),
+        &model,
+        builtin(),
+        user_overrides,
+        crate::llm_config::provider_has_feature(provider, "responses_api"),
     )
+    .capabilities
 }
 
 pub fn lookup_with_base_file(provider: &str, model: &str, base: &CapabilitiesFile) -> Capabilities {
     let model = crate::llm_config::capability_model_id(provider, model);
-    finish_lookup(provider, lookup_with(provider, &model, base, None))
-}
-
-fn finish_lookup(provider: &str, caps: Capabilities) -> Capabilities {
-    finish_lookup_with_responses(
+    resolve_with_features(
         provider,
-        caps,
+        &model,
+        base,
+        None,
         crate::llm_config::provider_has_feature(provider, "responses_api"),
     )
+    .capabilities
 }
 
 /// Resolve source-owned rules and wire identities without ambient registry state.
@@ -246,31 +253,7 @@ pub fn lookup_with_source_config(
             .iter()
             .any(|feature| feature == "responses_api")
     });
-    finish_lookup_with_responses(
-        provider,
-        lookup_with(provider, &model, base, None),
-        responses,
-    )
-}
-
-fn finish_lookup_with_responses(
-    provider: &str,
-    mut caps: Capabilities,
-    responses: bool,
-) -> Capabilities {
-    if provider != "openai" && provider != "mock" && !responses {
-        caps.responses_api = false;
-        caps.chat_completions_unsupported = false;
-    }
-    if provider != "openai" && provider != "mock" {
-        caps.hosted_tools.clear();
-        caps.remote_mcp = false;
-        caps.conversation_state = false;
-        caps.compaction = false;
-        caps.background_mode = false;
-        caps.tool_approval_policy = None;
-    }
-    caps
+    resolve_with_features(provider, &model, base, None, responses).capabilities
 }
 
 #[cfg(test)]

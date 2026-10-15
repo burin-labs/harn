@@ -5,11 +5,12 @@ use std::collections::HashSet;
 
 use crate::llm::api::{DeltaSender, LlmRequestPayload, LlmResult, ReasoningEffort, ThinkingConfig};
 use crate::llm::provider::{LlmProvider, LlmProviderChat};
-use crate::llm::providers::common::parse_major_minor_tail;
 use crate::llm::providers::schema_compat::{
     sanitize_schema_for_provider, SchemaCompatProfile, SchemaSurface,
 };
 use crate::value::VmError;
+pub(crate) use harn_provider_catalog::capabilities::claude_generation;
+use harn_provider_catalog::capabilities::is_claude_model_id;
 
 mod tool_history;
 
@@ -34,45 +35,6 @@ thread_local! {
         RefCell::new(HashSet::new());
     static ANTHROPIC_FORCED_JSON_WARN_ONCE: RefCell<HashSet<String>> =
         RefCell::new(HashSet::new());
-}
-
-/// Parse the (major, minor) generation out of a Claude model ID. Handles
-/// both dash-separated names like `claude-opus-4-7` / `claude-sonnet-4-6`
-/// and dotted variants like `claude-opus-4.7` (OpenRouter, some proxies),
-/// plus dated IDs like `claude-haiku-4-5-20251001` and single-component
-/// generations like `claude-fable-5` → (5, 0).
-///
-/// Returns `None` if the ID isn't a known Claude shape (e.g. `gpt-4o`),
-/// including non-numeric tails like `claude-mythos-preview`.
-#[expect(
-    clippy::string_slice,
-    reason = "idx comes from find() of the ASCII needle on the sliced string"
-)]
-pub(crate) fn claude_generation(model: &str) -> Option<(u32, u32)> {
-    let lower = model.to_lowercase();
-    if !is_claude_model_id(&lower) {
-        return None;
-    }
-    if let Some(tail) = lower.split("claude-").nth(1) {
-        if tail.as_bytes().first().is_some_and(u8::is_ascii_digit) {
-            return parse_major_minor_tail(tail);
-        }
-    }
-    // fable/mythos (the Mythos-class tier above Opus, generation 5+) share
-    // the Opus 4.7+ request surface, so the >= (4, 6) / (4, 7) guards below
-    // must fire for them too.
-    for family in ["opus", "sonnet", "haiku", "fable", "mythos"] {
-        let needle = format!("{family}-");
-        if let Some(idx) = lower.find(&needle) {
-            return parse_major_minor_tail(&lower[idx + needle.len()..]);
-        }
-    }
-    None
-}
-
-fn is_claude_model_id(model: &str) -> bool {
-    let lower = model.to_lowercase();
-    lower.starts_with("claude-") || lower.contains("/claude-") || lower.contains(".claude-")
 }
 
 /// Canonical message-level keys the Anthropic Messages API accepts on an

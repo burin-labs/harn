@@ -47,7 +47,7 @@ impl ReasoningEffort {
 }
 
 /// The reasoning-control shapes a route accepts.
-pub(super) fn rule_thinking_modes(rule: &ProviderRule) -> Vec<String> {
+pub fn rule_thinking_modes(rule: &ProviderRule) -> Vec<String> {
     let mut modes = rule.thinking_modes.clone().unwrap_or_else(|| {
         if rule.thinking.unwrap_or(false) {
             vec!["enabled".to_string()]
@@ -71,7 +71,7 @@ pub(super) fn rule_thinking_modes(rule: &ProviderRule) -> Vec<String> {
 /// Derived from the resolved modes, so it cannot disagree with them. Consumers
 /// used to hedge with `caps_supports(caps, "effort") || caps.reasoning_effort_supported`
 /// precisely because the two could differ; that hedge is now redundant.
-pub(super) fn rule_reasoning_effort_supported(rule: &ProviderRule) -> bool {
+pub fn rule_reasoning_effort_supported(rule: &ProviderRule) -> bool {
     rule_thinking_modes(rule)
         .iter()
         .any(|mode| mode == "effort")

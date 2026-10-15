@@ -392,7 +392,7 @@ pub(super) fn rule_to_caps(rule: &ProviderRule, defaults: &ProviderDefaults) -> 
     }
 }
 
-pub(super) fn rule_preferred_tool_format(rule: &ProviderRule) -> String {
+pub fn rule_preferred_tool_format(rule: &ProviderRule) -> String {
     // This is the `caps.preferred_tool_format` the runtime `lookup` returns for
     // a matched capability row. When the row pins a format, honor it (including
     // an explicit `text` — the reverse safety valve). Otherwise derive: native

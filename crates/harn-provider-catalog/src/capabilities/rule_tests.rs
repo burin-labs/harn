@@ -4,9 +4,8 @@
 
 use harn_glob::match_name as glob_match;
 
-use super::lookup::parse_capabilities_toml;
 use super::model::{Capabilities, WireDialect};
-use super::rule::lookup_with;
+use super::{CapabilityRoute, CapabilityRules};
 
 #[test]
 fn glob_match_substring() {
@@ -19,8 +18,14 @@ fn glob_match_substring() {
 /// from `src`: the parsed file is passed as the builtin base with no user
 /// layer, so no shipped rule interferes with the `extends` assertions.
 fn extends_caps(src: &str) -> Capabilities {
-    let file = parse_capabilities_toml(src).expect("test capabilities toml parses");
-    lookup_with("testprov", "test-model", &file, None)
+    let file = toml::from_str(src).expect("test capabilities toml parses");
+    CapabilityRules::new(&file, None)
+        .resolve(CapabilityRoute {
+            provider: "testprov",
+            model: "test-model",
+            responses_api: false,
+        })
+        .capabilities
 }
 
 #[test]

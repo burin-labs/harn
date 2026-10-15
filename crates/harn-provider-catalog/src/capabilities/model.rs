@@ -198,7 +198,7 @@ pub struct ProviderDefaults {
     #[serde(default)]
     pub prompt_cache_ttls: Option<Vec<String>>,
     /// Shortest prefix this provider will actually cache, in tokens. See
-    /// [`crate::llm::capabilities::rule::ProviderRule::prompt_cache_min_prefix_tokens`].
+    /// [`ProviderRule::prompt_cache_min_prefix_tokens`].
     #[serde(default)]
     pub prompt_cache_min_prefix_tokens: Option<u32>,
     /// Request-side cache marker placement shared by every adapter for this
@@ -785,7 +785,7 @@ pub struct Capabilities {
     pub prompt_cache_ttls: Vec<String>,
     /// Shortest prefix this route will actually cache, in tokens. `None` means
     /// the route has no model-specific floor and the wire-dialect default in
-    /// [`crate::llm::cache_conformance::CacheControlProfile`] applies.
+    /// The runtime's cache-control profile applies.
     pub prompt_cache_min_prefix_tokens: Option<u32>,
     pub cache_breakpoint_style: CacheBreakpointStyle,
     pub vision: bool,

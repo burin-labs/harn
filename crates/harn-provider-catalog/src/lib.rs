@@ -2,6 +2,7 @@
 //! Runtime loading and routing policy remain in `harn-vm`.
 
 pub mod artifact;
+pub mod capabilities;
 pub mod data_controls;
 pub mod model_def;
 pub mod model_operation;
