@@ -9,6 +9,7 @@ import {
   GitStore,
   admission_effect,
   begin_effect,
+  claim_reserved_effect,
   commit_state,
   control,
   dispatch_reserved_effect,
@@ -25,6 +26,44 @@ type ProviderEvidence = {integrated_commit: string}
 
 fn fence(state: Controller) -> Fence {
   return pick(state.authority, ["installation", "generation", "revision", "controller"])
+}
+
+pipeline test_atomic_adapter_claim_is_unique_durable_and_invalidated_by_stop(harness: Harness) {
+  const s = setup(harness)
+  defer {
+    harness.fs.delete(s.root)
+  }
+  const outcomes = parallel settle [1, 2] with { max_concurrent: 2 } { actor ->
+    claim_reserved_effect(pick(harness, ["process", "random"]), s.store, fence(s.state), s.request)
+  }
+  assert_eq(outcomes.failed, 0)
+  const results = outcomes.results.map({ result -> unwrap(result) })
+  const winners = results.filter({ result -> is_ok(result) })
+  assert_eq(len(winners), 1, "one actor must own the prepared atomic transaction")
+  const claim = unwrap(winners[0]!)
+  const current = read_state(harness.process, s.store)
+  assert_eq(current.commit, claim.commit, "the claim must name the actual remote revision")
+  assert_eq(current.state, claim.state)
+  assert_eq(claim.state.effects[0]?.status, "dispatching")
+  assert(claim.state.effects[0]?.dispatch_id != nil)
+  assert(
+    is_err(
+      claim_reserved_effect(
+        pick(harness, ["process", "random"]),
+        s.store,
+        fence(claim.state),
+        s.request,
+      ),
+    ),
+    "a repeated delivery must not obtain a second claim",
+  )
+  const stopped = unwrap(control(claim.state, fence(claim.state), "stopped"))
+  const stop = prepare_state(harness.process, s.store, current, stopped)
+  assert_eq(commit_state(harness.process, s.store, stop).status, "committed")
+  const after = read_state(harness.process, s.store)
+  assert(after.commit != claim.commit, "accepted stop must invalidate the atomic ref guard")
+  assert_eq(after.state!.effects[0]?.status, "unknown")
+  assert(is_err(transfer(after.state!, fence(after.state!), "replacement")))
 }
 
 fn setup(harness: Harness) -> Setup {
