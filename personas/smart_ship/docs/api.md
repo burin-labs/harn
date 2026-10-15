@@ -8,27 +8,107 @@ Version: `0.1.0`
 
 `lib/github.harn`
 
-### fn `github_review_observation`
+### fn `github_reviewed_change`
 
 Normalize the connector's complete exact-head census for live reads and deterministic replay.
 
 ```harn
-pub fn github_review_observation(census: GithubPullRequestReviewCensus) -> ReviewObservation {
+pub fn github_reviewed_change(census: GithubPullRequestReviewCensus) -> ReviewedChangeObservation {
 }
 ```
 
-### fn `read_github_reviews`
+### fn `read_github_reviewed_change`
 
 Read-only initial forge adapter. Errors retain the connector's structured refusal.
 
 ```harn
-pub fn read_github_reviews(harness: Harness, request: GithubPullRequestReviewCensusRequest) {
+pub fn read_github_reviewed_change(
+  harness: Harness,
+  request: GithubPullRequestReviewCensusRequest,
+) -> GithubConnectorResult<ReviewedChangeObservation> {
 }
 ```
 
 ## Export `lib`
 
 `lib/main.harn`
+
+### type `AdmissionEffect`
+
+Admission effects retain the complete independently qualified witness.
+
+```harn
+pub type AdmissionEffect = EffectTarget & {kind: "admission", admission: SignedAdmission}
+```
+
+### type `AdmissionRecord`
+
+A receipt retains required CI evidence rather than replacing it with an opaque digest.
+
+```harn
+pub type AdmissionRecord = AdmissionRequest \
+  & {schema: "smart-ship.admission.v1", proofs: list<Proof>, admitted_at_ms: int}
+```
+
+### type `AdmissionRequest`
+
+Frozen admission inputs are shared by dispatch, archived replay, and receipt validation.
+
+```harn
+pub type AdmissionRequest = {
+  installation: string,
+  policy_digest: string,
+  policy: Policy,
+  source: ReviewedSource,
+  reviews: ReviewObservation,
+  scope: SignedScope,
+}
+```
+
+### type `AdmissionRule`
+
+Trusted scope selection chooses an installation-owned review policy for one repository.
+
+```harn
+pub type AdmissionRule = {
+  id: string,
+  repository: string,
+  repository_id: string?,
+  scope_trust_domain: string,
+  review: ReviewPolicy,
+}
+```
+
+### type `AdmissionScope`
+
+The owning scope adapter attests the complete job census before dispatch bindings exist.
+
+```harn
+pub type AdmissionScope = {
+  schema: "smart-ship.admission-scope.v1",
+  installation: string,
+  policy_digest: string,
+  rule: string,
+  reviewed_head: string,
+  reviewed_base: string,
+  source: Source,
+  requirements: list<JobInputs>,
+  inventory_complete: bool,
+}
+```
+
+### type `AdmissionVerification`
+
+Qualification exposes both decisions and their complete inventories.
+
+```harn
+pub type AdmissionVerification = {
+  status: "admitted" | "pending" | "failed" | "invalid",
+  review: ReviewAdmission?,
+  checks: Verification,
+  invalid: list<string>,
+}
+```
 
 ### type `Artifact`
 
@@ -45,6 +125,8 @@ Authority is read from the effect owner immediately before an effect.
 ```harn
 pub type Authority = {
   installation: string,
+  policy: Policy,
+  policy_digest: string,
   generation: int,
   revision: int,
   controller: string,
@@ -65,8 +147,7 @@ pub type Change = {
   repository: string,
   head: string,
   integrated_commit: string,
-  review_receipt: string,
-  admission_receipt: string,
+  admission: SignedAdmission,
 }
 ```
 
@@ -146,6 +227,7 @@ pub type Effect = {
   request: EffectRequest,
   generation: int,
   controller: string,
+  policy_digest: string,
   status: "reserved" | "dispatching" | "unknown" | "confirmed" | "refused",
   dispatch_id: string?,
   receipt: string?,
@@ -181,17 +263,32 @@ Only the effect owner receives these handles; dispatch identities come from its 
 pub type EffectOwnerHost = {process: HarnessProcess, random: HarnessRandom}
 ```
 
-### type `EffectRequest`
+### type `EffectRefusal`
 
-An installation adapter's exact external action, retained through uncertain results.
+Unmeasured evidence remains nil; measured refusals retain complete counts and names.
 
 ```harn
-pub type EffectRequest = {
-  kind: "admission" | "release" | "rerun",
-  repository: string,
-  source: string,
-  input_digest: string,
+pub type EffectRefusal = {
+  reason: string,
+  admission: AdmissionVerification?,
+  verification: Verification?,
 }
+```
+
+### type `EffectRequest`
+
+A digest cannot stand in for an admission record at the mutation boundary.
+
+```harn
+pub type EffectRequest = AdmissionEffect | ReleaseEffect | RerunEffect
+```
+
+### type `EffectTarget`
+
+An exact external target and its immutable input identity.
+
+```harn
+pub type EffectTarget = {repository: string, source: string, input_digest: string}
 ```
 
 ### type `Execution`
@@ -284,6 +381,25 @@ pub type Installation = {
 }
 ```
 
+### type `JobInputs`
+
+A required job's complete execution inputs, independent of runner placement.
+
+```harn
+pub type JobInputs = {
+  id: string,
+  kind: "tests" | "check",
+  repository: string,
+  input_digest: string,
+  runtime_digest: string,
+  environment_digest: string,
+  coverage_digest: string,
+  trust_domain: string,
+  reuse_allowed: bool,
+  artifacts: list<string>,
+}
+```
+
 ### type `JobPlan`
 
 Preparation leaves an empty request; bind it to a frozen snapshot before managed execution.
@@ -351,6 +467,9 @@ pub type Policy = {
   repositories: list<string>,
   verifier_keys: list<VerifierKey>,
   checkpoint_keys: list<VerifierKey>,
+  scope_keys: list<VerifierKey>,
+  admission_keys: list<VerifierKey>,
+  admission_rules: list<AdmissionRule>,
   max_changes: int,
   max_unverified_ms: int,
   max_repair_attempts: int,
@@ -391,6 +510,14 @@ Original execution provenance remains attached to every selected output, includi
 
 ```harn
 pub type ReleaseArtifact = {artifact: Artifact, original: Execution, mode: "executed" | "reused"}
+```
+
+### type `ReleaseEffect`
+
+Release input identity names the exact proven checkpoint.
+
+```harn
+pub type ReleaseEffect = EffectTarget & {kind: "release"}
 ```
 
 ### type `ReleaseFile`
@@ -512,22 +639,18 @@ pub type RepairSpend = {committed_usd: float, spent_usd: float?, unreported_atte
 
 ### type `Requirement`
 
-A required job's complete execution inputs, independent of runner placement.
+A dispatch binds semantic job inputs to one immutable verification request.
 
 ```harn
-pub type Requirement = {
-  id: string,
-  execution_request: string,
-  kind: "tests" | "check",
-  repository: string,
-  input_digest: string,
-  runtime_digest: string,
-  environment_digest: string,
-  coverage_digest: string,
-  trust_domain: string,
-  reuse_allowed: bool,
-  artifacts: list<string>,
-}
+pub type Requirement = JobInputs & {execution_request: string}
+```
+
+### type `RerunEffect`
+
+A rerun retains the installation-selected source and input identity.
+
+```harn
+pub type RerunEffect = EffectTarget & {kind: "rerun"}
 ```
 
 ### type `Review`
@@ -555,7 +678,7 @@ pub type ReviewActor = {id: string, name: string, kind: string}
 
 ### type `ReviewAdmission`
 
-Counts and named refusals stay visible even when the review census is absent.
+Review counts and named refusals remain visible when evidence is absent.
 
 ```harn
 pub type ReviewAdmission = {
@@ -591,7 +714,7 @@ pub type ReviewObservation = {
 
 ### type `ReviewPolicy`
 
-An installation declares independent reviewers by stable identity, never display name.
+An installation declares independent reviewers by stable identity.
 
 ```harn
 pub type ReviewPolicy = {minimum_approvals: int, trusted_actor_ids: list<string>, allow_forks: bool}
@@ -605,9 +728,17 @@ Thread resolution remains distinct from whether its source is outdated.
 pub type ReviewThread = {id: string, resolved: bool, outdated: bool}
 ```
 
+### type `ReviewedChangeObservation`
+
+Source and review facts are projected from the same complete forge observation.
+
+```harn
+pub type ReviewedChangeObservation = {source: ReviewedSource, reviews: ReviewObservation}
+```
+
 ### type `ReviewedSource`
 
-Forge facts remain unknown until the adapter actually observes them.
+Forge facts remain unknown until the adapter observes them.
 
 ```harn
 pub type ReviewedSource = {
@@ -620,7 +751,17 @@ pub type ReviewedSource = {
   draft: bool?,
   head_repository: string?,
   base_repository: string?,
+  head_repository_id: string?,
+  base_repository_id: string?,
 }
+```
+
+### type `SignedAdmission`
+
+Only an installation's declared admission issuer can authorize the recorded decision.
+
+```harn
+pub type SignedAdmission = {record: AdmissionRecord, signer: string, signature: string}
 ```
 
 ### type `SignedCheckpoint`
@@ -629,6 +770,14 @@ Publication is independently signed by a key authorized for checkpoints.
 
 ```harn
 pub type SignedCheckpoint = {checkpoint: Checkpoint, signer: string, signature: string}
+```
+
+### type `SignedScope`
+
+Scope signatures authenticate selection without giving candidate code that authority.
+
+```harn
+pub type SignedScope = {scope: AdmissionScope, signer: string, signature: string}
 ```
 
 ### type `SigningIdentity`
@@ -708,12 +857,44 @@ pub type Verification = {
 }
 ```
 
+### type `VerificationPlan`
+
+A nonrecursive verification plan serves admission and cumulative grouped snapshots.
+
+```harn
+pub type VerificationPlan = {
+  installation: string,
+  frontier: string,
+  sources: list<Source>,
+  requirements: list<Requirement>,
+  inventory_complete: bool,
+}
+```
+
 ### type `VerifierKey`
 
 An executor key has one declared trust domain; another installation cannot borrow it.
 
 ```harn
 pub type VerifierKey = {id: string, public_key: string, trust_domain: string}
+```
+
+### fn `admission_bytes`
+
+The admission issuer signs inspectable review, scope, original execution, and timing facts.
+
+```harn
+pub fn admission_bytes(record: AdmissionRecord) -> string {
+}
+```
+
+### fn `admission_effect`
+
+Derive the external target and dispatch identity from the full signed admission.
+
+```harn
+pub fn admission_effect(signed: SignedAdmission) -> AdmissionEffect {
+}
 ```
 
 ### fn `begin_effect`
@@ -730,9 +911,18 @@ pub fn begin_effect(
 }
 ```
 
+### fn `bind_admission_job`
+
+Bind a stock precheck to the reviewed admission inputs before execution.
+
+```harn
+pub fn bind_admission_job(plan: JobPlan, request: AdmissionRequest) -> JobPlan {
+}
+```
+
 ### fn `bind_job`
 
-A prepared job cannot borrow a request from another frontier or verification plan.
+Bind a prepared stock job to the complete frozen grouped snapshot.
 
 ```harn
 pub fn bind_job(plan: JobPlan, snapshot: Snapshot) -> JobPlan {
@@ -827,6 +1017,15 @@ Decode an archived observation without fabricating absent actor, source, or plat
 
 ```harn
 pub fn decode_review_observation(value: unknown) -> ReviewObservation {
+}
+```
+
+### fn `decode_reviewed_change`
+
+Archived reads preserve the same source binding and unknown facts as live normalization.
+
+```harn
+pub fn decode_reviewed_change(value: unknown) -> ReviewedChangeObservation {
 }
 ```
 
@@ -929,7 +1128,7 @@ pub fn inspect_installation(process: HarnessProcess, config: Installation) -> In
 
 ### fn `is_digest`
 
-Content evidence uses an explicitly named hash algorithm.
+Content evidence names its hash algorithm.
 
 ```harn
 pub fn is_digest(value: string) -> bool {
@@ -938,7 +1137,7 @@ pub fn is_digest(value: string) -> bool {
 
 ### fn `is_git_id`
 
-Git supports SHA-1 and SHA-256 object names. Neither an empty nor symbolic name is a source identity.
+Git object names are immutable SHA-1 or SHA-256 identities, never symbolic refs.
 
 ```harn
 pub fn is_git_id(value: string) -> bool {
@@ -1007,6 +1206,15 @@ Validate installation policy before accepting any submitted work.
 
 ```harn
 pub fn policy_errors(policy: Policy) -> list<string> {
+}
+```
+
+### fn `prepare_admission`
+
+Derive every precheck request before dispatch; absent or incomplete scope remains visible.
+
+```harn
+pub fn prepare_admission(request: AdmissionRequest) -> VerificationPlan {
 }
 ```
 
@@ -1126,13 +1334,13 @@ pub fn repair_spend(incident: Incident) -> RepairSpend {
 Complete semantic inputs must match before an original job can be reused.
 
 ```harn
-pub fn requirement_identity(requirement: Requirement) -> string {
+pub fn requirement_identity(requirement: JobInputs) -> string {
 }
 ```
 
 ### fn `reserve_effect`
 
-Persist the reservation with CAS before starting an idempotent, source-guarded forge action.
+Persist the qualified reservation with CAS; refusals retain any measured evidence.
 
 ```harn
 pub fn reserve_effect(
@@ -1140,7 +1348,7 @@ pub fn reserve_effect(
   fence: Fence,
   request: EffectRequest,
   policy: Policy,
-) -> Result<Controller, string> {
+) -> Result<Controller, EffectRefusal> {
 }
 ```
 
@@ -1179,6 +1387,15 @@ pub fn run_repair(
   config: RepairModel,
   current_allowance: fn() -> float?,
 ) -> RepairRun {
+}
+```
+
+### fn `scope_bytes`
+
+Signing bytes authenticate the owning scope adapter's complete semantic selection.
+
+```harn
+pub fn scope_bytes(scope: AdmissionScope) -> string {
 }
 ```
 
@@ -1247,7 +1464,12 @@ pub fn start(state: Controller, fence: Fence) -> Result<Controller, string> {
 A verified transfer invalidates old controllers even when their local leases remain live.
 
 ```harn
-pub fn transfer(state: Controller, fence: Fence, controller: string) -> Result<Controller, string> {
+pub fn transfer(
+  state: Controller,
+  fence: Fence,
+  controller: string,
+  next_policy: Policy? = nil,
+) -> Result<Controller, string> {
 }
 ```
 
@@ -1271,9 +1493,18 @@ pub fn verification_request(frontier: string, requirement: string) -> string {
 
 ### fn `verify`
 
-Judge every required job using its signed original execution. Missing observations stay pending.
+Judge every required grouped job and every inspectable signed admission record.
 
 ```harn
 pub fn verify(snapshot: Snapshot, proofs: list<Proof>, policy: Policy) -> Verification {
+}
+```
+
+### fn `verify_admission`
+
+Judge signed admission through the same original-execution verifier used for grouped work.
+
+```harn
+pub fn verify_admission(signed: SignedAdmission, policy: Policy) -> AdmissionVerification {
 }
 ```

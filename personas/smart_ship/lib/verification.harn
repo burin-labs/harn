@@ -1,14 +1,31 @@
+import { review_admission, review_policy_errors } from "./admission"
 import {
+  admission_bytes,
   execution_bytes,
   is_digest,
   is_git_id,
   policy_digest,
+  prepare_admission,
   requirement_identity,
-  snapshot_verification_id,
+  scope_bytes,
+  snapshot_plan,
   source_identity,
   verification_request,
 } from "./identity"
-import { Execution, Policy, Proof, Requirement, Snapshot, Verification } from "./types"
+import { ReviewAdmission } from "./review"
+import {
+  AdmissionRecord,
+  AdmissionVerification,
+  Execution,
+  Policy,
+  Proof,
+  Requirement,
+  SignedAdmission,
+  Snapshot,
+  Verification,
+  VerificationPlan,
+  VerifierKey,
+} from "./types"
 
 fn duplicate(values: list<string>) -> bool {
   return values.any({ value -> len(values.filter({ other -> other == value })) > 1 })
@@ -25,6 +42,16 @@ fn requirement_valid(requirement: Requirement) -> bool {
     && !requirement.artifacts.contains("")
 }
 
+fn key_inventory_valid(keys: list<VerifierKey>) -> bool {
+  return len(keys) > 0 && !duplicate(keys.map({ key -> key.id }))
+    && keys.all(
+      { key ->
+        key.id != "" && key.trust_domain != ""
+          && regex_match("^[0-9a-f]{64}$", key.public_key) != nil
+      },
+    )
+}
+
 /** Validate installation policy before accepting any submitted work. */
 pub fn policy_errors(policy: Policy) -> list<string> {
   let errors: list<string> = []
@@ -38,21 +65,41 @@ pub fn policy_errors(policy: Policy) -> list<string> {
     || policy.max_repair_usd < 0.0 {
     errors = errors + ["work and repair budgets are invalid"]
   }
-  for keys in [policy.verifier_keys, policy.checkpoint_keys] {
-    if len(keys) == 0 || duplicate(keys.map({ key -> key.id }))
-      || keys.any(
-        { key ->
-          key.id == "" || key.trust_domain == ""
-            || regex_match("^[0-9a-f]{64}$", key.public_key) == nil
-        },
-      ) {
-      errors = errors + ["unique, named verification and checkpoint keys are required"]
+  for inventory in [
+    {role: "executor", keys: policy.verifier_keys},
+    {role: "checkpoint", keys: policy.checkpoint_keys},
+    {role: "scope", keys: policy.scope_keys},
+    {role: "admission", keys: policy.admission_keys},
+  ] {
+    if !key_inventory_valid(inventory.keys) {
+      errors = errors + ["invalid signing keys: " + inventory.role]
     }
+  }
+  if len(policy.admission_rules) == 0
+    || duplicate(policy.admission_rules.map({ rule -> rule.id })) {
+    errors = errors + ["unique admission rules are required"]
+  }
+  for rule in policy.admission_rules {
+    if rule.id == "" || !policy.repositories.contains(rule.repository)
+      || rule.repository_id == ""
+      || rule.scope_trust_domain == ""
+      || len(review_policy_errors(rule.review)) > 0
+      || !policy.scope_keys.any({ key -> key.trust_domain == rule.scope_trust_domain }) {
+      errors = errors + ["invalid admission rule: " + rule.id]
+    }
+  }
+  if policy.repositories.any(
+    { repository -> !policy.admission_rules.any({ rule -> rule.repository == repository }) },
+  ) {
+    errors = errors + ["repository admission rule is missing"]
+  }
+  if !policy.admission_keys.any({ key -> key.trust_domain == policy.installation }) {
+    errors = errors + ["installation admission issuer is missing"]
   }
   return errors
 }
 
-fn coverage_errors(snapshot: Snapshot, policy: Policy) -> list<string> {
+fn coverage_errors(snapshot: VerificationPlan, policy: Policy) -> list<string> {
   let errors: list<string> = []
   if !snapshot.inventory_complete || len(snapshot.requirements) == 0 {
     errors = errors + ["required job inventory is incomplete or empty"]
@@ -72,12 +119,16 @@ fn coverage_errors(snapshot: Snapshot, policy: Policy) -> list<string> {
     }
   }
   const repositories = snapshot.sources.map({ source -> source.repository })
-  const frontier = snapshot_verification_id(snapshot)
+  const frontier = snapshot.frontier
+  if snapshot.installation != policy.installation || !is_digest(frontier) {
+    errors = errors + ["verification installation or frontier differs"]
+  }
   if duplicate(snapshot.requirements.map({ requirement -> requirement.id })) {
     errors = errors + ["required job inventory contains duplicates"]
   }
   for requirement in snapshot.requirements {
     if !requirement_valid(requirement) || !repositories.contains(requirement.repository)
+      || !policy.verifier_keys.any({ key -> key.trust_domain == requirement.trust_domain })
       || requirement.execution_request != verification_request(frontier, requirement.id) {
       errors = errors + ["invalid required job: " + requirement.id]
     }
@@ -95,17 +146,32 @@ fn change_errors(snapshot: Snapshot, policy: Policy) -> list<string> {
   for change in snapshot.changes {
     if change.id == "" || !repositories.contains(change.repository) || !is_git_id(change.head)
       || !is_git_id(change.integrated_commit)
-      || !is_digest(change.review_receipt)
-      || !is_digest(change.admission_receipt) {
+      || change.admission.record.source.change != change.id
+      || change.admission.record.source.repository != change.repository
+      || change.admission.record.source.head != change.head
+      || change.admission.record.admitted_at_ms > snapshot.created_at_ms {
       errors = errors + ["invalid admitted change: " + change.id]
+    }
+    const admission = qualify_admission(change.admission, policy)
+    if admission.status != "admitted" {
+      errors = errors + ["unqualified admission: " + change.id]
+      const review = admission.review
+      const reasons = admission.invalid + admission.checks.invalid + admission.checks.pending
+        + admission.checks.failed
+        + admission.checks.infrastructure_failed
+        + if review == nil {
+          []
+        } else {
+          review.invalid + review.pending + review.failed
+        }
+      errors = errors + reasons.map({ reason -> "admission:" + change.id + ":" + reason })
     }
   }
   return errors
 }
 
 fn snapshot_errors(snapshot: Snapshot, policy: Policy) -> list<string> {
-  let errors = policy_errors(policy) + coverage_errors(snapshot, policy)
-    + change_errors(snapshot, policy)
+  let errors = policy_errors(policy) + change_errors(snapshot, policy)
   if snapshot.installation != policy.installation
     || snapshot.policy_digest != policy_digest(policy) {
     errors = errors + ["snapshot policy or installation differs"]
@@ -153,7 +219,28 @@ fn provenance_valid(original: Execution) -> bool {
       ))
 }
 
-fn proof_valid(proof: Proof, requirement: Requirement, snapshot: Snapshot, policy: Policy) -> bool {
+fn signature_valid(
+  signed: {signer: string, signature: string},
+  bytes: string,
+  keys: list<VerifierKey>,
+  domain: string,
+) -> bool {
+  const key = keys.find({ candidate -> candidate.id == signed.signer })
+  if key == nil || key.trust_domain != domain {
+    return false
+  }
+  const authenticated = try {
+    ed25519_verify(key.public_key, bytes, signed.signature)
+  }
+  return is_ok(authenticated) && unwrap(authenticated)
+}
+
+fn proof_valid(
+  proof: Proof,
+  requirement: Requirement,
+  snapshot: VerificationPlan,
+  policy: Policy,
+) -> bool {
   const original = proof.original
   if original.installation != policy.installation || !provenance_valid(original)
     || requirement_identity(original.requirement) != requirement_identity(requirement)
@@ -162,14 +249,12 @@ fn proof_valid(proof: Proof, requirement: Requirement, snapshot: Snapshot, polic
       != (original.requirement.execution_request == requirement.execution_request) {
     return false
   }
-  const key = policy.verifier_keys.find({ candidate -> candidate.id == proof.signer })
-  if key == nil || key.trust_domain != requirement.trust_domain {
-    return false
-  }
-  const authenticated = try {
-    ed25519_verify(key.public_key, execution_bytes(original), proof.signature)
-  }
-  if !is_ok(authenticated) || !unwrap(authenticated) {
+  if !signature_valid(
+    proof,
+    execution_bytes(original),
+    policy.verifier_keys,
+    requirement.trust_domain,
+  ) {
     return false
   }
   const source = snapshot.sources.find(
@@ -179,11 +264,13 @@ fn proof_valid(proof: Proof, requirement: Requirement, snapshot: Snapshot, polic
     || (source != nil && source_identity(original.source) == source_identity(source))
 }
 
-/**
- * Judge every required job using its signed original execution. Missing observations stay pending.
- */
-pub fn verify(snapshot: Snapshot, proofs: list<Proof>, policy: Policy) -> Verification {
-  let invalid = snapshot_errors(snapshot, policy)
+fn verify_plan(
+  snapshot: VerificationPlan,
+  proofs: list<Proof>,
+  policy: Policy,
+  initial_errors: list<string>,
+) -> Verification {
+  let invalid = initial_errors + coverage_errors(snapshot, policy)
   let pending: list<string> = []
   let failed: list<string> = []
   let infrastructure_failed: list<string> = []
@@ -236,4 +323,94 @@ pub fn verify(snapshot: Snapshot, proofs: list<Proof>, policy: Policy) -> Verifi
     infrastructure_failed: infrastructure_failed,
     invalid: invalid,
   }
+}
+
+fn admission_time_errors(record: AdmissionRecord) -> list<string> {
+  let invalid: list<string> = []
+  if record.admitted_at_ms < 0
+    || record.proofs.any({ proof -> proof.original.completed_at_ms > record.admitted_at_ms }) {
+    invalid = invalid + ["admission-time"]
+  }
+  for row in record.reviews.reviews {
+    for value in [row.submitted_at, row.updated_at] {
+      if value != nil {
+        const observed = try {
+          date_parse(value)
+        }
+        if is_err(observed) || unwrap(observed) * 1000 > record.admitted_at_ms {
+          invalid = invalid + ["review-after-admission:" + row.id]
+        }
+      }
+    }
+  }
+  return invalid
+}
+
+fn qualify_admission(signed: SignedAdmission, policy: Policy) -> AdmissionVerification {
+  const record = signed.record
+  const scope = record.scope.scope
+  const rule = policy.admission_rules.find({ candidate -> candidate.id == scope.rule })
+  let invalid = admission_time_errors(record)
+  if record.installation != policy.installation || record.policy_digest != policy_digest(policy)
+    || policy_digest(record.policy) != record.policy_digest
+    || scope.installation != record.installation
+    || scope.policy_digest != record.policy_digest
+    || scope.source.repository != record.source.repository
+    || scope.reviewed_head != record.source.head
+    || scope.reviewed_base != record.source.base {
+    invalid = invalid + ["admission-source-or-policy"]
+  }
+  if rule == nil || rule.repository != record.source.repository {
+    invalid = invalid + ["admission-rule"]
+  } else {
+    if rule.repository_id != record.source.base_repository_id {
+      invalid = invalid + ["admission-repository-binding"]
+    }
+    const authenticated = signature_valid(
+      record.scope,
+      scope_bytes(scope),
+      policy.scope_keys,
+      rule.scope_trust_domain,
+    )
+    if !authenticated {
+      invalid = invalid + ["scope-signature"]
+    }
+  }
+  if !signature_valid(signed, admission_bytes(record), policy.admission_keys, policy.installation) {
+    invalid = invalid + ["admission-signature"]
+  }
+  let review: ReviewAdmission? = nil
+  if rule != nil {
+    review = review_admission(record.source, rule.review, record.reviews)
+  }
+  const checks = verify_plan(prepare_admission(record), record.proofs, policy, [])
+  const status = if len(invalid) > 0 || checks.status == "invalid"
+    || (review != nil && review.status == "invalid") {
+    "invalid"
+  } else if checks.status == "failed"
+    || (review != nil && review.status == "failed") {
+    "failed"
+  } else if review == nil || review.status == "pending"
+    || checks.status == "pending" {
+    "pending"
+  } else {
+    "admitted"
+  }
+  return {status: status, review: review, checks: checks, invalid: invalid}
+}
+
+/** Judge signed admission through the same original-execution verifier used for grouped work. */
+pub fn verify_admission(signed: SignedAdmission, policy: Policy) -> AdmissionVerification {
+  const result = qualify_admission(signed, policy)
+  const errors = policy_errors(policy)
+  return if len(errors) == 0 {
+    result
+  } else {
+    result + {status: "invalid", invalid: result.invalid + errors}
+  }
+}
+
+/** Judge every required grouped job and every inspectable signed admission record. */
+pub fn verify(snapshot: Snapshot, proofs: list<Proof>, policy: Policy) -> Verification {
+  return verify_plan(snapshot_plan(snapshot), proofs, policy, snapshot_errors(snapshot, policy))
 }

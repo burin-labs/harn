@@ -1,5 +1,4 @@
 use std::collections::{BTreeMap, HashMap};
-use std::fmt;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
@@ -37,32 +36,9 @@ pub(crate) use disassembly::*;
 mod inline_cache;
 pub(crate) use inline_cache::*;
 
-/// One annotated `let` / `const` binding site of a chunk, indexed by
-/// `Op::AssertBindingType`.
-///
-/// The native mirror of `harn_kernel::BindingTypeSlot`. Both execution targets
-/// validate this slot through `harn_kernel::type_contract::matches_type`, so a
-/// binding assertion is one of the few checks that is bit-for-bit the same
-/// decision natively and in the portable kernel.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BindingTypeSlot {
-    pub name: String,
-    pub type_expr: TypeExpr,
-    /// Struct and enum names mentioned by `type_expr`. Every other named type
-    /// is unconstrained at runtime, matching parameter semantics.
-    pub nominal_type_names: Vec<String>,
-}
-
-/// A constant value in the constant pool.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub enum Constant {
-    Int(i64),
-    Float(f64),
-    String(String),
-    Bool(bool),
-    Nil,
-    Duration(i64),
-}
+// Native execution consumes the compiler's metadata directly. Runtime caches
+// remain native, while constants, local slots and type assertions have one owner.
+pub use harn_kernel::{BindingTypeSlot, Constant, LocalSlotInfo};
 
 /// Identity used for constant-pool deduplication.
 ///
@@ -115,27 +91,6 @@ fn build_constant_index(constants: &[Constant]) -> HashMap<ConstantKey, u16> {
         }
     }
     index
-}
-
-/// Debug metadata for a slot-indexed local in a compiled chunk.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct LocalSlotInfo {
-    pub name: String,
-    pub mutable: bool,
-    pub scope_depth: usize,
-}
-
-impl fmt::Display for Constant {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Constant::Int(n) => write!(f, "{n}"),
-            Constant::Float(n) => write!(f, "{n}"),
-            Constant::String(s) => write!(f, "\"{s}\""),
-            Constant::Bool(b) => write!(f, "{b}"),
-            Constant::Nil => write!(f, "nil"),
-            Constant::Duration(ms) => write!(f, "{ms}ms"),
-        }
-    }
 }
 
 /// A compiled chunk of bytecode.
@@ -662,18 +617,7 @@ impl Chunk {
         }
 
         let code = portable.code;
-        let constants = portable
-            .constants
-            .into_iter()
-            .map(|constant| match constant {
-                harn_kernel::Constant::Int(value) => Constant::Int(value),
-                harn_kernel::Constant::Float(value) => Constant::Float(value),
-                harn_kernel::Constant::String(value) => Constant::String(value),
-                harn_kernel::Constant::Bool(value) => Constant::Bool(value),
-                harn_kernel::Constant::Nil => Constant::Nil,
-                harn_kernel::Constant::Duration(value) => Constant::Duration(value),
-            })
-            .collect::<Vec<_>>();
+        let constants = portable.constants;
         let constant_count = constants.len();
         let inline_cache_count = inline_cache_slots.len();
         let mut inline_cache_index = vec![NO_INLINE_CACHE_SLOT; code.len()];
@@ -708,24 +652,8 @@ impl Chunk {
                     .map(|_| std::sync::OnceLock::new())
                     .collect(),
             ),
-            local_slots: portable
-                .local_slots
-                .into_iter()
-                .map(|slot| LocalSlotInfo {
-                    name: slot.name,
-                    mutable: slot.mutable,
-                    scope_depth: slot.scope_depth,
-                })
-                .collect(),
-            binding_types: portable
-                .binding_types
-                .into_iter()
-                .map(|slot| BindingTypeSlot {
-                    name: slot.name,
-                    type_expr: slot.type_expr,
-                    nominal_type_names: slot.nominal_type_names,
-                })
-                .collect(),
+            local_slots: portable.local_slots,
+            binding_types: portable.binding_types,
             references_outer_names: portable.references_outer_names,
             #[cfg(debug_assertions)]
             balance_depth: 0,

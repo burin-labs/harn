@@ -3,10 +3,14 @@ import {
   freeze_snapshot,
   is_digest,
   is_git_id,
+  prepare_admission,
   requirement_identity,
+  snapshot_plan,
   source_identity,
+  verification_request,
 } from "./identity"
 import {
+  AdmissionRequest,
   Artifact,
   Change,
   Execution,
@@ -15,6 +19,7 @@ import {
   Snapshot,
   Source,
   TestEvidence,
+  VerificationPlan,
 } from "./types"
 
 /** One stock command and its toolchain probe. Arguments never pass through a shell. */
@@ -259,20 +264,31 @@ pub fn prepare_job(harness: LocalHarness, job: LocalJob) -> JobPlan {
   return {job: job, source: source, requirement: requirement}
 }
 
-/** A prepared job cannot borrow a request from another frontier or verification plan. */
-pub fn bind_job(plan: JobPlan, snapshot: Snapshot) -> JobPlan {
+fn bind_plan(plan: JobPlan, snapshot: VerificationPlan) -> JobPlan {
   require snapshot.inventory_complete && snapshot.installation == plan.job.installation
-    && freeze_snapshot(snapshot) == snapshot,
+    && is_digest(snapshot.frontier),
     "job requires a complete frozen verification frontier"
   const requirements = snapshot.requirements.filter(
     { requirement -> requirement.id == plan.job.id },
   )
   const required = requirements[0]
   require len(requirements) == 1 && required != nil
+    && required.execution_request == verification_request(snapshot.frontier, required.id)
     && requirement_identity(required) == requirement_identity(plan.requirement)
     && snapshot.sources.contains(plan.source),
     "prepared job differs from the frozen source or required inputs"
   return plan + {requirement: required}
+}
+
+/** Bind a prepared stock job to the complete frozen grouped snapshot. */
+pub fn bind_job(plan: JobPlan, snapshot: Snapshot) -> JobPlan {
+  require freeze_snapshot(snapshot) == snapshot, "grouped verification frontier is not frozen"
+  return bind_plan(plan, snapshot_plan(snapshot))
+}
+
+/** Bind a stock precheck to the reviewed admission inputs before execution. */
+pub fn bind_admission_job(plan: JobPlan, request: AdmissionRequest) -> JobPlan {
+  return bind_plan(plan, prepare_admission(request))
 }
 
 type TestRead = {evidence: TestEvidence?, error: string}

@@ -1,4 +1,34 @@
-import { is_git_id } from "./identity"
+import { is_git_id } from "./identifiers"
+
+/** Forge facts remain unknown until the adapter observes them. */
+pub type ReviewedSource = {
+  repository: string,
+  change: string,
+  head: string,
+  base: string,
+  author: ReviewActor?,
+  state: "open" | "closed" | "merged" | nil,
+  draft: bool?,
+  head_repository: string?,
+  base_repository: string?,
+  head_repository_id: string?,
+  base_repository_id: string?,
+}
+
+/** An installation declares independent reviewers by stable identity. */
+pub type ReviewPolicy = {minimum_approvals: int, trusted_actor_ids: list<string>, allow_forks: bool}
+
+/** Review counts and named refusals remain visible when evidence is absent. */
+pub type ReviewAdmission = {
+  status: "approved" | "pending" | "failed" | "invalid",
+  required: int,
+  observed_reviews: int,
+  observed_threads: int,
+  approvers: list<string>,
+  pending: list<string>,
+  failed: list<string>,
+  invalid: list<string>,
+}
 
 /** Stable review identity is separate from a display name or an installation's trust policy. */
 pub type ReviewActor = {id: string, name: string, kind: string}
@@ -30,6 +60,20 @@ pub type ReviewObservation = {
   declared_threads: int,
   reviews: list<Review>,
   threads: list<ReviewThread>,
+}
+
+/** Source and review facts are projected from the same complete forge observation. */
+pub type ReviewedChangeObservation = {source: ReviewedSource, reviews: ReviewObservation}
+
+/** Archived reads preserve the same source binding and unknown facts as live normalization. */
+pub fn decode_reviewed_change(value: unknown) -> ReviewedChangeObservation {
+  const read = schema_expect(value, schema_of(ReviewedChangeObservation))
+  const reviews = validate_review_observation(read.reviews)
+  require read.source.repository == reviews.repository && read.source.change == reviews.change
+    && read.source.head == reviews.head
+    && read.source.base == reviews.base,
+    "reviewed change source differs from its complete review census"
+  return {source: read.source, reviews: reviews}
 }
 
 /** Live adapters and replay readers enter through the same source and inventory contract. */

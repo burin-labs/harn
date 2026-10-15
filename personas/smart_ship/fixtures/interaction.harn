@@ -3,16 +3,17 @@ import {
   Checkpoint,
   JobRun,
   Snapshot,
+  bind_admission_job,
   bind_job,
   checkpoint_id,
   execute_job,
   freeze_snapshot,
   prepare_job,
   promote,
-  run_job,
+  verify_admission,
 } from "../lib/main"
 import { Stack, git, job, project, snapshot } from "./neutral"
-import { Fixture, digest, fixture } from "./support"
+import { Fixture, finish_reviewed_admission, fixture, reviewed_request } from "./support"
 
 pub type Interaction = {
   root: string,
@@ -58,18 +59,37 @@ pub fn prepare_interaction(harness: Harness, stack: Stack) -> Interaction {
   git(harness.process, root, ["add", stack.capacity_path])
   git(harness.process, root, ["commit", "--quiet", "-m", "reduce idle capacity"])
   const change_a = git(harness.process, root, ["rev-parse", "HEAD"])
-  require run_job(local, job(command_host, stack, root, "change-a"), signer).proof.original.result
-    == "passed",
-    "change A failed independently"
+  const independent_a_plan = prepare_job(local, job(command_host, stack, root, "change-a"))
+  const request_a = reviewed_request(
+    f.policy,
+    f.private_key,
+    {id: "change-a", base: base},
+    independent_a_plan,
+  )
+  const independent_a = execute_job(
+    local,
+    bind_admission_job(independent_a_plan, request_a),
+    signer,
+  )
+  require independent_a.proof.original.result == "passed", "change A failed independently"
   git(harness.process, root, ["checkout", "--quiet", "--detach", base])
   harness.fs.write_text(path_join(root, stack.workers_path), stack.workers_change)
   git(harness.process, root, ["add", stack.workers_path])
   git(harness.process, root, ["commit", "--quiet", "-m", "serve three workers"])
   const change_b = git(harness.process, root, ["rev-parse", "HEAD"])
-  require run_job(local, job(command_host, stack, root, "change-b", 10), signer).proof.original
-    .result
-    == "passed",
-    "change B failed independently"
+  const independent_b_plan = prepare_job(local, job(command_host, stack, root, "change-b", 10))
+  const request_b = reviewed_request(
+    f.policy,
+    f.private_key,
+    {id: "change-b", base: base},
+    independent_b_plan,
+  )
+  const independent_b = execute_job(
+    local,
+    bind_admission_job(independent_b_plan, request_b),
+    signer,
+  )
+  require independent_b.proof.original.result == "passed", "change B failed independently"
   git(harness.process, root, ["cherry-pick", "--quiet", change_a])
   const combined_plan = prepare_job(local, job(command_host, stack, root, "combined"))
   const candidate = freeze_snapshot(
@@ -84,26 +104,41 @@ pub fn prepare_interaction(harness: Harness, stack: Stack) -> Interaction {
             repository: "project",
             head: change_a,
             integrated_commit: combined_plan.source.commit,
-            review_receipt: digest("fixture review A"),
-            admission_receipt: digest("fixture admission A"),
+            admission: finish_reviewed_admission(
+              request_a,
+              f.private_key,
+              independent_a.proof.original,
+            ),
           },
           {
             id: "change-b",
             repository: "project",
             head: change_b,
             integrated_commit: change_b,
-            review_receipt: digest("fixture review B"),
-            admission_receipt: digest("fixture admission B"),
+            admission: finish_reviewed_admission(
+              request_b,
+              f.private_key,
+              independent_b.proof.original,
+            ),
           },
         ],
       },
   )
   const combined = execute_job(local, bind_job(combined_plan, candidate), signer)
+  for change in candidate.changes {
+    const admission = verify_admission(change.admission, f.policy)
+    require admission.status == "admitted" && admission.checks.required == 1
+      && admission.checks.executed == 1
+      && admission.checks.reused == 0,
+      "independent stock CI did not execute against the frozen admission request"
+  }
   require combined.proof.original.result == "failed" && combined.proof.original.tests != nil
     && combined.proof.original.tests.failed == 1,
     "combined interaction failure was not observed"
   const held = promote(candidate, [combined.proof], f.policy, authority, f.fence)
   require held.status == "refused" && held.verification.failed == ["tests"]
+    && held.verification.status == "failed"
+    && len(held.verification.invalid) == 0
     && held.checkpoint == nil
     && authority.previous_checkpoint == previous,
     "failed interaction advanced the checkpoint"

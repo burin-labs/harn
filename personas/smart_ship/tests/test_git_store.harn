@@ -1,7 +1,15 @@
+import { assert_error_contains } from "std/testing"
 import { git } from "../fixtures/neutral"
-import { digest, fixture } from "../fixtures/support"
-import { Controller, control, effect_authorized, reserve_effect } from "../lib/controller"
+import { fixture } from "../fixtures/support"
+import {
+  Controller,
+  admission_effect,
+  control,
+  effect_authorized,
+  reserve_effect,
+} from "../lib/controller"
 import { GitStore, commit_state, prepare_state, read_state } from "../lib/git_store"
+import { policy_digest } from "../lib/identity"
 
 pipeline test_remote_state_cas_refuses_a_stale_writer_and_survives_a_new_reader(harness: Harness) {
   const root = harness.fs.mkdtemp_in_workspace("smart-ship-state-")
@@ -70,16 +78,76 @@ pipeline test_remote_state_cas_refuses_a_stale_writer_and_survives_a_new_reader(
     ["installation", "generation", "revision", "controller"],
   )
   const active = unwrap(control(winner_state, resume_fence, "active"))
+  const changed_policy = f.policy + {max_changes: 20}
+  const substituted = active
+    + {
+      authority: active.authority
+        + {policy: changed_policy, policy_digest: policy_digest(changed_policy)},
+    }
+  assert_error_contains(
+    fn() { prepare_state(harness.process, store, recovered, substituted) },
+    "policy cannot change within an authority generation",
+  )
+  const forged_authority = winner_state.authority
+    + {policy: changed_policy, policy_digest: substituted.authority.policy_digest}
+  const forged_previous = recovered + {state: winner_state + {authority: forged_authority}}
+  const forged_write = prepare_state(harness.process, store, forged_previous, substituted)
+  assert_error_contains(
+    fn() { commit_state(harness.process, store, forged_write) },
+    "policy cannot change within an authority generation",
+  )
+  assert_eq(read_state(harness.process, store).commit, recovered.commit)
+  const invalid_policy = f.policy + {max_changes: 0}
+  const invalid_generation = active
+    + {
+      authority: active.authority
+        + {
+          generation: active.authority.generation + 1,
+          mode: "shadow",
+          policy: invalid_policy,
+          policy_digest: policy_digest(invalid_policy),
+        },
+    }
+  assert_error_contains(
+    fn() { prepare_state(harness.process, store, recovered, invalid_generation) },
+    "complete valid policy",
+  )
+  // Bypass preparation with ordinary Git plumbing, as an untrusted state writer could.
+  const blob = harness.process.run(
+    {
+      program: "git",
+      cwd: workspace,
+      args: ["hash-object", "-w", "--stdin"],
+      stdin: json_stringify(invalid_generation),
+    },
+  )
+  assert(blob.success)
+  const tree = harness.process.run(
+    {
+      program: "git",
+      cwd: workspace,
+      args: ["mktree"],
+      stdin: "100644 blob " + blob.stdout.trim() + "\tstate.json\n",
+    },
+  )
+  assert(tree.success)
+  const unqualified = git(
+    harness.process,
+    workspace,
+    ["commit-tree", tree.stdout.trim(), "-p", recovered.commit!, "-m", "unqualified generation"],
+  )
+  assert_error_contains(
+    fn() { commit_state(
+      harness.process,
+      store,
+      {expected: recovered.commit, commit: unqualified, state: invalid_generation},
+    ) },
+    "complete valid policy",
+  )
+  assert_eq(read_state(harness.process, store).commit, recovered.commit)
   const resume = prepare_state(harness.process, store, recovered, active)
   assert_eq(commit_state(harness.process, store, resume).status, "committed")
-  const source = f.snapshot.sources[0]
-  assert(source != nil)
-  const request = {
-    kind: "admission",
-    repository: source.repository,
-    source: source.commit,
-    input_digest: digest("exact reviewed forge request"),
-  }
+  const request = admission_effect(f.snapshot.changes[0]!.admission)
   const active_fence = pick(
     active.authority,
     ["installation", "generation", "revision", "controller"],

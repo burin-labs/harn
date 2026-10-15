@@ -3,6 +3,7 @@ import {
   Controller,
   EffectRequest,
   Fence,
+  admission_effect,
   control,
   effect_authorized,
   reserve_effect,
@@ -28,14 +29,7 @@ pipeline test_unknown_external_action_blocks_transfer_and_stop_requires_reconcil
     effects: [],
     unverified_since_ms: nil,
   }
-  const source = f.snapshot.sources[0]
-  assert(source != nil)
-  const request: EffectRequest = {
-    kind: "admission",
-    repository: source.repository,
-    source: source.commit,
-    input_digest: digest("reviewed request"),
-  }
+  const request: EffectRequest = admission_effect(f.snapshot.changes[0]!.admission)
   const reserved = unwrap(reserve_effect(initial, fence(initial), request, f.policy))
   const effect = reserved.effects[0]
   assert(effect != nil && effect_authorized(reserved, effect))

@@ -1,6 +1,32 @@
-import { checkpoint_id, is_digest, is_git_id, requirement_identity, snapshot_id } from "./identity"
+pub import {
+  AdmissionEffect,
+  EffectRefusal,
+  EffectRequest,
+  EffectTarget,
+  ReleaseEffect,
+  RerunEffect,
+  admission_effect,
+} from "./effect_contract"
+import { qualify_admission_effect } from "./effect_contract"
+import {
+  checkpoint_id,
+  is_digest,
+  is_git_id,
+  policy_digest,
+  requirement_identity,
+  snapshot_id,
+} from "./identity"
 import { fence_matches, promote } from "./promotion"
-import { Authority, Checkpoint, Fence, Policy, Proof, Snapshot, Verification } from "./types"
+import {
+  AdmissionVerification,
+  Authority,
+  Checkpoint,
+  Fence,
+  Policy,
+  Proof,
+  Snapshot,
+  Verification,
+} from "./types"
 import { policy_errors, verify } from "./verification"
 
 /** An unreported attempt retains its full allowance, even after revocation or expiry. */
@@ -67,20 +93,13 @@ fn revoke_attempts(incident: Incident) -> Incident {
     }
 }
 
-/** An installation adapter's exact external action, retained through uncertain results. */
-pub type EffectRequest = {
-  kind: "admission" | "release" | "rerun",
-  repository: string,
-  source: string,
-  input_digest: string,
-}
-
 /** An unresolved request blocks authority transfer until the adapter reconciles it. */
 pub type Effect = {
   installation: string,
   request: EffectRequest,
   generation: int,
   controller: string,
+  policy_digest: string,
   status: "reserved" | "dispatching" | "unknown" | "confirmed" | "refused",
   dispatch_id: string?,
   receipt: string?,
@@ -153,38 +172,68 @@ fn authorized(state: Controller, fence: Fence) -> bool {
   return fence_matches(state.authority, fence)
 }
 
+fn policy_matches(state: Controller, policy: Policy) -> bool {
+  return policy.installation == state.authority.installation
+    && policy_digest(policy) == state.authority.policy_digest
+    && len(policy_errors(policy)) == 0
+}
+
 fn advance(state: Controller) -> Controller {
   let next = state
   next.authority.revision += 1
   return next
 }
 
-/** Persist the reservation with CAS before starting an idempotent, source-guarded forge action. */
+/** Construct a refusal without turning unmeasured evidence into a measured zero. */
+fn effect_refusal(
+  reason: string,
+  admission: AdmissionVerification? = nil,
+  verification: Verification? = nil,
+) -> EffectRefusal {
+  return {reason: reason, admission: admission, verification: verification}
+}
+
+/** Persist the qualified reservation with CAS; refusals retain any measured evidence. */
 pub fn reserve_effect(
   state: Controller,
   fence: Fence,
   request: EffectRequest,
   policy: Policy,
-) -> Result<Controller, string> {
+) -> Result<Controller, EffectRefusal> {
   if !authorized(state, fence) || state.authority.mode != "active"
-    || len(policy_errors(policy)) > 0
-    || policy.installation != state.authority.installation
+    || !policy_matches(state, policy)
     || !policy.repositories.contains(request.repository)
     || request.repository == ""
     || !is_git_id(request.source)
     || !is_digest(request.input_digest)
     || state.authority.held_repositories.contains(request.repository) {
-    return Err("external effect authority or source identity is invalid")
+    return Err(effect_refusal("external effect authority or source identity is invalid"))
   }
-  if request.kind == "release"
-    && (state.checkpoint == nil
-      || !state.checkpoint.snapshot.sources.any(
+  const admission = qualify_admission_effect(request, policy)
+  if admission != nil && admission.status != "admitted" {
+    return Err(effect_refusal("external admission is not qualified", admission))
+  }
+  if request.kind == "release" {
+    const checkpoint = state.checkpoint
+    if checkpoint == nil
+      || request.input_digest != checkpoint_id(checkpoint)
+      || policy_digest(checkpoint.policy) != state.authority.policy_digest
+      || !checkpoint.snapshot.sources.any(
         { source -> source.repository == request.repository && source.commit == request.source },
-      )) {
-    return Err("release source is not in the proven checkpoint")
+      ) {
+      return Err(effect_refusal("release request does not name the exact proven checkpoint"))
+    }
+    const verification = verify(checkpoint.snapshot, checkpoint.proofs, policy)
+    if verification.status != "verified" {
+      return Err(
+        effect_refusal("release checkpoint verification is not complete", nil, verification),
+      )
+    }
   }
   if state.effects.any({ effect -> effect.request == request }) {
-    return Err("external effect is already recorded; reconcile its original request")
+    return Err(
+      effect_refusal("external effect is already recorded; reconcile its original request"),
+    )
   }
   if state.effects.any(
     { effect ->
@@ -192,7 +241,7 @@ pub fn reserve_effect(
         && unresolved_effect(effect)
     },
   ) {
-    return Err("repository already has an unresolved external effect")
+    return Err(effect_refusal("repository already has an unresolved external effect"))
   }
   let next = advance(state)
   next.effects = next.effects
@@ -202,6 +251,7 @@ pub fn reserve_effect(
         request: request,
         generation: state.authority.generation,
         controller: state.authority.controller,
+        policy_digest: state.authority.policy_digest,
         status: "reserved",
         dispatch_id: nil,
         receipt: nil,
@@ -216,6 +266,7 @@ pub fn effect_authorized(state: Controller, effect: Effect) -> bool {
     && state.authority.installation == effect.installation
     && state.authority.generation == effect.generation
     && state.authority.controller == effect.controller
+    && state.authority.policy_digest == effect.policy_digest
     && !state.authority.held_repositories.contains(effect.request.repository)
     && state.effects.contains(effect)
     && effect.status == "reserved"
@@ -288,7 +339,8 @@ pub fn offer(
   policy: Policy,
   now_ms: int,
 ) -> Result<Controller, string> {
-  if !authorized(state, fence) || state.authority.mode != "active" {
+  if !authorized(state, fence) || state.authority.mode != "active"
+    || !policy_matches(state, policy) {
     return Err("admission authority unavailable")
   }
   if snapshot.installation != state.authority.installation
@@ -355,7 +407,7 @@ pub fn complete(
   proofs: list<Proof>,
   policy: Policy,
 ) -> Result<Controller, string> {
-  if !authorized(state, fence) || state.active == nil
+  if !authorized(state, fence) || !policy_matches(state, policy) || state.active == nil
     || snapshot_id(state.active) != snapshot_id(completed) {
     return Err("verification completion is stale or unclaimed")
   }
@@ -430,7 +482,8 @@ pub fn claim_repair(
   max_usd: float,
   policy: Policy,
 ) -> Result<Controller, string> {
-  if !authorized(state, fence) || state.authority.mode != "active"
+  if !authorized(state, fence) || !policy_matches(state, policy)
+    || state.authority.mode != "active"
     || owner == ""
     || lease_ms <= 0
     || lease_ms > policy.max_unverified_ms {
@@ -554,17 +607,44 @@ pub fn finish_repair(
   return Ok(next)
 }
 
+/** The controller owns drain and policy-change barriers for every durable generation transfer. */
+pub fn transfer_ready(state: Controller, next_policy_digest: string) -> bool {
+  return is_digest(next_policy_digest) && state.authority.mode == "draining"
+    && state.active == nil
+    && state.pending == nil
+    && !state.effects.any(unresolved_effect)
+    && !state.incidents.any(
+      { item -> item.attempts.any({ attempt -> attempt.status == "active" }) },
+    )
+    && (next_policy_digest == state.authority.policy_digest
+      || !state.incidents.any({ item -> !item.resolved }))
+}
+
 /** A verified transfer invalidates old controllers even when their local leases remain live. */
-pub fn transfer(state: Controller, fence: Fence, controller: string) -> Result<Controller, string> {
-  if !authorized(state, fence) || state.authority.mode != "draining" || controller == ""
-    || state.active != nil
-    || state.effects.any(unresolved_effect)
-    || state.incidents.any({ item -> item.attempts.any({ attempt -> attempt.status == "active" }) }) {
-    return Err("old mutation owners have not drained")
+pub fn transfer(
+  state: Controller,
+  fence: Fence,
+  controller: string,
+  next_policy: Policy? = nil,
+) -> Result<Controller, string> {
+  if next_policy != nil
+    && (next_policy.installation != state.authority.installation
+      || len(policy_errors(next_policy)) > 0) {
+    return Err("next generation policy is invalid or belongs to another installation")
+  }
+  const next_digest = if next_policy == nil {
+    state.authority.policy_digest
+  } else {
+    policy_digest(next_policy)
+  }
+  if !authorized(state, fence) || controller == "" || !transfer_ready(state, next_digest) {
+    return Err("old mutation owners or admitted work have not drained for this policy")
   }
   let next = advance(state)
   next.authority.generation += 1
   next.authority.controller = controller
+  next.authority.policy = next_policy ?? state.authority.policy
+  next.authority.policy_digest = next_digest
   next.authority.mode = "shadow"
   return Ok(next)
 }

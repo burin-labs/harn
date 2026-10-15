@@ -2,6 +2,251 @@
 use super::*;
 
 #[test]
+fn no_training_ceiling_plans_and_sends_only_required_controls() {
+    use crate::llm::api::{
+        preview_inference_admission, InferenceAdmissionRequest, InferenceAdmissionStatus,
+    };
+    use crate::llm_config::{DataPosture, RuntimeProviderEndpointOverrides};
+    use std::io::Write;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Arc, Mutex};
+
+    let _guard = env_guard();
+    let _allow = allow_stubbed_llm_transport();
+    let _cleanup = PrivacyOverrides;
+    let counter = Arc::new(AtomicUsize::new(0));
+    let captured = Arc::new(Mutex::new(Vec::new()));
+    let requests = counter.clone();
+    let bodies = captured.clone();
+    let server = spawn_llm_stub_many("privacy controls", 5, move |_, stream| {
+        let (_, body) = super::ollama_openai_compat::read_http_request(stream);
+        let responses = body.get("input").is_some();
+        bodies.lock().unwrap().push(body);
+        requests.fetch_add(1, Ordering::SeqCst);
+        let body = if responses {
+            r#"{"status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"accepted"}]}],"usage":{"input_tokens":3,"output_tokens":1,"total_tokens":4}}"#
+        } else {
+            r#"{"choices":[{"message":{"role":"assistant","content":"accepted"},"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":1,"total_tokens":4}}"#
+        };
+        write!(stream, "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}", body.len()).unwrap();
+    });
+    crate::llm_config::set_runtime_provider_endpoint_overrides(
+        RuntimeProviderEndpointOverrides::single("openrouter", format!("http://{}", server.addr()))
+            .unwrap(),
+    );
+    let boundary = super::super::inference_boundary::InferenceBoundary {
+        reach: super::super::inference_boundary::InferenceReach::AnyHosted,
+        allow_training_discounts: false,
+    };
+    let _host_boundary = ScopedEnvVar::set(
+        super::super::inference_boundary::HOST_BOUNDARY_ENV,
+        serde_json::to_string(&boundary).unwrap(),
+    );
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let mut opts = base_opts("openrouter");
+    opts.model = "google/gemini-3.5-flash-lite".into();
+    opts.api_key = "invalid-test-key".into();
+    opts.stream = false;
+    opts.inference_boundary = None;
+    for posture in [
+        None,
+        Some(DataPosture::Default),
+        Some(DataPosture::StrictestAvailable),
+    ] {
+        opts.data_controls = posture;
+        let before = counter.load(Ordering::SeqCst);
+        let preview = preview_inference_admission(&InferenceAdmissionRequest {
+            provider: opts.provider.clone(),
+            model: opts.model.clone(),
+            boundary: opts.inference_boundary,
+            data_controls: posture,
+        });
+        assert_eq!(preview.status, InferenceAdmissionStatus::Admitted);
+        assert!(preview.training_control_planned);
+        assert_eq!(
+            counter.load(Ordering::SeqCst),
+            before,
+            "preview never sends"
+        );
+        let result = runtime
+            .block_on(vm_call_llm_full(&opts))
+            .expect("required training control admits transport");
+        assert_eq!(result.text, "accepted");
+        assert_eq!(
+            counter.load(Ordering::SeqCst),
+            before + 1,
+            "actual same listener reached"
+        );
+        let receipt = result.telemetry.data_controls.unwrap();
+        assert_eq!(receipt.inference_boundary_rule, preview.governing_rule);
+        assert_eq!(receipt.outcome, preview.data_controls_outcome.unwrap());
+        let bodies = captured.lock().unwrap();
+        let body = bodies.last().unwrap();
+        assert_eq!(body["provider"]["data_collection"], "deny");
+        if posture == Some(DataPosture::StrictestAvailable) {
+            assert_eq!(body["provider"]["zdr"], true);
+        } else {
+            assert!(
+                body["provider"].get("zdr").is_none(),
+                "training ceiling adds no retention restriction"
+            );
+            assert_eq!(receipt.applied.len(), 1);
+        }
+    }
+
+    let _without_host = ScopedEnvVar::remove(super::super::inference_boundary::HOST_BOUNDARY_ENV);
+    opts.data_controls = Some(DataPosture::Default);
+    let result = runtime
+        .block_on(vm_call_llm_full(&opts))
+        .expect("unbounded default still works");
+    assert_eq!(counter.load(Ordering::SeqCst), 4);
+    assert_eq!(
+        result.telemetry.data_controls.unwrap().outcome,
+        super::super::data_controls::DataControlsOutcome::NotRequested
+    );
+    let bodies = captured.lock().unwrap();
+    let provider = &bodies.last().unwrap()["provider"];
+    assert!(provider.get("data_collection").is_none());
+    assert!(provider.get("zdr").is_none());
+    drop(bodies);
+    drop(_without_host);
+
+    opts.inference_boundary = Some(boundary);
+    let mut responses = crate::llm_config::provider_config("openrouter").unwrap();
+    responses.features.push("responses_api".into());
+    let mut overlay = crate::llm_config::ProvidersConfig::default();
+    overlay.providers.insert("openrouter".into(), responses);
+    crate::llm_config::set_user_overrides(Some(overlay));
+    opts.api_mode = super::super::LlmApiMode::Responses;
+    assert!(crate::llm_config::provider_has_feature(
+        "openrouter",
+        "responses_api"
+    ));
+    assert!(crate::llm::capabilities::should_use_responses_transport(
+        &opts.provider,
+        &opts.model,
+        true
+    ));
+    let preflight = super::super::inference_boundary::preflight_chat(
+        &super::super::LlmRequestPayload::from(&opts),
+    );
+    let result = runtime.block_on(vm_call_llm_full(&opts));
+    assert_eq!(
+        counter.load(Ordering::SeqCst),
+        4,
+        "Responses preflight_admitted={}, response_accepted={}, transmitted_without_training_control={}",
+        preflight.is_ok(),
+        result.as_ref().is_ok_and(|result| result.text == "accepted"),
+        captured.lock().unwrap().last().unwrap()["provider"]
+            .get("data_collection")
+            .is_none()
+    );
+    assert!(preflight.is_err());
+    assert!(result
+        .expect_err("Responses cannot credit an unapplied training control")
+        .to_string()
+        .contains("inference_boundary.training_unknown"));
+    opts.api_mode = super::super::LlmApiMode::ChatCompletions;
+    crate::llm_config::clear_user_overrides();
+    let mut definition = crate::llm_config::provider_config("openrouter").unwrap();
+    for retention_only in [true, false] {
+        if retention_only {
+            definition
+                .data_controls
+                .as_mut()
+                .unwrap()
+                .request_controls
+                .retain(|control| control.effect != crate::llm_config::DataControlEffect::Training);
+        } else {
+            definition
+                .data_controls
+                .as_mut()
+                .unwrap()
+                .request_controls
+                .clear();
+        }
+        let mut overlay = crate::llm_config::ProvidersConfig::default();
+        overlay
+            .providers
+            .insert("openrouter".into(), definition.clone());
+        crate::llm_config::set_user_overrides(Some(overlay));
+        let preview = preview_inference_admission(&InferenceAdmissionRequest {
+            provider: opts.provider.clone(),
+            model: opts.model.clone(),
+            boundary: opts.inference_boundary,
+            data_controls: opts.data_controls,
+        });
+        assert_eq!(preview.status, InferenceAdmissionStatus::Unknown);
+        assert!(!preview.training_control_planned);
+        let error = runtime
+            .block_on(vm_call_llm_full(&opts))
+            .expect_err("unknown without training control refuses");
+        assert!(error
+            .to_string()
+            .contains("inference_boundary.training_unknown"));
+        assert_eq!(
+            counter.load(Ordering::SeqCst),
+            4,
+            "positive-controlled counter proves refusal before transport"
+        );
+    }
+    crate::llm_config::clear_user_overrides();
+    let mut native = crate::llm_config::provider_config("gemini").unwrap();
+    native.data_controls = crate::llm_config::provider_config("openrouter")
+        .unwrap()
+        .data_controls;
+    for control in &mut native.data_controls.as_mut().unwrap().request_controls {
+        control.applies_to.clear();
+    }
+    let mut overlay = crate::llm_config::ProvidersConfig::default();
+    overlay.providers.insert("gemini".into(), native);
+    crate::llm_config::set_user_overrides(Some(overlay));
+    opts.provider = "gemini".into();
+    opts.model = "gemini-3.5-flash-lite".into();
+    opts.data_controls = Some(DataPosture::StrictestAvailable);
+    let preview = preview_inference_admission(&InferenceAdmissionRequest {
+        provider: opts.provider.clone(),
+        model: opts.model.clone(),
+        boundary: opts.inference_boundary,
+        data_controls: opts.data_controls,
+    });
+    assert_eq!(preview.status, InferenceAdmissionStatus::Unknown);
+    assert!(
+        !preview.training_control_planned,
+        "native adapter cannot apply declared controls"
+    );
+    let error = runtime
+        .block_on(vm_call_llm_full(&opts))
+        .expect_err("native cannot credit unapplied controls");
+    assert!(error
+        .to_string()
+        .contains("inference_boundary.training_unknown"));
+    assert_eq!(counter.load(Ordering::SeqCst), 4);
+    crate::llm_config::clear_user_overrides();
+    opts.provider = "openrouter".into();
+    opts.model = "google/gemini-3.5-flash-lite".into();
+    opts.data_controls = Some(DataPosture::Default);
+    opts.inference_boundary = None;
+    let result = runtime
+        .block_on(vm_call_llm_full(&opts))
+        .expect("same listener remains live after refusals");
+    assert_eq!(result.text, "accepted");
+    assert_eq!(counter.load(Ordering::SeqCst), 5);
+}
+
+struct PrivacyOverrides;
+
+impl Drop for PrivacyOverrides {
+    fn drop(&mut self) {
+        crate::llm_config::clear_user_overrides();
+        crate::llm_config::clear_runtime_provider_endpoint_overrides();
+    }
+}
+
+#[test]
 fn host_local_ceiling_allows_loopback_transport_and_records_its_rule() {
     let _guard = env_guard();
     let _allow_llm_transport = allow_stubbed_llm_transport();

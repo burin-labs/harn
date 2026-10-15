@@ -23,7 +23,7 @@ and add that directory instead. Preserve its qualified source identity and hash.
 
 Create an installation JSON document using the
 [`Installation` reference](api.md#type-installation). Supply your repository names,
-public verifier and publisher keys, budgets, credential-free Git state remote,
+public verifier, scope, admission and publisher keys, budgets, credential-free Git state remote,
 state branch, local bare workspace, and pinned controller artifact digest.
 Keep private signing keys in your credential store. Configure Git authentication
 and commit signing through Git's normal host configuration.
@@ -59,10 +59,14 @@ external request. Invoke `action: transfer` with `target_controller` set to the
 new qualified artifact digest. The new generation starts in shadow mode. Update
 the installation's controller digest before activating it. A rollback follows
 the same transfer procedure with the prior qualified artifact and a new generation.
+For a policy change, include the complete replacement `next_policy` in the
+transfer request. The state owner validates and archives that policy alongside
+its mechanically checked digest before committing the new generation. Update
+the installation configuration after that committed transfer.
 
 ## Observe GitHub reviews
 
-Import `harn-smart-ship/github` to call `read_github_reviews`. Its request names
+Import `harn-smart-ship/github` to call `read_github_reviewed_change`. Its request names
 the repository, pull request, exact expected head, and bounded page limits.
 Credentials enter through your host's secret store. The connector remains the
 owner of authenticated GitHub reads.
@@ -71,13 +75,15 @@ For the read-only command, save a `GithubPullRequestReviewCensusRequest` in
 `review-request.json` and supply the secret reference name, never its value:
 
 ```sh
-harn run --allow-process-network --read-only-root review-request.json .smart-ship-source/personas/smart_ship/github-cli.harn -- live review-request.json github/access-token > review-observation.json
+HARN_EGRESS_ALLOW=api.github.com harn run --allow-process-network --read-only-root review-request.json .smart-ship-source/personas/smart_ship/github-cli.harn -- live review-request.json github/access-token > review-observation.json
 harn run --read-only-root review-observation.json .smart-ship-source/personas/smart_ship/github-cli.harn -- replay review-observation.json
 ```
 
 Live reads refuse a changed head or incomplete inventory. Replay uses the same
-source and inventory validation. Both preserve unknown actors and review commits,
-platform approval, thread resolution, and outdated-source status separately.
+source and inventory validation. Both preserve source author, lifecycle, draft
+status, repository names and immutable IDs, review commits, submission and edit
+times, platform approval, and thread resolution separately. Unknown facts stay
+unknown.
 The observation supplies review evidence; it does not admit or merge the change.
 
 ## Uninstall
@@ -88,6 +94,47 @@ Remove the `harn-smart-ship` dependency from `harn.toml`, then run `harn install
 Retain remote state and signed checkpoint history for release consumers and recovery.
 
 ## Prepare verification
+
+Before integrating a change, obtain a `SignedScope` from the trusted owner of
+job selection. Match its rule to your frozen policy's `admission_rules`; each
+rule binds a repository, optional immutable repository ID, scope trust domain,
+and independent review policy. Configure GitHub rules with the observed base
+repository ID. Plain Git installations may explicitly use `repository_id: null`.
+Candidate code must not choose the scope inventory or receive scope/admission
+signing credentials.
+The scope owner binds `reviewed_head` and `reviewed_base` to the actual tested
+`source`. Keep GitHub's generated test merge commit there; it must not be
+relabelled as the reviewed PR head or the workflow run's API head field.
+
+Build an `AdmissionRequest` from that scope and the complete reviewed source
+observation, retaining the full frozen `policy` and its digest. Verification
+requires that embedded policy to match the independently trusted installation
+policy; a receipt's own keys do not establish trust. Call `prepare_admission` to obtain the complete precheck census, and
+bind prepared stock jobs with `bind_admission_job` before execution. Retain the original signed CI proofs
+in an `AdmissionRecord`, sign `admission_bytes` with the configured admission
+issuer, and require `verify_admission(...).status == admitted` before integrating.
+Missing checks remain pending; incomplete scope, invalid provenance, invalid
+reuse, or mismatched source/policy/issuer cannot qualify. Store the full signed
+record in `Change.admission`; grouped snapshots and release consumers recheck it.
+
+Build external admission requests with `admission_effect(signed)`. Pass that
+request to `reserve_effect` with your current state, fence, and trusted policy.
+The reservation checks the complete record and its derived target and digest.
+Commit the returned state through the Git compare-and-swap owner before calling
+`dispatch_reserved_effect`. An unsigned digest cannot authorize admission.
+Release requests must name the exact `checkpoint_id` in `input_digest` and a
+source in that fully verified checkpoint.
+Read admission refusals through `EffectRefusal.admission` and checkpoint
+refusals through `EffectRefusal.verification`. These retain required counts,
+pending and failing job names, and invalid evidence. A nil field means that
+qualification was not measured for that stage.
+
+Each authority generation freezes `policy_digest`. To change policy, drain
+pending and active verification, reconcile external effects, and resolve work
+that still needs the old policy. Call `transfer` with the next policy, commit
+and read back the new shadow generation, then update the installation config
+before activating it. Initialization refuses an untransferred config change.
+Read-only inspection can still show a checkpoint under its archived policy.
 
 Call `prepare_job` for each declared stock command, then build the complete
 snapshot from those measured sources and requirements. Call `freeze_snapshot`

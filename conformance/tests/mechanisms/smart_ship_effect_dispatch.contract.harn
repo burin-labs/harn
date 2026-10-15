@@ -3,6 +3,7 @@ import {
   Controller,
   EffectRequest,
   Fence,
+  admission_effect,
   begin_effect,
   control,
   reserve_effect,
@@ -31,13 +32,30 @@ pipeline default(harness: Harness) {
     effects: [],
     unverified_since_ms: nil,
   }
-  const source = f.snapshot.sources[0]!
-  const request: EffectRequest = {
+  const unsigned = {
     kind: "admission",
-    repository: source.repository,
-    source: source.commit,
+    repository: "project",
+    source: sha256_hex("unreviewed source"),
     input_digest: digest("reviewed request"),
   }
+  contract_negative(
+    harness.stdio,
+    "unsigned_admission_refused",
+    is_ok(
+      try {
+        schema_expect(unsigned, schema_of(EffectRequest))
+      },
+    ),
+  )
+  const signed = f.snapshot.changes[0]!.admission
+  const request = admission_effect(signed)
+  contract_negative(
+    harness.stdio,
+    "invalid_admission_signature_refused",
+    is_ok(
+      reserve_effect(initial, fence(initial), admission_effect(signed + {signature: ""}), f.policy),
+    ),
+  )
   const reserved = unwrap(reserve_effect(initial, fence(initial), request, f.policy))
   const claimed = unwrap(begin_effect(reserved, fence(reserved), request, digest("actor one")))
   contract_effect(

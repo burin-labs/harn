@@ -7,6 +7,7 @@ execution environments, verification keys, and budgets belong to installation
 policy.
 
 [Install and control Smart Ship](docs/install.md).
+[Run stock verification in CI](docs/ci.md).
 
 The package provides signed verification and checkpoint contracts, durable Git
 controller state, bounded repair claims, and a standard Harn repair agent. Live
@@ -26,8 +27,13 @@ Missing facts remain pending; incomplete or differently bound evidence is
 invalid. The result retains observed counts and named refusals. This qualifies
 review only; job selection, required checks, and signed admission remain separate
 obligations before integration.
-The current connector leaves submission chronology unknown, so its observations
-alone cannot qualify review until the owning connector exposes that fact.
+
+`verify_admission` also requires an authenticated scope selection, every required
+original or valid reused CI proof, and an installation-authorized admission
+signature. Snapshots retain that complete record and requalify it during
+checkpoint validation. A digest-shaped string cannot stand in for admission.
+`prepare_admission` freezes precheck requests before execution; stock jobs with
+reuse disabled must execute against those requests.
 
 ## Verify the package
 

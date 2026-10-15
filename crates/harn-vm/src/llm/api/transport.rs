@@ -361,17 +361,20 @@ pub(crate) async fn vm_call_llm_api_with_body(
     let request_origin = tokio::time::Instant::now();
     // Provider data controls resolve once, here, so the body half, the header
     // half, and the receipt describing them come from one plan and cannot
-    // disagree. Under the `default` posture the plan is empty and the request
-    // is untouched. The writes land inside, after every other body mutation.
+    // disagree. A host no-training ceiling adds required training controls;
+    // other default requests stay untouched. Writes follow other mutations.
     // A route the catalog records as training on API traffic, with no control
     // to stop it, cannot satisfy the strict posture. Refuse before the request
     // is built rather than sending it and reporting `no_control_available`,
     // which would read as a successful strict call.
-    let data_controls = crate::llm::api::data_controls::resolve(
+    let boundary = super::inference_boundary::effective_result(opts.inference_boundary)
+        .map_err(VmError::Runtime)?;
+    let data_controls = crate::llm::api::data_controls::resolve_for_boundary(
         &opts.provider,
         &opts.model,
         crate::llm::api::data_controls::dialect_of(dialect.stream_protocol()),
         opts.data_controls,
+        boundary,
     );
     if let Some(refusal) = crate::llm::api::data_controls::training_refusal(
         &opts.provider,
@@ -382,7 +385,7 @@ pub(crate) async fn vm_call_llm_api_with_body(
         return Err(VmError::Runtime(refusal));
     }
     let mut data_controls_receipt = data_controls.receipt.clone();
-    if let Some(boundary) = super::inference_boundary::effective(opts.inference_boundary) {
+    if let Some(boundary) = boundary {
         let rule = super::inference_boundary::governing_rule(
             boundary,
             &opts.provider,
