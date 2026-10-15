@@ -14,8 +14,10 @@ subdirectory adds rules for changes under it.
 - Harn owns orchestration, transcript lifecycle, replay/eval, worker lineage, capability policy, and
   mutation-session audit metadata; hosts own presentation, approval UX, concrete file mutations, and
   undo/redo. Judge a finding against the owner of the behavior. (AGENTS.md#Ownership)
-- Every output registered in `scripts/generated_artifacts.toml` is generated: a hand edit to one
-  is a defect, and the fix edits its source and regenerates. Examples include `spec/HARN_SPEC.md`,
+- Outputs whose entry in `scripts/generated_artifacts.toml` has a nonempty `gen` command are
+  generated: a hand edit to one is a defect, and the fix edits its source and regenerates.
+  Entries with an empty `gen` command describe source-owned validation code; edit that code
+  directly and run its registered `check` target. Generated examples include `spec/HARN_SPEC.md`,
   `docs/src/language-spec.md`, the provider catalog projections, and the provider docs. A new
   artifact needs Makefile targets, a registry entry, `make all`, and CI wiring. (AGENTS.md#Source
   ownership and generated files; `scripts/generated_artifacts.toml`)
