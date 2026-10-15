@@ -359,6 +359,15 @@ impl Compiler {
                     SchemaFragment::List(branches),
                 )])))
             }
+            // `Schema<T>` stores a schema dictionary, not a value of T. Its
+            // static payload relation is owned by the typechecker. Preserve
+            // that runtime representation without shadowing a local alias.
+            TypeExpr::Applied { name, args }
+                if name == "Schema" && args.len() == 1 && !self.type_aliases.contains_key(name) =>
+            {
+                Self::type_expr_to_schema_value(&TypeExpr::Named("dict".to_string()))
+                    .map(SchemaFragment::Value)
+            }
             TypeExpr::Applied { name, args } => {
                 let alias = self.type_aliases.get(name)?;
                 let Some(body) = alias.body.as_ref() else {

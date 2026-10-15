@@ -2338,6 +2338,9 @@ an importer can declare `type Stored = Receipt<Payload>` and decode JSON with
 `Payload` resolves in the importing module. Public re-exports preserve that
 scope.
 
+Nested `Schema<T>` fields check for a schema dictionary, rather than a value of
+`T`. The typechecker owns the relation between that dictionary and `T`.
+
 ### Public re-exports
 
 A facade module can re-publish symbols from other modules as part of its
