@@ -3,6 +3,9 @@
 //! Bytecode execution with required host services supplied by an execution backend.
 
 pub mod atomic_io;
+#[cfg(feature = "vm-bench-internals")]
+#[doc(hidden)]
+pub mod bench_internals;
 pub mod builtin_profile;
 pub mod bytecode_cache;
 pub mod cancellation;

@@ -960,10 +960,9 @@ mod tests {
     use harn_parser::Parser;
 
     use super::{
-        compile_embedded_stdlib_module_artifact_from_source_with_context, compile_module_artifact,
-        compile_module_artifact_from_source, compile_privileged_wire_module_artifact_from_source,
-        needs_imported_enum_candidates, parse_module_source, ModuleCompilationContext,
-        ModuleImportBinding, ModuleProvenance,
+        compile_module_artifact, compile_module_artifact_from_source,
+        compile_privileged_wire_module_artifact_from_source, needs_imported_enum_candidates,
+        parse_module_source, ModuleCompilationContext, ModuleImportBinding, ModuleProvenance,
     };
     use crate::chunk::Constant;
 

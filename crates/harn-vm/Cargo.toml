@@ -42,7 +42,7 @@ default = ["full"]
 # families are sliced out of the VM.
 full = ["postgres", "sqlite", "content", "compression", "http-compression", "cloud-aws", "native-keyring"]
 llm-bench-internals = []
-vm-bench-internals = []
+vm-bench-internals = ["harn-vm-core/vm-bench-internals"]
 # Document extraction and HTML querying builtins. Kept in the default product
 # surface; lean embedders and the test engine can omit their parser/PDF graph.
 content = ["dep:lopdf", "dep:scraper"]

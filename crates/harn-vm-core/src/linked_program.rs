@@ -557,7 +557,6 @@ impl std::error::Error for LinkedProgramError {}
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::module_artifact::ModuleProvenance;
     use std::fs;
 
     /// Write `contents` to `path` keeping its length and its exact nanosecond

@@ -40,7 +40,7 @@ pub(super) fn reset_stdlib_module_artifact_cache() {
     stdlib_module_artifact_cache().clear();
 }
 
-#[cfg(any(test, feature = "vm-test-support"))]
+#[cfg(feature = "vm-test-support")]
 pub(super) fn stdlib_module_artifact_cache_ptr(module: &str, source: &str) -> Option<usize> {
     let key = stdlib_artifact_cache_key(module, source);
     stdlib_module_artifact_cache()

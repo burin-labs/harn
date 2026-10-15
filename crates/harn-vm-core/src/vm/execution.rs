@@ -23,12 +23,12 @@ thread_local! {
     static SCOPE_INTERRUPT_POLLS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
 }
 
-#[cfg(any(test, feature = "vm-test-support"))]
+#[cfg(feature = "vm-test-support")]
 pub fn reset_scope_interrupt_async_dispatches() {
     SCOPE_INTERRUPT_ASYNC_DISPATCHES.set(0);
 }
 
-#[cfg(any(test, feature = "vm-test-support"))]
+#[cfg(feature = "vm-test-support")]
 pub fn scope_interrupt_async_dispatches() -> u64 {
     SCOPE_INTERRUPT_ASYNC_DISPATCHES.get()
 }

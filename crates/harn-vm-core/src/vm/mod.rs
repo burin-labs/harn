@@ -49,7 +49,7 @@ pub use test_support::{
 mod tool_callable;
 mod work;
 
-#[cfg(test)]
+#[cfg(any(test, feature = "vm-bench-internals"))]
 pub(crate) mod test_runtime;
 
 pub use async_builtin::run_async_builtin_with;

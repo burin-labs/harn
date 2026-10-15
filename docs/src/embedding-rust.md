@@ -114,6 +114,27 @@ depends on `harn-cli` (which enables the full set) gets the full surface
 regardless of what it requests from `harn-serve`. The lean configurations only
 take effect in builds that do **not** pull in the full CLI.
 
+## Construct a VM directly
+
+Create the native interpreter with `harn_vm::new_vm()` and register its standard
+library before executing code:
+
+```rust
+let mut vm = harn_vm::new_vm();
+harn_vm::register_vm_stdlib(&mut vm);
+```
+
+Replace `Vm::new()` and `Vm::default()` with this factory. Import
+`harn_vm::NativeVmExt` when using `set_bridge`, `set_connector_clients`,
+`evaluate_decision`, `set_evaluation_replay`, or `execution_evidence`.
+
+The interpreter, values, compiler, and module artifacts belong to
+`harn-vm-core`; `harn-vm` re-exports their public paths. A custom execution
+backend constructs `harn_vm_core::Vm::with_runtime` with its required
+`Arc<dyn VmRuntime>`. That contract supplies capability dispatch, policy gates,
+execution scopes, deadlines, tracing, and task cleanup. Native embeddings
+should use `harn_vm::new_vm()` to install those services together.
+
 ## Resolve connector credentials
 
 Use `harn_serve::try_load_provider_connectors` with the project directory or
