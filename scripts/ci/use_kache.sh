@@ -10,7 +10,9 @@
 #
 # The binary is pinned to a release of its primary source and checked against
 # its digest before first use; each host keeps one copy per version. The store
-# is shared by every runner on the host and capped. Configuration is per job:
+# is shared by every runner on the host and capped. Runtime and configuration
+# are private to this job, so a reused checkout cannot inherit another job's
+# telemetry session. Configuration is per job:
 # no `kache init`, no host config, no scheduler, no target cleanup, no remote.
 #
 # Usage: scripts/ci/use_kache.sh [github-env]
@@ -48,13 +50,14 @@ if [[ ! -x "$kache" ]]; then
 fi
 version="$("$kache" --version)"
 
-mkdir -p "$root/store" "$root/run"
-: > "$root/kache.toml"
+mkdir -p "$root/store"
+runtime="$(mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/harn-kache.XXXXXX")"
+: > "$runtime/kache.toml"
 {
   echo "RUSTC_WRAPPER=$kache"
   echo "KACHE_CACHE_DIR=$root/store"
-  echo "KACHE_RUNTIME_DIR=$root/run"
-  echo "KACHE_CONFIG=$root/kache.toml"
+  echo "KACHE_RUNTIME_DIR=$runtime"
+  echo "KACHE_CONFIG=$runtime/kache.toml"
   # Persistent targets live outside the checkout. Pin telemetry to this job's
   # source root instead of the common ancestor Kache infers from output paths.
   echo "KACHE_EVENT_ROOT=${GITHUB_WORKSPACE:-$PWD}"

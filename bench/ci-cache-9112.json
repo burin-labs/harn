@@ -35,10 +35,25 @@
     "errors": 0,
     "finalizer_emitted_measured_record": true
   },
+  "job_runtime_isolation_probe": {
+    "observed_at": "2026-10-15",
+    "helper_sha256": "031927a8e329ba550a3949f25c164400e3d0119c4043ddf13b0c00d4b18de4de",
+    "wrapper": "kache 1.2.1",
+    "host": "hetzner-1",
+    "toolchain": "rustc 1.95.0",
+    "profile": "dev",
+    "fixture": "A library returning 9112 and a binary printing that value, built twice in the same checkout with separate empty targets and private runtime/config directories against one shared object store.",
+    "first_job": {"requests": 2, "hits": 0, "misses": 2, "errors": 0, "session_id": "17cd09c8378a0473"},
+    "second_job": {"requests": 2, "hits": 2, "misses": 0, "errors": 0, "session_id": "54f45c60d7fa3f4d"},
+    "distinct_runtime_directories": true,
+    "both_binaries_printed_expected_value": true,
+    "claim": "Private telemetry does not prevent shared compiler-object hits, and the second job does not inherit the first job's cold misses.",
+    "limitation": "This two-unit probe proves cache and session behavior, not Harn build latency or complete multi-command job attribution."
+  },
   "limitations": [
     "Sequential trials on a shared runner under unrelated CI load; wall times are observations, not a controlled distribution or merge-queue p90.",
     "The first two Kache reports inferred the common target parent as session root; their per-checkout counters were unmeasured. Explicit KACHE_EVENT_ROOT fixed attribution for the source-change control.",
-    "A checkout session can span multiple Cargo commands or consecutive jobs; the finalizer does not claim per-job attribution.",
+    "The original trials shared runtime state, so a checkout session could span consecutive jobs. The follow-up isolates job runtime state; a long job can still span multiple sessions after five idle minutes, so the finalizer does not claim complete per-job attribution.",
     "This trial builds the CLI; it does not establish workspace test-unit or package-verification latency."
   ]
 }
