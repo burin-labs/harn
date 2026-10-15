@@ -24,6 +24,7 @@ pub(crate) trait VmRuntime: Any + Send + Sync {
     fn baseline(&self) -> Arc<dyn VmRuntimeBaseline>;
     fn builtin_bridge(&self) -> Option<&dyn VmBuiltinBridge>;
     fn harness_methods(&self) -> &dyn super::HarnessMethods;
+    fn top_level_scope(&self, vm: &mut super::Vm) -> Box<dyn super::VmExecutionScope>;
     fn rebind_execution_state(&self, vm: &mut super::Vm);
     fn set_source_dir(&self, dir: &Path);
     fn denied_builtin_family(

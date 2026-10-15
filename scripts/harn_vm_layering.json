@@ -6,25 +6,28 @@
     "connectors->stdlib": 9,
     "llm->agent_events": 142,
     "llm->agent_sessions": 420,
+    "llm->native_vm": 1,
     "llm->orchestration": 280,
     "llm->stdlib": 347,
     "llm->triggers": 6,
     "llm_config->llm": 55,
     "llm_config->orchestration": 1,
     "llm_config->stdlib": 12,
-    "orchestration->stdlib": 132,
+    "orchestration->stdlib": 131,
     "provider_catalog->llm": 8,
     "provider_catalog->stdlib": 1,
+    "triggers->native_vm": 2,
     "triggers->stdlib": 34,
     "value->orchestration": 1,
     "value->stdlib": 1,
     "value->vm": 6,
-    "vm->agent_sessions": 19,
-    "vm->connectors": 6,
-    "vm->llm": 21,
-    "vm->orchestration": 85,
-    "vm->stdlib": 84,
-    "vm->triggers": 8
+    "vm->agent_sessions": 16,
+    "vm->connectors": 3,
+    "vm->llm": 12,
+    "vm->native_vm": 11,
+    "vm->orchestration": 69,
+    "vm->stdlib": 55,
+    "vm->triggers": 5
   },
   "layers": [
     [
@@ -54,7 +57,8 @@
     ],
     [
       "stdlib",
-      "harness_methods"
+      "harness_methods",
+      "native_vm"
     ]
   ]
 }

@@ -34,6 +34,9 @@ impl VmRuntime for RefusingRuntime {
     fn harness_methods(&self) -> &dyn crate::vm::HarnessMethods {
         self.native.harness_methods()
     }
+    fn top_level_scope(&self, vm: &mut Vm) -> Box<dyn crate::vm::VmExecutionScope> {
+        self.native.top_level_scope(vm)
+    }
     fn baseline(&self) -> Arc<dyn VmRuntimeBaseline> {
         Arc::new(RefusingBaseline {
             native: self.native.baseline(),

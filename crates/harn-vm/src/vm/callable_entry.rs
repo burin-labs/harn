@@ -1,4 +1,3 @@
-use crate::native_vm::NativeVmState;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -81,39 +80,10 @@ impl TopLevelEntry {
 }
 
 impl Vm {
-    /// Host projection of the bounded Harness evaluator with the VM's ordinary
-    /// execution scope, accounting and receipt ownership.
-    pub async fn evaluate_decision(
-        &mut self,
-        site_id: &str,
-        state: serde_json::Value,
-        questions: serde_json::Value,
-        policy: serde_json::Value,
-    ) -> Result<crate::llm::decision::EvaluationResult, VmError> {
-        self.ensure_execution_available()?;
-        let ambient = self.prepare_top_level_ambient();
-        let ctx = super::AsyncBuiltinCtx::from_inline_parent(self);
-        crate::orchestration::scope_ambient(ambient, async {
-            crate::llm::decision::evaluate_json(&ctx, site_id, state, questions, policy).await
-        })
-        .await
-    }
-
-    pub(super) fn prepare_top_level_ambient(
-        &mut self,
-    ) -> crate::orchestration::AmbientExecutionScope {
+    pub(super) fn prepare_top_level_scope(&mut self) -> Box<dyn super::VmExecutionScope> {
         self.prepare_execution_for_top_level();
-        self.capture_agent_cleanup_runtimes();
-        crate::orchestration::AmbientExecutionScope::capture_for_top_level_execution(
-            self.execution_id.clone(),
-            self.native().llm_mock_context.clone(),
-            self.native().worker_registry.clone(),
-            self.native().daemon_registry.clone(),
-            self.native().trigger_registry.clone(),
-            self.native().session_runtime.clone(),
-            self.native().tracing_runtime.clone(),
-            self.native().agent_host_session_runtime.clone(),
-        )
+        let runtime = Arc::clone(&self.runtime);
+        runtime.top_level_scope(self)
     }
 
     /// Execute a compiled callable entry with explicit values under a host
@@ -147,12 +117,10 @@ impl Vm {
         entry: TopLevelEntry,
     ) -> Result<VmValue, VmError> {
         self.ensure_execution_available()?;
-        let registry = self.native().pool_registry.clone();
-        let ambient = self.prepare_top_level_ambient();
-        let execution = crate::stdlib::pool::with_pool_registry_scope(registry, async {
-            self.execute_entry_scoped(entry).await
-        });
-        let result = crate::orchestration::scope_ambient(ambient, execution).await;
+        let scope = self.prepare_top_level_scope();
+        let execution =
+            super::scope_runtime(scope, async { self.execute_entry_scoped(entry).await });
+        let result = execution.await;
         if self.owns_execution {
             if let Some(recorder) = self.flight_recorder.as_ref() {
                 match &result {

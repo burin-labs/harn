@@ -1,4 +1,3 @@
-use crate::native_vm::NativeVmState;
 use std::future::Future;
 use std::sync::Arc;
 
@@ -764,12 +763,9 @@ impl Vm {
             return self.call_closure(closure, args).await;
         }
 
-        let registry = self.native().pool_registry.clone();
-        let ambient = self.prepare_top_level_ambient();
-        let call = crate::stdlib::pool::with_pool_registry_scope(registry, async {
-            self.call_closure(closure, args).await
-        });
-        Box::pin(crate::orchestration::scope_ambient(ambient, call)).await
+        let scope = self.prepare_top_level_scope();
+        let call = super::scope_runtime(scope, async { self.call_closure(closure, args).await });
+        Box::pin(call).await
     }
 
     /// Resolve a named builtin: sync builtins → async builtins → bridge → error.

@@ -69,6 +69,14 @@ impl VmRuntime for NativeExecutionState {
         crate::harness_methods::runtime_methods()
     }
 
+    fn top_level_scope(&self, vm: &mut Vm) -> Box<dyn crate::vm::VmExecutionScope> {
+        vm.capture_agent_cleanup_runtimes();
+        Box::new(NativeExecutionScope {
+            ambient: vm.capture_top_level_ambient(),
+            pools: Arc::clone(&self.pool_registry),
+        })
+    }
+
     fn rebind_execution_state(&self, vm: &mut Vm) {
         crate::stdlib::rebind_execution_state_builtins(vm);
     }
@@ -157,6 +165,57 @@ impl VmRuntime for NativeExecutionState {
 }
 
 struct NativeExecutionBaseline;
+
+struct NativeExecutionScope {
+    ambient: crate::orchestration::AmbientExecutionScope,
+    pools: Arc<crate::stdlib::pool::PoolRegistry>,
+}
+
+impl crate::vm::VmExecutionScope for NativeExecutionScope {
+    fn poll(
+        &mut self,
+        cx: &mut std::task::Context<'_>,
+        continuation: &mut dyn FnMut(&mut std::task::Context<'_>) -> std::task::Poll<()>,
+    ) -> std::task::Poll<()> {
+        self.ambient.poll_scoped(false, || {
+            crate::stdlib::pool::with_pool_registry_poll(&self.pools, || continuation(cx))
+        })
+    }
+}
+
+impl Vm {
+    pub(crate) fn capture_top_level_ambient(&self) -> crate::orchestration::AmbientExecutionScope {
+        crate::orchestration::AmbientExecutionScope::capture_for_top_level_execution(
+            self.execution_id.clone(),
+            self.native().llm_mock_context.clone(),
+            self.native().worker_registry.clone(),
+            self.native().daemon_registry.clone(),
+            self.native().trigger_registry.clone(),
+            self.native().session_runtime.clone(),
+            self.native().tracing_runtime.clone(),
+            self.native().agent_host_session_runtime.clone(),
+        )
+    }
+
+    /// Evaluate a decision under this interpreter's execution and receipt owner.
+    pub async fn evaluate_decision(
+        &mut self,
+        site_id: &str,
+        state: serde_json::Value,
+        questions: serde_json::Value,
+        policy: serde_json::Value,
+    ) -> Result<crate::llm::decision::EvaluationResult, VmError> {
+        self.ensure_execution_available()?;
+        self.prepare_execution_for_top_level();
+        self.capture_agent_cleanup_runtimes();
+        let ambient = self.capture_top_level_ambient();
+        let ctx = crate::vm::AsyncBuiltinCtx::from_inline_parent(self);
+        crate::orchestration::scope_ambient(ambient, async {
+            crate::llm::decision::evaluate_json(&ctx, site_id, state, questions, policy).await
+        })
+        .await
+    }
+}
 
 impl VmRuntimeBaseline for NativeExecutionBaseline {
     fn instantiate(&self, source_dir: Option<&Path>) -> Arc<dyn VmRuntime> {

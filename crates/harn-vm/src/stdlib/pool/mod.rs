@@ -494,6 +494,13 @@ where
     ACTIVE_POOL_REGISTRY.scope(registry, future).await
 }
 
+pub(crate) fn with_pool_registry_poll<T>(
+    registry: &Arc<PoolRegistry>,
+    poll: impl FnOnce() -> T,
+) -> T {
+    ACTIVE_POOL_REGISTRY.sync_scope(Arc::clone(registry), poll)
+}
+
 fn fallback_pool_registry() -> Arc<PoolRegistry> {
     FALLBACK_POOL_REGISTRY
         .get_or_init(|| Arc::new(PoolRegistry::default()))

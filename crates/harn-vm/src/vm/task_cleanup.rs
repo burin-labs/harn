@@ -64,7 +64,7 @@ impl Vm {
         );
     }
 
-    pub(super) fn capture_agent_cleanup_runtimes(&mut self) {
+    pub(crate) fn capture_agent_cleanup_runtimes(&mut self) {
         // Entry reads the VM's current runtimes, never a prior execution's
         // retained snapshot. Drop and scheduling must use this captured owner.
         use crate::native_vm::NativeVmState;
