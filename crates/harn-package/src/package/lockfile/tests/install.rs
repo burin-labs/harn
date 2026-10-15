@@ -420,7 +420,7 @@ version = "0.1.0"
     for (frozen, offline) in [(false, false), (true, false), (false, true), (true, true)] {
         let error = install_packages_in(workspace.env(), frozen, None, offline).unwrap_err();
         let message = error.to_string();
-        if frozen {
+        if frozen || offline {
             assert!(message.contains(LOCK_FILE) && message.contains("would need to change"));
         } else {
             assert!(
@@ -442,7 +442,7 @@ version = "0.1.0"
     assert!(error.to_string().contains(LOCK_FILE));
     assert_eq!(fs::read_to_string(&lock_path).unwrap(), original_lock);
     assert_eq!(current_packages_dir(root), original_generation);
-    install_packages_in(workspace.env(), false, None, true).unwrap();
+    install_packages_in(workspace.env(), false, None, false).unwrap();
     let updated_lock = LockFile::load(&lock_path).unwrap().unwrap();
     let updated_entry = updated_lock.find("acme-rules").unwrap();
     assert_eq!(updated_entry.content_hash, entry.content_hash);
@@ -456,13 +456,13 @@ version = "0.1.0"
         Some(requested_evidence)
     );
     fs::write(root.join(MANIFEST), &manifest).unwrap();
-    install_packages_in(workspace.env(), false, None, true).unwrap();
+    install_packages_in(workspace.env(), false, None, false).unwrap();
     assert_eq!(fs::read_to_string(&lock_path).unwrap(), original_lock);
     let direct_manifest = format!(
         "[package]\nname = \"workspace\"\nversion = \"0.1.0\"\n\n[dependencies]\nacme-rules = {{ archive = \"{archive}\", checksum = \"{checksum}\" }}\n"
     );
     fs::write(root.join(MANIFEST), &direct_manifest).unwrap();
-    install_packages_in(workspace.env(), false, None, true).unwrap();
+    install_packages_in(workspace.env(), false, None, false).unwrap();
     let direct_lock_bytes = fs::read_to_string(&lock_path).unwrap();
     let direct_lock = LockFile::load(&lock_path).unwrap().unwrap();
     let direct_entry = direct_lock.find("acme-rules").unwrap();
@@ -480,7 +480,7 @@ version = "0.1.0"
     for (frozen, offline) in [(false, false), (true, false), (false, true), (true, true)] {
         let error = install_packages_in(workspace.env(), frozen, None, offline).unwrap_err();
         let message = error.to_string();
-        if frozen {
+        if frozen || offline {
             assert!(message.contains(LOCK_FILE) && message.contains("would need to change"));
         } else {
             assert!(message.contains(&poisoned_checksum));
@@ -489,7 +489,7 @@ version = "0.1.0"
         assert_eq!(current_packages_dir(root), direct_generation);
     }
     fs::write(root.join(MANIFEST), &manifest).unwrap();
-    install_packages_in(workspace.env(), false, None, true).unwrap();
+    install_packages_in(workspace.env(), false, None, false).unwrap();
     assert_eq!(fs::read_to_string(&lock_path).unwrap(), original_lock);
     fs::remove_dir_all(current_packages_dir(root)).unwrap();
     fs::remove_file(&archive_path).unwrap();
