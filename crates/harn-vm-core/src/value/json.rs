@@ -28,9 +28,9 @@ impl From<harn_kernel::DataValue> for VmValue {
     }
 }
 
-pub(crate) const BYTES_B64_TAG: &str = "$bytes_b64";
+pub const BYTES_B64_TAG: &str = "$bytes_b64";
 
-pub(crate) fn tagged_bytes_json(bytes: &[u8]) -> serde_json::Value {
+pub fn tagged_bytes_json(bytes: &[u8]) -> serde_json::Value {
     use base64::Engine;
 
     serde_json::json!({

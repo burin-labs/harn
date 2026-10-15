@@ -4,6 +4,7 @@ mod generator;
 mod iter;
 mod list;
 mod mutating;
+pub use mutating::Mutation;
 mod number;
 mod range;
 mod set;

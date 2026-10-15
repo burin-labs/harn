@@ -70,7 +70,9 @@ pub use builtin_manifest::{
 };
 pub use callable_entry::TopLevelEntry;
 pub use debug::{DebugAction, DebugState};
+pub use execution_deadline::{ExecutionDeadlineGuard, ExecutionDeadlinePauseGuard};
 pub use harness_seam::{HarnessMethodFuture, HarnessMethods};
+pub use methods::Mutation;
 pub use module_phase_timing::{ModulePhaseRecorder, ModulePhaseStats};
 pub use modules::resolve_module_import_path;
 pub use registration::VmBuiltinRegistration;

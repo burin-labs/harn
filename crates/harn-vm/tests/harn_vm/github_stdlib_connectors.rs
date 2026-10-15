@@ -83,7 +83,7 @@ fn run_with_github_client(source: &str, client: Arc<RecordingClient>) -> Result<
                 clients.insert(ProviderId::from("github"), client);
                 install_active_connector_clients(clients);
 
-                let mut vm = crate::new_vm();
+                let mut vm = harn_vm::new_vm();
                 register_vm_stdlib(&mut vm);
                 vm.execute(&chunk)
                     .await
