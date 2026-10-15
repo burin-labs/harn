@@ -586,3 +586,7 @@ mod public_timeline_tests;
 #[cfg(test)]
 #[path = "agent_session_journal_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "agent_session_journal/journal_handoff_tests.rs"]
+mod journal_handoff_tests;

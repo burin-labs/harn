@@ -319,10 +319,6 @@ fn lookup<'a>(body: &'a serde_json::Value, path: &str) -> Option<&'a serde_json:
 }
 
 #[cfg(test)]
-#[path = "reasoning_receipt/journal_handoff_tests.rs"]
-mod journal_handoff_tests;
-
-#[cfg(test)]
 mod tests {
     use super::*;
     use crate::llm::api::{ReasoningEffort, ThinkingConfig};

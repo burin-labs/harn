@@ -1,4 +1,4 @@
-use super::*;
+use crate::llm::reasoning_receipt::{record, scope_request_receipts, RequestReceipts};
 
 fn emit_receipt() {
     record(
@@ -33,7 +33,7 @@ async fn provider_thread_handoff_keeps_the_owning_durable_journal() {
     let store = crate::agent_sessions::journal_store(session_id).unwrap();
     let receipts = RequestReceipts::for_journal(Some(session_id), "handoff-call");
     // A measured same-thread receipt establishes the journal and reporting path.
-    REQUEST_RECEIPTS.sync_scope(receipts.clone(), emit_receipt);
+    scope_request_receipts(receipts.clone(), async { emit_receipt() }).await;
     assert!(receipts.take_journal_error().is_none());
     crate::agent_session_journal::flush(session_id)
         .await
@@ -43,8 +43,11 @@ async fn provider_thread_handoff_keeps_the_owning_durable_journal() {
         .unwrap();
     assert_eq!(events.len(), 1);
     let provider_receipts = receipts.clone();
+    let runtime = tokio::runtime::Handle::current();
     crate::runtime_stack::spawn(move || {
-        REQUEST_RECEIPTS.sync_scope(provider_receipts, emit_receipt);
+        runtime.block_on(scope_request_receipts(provider_receipts, async {
+            emit_receipt()
+        }));
     })
     .join()
     .unwrap();
@@ -70,7 +73,7 @@ async fn provider_thread_handoff_keeps_the_owning_durable_journal() {
         ),
     )
     .unwrap();
-    REQUEST_RECEIPTS.sync_scope(receipts.clone(), emit_receipt);
+    scope_request_receipts(receipts.clone(), async { emit_receipt() }).await;
     assert_eq!(
         receipts.take_journal_error().as_deref(),
         Some("agent transcript audit writer: journal is closed"),
