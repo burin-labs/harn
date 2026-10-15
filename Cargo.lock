@@ -3496,6 +3496,7 @@ dependencies = [
  "harn-package",
  "harn-parser",
  "harn-prompt-syntax",
+ "harn-provider-catalog",
  "harn-rules",
  "harn-rules-hostlib",
  "harn-serve",

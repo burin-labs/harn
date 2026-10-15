@@ -13,7 +13,6 @@ mod provider_def;
 mod resolution;
 mod reviewer;
 mod taxonomy;
-use harn_provider_catalog::config::chat_wire;
 
 #[cfg(test)]
 mod logical_defaults_tests;
@@ -30,10 +29,6 @@ mod tool_format_fitness_tests;
 
 pub use catalog::*;
 pub use harn_provider_catalog::config::*;
-pub use harn_provider_catalog::model_def::*;
-pub use harn_provider_catalog::presentation::*;
-pub use harn_provider_catalog::pricing::*;
-pub use harn_provider_catalog::ModelOperation;
 pub use loading::*;
 pub use provider_def::*;
 pub use resolution::*;
