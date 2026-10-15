@@ -228,8 +228,7 @@ impl Vm {
         // If this closure originated from an imported module, switch
         // the thread-local source dir so that render() and other
         // source-relative builtins resolve relative to the module.
-        let saved_source_dir =
-            crate::stdlib::process::enter_frame_source_dir(closure.source_dir.as_deref());
+        let saved_source_dir = self.runtime.enter_source_dir(closure.source_dir.as_deref());
 
         // `closure_call_env_for_current_frame` still reads the caller's
         // `self.env`, so build the callee env first, then *move* the caller
@@ -286,12 +285,8 @@ impl Vm {
         // tokens, cost, and budget exhaustion to it. The push is keyed
         // off the function name registered by compiler-emitted
         // `__register_step` calls.
-        crate::step_runtime::maybe_push_active_persona(&closure.func.name, self.frames.len());
-        crate::step_runtime::maybe_push_active_step(
-            &closure.func.name,
-            self.frames.len(),
-            step_args,
-        );
+        self.runtime
+            .enter_function(&closure.func.name, self.frames.len(), step_args);
     }
 
     /// Push a new call frame for a closure invocation.
@@ -316,12 +311,11 @@ impl Vm {
         let callee_argc = closure
             .func
             .callee_arg_count(legacy_args.as_ref().map_or_else(|| args.len(), Vec::len));
-        let step_args =
-            if crate::step_runtime::step_definition_for_function(&closure.func.name).is_some() {
-                args.to_vec_from(0)
-            } else {
-                Vec::new()
-            };
+        let step_args = if self.runtime.is_step_function(&closure.func.name) {
+            args.to_vec_from(0)
+        } else {
+            Vec::new()
+        };
         self.enter_closure_frame(
             closure,
             callee_argc,
@@ -356,12 +350,11 @@ impl Vm {
                     return Err(error);
                 }
             };
-        let step_args =
-            if crate::step_runtime::step_definition_for_function(&closure.func.name).is_some() {
-                self.stack[args_start..].to_vec()
-            } else {
-                Vec::new()
-            };
+        let step_args = if self.runtime.is_step_function(&closure.func.name) {
+            self.stack[args_start..].to_vec()
+        } else {
+            Vec::new()
+        };
         let callee_argc = closure
             .func
             .callee_arg_count(legacy_args.as_ref().map_or(supplied_args_len, Vec::len));

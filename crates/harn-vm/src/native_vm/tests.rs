@@ -46,6 +46,9 @@ impl VmRuntime for RefusingRuntime {
     fn task_cleanup(&self, execution_id: &crate::ExecutionId) -> Arc<dyn crate::vm::VmTaskCleanup> {
         self.native.task_cleanup(execution_id)
     }
+    fn subtask_scope(&self) -> Box<dyn crate::vm::VmExecutionScope> {
+        self.native.subtask_scope()
+    }
     fn start_span(&self, kind: crate::vm::VmSpanKind, name: String) -> crate::vm::ScopeSpan {
         self.native.start_span(kind, name)
     }
@@ -78,6 +81,24 @@ impl VmRuntime for RefusingRuntime {
 
     fn set_source_dir(&self, dir: &Path) {
         self.native.set_source_dir(dir);
+    }
+    fn enter_source_dir(&self, dir: Option<&Path>) -> Option<std::path::PathBuf> {
+        self.native.enter_source_dir(dir)
+    }
+    fn is_step_function(&self, name: &str) -> bool {
+        self.native.is_step_function(name)
+    }
+    fn is_tracked_function(&self, name: &str) -> bool {
+        self.native.is_tracked_function(name)
+    }
+    fn enter_function(&self, name: &str, frame_depth: usize, args: &[VmValue]) {
+        self.native.enter_function(name, frame_depth, args);
+    }
+    fn prune_frames(&self, frame_depth: usize) {
+        self.native.prune_frames(frame_depth);
+    }
+    fn suspend_active_context(&self) -> crate::vm::step_context::ActiveContextGuard {
+        self.native.suspend_active_context()
     }
     fn denied_builtin_family(
         &self,

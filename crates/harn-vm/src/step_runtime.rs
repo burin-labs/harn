@@ -38,114 +38,10 @@ fn vm_str(value: &VmValue) -> Option<&str> {
     }
 }
 
-/// Static metadata captured from a `@step(...)` attribute.
-///
-/// Populated by the `__register_step` builtin (see [`register_step_from_dict`])
-/// when the program first runs, then consulted by `llm_call` and the
-/// frame-pop hooks while the step is active.
-#[derive(Debug, Default, Clone)]
-pub struct StepDefinition {
-    pub name: String,
-    pub function: String,
-    pub model: Option<String>,
-    pub max_tokens: Option<u64>,
-    pub max_usd: Option<f64>,
-    /// One of "fail" (default), "continue", "escalate". Drives how a
-    /// `budget_exceeded` error propagating out of the step is handled —
-    /// see `crates/harn-vm/src/vm/execution.rs`.
-    pub error_boundary: Option<String>,
-}
-
-#[derive(Debug, Default, Clone)]
-pub struct PersonaDefinition {
-    pub name: String,
-    /// Per-stage tool/side-effect scoping. Keyed lookups by stage name happen
-    /// every step entry; the list is small (a handful of stages per persona)
-    /// so a `Vec` keeps insertion order and matches the manifest's authored
-    /// ordering.
-    pub stages: Vec<StageDecl>,
-    /// The persona's declared output style (how it shapes its prose), surfaced
-    /// to Harn via `persona_output_style()`. `None` when the persona declares
-    /// no style.
-    pub output_style: Option<harn_modules::personas::PersonaOutputStyle>,
-}
-
-impl StepDefinition {
-    pub fn boundary(&self) -> StepErrorBoundary {
-        match self.error_boundary.as_deref() {
-            Some("continue") => StepErrorBoundary::Continue,
-            Some("escalate") => StepErrorBoundary::Escalate,
-            _ => StepErrorBoundary::Fail,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum StepErrorBoundary {
-    Fail,
-    Continue,
-    Escalate,
-}
-
-/// Tracks one in-flight step. The `frame_depth` is `Vm::frames.len()`
-/// captured immediately after `push_closure_frame` returns, so an
-/// `ActiveStep` is "alive" while `Vm::frames.len() >= frame_depth`.
-#[derive(Debug, Clone)]
-pub struct ActiveStep {
-    pub frame_depth: usize,
-    pub definition: Arc<StepDefinition>,
-    pub persona: Option<String>,
-    pub args: Vec<VmValue>,
-    pub input_tokens: u64,
-    pub output_tokens: u64,
-    pub cost_usd: f64,
-    pub llm_calls: u32,
-    pub last_model: Option<String>,
-    /// Tracing span id opened when the step's frame was pushed; ended on
-    /// completion. 0 when tracing was disabled at push time, in which
-    /// case `span_end` is a no-op anyway.
-    pub span_id: u64,
-    /// True when this step pushed a per-stage `CapabilityPolicy` onto the
-    /// execution policy stack. The runtime pops it when the step's frame
-    /// unwinds, mirroring the RAII guard pattern in
-    /// `crates/harn-serve/src/adapters/acp/modes.rs`.
-    pub stage_policy_pushed: bool,
-}
-
-impl ActiveStep {
-    fn new(
-        frame_depth: usize,
-        definition: Arc<StepDefinition>,
-        persona: Option<String>,
-        args: Vec<VmValue>,
-        span_id: u64,
-        stage_policy_pushed: bool,
-    ) -> Self {
-        Self {
-            frame_depth,
-            definition,
-            persona,
-            args,
-            input_tokens: 0,
-            output_tokens: 0,
-            cost_usd: 0.0,
-            llm_calls: 0,
-            last_model: None,
-            span_id,
-            stage_policy_pushed,
-        }
-    }
-
-    fn total_tokens(&self) -> u64 {
-        self.input_tokens.saturating_add(self.output_tokens)
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct ActivePersona {
-    pub frame_depth: usize,
-    pub definition: Arc<PersonaDefinition>,
-}
+pub(crate) use crate::vm::step_context::{ActiveContextGuard, ActiveContextSnapshot};
+pub use crate::vm::step_context::{
+    ActivePersona, ActiveStep, PersonaDefinition, StepDefinition, StepErrorBoundary,
+};
 
 /// Snapshot persisted into [`COMPLETED_STEPS`] when the step's frame
 /// unwinds. Receipts and `harn persona inspect`-style downstream consumers
@@ -538,12 +434,6 @@ pub fn clear_persona_hooks() {
     PERSONA_HOOKS.with(|hooks| hooks.borrow_mut().clear());
 }
 
-#[derive(Clone, Default)]
-pub(crate) struct ActiveContextSnapshot {
-    steps: Vec<ActiveStep>,
-    personas: Vec<ActivePersona>,
-}
-
 pub(crate) fn swap_active_context(snapshot: ActiveContextSnapshot) -> ActiveContextSnapshot {
     ActiveContextSnapshot {
         steps: STEP_STACK.with(|stack| std::mem::replace(&mut *stack.borrow_mut(), snapshot.steps)),
@@ -566,32 +456,25 @@ static NEXT_ACTIVE_CONTEXT_SUSPENSION_ID: AtomicU64 = AtomicU64::new(1);
 pub(crate) fn suspend_active_context() -> ActiveContextGuard {
     let id = NEXT_ACTIVE_CONTEXT_SUSPENSION_ID.fetch_add(1, Ordering::Relaxed);
     ACTIVE_CONTEXT_SUSPENSION_STACK.with(|stack| stack.borrow_mut().push(id));
-    ActiveContextGuard {
+    ActiveContextGuard::new(
         id,
-        outer: Some(swap_active_context(ActiveContextSnapshot::default())),
-    }
+        swap_active_context(ActiveContextSnapshot::default()),
+        restore_active_context,
+    )
 }
 
-pub(crate) struct ActiveContextGuard {
-    id: u64,
-    outer: Option<ActiveContextSnapshot>,
-}
-
-impl Drop for ActiveContextGuard {
-    fn drop(&mut self) {
-        let owns_current_scope = ACTIVE_CONTEXT_SUSPENSION_STACK.with(|stack| {
-            let mut stack = stack.borrow_mut();
-            if stack.last() == Some(&self.id) {
-                stack.pop();
-                true
-            } else {
-                false
-            }
-        });
-        if owns_current_scope {
-            let outer = self.outer.take().expect("active context snapshot");
-            let _ = swap_active_context(outer);
+fn restore_active_context(id: u64, outer: ActiveContextSnapshot) {
+    let owns_current_scope = ACTIVE_CONTEXT_SUSPENSION_STACK.with(|stack| {
+        let mut stack = stack.borrow_mut();
+        if stack.last() == Some(&id) {
+            stack.pop();
+            true
+        } else {
+            false
         }
+    });
+    if owns_current_scope {
+        let _ = swap_active_context(outer);
     }
 }
 
@@ -599,10 +482,14 @@ pub fn is_tracked_function(function_name: &str) -> bool {
     if tracked_registries_empty() {
         return false;
     }
-    (!step_registry_empty()
-        && STEP_REGISTRY.with(|registry| registry.borrow().contains_key(function_name)))
+    is_step_function(function_name)
         || (!persona_registry_empty()
             && PERSONA_REGISTRY.with(|registry| registry.borrow().contains_key(function_name)))
+}
+
+pub(crate) fn is_step_function(function_name: &str) -> bool {
+    !step_registry_empty()
+        && STEP_REGISTRY.with(|registry| registry.borrow().contains_key(function_name))
 }
 
 pub fn step_definition_for_function(function_name: &str) -> Option<Arc<StepDefinition>> {

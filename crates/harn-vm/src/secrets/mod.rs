@@ -215,6 +215,17 @@ pub(crate) fn active_secret_provider() -> Option<Arc<dyn SecretProvider>> {
     ACTIVE_SECRET_PROVIDER.try_with(Arc::clone).ok()
 }
 
+/// Install a captured provider for one poll and restore the polling task's view.
+pub(crate) fn with_secret_provider_poll<T>(
+    provider: &Option<Arc<dyn SecretProvider>>,
+    poll: impl FnOnce() -> T,
+) -> T {
+    match provider {
+        Some(provider) => ACTIVE_SECRET_PROVIDER.sync_scope(Arc::clone(provider), poll),
+        None => poll(),
+    }
+}
+
 /// Resolve secret references through `provider` for one async operation.
 ///
 /// Hosts scope the complete session execution so model discovery, routing,

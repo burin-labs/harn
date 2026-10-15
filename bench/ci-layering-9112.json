@@ -1,0 +1,106 @@
+{
+  "schema": "harn.build_observation.v1",
+  "issue": "https://github.com/burin-labs/harn/issues/9112",
+  "recordedAt": "2026-10-15",
+  "targetSeconds": 600,
+  "targetProven": false,
+  "nativeRuntimeBoundary": {
+    "sourceCommit": "94a4a09ca5b422c4aef6f0a4af7494f4475c6b51",
+    "sourceTree": "39ff87e89de2257e9b76200d0dcdec19e39d5ade",
+    "toolchain": "1.95.0",
+    "platform": "aarch64-apple-darwin",
+    "profile": "dev",
+    "command": "HARN_TEST_ONE_PACKAGE=harn-vm HARN_TEST_ONE_NAME=native_vm::tests::required_runtime_denial_reaches_every_builtin_dispatch_and_survives_forks make test-one",
+    "cargoTimings": true,
+    "vmLibraryTestCompileSeconds": 180.75,
+    "cargoElapsedSeconds": 187,
+    "requiredGate": {
+      "deniedRoutes": 9,
+      "deniedHandlerCalls": 0,
+      "allowedNeighborHandlerCalls": 1
+    },
+    "interpretation": "A new baseline for the required native runtime boundary, not a measured improvement over a controlled previous build.",
+    "limitations": [
+      "Shared local host, development profile, existing dependency artifacts and compiler cache; not the Linux CI producer profile.",
+      "The Cargo unit duration excludes host lease wait time.",
+      "The runtime services still lived inside harn-vm at this checkpoint. Internal file moves do not create independently reusable compiler units."
+    ]
+  },
+  "workflowCheckpoints": [
+    {
+      "name": "First sample after prompt syntax landed",
+      "sampleCount": 5,
+      "nearestRankP90Seconds": 1625,
+      "runs": [
+        {"id": 38685107867, "sha": "48600d47d010b9c968d303245e4dca0ce0495acd", "seconds": 1162},
+        {"id": 38683841160, "sha": "6416f00fc8e838f0a71617d7659480484f966ca9", "seconds": 1189},
+        {"id": 38679969092, "sha": "7a1bbdec9dc33e1ec6dc376d419240c1c8fa77c0", "seconds": 1574},
+        {"id": 38679338012, "sha": "2f65a4859f8249751e755e66770f8887ac039d59", "seconds": 1625},
+        {"id": 38678325970, "sha": "6f0b891d7bcc93bbf9398652dfd8a77ea0721438", "seconds": 1335}
+      ]
+    },
+    {
+      "name": "Next three successful merge groups included",
+      "sampleCount": 5,
+      "nearestRankP90Seconds": 1189,
+      "runs": [
+        {"id": 38687991698, "sha": "c4f2c6f9a7219dc38fda7875467080bf0af3315d", "seconds": 1089},
+        {"id": 38686975294, "sha": "42ca5b0e2c60664d042bac33a0419d9f1c161ed0", "seconds": 1160},
+        {"id": 38686801775, "sha": "363e3f22d39fdb1b7b59386a6e59b253934ee7cb", "seconds": 1175},
+        {"id": 38685107867, "sha": "48600d47d010b9c968d303245e4dca0ce0495acd", "seconds": 1162},
+        {"id": 38683841160, "sha": "6416f00fc8e838f0a71617d7659480484f966ca9", "seconds": 1189}
+      ]
+    }
+  ],
+  "latestSuccessfulWorkflowPhases": {
+    "runId": 38687991698,
+    "sourceCommit": "c4f2c6f9a7219dc38fda7875467080bf0af3315d",
+    "workflowSeconds": 1089,
+    "jobsRead": 52,
+    "jobsWithStartAndCompletion": 52,
+    "cliProducer": {
+      "jobId": 116267269824,
+      "runnerGroup": "GitHub Actions",
+      "runnerLabels": ["ubuntu-24.04"],
+      "elapsedSeconds": 925,
+      "rustCacheSetupSeconds": 37,
+      "portableCliBuildSeconds": 860,
+      "artifactUploadSeconds": 4
+    },
+    "longestJob": {
+      "name": "Release residual audit",
+      "jobId": 116267269517,
+      "elapsedSeconds": 1030,
+      "aotGenerationSeconds": 354,
+      "sharedCliWaitSeconds": 551,
+      "auditSeconds": 93
+    },
+    "otherPhases": [
+      {"jobId": 116267269820, "name": "VS Code extension", "elapsedSeconds": 950, "sharedCliWaitSeconds": 925},
+      {"jobId": 116267269877, "name": "Stack frame budget", "elapsedSeconds": 941, "censusSeconds": 339, "sharedCliWaitSeconds": 568},
+      {"jobId": 116267269775, "name": "Rust workspace tests", "elapsedSeconds": 712, "securityArchiveBuildSeconds": 656, "testRunSeconds": 26},
+      {"jobId": 116267269527, "name": "Verify publishable crates", "elapsedSeconds": 747, "packageChecksSeconds": 688}
+    ],
+    "interpretation": "The shared CLI producer remains a build bottleneck. The editor job spends almost all its time waiting for that artifact, and the longest job finishes its audit after that same wait.",
+    "limitations": [
+      "GitHub step timestamps measure complete script phases; the 860-second build phase is not a rustc unit duration.",
+      "This run used the hosted fallback. The measured Kache experiment and the deployed persistent Kache store apply to owned runners, so their timings do not describe this producer.",
+      "Only one workflow was decomposed into phases. These observations identify a live bottleneck, not a controlled causal comparison."
+    ]
+  },
+  "workflowMethod": {
+    "selection": "Latest five completed successful ci.yml merge_group runs at each checkpoint, in API recency order.",
+    "elapsed": "GitHub workflow updatedAt minus startedAt after terminal success, excluding queue admission wait.",
+    "quantile": "Nearest-rank p90; with five observations this is the maximum.",
+    "limitations": [
+      "Five successful runs are a progress sample, not a stable estimate of end-to-end pull-request latency or failure recovery.",
+      "Caches, host load, unrelated merged changes, and the mix of changed crates were not controlled. The difference cannot be attributed exclusively to this issue.",
+      "The provider catalog and native runtime changes were still open when these workflows ran."
+    ]
+  },
+  "nextRequiredEvidence": [
+    "Measure cold, warm, and changed-leaf builds after physical crate extraction with identical source inputs and explicit cache request counts.",
+    "Measure the harn-vm library and library-test compiler units, the complete Rust producer, and merge-group workflow latency separately.",
+    "Keep the 600-second target open until the canonical CI path demonstrates it."
+  ]
+}

@@ -31,7 +31,7 @@ use crate::runtime_limits::RuntimeLimits;
 use crate::stdlib::args::{ArgError, Args, ErrorKind};
 use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::value::{VmClosure, VmError, VmValue};
-use crate::vm::{subtask, AsyncBuiltinCtx, Vm};
+use crate::vm::{AsyncBuiltinCtx, Vm};
 use futures::FutureExt;
 use harn_parser::diagnostic_codes::Code;
 use serde::{Deserialize, Serialize};
@@ -2282,7 +2282,7 @@ fn spawn_task(pool: Arc<parking_lot::Mutex<PoolEntry>>, pending: PendingTask) {
     // subtask seam captures the ambient scope that carries it. Without that,
     // the receipt would bind to a worker thread's own default log.
     let event_log = ensure_pool_event_log();
-    subtask::spawn_child(
+    crate::native_vm::subtask::spawn_child(
         pool_registry_for_ctx(context.as_ref()),
         emit_pool_dequeue_receipt(event_log, dequeue_receipt),
     );
@@ -2306,7 +2306,7 @@ fn spawn_task(pool: Arc<parking_lot::Mutex<PoolEntry>>, pending: PendingTask) {
     let registry = ctx.pool_registry();
     let task_group_id = pool_id_for_span;
     let scheduled_activity = ctx.wait_for_graph().register_task(task_runtime_id.clone());
-    subtask::spawn_child(registry, async move {
+    crate::native_vm::subtask::spawn_child(registry, async move {
         let _scheduled_activity = scheduled_activity;
         tokio::task::yield_now().await;
         let outcome = std::panic::AssertUnwindSafe(async {

@@ -7,6 +7,8 @@ use serde_json::{json, Value};
 use tokio::sync::Mutex;
 
 use crate::bridge::HostBridge;
+use crate::llm::agent_tool_preparation as preparation_dispatch;
+use crate::tool_registry::preparation_scope::scope;
 use crate::tool_registry::preparation_scope::{current_invocation, enforce_contract, preparation};
 use crate::value::VmValue;
 
@@ -21,9 +23,9 @@ async fn prepared_verify_child_interpreter_preserves_read_only_restriction() {
             let registry = Arc::new(crate::stdlib::pool::PoolRegistry::default());
             let future = async { enforce_contract("unknown_host_effect", None) };
             let child = if independent {
-                crate::vm::subtask::spawn_inherited_child(registry, future)
+                crate::native_vm::subtask::spawn_inherited_child(registry, future)
             } else {
-                crate::vm::subtask::spawn_child(registry, future)
+                crate::native_vm::subtask::spawn_child(registry, future)
             };
             child.await.unwrap()
         })
@@ -36,18 +38,22 @@ async fn prepared_verify_child_interpreter_preserves_read_only_restriction() {
 async fn prepared_verify_independent_session_cannot_reuse_invocation() {
     let fixture = Fixture::new();
     let (ctx, registry) = fixture.registry(false).await;
-    let binding = super::prepare(&ctx, Some(&registry), "verify", &json!({}), "test-session")
-        .await
-        .unwrap()
-        .unwrap();
-    super::scope(Some(binding), async {
+    let binding =
+        preparation_dispatch::prepare(&ctx, Some(&registry), "verify", &json!({}), "test-session")
+            .await
+            .unwrap()
+            .unwrap();
+    scope(Some(binding), async {
         assert!(current_invocation().is_some());
-        assert!(
-            super::validate_handler(Some(&ctx), Some(&registry), "different", &json!({}))
-                .await
-                .is_err()
-        );
-        let child = crate::vm::subtask::spawn_inherited_child(
+        assert!(preparation_dispatch::validate_handler(
+            Some(&ctx),
+            Some(&registry),
+            "different",
+            &json!({})
+        )
+        .await
+        .is_err());
+        let child = crate::native_vm::subtask::spawn_inherited_child(
             Arc::new(crate::stdlib::pool::PoolRegistry::default()),
             async { current_invocation() },
         );
@@ -108,7 +114,7 @@ impl Fixture {
         &self,
         preparation: &str,
     ) -> (crate::vm::AsyncBuiltinCtx, VmValue) {
-        let source = include_str!("fixtures/prepared_verify.harn.template")
+        let source = include_str!("../../llm/fixtures/prepared_verify.harn.template")
             .replace("{{preparation}}", preparation);
         let chunk = crate::compile_source(&source).expect("compile preparation fixture");
         let mut vm = crate::Vm::new();
@@ -136,7 +142,7 @@ async fn prepared_verify_admits_pure_result_constructors_and_compiler_try_result
         format!("unwrap_or(try {{ throw \"absent\" }}, {read})"),
     ] {
         let (ctx, registry) = fixture.registry_with_preparation(&expression).await;
-        let binding = super::prepare(
+        let binding = preparation_dispatch::prepare(
             &ctx,
             Some(&registry),
             "verify",
@@ -157,7 +163,7 @@ async fn prepared_verify_result_constructors_do_not_admit_file_mutation() {
     let path = serde_json::to_string(&fixture.facts_path).unwrap();
     let expression = format!("harness.fs.write_text({path}, \"mutated before consent\")");
     let (ctx, registry) = fixture.registry_with_preparation(&expression).await;
-    let error = match super::prepare(
+    let error = match preparation_dispatch::prepare(
         &ctx,
         Some(&registry),
         "verify",
@@ -193,7 +199,7 @@ fn pin_dispatch<'a>(
     Box<impl std::future::Future<Output = Result<VmValue, crate::value::VmError>> + 'a>,
 > {
     Box::pin(
-        super::super::agent_host_primitives::host_agent_dispatch_tool_call(
+        crate::llm::agent_host_primitives::host_agent_dispatch_tool_call(
             ctx,
             call,
             Some(registry),

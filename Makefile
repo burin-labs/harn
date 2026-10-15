@@ -180,7 +180,7 @@ provider-catalog-test:
 	$(HARN_CARGO_CMD) nextest run -p harn-provider-catalog $(PROVIDER_CATALOG_TEST_ARGS)
 
 execution-policy-test:
-	$(HARN_CARGO_CMD) nextest run --locked -p harn-execution-policy $(EXECUTION_POLICY_TEST_ARGS)
+	$(HARN_RUST_TEST_ENV) $(HARN_CARGO_CMD) nextest run --locked -p harn-execution-policy $(EXECUTION_POLICY_TEST_ARGS)
 
 # The corpus is included from harn-kernel/testdata by both this native-VM test
 # and the browser-Wasm tests. It must stay one data source with three adapters.

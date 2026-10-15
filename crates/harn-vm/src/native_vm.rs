@@ -7,6 +7,7 @@ use std::{future::Future, pin::Pin};
 
 mod bridge;
 mod lifecycle;
+pub(crate) mod subtask;
 mod task_cleanup;
 mod tracing;
 
@@ -100,6 +101,10 @@ impl VmRuntime for NativeExecutionState {
         self.retained_cleanup_runtimes(execution_id)
     }
 
+    fn subtask_scope(&self) -> Box<dyn crate::vm::VmExecutionScope> {
+        subtask::capture_inline(Arc::clone(&self.pool_registry))
+    }
+
     fn start_span(&self, kind: crate::vm::VmSpanKind, name: String) -> crate::vm::ScopeSpan {
         tracing::start_span(kind, name)
     }
@@ -126,6 +131,31 @@ impl VmRuntime for NativeExecutionState {
 
     fn set_source_dir(&self, dir: &Path) {
         crate::stdlib::set_thread_source_dir(dir);
+    }
+
+    fn enter_source_dir(&self, dir: Option<&Path>) -> Option<std::path::PathBuf> {
+        crate::stdlib::process::enter_frame_source_dir(dir)
+    }
+
+    fn is_step_function(&self, name: &str) -> bool {
+        crate::step_runtime::is_step_function(name)
+    }
+
+    fn is_tracked_function(&self, name: &str) -> bool {
+        crate::step_runtime::is_tracked_function(name)
+    }
+
+    fn enter_function(&self, name: &str, frame_depth: usize, args: &[VmValue]) {
+        crate::step_runtime::maybe_push_active_persona(name, frame_depth);
+        crate::step_runtime::maybe_push_active_step(name, frame_depth, args);
+    }
+
+    fn prune_frames(&self, frame_depth: usize) {
+        crate::step_runtime::prune_below_frame(frame_depth);
+    }
+
+    fn suspend_active_context(&self) -> crate::vm::step_context::ActiveContextGuard {
+        crate::step_runtime::suspend_active_context()
     }
 
     fn denied_builtin_family(

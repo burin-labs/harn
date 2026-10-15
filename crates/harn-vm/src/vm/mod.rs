@@ -25,6 +25,7 @@ mod state;
 mod stdlib_artifact;
 mod stdlib_export;
 mod stdlib_registration;
+pub(crate) mod step_context;
 pub mod subtask;
 mod task_cleanup;
 mod tool_callable;

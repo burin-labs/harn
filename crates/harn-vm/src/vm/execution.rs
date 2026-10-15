@@ -170,7 +170,7 @@ impl Vm {
                     self.env = frame.saved_env;
                 }
             }
-            crate::step_runtime::prune_below_frame(self.frames.len());
+            self.runtime.prune_frames(self.frames.len());
 
             // Drop deadlines that belonged to unwound frames.
             while self
@@ -330,7 +330,7 @@ impl Vm {
                     self.runtime.set_source_dir(dir);
                 }
                 let current_depth = self.frames.len();
-                crate::step_runtime::prune_below_frame(current_depth);
+                self.runtime.prune_frames(current_depth);
                 // Drop any deadlines owned by the popped frame so the
                 // caller doesn't inherit them (an early `return` from
                 // inside `deadline(d) { ... }` would otherwise leave the
@@ -412,7 +412,7 @@ impl Vm {
                         let current_depth = self.frames.len();
                         self.exception_handlers
                             .retain(|h| h.frame_depth <= current_depth);
-                        crate::step_runtime::prune_below_frame(current_depth);
+                        self.runtime.prune_frames(current_depth);
                         while self.deadlines.last().is_some_and(|d| d.1 > current_depth) {
                             self.deadlines.pop();
                         }
@@ -490,7 +490,7 @@ impl Vm {
             }
         }
         let current_depth = self.frames.len();
-        crate::step_runtime::prune_below_frame(current_depth);
+        self.runtime.prune_frames(current_depth);
         while self.deadlines.last().is_some_and(|d| d.1 > current_depth) {
             self.deadlines.pop();
         }
