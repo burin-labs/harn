@@ -507,6 +507,16 @@ pipeline test_current_review_and_head_remain_required_after_original_ci_passes(h
   )
   assert_eq(invalid.assessment.status, "invalid")
   assert(invalid.assessment.invalid.contains("admission-source-or-policy"))
+  const retargeted = replay_github_ci(
+    f.request.policy,
+    pending + {record: pending.record + {reviews: f.request.reviews + {base_branch: "release"}}},
+    POLICY,
+    JOBS,
+  )
+  assert_eq(retargeted.assessment.status, "invalid")
+  assert(retargeted.assessment.review!.invalid.contains("review-source-binding"))
+  assert_eq(retargeted.assessment.checks.executed, 1)
+  assert_eq(retargeted.source_reads, pending.source_reads)
 }
 
 pipeline test_every_matrix_leg_requires_its_own_original_execution(harness: Harness) {
