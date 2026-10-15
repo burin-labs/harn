@@ -364,7 +364,7 @@ fn worker_thread(
 /// the caller can invoke it repeatedly.
 async fn build_probe_closure(script: &str) -> Result<(harn_vm::Vm, Arc<VmClosure>), String> {
     let chunk = compile_source(script).map_err(|error| format!("compile: {error}"))?;
-    let mut vm = harn_vm::Vm::new();
+    let mut vm = harn_vm::new_vm();
     register_vm_stdlib(&mut vm);
     vm.set_harness(harn_vm::Harness::real());
     let value = vm
@@ -442,7 +442,7 @@ fn run_script(script: &str) -> Result<(), String> {
     let local = tokio::task::LocalSet::new();
     runtime.block_on(local.run_until(async move {
         let chunk = compile_source(script).map_err(|error| format!("compile: {error}"))?;
-        let mut vm = harn_vm::Vm::new();
+        let mut vm = harn_vm::new_vm();
         register_vm_stdlib(&mut vm);
         vm.execute(&chunk)
             .await
