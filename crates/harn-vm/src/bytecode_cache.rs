@@ -43,6 +43,9 @@
 //! safely — the last writer wins, but every reader observes a consistent file
 //! because the rename is atomic on every supported filesystem.
 
+mod stdlib_digest;
+pub use stdlib_digest::{embedded_stdlib_digest_bytes, embedded_stdlib_digest_from_sources};
+
 use std::borrow::Cow;
 use std::fs;
 use std::io;
@@ -1141,7 +1144,7 @@ fn module_compilation_context_hash_fingerprinted(
     let mut hasher = Sha256::new();
     hasher.update(b"module-artifact-source-local-v4\0");
     hasher.update(b"stdlib-digest\0");
-    hasher.update(crate::runtime_content::embedded_stdlib_digest_bytes());
+    hasher.update(embedded_stdlib_digest_bytes());
     hasher.update(b"\0codegen-fingerprint\0");
     hasher.update(codegen_fingerprint.as_bytes());
     hasher.update(b"\0imported-interface\0");

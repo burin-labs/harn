@@ -266,7 +266,7 @@ fn first_object_param_error(
                 .map(schema_expected_label)
                 .unwrap_or_else(|| "value".to_string());
             let actual_keys = fields.keys().map(|key| key.as_str()).collect::<Vec<_>>();
-            let actual_summary = crate::stdlib::shapes::format_available_fields(&actual_keys);
+            let actual_summary = super::format_available_fields(&actual_keys);
             return Some(match suggestion {
                 Some(suggestion) => format!(
                     "parameter '{param_name}': missing field '{key}' ({expected}), did you mean '{suggestion}'? — {actual_summary}"

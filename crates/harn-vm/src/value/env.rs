@@ -5,8 +5,7 @@ use std::pin::Pin;
 use std::sync::{Arc, Weak};
 
 use crate::chunk::CompiledFunctionRef;
-use crate::trust_graph::AutonomyTier;
-use harn_execution_policy::CapabilityPolicy;
+use harn_execution_policy::{AutonomyTier, CapabilityPolicy};
 
 use super::{VmError, VmMutex, VmValue};
 

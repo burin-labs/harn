@@ -1,5 +1,14 @@
 use crate::value::VmValue;
 
+/// Shared missing-field diagnostic for shape and schema validation.
+pub(crate) fn format_available_fields(keys: &[&str]) -> String {
+    if keys.is_empty() {
+        "no fields present".to_string()
+    } else {
+        format!("available fields: {}", keys.join(", "))
+    }
+}
+
 mod admit;
 mod api;
 mod canonicalize;

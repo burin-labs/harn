@@ -10,6 +10,7 @@ mod dispatch;
 mod execution;
 mod execution_deadline;
 mod execution_evidence;
+pub mod flight_recorder;
 mod format;
 mod harness_seam;
 mod interrupts;
@@ -22,6 +23,7 @@ pub(crate) mod ops;
 mod process_exit;
 mod registration;
 mod runtime;
+mod runtime_context;
 mod runtime_scope;
 mod scope;
 mod state;
@@ -75,6 +77,8 @@ pub(crate) use registration::VmBuiltinRegistration;
 pub(crate) use runtime::{
     BuiltinGateDecision, VmBuiltinBridge, VmRuntime, VmRuntimeBaseline, VmSpanKind, VmTaskCleanup,
 };
+pub use runtime_context::RuntimeContext;
+pub(crate) use runtime_context::{runtime_context_clear, runtime_context_get, runtime_context_set};
 pub(crate) use runtime_scope::{scope_runtime, VmExecutionScope};
 pub use state::{Vm, VmBaseline};
 pub(crate) use stdlib_artifact::prepare_stdlib_module_artifact;

@@ -226,7 +226,7 @@ impl Vm {
         // rather than at each caller. Handlers ran when the run was live and
         // their effects are recorded; running them again repeats those
         // effects. The replay fact is read from its single owner.
-        if crate::triggers::dispatcher::is_replay() {
+        if self.runtime().is_replay() {
             crate::cancellation::note_not_dispatched(
                 crate::cancellation::NotDispatchedReason::ReplayPath,
             );

@@ -170,6 +170,18 @@ impl VmRuntime for NativeExecutionState {
         crate::stdlib::process::enter_frame_source_dir(dir)
     }
 
+    fn runtime_context_value(&self, vm: &Vm) -> VmValue {
+        crate::runtime_context::runtime_context_value(vm)
+    }
+
+    fn is_replay(&self) -> bool {
+        crate::triggers::dispatcher::is_replay()
+    }
+
+    fn warn(&self, category: &str, message: &str) {
+        crate::events::log_warn(category, message);
+    }
+
     fn is_step_function(&self, name: &str) -> bool {
         crate::step_runtime::is_step_function(name)
     }

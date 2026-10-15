@@ -164,6 +164,18 @@ impl VmRuntime for RefusingRuntime {
     fn enter_source_dir(&self, dir: Option<&Path>) -> Option<std::path::PathBuf> {
         self.native.enter_source_dir(dir)
     }
+    fn runtime_context_value(&self, vm: &Vm) -> VmValue {
+        self.native.runtime_context_value(vm)
+    }
+
+    fn is_replay(&self) -> bool {
+        self.native.is_replay()
+    }
+
+    fn warn(&self, category: &str, message: &str) {
+        self.native.warn(category, message);
+    }
+
     fn is_step_function(&self, name: &str) -> bool {
         self.native.is_step_function(name)
     }

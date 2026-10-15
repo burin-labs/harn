@@ -404,13 +404,11 @@ impl Vm {
             return None;
         }
         Some(match name {
-            "runtime_context" | "task_current" => {
-                Ok(crate::runtime_context::runtime_context_value(self))
-            }
+            "runtime_context" | "task_current" => Ok(self.runtime().runtime_context_value(self)),
             "runtime_context_values" => Ok(VmValue::dict(self.runtime_context.values.clone())),
-            "runtime_context_get" => crate::runtime_context::runtime_context_get(self, args),
-            "runtime_context_set" => crate::runtime_context::runtime_context_set(self, args),
-            "runtime_context_clear" => crate::runtime_context::runtime_context_clear(self, args),
+            "runtime_context_get" => super::runtime_context_get(self, args),
+            "runtime_context_set" => super::runtime_context_set(self, args),
+            "runtime_context_clear" => super::runtime_context_clear(self, args),
             _ => Err(VmError::UndefinedBuiltin(name.to_string())),
         })
     }

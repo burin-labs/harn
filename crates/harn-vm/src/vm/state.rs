@@ -305,7 +305,7 @@ pub struct Vm {
     /// Counter for logical runtime-context task groups.
     pub(crate) runtime_context_counter: u64,
     /// Logical runtime task context visible through `runtime_context()`.
-    pub(crate) runtime_context: crate::runtime_context::RuntimeContext,
+    pub(crate) runtime_context: super::RuntimeContext,
     /// Active deadline stack: (deadline_instant, frame_depth).
     pub(crate) deadlines: Vec<(Instant, usize)>,
     /// Uncatchable wall-clock deadline imposed by the embedding host.
@@ -520,7 +520,7 @@ impl VmBaseline {
             task_scopes: Vec::new(),
             task_counter: 0,
             runtime_context_counter: 0,
-            runtime_context: crate::runtime_context::RuntimeContext::root(),
+            runtime_context: super::RuntimeContext::root(),
             deadlines: Vec::new(),
             execution_deadline: super::execution::new_execution_deadline_state(None),
             breakpoints: BTreeMap::new(),
@@ -798,7 +798,7 @@ impl Vm {
             task_scopes: Vec::new(),
             task_counter: 0,
             runtime_context_counter: 0,
-            runtime_context: crate::runtime_context::RuntimeContext::root(),
+            runtime_context: super::RuntimeContext::root(),
             deadlines: Vec::new(),
             execution_deadline: super::execution::new_execution_deadline_state(None),
             breakpoints: BTreeMap::new(),

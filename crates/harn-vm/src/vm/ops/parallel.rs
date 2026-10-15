@@ -692,7 +692,7 @@ impl super::super::Vm {
                 // remaining task before the nursery exits.
                 let pending = task.pending_cleanup();
                 if let Err(error) = super::call_support::abort_task_and_wait(task).await {
-                    crate::events::log_warn(
+                    self.runtime().warn(
                         "task_scope.cancel_cleanup",
                         &format!("durable sibling cleanup remains pending: {error}"),
                     );
