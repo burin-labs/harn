@@ -300,18 +300,18 @@ fn detached_task_abort_survives_the_source_runtime_shutdown() {
             std::future::pending::<Result<(crate::value::VmValue, String), crate::value::VmError>>()
                 .await
         });
-        crate::vm::ops::abort_task_detached(crate::vm::SpawnedTask {
-            task: crate::value::VmTaskHandle {
+        harn_vm_core::vm::abort_task_for_test(
+            crate::value::VmTaskHandle {
                 handle,
                 cancel_token: cancel_token.clone(),
                 wait_task_id: task_id.to_string(),
             },
-            runtimes: Arc::new(crate::agent_lifecycle_cleanup::CleanupRuntimes::new(
+            Arc::new(crate::agent_lifecycle_cleanup::CleanupRuntimes::new(
                 "detached-execution".to_string(),
                 crate::agent_sessions::active_session_runtime(),
                 super::super::active_agent_host_session_runtime(),
             )),
-        });
+        );
     });
     drop(source_runtime);
 
@@ -454,7 +454,7 @@ fn dropping_an_inline_vm_does_not_cancel_the_parent_lifecycle() {
         // states that exactly; waiting for an interval that elapsed cannot,
         // because an interval always elapses.
         let spawns_before = crate::vm::subtask::lifecycle_cleanup_spawn_count();
-        let inline = parent.child_vm_inline();
+        let inline = parent.child_vm_for_host();
         drop(inline);
         assert_eq!(
             crate::vm::subtask::lifecycle_cleanup_spawn_count(),
@@ -569,15 +569,13 @@ fn pending_cleanup_keeps_the_execution_that_owned_the_cancelled_task() {
         )
         .expect("claim lifecycle");
         super::super::seed_host_session_provider_model(session_id, "mock", "fixture");
-        vm.pending_task_cleanups.insert(
+        vm.retain_pending_cleanup_for_test(
             "public-task".to_string(),
-            crate::vm::PendingTaskCleanup {
-                task_id: task_id.to_string(),
-                runtimes: Arc::new(vm.agent_cleanup_runtimes()),
-            },
+            task_id.to_string(),
+            Arc::new(vm.agent_cleanup_runtimes()),
         );
 
-        vm.prepare_execution_for_top_level();
+        vm.prepare_execution_for_test();
         assert_ne!(vm.execution_id().to_string(), original_execution_id);
         drop(vm);
     });

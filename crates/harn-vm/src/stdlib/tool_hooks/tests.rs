@@ -9,7 +9,10 @@ fn vm_with_stdlib() -> Vm {
 }
 
 fn call_sync(vm: &Vm, name: &str, args: &[VmValue]) -> Result<VmValue, VmError> {
-    let builtin = vm.builtins.get(name).cloned().expect("builtin registered");
+    let builtin = vm
+        .builtin_handler_for_test(name)
+        .cloned()
+        .expect("builtin registered");
     let mut out = String::new();
     builtin(args, &mut out)
 }

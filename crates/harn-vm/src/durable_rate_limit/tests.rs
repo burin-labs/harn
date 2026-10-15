@@ -1,5 +1,5 @@
 use super::*;
-use crate::{compile_source, register_vm_stdlib, reset_thread_local_state, Vm};
+use crate::{compile_source, register_vm_stdlib, reset_thread_local_state};
 use rusqlite::{params, Connection, TransactionBehavior};
 use std::path::{Path, PathBuf};
 use std::sync::{mpsc, Arc, Barrier};

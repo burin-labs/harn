@@ -43,13 +43,8 @@ pub fn current() -> int {
 ",
     )
     .expect("write module");
-    let callable = VmCallable::Lazy(LazyVmCallable::new(module_path, "next"));
-    let current = match &callable {
-        VmCallable::Lazy(lazy) => {
-            VmCallable::Lazy(LazyVmCallable::new(lazy.module_path.clone(), "current"))
-        }
-        VmCallable::Eager(_) | VmCallable::Pipeline(_) => unreachable!("test callable is lazy"),
-    };
+    let callable = VmCallable::Lazy(LazyVmCallable::new(module_path.clone(), "next"));
+    let current = VmCallable::Lazy(LazyVmCallable::new(module_path, "current"));
 
     runtime.block_on(async {
         let root = crate::new_vm();
@@ -180,7 +175,7 @@ pub pipeline run(harness: Harness, value) {
         );
     };
     assert_eq!(*received, 43);
-    assert_eq!(vm.source_dir.as_deref(), Some(caller_dir.path()));
+    assert_eq!(vm.source_dir(), Some(caller_dir.path()));
 }
 
 #[tokio::test(flavor = "current_thread")]

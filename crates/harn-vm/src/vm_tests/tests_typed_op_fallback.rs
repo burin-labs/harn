@@ -16,7 +16,7 @@
 
 use crate::compiler::{Compiler, CompilerOptions};
 use crate::stdlib::register_vm_stdlib;
-use crate::vm::Vm;
+
 use harn_lexer::Lexer;
 use harn_parser::Parser;
 

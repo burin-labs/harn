@@ -59,12 +59,12 @@ pub(crate) struct SharedModuleInstanceStore {
     entries: VmMutex<BTreeMap<PathBuf, Vec<SharedModuleInstance>>>,
     /// Instantiations performed by the stdlib loader in this tree, by
     /// synthetic path. Tests use it to prove reuse and invalidation.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "vm-test-support"))]
     instantiations: VmMutex<BTreeMap<PathBuf, usize>>,
 }
 
 impl SharedModuleInstanceStore {
-    #[cfg(test)]
+    #[cfg(any(test, feature = "vm-test-support"))]
     pub(crate) fn instantiation_count(&self, synthetic: &Path) -> usize {
         self.instantiations
             .lock()
@@ -107,7 +107,7 @@ impl Vm {
         artifact: &PreparedModuleArtifact,
         loaded: &Arc<LoadedModule>,
     ) {
-        #[cfg(test)]
+        #[cfg(any(test, feature = "vm-test-support"))]
         {
             *self
                 .shared_module_instances

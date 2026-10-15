@@ -165,7 +165,8 @@ impl Vm {
 /// closures forwarded into the context, which the dispatch loop appends to the
 /// real parent VM. Cancel-safe: if the returned future is dropped, the ctx +
 /// child `Vm` are dropped with it.
-pub(crate) fn run_async_builtin_with<F, M>(
+#[doc(hidden)]
+pub fn run_async_builtin_with<F, M>(
     child: Vm,
     make_fut: M,
 ) -> impl Future<Output = (F::Output, String)>

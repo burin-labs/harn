@@ -1,5 +1,5 @@
 use super::HostRequestTrace;
-use crate::{Vm, VmValue};
+use crate::VmValue;
 use std::sync::{Arc, Mutex};
 
 #[derive(Default)]

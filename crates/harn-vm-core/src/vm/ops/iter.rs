@@ -298,7 +298,7 @@ impl super::super::Vm {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::vm::{IterState, Vm};
+    use crate::vm::IterState;
 
     fn run_iter_init_test(test: impl std::future::Future<Output = ()>) {
         let rt = tokio::runtime::Builder::new_current_thread()

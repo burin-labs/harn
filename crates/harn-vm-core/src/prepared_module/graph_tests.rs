@@ -5,7 +5,7 @@ fn generation_value(cache: &PreparedModuleCache, path: &Path) -> crate::value::V
         .enable_all()
         .build()
         .unwrap();
-    let mut vm = crate::Vm::new();
+    let mut vm = crate::vm::test_runtime::new_vm();
     vm.set_prepared_module_generation(cache.clone());
     runtime.block_on(async {
         let exports = vm.load_module_exports(path).await.unwrap();

@@ -200,7 +200,7 @@ where
 }
 
 /// Put a prepared subtask on the runtime as a member of `set`.
-pub(crate) fn spawn_into<F>(
+pub fn spawn_into<F>(
     set: &mut tokio::task::JoinSet<F::Output>,
     future: PreparedSubtask<F>,
 ) -> tokio::task::AbortHandle
@@ -266,7 +266,7 @@ where
     runtime.spawn(future)
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "vm-test-support"))]
 thread_local! {
     /// Detached recovery tasks this thread has handed to the process-owned
     /// runtime.
@@ -282,16 +282,17 @@ thread_local! {
     static LIFECYCLE_CLEANUP_SPAWNS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "vm-test-support"))]
 fn note_lifecycle_cleanup_spawn() {
     LIFECYCLE_CLEANUP_SPAWNS.with(|count| count.set(count.get().saturating_add(1)));
 }
 
-#[cfg(not(test))]
+#[cfg(not(any(test, feature = "vm-test-support")))]
 fn note_lifecycle_cleanup_spawn() {}
 
-#[cfg(test)]
-pub(crate) fn lifecycle_cleanup_spawn_count() -> u64 {
+#[cfg(any(test, feature = "vm-test-support"))]
+#[doc(hidden)]
+pub fn lifecycle_cleanup_spawn_count() -> u64 {
     LIFECYCLE_CLEANUP_SPAWNS.with(std::cell::Cell::get)
 }
 

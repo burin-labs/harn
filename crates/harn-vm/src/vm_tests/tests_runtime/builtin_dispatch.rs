@@ -6,13 +6,14 @@
 
 use crate::compiler::Compiler;
 use crate::stdlib::register_vm_stdlib;
+use crate::NativeVmExt;
 use crate::VmValue;
 use harn_lexer::Lexer;
 use harn_parser::Parser;
 use std::sync::Arc;
 
 use super::harness::*;
-use crate::vm::*;
+
 #[test]
 fn test_direct_builtin_call_uses_registered_sync_id() {
     let (out, _) = run_harn_with_setup(

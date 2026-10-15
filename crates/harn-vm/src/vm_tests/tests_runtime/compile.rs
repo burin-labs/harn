@@ -10,7 +10,7 @@ use harn_lexer::Lexer;
 use harn_parser::Parser;
 
 use super::harness::*;
-use crate::vm::*;
+
 #[test]
 fn compile_named_pipeline_ignores_unbound_params() {
     let rt = tokio::runtime::Builder::new_current_thread()
