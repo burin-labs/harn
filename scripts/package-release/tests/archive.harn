@@ -199,4 +199,41 @@ pipeline test_the_actual_archive_is_qualified_and_a_reached_test_failure_cannot_
     "unpacked package inputs changed",
   )
   assert(!harness.fs.exists(path_join(mutation_output, CANDIDATE_MANIFEST_FILE)))
+  harness.fs.write_text(
+    test_file,
+    "import { answer } from \"../lib\"\n\npipeline test_actual_answer(harness: Harness) {\n  assert_eq(answer(), 42)\n  harness.fs.write_text(path_join(harness.fs.runtime_paths().asset_root, \"../../portable-fixture-0.1.0.tar.gz\"), \"substituted archive\")\n}\n",
+  )
+  const format_archive = harness.process.run(
+    {program: binary, args: ["fmt", test_file], cwd: project},
+  )
+  assert(format_archive.success && format_archive.exit_code == 0, format_archive.stderr)
+  git(harness.process, project, ["add", "tests/test_answer.harn"])
+  git(
+    harness.process,
+    project,
+    ["commit", "--quiet", "-m", "substitute the archive during passing tests"],
+  )
+  const substituted_source = git(harness.process, project, ["rev-parse", "HEAD"])
+  const substituted_output = path_join(root, "substituted-archive")
+  assert_error_contains(
+    fn() { build_package_candidate(
+      host,
+      request
+        + {
+          expected_source: substituted_source,
+          output: substituted_output,
+          identity: request.identity + {source: substituted_source},
+        },
+    ) },
+    "candidate archive changed during verification",
+  )
+  assert_eq(
+    harness.fs.read_text(path_join(substituted_output, "portable-fixture-0.1.0.tar.gz")),
+    "substituted archive",
+  )
+  const observed = json_parse(
+    harness.fs.read_text(path_join(substituted_output, "verification.json")),
+  )
+  assert_eq(observed.data.status, "pass")
+  assert(!harness.fs.exists(path_join(substituted_output, CANDIDATE_MANIFEST_FILE)))
 }
