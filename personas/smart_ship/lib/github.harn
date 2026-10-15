@@ -12,3 +12,13 @@ pub import {
   submit_github_admission,
 } from "./github_effect"
 pub import { github_reviewed_change, read_github_reviewed_change } from "./github_review"
+pub import {
+  GithubCiArtifact,
+  GithubCiAssessment,
+  GithubCiIdentity,
+  GithubCiJob,
+  GithubCiLeg,
+  assess_github_ci,
+  github_ci_identities,
+  read_github_ci_artifacts,
+} from "./github_ci"

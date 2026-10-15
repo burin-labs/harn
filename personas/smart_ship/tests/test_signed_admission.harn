@@ -13,6 +13,7 @@ import {
   SignedAdmission,
   SignedScope,
   admission_bytes,
+  assess_admission,
   freeze_snapshot,
   policy_digest,
   prepare_admission,
@@ -31,6 +32,36 @@ fn sign(f: Fixture, record: AdmissionRecord) -> SignedAdmission {
 
 fn sign_scope(f: Fixture, scope: AdmissionScope) -> SignedScope {
   return {scope: scope, signer: "scope", signature: ed25519_sign(f.private_key, scope_bytes(scope))}
+}
+
+pipeline test_preissuance_assessment_uses_final_qualification_without_issuer_authority(
+  harness: Harness,
+) {
+  const f = fixture(harness.random)
+  const record = f.snapshot.changes[0]!.admission.record
+  const original = record.proofs[0]!
+  for candidate in [
+    record,
+    record + {proofs: []},
+    record + {proofs: [original + {signature: ""}]},
+    record + {scope: record.scope + {signature: ""}},
+    record + {reviews: record.reviews + {reviews: []}},
+    record + {source: record.source + {head: sha256_hex("changed head")}},
+    record + {admitted_at_ms: 0},
+  ] {
+    assert_eq(assess_admission(candidate, f.policy), verify_admission(sign(f, candidate), f.policy))
+  }
+  const assessed = assess_admission(record, f.policy)
+  assert_eq(assessed.status, "admitted")
+  assert_eq(assessed.checks.required, 1)
+  assert_eq(assessed.checks.reused, 1)
+  assert_eq(assessed.review!.observed_reviews, 1)
+  const unsigned = {record: record, signer: "admitter", signature: ""}
+  assert(verify_admission(unsigned, f.policy).invalid.contains("admission-signature"))
+  const invalid_policy = f.policy + {admission_keys: []}
+  const refused = assess_admission(record, invalid_policy)
+  assert_eq(refused.status, "invalid")
+  assert(refused.invalid.contains("invalid signing keys: admission"))
 }
 
 pipeline test_signed_admission_retains_nonempty_review_and_original_ci_through_replay(

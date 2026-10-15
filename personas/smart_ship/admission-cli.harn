@@ -1,0 +1,104 @@
+import {
+  GithubCiJob,
+  assess_github_ci,
+  read_github_ci_artifacts,
+  read_github_reviewed_change,
+} from "./lib/github"
+import { AdmissionRequest, SignedAdmission, admission_bytes, verify_admission } from "./lib/main"
+import { ProducerPolicy, Run, live_source } from "burin-ci-checks/ci_job_proof"
+
+type Request = {
+  action: "inspect" | "issue",
+  request: AdmissionRequest,
+  producer: {run_id: int, attempt: int},
+  producer_policy: ProducerPolicy,
+  run_name: string,
+  jobs: list<GithubCiJob>,
+  token_secret: string,
+  issuer?: {id: string, secret: string},
+}
+
+fn main(harness: Harness) {
+  require len(argv) == 1, "pass one trusted public admission request file after --"
+  const text = harness.fs.read_text(argv[0])
+  require len(text) <= 16777216, "admission request exceeds its size limit"
+  const input: Request = schema_expect(json_parse(text), schema_of(Request))
+  require input.producer.run_id > 0 && input.producer.attempt > 0,
+    "admission requires the original producer run and attempt"
+  const repository = input.producer_policy.repository
+  const parts = repository.split("/")
+  require len(parts) == 2 && input.request.scope.scope.source.repository == repository,
+    "admission producer must match the trusted repository scope"
+  const token = harness.secrets.read(input.token_secret)
+  const source = live_source(harness.net, harness.fs, token)
+  const producer = schema_expect(
+    source.json(
+      "/repos/" + repository + "/actions/runs/" + to_string(input.producer.run_id)
+        + "/attempts/"
+        + to_string(input.producer.attempt),
+    ),
+    schema_of(Run),
+  )
+  require producer.id == input.producer.run_id && producer.run_attempt == input.producer.attempt,
+    "GitHub returned a different producer run or attempt"
+  const options = {installation_token: token}
+  const artifacts = read_github_ci_artifacts(
+    harness,
+    input.request,
+    input.jobs,
+    producer,
+    input.run_name,
+    options,
+  )
+  const observed = read_github_reviewed_change(
+    harness,
+    {
+      owner: parts[0]!,
+      repo: parts[1]!,
+      pull_number: to_int(input.request.source.change),
+      expected_head_oid: input.request.scope.scope.reviewed_head,
+      per_page: 100,
+      max_pages: 100,
+      maximum_count: 10000,
+      options: options,
+    },
+  )
+  if is_err(observed) {
+    throw "admission review read refused: " + json_stringify(unwrap_err(observed))
+  }
+  const current = unwrap(observed)
+  const request = input.request + {source: current.source, reviews: current.reviews}
+  const assessment = assess_github_ci(
+    source,
+    input.producer_policy,
+    producer,
+    request,
+    input.jobs,
+    artifacts,
+    harness.clock.now_ms(),
+  )
+  if input.action == "inspect" || assessment.assessment.status != "admitted" {
+    harness.stdio.println(json_stringify({observation: assessment, admission: nil}))
+    if assessment.assessment.status != "admitted" {
+      harness.runtime.exit(1)
+    }
+    return
+  }
+  const issuer = input.issuer
+  require issuer != nil
+    && request.policy.admission_keys.any(
+      { key -> key.id == issuer.id && key.trust_domain == request.installation },
+    ),
+    "issue requires an enrolled admission issuer"
+  const signed: SignedAdmission = {
+    record: assessment.record,
+    signer: issuer.id,
+    signature: ed25519_sign(
+      harness.secrets.read(issuer.secret),
+      admission_bytes(assessment.record),
+    ),
+  }
+  require verify_admission(signed, request.policy) == assessment.assessment,
+    "admission issuer did not authenticate the assessed record"
+  harness.stdio.println(json_stringify({observation: assessment, admission: signed}))
+}

@@ -39,6 +39,14 @@ that arrives after CI does not change that execution identity. The admission
 issuer still signs the current complete review facts; a changed source, scope
 or policy requires fresh qualification.
 
+The GitHub export provides `github_ci_identities` and `assess_github_ci`.
+The first projects the signed stock inventory into shared CI registration;
+the second joins the original provider census with actual signed `JobRun`
+artifacts. `assess_admission` uses the final verifier before an issuer key is
+read. Assessment alone grants no admission authority. The
+`admission-cli.harn` command reads live CI and current reviews, then optionally
+issues a signed receipt. Hosted sandbox qualification remains in progress.
+
 ## Verify the package
 
 ```sh
