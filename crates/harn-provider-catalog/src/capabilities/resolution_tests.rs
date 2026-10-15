@@ -1,4 +1,17 @@
-use super::{CapabilitiesFile, CapabilityRoute, CapabilityRules};
+use super::{Capabilities, CapabilitiesFile, CapabilityRoute, CapabilityRules};
+
+#[test]
+fn unmatched_route_preserves_the_complete_restrictive_default() {
+    let base = CapabilitiesFile::default();
+    let result = CapabilityRules::new(&base, None).resolve(CapabilityRoute {
+        provider: "unknown",
+        model: "unknown",
+        responses_api: false,
+    });
+    assert!(!result.matched());
+    assert!(!result.has_defaults());
+    assert_eq!(result.capabilities, Capabilities::default());
+}
 
 #[test]
 fn explicit_overlay_extends_builtin_and_preserves_authored_provenance() {
@@ -56,11 +69,18 @@ fn unmatched_mock_is_distinct_from_a_matched_restrictive_route() {
 model_match = "restricted"
 native_tools = false
 vision = false
+[[provider.mock]]
+model_match = "capable"
+native_tools = true
 "#,
     )
     .unwrap();
     let rules = CapabilityRules::new(&base, None);
-    for (model, matched, native_tools) in [("restricted", true, false), ("unknown", false, true)] {
+    for (model, matched, native_tools) in [
+        ("restricted", true, false),
+        ("capable", true, true),
+        ("unknown", false, false),
+    ] {
         let result = rules.resolve(CapabilityRoute {
             provider: "mock",
             model,
