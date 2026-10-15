@@ -1,8 +1,8 @@
 //! OpenAI-compatible wire encoding over an explicitly captured route.
 
 pub mod messages;
-pub mod openrouter;
-pub mod reasoning;
+mod openrouter;
+mod reasoning;
 mod tools;
 
 #[cfg(any(test, feature = "test-support"))]
@@ -21,10 +21,8 @@ use messages::{
     enforce_single_tool_call_history, maybe_remap_tool_call_text,
     relocate_tool_message_images_to_user, sanitize_openai_message_for_request,
 };
-pub use openrouter::{
-    apply_openrouter_provider_order, apply_openrouter_route_denylist,
-    ensure_openrouter_require_parameters,
-};
+pub use openrouter::ensure_openrouter_require_parameters;
+use openrouter::{apply_openrouter_provider_order, apply_openrouter_route_denylist};
 use reasoning::{
     enabled_reasoning_config, groq_qwen_reasoning_effort, is_openrouter_reasoning_disable,
     minimax_thinking_config, model_declares_reasoning, openrouter_reasoning_config,
