@@ -58,7 +58,9 @@ pub use debug::{DebugAction, DebugState};
 pub(crate) use harness_seam::{HarnessMethodFuture, HarnessMethods};
 pub use module_phase_timing::{ModulePhaseRecorder, ModulePhaseStats};
 pub use modules::resolve_module_import_path;
-pub(crate) use runtime::{BuiltinGateDecision, VmBuiltinBridge, VmRuntime, VmRuntimeBaseline};
+pub(crate) use runtime::{
+    BuiltinGateDecision, VmBuiltinBridge, VmRuntime, VmRuntimeBaseline, VmTaskCleanup,
+};
 pub(crate) use runtime_scope::{scope_runtime, VmExecutionScope};
 pub use state::{Vm, VmBaseline};
 pub(crate) use stdlib_artifact::prepare_stdlib_module_artifact;

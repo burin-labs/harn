@@ -23,8 +23,8 @@
     "value->vm": 6,
     "vm->agent_sessions": 16,
     "vm->connectors": 3,
-    "vm->llm": 12,
-    "vm->native_vm": 11,
+    "vm->llm": 11,
+    "vm->native_vm": 8,
     "vm->orchestration": 69,
     "vm->stdlib": 55,
     "vm->triggers": 5

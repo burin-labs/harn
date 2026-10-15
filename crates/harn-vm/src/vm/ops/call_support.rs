@@ -12,7 +12,7 @@ pub(super) fn finish_task_join(
     cleanup: PendingTaskCleanup,
 ) -> VmTaskJoinResult {
     if !matches!(&joined, Ok(Ok(_))) {
-        schedule_task_cleanup(cleanup.task_id, cleanup.runtimes.as_ref().clone());
+        schedule_task_cleanup(cleanup.task_id, cleanup.runtimes);
     }
     joined
 }
@@ -27,13 +27,13 @@ pub(crate) fn abort_task_detached(owned: SpawnedTask) {
     // again panics. Cleanup needs the task identity, not its discarded output,
     // so never hand an already-finished handle to the waiter.
     if task.handle.is_finished() {
-        schedule_task_cleanup(task_id, runtimes.as_ref().clone());
+        schedule_task_cleanup(task_id, runtimes);
         return;
     }
     task.cancel_token
         .store(true, std::sync::atomic::Ordering::SeqCst);
     task.handle.abort();
-    schedule_task_cleanup_after(task_id, runtimes.as_ref().clone(), async move {
+    schedule_task_cleanup_after(task_id, runtimes, async move {
         let _ = task.handle.await;
     });
 }
@@ -43,22 +43,19 @@ pub(crate) fn abort_task_detached(owned: SpawnedTask) {
 /// no late admission or retry-exhaustion path that can discard the owner.
 pub(crate) fn schedule_task_cleanup(
     task_id: String,
-    runtimes: crate::agent_lifecycle_cleanup::CleanupRuntimes,
+    runtimes: std::sync::Arc<dyn super::super::VmTaskCleanup>,
 ) {
     schedule_task_cleanup_after(task_id, runtimes, std::future::ready(()));
 }
 
 fn schedule_task_cleanup_after<F>(
     task_id: String,
-    runtimes: crate::agent_lifecycle_cleanup::CleanupRuntimes,
+    runtimes: std::sync::Arc<dyn super::super::VmTaskCleanup>,
     before_cleanup: F,
 ) where
     F: std::future::Future<Output = ()> + Send + 'static,
 {
-    crate::vm::subtask::spawn_lifecycle_cleanup(async move {
-        before_cleanup.await;
-        crate::agent_lifecycle_cleanup::schedule(task_id, runtimes);
-    });
+    runtimes.schedule(task_id, Box::pin(before_cleanup));
 }
 
 pub(super) async fn abort_task_and_wait(owned: SpawnedTask) -> Result<(), crate::value::VmError> {

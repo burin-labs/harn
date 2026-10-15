@@ -5,6 +5,8 @@ use crate::vm::{BuiltinGateDecision, Vm, VmRuntime, VmRuntimeBaseline};
 use std::{any::Any, path::Path, sync::Arc};
 use std::{future::Future, pin::Pin};
 
+mod task_cleanup;
+
 #[derive(Clone)]
 pub(crate) struct NativeExecutionState {
     pub bridge: Option<Arc<crate::bridge::HostBridge>>,
@@ -69,12 +71,30 @@ impl VmRuntime for NativeExecutionState {
         crate::harness_methods::runtime_methods()
     }
 
-    fn top_level_scope(&self, vm: &mut Vm) -> Box<dyn crate::vm::VmExecutionScope> {
-        vm.capture_agent_cleanup_runtimes();
+    fn prepare_top_level(&mut self, execution_id: &crate::ExecutionId, new_execution: bool) {
+        if new_execution {
+            // Receipts from one run must never appear in the next run's record.
+            crate::llm::reset_reasoning_receipts();
+            self.evaluation.journal = Arc::default();
+        }
+        self.cleanup_runtimes = Some(Arc::new(
+            self.current_cleanup_runtimes(execution_id)
+                .capture_transport(),
+        ));
+    }
+
+    fn top_level_scope(
+        &self,
+        execution_id: &crate::ExecutionId,
+    ) -> Box<dyn crate::vm::VmExecutionScope> {
         Box::new(NativeExecutionScope {
-            ambient: vm.capture_top_level_ambient(),
+            ambient: self.capture_top_level_ambient(execution_id),
             pools: Arc::clone(&self.pool_registry),
         })
+    }
+
+    fn task_cleanup(&self, execution_id: &crate::ExecutionId) -> Arc<dyn crate::vm::VmTaskCleanup> {
+        self.retained_cleanup_runtimes(execution_id)
     }
 
     fn rebind_execution_state(&self, vm: &mut Vm) {
@@ -183,20 +203,25 @@ impl crate::vm::VmExecutionScope for NativeExecutionScope {
     }
 }
 
-impl Vm {
-    pub(crate) fn capture_top_level_ambient(&self) -> crate::orchestration::AmbientExecutionScope {
+impl NativeExecutionState {
+    fn capture_top_level_ambient(
+        &self,
+        execution_id: &crate::ExecutionId,
+    ) -> crate::orchestration::AmbientExecutionScope {
         crate::orchestration::AmbientExecutionScope::capture_for_top_level_execution(
-            self.execution_id.clone(),
-            self.native().llm_mock_context.clone(),
-            self.native().worker_registry.clone(),
-            self.native().daemon_registry.clone(),
-            self.native().trigger_registry.clone(),
-            self.native().session_runtime.clone(),
-            self.native().tracing_runtime.clone(),
-            self.native().agent_host_session_runtime.clone(),
+            execution_id.clone(),
+            self.llm_mock_context.clone(),
+            self.worker_registry.clone(),
+            self.daemon_registry.clone(),
+            self.trigger_registry.clone(),
+            self.session_runtime.clone(),
+            self.tracing_runtime.clone(),
+            self.agent_host_session_runtime.clone(),
         )
     }
+}
 
+impl Vm {
     /// Evaluate a decision under this interpreter's execution and receipt owner.
     pub async fn evaluate_decision(
         &mut self,
@@ -207,8 +232,7 @@ impl Vm {
     ) -> Result<crate::llm::decision::EvaluationResult, VmError> {
         self.ensure_execution_available()?;
         self.prepare_execution_for_top_level();
-        self.capture_agent_cleanup_runtimes();
-        let ambient = self.capture_top_level_ambient();
+        let ambient = self.native().capture_top_level_ambient(self.execution_id());
         let ctx = crate::vm::AsyncBuiltinCtx::from_inline_parent(self);
         crate::orchestration::scope_ambient(ambient, async {
             crate::llm::decision::evaluate_json(&ctx, site_id, state, questions, policy).await

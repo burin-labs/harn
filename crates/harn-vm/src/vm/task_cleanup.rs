@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 pub(crate) struct SpawnedTask {
     pub(crate) task: crate::value::VmTaskHandle,
-    pub(crate) runtimes: Arc<crate::agent_lifecycle_cleanup::CleanupRuntimes>,
+    pub(crate) runtimes: Arc<dyn super::VmTaskCleanup>,
 }
 
 impl SpawnedTask {
@@ -18,22 +18,19 @@ impl SpawnedTask {
 #[derive(Clone)]
 pub(crate) struct PendingTaskCleanup {
     pub(crate) task_id: String,
-    pub(crate) runtimes: Arc<crate::agent_lifecycle_cleanup::CleanupRuntimes>,
+    pub(crate) runtimes: Arc<dyn super::VmTaskCleanup>,
 }
 
 impl Vm {
     /// Stop every outstanding child and transfer durable agent cleanup to the
     /// process-owned recovery runtime before this execution releases state.
     pub(crate) fn cancel_spawned_tasks(&mut self) {
-        let runtimes = self.agent_cleanup_runtimes();
+        let runtimes = self.retained_task_cleanup();
         for (_, task) in std::mem::take(&mut self.spawned_tasks) {
             super::ops::abort_task_detached(task);
         }
         for (_, pending) in std::mem::take(&mut self.pending_task_cleanups) {
-            super::ops::call_support::schedule_task_cleanup(
-                pending.task_id,
-                pending.runtimes.as_ref().clone(),
-            );
+            super::ops::call_support::schedule_task_cleanup(pending.task_id, pending.runtimes);
         }
         // A top-level VM can own an agent lifecycle independently of spawned
         // children. Inline child VMs share that identity but must not activate
@@ -46,10 +43,6 @@ impl Vm {
         }
     }
 
-    pub(crate) fn agent_cleanup_runtimes(&self) -> crate::agent_lifecycle_cleanup::CleanupRuntimes {
-        self.retained_agent_cleanup_runtimes().as_ref().clone()
-    }
-
     pub(crate) fn register_spawned_task(
         &mut self,
         public_id: String,
@@ -59,36 +52,12 @@ impl Vm {
             public_id,
             SpawnedTask {
                 task,
-                runtimes: self.retained_agent_cleanup_runtimes(),
+                runtimes: self.retained_task_cleanup(),
             },
         );
     }
 
-    pub(crate) fn capture_agent_cleanup_runtimes(&mut self) {
-        // Entry reads the VM's current runtimes, never a prior execution's
-        // retained snapshot. Drop and scheduling must use this captured owner.
-        use crate::native_vm::NativeVmState;
-        let runtimes = self.current_agent_cleanup_runtimes().capture_transport();
-        self.native_mut().cleanup_runtimes = Some(Arc::new(runtimes));
-    }
-
-    fn retained_agent_cleanup_runtimes(
-        &self,
-    ) -> Arc<crate::agent_lifecycle_cleanup::CleanupRuntimes> {
-        use crate::native_vm::NativeVmState;
-        match &self.native().cleanup_runtimes {
-            Some(runtimes) => runtimes.clone(),
-            // Never-executed VMs have no originating transport to inherit.
-            None => Arc::new(self.current_agent_cleanup_runtimes()),
-        }
-    }
-
-    fn current_agent_cleanup_runtimes(&self) -> crate::agent_lifecycle_cleanup::CleanupRuntimes {
-        use crate::native_vm::NativeVmState;
-        crate::agent_lifecycle_cleanup::CleanupRuntimes::new(
-            self.execution_id.to_string(),
-            self.native().session_runtime.clone(),
-            self.native().agent_host_session_runtime.clone(),
-        )
+    fn retained_task_cleanup(&self) -> Arc<dyn super::VmTaskCleanup> {
+        self.runtime.task_cleanup(&self.execution_id)
     }
 }

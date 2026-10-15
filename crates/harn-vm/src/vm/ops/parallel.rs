@@ -695,10 +695,7 @@ impl super::super::Vm {
                         "task_scope.cancel_cleanup",
                         &format!("durable sibling cleanup remains pending: {error}"),
                     );
-                    super::call_support::schedule_task_cleanup(
-                        pending.task_id,
-                        pending.runtimes.as_ref().clone(),
-                    );
+                    super::call_support::schedule_task_cleanup(pending.task_id, pending.runtimes);
                     cleanup_error.get_or_insert(error);
                 }
                 continue;

@@ -82,8 +82,7 @@ impl TopLevelEntry {
 impl Vm {
     pub(super) fn prepare_top_level_scope(&mut self) -> Box<dyn super::VmExecutionScope> {
         self.prepare_execution_for_top_level();
-        let runtime = Arc::clone(&self.runtime);
-        runtime.top_level_scope(self)
+        self.runtime.top_level_scope(&self.execution_id)
     }
 
     /// Execute a compiled callable entry with explicit values under a host

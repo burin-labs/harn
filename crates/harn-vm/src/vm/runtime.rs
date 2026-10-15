@@ -24,7 +24,12 @@ pub(crate) trait VmRuntime: Any + Send + Sync {
     fn baseline(&self) -> Arc<dyn VmRuntimeBaseline>;
     fn builtin_bridge(&self) -> Option<&dyn VmBuiltinBridge>;
     fn harness_methods(&self) -> &dyn super::HarnessMethods;
-    fn top_level_scope(&self, vm: &mut super::Vm) -> Box<dyn super::VmExecutionScope>;
+    fn prepare_top_level(&mut self, execution_id: &crate::ExecutionId, new_execution: bool);
+    fn top_level_scope(
+        &self,
+        execution_id: &crate::ExecutionId,
+    ) -> Box<dyn super::VmExecutionScope>;
+    fn task_cleanup(&self, execution_id: &crate::ExecutionId) -> Arc<dyn VmTaskCleanup>;
     fn rebind_execution_state(&self, vm: &mut super::Vm);
     fn set_source_dir(&self, dir: &Path);
     fn denied_builtin_family(
@@ -54,4 +59,14 @@ pub(crate) trait VmRuntime: Any + Send + Sync {
 
 pub(crate) trait VmRuntimeBaseline: Send + Sync {
     fn instantiate(&self, source_dir: Option<&Path>) -> Arc<dyn VmRuntime>;
+}
+
+/// Retained cleanup ownership for one execution, independent of later scopes.
+pub(crate) trait VmTaskCleanup: Send + Sync {
+    fn abandon_task<'a>(
+        &'a self,
+        task_id: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<(), VmError>> + Send + 'a>>;
+
+    fn schedule(&self, task_id: String, before_cleanup: Pin<Box<dyn Future<Output = ()> + Send>>);
 }

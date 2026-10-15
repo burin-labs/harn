@@ -34,8 +34,17 @@ impl VmRuntime for RefusingRuntime {
     fn harness_methods(&self) -> &dyn crate::vm::HarnessMethods {
         self.native.harness_methods()
     }
-    fn top_level_scope(&self, vm: &mut Vm) -> Box<dyn crate::vm::VmExecutionScope> {
-        self.native.top_level_scope(vm)
+    fn prepare_top_level(&mut self, execution_id: &crate::ExecutionId, new_execution: bool) {
+        self.native.prepare_top_level(execution_id, new_execution);
+    }
+    fn top_level_scope(
+        &self,
+        execution_id: &crate::ExecutionId,
+    ) -> Box<dyn crate::vm::VmExecutionScope> {
+        self.native.top_level_scope(execution_id)
+    }
+    fn task_cleanup(&self, execution_id: &crate::ExecutionId) -> Arc<dyn crate::vm::VmTaskCleanup> {
+        self.native.task_cleanup(execution_id)
     }
     fn baseline(&self) -> Arc<dyn VmRuntimeBaseline> {
         Arc::new(RefusingBaseline {

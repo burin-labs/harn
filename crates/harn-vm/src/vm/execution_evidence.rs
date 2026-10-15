@@ -22,18 +22,16 @@ impl Vm {
     }
 
     pub(crate) fn prepare_execution_for_top_level(&mut self) {
-        if !self.owns_execution {
-            return;
+        if self.owns_execution {
+            self.execution_id = crate::observability::execution_scope::mint_execution_scope();
+            self.flight_recorder = self.flight_recorder_max_events.map(|max_events| {
+                crate::flight_recorder::FlightRecorder::new(self.execution_id.clone(), max_events)
+            });
         }
-        self.execution_id = crate::observability::execution_scope::mint_execution_scope();
-        // One run's receipts must never be persisted onto the next run's
-        // record, so the collector is cleared at the top-level boundary that
-        // mints the new execution identity.
-        crate::llm::reset_reasoning_receipts();
-        self.native_mut().evaluation.journal = std::sync::Arc::default();
-        self.flight_recorder = self.flight_recorder_max_events.map(|max_events| {
-            crate::flight_recorder::FlightRecorder::new(self.execution_id.clone(), max_events)
-        });
+        let execution_id = self.execution_id.clone();
+        let new_execution = self.owns_execution;
+        self.runtime_mut()
+            .prepare_top_level(&execution_id, new_execution);
     }
 
     /// Durable identity of the current or most recently completed execution.
