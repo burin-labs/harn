@@ -60,6 +60,7 @@ use crate::stdlib::host::process_admission::{
 use crate::stdlib::process::{swap_session_environment, swap_source_dir};
 use crate::stdlib::template::llm_context::{swap_llm_render_stack, LlmRenderContextFrame};
 pub(crate) mod blocking;
+mod polling;
 mod subtask_state;
 mod top_level;
 
@@ -697,36 +698,6 @@ impl Drop for RestoreGuard<'_> {
         if self.armed {
             self.scope.swap_in_place();
         }
-    }
-}
-
-impl<F: Future> Future for Scoped<F> {
-    type Output = F::Output;
-
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<F::Output> {
-        let this = self.project();
-        this.scope
-            .poll_scoped(*this.commit_on_ready, || this.inner.poll(cx))
-    }
-}
-
-impl AmbientExecutionScope {
-    pub(crate) fn poll_scoped<T>(
-        &mut self,
-        commit_on_ready: bool,
-        poll: impl FnOnce() -> Poll<T>,
-    ) -> Poll<T> {
-        // Install this task's scope, capturing whatever the polling thread had.
-        self.swap_in_place();
-        let mut restore = RestoreGuard {
-            scope: self,
-            armed: true,
-        };
-        let result = poll();
-        if result.is_ready() && commit_on_ready {
-            restore.commit();
-        }
-        result
     }
 }
 

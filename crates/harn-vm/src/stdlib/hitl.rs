@@ -1,4 +1,4 @@
-use crate::value::VmDictExt;
+use crate::{native_vm::NativeVmState, value::VmDictExt};
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
@@ -1303,7 +1303,6 @@ fn parse_hitl_response_dict(
 }
 
 fn maybe_notify_host(ctx: Option<&AsyncBuiltinCtx>, request: &HitlRequestEnvelope) {
-    use crate::native_vm::NativeVmState;
     let Some(bridge) = ctx.and_then(|ctx| ctx.child_vm().native().bridge.clone()) else {
         return;
     };

@@ -5,6 +5,7 @@ use crate::vm::{BuiltinGateDecision, Vm, VmRuntime, VmRuntimeBaseline};
 use std::{any::Any, path::Path, sync::Arc};
 use std::{future::Future, pin::Pin};
 
+mod bridge;
 mod lifecycle;
 mod task_cleanup;
 mod tracing;

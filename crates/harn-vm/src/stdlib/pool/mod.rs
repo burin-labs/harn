@@ -19,7 +19,6 @@
 use crate::value::VmDictExt;
 use std::any::Any;
 use std::collections::{BTreeMap, HashMap, VecDeque};
-use std::future::Future;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -38,7 +37,10 @@ use harn_parser::diagnostic_codes::Code;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
+mod scope;
 mod storage;
+use scope::current_pool_registry;
+pub(crate) use scope::{new_pool_registry, with_pool_registry_poll, with_pool_registry_scope};
 use storage::{PersistedPoolMeta, PersistedPoolState, PersistedTask, PoolDurableStore, PoolRecord};
 
 /// Default `max_concurrent` when a pool is created without one.
@@ -475,42 +477,6 @@ impl PoolRegistryState {
         self.pools.clear();
         self.names.clear();
     }
-}
-
-tokio::task_local! {
-    static ACTIVE_POOL_REGISTRY: Arc<PoolRegistry>;
-}
-
-static FALLBACK_POOL_REGISTRY: std::sync::OnceLock<Arc<PoolRegistry>> = std::sync::OnceLock::new();
-
-pub(crate) fn new_pool_registry() -> Arc<PoolRegistry> {
-    Arc::new(PoolRegistry::default())
-}
-
-pub(crate) async fn with_pool_registry_scope<F>(registry: Arc<PoolRegistry>, future: F) -> F::Output
-where
-    F: Future,
-{
-    ACTIVE_POOL_REGISTRY.scope(registry, future).await
-}
-
-pub(crate) fn with_pool_registry_poll<T>(
-    registry: &Arc<PoolRegistry>,
-    poll: impl FnOnce() -> T,
-) -> T {
-    ACTIVE_POOL_REGISTRY.sync_scope(Arc::clone(registry), poll)
-}
-
-fn fallback_pool_registry() -> Arc<PoolRegistry> {
-    FALLBACK_POOL_REGISTRY
-        .get_or_init(|| Arc::new(PoolRegistry::default()))
-        .clone()
-}
-
-fn current_pool_registry() -> Arc<PoolRegistry> {
-    ACTIVE_POOL_REGISTRY
-        .try_with(Arc::clone)
-        .unwrap_or_else(|_| fallback_pool_registry())
 }
 
 fn pool_registry_for_ctx(ctx: Option<&AsyncBuiltinCtx>) -> Arc<PoolRegistry> {

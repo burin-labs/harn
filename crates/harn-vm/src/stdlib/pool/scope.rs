@@ -1,0 +1,43 @@
+//! Pool registry ownership across native polls and spawned tasks.
+
+use super::PoolRegistry;
+use std::{
+    future::Future,
+    sync::{Arc, OnceLock},
+};
+
+tokio::task_local! {
+    static ACTIVE_POOL_REGISTRY: Arc<PoolRegistry>;
+}
+
+static FALLBACK_POOL_REGISTRY: OnceLock<Arc<PoolRegistry>> = OnceLock::new();
+
+pub(crate) fn new_pool_registry() -> Arc<PoolRegistry> {
+    Arc::new(PoolRegistry::default())
+}
+
+pub(crate) async fn with_pool_registry_scope<F>(registry: Arc<PoolRegistry>, future: F) -> F::Output
+where
+    F: Future,
+{
+    ACTIVE_POOL_REGISTRY.scope(registry, future).await
+}
+
+pub(crate) fn with_pool_registry_poll<T>(
+    registry: &Arc<PoolRegistry>,
+    poll: impl FnOnce() -> T,
+) -> T {
+    ACTIVE_POOL_REGISTRY.sync_scope(Arc::clone(registry), poll)
+}
+
+fn fallback_pool_registry() -> Arc<PoolRegistry> {
+    FALLBACK_POOL_REGISTRY
+        .get_or_init(new_pool_registry)
+        .clone()
+}
+
+pub(super) fn current_pool_registry() -> Arc<PoolRegistry> {
+    ACTIVE_POOL_REGISTRY
+        .try_with(Arc::clone)
+        .unwrap_or_else(|_| fallback_pool_registry())
+}
