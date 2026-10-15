@@ -103,7 +103,7 @@ pub fn runtime_content_fingerprint() -> &'static RuntimeContentFingerprint {
     static FINGERPRINT: OnceLock<RuntimeContentFingerprint> = OnceLock::new();
     FINGERPRINT.get_or_init(|| {
         let compatibility = RuntimeCompatibilityFingerprint {
-            codegen_fingerprint: crate::bytecode_cache::CODEGEN_FINGERPRINT.to_string(),
+            codegen_fingerprint: crate::bytecode_cache::compiler_fingerprint().to_string(),
             bytecode_schema_version: crate::bytecode_cache::SCHEMA_VERSION,
             linked_program_schema_version: crate::linked_program::LINKED_PROGRAM_SCHEMA_VERSION,
             linker_algorithm_version: crate::linked_program::LINKER_ALGORITHM_VERSION,
@@ -334,7 +334,7 @@ mod tests {
         );
         assert_eq!(
             actual.compatibility.codegen_fingerprint,
-            crate::bytecode_cache::CODEGEN_FINGERPRINT
+            crate::bytecode_cache::compiler_fingerprint().to_string()
         );
         assert_eq!(
             actual.compatibility.build_features,

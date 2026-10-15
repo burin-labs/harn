@@ -35,6 +35,14 @@ fn codegen_fingerprint_tracks_derived_interface_owners() {
         "harn-vm-core/src/bytecode_cache/interface.rs",
         "harn-vm-core/src/context_manifest.rs",
         "harn-vm-core/src/module_source.rs",
+        "harn-vm-core/src/module_artifact/context.rs",
+        "harn-vm-core/src/schema/type_check.rs",
+        "harn-vm-core/src/source_compile.rs",
+        "harn-vm-core/src/typecheck.rs",
+        "harn-vm-core/src/vm/builtin_manifest.rs",
+        "harn-builtin-meta/src/lib.rs",
+        "harn-builtin-registry/src/lib.rs",
+        "harn-capability-contracts/src/lib.rs",
     ] {
         let path = root.path().join(relative);
         let original = fs::read(&path).unwrap();
@@ -54,6 +62,8 @@ fn codegen_fingerprint_tracks_derived_interface_owners() {
     assert_ne!(fingerprint_inputs(&compiler_inputs(&manifest)), baseline);
     assert!(watch_roots(&manifest).contains(&root.path().join("harn-modules/src")));
     assert!(watch_roots(&manifest).contains(&manifest.join("src/bytecode_cache")));
+    assert!(watch_roots(&manifest).contains(&manifest.join("src/module_artifact")));
+    assert!(watch_roots(&manifest).contains(&manifest.join("src/schema")));
     fs::remove_file(new_module).unwrap();
     assert_eq!(fingerprint_inputs(&compiler_inputs(&manifest)), baseline);
 
@@ -139,6 +149,26 @@ fn seed_compiler_sources(root: &Path, compiler_body: &str) {
             "pub fn validate() {}",
         ),
         ("harn-vm-core/src/module_source.rs", "pub fn identity() {}"),
+        (
+            "harn-vm-core/src/module_artifact/context.rs",
+            "pub fn context() {}",
+        ),
+        (
+            "harn-vm-core/src/schema/type_check.rs",
+            "pub fn type_check() {}",
+        ),
+        ("harn-vm-core/src/source_compile.rs", "pub fn compile() {}"),
+        ("harn-vm-core/src/typecheck.rs", "pub fn check() {}"),
+        (
+            "harn-vm-core/src/vm/builtin_manifest.rs",
+            "pub fn manifest() {}",
+        ),
+        ("harn-builtin-meta/src/lib.rs", "pub struct Contract;"),
+        ("harn-builtin-registry/src/lib.rs", "pub fn lookup() {}"),
+        (
+            "harn-capability-contracts/src/lib.rs",
+            "pub fn signature() {}",
+        ),
         (
             "harn-vm-core/src/module_artifact.rs",
             "pub fn compile_artifact() {}",

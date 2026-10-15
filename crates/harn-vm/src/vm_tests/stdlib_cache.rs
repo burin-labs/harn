@@ -204,6 +204,7 @@ fn warm_embedded_stdlib_leaves_the_agent_stack_on_disk() {
     let before = harn_vm_core::vm::module_interface_resolution_count_for_test();
     runtime.block_on(async {
         let mut vm = crate::new_vm();
+        crate::register_vm_stdlib(&mut vm);
         vm.load_module_exports_from_import("std/agent/loop")
             .await
             .expect("stdlib import succeeds");

@@ -23,6 +23,7 @@ pub fn prepare_entry_store(source_path: &Path, source: &str) -> super::LookupOut
             source_hash,
             context_hash,
             harn_version: std::borrow::Cow::Borrowed(super::HARN_VERSION),
+            compiler_contracts: super::compiler_contracts::fingerprint(),
             compiler_tag: super::compiler_options_tag(super::CompilerOptions::from_env()),
             provenance: super::ModuleProvenance::User,
         },

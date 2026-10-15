@@ -205,7 +205,7 @@ child_effect()
             drop(execution);
 
 
-            assert!(!vm.frame_count() == 0, "fixture must abandon a live frame");
+            assert!(vm.frame_count() > 0, "fixture must abandon a live frame");
             assert_eq!(
                 crate::stdlib::process::source_root_path(),
                 baseline_dir.path()

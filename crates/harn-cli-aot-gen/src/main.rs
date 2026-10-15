@@ -278,7 +278,7 @@ fn build_expected(
     let manifest = CliAotManifest {
         schema_version: CLI_AOT_MANIFEST_SCHEMA_VERSION,
         harn_version: contract.harn_version.clone(),
-        compiler_fingerprint: contract.compiler_fingerprint.clone(),
+        compiler_fingerprint: harn_vm::bytecode_cache::compiler_fingerprint().to_string(),
         scripts,
     };
     Ok(ExpectedArtifacts {

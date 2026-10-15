@@ -106,8 +106,33 @@ fn header_mismatch_returns_none() {
         context_hash: key.context_hash,
         harn_version: std::borrow::Cow::Borrowed(HARN_VERSION),
         compiler_tag: key.compiler_tag,
+        compiler_contracts: key.compiler_contracts,
     };
     assert!(read_entry_candidate(&path, &other).unwrap().is_none());
+}
+
+#[test]
+fn artifact_header_refuses_a_different_builtin_contract_set() {
+    let chunk = compile_source("1 + 1").expect("compile");
+    let key = CacheKey::from_source(Path::new("/tmp/contracts.harn"), "1 + 1");
+    let tmp = tempfile::tempdir().unwrap();
+    let path = tmp.path().join("contracts.harnbc");
+    store_at(&path, &key, &chunk).expect("write");
+    assert!(read_entry_candidate(&path, &key).unwrap().is_some());
+
+    let mut foreign = key.clone();
+    foreign.compiler_contracts[0] ^= 1;
+    assert_ne!(key.module_filename(), foreign.module_filename());
+    assert!(read_entry_candidate(&path, &foreign).unwrap().is_none());
+
+    let module = crate::module_artifact::compile_module_artifact_from_source(
+        Path::new("/tmp/contracts.harn"),
+        "pub fn value() { return 1 }",
+    )
+    .unwrap();
+    let encoded = serialize_module_artifact(&key, &module).unwrap();
+    assert!(read_header_from(encoded.as_slice(), &key, Some(&key.context_hash)).is_some());
+    assert!(read_header_from(encoded.as_slice(), &foreign, Some(&foreign.context_hash)).is_none());
 }
 
 #[test]
@@ -730,6 +755,7 @@ fn seed_entry(tmp: &Path, dep_body: &str, settle: Settle) -> (PathBuf, String) {
         source_hash: sha256(entry_source.as_bytes()),
         context_hash,
         harn_version: std::borrow::Cow::Borrowed(HARN_VERSION),
+        compiler_contracts: compiler_contracts::fingerprint(),
         compiler_tag: compiler_options_tag(CompilerOptions::from_env()),
     };
     let chunk = compile_source(&entry_source).expect("compile");
@@ -868,6 +894,7 @@ fn stored_manifest(entry: &Path, entry_source: &str) -> ContextManifest {
             source_hash: sha256(entry_source.as_bytes()),
             context_hash: [0u8; 32],
             harn_version: std::borrow::Cow::Borrowed(HARN_VERSION),
+            compiler_contracts: compiler_contracts::fingerprint(),
             compiler_tag: compiler_options_tag(CompilerOptions::from_env()),
         },
     )
@@ -1048,6 +1075,7 @@ fn a_touched_dependency_refreshes_the_manifest_instead_of_re_walking_forever() {
             source_hash: sha256(entry_source.as_bytes()),
             context_hash: [0u8; 32],
             harn_version: std::borrow::Cow::Borrowed(HARN_VERSION),
+            compiler_contracts: compiler_contracts::fingerprint(),
             compiler_tag: compiler_options_tag(CompilerOptions::from_env()),
         },
     )
@@ -1169,6 +1197,7 @@ fn store_beside(entry: &Path, source: &str) -> PathBuf {
         source_hash: sha256(source.as_bytes()),
         context_hash,
         harn_version: std::borrow::Cow::Borrowed(HARN_VERSION),
+        compiler_contracts: compiler_contracts::fingerprint(),
         compiler_tag: compiler_options_tag(CompilerOptions::from_env()),
     };
     let artifact = adjacent_cache_path(entry).unwrap();
@@ -1253,6 +1282,7 @@ fn an_artifact_from_another_build_of_this_version_is_not_served() {
         source_hash: sha256(source.as_bytes()),
         context_hash,
         harn_version: std::borrow::Cow::Borrowed(HARN_VERSION),
+        compiler_contracts: compiler_contracts::fingerprint(),
         compiler_tag: compiler_options_tag(CompilerOptions::from_env()),
     };
     let payload = serialize_cache_payload(&EntryPayload {

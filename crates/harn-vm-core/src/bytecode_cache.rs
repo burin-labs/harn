@@ -30,6 +30,7 @@
 //! provenance   : u8        authority the artifact was compiled under
 //! source_hash  : [u8; 32]
 //! context_hash : [u8; 32]
+//! contracts    : [u8; 32]   typed builtin signatures and authority
 //! payload      : postcard-serialized payload for `kind`
 //! ```
 //!
@@ -112,7 +113,8 @@ pub const MAGIC: &[u8; 8] = b"HARNBC\0\0";
 /// v15: manifests record what each bare (package-shaped) import resolved to,
 /// so a reinstalled package generation invalidates them; module interfaces are
 /// persisted beside their manifest (kind 3).
-pub const SCHEMA_VERSION: u32 = 15;
+/// v16: artifacts bind the complete builtin signature and authority contracts.
+pub const SCHEMA_VERSION: u32 = 16;
 
 /// Compile-time Harn release. Cache files written by a different release
 /// are rejected on load.
@@ -133,6 +135,9 @@ pub const HARN_VERSION: &str = env!("CARGO_PKG_VERSION");
 /// builds' module artifacts on distinct filenames rather than overwriting each
 /// other, since `module_filename` is derived from that hash.
 pub const CODEGEN_FINGERPRINT: &str = env!("HARN_CODEGEN_FINGERPRINT");
+
+mod compiler_contracts;
+pub use compiler_contracts::compiler_fingerprint;
 
 /// Conventional extension for entry-chunk cache files.
 pub const CACHE_EXTENSION: &str = "harnbc";
@@ -204,6 +209,8 @@ impl LookupOutcome {
 pub struct CacheKey {
     pub source_hash: [u8; 32],
     pub context_hash: [u8; 32],
+    /// Typed builtin contracts used by this compilation, including source authority.
+    pub compiler_contracts: [u8; 32],
     /// Harn version stamped into, and required by, this artifact's header.
     ///
     /// Normally the running binary's own [`HARN_VERSION`]. Release preparation
@@ -241,6 +248,7 @@ impl CacheKey {
             source_hash,
             context_hash,
             harn_version: Cow::Borrowed(HARN_VERSION),
+            compiler_contracts: compiler_contracts::fingerprint(),
             compiler_tag: compiler_options_tag(CompilerOptions::from_env()),
             // Entry chunks are always compiled ordinary. The trusted
             // latch governs `module_provenance`, i.e. the graph a VM
@@ -268,6 +276,7 @@ impl CacheKey {
             source_hash,
             context_hash,
             harn_version: Cow::Borrowed(HARN_VERSION),
+            compiler_contracts: compiler_contracts::fingerprint(),
             compiler_tag: compiler_options_tag(CompilerOptions::from_env()),
             // Entry chunks are always compiled ordinary. The trusted
             // latch governs `module_provenance`, i.e. the graph a VM
@@ -319,6 +328,7 @@ impl CacheKey {
             source_hash: content_hash,
             context_hash: module_compilation_context_hash(compilation_context),
             harn_version: Cow::Borrowed(HARN_VERSION),
+            compiler_contracts: compiler_contracts::fingerprint(),
             compiler_tag: compiler_options_tag(CompilerOptions::from_env()),
             provenance,
         }
@@ -347,6 +357,7 @@ impl CacheKey {
                 EMBEDDED_STDLIB_INTERFACE_DIGEST,
             ),
             harn_version: Cow::Borrowed(HARN_VERSION),
+            compiler_contracts: compiler_contracts::fingerprint(),
             compiler_tag: compiler_options_tag(CompilerOptions::from_env()),
             provenance,
         }
@@ -371,6 +382,7 @@ impl CacheKey {
         let mut hasher = Sha256::new();
         hasher.update(self.source_hash);
         hasher.update(self.context_hash);
+        hasher.update(self.compiler_contracts);
         hasher.update(self.harn_version.as_bytes());
         hasher.update([self.compiler_tag]);
         // Authority is part of the filename, not only of the header check, so a
@@ -564,6 +576,7 @@ pub fn load(source_path: &Path, source: &str) -> LookupOutcome {
         source_hash: sha256(source.as_bytes()),
         context_hash: [0u8; 32],
         harn_version: Cow::Borrowed(HARN_VERSION),
+        compiler_contracts: compiler_contracts::fingerprint(),
         compiler_tag: compiler_options_tag(CompilerOptions::from_env()),
         // Entry chunks are always compiled ordinary. The trusted
         // latch governs `module_provenance`, i.e. the graph a VM
@@ -969,6 +982,7 @@ fn encode_artifact_fingerprinted(
     buf.push(provenance_tag(key.provenance));
     buf.extend_from_slice(&key.source_hash);
     buf.extend_from_slice(&key.context_hash);
+    buf.extend_from_slice(&key.compiler_contracts);
     buf.extend_from_slice(payload);
     buf
 }

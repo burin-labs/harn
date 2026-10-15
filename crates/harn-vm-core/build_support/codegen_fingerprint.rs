@@ -16,8 +16,13 @@ const SOURCE_ROOTS: &[&str] = &[
     "harn-ir/src",
     "harn-kernel/src",
     "harn-modules/src",
+    "harn-builtin-meta/src",
+    "harn-builtin-registry/src",
+    "harn-capability-contracts/src",
     "harn-vm-core/src/chunk",
     "harn-vm-core/src/bytecode_cache",
+    "harn-vm-core/src/module_artifact",
+    "harn-vm-core/src/schema",
 ];
 
 const SOURCE_FILES: &[&str] = &[
@@ -27,6 +32,9 @@ const SOURCE_FILES: &[&str] = &[
     "context_manifest.rs",
     "module_artifact.rs",
     "module_source.rs",
+    "source_compile.rs",
+    "typecheck.rs",
+    "vm/builtin_manifest.rs",
 ];
 
 pub fn compiler_inputs(manifest_dir: &Path) -> Vec<CompilerInput> {

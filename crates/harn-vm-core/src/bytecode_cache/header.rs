@@ -92,6 +92,12 @@ pub(super) fn read_header_from(
     if expected_context.is_some_and(|expected| *expected != context_hash) {
         return None;
     }
+    let mut compiler_contracts = [0; 32];
+    if file.read_exact(&mut compiler_contracts).is_err()
+        || compiler_contracts != key.compiler_contracts
+    {
+        return None;
+    }
     let mut payload = Vec::new();
     if file.read_to_end(&mut payload).is_err() {
         return None;

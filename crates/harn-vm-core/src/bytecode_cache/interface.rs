@@ -64,6 +64,7 @@ impl InterfaceSlot {
         let dir = cache_dir()?;
         let anchor = module_source::canonical_identity(source_path);
         let key = CacheKey {
+            compiler_contracts: super::compiler_contracts::fingerprint(),
             source_hash: sha256(source.as_bytes()),
             context_hash: interface_context_hash(&anchor, CODEGEN_FINGERPRINT),
             harn_version: Cow::Borrowed(HARN_VERSION),

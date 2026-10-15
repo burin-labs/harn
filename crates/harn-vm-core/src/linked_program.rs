@@ -65,7 +65,7 @@ pub fn link_program(
     let mut report = LinkReport {
         linker_algorithm_version: LINKER_ALGORITHM_VERSION,
         harn_version: bytecode_cache::HARN_VERSION.to_string(),
-        codegen_fingerprint: bytecode_cache::CODEGEN_FINGERPRINT.to_string(),
+        codegen_fingerprint: bytecode_cache::compiler_fingerprint().to_string(),
         input_bytecode_bytes: entry_bytes.len() as u64,
         output_bytecode_bytes: entry_bytes.len() as u64,
         user_input_bytes: entry_bytes.len() as u64,
@@ -343,7 +343,7 @@ impl LinkedProgramIdentity {
         Self {
             graph_digest_blake3,
             harn_version: bytecode_cache::HARN_VERSION.to_string(),
-            codegen_fingerprint: bytecode_cache::CODEGEN_FINGERPRINT.to_string(),
+            codegen_fingerprint: bytecode_cache::compiler_fingerprint().to_string(),
             bytecode_schema_version: bytecode_cache::SCHEMA_VERSION,
             linker_algorithm_version: LINKER_ALGORITHM_VERSION,
             optimizations_enabled: crate::CompilerOptions::from_env().optimizations_enabled(),

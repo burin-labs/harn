@@ -93,7 +93,7 @@ struct PreparedModuleCacheKey {
     source_hash: [u8; 32],
     provenance: ModuleProvenance,
     harn_version: &'static str,
-    codegen_fingerprint: &'static str,
+    codegen_fingerprint: Arc<str>,
     optimizations_enabled: bool,
     compilation_context_digest: [u8; 32],
 }
@@ -124,7 +124,7 @@ impl PreparedModuleCacheKey {
             source_hash,
             provenance,
             harn_version: crate::bytecode_cache::HARN_VERSION,
-            codegen_fingerprint: crate::bytecode_cache::CODEGEN_FINGERPRINT,
+            codegen_fingerprint: crate::bytecode_cache::compiler_fingerprint(),
             optimizations_enabled: crate::compiler::CompilerOptions::from_env()
                 .optimizations_enabled(),
             compilation_context_digest: compilation_context.digest(),
