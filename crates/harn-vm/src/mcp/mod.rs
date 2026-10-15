@@ -172,6 +172,14 @@ impl From<VmMcpClientHandle> for crate::value::VmMcpClientHandle {
     }
 }
 
+impl TryFrom<&crate::value::VmMcpClientHandle> for VmMcpClientHandle {
+    type Error = VmError;
+
+    fn try_from(handle: &crate::value::VmMcpClientHandle) -> Result<Self, Self::Error> {
+        native_client(handle).map(|client| client.as_ref().clone())
+    }
+}
+
 pub(crate) fn native_client(
     handle: &crate::value::VmMcpClientHandle,
 ) -> Result<Arc<VmMcpClientHandle>, VmError> {
