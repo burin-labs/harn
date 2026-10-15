@@ -10,7 +10,7 @@ use std::fs;
 
 use harn_lexer::Lexer;
 use harn_parser::Parser;
-use harn_vm::{register_vm_stdlib, Compiler, Harness, Vm, VmValue};
+use harn_vm::{register_vm_stdlib, Compiler, Harness, VmValue};
 use tempfile::TempDir;
 
 fn run_harn(source: &str) -> (VmValue, String) {

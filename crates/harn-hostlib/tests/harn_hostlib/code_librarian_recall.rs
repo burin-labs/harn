@@ -13,7 +13,7 @@ use std::path::PathBuf;
 
 use harn_lexer::Lexer;
 use harn_parser::Parser;
-use harn_vm::{register_vm_stdlib, Compiler, Vm, VmValue};
+use harn_vm::{register_vm_stdlib, Compiler, VmValue};
 
 fn fixture_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/code_index_queries")

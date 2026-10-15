@@ -26,7 +26,7 @@ use harn_hostlib::{
 };
 use harn_lexer::Lexer;
 use harn_parser::Parser;
-use harn_vm::{register_vm_stdlib, Compiler, Vm, VmError, VmValue};
+use harn_vm::{register_vm_stdlib, Compiler, VmError, VmValue};
 use sha2::{Digest, Sha256};
 use tempfile::TempDir;
 

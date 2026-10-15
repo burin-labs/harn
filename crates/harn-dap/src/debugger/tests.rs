@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use std::path::Path;
 use std::path::PathBuf;
 
-use harn_vm::{Vm, VmValue};
+use harn_vm::VmValue;
 use serde_json::json;
 use tempfile::TempDir;
 
