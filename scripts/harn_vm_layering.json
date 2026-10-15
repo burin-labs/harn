@@ -24,7 +24,7 @@
     "vm->connectors": 1,
     "vm->llm": 4,
     "vm->native_vm": 4,
-    "vm->orchestration": 52,
+    "vm->orchestration": 39,
     "vm->stdlib": 44,
     "vm->triggers": 4
   },
