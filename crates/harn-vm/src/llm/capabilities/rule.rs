@@ -36,7 +36,7 @@ pub(super) fn lookup_with_match(
 ) -> (Capabilities, bool) {
     let resolved = resolve_with_features(provider, model, builtin, user, false);
     let matched = resolved.matched();
-    (resolved.capabilities, matched)
+    (resolved.capabilities(), matched)
 }
 
 pub(super) fn first_matching_rule(

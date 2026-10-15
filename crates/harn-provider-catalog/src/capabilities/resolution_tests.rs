@@ -10,7 +10,7 @@ fn unmatched_route_preserves_the_complete_restrictive_default() {
     });
     assert!(!result.matched());
     assert!(!result.has_defaults());
-    assert_eq!(result.capabilities, Capabilities::default());
+    assert_eq!(result.capabilities(), Capabilities::default());
 }
 
 #[test]
@@ -44,9 +44,10 @@ vision = false
         responses_api: false,
     });
     assert!(result.matched());
-    assert!(!result.capabilities.vision);
-    assert!(result.capabilities.native_tools);
-    assert!(result.capabilities.seed_supported);
+    let caps = result.capabilities();
+    assert!(!caps.vision);
+    assert!(caps.native_tools);
+    assert!(caps.seed_supported);
     assert_eq!(result.provenance.len(), 2);
     assert!(result.provenance[0].contains("user capability overlay"));
     assert!(result.provenance[1].contains("Harn built-in"));
@@ -57,8 +58,9 @@ vision = false
     });
     assert!(!unknown.matched());
     assert!(unknown.provenance.is_empty());
-    assert!(!unknown.capabilities.native_tools);
-    assert!(unknown.capabilities.seed_supported);
+    let caps = unknown.capabilities();
+    assert!(!caps.native_tools);
+    assert!(caps.seed_supported);
 }
 
 #[test]
@@ -87,7 +89,7 @@ native_tools = true
             responses_api: false,
         });
         assert_eq!(result.matched(), matched, "{model}");
-        assert_eq!(result.capabilities.native_tools, native_tools, "{model}");
+        assert_eq!(result.capabilities().native_tools, native_tools, "{model}");
     }
 }
 
@@ -121,7 +123,7 @@ background_mode = true
             responses_api: feature,
         });
         assert!(result.matched(), "{provider}");
-        let caps = result.capabilities;
+        let caps = result.capabilities();
         assert_eq!(caps.responses_api, responses, "{provider}:{feature}");
         assert_eq!(
             !caps.hosted_tools.is_empty(),
