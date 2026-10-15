@@ -6,6 +6,7 @@ import {
   admission_effect,
   begin_effect,
   control,
+  effect_receipt,
   reserve_effect,
   settle_effect,
   transfer,
@@ -88,7 +89,13 @@ pipeline default(harness: Harness) {
     is_err(transfer(uncertain, fence(uncertain), "replacement")),
   )
   const settled = unwrap(
-    settle_effect(uncertain, fence(uncertain), request, "confirmed", digest("measured receipt")),
+    settle_effect(
+      uncertain,
+      fence(uncertain),
+      request,
+      "confirmed",
+      effect_receipt(json_stringify({fixture: "measured receipt"})),
+    ),
   )
   contract_negative(
     harness.stdio,
