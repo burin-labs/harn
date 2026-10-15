@@ -41,7 +41,7 @@ mod tests {
             "allowed_tools": [],
             "on_exit": {
                 "on_complete": "done",
-                "policy_override": {"capabilities": {}}
+                "policy_override": {"capabilities": {}, "capabilities_restricted": true}
             }
         }))
         .unwrap();
@@ -58,7 +58,7 @@ mod tests {
         assert_eq!(restored, stage);
 
         let inherited: StageDecl = serde_json::from_value(serde_json::json!({
-            "name": "verify", "on_exit": {"policy_override": {}}
+            "name": "verify", "on_exit": {"policy_override": {"capabilities": {}}}
         }))
         .unwrap();
         assert!(inherited.allowed_tools.is_none());

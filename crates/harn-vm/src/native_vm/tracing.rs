@@ -48,7 +48,7 @@ mod tests {
             vm.register_builtin("llm_call", |_, _| Ok(VmValue::Int(7)));
             assert!(vm.runtime().builtin_span("llm_call").is_none());
             assert_eq!(
-                vm.call_named_builtin("llm_call", vec![])
+                vm.call_named_builtin("llm_call", vec![VmValue::String("fixture".into())])
                     .await
                     .unwrap()
                     .display(),
@@ -58,7 +58,7 @@ mod tests {
 
             crate::tracing::set_tracing_enabled(true);
             assert_eq!(
-                vm.call_named_builtin("llm_call", vec![])
+                vm.call_named_builtin("llm_call", vec![VmValue::String("fixture".into())])
                     .await
                     .unwrap()
                     .display(),
