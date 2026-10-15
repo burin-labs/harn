@@ -23,6 +23,11 @@ KACHE_ASSET="kache-x86_64-unknown-linux-musl.tar.gz"
 KACHE_SHA256=9b2b86d592c5ffb53400218f450fc6b02008bd132827ae6cd133ec8859c9b753
 
 github_env=${1:-${GITHUB_ENV:?GITHUB_ENV is required}}
+compile_policy=${HARN_EXT_KACHE_COMPILE_POLICY:-artifacts}
+case "$compile_policy" in
+  artifacts|native-incremental) ;;
+  *) echo "::error::unknown Kache compile policy: $compile_policy"; exit 1 ;;
+esac
 if [[ "$(uname -s)-$(uname -m)" != Linux-x86_64 ]]; then
   echo "::error::Kache is pinned for Linux x86_64 only, not $(uname -s)-$(uname -m)"
   exit 1
@@ -70,5 +75,14 @@ runtime="$(mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/harn-kache.XXXXXX")"
   echo "KACHE_AUTO_RECOVER_MIN_FREE_BYTES=0"
   echo "KACHE_AUTO_RECOVER_TARGETS=0"
   echo "KACHE_AUTO_SHARE_TARGET_FILES=0"
+  if [[ "$compile_policy" == native-incremental ]]; then
+    # Only the native library keeps incremental state in this runner's private
+    # target. Other crates still use shared compiler objects. These settings
+    # were measured together through canonical CLI packaging and restoration.
+    echo "CARGO_INCREMENTAL=1"
+    echo "CARGO_PROFILE_CI_CLI_CODEGEN_UNITS=16"
+    echo "KACHE_ADAPTIVE_INCREMENTAL=0"
+    echo "KACHE_INCREMENTAL_CRATES=harn_vm"
+  fi
 } >> "$github_env"
-echo "::notice::HARN_COMPILER_CACHE=kache version=\"$version\" store=$root/store max=${max_gib}GiB"
+echo "::notice::HARN_COMPILER_CACHE=kache version=\"$version\" policy=$compile_policy store=$root/store max=${max_gib}GiB"

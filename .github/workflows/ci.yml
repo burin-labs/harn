@@ -913,7 +913,7 @@ jobs:
           reuse-workspace-crates: "true"
           save: "false"
           persistent-target: ${{ env.HARN_RUNNER_TIER == 'self-hosted' }}
-          compiler-cache: ${{ env.HARN_RUNNER_TIER == 'self-hosted' && 'kache' || '' }}
+          compiler-cache: ${{ env.HARN_RUNNER_TIER == 'self-hosted' && 'kache-native-incremental' || '' }}
       # Read the counters before the first compile, so the summary below can
       # report what this job did rather than what the machine has done since
       # its cache server last started.
