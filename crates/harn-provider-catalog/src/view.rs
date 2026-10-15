@@ -1,14 +1,15 @@
 //! Queries over one explicit catalog and capability overlay.
 
 use crate::capabilities::{
-    CapabilitiesFile, CapabilityResolution, CapabilityRoute, CapabilityRules,
+    CapabilitiesFile, CapabilityProbeReceipt, CapabilityResolution, CapabilityRoute,
+    CapabilityRules,
 };
 use crate::config::ProvidersConfig;
 
 /// A borrowed catalog snapshot. Capturing runtime overlays belongs to the
 /// adapter; every query here uses only these inputs.
 pub struct CatalogView<'a> {
-    config: &'a ProvidersConfig,
+    pub(crate) config: &'a ProvidersConfig,
     rules: CapabilityRules<'a>,
 }
 
@@ -41,6 +42,33 @@ impl<'a> CatalogView<'a> {
             model: &model,
             responses_api,
         })
+    }
+
+    pub fn artifact(&self) -> crate::ProviderCatalogArtifact {
+        self.artifact_with_measurements(&CatalogMeasurements::default())
+    }
+
+    pub fn artifact_with_measurements(
+        &self,
+        measurements: &CatalogMeasurements,
+    ) -> crate::ProviderCatalogArtifact {
+        crate::catalog::project(self, measurements)
+    }
+}
+
+/// Endpoint-owned observations captured by the runtime before projection.
+#[derive(Default)]
+pub struct CatalogMeasurements(
+    std::collections::BTreeMap<String, std::collections::BTreeMap<String, CapabilityProbeReceipt>>,
+);
+
+impl CatalogMeasurements {
+    pub fn insert(&mut self, provider: String, model: String, receipt: CapabilityProbeReceipt) {
+        self.0.entry(provider).or_default().insert(model, receipt);
+    }
+
+    pub(crate) fn get(&self, provider: &str, model: &str) -> Option<&CapabilityProbeReceipt> {
+        self.0.get(provider)?.get(model)
     }
 }
 

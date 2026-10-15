@@ -150,3 +150,82 @@ fn provider_catalog_show_reports_model_availability() {
         "serverless"
     );
 }
+
+#[test]
+fn catalog_export_resolves_wire_capabilities_from_its_explicit_provider_overlay() {
+    let root = tempfile::tempdir().unwrap();
+    let overlay_path = root.path().join("providers.toml");
+    let capabilities_path = root.path().join("capabilities.toml");
+    let overlay = r#"
+[providers.fixture_proxy]
+base_url = "https://fixture.invalid/v1"
+chat_endpoint = "/chat/completions"
+auth_style = "none"
+features = ["wire_model_capabilities", "responses_api"]
+[models.private-wire-alias]
+name = "Explicit wire identity fixture"
+provider = "fixture_proxy"
+context_window = 8192
+wire_model = "served-shape"
+"#;
+    fs::write(
+        &capabilities_path,
+        r#"
+[[provider.fixture_proxy]]
+model_match = "served-shape"
+native_tools = true
+vision = true
+responses_api = true
+"#,
+    )
+    .unwrap();
+    let export = |name: &str| {
+        let destination = root.path().join(name);
+        let output = harn_e2e_command()
+            .current_dir(root.path())
+            .args(["provider", "catalog", "export", "--output-dir"])
+            .arg(&destination)
+            .arg("--overlay")
+            .arg(&overlay_path)
+            .arg("--capabilities-overlay")
+            .arg(&capabilities_path)
+            .output()
+            .expect("export catalog");
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let catalog: serde_json::Value =
+            serde_json::from_slice(&fs::read(destination.join("provider-catalog.json")).unwrap())
+                .unwrap();
+        catalog["models"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["id"] == "private-wire-alias")
+            .expect("explicit model was exported")
+            .clone()
+    };
+    fs::write(&overlay_path, overlay).unwrap();
+    let declared = export("declared");
+    assert_eq!(declared["tool_support"]["native"], true);
+    assert!(declared["capability_tags"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|tag| tag == "vision"));
+
+    fs::write(
+        &overlay_path,
+        overlay.replace("\"wire_model_capabilities\", ", ""),
+    )
+    .unwrap();
+    let undeclared = export("undeclared");
+    assert_eq!(undeclared["tool_support"]["native"], false);
+    assert!(!undeclared["capability_tags"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|tag| tag == "vision"));
+}

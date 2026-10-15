@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::llm_config::ModelEligibilityMeasurementKind;
+use crate::config::ModelEligibilityMeasurementKind;
 
 use super::*;
 
@@ -270,7 +270,7 @@ pub fn validate_artifact(artifact: &ProviderCatalogArtifact) -> ProviderCatalogV
                     ));
                 }
             }
-            if tier.request.is_none() && tier.id == crate::llm::serving_tiers::FAST_TIER_ID {
+            if tier.request.is_none() && tier.id == crate::config::FAST_TIER_ID {
                 result.errors.push(format!(
                     "model {} fast serving tier must declare a request knob",
                     model.id
@@ -287,7 +287,7 @@ pub fn validate_artifact(artifact: &ProviderCatalogArtifact) -> ProviderCatalogV
             }
             // `standard` is the implicit default; declaring it would create a
             // second way to say "no mode" that the runtime already discards.
-            if mode.id == crate::llm::reasoning_modes::STANDARD_MODE_ID {
+            if mode.id == crate::config::STANDARD_MODE_ID {
                 result.errors.push(format!(
                     "model {} declares the implicit default reasoning mode {:?}; \
                      omit it instead",
@@ -353,7 +353,7 @@ pub fn validate_artifact(artifact: &ProviderCatalogArtifact) -> ProviderCatalogV
                     model.id
                 ));
             }
-            if model.row_kind == Some(crate::llm_config::ModelRowKind::Snapshot) {
+            if model.row_kind == Some(crate::config::ModelRowKind::Snapshot) {
                 result.errors.push(format!(
                     "model {} is a snapshot and cannot name a current_snapshot",
                     model.id
@@ -773,10 +773,6 @@ pub fn validate_artifact(artifact: &ProviderCatalogArtifact) -> ProviderCatalogV
     validate_model_families(artifact, &provider_ids, &mut result);
 
     result
-}
-
-pub fn validate_current() -> ProviderCatalogValidation {
-    validate_artifact(&artifact())
 }
 
 fn validate_model_families(

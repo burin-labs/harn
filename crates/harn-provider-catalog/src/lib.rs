@@ -5,6 +5,7 @@
 pub mod artifact;
 mod bindings;
 pub mod capabilities;
+mod catalog;
 pub mod config;
 pub mod data_controls;
 pub mod decision_contract;
@@ -14,10 +15,12 @@ pub mod model_operation;
 pub mod presentation;
 pub mod pricing;
 mod schema;
+pub mod taxonomy;
 mod view;
 
 pub use artifact::*;
 pub use bindings::{swift_binding, swift_binding_embedded, typescript_declarations};
+pub use catalog::{artifact_to_json, validate_artifact};
 pub use data_controls::*;
 pub use from_artifact::config_from_artifact;
 pub use model_def::*;
@@ -27,7 +30,7 @@ pub use pricing::*;
 pub use schema::{schema_json, schema_value};
 pub use view::{
     capability_model_id_for_config, configured_provider_selector, normalize_model_id_with_config,
-    CatalogView,
+    CatalogMeasurements, CatalogView,
 };
 
 /// Generated provider snapshot packaged with this crate.

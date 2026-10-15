@@ -70,7 +70,9 @@ mod tool_format;
 pub(crate) use admission::admit_portable_option_for_thinking;
 pub use effort::ReasoningEffort;
 pub(crate) use lookup::should_use_responses_transport;
+pub(crate) use overrides::current_user_overrides;
 pub(crate) use overrides::swap_user_overrides;
+pub(crate) use runtime_probe::cached_measurement;
 
 pub use admission::{
     admit_portable_option, admit_portable_option_with_effort, admit_prompt_cache_ttl,

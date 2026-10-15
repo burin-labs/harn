@@ -622,6 +622,7 @@ sources = [
   "crates/harn-cli/src/commands/dump_trigger_quickref.rs",
   "crates/harn-vm/src/llm/",
   "crates/harn-vm/src/provider_catalog.rs",
+  "crates/harn-provider-catalog/src/",
 ]
 ci = true
 make_all = true

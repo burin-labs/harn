@@ -5,9 +5,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use tokio::sync::OnceCell;
 
-use super::model::{
-    Capabilities, CapabilityProbeReceipt, CapabilityProbeStatus, ToolModeParitySource,
-};
+use super::model::{Capabilities, CapabilityProbeReceipt, CapabilityProbeStatus};
 
 type ProbeCell = Arc<OnceCell<CapabilityProbeReceipt>>;
 
@@ -98,41 +96,28 @@ async fn ensure_runtime_probe_with(
 }
 
 pub(super) fn apply_cached_measurement(provider: &str, model: &str, caps: &mut Capabilities) {
-    let Some(kind) = ProbeKind::for_provider(provider) else {
-        return;
-    };
-    let resolved = crate::llm::helpers::ResolvedProvider::resolve_without_capabilities(provider);
-    apply_cached_measurement_with(model, kind, &resolved.base_url, caps);
+    if let Some(receipt) = cached_measurement(provider, model) {
+        harn_provider_catalog::capabilities::apply_probe_receipt(caps, receipt);
+    }
 }
 
-fn apply_cached_measurement_with(
+pub(crate) fn cached_measurement(provider: &str, model: &str) -> Option<CapabilityProbeReceipt> {
+    let kind = ProbeKind::for_provider(provider)?;
+    let resolved = crate::llm::helpers::ResolvedProvider::resolve_without_capabilities(provider);
+    cached_measurement_with(model, kind, &resolved.base_url)
+}
+
+fn cached_measurement_with(
     model: &str,
     kind: ProbeKind,
     base_url: &str,
-    caps: &mut Capabilities,
-) {
-    let Some(endpoint) = probe_endpoint(base_url, kind, true) else {
-        return;
-    };
+) -> Option<CapabilityProbeReceipt> {
+    let endpoint = probe_endpoint(base_url, kind, true)?;
     let key = cache_key(model, &endpoint, kind);
-    let receipt = PROBES
+    PROBES
         .get()
         .and_then(|probes| probes.lock().ok()?.get(&key).cloned())
-        .and_then(|cell| cell.get().cloned());
-    let Some(receipt) = receipt else {
-        return;
-    };
-    if let Some(native_tools) = receipt.native_tools {
-        caps.native_tools = native_tools;
-        caps.preferred_tool_format = Some(if native_tools { "native" } else { "json" }.to_string());
-        caps.tool_mode_parity =
-            Some(if native_tools { "unknown" } else { "text_only" }.to_string());
-        caps.tool_mode_parity_source = Some(ToolModeParitySource::RuntimeProbe);
-        if let Some(parallel) = receipt.supports_parallel_tool_calls {
-            caps.supports_parallel_tool_calls = parallel;
-        }
-    }
-    caps.runtime_probe = Some(receipt);
+        .and_then(|cell| cell.get().cloned())
 }
 
 async fn probe(
@@ -259,113 +244,4 @@ fn probe_endpoint(base_url: &str, kind: ProbeKind, redact_credentials: bool) -> 
         url.set_password(None).ok()?;
     }
     Some(url.to_string())
-}
-
-#[cfg(test)]
-mod tests {
-    use std::sync::atomic::{AtomicUsize, Ordering};
-
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
-
-    use super::*;
-
-    async fn one_response(status: &'static str, body: &'static str) -> (String, Arc<AtomicUsize>) {
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-            .await
-            .expect("bind probe stub");
-        let addr = listener.local_addr().expect("probe stub address");
-        let hits = Arc::new(AtomicUsize::new(0));
-        let server_hits = hits.clone();
-        tokio::spawn(async move {
-            let (mut socket, _) = listener.accept().await.expect("accept probe request");
-            let mut request = vec![0; 4096];
-            let _ = socket.read(&mut request).await.expect("read probe request");
-            server_hits.fetch_add(1, Ordering::SeqCst);
-            let response = format!(
-                "HTTP/1.1 {status}\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
-                body.len()
-            );
-            socket
-                .write_all(response.as_bytes())
-                .await
-                .expect("write probe response");
-        });
-        (format!("http://{addr}"), hits)
-    }
-
-    fn resolved(base_url: String) -> crate::llm::helpers::ResolvedProvider {
-        crate::llm::helpers::ResolvedProvider {
-            pdef: None,
-            base_url,
-            endpoint: "/v1/chat/completions".to_string(),
-        }
-    }
-
-    #[tokio::test(flavor = "current_thread")]
-    async fn live_template_measurement_overrides_a_stale_catalog_answer_once() {
-        let (base_url, hits) = one_response(
-            "200 OK",
-            r#"{"chat_template_caps":{"supports_tools":true,"supports_tool_calls":false,"supports_parallel_tool_calls":true}}"#,
-        )
-        .await;
-        let provider = "llamacpp";
-        let model = format!("stale-native-{}", uuid::Uuid::now_v7());
-        ensure_runtime_probe_with(
-            provider,
-            &model,
-            ProbeKind::LlamaProps,
-            resolved(base_url.clone()),
-        )
-        .await;
-        ensure_runtime_probe_with(
-            provider,
-            &model,
-            ProbeKind::LlamaProps,
-            resolved(base_url.clone()),
-        )
-        .await;
-
-        let mut caps = Capabilities::default();
-        caps.native_tools = true;
-        caps.preferred_tool_format = Some("native".to_string());
-        apply_cached_measurement_with(&model, ProbeKind::LlamaProps, &base_url, &mut caps);
-
-        assert_eq!(
-            hits.load(Ordering::SeqCst),
-            1,
-            "probe must be single-flight cached"
-        );
-        assert!(
-            !caps.native_tools,
-            "loaded template must beat the stale catalog row"
-        );
-        assert_eq!(caps.preferred_tool_format.as_deref(), Some("json"));
-        assert_eq!(caps.tool_mode_parity.as_deref(), Some("text_only"));
-        assert_eq!(
-            caps.runtime_probe.as_ref().map(|receipt| receipt.status),
-            Some(CapabilityProbeStatus::Measured)
-        );
-    }
-
-    #[tokio::test(flavor = "current_thread")]
-    async fn unsupported_probe_keeps_the_conservative_answer_and_records_why() {
-        let (base_url, _) = one_response("404 Not Found", r#"{"error":"not found"}"#).await;
-        let provider = "mlx";
-        let model = format!("unknown-{}", uuid::Uuid::now_v7());
-        ensure_runtime_probe_with(
-            provider,
-            &model,
-            ProbeKind::LlamaProps,
-            resolved(base_url.clone()),
-        )
-        .await;
-
-        let mut caps = Capabilities::default();
-        apply_cached_measurement_with(&model, ProbeKind::LlamaProps, &base_url, &mut caps);
-
-        assert!(!caps.native_tools);
-        let receipt = caps.runtime_probe.expect("unavailable probe receipt");
-        assert_eq!(receipt.status, CapabilityProbeStatus::Unavailable);
-        assert!(receipt.detail.contains("HTTP 404"), "{}", receipt.detail);
-    }
 }

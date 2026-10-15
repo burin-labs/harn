@@ -1,6 +1,6 @@
 use super::*;
 
-use crate::llm_config::ModelEligibilityMeasurementKind;
+use crate::config::ModelEligibilityMeasurementKind;
 
 #[test]
 fn schema_id_tracks_schema_version() {

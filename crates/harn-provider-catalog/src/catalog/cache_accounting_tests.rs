@@ -5,9 +5,9 @@ use super::*;
 /// what a consumer of the published artifact sees rather than the in-memory
 /// struct.
 fn serialized_provider_field(declared: Option<bool>) -> Option<serde_json::Value> {
-    let provider = crate::llm_config::ProviderDef {
+    let provider = crate::config::ProviderDef {
         cache_usage_accounting: declared,
-        ..crate::llm_config::ProviderDef::default()
+        ..crate::config::ProviderDef::default()
     };
     let row = catalog_provider("probe".to_string(), provider);
     let encoded = serde_json::to_value(&row).expect("catalog row serializes");
@@ -24,7 +24,7 @@ fn catalog_schema() -> serde_json::Value {
 
 #[test]
 fn cerebras_and_together_publish_both_verified_accounting_fields() {
-    let config = crate::llm_config::embedded_config(None);
+    let config = crate::config::embedded_config(None);
     let audit = config
         .usage_accounting_audit
         .as_ref()

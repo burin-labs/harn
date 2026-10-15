@@ -1,6 +1,6 @@
 use super::*;
 
-use crate::llm_config::LocalRuntimeStop;
+use crate::config::LocalRuntimeStop;
 
 #[test]
 fn validation_rejects_incoherent_local_runtime_lifecycle_contract() {

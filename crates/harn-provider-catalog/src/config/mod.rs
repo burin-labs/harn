@@ -6,6 +6,7 @@ mod data_controls;
 pub mod overlay_audit;
 mod parsing;
 mod provider_def;
+mod query;
 mod usage_accounting_audit;
 
 #[cfg(test)]
@@ -26,9 +27,13 @@ pub use data_controls::*;
 pub use overlay_audit::*;
 pub use parsing::*;
 pub use provider_def::*;
+pub use query::*;
 pub use usage_accounting_audit::*;
 
 pub const LOGICAL_MODEL_DEFAULT_PREFIX: &str = "logical:";
+pub const FAST_TIER_ID: &str = "fast";
+/// Requesting the standard reasoning mode is equivalent to omitting a mode.
+pub const STANDARD_MODE_ID: &str = "standard";
 
 /// Whether a defaults selector names an exact logical model rather than a route glob.
 pub fn is_logical_model_selector(selector: &str) -> bool {

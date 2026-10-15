@@ -40,6 +40,21 @@ pub fn builtin_file() -> &'static CapabilitiesFile {
     })
 }
 
+/// Apply a captured endpoint measurement after declared capability resolution.
+pub fn apply_probe_receipt(caps: &mut Capabilities, receipt: CapabilityProbeReceipt) {
+    if let Some(native_tools) = receipt.native_tools {
+        caps.native_tools = native_tools;
+        caps.preferred_tool_format = Some(if native_tools { "native" } else { "json" }.to_string());
+        caps.tool_mode_parity =
+            Some(if native_tools { "unknown" } else { "text_only" }.to_string());
+        caps.tool_mode_parity_source = Some(ToolModeParitySource::RuntimeProbe);
+        if let Some(parallel) = receipt.supports_parallel_tool_calls {
+            caps.supports_parallel_tool_calls = parallel;
+        }
+    }
+    caps.runtime_probe = Some(receipt);
+}
+
 /// Identity and adapter features for one capability lookup. `model` is the
 /// provider's capability identity, including any configured wire-model alias.
 pub struct CapabilityRoute<'a> {
