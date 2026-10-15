@@ -10,6 +10,44 @@ use crate::package::CheckConfig;
 use super::unique_temp_dir;
 
 #[test]
+fn bundle_manifest_includes_guard_calls_without_unreferenced_prompts() {
+    let dir = unique_temp_dir("harn-check-bundle-match-guard");
+    std::fs::create_dir_all(&dir).unwrap();
+    for name in ["direct", "guard", "unreferenced"] {
+        std::fs::write(dir.join(format!("{name}.harn.prompt")), name).unwrap();
+    }
+    std::fs::write(
+        dir.join("main.harn"),
+        r#"
+fn main(harness: Harness) -> string {
+  harness.stdio.println(harness.fs.render_prompt("direct.harn.prompt"))
+  return match true {
+    true if harness.fs.render_prompt("guard.harn.prompt") == "guard" -> { "ready" }
+    _ -> { "skipped" }
+  }
+}
+"#,
+    )
+    .unwrap();
+    let manifest = build_bundle_manifest(&[dir.join("main.harn")], &CheckConfig::default());
+    let assets = manifest["prompt_assets"].as_array().expect("prompt assets");
+    for name in ["direct", "guard"] {
+        assert!(
+            assets.iter().any(|asset| asset
+                .as_str()
+                .is_some_and(|path| path.ends_with(&format!("/{name}.harn.prompt")))),
+            "{manifest}"
+        );
+    }
+    assert_eq!(
+        assets.len(),
+        2,
+        "unreferenced prompt must stay outside the bundle"
+    );
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
 fn bundle_manifest_tracks_prompt_assets_host_caps_and_worktree_repos() {
     let dir = unique_temp_dir("harn-check-bundle-manifest");
     std::fs::create_dir_all(dir.join("prompts")).unwrap();
