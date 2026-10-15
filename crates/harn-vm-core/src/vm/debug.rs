@@ -705,7 +705,6 @@ impl Vm {
 
 #[cfg(test)]
 mod breakpoint_tests {
-    use super::*;
     #[test]
     fn test_breakpoints_wildcard_matches_any_file() {
         let mut vm = crate::vm::test_runtime::new_vm();

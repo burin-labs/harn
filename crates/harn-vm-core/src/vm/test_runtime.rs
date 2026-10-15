@@ -10,7 +10,7 @@ struct TestRuntime {
     execution: Option<crate::ExecutionId>,
 }
 
-pub(super) fn new_vm() -> super::Vm {
+pub(crate) fn new_vm() -> super::Vm {
     let mut vm = super::Vm::with_runtime(Arc::new(TestRuntime::default()));
     vm.set_harness(crate::value::VmHarness::from_host(Arc::new(())));
     vm
