@@ -182,3 +182,10 @@ responses, including unrelated artifacts and every measured page.
 observations through the same shared reader. Missing, reordered or unused
 responses refuse. Replay checks the archived decision; it does not claim a
 fresh provider read or grant permission to issue a live admission.
+
+Decode a saved observation with `schema_of(GithubCiAssessment)` before replay.
+Each artifact has a `status`: `"read"` carries its complete `receipt`, and
+`"unavailable"` carries the connector's exact `error`. Preserve both outcomes
+when storing the JSON. An absent rate-limit field stays absent; an explicitly
+reported zero stays zero. An unavailable artifact cannot count as an executed
+stock requirement.
