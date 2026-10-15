@@ -49,6 +49,10 @@ impl SandboxBackend for Backend {
         Path::new(SANDBOX_EXEC_PATH).exists()
     }
 
+    fn filesystem_available() -> bool {
+        Self::available() && parent_environment::available()
+    }
+
     fn confine_current_process(
         policy: &CapabilityPolicy,
     ) -> Result<super::SandboxMechanism, VmError> {
@@ -123,7 +127,7 @@ fn wrap_with_sandbox_exec(
             profile,
         );
     }
-    parent_environment::protect()?;
+    parent_environment::protect(profile)?;
     match nested::nesting(policy) {
         nested::Nesting::NotNested => {}
         // Already confined at least as strictly: macOS would refuse a second

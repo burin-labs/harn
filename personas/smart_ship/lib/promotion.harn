@@ -1,0 +1,85 @@
+import { checkpoint_bytes, checkpoint_id } from "./identity"
+import {
+  Authority,
+  CheckpointTrust,
+  Fence,
+  Policy,
+  Promotion,
+  Proof,
+  SignedCheckpoint,
+  Snapshot,
+} from "./types"
+import { verify } from "./verification"
+
+/** The effect owner must compare this fence atomically with its durable authority record. */
+pub fn fence_matches(authority: Authority, fence: Fence) -> bool {
+  return authority.installation == fence.installation && authority.generation == fence.generation
+    && authority.revision == fence.revision
+    && authority.controller == fence.controller
+}
+
+/** Assess promotion without mutating refs, deployment state, or the previous checkpoint. */
+pub fn promote(
+  snapshot: Snapshot,
+  proofs: list<Proof>,
+  policy: Policy,
+  authority: Authority,
+  fence: Fence,
+) -> Promotion {
+  const verification = verify(snapshot, proofs, policy)
+  const held = snapshot.sources.any(
+    { source -> authority.held_repositories.contains(source.repository) },
+  )
+  let reason = ""
+  if !fence_matches(authority, fence) || authority.installation != snapshot.installation
+    || authority.generation != snapshot.generation {
+    reason = "controller authority changed"
+  } else if !["active", "draining"].contains(authority.mode) {
+    reason = "controller is " + authority.mode
+  } else if held {
+    reason = "a repository is held"
+  } else if snapshot.previous_checkpoint != authority.previous_checkpoint
+    || snapshot.sequence <= authority.promoted_sequence {
+    reason = "checkpoint ancestry changed or this snapshot is obsolete"
+  } else if verification.status != "verified" {
+    reason = "verification is " + verification.status
+  }
+  return {
+    status: if reason == "" {
+      "promote"
+    } else {
+      "refused"
+    },
+    reason: reason,
+    verification: verification,
+    checkpoint: if reason == "" {
+      {schema: "smart-ship.checkpoint.v1", policy: policy, snapshot: snapshot, proofs: proofs}
+    } else {
+      nil
+    },
+  }
+}
+
+/** Consumers verify the full manifest and its issuer, rather than trusting a moving ref. */
+pub fn checkpoint_valid(signed: SignedCheckpoint, trust: CheckpointTrust) -> bool {
+  const checkpoint = signed.checkpoint
+  const key = trust.checkpoint_keys.find({ candidate -> candidate.id == signed.signer })
+  if key == nil || key.trust_domain != trust.installation
+    || checkpoint.policy.installation != trust.installation
+    || verify(checkpoint.snapshot, checkpoint.proofs, checkpoint.policy).status != "verified" {
+    return false
+  }
+  const authenticated = try {
+    ed25519_verify(key.public_key, checkpoint_bytes(checkpoint), signed.signature)
+  }
+  return is_ok(authenticated) && unwrap(authenticated)
+}
+
+/** Project the exact release identity only after validating its signature and complete evidence. */
+pub fn release_identity(signed: SignedCheckpoint, trust: CheckpointTrust) -> string? {
+  return if checkpoint_valid(signed, trust) {
+    checkpoint_id(signed.checkpoint)
+  } else {
+    nil
+  }
+}

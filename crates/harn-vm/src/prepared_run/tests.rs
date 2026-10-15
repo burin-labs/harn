@@ -17,6 +17,8 @@ mod agent_terminal;
 mod executor_failures;
 mod identity_session;
 mod live_approval;
+#[cfg(target_os = "linux")]
+mod source_verifier;
 
 const NOW_MS: u64 = 1_000;
 const DEADLINE_MS: u64 = 61_000;
@@ -193,6 +195,7 @@ fn capability_policy() -> CapabilityPolicy {
 fn intent() -> RunIntent {
     RunIntent {
         intent_id: "steel-thread".to_string(),
+        verifier_loaders: Vec::new(),
         capability_policy: capability_policy(),
         network: vec![network("api.example.test")],
         secrets: vec![provider_secret("openai")],
@@ -259,6 +262,7 @@ fn net_policy() -> NetPolicy {
 fn host_facts() -> HostFacts {
     HostFacts {
         capability_ceiling: capability_policy(),
+        admitted_verifier_loaders: BTreeSet::new(),
         approval_policy: run_approval_policy(
             RunInteractivity::NonInteractive,
             ApprovalAvailability::Available,

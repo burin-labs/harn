@@ -1,0 +1,146 @@
+import { Controller, Effect, Incident } from "./controller"
+import { GitStore, StateRead, commit_state, prepare_state, read_state } from "./git_store"
+import { checkpoint_id, is_digest, snapshot_id } from "./identity"
+import { Authority, Policy, Verification } from "./types"
+import { policy_errors, verify } from "./verification"
+
+/** Public configuration contains policy and credential-free Git locations. */
+pub type Installation = {
+  schema: "smart-ship.installation.v1",
+  policy: Policy,
+  store: GitStore,
+  controller: string,
+}
+
+/** Missing job selection stays nil, distinct from a measured empty inventory. */
+pub type Inspection = {
+  installation: string,
+  state_commit: string?,
+  authority: Authority?,
+  checkpoint: string?,
+  active_snapshot: string?,
+  pending_snapshot: string?,
+  verification: Verification?,
+  incidents: list<Incident>,
+  effects: list<Effect>,
+}
+
+/** Load installation data once at its public boundary. No credentials belong in this document. */
+pub fn load_installation(fs: HarnessFs, path: string) -> Installation {
+  const text = fs.read_text(path)
+  require len(text) <= 1048576, "installation configuration exceeds its size limit"
+  const config: Installation = schema_expect(json_parse(text), schema_of(Installation))
+  require is_digest(config.controller) && len(policy_errors(config.policy)) == 0,
+    "installation requires a pinned controller artifact and valid qualification policy"
+  return config
+}
+
+/** Create only shadow authority, preserving any already initialized remote history. */
+pub fn initialize_installation(process: HarnessProcess, config: Installation) -> StateRead {
+  require is_digest(config.controller) && len(policy_errors(config.policy)) == 0,
+    "installation configuration is invalid"
+  const initialized = process.run(
+    {
+      program: "git",
+      args: ["init", "--bare", "--quiet", "--", config.store.workspace],
+      timeout_ms: config.store.timeout_ms,
+    },
+  )
+  require initialized.success && initialized.exit_code == 0,
+    "controller object workspace could not initialize"
+  const previous = read_state(process, config.store)
+  if previous.state != nil {
+    require previous.state.authority.installation == config.policy.installation,
+      "state ref belongs to another installation"
+    return previous
+  }
+  const state: Controller = {
+    schema: "smart-ship.controller.v1",
+    authority: {
+      installation: config.policy.installation,
+      generation: 1,
+      revision: 1,
+      controller: config.controller,
+      mode: "shadow",
+      previous_checkpoint: "",
+      promoted_sequence: 0,
+      held_repositories: [],
+    },
+    active: nil,
+    pending: nil,
+    checkpoint: nil,
+    incidents: [],
+    effects: [],
+    unverified_since_ms: nil,
+  }
+  const write = prepare_state(process, config.store, previous, state)
+  const committed = commit_state(process, config.store, write)
+  require committed.status == "committed",
+    "installation initialization is unconfirmed: "
+    + committed.status
+  return read_state(process, config.store)
+}
+
+/** Project durable state without claiming readiness when no job census has been frozen. */
+pub fn inspect_installation(process: HarnessProcess, config: Installation) -> Inspection {
+  const read = read_state(process, config.store)
+  const state = read.state
+  if state == nil {
+    return {
+      installation: config.policy.installation,
+      state_commit: read.commit,
+      authority: nil,
+      checkpoint: nil,
+      active_snapshot: nil,
+      pending_snapshot: nil,
+      verification: nil,
+      incidents: [],
+      effects: [],
+    }
+  }
+  require state.authority.installation == config.policy.installation,
+    "state ref belongs to another installation"
+  const checkpoint = state.checkpoint
+  const snapshot = state.active ?? state.pending ?? checkpoint?.snapshot
+  const qualified = snapshot != nil && checkpoint != nil
+    && snapshot_id(snapshot) == snapshot_id(checkpoint.snapshot)
+  return {
+    installation: config.policy.installation,
+    state_commit: read.commit,
+    authority: state.authority,
+    checkpoint: if checkpoint == nil {
+      nil
+    } else {
+      checkpoint_id(checkpoint)
+    },
+    active_snapshot: if state.active == nil {
+      nil
+    } else {
+      snapshot_id(state.active)
+    },
+    pending_snapshot: if state.pending == nil {
+      nil
+    } else {
+      snapshot_id(state.pending)
+    },
+    verification: if snapshot == nil {
+      nil
+    } else {
+      verify(
+        snapshot,
+        if qualified {
+          checkpoint.proofs
+        } else {
+          []
+        },
+        if qualified {
+          checkpoint.policy
+        } else {
+          config.policy
+        },
+      )
+    },
+    incidents: state.incidents,
+    effects: state.effects,
+  }
+}

@@ -31,6 +31,32 @@ fn file_capture_shell_spec(system: HarnessSystem) {
 }
 
 pipeline default(harness: Harness) {
+  if harness.system.platform().os == "darwin" {
+    const confinement = harness.system.sandbox_confinement()
+    if !confinement.confines_processes {
+      const expected = confinement.os_hardened_refusal
+      require expected != nil, "unavailable confinement must report its typed refusal"
+      require expected.sandbox_mechanism.schema == "harn.process.sandbox_mechanism_unavailable.v1",
+        "unavailable confinement must name the mechanism contract"
+      let refused = false
+      try {
+        harness.process.run(
+          {
+            program: "/bin/echo",
+            args: ["unexpected-unsupported-child"],
+            sandbox_profile: "os_hardened",
+          },
+        )
+      } catch (error) {
+        require error.sandbox_mechanism == expected.sandbox_mechanism,
+          "spawn refusal must match the measured confinement fact"
+        refused = true
+      }
+      require refused, "unsupported macOS host started a confined child"
+      harness.stdio.println("process confinement refusal verified on unsupported macOS host")
+      return
+    }
+  }
   const result = command_run(
     harness.tools,
     echo_argv(harness.system, "smoke"),

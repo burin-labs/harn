@@ -93,6 +93,7 @@ pub(super) async fn dispatch_process_exec_after_policy(
         let stdout = String::from_utf8_lossy(&output.stdout);
         let stderr = String::from_utf8_lossy(&output.stderr);
         let response = process_exec_response(ProcessExecResponse {
+            verifier_receipt: None,
             pid: None,
             started_at,
             started,
@@ -123,7 +124,10 @@ pub(super) async fn dispatch_process_exec_after_policy(
         .or_else(|| optional_i64(params, "timeout_ms"))
         .filter(|value| *value > 0)
         .map(|value| value as u64);
-    let mut cmd = build_sandboxed_command(params, "process.exec")?;
+    let PreparedProcessCommand {
+        command: mut cmd,
+        witness,
+    } = build_sandboxed_command(params, "process.exec")?;
     crate::op_interrupt::configure_tokio_kill_group(&mut cmd);
     let cleanup_token = crate::op_interrupt::new_process_cleanup_token();
     cmd.env(
@@ -306,7 +310,18 @@ pub(super) async fn dispatch_process_exec_after_policy(
     let stderr_utf8_valid = std::str::from_utf8(&stderr).is_ok();
     let stdout = String::from_utf8_lossy(&stdout).to_string();
     let stderr = String::from_utf8_lossy(&stderr).to_string();
+    let verifier_receipt = if !timed_out {
+        witness
+            .map(|witness| witness.receipt())
+            .transpose()
+            .map_err(|error| {
+                VmError::Runtime(format!("process.exec verifier completion refused: {error}"))
+            })?
+    } else {
+        None
+    };
     let response = process_exec_response(ProcessExecResponse {
+        verifier_receipt,
         pid,
         started_at,
         started,
@@ -385,10 +400,23 @@ async fn terminate_process_exec_child(
 /// The platform-independent normalization lives in [`ProcessExecLaunch`].
 /// This function projects it onto Tokio for `process.spawn` and
 /// `process.exec`.
+pub(crate) struct PreparedProcessCommand {
+    pub(crate) command: tokio::process::Command,
+    pub(crate) witness: Option<crate::verifier_provenance::VerifierExecutionWitness>,
+}
+
+impl std::fmt::Debug for PreparedProcessCommand {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("PreparedProcessCommand")
+            .finish_non_exhaustive()
+    }
+}
+
 pub(crate) fn build_sandboxed_command(
     params: &crate::value::DictMap,
     label: &str,
-) -> Result<tokio::process::Command, VmError> {
+) -> Result<PreparedProcessCommand, VmError> {
     let _profile_guard = optional_string(params, "sandbox_profile")
         .as_deref()
         .map(crate::process_sandbox::push_sandbox_profile_override)
@@ -397,8 +425,31 @@ pub(crate) fn build_sandboxed_command(
         crate::process_sandbox::ProcessSandboxScope::from_value(params.get("sandbox"))?,
     )?;
     let launch = ProcessExecLaunch::from_params(params, label)?;
+    let verifier = crate::prepared_run::prepared_verifier(
+        &launch.program,
+        &launch.args,
+        launch.cwd.as_deref().expect("normalized process cwd"),
+    )
+    .map_err(VmError::Runtime)?;
+    #[cfg(target_os = "linux")]
+    let pinned = verifier
+        .as_ref()
+        .map(|verifier| verifier.launch())
+        .transpose()
+        .map_err(VmError::Runtime)?;
+    #[cfg(target_os = "linux")]
+    let (program, args) = pinned
+        .as_ref()
+        .map_or((&launch.program, launch.args.as_slice()), |pinned| {
+            (&pinned.program, pinned.args.as_slice())
+        });
+    #[cfg(not(target_os = "linux"))]
+    let (program, args) = {
+        let _ = verifier;
+        (&launch.program, launch.args.as_slice())
+    };
     let (mut cmd, session_closed) =
-        crate::process_sandbox::tokio_command_for_with_env_state(&launch.program, &launch.args)
+        crate::process_sandbox::tokio_command_for_with_env_state(program, args)
             .map_err(|error| contextualize_process_error(label, "sandbox setup", error))?;
     if let Some(cwd) = launch.cwd {
         cmd.current_dir(cwd);
@@ -420,7 +471,17 @@ pub(crate) fn build_sandboxed_command(
         closed,
     );
     crate::process_sandbox::validate_command_environment(cmd.as_std_mut(), closed)?;
-    Ok(cmd)
+    #[cfg(target_os = "linux")]
+    let witness = pinned
+        .map(|pinned| pinned.bind_to_command(cmd.as_std_mut(), closed))
+        .transpose()
+        .map_err(VmError::Runtime)?;
+    #[cfg(not(target_os = "linux"))]
+    let witness = None;
+    Ok(PreparedProcessCommand {
+        command: cmd,
+        witness,
+    })
 }
 
 /// Normalized process authority at the host boundary.
@@ -538,6 +599,7 @@ fn contextualize_process_error(label: &str, stage: &str, error: VmError) -> VmEr
 }
 
 struct ProcessExecResponse<'a> {
+    verifier_receipt: Option<crate::verifier_provenance::VerifierExecutionReceipt>,
     pid: Option<u32>,
     started_at: String,
     started: Instant,
@@ -554,6 +616,17 @@ struct ProcessExecResponse<'a> {
 fn process_exec_response(response: ProcessExecResponse<'_>) -> VmValue {
     let combined = format!("{}{}", response.stdout, response.stderr);
     let mut result = crate::value::DictMap::new();
+    result.insert(
+        "verifier_receipt".into(),
+        response
+            .verifier_receipt
+            .map(|receipt| {
+                crate::stdlib::json_to_vm_value(
+                    &serde_json::to_value(receipt).expect("typed verifier receipt"),
+                )
+            })
+            .unwrap_or(VmValue::Nil),
+    );
     result.put_str(
         "command_id",
         format!(

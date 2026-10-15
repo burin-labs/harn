@@ -92,6 +92,7 @@ enum SpawnStatus {
     Exited,
     Killed,
     TimedOut,
+    Blocked,
 }
 
 impl SpawnStatus {
@@ -101,6 +102,7 @@ impl SpawnStatus {
             SpawnStatus::Exited => "exited",
             SpawnStatus::Killed => "killed",
             SpawnStatus::TimedOut => "timed_out",
+            SpawnStatus::Blocked => "blocked",
         }
     }
 
@@ -113,6 +115,8 @@ impl SpawnStatus {
 /// drain/wait task.
 #[derive(Default)]
 struct SpawnState {
+    verifier_completion:
+        Option<Result<crate::verifier_provenance::VerifierExecutionReceipt, String>>,
     stdout: Vec<u8>,
     stderr: Vec<u8>,
     exit_code: Option<i32>,
@@ -178,7 +182,7 @@ impl SpawnEntry {
             Some(existing) if existing.is_terminal() => existing,
             _ => {
                 state.status = Some(status);
-                state.exit_code = Some(exit_code);
+                state.exit_code = (status != SpawnStatus::Blocked).then_some(exit_code);
                 state.ended_at = Some(audited_utc_now_rfc3339("host_call/process.spawn.ended_at"));
                 status
             }
@@ -203,6 +207,8 @@ fn next_handle(pid: Option<u32>) -> (String, u64) {
 /// minted to bound memory.
 #[derive(Clone)]
 struct TerminalReceipt {
+    verifier_completion:
+        Option<Result<crate::verifier_provenance::VerifierExecutionReceipt, String>>,
     handle_id: String,
     pid: Option<u32>,
     command_display: String,
@@ -224,6 +230,7 @@ fn receipt_from_entry(entry: &SpawnEntry, forced: Option<(SpawnStatus, i32)>) ->
         None => (state.status.unwrap_or(SpawnStatus::Exited), state.exit_code),
     };
     TerminalReceipt {
+        verifier_completion: state.verifier_completion.clone(),
         handle_id: entry.handle_id.clone(),
         pid: entry.pid,
         command_display: entry.command_display.clone(),
@@ -396,7 +403,9 @@ async fn spawn(
         .filter(|value| *value > 0)
         .map(|value| value as u64);
 
-    let mut cmd = build_sandboxed_command(params, "process.spawn")?;
+    let prepared = build_sandboxed_command(params, "process.spawn")?;
+    let witness = prepared.witness;
+    let mut cmd = prepared.command;
     crate::op_interrupt::configure_tokio_kill_group(&mut cmd);
     let cleanup_token = crate::op_interrupt::new_process_cleanup_token();
     cmd.env(
@@ -454,7 +463,15 @@ async fn spawn(
 
     let task_entry = Arc::clone(&entry);
     tokio::spawn(async move {
-        run_to_completion(child, stdout_pipe, stderr_pipe, timeout_ms, task_entry).await;
+        run_to_completion(
+            child,
+            stdout_pipe,
+            stderr_pipe,
+            timeout_ms,
+            task_entry,
+            witness,
+        )
+        .await;
     });
 
     {
@@ -483,6 +500,7 @@ async fn run_to_completion(
     stderr_pipe: Option<tokio::process::ChildStderr>,
     timeout_ms: Option<u64>,
     entry: Arc<SpawnEntry>,
+    witness: Option<crate::verifier_provenance::VerifierExecutionWitness>,
 ) {
     let stdout_buf = Arc::new(Mutex::new(Vec::<u8>::new()));
     let stderr_buf = Arc::new(Mutex::new(Vec::<u8>::new()));
@@ -523,13 +541,17 @@ async fn run_to_completion(
             }
         }
     };
-    let (status, exit_code) = match outcome {
-        Outcome::Exited(result) => exit_status(result),
+    let (status, exit_code, wait_error) = match outcome {
+        Outcome::Exited(result) => {
+            let error = result.as_ref().err().map(ToString::to_string);
+            let (status, code) = exit_status(result);
+            (status, code, error)
+        }
         Outcome::Terminate(status) => {
             signal_entry_process_tree(&entry);
             let _ = child.kill().await;
             let _ = child.wait().await;
-            (status, -1)
+            (status, -1, None)
         }
     };
 
@@ -563,6 +585,20 @@ async fn run_to_completion(
     };
     entry.unregister_cleanup();
 
+    let verifier_completion = if status == SpawnStatus::Exited {
+        witness.map(|witness| match wait_error {
+            Some(error) => Err(error),
+            None => witness.receipt().map_err(|error| error.to_string()),
+        })
+    } else {
+        None
+    };
+    let (status, exit_code) = if verifier_completion.as_ref().is_some_and(Result::is_err) {
+        (SpawnStatus::Blocked, -1)
+    } else {
+        (status, exit_code)
+    };
+
     let stdout = std::mem::take(&mut *stdout_buf.lock().expect("stdout buf poisoned"));
     let stderr = std::mem::take(&mut *stderr_buf.lock().expect("stderr buf poisoned"));
 
@@ -570,6 +606,7 @@ async fn run_to_completion(
         let mut state = entry.state.lock().expect("spawn state poisoned");
         state.stdout = stdout;
         state.stderr = stderr;
+        state.verifier_completion = verifier_completion;
     }
     // Record the terminal status (first-writer-wins): a concurrent `kill()` may
     // have already published `killed`, in which case we keep it and only attach
@@ -658,33 +695,67 @@ fn poll(params: &crate::value::DictMap) -> Result<VmValue, VmError> {
         if status.is_terminal() {
             state.observed = true;
         }
-        return Ok(poll_dict(
-            &entry.handle_id,
+        return with_verifier_completion(
+            poll_dict(
+                &entry.handle_id,
+                status,
+                &entry.command_display,
+                &entry.started_at,
+                entry.pid,
+                state.exit_code,
+                &state.stdout,
+                &state.stderr,
+            ),
             status,
-            &entry.command_display,
-            &entry.started_at,
-            entry.pid,
-            state.exit_code,
-            &state.stdout,
-            &state.stderr,
-        ));
+            state.verifier_completion.as_ref(),
+        );
     }
     // Live entry gone: consume a terminal receipt if the handle was evicted
     // after reaching a terminal state, so the caller still observes the
     // outcome rather than a hard unknown-handle error.
     if let Some(receipt) = lookup_receipt(&handle_id) {
-        return Ok(poll_dict(
-            &receipt.handle_id,
+        return with_verifier_completion(
+            poll_dict(
+                &receipt.handle_id,
+                receipt.status,
+                &receipt.command_display,
+                &receipt.started_at,
+                receipt.pid,
+                receipt.exit_code,
+                &[],
+                &[],
+            ),
             receipt.status,
-            &receipt.command_display,
-            &receipt.started_at,
-            receipt.pid,
-            receipt.exit_code,
-            &[],
-            &[],
-        ));
+            receipt.verifier_completion.as_ref(),
+        );
     }
     Err(unknown_handle_error(&handle_id))
+}
+
+fn with_verifier_completion(
+    value: VmValue,
+    status: SpawnStatus,
+    completion: Option<&Result<crate::verifier_provenance::VerifierExecutionReceipt, String>>,
+) -> Result<VmValue, VmError> {
+    if !matches!(status, SpawnStatus::Exited | SpawnStatus::Blocked) {
+        return Ok(value);
+    }
+    match completion {
+        Some(Ok(receipt)) => {
+            let mut fields = value.as_dict().expect("process result record").clone();
+            fields.insert(
+                "verifier_receipt".into(),
+                crate::stdlib::json_to_vm_value(
+                    &serde_json::to_value(receipt).expect("typed verifier receipt"),
+                ),
+            );
+            Ok(VmValue::dict_map(fields))
+        }
+        Some(Err(error)) => Err(VmError::Runtime(format!(
+            "process.spawn verifier completion refused: {error}"
+        ))),
+        None => Ok(value),
+    }
 }
 
 /// Build the terminal `wait` result dict. Shared by the live-entry and
@@ -716,7 +787,11 @@ async fn wait(params: &crate::value::DictMap) -> Result<VmValue, VmError> {
             // Live entry gone: a terminal receipt still lets the caller
             // observe the outcome. An evicted handle is always terminal.
             if let Some(receipt) = lookup_receipt(&handle_id) {
-                return Ok(wait_dict(receipt.status, receipt.exit_code, &[], &[]));
+                return with_verifier_completion(
+                    wait_dict(receipt.status, receipt.exit_code, &[], &[]),
+                    receipt.status,
+                    receipt.verifier_completion.as_ref(),
+                );
             }
             return Err(unknown_handle_error(&handle_id));
         }
@@ -759,12 +834,11 @@ async fn wait(params: &crate::value::DictMap) -> Result<VmValue, VmError> {
     if status.is_terminal() {
         state.observed = true;
     }
-    Ok(wait_dict(
+    with_verifier_completion(
+        wait_dict(status, state.exit_code, &state.stdout, &state.stderr),
         status,
-        state.exit_code,
-        &state.stdout,
-        &state.stderr,
-    ))
+        state.verifier_completion.as_ref(),
+    )
 }
 
 async fn kill(params: &crate::value::DictMap) -> Result<VmValue, VmError> {
@@ -1200,6 +1274,7 @@ mod tests {
     /// overflow bound without spawning processes.
     fn fake_receipt(handle_id: &str, seq: u64) -> TerminalReceipt {
         TerminalReceipt {
+            verifier_completion: None,
             handle_id: handle_id.to_string(),
             pid: None,
             command_display: "fake".to_string(),

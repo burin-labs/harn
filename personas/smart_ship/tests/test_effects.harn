@@ -1,0 +1,106 @@
+import { digest, fixture } from "../fixtures/support"
+import {
+  Controller,
+  EffectRequest,
+  Fence,
+  control,
+  effect_authorized,
+  reserve_effect,
+  settle_effect,
+  transfer,
+} from "../lib/main"
+
+fn fence(state: Controller) -> Fence {
+  return pick(state.authority, ["installation", "generation", "revision", "controller"])
+}
+
+pipeline test_unknown_external_action_blocks_transfer_and_stop_requires_reconciliation(
+  harness: Harness,
+) {
+  const f = fixture(harness.random)
+  const initial: Controller = {
+    schema: "smart-ship.controller.v1",
+    authority: f.authority,
+    active: nil,
+    pending: nil,
+    checkpoint: nil,
+    incidents: [],
+    effects: [],
+    unverified_since_ms: nil,
+  }
+  const source = f.snapshot.sources[0]
+  assert(source != nil)
+  const request: EffectRequest = {
+    kind: "admission",
+    repository: source.repository,
+    source: source.commit,
+    input_digest: digest("reviewed request"),
+  }
+  const reserved = unwrap(reserve_effect(initial, fence(initial), request, f.policy))
+  const effect = reserved.effects[0]
+  assert(effect != nil && effect_authorized(reserved, effect))
+  assert(!is_ok(reserve_effect(reserved, fence(initial), request, f.policy)))
+  assert(!is_ok(reserve_effect(reserved, fence(reserved), request, f.policy)))
+  assert(
+    !is_ok(
+      reserve_effect(
+        reserved,
+        fence(reserved),
+        request + {source: sha256_hex("another head")},
+        f.policy,
+      ),
+    ),
+  )
+  assert(
+    !is_ok(reserve_effect(initial, fence(initial), request + {repository: "foreign"}, f.policy)),
+  )
+  assert(!is_ok(reserve_effect(initial, fence(initial), request + {kind: "release"}, f.policy)))
+  const draining = unwrap(control(reserved, fence(reserved), "draining"))
+  assert(effect_authorized(draining, effect))
+  assert(!is_ok(transfer(draining, fence(draining), "replacement")))
+  const stopped = unwrap(control(draining, fence(draining), "stopped"))
+  assert(!effect_authorized(stopped, effect))
+  assert_eq(stopped.effects[0]?.status, "unknown")
+  const resumed = unwrap(control(stopped, fence(stopped), "active"))
+  assert(!effect_authorized(resumed, effect))
+  const unknown = unwrap(settle_effect(resumed, fence(resumed), request, "unknown", nil))
+  assert(!is_ok(settle_effect(unknown, fence(unknown), request, "confirmed", nil)))
+  assert(
+    !is_ok(
+      settle_effect(
+        unknown,
+        fence(unknown),
+        request + {source: sha256_hex("wrong head")},
+        "confirmed",
+        digest("receipt"),
+      ),
+    ),
+  )
+  const still_draining = unwrap(control(unknown, fence(unknown), "draining"))
+  assert(!is_ok(transfer(still_draining, fence(still_draining), "replacement")))
+  const confirmed = unwrap(
+    settle_effect(
+      still_draining,
+      fence(still_draining),
+      request,
+      "confirmed",
+      digest("observed exact-head merge"),
+    ),
+  )
+  const transferred = unwrap(transfer(confirmed, fence(confirmed), "replacement"))
+  assert_eq(transferred.authority.generation, 2)
+  assert(!effect_authorized(transferred, effect))
+  assert(
+    !is_ok(
+      settle_effect(transferred, fence(transferred), request, "confirmed", digest("late callback")),
+    ),
+  )
+  // Rollback restores the old controller through a new generation, never old fences.
+  const rollback_drain = unwrap(control(transferred, fence(transferred), "draining"))
+  const rolled_back = unwrap(transfer(rollback_drain, fence(rollback_drain), "owner"))
+  const active = unwrap(control(rolled_back, fence(rolled_back), "active"))
+  assert_eq(active.authority.generation, 3)
+  assert(!effect_authorized(active, effect))
+  assert_eq(active.effects[0]?.receipt, digest("observed exact-head merge"))
+  assert(!is_ok(reserve_effect(active, fence(active), request, f.policy)))
+}

@@ -91,7 +91,9 @@ fn build_sandboxed_command_forces_deterministic_message_locale() {
     caller_env.put_str("CARGO_TARGET_DIR", "/tmp/target");
     params.put("env", VmValue::dict_map(caller_env));
 
-    let cmd = build_sandboxed_command(&params, "process.exec").expect("build command");
+    let cmd = build_sandboxed_command(&params, "process.exec")
+        .expect("build command")
+        .command;
     let env = command_env(&cmd);
 
     assert_eq!(
@@ -128,7 +130,9 @@ fn build_sandboxed_command_respects_a_caller_pinned_locale() {
     caller_env.put_str("LC_MESSAGES", "fr_FR.UTF-8");
     params.put("env", VmValue::dict_map(caller_env));
 
-    let cmd = build_sandboxed_command(&params, "process.exec").expect("build command");
+    let cmd = build_sandboxed_command(&params, "process.exec")
+        .expect("build command")
+        .command;
     let env = command_env(&cmd);
 
     assert_eq!(
@@ -177,7 +181,9 @@ fn sandboxed_process_exec_neutralizes_rustc_wrappers_after_caller_env_policy() {
         ])),
     );
 
-    let cmd = build_sandboxed_command(&params, "process.exec").expect("build command");
+    let cmd = build_sandboxed_command(&params, "process.exec")
+        .expect("build command")
+        .command;
     crate::orchestration::pop_execution_policy();
     let env = command_env(&cmd);
 
@@ -213,7 +219,9 @@ fn unsandboxed_process_exec_preserves_caller_rustc_wrapper() {
     );
     params.put("env", VmValue::dict_map(caller_env));
 
-    let cmd = build_sandboxed_command(&params, "process.exec").expect("build command");
+    let cmd = build_sandboxed_command(&params, "process.exec")
+        .expect("build command")
+        .command;
     let env = command_env(&cmd);
 
     for (key, value) in [

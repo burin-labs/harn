@@ -1,0 +1,142 @@
+import { ReviewObservation, ReviewPolicy, ReviewedSource, review_admission } from "../lib/main"
+
+const author = {id: "author-1", name: "author", kind: "User"}
+
+const reviewer = {id: "reviewer-1", name: "reviewer", kind: "User"}
+
+const source: ReviewedSource = {
+  repository: "example/project",
+  change: "17",
+  head: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  base: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  author: author,
+  state: "open",
+  draft: false,
+  head_repository: "example/project",
+  base_repository: "example/project",
+}
+
+const policy: ReviewPolicy = {
+  minimum_approvals: 1,
+  trusted_actor_ids: [reviewer.id],
+  allow_forks: false,
+}
+
+const approval = {
+  id: "r1",
+  state: "approved",
+  head: source.head,
+  actor: reviewer,
+  updated_at: "2026-10-14T00:00:00Z",
+  submitted_at: "2026-10-14T00:00:00Z",
+}
+
+const observation: ReviewObservation = {
+  schema: "smart-ship.review-observation.v1",
+  repository: source.repository,
+  change: source.change,
+  head: source.head,
+  base: source.base,
+  platform_decision: nil,
+  declared_reviews: 1,
+  declared_threads: 0,
+  reviews: [approval],
+  threads: [],
+}
+
+pipeline test_admission_requires_independent_current_head_and_complete_facts() {
+  const accepted = review_admission(source, policy, observation)
+  assert(accepted.status == "approved", json_stringify(accepted))
+  assert_eq(accepted.approvers, [reviewer.id])
+  assert_eq(accepted.observed_reviews, 1)
+  assert_eq(accepted.pending, [])
+  const self_review = observation + {reviews: [approval + {actor: author}]}
+  assert_eq(
+    review_admission(source, policy + {trusted_actor_ids: [author.id]}, self_review).status,
+    "pending",
+  )
+  for missing in [
+    nil,
+    observation + {declared_reviews: 0, reviews: []},
+    observation + {reviews: [approval + {head: source.base}]},
+    observation + {reviews: [approval + {actor: author}]},
+    observation + {reviews: [approval + {actor: nil}]},
+    observation + {reviews: [approval + {head: nil}]},
+    observation + {reviews: [approval + {submitted_at: nil}]},
+    observation + {reviews: [approval + {actor: reviewer + {id: "same-name-other-id"}}]},
+  ] {
+    const decision = review_admission(source, policy, missing)
+    assert_eq(decision.status, "pending")
+    assert_eq(decision.approvers, [])
+    assert(decision.pending.contains("independent-exact-head-approvals"))
+  }
+  for incomplete in [
+    source + {author: nil},
+    source + {state: nil},
+    source + {draft: nil},
+    source + {head_repository: nil},
+    source + {base_repository: nil},
+    source + {draft: true},
+  ] {
+    assert_eq(review_admission(incomplete, policy, observation).status, "pending")
+  }
+  for incomplete in [
+    observation + {reviews: []},
+    observation + {declared_threads: 1},
+    observation + {head: source.base},
+    observation + {base: source.head},
+    observation + {reviews: [approval + {submitted_at: "not-a-time"}]},
+  ] {
+    const decision = review_admission(source, policy, incomplete)
+    assert_eq(decision.status, "invalid")
+    assert(len(decision.invalid) > 0)
+  }
+  assert_eq(
+    review_admission(source, policy + {minimum_approvals: 0}, observation).status,
+    "invalid",
+  )
+  assert_eq(review_admission(source + {state: "closed"}, policy, observation).status, "failed")
+  assert_eq(
+    review_admission(source + {head_repository: "fork/project"}, policy, observation).status,
+    "failed",
+  )
+}
+
+pipeline test_replay_uses_latest_unambiguous_vote_and_preserves_all_thread_holds() {
+  const requested = approval
+    + {id: "r2", state: "changes_requested", submitted_at: "2026-10-14T01:00:00Z"}
+  const denied = observation + {declared_reviews: 2, reviews: [approval, requested]}
+  const failure = review_admission(source, policy, denied)
+  assert_eq(failure.status, "failed")
+  assert_eq(failure.failed, ["changes-requested:" + reviewer.id])
+  const edited_old_approval = approval + {updated_at: "2026-10-14T03:00:00Z"}
+  assert_eq(
+    review_admission(source, policy, denied + {reviews: [edited_old_approval, requested]}).status,
+    "failed",
+  )
+  const renewed = approval + {id: "r3", submitted_at: "2026-10-14T02:00:00Z"}
+  const restored = denied + {declared_reviews: 3, reviews: [renewed, approval, requested]}
+  assert_eq(review_admission(source, policy, restored).status, "approved")
+  const dismissed = renewed + {state: "dismissed"}
+  assert_eq(
+    review_admission(source, policy, restored + {reviews: [dismissed, approval, requested]}).status,
+    "pending",
+  )
+  const tied = denied + {reviews: [approval, requested + {submitted_at: approval.submitted_at}]}
+  assert(review_admission(source, policy, tied).pending.contains("ambiguous-review:" + reviewer.id))
+  for outdated in [false, true] {
+    const unresolved = observation
+      + {declared_threads: 1, threads: [{id: "thread-1", resolved: false, outdated: outdated}]}
+    const decision = review_admission(source, policy, unresolved)
+    assert_eq(decision.status, "failed")
+    assert_eq(decision.failed, ["unresolved-thread:thread-1"])
+  }
+  assert_eq(
+    review_admission(source, policy, observation + {platform_decision: "review_required"}).status,
+    "pending",
+  )
+  assert_eq(
+    review_admission(source, policy, observation + {platform_decision: "changes_requested"}).status,
+    "failed",
+  )
+}

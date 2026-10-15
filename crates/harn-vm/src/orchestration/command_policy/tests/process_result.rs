@@ -25,4 +25,8 @@ fn blocked_response_contains_every_process_result_field() {
     }
     assert!(!response.contains_key("exit_status"));
     assert!(!response.contains_key("legacy_status"));
+    assert!(matches!(
+        response.get("verifier_receipt"),
+        Some(VmValue::Nil)
+    ));
 }

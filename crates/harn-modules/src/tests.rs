@@ -110,7 +110,7 @@ fn deeply_nested_wave_parses_on_workers_without_ambient_stack() {
             &format!("pub fn too_deep() {{ return {too_deep} }}\n"),
         ));
 
-        let loaded = load_wave(&paths, &[], ParsedSourceRetention::None, None);
+        let loaded = load_wave(&paths, &[], ParsedSourceRetention::None, None, None);
 
         let (refused, accepted) = loaded.split_last().expect("one module per path");
         for (i, (module, _)) in accepted.iter().enumerate() {
@@ -160,7 +160,7 @@ fn graph_only_wave_never_retains_parsed_sources() {
         })
         .collect();
 
-    let loaded = load_wave(&paths, &[], ParsedSourceRetention::None, None);
+    let loaded = load_wave(&paths, &[], ParsedSourceRetention::None, None, None);
 
     assert_eq!(loaded.len(), paths.len());
     assert!(

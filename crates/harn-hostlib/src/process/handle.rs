@@ -199,6 +199,13 @@ pub enum OutputCapture {
 /// real and mock paths uniform without forcing async into the rest of the
 /// hostlib.
 pub trait ProcessHandle: Send {
+    /// Available only after a normal wait validates this child's prepared runner.
+    fn verifier_execution_receipt(
+        &self,
+    ) -> Option<harn_vm::verifier_provenance::VerifierExecutionReceipt> {
+        None
+    }
+
     /// First program proven absent before spawn. Consumers may publish this
     /// evidence only after a normal exit with code 127.
     fn missing_program(&self) -> Option<&str> {

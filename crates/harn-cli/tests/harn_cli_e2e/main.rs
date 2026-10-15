@@ -106,6 +106,8 @@ mod persona_activation_cli_e2e;
 mod pg_codegen_cli;
 mod precompile_dispatch;
 mod predicate_contract;
+#[cfg(target_os = "macos")]
+mod process_smoke_cli;
 mod provider_catalog_sources;
 mod provider_dispatch_audit;
 mod provider_option_qualification;
@@ -156,6 +158,12 @@ const _: [(&str, fn()); 2] = [
         acp_confinement_cli::without_confine_workspace_the_same_write_lands_outside,
     ),
 ];
+
+#[cfg(target_os = "macos")]
+const _: (&str, fn()) = (
+    required_pr_e2e::CASES[17],
+    process_smoke_cli::process_smoke_matches_the_hosts_measured_confinement,
+);
 
 const _: [(&str, fn()); 12] = [
     (
