@@ -12,6 +12,9 @@ pub struct CommandPlan {
     pub program: String,
     pub environment: BTreeMap<String, String>,
     pub argv: Option<Vec<String>>,
+    /// Observed literal invocation, including env prefixes. This is evidence
+    /// for inspection only; it never authorizes shell-to-direct conversion.
+    pub literal_argv: Option<Vec<String>>,
     /// Shell lookup requires ruling out startup code and imported functions.
     pub requires_clean_shell_environment: bool,
 }
@@ -49,6 +52,11 @@ pub fn plan_invocation(program: &str, args: &[String]) -> Option<CommandPlan> {
                     program: program.to_string(),
                     environment: BTreeMap::new(),
                     argv: None,
+                    literal_argv: Some(
+                        std::iter::once(program.to_string())
+                            .chain(args.iter().cloned())
+                            .collect(),
+                    ),
                     requires_clean_shell_environment: false,
                 });
             }
@@ -147,6 +155,7 @@ pub fn plan_posix_command(source: &str) -> Option<CommandPlan> {
         requires_clean_shell_environment: false,
         program,
         environment,
+        literal_argv: (single && all_literal).then(|| argv[index..].to_vec()),
         argv: (plain && index == 0).then_some(argv),
     })
 }
@@ -353,5 +362,37 @@ mod tests {
                 .unwrap()
                 .requires_clean_shell_environment
         );
+    }
+
+    #[test]
+    fn literal_loader_inspection_does_not_authorize_shell_conversion() {
+        for source in [
+            "PYTHONPATH=/workspace python -m pytest test_calc.py",
+            "env PYTHONPATH=/workspace python -m pytest test_calc.py",
+        ] {
+            let plan = plan_posix_command(source).unwrap();
+            assert_eq!(plan.program, "python");
+            assert_eq!(plan.environment["PYTHONPATH"], "/workspace");
+            assert_eq!(
+                plan.literal_argv.as_deref(),
+                Some(
+                    ["python", "-m", "pytest", "test_calc.py"]
+                        .map(String::from)
+                        .as_slice()
+                ),
+            );
+            assert!(
+                plan.argv.is_none(),
+                "inspection cannot authorize conversion: {source}"
+            );
+        }
+        for source in ["python -m pytest > output", "python -m $MODULE"] {
+            let plan = plan_posix_command(source).unwrap();
+            assert!(
+                plan.literal_argv.is_none(),
+                "ambiguous loader invocation: {source}"
+            );
+            assert!(plan.argv.is_none());
+        }
     }
 }

@@ -1,0 +1,28 @@
+import { read_github_reviews } from "./lib/github"
+import { decode_review_observation } from "./lib/review"
+import { GithubPullRequestReviewCensusRequest } from "harn-github-connector/default"
+
+fn main(harness: Harness) {
+  require len(argv) >= 2, "pass live|replay and a JSON request or observation file"
+  const text = harness.fs.read_text(argv[1])
+  require len(text) <= 4194304, "review input exceeds its size limit"
+  const raw = json_parse(text)
+  if argv[0] == "replay" {
+    harness.stdio.println(json_stringify(decode_review_observation(raw)))
+    return
+  }
+  require argv[0] == "live" && len(argv) == 3, "live requires a credential reference name"
+  const request: GithubPullRequestReviewCensusRequest = schema_expect(
+    raw,
+    schema_of(GithubPullRequestReviewCensusRequest),
+  )
+  const observed = read_github_reviews(
+    harness,
+    request
+      + {options: (request.options ?? {}) + {installation_token: harness.secrets.read(argv[2])}},
+  )
+  if is_err(observed) {
+    throw "review observation refused: " + json_stringify(unwrap_err(observed))
+  }
+  harness.stdio.println(json_stringify(unwrap(observed)))
+}

@@ -175,13 +175,28 @@ pub const WAITPOINT: Ty = Ty::Shape(&[
     ShapeFieldDescriptor::new("metadata", TY_DICT_OR_NIL),
 ]);
 
+/// Evidence that the completed child executed its host-prepared runner bytes.
+pub const VERIFIER_EXECUTION_RECEIPT: Ty = Ty::Shape(&[
+    ShapeFieldDescriptor::new("verifier_id", TY_STRING),
+    ShapeFieldDescriptor::new("baseline_sha256", TY_STRING),
+    ShapeFieldDescriptor::new(
+        "executed_material",
+        Ty::Shape(&[ShapeFieldDescriptor::new(
+            "disposition",
+            Ty::LitString("unchanged"),
+        )]),
+    ),
+]);
+
 /// Stable synchronous subprocess result returned by `harness.process.run`,
 /// `exec`, `shell`, `exec_at`, and `shell_at`.
 ///
-/// This is the typed projection of `process_exec_response` in `harn-vm`.
-/// Keep every runtime field here so callers can use a narrower named record
-/// alias without losing typo checking at the public capability boundary.
+/// Keep this projection aligned with `process_exec_response` in `harn-vm`.
 pub const PROCESS_RESULT: Ty = Ty::Shape(&[
+    ShapeFieldDescriptor::optional(
+        "verifier_receipt",
+        Ty::Optional(&VERIFIER_EXECUTION_RECEIPT),
+    ),
     ShapeFieldDescriptor::new("command_id", TY_STRING),
     ShapeFieldDescriptor::new("status", TY_STRING),
     ShapeFieldDescriptor::new("pid", TY_INT_OR_NIL),

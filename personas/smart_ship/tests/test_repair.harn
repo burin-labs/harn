@@ -1,0 +1,147 @@
+import { agent_tool_handler_result } from "std/agent/tool_lifecycle"
+import { llm_tool_call, with_llm_script } from "std/testing"
+import { RepairContext, RepairModel, run_repair } from "../lib/main"
+
+const CONTEXT: RepairContext = {
+  incident: "claimed-incident",
+  snapshot: "frozen-source",
+  intent: ["preserve accepted capacity"],
+  failure: "capacity test failed",
+  files: ["capacity.py"],
+}
+
+const MODEL: RepairModel = {
+  provider: "mock",
+  model: "mock",
+  max_iterations: 4,
+  max_output_tokens: 128,
+  timeout_ms: 5000,
+  max_usd: 1.0,
+  verification_tools: ["verify"],
+}
+
+pipeline test_provider_run_requires_its_reserved_spend_allowance(harness: Harness) {
+  let verified = 0
+  const tools = tool_define(
+    tool_registry(),
+    "verify",
+    "Verify the repair",
+    {
+      parameters: {},
+      returns: {type: "string"},
+      annotations: {kind: "read"},
+      handler: { _ ->
+        verified += 1
+        "verified"
+      },
+    },
+  )
+  const refused = with_llm_script(
+    harness.llm,
+    [llm_tool_call("verify", {}, "must-not-run")],
+    { ->
+      try {
+        run_repair(harness, CONTEXT, tools, MODEL, { -> 0.5 })
+      }
+    },
+  )
+  assert(!is_ok(refused))
+  assert_eq(verified, 0)
+}
+
+pipeline test_repair_stops_before_another_provider_turn_when_authority_is_revoked(
+  harness: Harness,
+) {
+  let authorized = true
+  let proposed = 0
+  let verified = 0
+  let tools = tool_define(
+    tool_registry(),
+    "propose",
+    "Propose a repair",
+    {
+      parameters: {},
+      returns: {type: "string"},
+      annotations: {kind: "edit"},
+      handler: { _ ->
+        proposed += 1
+        authorized = false
+        "proposal"
+      },
+    },
+  )
+  tools = tool_define(
+    tools,
+    "verify",
+    "Verify the repair",
+    {
+      parameters: {},
+      returns: {type: "string"},
+      annotations: {kind: "read"},
+      handler: { _ ->
+        verified += 1
+        "verified"
+      },
+    },
+  )
+  const result = with_llm_script(
+    harness.llm,
+    [llm_tool_call("propose", {}, "first"), llm_tool_call("verify", {}, "forbidden")],
+    { ->
+      run_repair(
+        harness,
+        CONTEXT,
+        tools,
+        MODEL,
+        { ->
+          if authorized {
+            1.0
+          } else {
+            nil
+          }
+        },
+      )
+    },
+  )
+  assert_eq(proposed, 1)
+  assert_eq(verified, 0)
+  assert_eq(result.provider_calls, 1)
+  assert_eq(result.terminal.kind, "policy_stop")
+  assert_eq(result.terminal.reason, "repair authority revoked")
+  assert_eq(result.successful_tools, ["propose"])
+}
+
+pipeline test_failed_verification_does_not_finish_repair_and_pass_does(harness: Harness) {
+  let attempts = 0
+  const tools = tool_define(
+    tool_registry(),
+    "verify",
+    "Verify the repair",
+    {
+      parameters: {},
+      returns: {type: "object"},
+      annotations: {kind: "read"},
+      handler: { _ ->
+        attempts += 1
+        agent_tool_handler_result(
+          "measured verification",
+          {attempt: attempts},
+          if attempts == 1 {
+            "error"
+          } else {
+            "ok"
+          },
+        )
+      },
+    },
+  )
+  const result = with_llm_script(
+    harness.llm,
+    [llm_tool_call("verify", {}, "failed"), llm_tool_call("verify", {}, "passed")],
+    { -> run_repair(harness, CONTEXT, tools, MODEL, { -> 1.0 }) },
+  )
+  assert_eq(attempts, 2)
+  assert_eq(result.provider_calls, 2)
+  assert_eq(result.terminal.kind, "natural")
+  assert_eq(result.successful_tools, ["verify"])
+}

@@ -72,6 +72,11 @@ pub struct PolicyDecisionEvidence {
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct RunAuthorityReceipt {
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub verifier_baselines: BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub verifier_observations:
+        BTreeMap<String, crate::verifier_provenance::VerifierLoaderObservation>,
     pub schema: String,
     pub stage: AuthorityReceiptStage,
     pub status: AuthorityReceiptStatus,
@@ -102,6 +107,8 @@ impl RunAuthorityReceipt {
         observed_at_ms: u64,
     ) -> Self {
         Self {
+            verifier_baselines: BTreeMap::new(),
+            verifier_observations: BTreeMap::new(),
             schema: RUN_AUTHORITY_RECEIPT_SCHEMA.to_string(),
             stage: AuthorityReceiptStage::Startup,
             status: AuthorityReceiptStatus::Preparing,

@@ -409,6 +409,88 @@ version = "0.1.0"
         .is_file());
 
     let original_lock = fs::read_to_string(&lock_path).unwrap();
+    let original_generation = current_packages_dir(root);
+    let poisoned_checksum = format!("sha256:{}", "0".repeat(64));
+    assert_ne!(checksum, poisoned_checksum);
+    fs::write(
+        root.join(MANIFEST),
+        manifest.replace(&checksum, &poisoned_checksum),
+    )
+    .unwrap();
+    for (frozen, offline) in [(false, false), (true, false), (false, true), (true, true)] {
+        let error = install_packages_in(workspace.env(), frozen, None, offline).unwrap_err();
+        let message = error.to_string();
+        if frozen || offline {
+            assert!(message.contains(LOCK_FILE) && message.contains("would need to change"));
+        } else {
+            assert!(
+                message.contains(&poisoned_checksum),
+                "changed checksum must not reuse the old lock: {error}"
+            );
+        }
+        assert_eq!(fs::read_to_string(&lock_path).unwrap(), original_lock);
+        assert_eq!(current_packages_dir(root), original_generation);
+    }
+    fs::write(root.join(MANIFEST), &manifest).unwrap();
+    let registry_provenance = entry.registry.as_ref().unwrap();
+    let original_evidence = registry_provenance.provenance_url.as_ref().unwrap();
+    let requested_evidence = "https://github.com/acme/rules/releases/tag/v1.0.0-qualified";
+    let updated_manifest = manifest.replace(original_evidence, requested_evidence);
+    assert_ne!(manifest, updated_manifest);
+    fs::write(root.join(MANIFEST), &updated_manifest).unwrap();
+    let error = install_packages_in(workspace.env(), true, None, true).unwrap_err();
+    assert!(error.to_string().contains(LOCK_FILE));
+    assert_eq!(fs::read_to_string(&lock_path).unwrap(), original_lock);
+    assert_eq!(current_packages_dir(root), original_generation);
+    install_packages_in(workspace.env(), false, None, false).unwrap();
+    let updated_lock = LockFile::load(&lock_path).unwrap().unwrap();
+    let updated_entry = updated_lock.find("acme-rules").unwrap();
+    assert_eq!(updated_entry.content_hash, entry.content_hash);
+    assert_eq!(
+        updated_entry
+            .registry
+            .as_ref()
+            .unwrap()
+            .provenance_url
+            .as_deref(),
+        Some(requested_evidence)
+    );
+    fs::write(root.join(MANIFEST), &manifest).unwrap();
+    install_packages_in(workspace.env(), false, None, false).unwrap();
+    assert_eq!(fs::read_to_string(&lock_path).unwrap(), original_lock);
+    let direct_manifest = format!(
+        "[package]\nname = \"workspace\"\nversion = \"0.1.0\"\n\n[dependencies]\nacme-rules = {{ archive = \"{archive}\", checksum = \"{checksum}\" }}\n"
+    );
+    fs::write(root.join(MANIFEST), &direct_manifest).unwrap();
+    install_packages_in(workspace.env(), false, None, false).unwrap();
+    let direct_lock_bytes = fs::read_to_string(&lock_path).unwrap();
+    let direct_lock = LockFile::load(&lock_path).unwrap().unwrap();
+    let direct_entry = direct_lock.find("acme-rules").unwrap();
+    assert_eq!(
+        direct_entry.content_hash.as_deref(),
+        Some(checksum.as_str())
+    );
+    assert!(direct_entry.registry.is_none());
+    let direct_generation = current_packages_dir(root);
+    fs::write(
+        root.join(MANIFEST),
+        direct_manifest.replace(&checksum, &poisoned_checksum),
+    )
+    .unwrap();
+    for (frozen, offline) in [(false, false), (true, false), (false, true), (true, true)] {
+        let error = install_packages_in(workspace.env(), frozen, None, offline).unwrap_err();
+        let message = error.to_string();
+        if frozen || offline {
+            assert!(message.contains(LOCK_FILE) && message.contains("would need to change"));
+        } else {
+            assert!(message.contains(&poisoned_checksum));
+        }
+        assert_eq!(fs::read_to_string(&lock_path).unwrap(), direct_lock_bytes);
+        assert_eq!(current_packages_dir(root), direct_generation);
+    }
+    fs::write(root.join(MANIFEST), &manifest).unwrap();
+    install_packages_in(workspace.env(), false, None, false).unwrap();
+    assert_eq!(fs::read_to_string(&lock_path).unwrap(), original_lock);
     fs::remove_dir_all(current_packages_dir(root)).unwrap();
     fs::remove_file(&archive_path).unwrap();
     let reinstalled = install_packages_in(workspace.env(), true, None, true).unwrap();

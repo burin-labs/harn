@@ -1,0 +1,199 @@
+import { digest, execution, fixture, proof } from "../fixtures/support"
+import {
+  checkpoint_bytes,
+  checkpoint_id,
+  checkpoint_valid,
+  freeze_snapshot,
+  policy_digest,
+  promote,
+  release_identity,
+  verify,
+} from "../lib/main"
+
+pipeline test_prior_execution_cannot_be_relabelled_as_the_current_dispatch(harness: Harness) {
+  const f = fixture(harness.random)
+  const original_snapshot = freeze_snapshot(
+    f.snapshot
+      + {
+        requirements: f.snapshot.requirements.map(
+          { requirement -> requirement + {reuse_allowed: false} },
+        ),
+      },
+  )
+  const original_requirement = original_snapshot.requirements[0]!
+  const prior = proof(f, execution(f) + {requirement: original_requirement})
+  assert_eq(verify(original_snapshot, [prior], f.policy).status, "verified")
+  const current = freeze_snapshot(original_snapshot + {sequence: 2, created_at_ms: 3000})
+  const current_requirement = current.requirements[0]!
+  assert(current_requirement.execution_request != original_requirement.execution_request)
+  assert_eq(
+    verify(current, [prior], f.policy).status,
+    "invalid",
+    "a prior execution must not bypass disabled reuse by claiming it executed for a new dispatch",
+  )
+  assert_eq(verify(current, [prior + {mode: "reused"}], f.policy).status, "invalid")
+  const copied_request = current + {requirements: [original_requirement]}
+  assert_eq(
+    verify(copied_request, [prior], f.policy).status,
+    "invalid",
+    "copying an old request must not make it belong to a new frontier",
+  )
+  const forged = prior + {original: prior.original + {requirement: current_requirement}}
+  assert_eq(
+    verify(current, [forged], f.policy).status,
+    "invalid",
+    "the execution signature must bind its original request",
+  )
+}
+
+pipeline test_complete_execution_promotes_and_tampered_checkpoint_cannot_release(harness: Harness) {
+  const f = fixture(harness.random)
+  const p = proof(f, execution(f))
+  const result = promote(f.snapshot, [p], f.policy, f.authority, f.fence)
+  assert_eq(result.status, "promote")
+  assert_eq(result.verification.required, 1)
+  assert_eq(result.verification.executed, 1)
+  const checkpoint = result.checkpoint
+  assert(checkpoint != nil)
+  const signed = {
+    checkpoint: checkpoint,
+    signer: "publisher",
+    signature: ed25519_sign(f.private_key, checkpoint_bytes(checkpoint)),
+  }
+  assert(checkpoint_valid(signed, f.policy))
+  assert_eq(release_identity(signed, f.policy), checkpoint_id(checkpoint))
+  // A later policy must not erase the proof for the version already deployed.
+  const newer_policy = f.policy + {max_changes: 20, max_repair_usd: 9.0, verifier_keys: []}
+  assert(checkpoint_valid(signed, newer_policy))
+  assert_eq(release_identity(signed, newer_policy), checkpoint_id(checkpoint))
+  assert(!checkpoint_valid(signed, f.policy + {installation: "foreign"}))
+  const poisoned = signed + {checkpoint: checkpoint + {snapshot: f.snapshot + {sequence: 2}}}
+  assert(!checkpoint_valid(poisoned, f.policy))
+  assert_eq(release_identity(poisoned, f.policy), nil)
+}
+
+pipeline test_missing_and_empty_inventory_never_advance_checkpoint(harness: Harness) {
+  const f = fixture(harness.random)
+  const pending = promote(f.snapshot, [], f.policy, f.authority, f.fence)
+  assert_eq(pending.status, "refused")
+  assert_eq(pending.verification.pending, ["tests"])
+  assert_eq(pending.checkpoint, nil)
+  const empty = verify(f.snapshot + {requirements: []}, [], f.policy)
+  assert_eq(empty.status, "invalid")
+  assert_eq(empty.required, 0)
+  assert(len(empty.invalid) > 0)
+  const partial = verify(
+    f.snapshot + {inventory_complete: false},
+    [proof(f, execution(f))],
+    f.policy,
+  )
+  assert_eq(partial.status, "invalid")
+  const broader = f.policy + {repositories: ["project", "unchecked"]}
+  const uncovered = f.snapshot
+    + {
+      policy_digest: policy_digest(broader),
+      sources: f.snapshot.sources
+        + [
+          {
+            repository: "unchecked",
+            commit: sha256_hex("other commit"),
+            tree: sha256_hex("other tree"),
+          },
+        ],
+    }
+  assert_eq(verify(uncovered, [proof(f, execution(f))], broader).status, "invalid")
+}
+
+pipeline test_reuse_requires_original_signature_and_all_semantic_inputs(harness: Harness) {
+  const f = fixture(harness.random)
+  const current = execution(f)
+  const prior_source = current.source + {commit: sha256_hex("older commit")}
+  const origin = freeze_snapshot(f.snapshot + {sources: [prior_source]})
+  const old = current + {source: prior_source, requirement: origin.requirements[0]!}
+  const reused = proof(f, old) + {mode: "reused"}
+  const target = freeze_snapshot(f.snapshot + {sequence: 2})
+  const green = verify(target, [reused], f.policy)
+  assert_eq(green.status, "verified")
+  assert_eq(green.executed, 0)
+  assert_eq(green.reused, 1)
+  assert_eq(reused.original.run, "run-1")
+  assert_eq(verify(target, [reused + {mode: "executed"}], f.policy).status, "invalid")
+  const wrong_source = proof(f, old + {requirement: target.requirements[0]!})
+  assert_eq(
+    verify(target, [wrong_source], f.policy).status,
+    "invalid",
+    "a current request still requires the exact source that executed",
+  )
+  for altered in [
+    current.requirement + {input_digest: digest("changed")},
+    current.requirement + {runtime_digest: digest("changed")},
+    current.requirement + {environment_digest: digest("changed")},
+    current.requirement + {coverage_digest: digest("changed")},
+  ] {
+    const candidate = freeze_snapshot(target + {requirements: [altered]})
+    assert_eq(verify(candidate, [reused], f.policy).status, "invalid")
+  }
+  assert_eq(verify(target, [reused + {signature: ""}], f.policy).status, "invalid")
+  const tampered = reused + {original: old + {run: "fake"}}
+  assert_eq(verify(target, [tampered], f.policy).status, "invalid")
+}
+
+pipeline test_duplicate_unknown_and_cross_installation_proofs_are_invalid(harness: Harness) {
+  const f = fixture(harness.random)
+  const p = proof(f, execution(f))
+  assert_eq(verify(f.snapshot, [p, p], f.policy).invalid, ["tests"])
+  assert_eq(verify(f.snapshot, [p + {requirement: "unknown"}], f.policy).status, "invalid")
+  const foreign = proof(f, execution(f) + {installation: "foreign"})
+  assert_eq(verify(f.snapshot, [foreign], f.policy).status, "invalid")
+  const wrong_domain = f.policy
+    + {verifier_keys: f.policy.verifier_keys.map({ key -> key + {trust_domain: "other"} })}
+  assert_eq(verify(f.snapshot, [p], wrong_domain).status, "invalid")
+}
+
+pipeline test_signed_failure_is_observed_and_missing_provenance_is_invalid(harness: Harness) {
+  const f = fixture(harness.random)
+  const failed = verify(f.snapshot, [proof(f, execution(f) + {result: "failed"})], f.policy)
+  assert_eq(failed.status, "failed")
+  assert_eq(failed.failed, ["tests"])
+  assert_eq(failed.executed, 1)
+  const no_artifacts = proof(f, execution(f) + {result: "failed", artifacts: []})
+  assert_eq(verify(f.snapshot, [no_artifacts], f.policy).failed, ["tests"])
+  const infrastructure = verify(
+    f.snapshot,
+    [proof(f, execution(f) + {result: "infrastructure_failed"})],
+    f.policy,
+  )
+  assert_eq(infrastructure.infrastructure_failed, ["tests"])
+  assert_eq(infrastructure.failed, [])
+  const cancelled = verify(f.snapshot, [proof(f, execution(f) + {result: "cancelled"})], f.policy)
+  assert_eq(cancelled.status, "pending")
+  for bad in [
+    execution(f) + {run: ""},
+    execution(f) + {job: ""},
+    execution(f) + {attempt: 0},
+    execution(f) + {artifacts: []},
+  ] {
+    assert_eq(verify(f.snapshot, [proof(f, bad)], f.policy).status, "invalid")
+  }
+}
+
+pipeline test_stop_hold_shadow_stale_authority_and_obsolete_frontiers_refuse(harness: Harness) {
+  const f = fixture(harness.random)
+  const p = proof(f, execution(f))
+  for authority in [
+    f.authority + {mode: "stopped"},
+    f.authority + {mode: "shadow"},
+    f.authority + {revision: 2},
+    f.authority + {generation: 2},
+    f.authority + {controller: "new-owner"},
+    f.authority + {held_repositories: ["project"]},
+    f.authority + {promoted_sequence: 1},
+    f.authority + {previous_checkpoint: digest("newer")},
+  ] {
+    const result = promote(f.snapshot, [p], f.policy, authority, f.fence)
+    assert_eq(result.verification.status, "verified")
+    assert_eq(result.status, "refused")
+    assert_eq(result.checkpoint, nil)
+    assert(result.reason != "")
+  }
+}
