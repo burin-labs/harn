@@ -11,8 +11,10 @@ case "$*" in
   *workflows/ci.yml/runs*) cat "$FIXTURE/runs" ;;
   *workflows/macos-nightly.yml/runs*) cat "$FIXTURE/native-runs" ;;
   *workflows/macos-nightly.yml*) cat "$FIXTURE/native-workflow" ;;
-  *runs/8[12]/attempts/1/jobs*) cat "$FIXTURE/native-jobs" ;;
-  *runs/8[12]/attempts/1*) cat "$FIXTURE/native-run" ;;
+  *runs/81/attempts/1/jobs*) cat "$FIXTURE/native-jobs" ;;
+  *runs/81/attempts/1*) cat "$FIXTURE/native-run" ;;
+  *runs/82/attempts/1/jobs*) cat "$FIXTURE/newer-jobs" ;;
+  *runs/82/attempts/1*) cat "$FIXTURE/newer-run" ;;
   *runs/71/jobs*) cat "$FIXTURE/jobs" ;;
   *) exit 9 ;;
 esac
@@ -95,8 +97,8 @@ done
 jq '.[0].jobs += [.[0].jobs[0] | .id=92] | .[0].total_count=2' "$scratch/good-native/native-jobs" > "$scratch/native-jobs"
 native_refused duplicate-required-job
 jq '.[0].workflow_runs += [.[0].workflow_runs[0] | .id=82 | .conclusion="failure"] | .[0].total_count=2' "$scratch/good-native/native-runs" > "$scratch/native-runs"
-jq '.id=82 | .conclusion="failure"' "$scratch/good-native/native-run" > "$scratch/native-run"
-jq '.[0].jobs[0].run_id=82' "$scratch/good-native/native-jobs" > "$scratch/native-jobs"
+jq '.id=82 | .conclusion="failure"' "$scratch/good-native/native-run" > "$scratch/newer-run"
+jq '.[0].jobs[0].run_id=82' "$scratch/good-native/native-jobs" > "$scratch/newer-jobs"
 native_refused newer-failure-after-prior-success
 bash "$root/scripts/stage_release_tools.sh" "$scratch/staged"
 mkdir "$scratch/other-checkout"
