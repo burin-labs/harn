@@ -4,7 +4,7 @@ use std::time::Duration;
 use crate::chunk::ChunkRef;
 use crate::value::{VmError, VmValue};
 
-use super::{ScopeSpan, Vm};
+use super::Vm;
 
 pub(super) enum TopLevelEntry {
     Chunk(ChunkRef),
@@ -142,11 +142,16 @@ impl Vm {
         let _execution_activity = self
             .wait_for_graph
             .register_task(self.runtime_context.task_id.clone());
-        let _span = ScopeSpan::new(crate::tracing::SpanKind::Pipeline, "main".into());
+        let _span = self
+            .runtime
+            .start_span(super::VmSpanKind::Pipeline, "main".into());
         match entry.run(self).await {
-            Ok(value) => self.run_pipeline_finish_lifecycle(value).await,
+            Ok(value) => {
+                let runtime = Arc::clone(&self.runtime);
+                runtime.finish_pipeline(self, value).await
+            }
             Err(error) => {
-                crate::orchestration::clear_pipeline_on_finish();
+                self.runtime.clear_pipeline_finish();
                 Err(error)
             }
         }

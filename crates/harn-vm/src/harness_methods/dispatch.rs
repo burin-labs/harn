@@ -169,7 +169,7 @@ async fn call_harness_method_in_scope(
                 let qualified_name = format!("harness.{}.{method}", capability.field_name());
                 // Capability dispatch bypasses `call_builtin_impl`, so it
                 // owns opening the observation scope for this call.
-                let _observe = Vm::observe_builtin_call(&qualified_name);
+                let _observe = vm.observe_builtin_call(&qualified_name);
                 return vm
                     .call_builtin_entry(&qualified_name, dispatch, args.to_vec())
                     .await;

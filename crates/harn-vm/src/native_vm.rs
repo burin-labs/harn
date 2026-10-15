@@ -5,7 +5,9 @@ use crate::vm::{BuiltinGateDecision, Vm, VmRuntime, VmRuntimeBaseline};
 use std::{any::Any, path::Path, sync::Arc};
 use std::{future::Future, pin::Pin};
 
+mod lifecycle;
 mod task_cleanup;
+mod tracing;
 
 #[derive(Clone)]
 pub(crate) struct NativeExecutionState {
@@ -95,6 +97,26 @@ impl VmRuntime for NativeExecutionState {
 
     fn task_cleanup(&self, execution_id: &crate::ExecutionId) -> Arc<dyn crate::vm::VmTaskCleanup> {
         self.retained_cleanup_runtimes(execution_id)
+    }
+
+    fn start_span(&self, kind: crate::vm::VmSpanKind, name: String) -> crate::vm::ScopeSpan {
+        tracing::start_span(kind, name)
+    }
+
+    fn builtin_span(&self, name: &str) -> Option<crate::vm::ScopeSpan> {
+        tracing::builtin_span(name)
+    }
+
+    fn finish_pipeline<'a>(
+        &'a self,
+        vm: &'a mut Vm,
+        value: VmValue,
+    ) -> Pin<Box<dyn Future<Output = Result<VmValue, VmError>> + Send + 'a>> {
+        Box::pin(vm.run_pipeline_finish_lifecycle(value))
+    }
+
+    fn clear_pipeline_finish(&self) {
+        crate::orchestration::clear_pipeline_on_finish();
     }
 
     fn rebind_execution_state(&self, vm: &mut Vm) {

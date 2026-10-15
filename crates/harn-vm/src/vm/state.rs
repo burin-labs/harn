@@ -48,18 +48,21 @@ pub(crate) struct LazyCallableCacheSlot {
 pub(crate) type LazyCallableModuleCache =
     Arc<VmMutex<BTreeMap<PathBuf, Vec<LazyCallableCacheSlot>>>>;
 
-/// RAII guard that starts a tracing span on creation and ends it on drop.
-pub(crate) struct ScopeSpan(u64);
+/// A runtime-owned span closed when the interpreter leaves its scope.
+pub(crate) struct ScopeSpan {
+    id: u64,
+    end: fn(u64),
+}
 
 impl ScopeSpan {
-    pub(crate) fn new(kind: crate::tracing::SpanKind, name: String) -> Self {
-        Self(crate::tracing::span_start(kind, name))
+    pub(crate) fn new(id: u64, end: fn(u64)) -> Self {
+        Self { id, end }
     }
 }
 
 impl Drop for ScopeSpan {
     fn drop(&mut self) {
-        crate::tracing::span_end(self.0);
+        (self.end)(self.id);
     }
 }
 

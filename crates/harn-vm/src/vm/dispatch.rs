@@ -31,37 +31,17 @@ struct ResolvedSyncBuiltin {
 }
 
 impl Vm {
-    fn builtin_span_kind(name: &str) -> Option<crate::tracing::SpanKind> {
-        // Capability dispatch passes the public `harness.<capability>.<method>`
-        // path while ambient dispatch passes the legacy global. Both resolve to
-        // the same registry entry, so the two surfaces cannot classify the same
-        // effect differently. `__cap_` is an internal renaming artifact.
-        let resolved = crate::stdlib::builtin_for_harness_path(name).unwrap_or(name);
-        match resolved.strip_prefix("__cap_").unwrap_or(resolved) {
-            "llm_call" | "llm_stream" | "llm_stream_call" | "agent_loop" => {
-                Some(crate::tracing::SpanKind::LlmCall)
-            }
-            "mcp_call" => Some(crate::tracing::SpanKind::ToolCall),
-            _ => None,
-        }
-    }
-
     /// Open the observation scope for one builtin call. Both members are inert
     /// unless the operator asked for the corresponding output.
     ///
-    /// The guard is returned BOXED, and only when something is actually being
-    /// observed. A builtin call reaches the VM recursively (a builtin invokes a
-    /// pipeline that dispatches more builtins), so this guard is a live local on
-    /// every frame of that recursion. Held by value, the ~48-byte aggregate did
-    /// not just add its own size per frame — as a recursive-frame local it
-    /// shifted the compiler's spill/inline decisions, so the real growth
-    /// exceeded `size_of::<BuiltinObservation>()` and overflowed the stack on
-    /// deep dispatch even with profiling OFF (both members `None`). Returning
-    /// `Option<Box<_>>` keeps the frame local pointer-sized (an 8-byte niche
-    /// `None` on the inert hot path, with no allocation) and only touches the
-    /// heap when an observer is genuinely active. See harn#4928.
-    pub(crate) fn observe_builtin_call(name: &str) -> Option<Box<BuiltinObservation<'_>>> {
-        let span = Self::builtin_span_kind(name).map(|kind| ScopeSpan::new(kind, name.to_string()));
+    /// Nested builtin callbacks retain a guard in every frame. Keeping it
+    /// boxed avoids the deep-dispatch stack overflow from inline guards
+    /// (#4928), while `None` leaves the inactive path pointer-sized.
+    pub(crate) fn observe_builtin_call<'a>(
+        &self,
+        name: &'a str,
+    ) -> Option<Box<BuiltinObservation<'a>>> {
+        let span = self.runtime.builtin_span(name);
         let timer = crate::builtin_profile::BuiltinTimer::start(name);
         if span.is_none() && timer.is_none() {
             // Inert: nothing to observe. No allocation, an 8-byte `None` local.
@@ -814,7 +794,7 @@ impl Vm {
             .get(name)
             .cloned()
             .ok_or_else(|| VmError::UndefinedBuiltin(name.to_string()))?;
-        let _observe = Self::observe_builtin_call(name);
+        let _observe = self.observe_builtin_call(name);
         // The Harness method contract has already applied policy and recorded
         // its typed effects. Only validate the hidden implementation's runtime
         // argument shape here; `validate_sync_builtin_args` would reapply the
@@ -866,7 +846,7 @@ impl Vm {
             Ok(resolved) => resolved,
             Err(error) => return Some(Err(error)),
         };
-        let _observe = Self::observe_builtin_call(name);
+        let _observe = self.observe_builtin_call(name);
         if let Err(error) = args.with_slice(|slice| {
             Self::validate_sync_builtin_args(
                 self.runtime.as_ref(),
@@ -906,7 +886,7 @@ impl Vm {
             )));
         }
 
-        let _observe = Self::observe_builtin_call(name);
+        let _observe = self.observe_builtin_call(name);
         if let Err(error) = Self::validate_sync_builtin_args(
             self.runtime.as_ref(),
             &self.denied_builtins,
@@ -932,7 +912,7 @@ impl Vm {
         direct_id: Option<BuiltinId>,
         enforce_contract: bool,
     ) -> Result<VmValue, VmError> {
-        let _observe = Self::observe_builtin_call(name);
+        let _observe = self.observe_builtin_call(name);
 
         self.runtime.gate_preparation(
             name,

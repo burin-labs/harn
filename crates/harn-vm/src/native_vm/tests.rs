@@ -46,6 +46,22 @@ impl VmRuntime for RefusingRuntime {
     fn task_cleanup(&self, execution_id: &crate::ExecutionId) -> Arc<dyn crate::vm::VmTaskCleanup> {
         self.native.task_cleanup(execution_id)
     }
+    fn start_span(&self, kind: crate::vm::VmSpanKind, name: String) -> crate::vm::ScopeSpan {
+        self.native.start_span(kind, name)
+    }
+    fn builtin_span(&self, name: &str) -> Option<crate::vm::ScopeSpan> {
+        self.native.builtin_span(name)
+    }
+    fn finish_pipeline<'a>(
+        &'a self,
+        vm: &'a mut Vm,
+        value: VmValue,
+    ) -> Pin<Box<dyn Future<Output = Result<VmValue, VmError>> + Send + 'a>> {
+        self.native.finish_pipeline(vm, value)
+    }
+    fn clear_pipeline_finish(&self) {
+        self.native.clear_pipeline_finish();
+    }
     fn baseline(&self) -> Arc<dyn VmRuntimeBaseline> {
         Arc::new(RefusingBaseline {
             native: self.native.baseline(),

@@ -17,7 +17,7 @@ use crate::prepared_module::PreparedModuleArtifact;
 use crate::value::{ModuleFunctionRegistry, VmClosure, VmEnv, VmError, VmValue};
 
 use super::stdlib_artifact::stdlib_module_artifact;
-use super::{ScopeSpan, Vm};
+use super::Vm;
 
 mod shared_instances;
 mod transaction;
@@ -989,7 +989,9 @@ impl Vm {
         provenance: ModuleProvenance,
     ) -> Pin<Box<dyn Future<Output = Result<(), VmError>> + Send + 'a>> {
         Box::pin(async move {
-            let _import_span = ScopeSpan::new(crate::tracing::SpanKind::Import, path.to_string());
+            let _import_span = self
+                .runtime
+                .start_span(super::VmSpanKind::Import, path.to_string());
 
             let stdlib_module = path
                 .strip_prefix("std/")

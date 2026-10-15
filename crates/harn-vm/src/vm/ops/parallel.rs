@@ -336,8 +336,9 @@ async fn stream_capped_unordered<F, T>(
 
 impl super::super::Vm {
     pub(super) async fn execute_parallel(&mut self) -> Result<(), VmError> {
-        let _par_span =
-            super::super::ScopeSpan::new(crate::tracing::SpanKind::Parallel, "parallel".into());
+        let _par_span = self
+            .runtime
+            .start_span(super::super::VmSpanKind::Parallel, "parallel".into());
         let closure = self.pop()?;
         let count_val = self.pop()?;
         let cap_val = self.pop()?;
@@ -619,8 +620,9 @@ impl super::super::Vm {
     }
 
     pub(super) fn execute_spawn(&mut self) -> Result<(), VmError> {
-        let _spawn_span =
-            super::super::ScopeSpan::new(crate::tracing::SpanKind::Spawn, "spawn".into());
+        let _spawn_span = self
+            .runtime
+            .start_span(super::super::VmSpanKind::Spawn, "spawn".into());
         let closure = self.pop()?;
         if let VmValue::Closure(closure) = closure {
             self.task_counter += 1;
