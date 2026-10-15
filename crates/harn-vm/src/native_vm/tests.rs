@@ -107,6 +107,16 @@ impl VmRuntime for RefusingRuntime {
     fn suspend_active_context(&self) -> crate::vm::step_context::ActiveContextGuard {
         self.native.suspend_active_context()
     }
+    fn step_error_boundary(
+        &self,
+        error: VmError,
+        frame_depth: usize,
+    ) -> crate::vm::step_context::StepBoundaryDecision {
+        self.native.step_error_boundary(error, frame_depth)
+    }
+    fn finish_skipped_step(&self, frame_depth: usize, message: String) {
+        self.native.finish_skipped_step(frame_depth, message);
+    }
     fn denied_builtin_family(
         &self,
         denied: std::collections::HashSet<String>,

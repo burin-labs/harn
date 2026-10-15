@@ -9,6 +9,7 @@ mod bridge;
 mod context;
 mod execution_evidence;
 mod lifecycle;
+mod step_lifecycle;
 pub(crate) mod subtask;
 mod task_cleanup;
 mod tracing;
@@ -166,6 +167,18 @@ impl VmRuntime for NativeExecutionState {
 
     fn suspend_active_context(&self) -> crate::vm::step_context::ActiveContextGuard {
         crate::step_runtime::suspend_active_context()
+    }
+
+    fn step_error_boundary(
+        &self,
+        error: VmError,
+        frame_depth: usize,
+    ) -> crate::vm::step_context::StepBoundaryDecision {
+        step_lifecycle::error_boundary(error, frame_depth)
+    }
+
+    fn finish_skipped_step(&self, frame_depth: usize, message: String) {
+        crate::step_runtime::pop_and_record(frame_depth, "skipped", Some(message));
     }
 
     fn denied_builtin_family(

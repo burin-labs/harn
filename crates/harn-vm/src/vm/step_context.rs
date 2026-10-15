@@ -1,6 +1,6 @@
 //! Typed call-context data shared by the interpreter and its execution runtime.
 
-use crate::value::VmValue;
+use crate::value::{VmError, VmValue};
 use harn_execution_policy::StageDecl;
 use std::sync::Arc;
 
@@ -39,6 +39,11 @@ pub enum StepErrorBoundary {
     Fail,
     Continue,
     Escalate,
+}
+
+pub(crate) enum StepBoundaryDecision {
+    Continue { message: String },
+    Throw(VmError),
 }
 
 /// One tracked step, alive while its owning frame remains on the stack.

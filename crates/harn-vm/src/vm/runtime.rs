@@ -59,6 +59,12 @@ pub(crate) trait VmRuntime: Any + Send + Sync {
     fn enter_function(&self, name: &str, frame_depth: usize, args: &[VmValue]);
     fn prune_frames(&self, frame_depth: usize);
     fn suspend_active_context(&self) -> super::step_context::ActiveContextGuard;
+    fn step_error_boundary(
+        &self,
+        error: VmError,
+        frame_depth: usize,
+    ) -> super::step_context::StepBoundaryDecision;
+    fn finish_skipped_step(&self, frame_depth: usize, message: String);
     fn denied_builtin_family(
         &self,
         denied: std::collections::HashSet<String>,

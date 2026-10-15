@@ -502,24 +502,9 @@ impl Vm {
     /// short-circuited (`continue`) or annotated (`escalate`) before the
     /// generic try/catch machinery sees it.
     pub(crate) fn apply_step_error_boundary(&mut self, error: VmError) -> StepBoundaryOutcome {
-        use crate::step_runtime;
-        if !step_runtime::is_step_budget_exhausted(&error) {
-            return StepBoundaryOutcome::Throw(error);
-        }
-        let Some(step_depth) = step_runtime::active_step_frame_depth() else {
-            return StepBoundaryOutcome::Throw(error);
-        };
-        // The step's frame is the topmost on the call stack iff its
-        // recorded frame_depth equals `frames.len()`. If the throw is
-        // coming from a deeper frame we let it bubble up — the boundary
-        // still applies later when the step's own frame is reached.
-        if step_depth != self.frames.len() {
-            return StepBoundaryOutcome::Throw(error);
-        }
-        let boundary = step_runtime::with_active_step(|step| step.definition.boundary())
-            .unwrap_or(step_runtime::StepErrorBoundary::Fail);
-        match boundary {
-            step_runtime::StepErrorBoundary::Continue => {
+        use super::step_context::StepBoundaryDecision;
+        match self.runtime.step_error_boundary(error, self.frames.len()) {
+            StepBoundaryDecision::Continue { message } => {
                 // Mimic VmError::Return(Nil) for the step's frame: pop
                 // the frame, restore its env/iterators/stack, and feed a
                 // Nil return value back to the caller.
@@ -531,11 +516,7 @@ impl Vm {
                     let current_depth = self.frames.len();
                     self.exception_handlers
                         .retain(|h| h.frame_depth <= current_depth);
-                    step_runtime::pop_and_record(
-                        current_depth + 1,
-                        "skipped",
-                        Some(step_runtime_error_message(&error)),
-                    );
+                    self.runtime.finish_skipped_step(current_depth + 1, message);
                     if self.frames.is_empty() {
                         return StepBoundaryOutcome::Returned(VmValue::Nil);
                     }
@@ -545,33 +526,7 @@ impl Vm {
                 }
                 StepBoundaryOutcome::Returned(VmValue::Nil)
             }
-            step_runtime::StepErrorBoundary::Escalate => {
-                let identity = step_runtime::with_active_step(|step| {
-                    (
-                        step.definition.name.clone(),
-                        step.definition.function.clone(),
-                    )
-                });
-                step_runtime::pop_and_record(
-                    step_depth,
-                    "escalated",
-                    Some(step_runtime_error_message(&error)),
-                );
-                let (step_name, function) = identity.unzip();
-                StepBoundaryOutcome::Throw(step_runtime::mark_escalated(
-                    error,
-                    step_name.as_deref(),
-                    function.as_deref(),
-                ))
-            }
-            step_runtime::StepErrorBoundary::Fail => {
-                step_runtime::pop_and_record(
-                    step_depth,
-                    "failed",
-                    Some(step_runtime_error_message(&error)),
-                );
-                StepBoundaryOutcome::Throw(error)
-            }
+            StepBoundaryDecision::Throw(error) => StepBoundaryOutcome::Throw(error),
         }
     }
 }
@@ -592,16 +547,6 @@ fn next_deadline(
     .map_or((None, None), |(deadline, kind)| {
         (Some(deadline), Some(kind))
     })
-}
-
-fn step_runtime_error_message(error: &VmError) -> String {
-    match error {
-        VmError::Thrown(VmValue::Dict(dict)) => dict
-            .get("message")
-            .map(|v| v.display())
-            .unwrap_or_else(|| error.to_string()),
-        _ => error.to_string(),
-    }
 }
 
 pub(crate) enum StepBoundaryOutcome {
