@@ -57,7 +57,7 @@ pub(crate) fn swap_source_dir(next: Option<PathBuf>) -> Option<PathBuf> {
 /// the restore both happen on one task, bracketed by one frame's lifetime. A
 /// body that runs as its own task cannot use it, because the frame pops on that
 /// task long after the caller resumed — see
-/// [`crate::orchestration::scope_spawned_source_dir`].
+/// [`crate::orchestration::poll_source_dir`].
 pub(crate) fn enter_frame_source_dir(module_dir: Option<&std::path::Path>) -> Option<PathBuf> {
     let dir = module_dir?;
     let previous = VM_SOURCE_DIR.with(|sd| sd.borrow().clone());

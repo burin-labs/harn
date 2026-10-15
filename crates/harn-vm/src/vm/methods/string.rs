@@ -19,7 +19,7 @@ impl crate::vm::Vm {
             ))),
             "split" => {
                 let Some(sep) = args.first().map(|a| a.as_str_cow()) else {
-                    return Err(crate::stdlib::strings::split_separator_required());
+                    return Err(crate::value::split_separator_required());
                 };
                 Ok(VmValue::List(std::sync::Arc::new(
                     s.split(&*sep)
@@ -37,7 +37,7 @@ impl crate::vm::Vm {
             "lower" => Ok(VmValue::String(arcstr::ArcStr::from(s.to_lowercase()))),
             "upper" => Ok(VmValue::String(arcstr::ArcStr::from(s.to_uppercase()))),
             "substring" => Ok(VmValue::String(arcstr::ArcStr::from(
-                crate::stdlib::strings::char_substring(
+                crate::value::char_substring(
                     s,
                     args.first().and_then(|a| a.as_int()).unwrap_or(0),
                     args.get(1).and_then(|a| a.as_int()),

@@ -21,11 +21,10 @@
     "value->stdlib": 1,
     "value->vm": 6,
     "vm->agent_sessions": 11,
-    "vm->connectors": 1,
     "vm->llm": 4,
-    "vm->native_vm": 4,
-    "vm->orchestration": 39,
-    "vm->stdlib": 44,
+    "vm->native_vm": 1,
+    "vm->orchestration": 38,
+    "vm->stdlib": 30,
     "vm->triggers": 4
   },
   "layers": [

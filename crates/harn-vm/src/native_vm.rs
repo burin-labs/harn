@@ -9,8 +9,10 @@ mod bridge;
 mod context;
 mod execution_evidence;
 mod lifecycle;
+mod stdlib_registration;
 mod step_hooks;
 mod step_lifecycle;
+pub(crate) use stdlib_registration::install_shared_stdlib_registration;
 pub(crate) mod subtask;
 mod task_cleanup;
 mod timed_execution;
@@ -125,6 +127,15 @@ impl VmRuntime for NativeExecutionState {
         deadline: std::time::Instant,
     ) -> Pin<Box<dyn Future<Output = Result<VmValue, VmError>> + Send + 'a>> {
         Box::pin(timed_execution::execute(vm, entry, deadline))
+    }
+
+    fn poll_source_dir(
+        &self,
+        source_dir: &mut Option<std::path::PathBuf>,
+        cx: &mut std::task::Context<'_>,
+        continuation: &mut dyn FnMut(&mut std::task::Context<'_>) -> std::task::Poll<()>,
+    ) -> std::task::Poll<()> {
+        crate::orchestration::poll_source_dir(source_dir, || continuation(cx))
     }
 
     fn start_span(&self, kind: crate::vm::VmSpanKind, name: String) -> crate::vm::ScopeSpan {
@@ -331,6 +342,21 @@ impl NativeExecutionState {
 }
 
 impl Vm {
+    pub fn new() -> Self {
+        crate::initialize_runtime_assets();
+        Self::with_runtime(Arc::new(NativeExecutionState::fresh()))
+    }
+
+    /// Set the bridge for delegating unknown builtins in bridge mode.
+    pub fn set_bridge(&mut self, bridge: Arc<crate::bridge::HostBridge>) {
+        self.native_mut().bridge = Some(bridge);
+    }
+
+    /// Install the connector projection owned by this VM execution tree.
+    pub fn set_connector_clients(&mut self, clients: crate::connectors::VmConnectorClients) {
+        self.native_mut().connector_clients = Arc::new(clients);
+    }
+
     /// Evaluate a decision under this interpreter's execution and receipt owner.
     pub async fn evaluate_decision(
         &mut self,
@@ -347,6 +373,12 @@ impl Vm {
             crate::llm::decision::evaluate_json(&ctx, site_id, state, questions, policy).await
         })
         .await
+    }
+}
+
+impl Default for Vm {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

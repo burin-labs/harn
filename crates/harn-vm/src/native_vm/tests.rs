@@ -74,6 +74,15 @@ impl RefusingRuntime {
 }
 
 impl VmRuntime for RefusingRuntime {
+    fn poll_source_dir(
+        &self,
+        source_dir: &mut Option<std::path::PathBuf>,
+        cx: &mut std::task::Context<'_>,
+        continuation: &mut dyn FnMut(&mut std::task::Context<'_>) -> std::task::Poll<()>,
+    ) -> std::task::Poll<()> {
+        self.native.poll_source_dir(source_dir, cx, continuation)
+    }
+
     fn as_any(&self) -> &dyn Any {
         &self.native
     }

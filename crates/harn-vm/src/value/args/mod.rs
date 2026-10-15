@@ -52,8 +52,6 @@ mod options;
 mod tag;
 
 #[cfg(test)]
-mod drift_tests;
-#[cfg(test)]
 mod tests;
 
 use std::time::Duration as StdDuration;
@@ -61,8 +59,6 @@ use std::time::Duration as StdDuration;
 use crate::value::{DictMap, VmClosure, VmError, VmValue};
 
 pub(crate) use options::Options;
-#[cfg(test)]
-pub(crate) use tag::tag_is_canonical;
 pub(crate) use tag::Expected;
 
 /// Whether an argument failure bubbles as a runtime error or as a value the
@@ -118,10 +114,7 @@ impl ArgError {
         fn_err(
             fn_name,
             kind,
-            format_args!(
-                "`{name}` must be {expected}, got {}",
-                crate::stdlib::args::describe(got)
-            ),
+            format_args!("`{name}` must be {expected}, got {}", describe(got)),
         )
     }
 
@@ -136,10 +129,7 @@ impl ArgError {
         fn_err(
             fn_name,
             kind,
-            format_args!(
-                "`{name}` must be {expected} or nil, got {}",
-                crate::stdlib::args::describe(got)
-            ),
+            format_args!("`{name}` must be {expected} or nil, got {}", describe(got)),
         )
     }
 
@@ -601,7 +591,7 @@ impl<'name, 'a> Args<'name, 'a> {
             return Ok(serde_json::Map::new());
         };
         match value {
-            VmValue::Dict(_) => match crate::llm::helpers::vm_value_to_json(value) {
+            VmValue::Dict(_) => match crate::value::json::vm_value_to_json(value) {
                 serde_json::Value::Object(map) => Ok(map),
                 other => unreachable!("a dict converts to a JSON object, got {other:?}"),
             },

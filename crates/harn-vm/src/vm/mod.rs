@@ -1,5 +1,7 @@
 mod async_builtin;
 mod builtin;
+mod builtin_def;
+mod builtin_manifest;
 mod cache;
 mod call_args;
 mod callable_entry;
@@ -18,13 +20,13 @@ mod module_phase_timing;
 mod modules;
 pub(crate) mod ops;
 mod process_exit;
+mod registration;
 mod runtime;
 mod runtime_scope;
 mod scope;
 mod state;
 mod stdlib_artifact;
 mod stdlib_export;
-mod stdlib_registration;
 pub(crate) mod step_context;
 pub mod subtask;
 mod task_cleanup;
@@ -55,11 +57,21 @@ mod tests_value_calls;
 pub(crate) use async_builtin::run_async_builtin_with;
 pub use async_builtin::{AsyncBuiltinCtx, VmCallSite};
 pub use builtin::{VmBuiltinArity, VmBuiltinKind, VmBuiltinMetadata};
+pub use builtin_def::{
+    AsyncBuiltinFuture, AsyncHandler, SyncHandler, VmBuiltinDef, VmBuiltinHandler, ALL_BUILTIN_DEFS,
+};
+pub(crate) use builtin_manifest::builtin_policy_metadata;
+pub use builtin_manifest::{
+    all_builtin_defs, all_builtin_manifest, builtin_for_harness_path, builtin_manifest_entry,
+    capability_method_manifest_entry, harness_method_for_builtin,
+    recorded_effect_builtin_manifest_entry,
+};
 pub(crate) use callable_entry::TopLevelEntry;
 pub use debug::{DebugAction, DebugState};
 pub(crate) use harness_seam::{HarnessMethodFuture, HarnessMethods};
 pub use module_phase_timing::{ModulePhaseRecorder, ModulePhaseStats};
 pub use modules::resolve_module_import_path;
+pub(crate) use registration::VmBuiltinRegistration;
 pub(crate) use runtime::{
     BuiltinGateDecision, VmBuiltinBridge, VmRuntime, VmRuntimeBaseline, VmSpanKind, VmTaskCleanup,
 };

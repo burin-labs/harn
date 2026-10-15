@@ -414,33 +414,33 @@ impl Vm {
         // Spawn the generator body as an async task. It carries its own ambient
         // scope, anchored on the module that defined the closure, instead of
         // writing the creator's thread-local source dir and unwinding it when
-        // the body's frame pops — those happen on different tasks. See
-        // `scope_spawned_source_dir`.
+        // the body's frame pops, since those happen on different tasks.
         // The task will execute until return, sending yielded values through the channel.
         let body_source_dir = closure.source_dir.clone();
-        let tx_for_error = child.yield_sender.clone();
-        tokio::task::spawn_local(crate::orchestration::scope_spawned_source_dir(
+        let scope = super::runtime_scope::SourceDirExecutionScope::new(
+            Arc::clone(&child.runtime),
             body_source_dir,
-            async move {
-                let result = child
-                    .run_chunk_ref(
-                        chunk,
-                        argc,
-                        None,
-                        module_functions,
-                        module_state,
-                        Some(local_slots),
-                    )
-                    .await;
-                if let Err(error) = result {
-                    if let Some(sender) = tx_for_error {
-                        let _ = sender.send(Err(error)).await;
-                    }
+        );
+        let tx_for_error = child.yield_sender.clone();
+        tokio::task::spawn_local(super::scope_runtime(scope, async move {
+            let result = child
+                .run_chunk_ref(
+                    chunk,
+                    argc,
+                    None,
+                    module_functions,
+                    module_state,
+                    Some(local_slots),
+                )
+                .await;
+            if let Err(error) = result {
+                if let Some(sender) = tx_for_error {
+                    let _ = sender.send(Err(error)).await;
                 }
-                // When the generator body finishes (return or fall-through),
-                // the sender is dropped, signaling completion to the receiver.
-            },
-        ));
+            }
+            // When the generator body finishes (return or fall-through),
+            // the sender is dropped, signaling completion to the receiver.
+        }));
 
         let receiver = Arc::new(tokio::sync::Mutex::new(rx));
         if closure.func.is_stream {

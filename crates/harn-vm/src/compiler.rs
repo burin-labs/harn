@@ -289,7 +289,7 @@ impl Compiler {
 }
 
 fn install_native_builtin_contracts() {
-    harn_builtin_registry::install_builtin_manifest(crate::stdlib::all_builtin_manifest());
+    harn_builtin_registry::install_builtin_manifest(crate::vm::all_builtin_manifest());
 }
 
 impl Default for Compiler {

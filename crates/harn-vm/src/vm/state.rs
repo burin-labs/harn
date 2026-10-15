@@ -757,11 +757,6 @@ impl Vm {
         Ok(false)
     }
 
-    pub fn new() -> Self {
-        crate::initialize_runtime_assets();
-        Self::with_runtime(Arc::new(crate::native_vm::NativeExecutionState::fresh()))
-    }
-
     pub(crate) fn runtime(&self) -> &dyn super::VmRuntime {
         self.runtime.as_ref()
     }
@@ -966,12 +961,6 @@ impl Vm {
         self.debug_hook.is_some()
             || !self.breakpoints.is_empty()
             || !self.function_breakpoints.is_empty()
-    }
-
-    /// Set the bridge for delegating unknown builtins in bridge mode.
-    pub fn set_bridge(&mut self, bridge: Arc<crate::bridge::HostBridge>) {
-        use crate::native_vm::NativeVmState;
-        self.native_mut().bridge = Some(bridge);
     }
 
     /// Set builtins that are denied in sandbox mode.
@@ -1191,12 +1180,6 @@ impl Vm {
         self.root_harness = Some(VmValue::harness(harness.into()));
     }
 
-    /// Install the connector projection owned by this VM execution tree.
-    pub fn set_connector_clients(&mut self, clients: crate::connectors::VmConnectorClients) {
-        use crate::native_vm::NativeVmState;
-        self.native_mut().connector_clients = Arc::new(clients);
-    }
-
     pub(crate) fn harness(&self) -> Option<&crate::value::VmHarness> {
         match self.root_harness.as_ref() {
             Some(VmValue::Harness(handle)) => Some(handle),
@@ -1380,12 +1363,6 @@ impl Drop for Vm {
             crate::coverage::merge_into_global(coverage);
         }
         self.cancel_spawned_tasks();
-    }
-}
-
-impl Default for Vm {
-    fn default() -> Self {
-        Self::new()
     }
 }
 

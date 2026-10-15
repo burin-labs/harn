@@ -38,6 +38,40 @@ impl VmExecutionScope for BuiltinExecutionScope {
     }
 }
 
+pub(crate) struct SourceDirExecutionScope {
+    runtime: std::sync::Arc<dyn super::VmRuntime>,
+    source_dir: Option<std::path::PathBuf>,
+    active: bool,
+}
+
+impl SourceDirExecutionScope {
+    pub(crate) fn new(
+        runtime: std::sync::Arc<dyn super::VmRuntime>,
+        source_dir: Option<std::path::PathBuf>,
+    ) -> Self {
+        Self {
+            runtime,
+            active: source_dir.is_some(),
+            source_dir,
+        }
+    }
+}
+
+impl VmExecutionScope for SourceDirExecutionScope {
+    fn poll(
+        &mut self,
+        cx: &mut Context<'_>,
+        continuation: &mut dyn FnMut(&mut Context<'_>) -> Poll<()>,
+    ) -> Poll<()> {
+        if self.active {
+            self.runtime
+                .poll_source_dir(&mut self.source_dir, cx, continuation)
+        } else {
+            continuation(cx)
+        }
+    }
+}
+
 pin_project_lite::pin_project! {
     pub(crate) struct RuntimeScoped<F, S> {
         #[pin]

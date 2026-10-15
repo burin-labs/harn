@@ -60,7 +60,7 @@ impl crate::vm::Vm {
                 Some(Self::call_number_method(obj, method, args))
             }
             VmValue::Range(r) => Self::call_range_method_sync(obj, r, method, args),
-            VmValue::Rng(_) => crate::stdlib::call_seeded_random_method(obj, method, args),
+            VmValue::Rng(handle) => handle.call_method(method, args),
             _ => None,
         }
     }

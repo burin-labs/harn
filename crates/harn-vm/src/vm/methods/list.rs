@@ -508,8 +508,7 @@ impl crate::vm::Vm {
                 let mut groups: BTreeMap<String, Vec<VmValue>> = BTreeMap::new();
                 for item in items.iter() {
                     let key = self.call_callable_one(callable, item).await?;
-                    let key_str =
-                        crate::stdlib::collections::string_discriminator(&key, "group_by")?;
+                    let key_str = crate::value::string_discriminator(&key, "group_by")?;
                     groups.entry(key_str).or_default().push(item.clone());
                 }
                 let result: crate::value::DictMap = groups
@@ -602,8 +601,7 @@ impl crate::vm::Vm {
                 let mut counts: BTreeMap<String, i64> = BTreeMap::new();
                 for item in items.iter() {
                     let key = self.call_callable_one(callable, item).await?;
-                    let bucket =
-                        crate::stdlib::collections::string_discriminator(&key, "count_by")?;
+                    let bucket = crate::value::string_discriminator(&key, "count_by")?;
                     *counts.entry(bucket).or_insert(0) += 1;
                 }
                 Ok(VmValue::dict(

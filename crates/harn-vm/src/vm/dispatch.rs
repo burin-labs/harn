@@ -223,8 +223,8 @@ impl Vm {
     /// same handler. `runtime_only` defs skip the parser-side publish (the
     /// vm-side registration still happens). `parser_only` defs skip the
     /// vm-side registration entirely (handler is `None`).
-    pub fn register_builtin_def(&mut self, def: &'static crate::stdlib::macros::VmBuiltinDef) {
-        use crate::stdlib::macros::VmBuiltinHandler;
+    pub fn register_builtin_def(&mut self, def: &'static super::VmBuiltinDef) {
+        use super::VmBuiltinHandler;
         if def.parser_only {
             return;
         }
@@ -1043,7 +1043,7 @@ impl Vm {
 /// category / doc / signature_text fields without duplicating the chain
 /// across the Sync / Async dispatch arms in `register_builtin_def`.
 fn builtin_def_metadata(
-    def: &'static crate::stdlib::macros::VmBuiltinDef,
+    def: &'static super::VmBuiltinDef,
     name: &'static str,
     arity: VmBuiltinArity,
     kind: VmBuiltinKind,

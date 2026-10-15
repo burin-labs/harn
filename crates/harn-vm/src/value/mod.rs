@@ -1,3 +1,4 @@
+pub(crate) mod args;
 mod build;
 mod core;
 mod diff;
@@ -10,8 +11,10 @@ mod io_error;
 mod isolate;
 pub mod json;
 mod mcp_client;
+mod random;
 pub(crate) mod recursion;
 mod sandbox_refusal;
+mod semantics;
 mod set;
 mod storage_json;
 mod structural;
@@ -50,11 +53,13 @@ pub use io_error::{
 };
 pub use isolate::IsolateValue;
 pub use mcp_client::VmMcpClientHandle;
+pub(crate) use random::RandomOperation;
 pub(crate) use sandbox_refusal::NO_OS_SANDBOX;
 pub use sandbox_refusal::{
     ConfinementDimension, SandboxMechanism, SandboxMechanismAvailability,
     SandboxMechanismUnavailable, SandboxRequirement,
 };
+pub(crate) use semantics::{char_substring, split_separator_required, string_discriminator};
 pub use set::VmSet;
 pub(crate) use storage_json::vm_to_storage_json;
 pub use structural::{

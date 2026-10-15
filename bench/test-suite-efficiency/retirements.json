@@ -3,6 +3,27 @@
   "baselineRevision": "7deefa6d8215dc5ce0bac2705624516d17c89392",
   "removedCases": [
     {
+      "path": "crates/harn-vm/src/stdlib/args/drift_tests.rs",
+      "name": "stdlib_diagnostics_name_types_the_runtime_has",
+      "reason": "REMOVED: scanning Rust source prose with a regex coupled argument validation to the native source tree and required exemptions for legitimate JSON terminology. Typed Args/Options errors and their canonical runtime vocabulary retain executable checks; arbitrary handwritten diagnostic prose is no longer linted by this unit test.",
+      "retainedPath": "crates/harn-vm/src/value/args/tests.rs",
+      "retainedName": "missing_and_wrong_type_read_differently"
+    },
+    {
+      "path": "crates/harn-vm/src/stdlib/args/drift_tests.rs",
+      "name": "recommended_spellings_are_canonical",
+      "reason": "SUBSUMED: the recommendation table existed only for the retired source-prose regex. The retained test checks the type tags actually emitted by the typed argument validator against the canonical runtime vocabulary.",
+      "retainedPath": "crates/harn-vm/src/value/args/tag.rs",
+      "retainedName": "every_variant_names_a_tag_type_of_returns"
+    },
+    {
+      "path": "crates/harn-vm/src/stdlib/args/drift_tests.rs",
+      "name": "the_pattern_matches_claims_and_not_identifiers",
+      "reason": "REMOVED: this tested the retired source-prose regex rather than a Harn argument boundary. Typed argument failure checks remain at the owning validator.",
+      "retainedPath": "crates/harn-vm/src/value/args/tests.rs",
+      "retainedName": "a_dict_is_not_a_string"
+    },
+    {
       "path": "crates/harn-vm/tests/harn_vm/thread_local_audit.rs",
       "name": "pool_worker_boundary_uses_task_local_registry_not_thread_local_registry",
       "reason": "SUBSUMED: source-substring checks failed when the task-local moved into its owning module. The retained test drives the real worker boundary, requires a different OS thread, and compares the actual inherited pool registry identity against a distinct parent fallback.",
