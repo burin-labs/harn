@@ -88,8 +88,8 @@ spec/run-view-fixtures/cases/session-lineage-failure-approval/expected/runs/01-c
 spec/run-view-fixtures/cases/session-lineage-failure-approval/expected/session_view.json -merge
 spec/run-view-fixtures/cases/stage-transcript-active-auth/expected/runs/run.run_view.json -merge
 spec/run-view-fixtures/cases/stage-transcript-active-auth/expected/session_view.json -merge
-crates/harn-vm/src/llm/providers.toml -merge
-crates/harn-vm/src/llm/capabilities.toml -merge
+crates/harn-provider-catalog/src/providers.toml -merge
+crates/harn-provider-catalog/src/capabilities.toml -merge
 spec/provider-catalog/provider-catalog.json -merge
 spec/provider-catalog/provider-catalog.schema.json -merge
 spec/provider-catalog/harn-provider-catalog.d.ts -merge
