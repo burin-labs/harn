@@ -179,9 +179,9 @@ pub const LITERAL_KEYWORDS: &[&str] = &["true", "false", "nil"];
 
 /// Filters callable after a `|` in an interpolation, e.g. `{{ name | upper }}`.
 ///
-/// Derived from [`super::filters::FILTERS`], which `apply_filter`
-/// dispatches through — so the spelling an editor highlights and the
-/// filter the engine runs cannot disagree. The full table carries each
+/// Derived from [`super::filters::FILTERS`]. Native rendering exhaustively
+/// dispatches its typed IDs, so highlighted spellings and implemented filters
+/// cannot disagree. The full table carries each
 /// filter's parameters and description too; this is the spelling-only
 /// view the grammar generator needs.
 pub fn filter_names() -> Vec<&'static str> {
@@ -189,7 +189,7 @@ pub fn filter_names() -> Vec<&'static str> {
 }
 
 /// Names accepted by `{{ section "..." }}`. This is the authority:
-/// `sections::is_builtin_section` reads it, so an undeclared name is a template
+/// The parser reads it, so an undeclared name is a template
 /// error rather than a silently un-highlighted one.
 pub const SECTIONS: &[&str] = &[
     "task",
@@ -202,7 +202,7 @@ pub const SECTIONS: &[&str] = &[
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::stdlib::template::validate_template_syntax;
+    use crate::validate_template_syntax;
 
     /// Every declared word must be spelled uniquely within its group and across
     /// the groups that share a TextMate scope, so the generated grammar cannot

@@ -13,6 +13,7 @@ harn-builtin-meta = { path = "../harn-builtin-meta", version = "=0.10.166" }
 harn-fmt = { path = "../harn-fmt", version = "=0.10.166" }
 harn-lexer = { path = "../harn-lexer", version = "=0.10.166" }
 harn-parser = { path = "../harn-parser", version = "=0.10.166" }
+harn-prompt-syntax = { path = "../harn-prompt-syntax", version = "=0.10.166" }
 harn-glob = { path = "../harn-glob", version = "=0.10.166" }
 # Lean by default so in-process embedders (Burin TUI, #6416) can drop
 # postgres/sqlx and other `harn-vm/full` families without Cargo unifying them
