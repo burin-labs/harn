@@ -15,6 +15,11 @@ pub(crate) struct TestArgs {
         "plan", "affected_from", "shard_index", "filter", "parallel", "watch",
         "determinism", "evals", "coverage", "coverage_out", "timing_baseline",
         "timing_environment", "approve_risky", "record", "replay", "skill_dir",
+        "agents_target", "agents_api_key", "agents_category", "agents_workspace_id",
+        "agents_session_id", "junit", "timeout", "trusted_host_dispatch", "max_test_ms",
+        "max_execute_ms", "fail_fast", "fail_on_skip", "allow_empty", "jobs",
+        "max_cost_regression_percent", "internal_conformance_worker", "verbose", "timing",
+        "diagnose", "differential_optimizations",
     ])]
     pub verify_shards: Option<String>,
     /// Only run tests whose names or paths contain this pattern.

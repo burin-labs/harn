@@ -183,6 +183,7 @@ selection and timing baseline; worker counts may differ:
 
 ```sh
 TEST_SOURCE=$(git rev-parse HEAD)
+mkdir -p reports
 harn test suite --parallel --jobs 1 --shard-index 1 --shard-total 3 --json-out reports/1.json
 harn test suite --parallel --jobs 2 --shard-index 2 --shard-total 3 --json-out reports/2.json
 harn test suite --parallel --jobs 3 --shard-index 3 --shard-total 3 --json-out reports/3.json

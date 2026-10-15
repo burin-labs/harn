@@ -26,6 +26,33 @@ fn git(root: &Path, args: &[&str]) -> String {
     String::from_utf8(output.stdout).unwrap().trim().into()
 }
 
+#[test]
+fn verification_refuses_execution_flags_before_reading_reports() {
+    for flags in [
+        vec!["--junit", "unused.xml"],
+        vec!["--fail-fast"],
+        vec!["--verbose"],
+        vec!["--timeout", "1000"],
+        vec!["--jobs", "2"],
+    ] {
+        let output = harn_e2e_command()
+            .args([
+                "test",
+                "--verify-shards",
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "--shard-total",
+                "1",
+            ])
+            .args(&flags)
+            .arg("missing-report.json")
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(2), "flags={flags:?}");
+        assert!(output.stdout.is_empty(), "verification must not run");
+        assert!(String::from_utf8_lossy(&output.stderr).contains("cannot be used with"));
+    }
+}
+
 fn fixture() -> tempfile::TempDir {
     let root = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(root.path().join("suite/a")).unwrap();
