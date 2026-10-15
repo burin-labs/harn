@@ -433,7 +433,7 @@ sources = [
   "crates/harn-vm/src/agent_sessions/canonical_boundary.rs",
   "crates/harn-stdlib/src/stdlib/external_action/vocabulary.harn",
   "crates/harn-vm/src/mcp_tasks.rs",
-  "crates/harn-vm/src/tool_annotations.rs",
+  "crates/harn-execution-policy/src/tool_annotations.rs",
   "crates/harn-vm/src/tool_registry.rs",
   "crates/harn-vm/src/tool_registry/",
   "crates/harn-vm/src/llm/api/inference_boundary/",

@@ -50,7 +50,7 @@ before it.
 
 ## Adding a denylist row
 
-`crates/harn-vm/src/known_paths/known_paths.toml`. One line under
+`crates/harn-execution-policy/src/known_paths/known_paths.toml`. One line under
 `[credential] home`, plus a line under `[credential.reason]` saying why. It is
 data on purpose: the sandbox denylist, the taint gate's secret-read check, the
 command risk scan, and the default approval patterns all derive from it, and

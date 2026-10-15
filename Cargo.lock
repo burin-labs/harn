@@ -3592,6 +3592,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "harn-execution-policy"
+version = "0.10.166"
+dependencies = [
+ "harn-glob",
+ "schemars",
+ "serde",
+ "serde_json",
+ "toml",
+ "ts-rs",
+]
+
+[[package]]
 name = "harn-flock"
 version = "0.10.166"
 dependencies = [
@@ -4163,6 +4175,7 @@ dependencies = [
  "harn-builtin-registry",
  "harn-capability-contracts",
  "harn-clock",
+ "harn-execution-policy",
  "harn-flock",
  "harn-glob",
  "harn-ir",

@@ -6,7 +6,8 @@ fn grants(policy: &CapabilityPolicy, capability: &str, operation: &str) -> bool 
     })
 }
 
-pub(crate) fn operation_is_covered(capability: &str, allowed: &str, requested: &str) -> bool {
+/// Whether a granted operation covers the requested resource-scoped operation.
+pub fn operation_is_covered(capability: &str, allowed: &str, requested: &str) -> bool {
     allowed == requested
         || (capability == "authority"
             && !allowed.contains('@')
@@ -15,7 +16,8 @@ pub(crate) fn operation_is_covered(capability: &str, allowed: &str, requested: &
                 .is_some_and(|(access, _)| access == allowed))
 }
 
-pub(super) fn policy_allows_capability(
+/// Resolve capability implication and explicit deny-all semantics once.
+pub fn policy_allows_capability(
     policy: &CapabilityPolicy,
     capability: &str,
     operation: &str,

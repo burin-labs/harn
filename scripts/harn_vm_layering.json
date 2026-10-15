@@ -18,7 +18,6 @@
     "provider_catalog->stdlib": 1,
     "triggers->native_vm": 2,
     "triggers->stdlib": 34,
-    "value->orchestration": 1,
     "value->stdlib": 1,
     "value->vm": 6,
     "vm->agent_sessions": 16,

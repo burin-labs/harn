@@ -1385,14 +1385,14 @@
       "path": "crates/harn-vm/src/tool_annotations.rs",
       "name": "arg_schema_defaults_empty",
       "reason": "Vacuous: only checks that the compiler-derived Default of ToolArgSchema leaves its collection fields empty.",
-      "retainedPath": "crates/harn-vm/src/tool_annotations.rs",
+      "retainedPath": "crates/harn-execution-policy/src/tool_annotations.rs",
       "retainedAssertion": "#[derive(Default)] on ToolArgSchema"
     },
     {
       "path": "crates/harn-vm/src/tool_annotations.rs",
       "name": "annotations_default_result_routes_empty",
       "reason": "Vacuous: only checks that the compiler-derived Default of ToolAnnotations yields false, empty, and None fields.",
-      "retainedPath": "crates/harn-vm/src/tool_annotations.rs",
+      "retainedPath": "crates/harn-execution-policy/src/tool_annotations.rs",
       "retainedAssertion": "#[derive(Default)] on ToolAnnotations"
     },
     {

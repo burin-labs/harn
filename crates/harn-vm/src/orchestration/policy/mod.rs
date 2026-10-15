@@ -8,7 +8,6 @@ mod capability_invocation;
 #[cfg(test)]
 pub(crate) use approval_rules::first_sensitive_path;
 pub(crate) use approval_rules::PolicyAuthorityRequest;
-mod capability_lattice;
 pub use capability_invocation::enforce_current_policy_for_capability;
 pub(crate) use capability_invocation::scope_read_only_invocation;
 mod consent_capability;
@@ -33,8 +32,8 @@ use crate::runtime_limits::RuntimeLimits;
 use crate::tool_annotations::{SideEffectLevel, ToolAnnotations};
 use crate::value::{VmError, VmValue};
 use crate::workspace_path::{classify_permission_path, WorkspacePathInfo};
-pub(crate) use capability_lattice::operation_is_covered;
-use capability_lattice::policy_allows_capability;
+pub(crate) use harn_execution_policy::operation_is_covered;
+use harn_execution_policy::policy_allows_capability;
 
 pub(crate) use crate::runtime_effects::RuntimeEffectState;
 pub use crate::tool_annotations::{ToolArgSchema, ToolKind};

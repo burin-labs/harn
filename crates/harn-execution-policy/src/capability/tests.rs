@@ -1,13 +1,10 @@
-//! Capability-policy type unit tests.
-//!
-//! Split out of `types.rs` to keep that module within the
-//! source-file-length ratchet; the module path is unchanged.
+//! Capability authority, attenuation, and wire compatibility.
 
 use std::collections::BTreeMap;
 
 use super::{
-    intersect_roots, sandbox_profile_strictness, CapabilityPolicy, ModelPolicy,
-    ProcessNetworkProxy, ProcessSandboxPolicy, RequiredSuccessfulTool, SandboxProfile,
+    intersect_roots, sandbox_profile_strictness, CapabilityPolicy, ProcessNetworkProxy,
+    ProcessSandboxPolicy, SandboxProfile,
 };
 
 #[test]
@@ -90,27 +87,6 @@ fn a_neutral_policy_asserts_no_confinement_of_its_own() {
     assert_eq!(
         CapabilityPolicy::default().sandbox_profile,
         SandboxProfile::Worktree
-    );
-}
-
-#[test]
-fn model_policy_round_trips_required_successful_tool_or_groups() {
-    let value = serde_json::json!({
-        "require_successful_tools": ["verify", ["edit", "scaffold"]]
-    });
-
-    let policy: ModelPolicy = serde_json::from_value(value.clone()).unwrap();
-    assert_eq!(
-        policy.require_successful_tools,
-        Some(vec![
-            RequiredSuccessfulTool::Tool("verify".to_string()),
-            RequiredSuccessfulTool::AnyOf(vec!["edit".to_string(), "scaffold".to_string()]),
-        ])
-    );
-    let serialized = serde_json::to_value(policy).unwrap();
-    assert_eq!(
-        serialized.get("require_successful_tools"),
-        value.get("require_successful_tools")
     );
 }
 
