@@ -60,6 +60,7 @@ pub fn initialize_installation(process: HarnessProcess, config: Installation) ->
     schema: "smart-ship.controller.v1",
     authority: {
       installation: config.policy.installation,
+      policy: config.policy,
       policy_digest: policy_digest(config.policy),
       generation: 1,
       revision: 1,

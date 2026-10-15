@@ -1,6 +1,7 @@
 import { git_env_remove, git_noninteractive_env } from "std/git"
 import { Controller, transfer_ready } from "./controller"
-import { is_digest, is_git_id } from "./identity"
+import { is_git_id, policy_digest } from "./identity"
+import { policy_errors } from "./verification"
 
 /**
  * A private bare object workspace and a configured remote; credentials stay in Git's host store.
@@ -97,7 +98,10 @@ pub fn read_state(process: HarnessProcess, store: GitStore) -> StateRead {
 }
 
 fn check_transition(previous: Controller?, next: Controller) {
-  require is_digest(next.authority.policy_digest), "authority policy identity is missing"
+  require next.authority.policy.installation == next.authority.installation
+    && len(policy_errors(next.authority.policy)) == 0
+    && next.authority.policy_digest == policy_digest(next.authority.policy),
+    "authority requires its complete valid policy and matching identity"
   if previous != nil {
     require next.authority.installation == previous.authority.installation
       && next.authority.revision == previous.authority.revision + 1,

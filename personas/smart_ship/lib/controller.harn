@@ -643,6 +643,7 @@ pub fn transfer(
   let next = advance(state)
   next.authority.generation += 1
   next.authority.controller = controller
+  next.authority.policy = next_policy ?? state.authority.policy
   next.authority.policy_digest = next_digest
   next.authority.mode = "shadow"
   return Ok(next)

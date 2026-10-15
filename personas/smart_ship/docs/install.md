@@ -59,6 +59,10 @@ external request. Invoke `action: transfer` with `target_controller` set to the
 new qualified artifact digest. The new generation starts in shadow mode. Update
 the installation's controller digest before activating it. A rollback follows
 the same transfer procedure with the prior qualified artifact and a new generation.
+For a policy change, include the complete replacement `next_policy` in the
+transfer request. The state owner validates and archives that policy alongside
+its mechanically checked digest before committing the new generation. Update
+the installation configuration after that committed transfer.
 
 ## Observe GitHub reviews
 

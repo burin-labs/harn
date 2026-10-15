@@ -154,6 +154,7 @@ pipeline test_policy_changes_require_a_drained_generation_transfer(harness: Harn
   const transferred = unwrap(transfer(drained, fence(drained), "replacement", changed))
   assert_eq(transferred.authority.generation, state.authority.generation + 1)
   assert_eq(transferred.authority.policy_digest, policy_digest(changed))
+  assert_eq(transferred.authority.policy, changed)
   const active = unwrap(control(transferred, fence(transferred), "active"))
   const original = f.snapshot.changes[0]!.admission.record.proofs[0]!.original
   const signed = reviewed_admission(

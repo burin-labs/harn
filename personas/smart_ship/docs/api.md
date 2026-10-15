@@ -125,6 +125,7 @@ Authority is read from the effect owner immediately before an effect.
 ```harn
 pub type Authority = {
   installation: string,
+  policy: Policy,
   policy_digest: string,
   generation: int,
   revision: int,
