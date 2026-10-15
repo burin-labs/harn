@@ -92,6 +92,15 @@ committed for dispatch may finish; stop preserves its uncertain outcome until
 an actual provider receipt is recorded. Unknown results block transfer and are
 never redispatched from the original reservation.
 
+The GitHub effect adapter reserves signed admissions through this same owner
+and calls the published connector with the verified head. GitHub enforces its
+effective branch rules. Durable effect receipts retain canonical provider JSON
+and its checked hash, including the actual integrated commit. Duplicate
+submissions return that recorded outcome without another provider call;
+uncertain responses remain a transfer barrier. Configure and activate this
+adapter only after qualifying the installation's release guard and exclusive
+landing ownership.
+
 The Python and TypeScript fixtures execute ordinary commands against clean Git
 sources. Each reviewed change passes independently; their combination fails one
 test. `fixtures/live_repair.harn` uses a real configured model, independently

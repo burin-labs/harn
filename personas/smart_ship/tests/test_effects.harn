@@ -1,4 +1,4 @@
-import { digest, fixture } from "../fixtures/support"
+import { fixture } from "../fixtures/support"
 import {
   Controller,
   EffectRequest,
@@ -6,6 +6,7 @@ import {
   admission_effect,
   control,
   effect_authorized,
+  effect_receipt,
   reserve_effect,
   settle_effect,
   transfer,
@@ -66,7 +67,7 @@ pipeline test_unknown_external_action_blocks_transfer_and_stop_requires_reconcil
         fence(unknown),
         request + {source: sha256_hex("wrong head")},
         "confirmed",
-        digest("receipt"),
+        effect_receipt("{\"result\":\"receipt\"}"),
       ),
     ),
   )
@@ -78,7 +79,7 @@ pipeline test_unknown_external_action_blocks_transfer_and_stop_requires_reconcil
       fence(still_draining),
       request,
       "confirmed",
-      digest("observed exact-head merge"),
+      effect_receipt("{\"result\":\"observed exact-head merge\"}"),
     ),
   )
   const transferred = unwrap(transfer(confirmed, fence(confirmed), "replacement"))
@@ -86,7 +87,13 @@ pipeline test_unknown_external_action_blocks_transfer_and_stop_requires_reconcil
   assert(!effect_authorized(transferred, effect))
   assert(
     !is_ok(
-      settle_effect(transferred, fence(transferred), request, "confirmed", digest("late callback")),
+      settle_effect(
+        transferred,
+        fence(transferred),
+        request,
+        "confirmed",
+        effect_receipt("{\"result\":\"late callback\"}"),
+      ),
     ),
   )
   // Rollback restores the old controller through a new generation, never old fences.
@@ -95,6 +102,9 @@ pipeline test_unknown_external_action_blocks_transfer_and_stop_requires_reconcil
   const active = unwrap(control(rolled_back, fence(rolled_back), "active"))
   assert_eq(active.authority.generation, 3)
   assert(!effect_authorized(active, effect))
-  assert_eq(active.effects[0]?.receipt, digest("observed exact-head merge"))
+  assert_eq(
+    active.effects[0]?.receipt,
+    effect_receipt("{\"result\":\"observed exact-head merge\"}"),
+  )
   assert(!is_ok(reserve_effect(active, fence(active), request, f.policy)))
 }

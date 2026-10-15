@@ -1,0 +1,210 @@
+import { Controller, Effect, EffectRefusal, reserve_effect } from "./controller"
+import { AdmissionEffect, admission_effect, effect_receipt } from "./effect_contract"
+import { EffectDispatch, EffectOutcome, dispatch_reserved_effect } from "./effect_owner"
+import { StateRead, commit_state, prepare_state, read_state } from "./git_store"
+import { policy_digest } from "./identity"
+import { Installation } from "./installation"
+import { Fence, SignedAdmission } from "./types"
+import {
+  GithubConnectorError,
+  GithubPullRequestMergeReceipt,
+  pulls_merge_safe,
+} from "harn-github-connector/default"
+
+/** Trusted installation settings; submissions cannot choose authentication or transport. */
+pub type GithubAdmissionConfiguration = {
+  installation: Installation,
+  token_reference: string,
+  method: "merge" | "squash" | "rebase",
+  api_base_url?: string,
+}
+
+/** A complete signed witness and the authority revision the submitter observed. */
+pub type GithubAdmissionSubmission = {fence: Fence, admission: SignedAdmission}
+
+/** A confirmed provider result retains the actual integrated commit, not a guessed tree. */
+pub type GithubAdmissionConfirmed = {
+  schema: "smart-ship.github-admission-result.v1",
+  status: "confirmed",
+  request: AdmissionEffect,
+  provider: GithubPullRequestMergeReceipt,
+}
+
+/** A definite refusal is different from losing a response after a possible mutation. */
+pub type GithubAdmissionRefused = {
+  schema: "smart-ship.github-admission-result.v1",
+  status: "refused",
+  request: AdmissionEffect,
+  error: GithubConnectorError,
+}
+
+/** Uncertain operations block transfer and require observation before any new action. */
+pub type GithubAdmissionUnknown = {
+  schema: "smart-ship.github-admission-result.v1",
+  status: "unknown",
+  request: AdmissionEffect,
+  error: GithubConnectorError,
+}
+
+/** Closed wire evidence preserves confirmed, refused and uncertain provider outcomes. */
+pub type GithubAdmissionEvidence = GithubAdmissionConfirmed \
+  | GithubAdmissionRefused \
+  | GithubAdmissionUnknown
+
+/**
+ * Dispatch status says whether this invocation acted; prior receipt content remains inspectable.
+ */
+pub type GithubAdmissionDispatch = {
+  dispatch: EffectDispatch,
+  reason: string?,
+  admission_refusal: EffectRefusal?,
+}
+
+type SettledStatus = "confirmed" | "refused" | "unknown"
+
+type GithubTarget = {owner: string, repo: string, pull_number: int}
+
+fn not_started(
+  previous: StateRead,
+  reason: string,
+  existing: Effect? = nil,
+) -> GithubAdmissionDispatch {
+  const outcome: EffectOutcome? = if existing != nil
+    && ["confirmed", "refused", "unknown"].contains(existing.status) {
+    {status: schema_expect(existing.status, schema_of(SettledStatus)), receipt: existing.receipt}
+  } else {
+    nil
+  }
+  return {
+    dispatch: {
+      status: "not_started",
+      dispatch_started: false,
+      state_commit: previous.commit,
+      outcome: outcome,
+    },
+    reason: reason,
+    admission_refusal: nil,
+  }
+}
+
+fn github_outcome(
+  harness: Harness,
+  configuration: GithubAdmissionConfiguration,
+  request: AdmissionEffect,
+  target: GithubTarget,
+) -> EffectOutcome {
+  const merged = pulls_merge_safe(
+    harness,
+    {
+      owner: target.owner,
+      repo: target.repo,
+      pull_number: target.pull_number,
+      expected_head_oid: request.source,
+      method: configuration.method,
+      delete_branch: false,
+      options: {
+        installation_token: harness.secrets.read(configuration.token_reference),
+        api_base_url: configuration.api_base_url ?? "https://api.github.com",
+        allow_gh_auth_fallback: false,
+        retry_unsafe: false,
+        retry: {max_attempts: 1},
+      },
+    },
+  )
+  const evidence: GithubAdmissionEvidence = match merged {
+    Ok(provider) -> { {
+      schema: "smart-ship.github-admission-result.v1",
+      status: "confirmed",
+      request: request,
+      provider: provider,
+    } }
+    Err(error) -> {
+      // These responses explicitly refuse the request; transport and malformed-response errors
+      // cannot establish whether GitHub integrated anything and must never cause redispatch.
+      const refused = error.code == "stale_head"
+        || [401, 403, 404, 405, 409, 422].contains(error.http_status ?? 0)
+      if refused {
+        {
+          schema: "smart-ship.github-admission-result.v1",
+          status: "refused",
+          request: request,
+          error: error,
+        }
+      } else {
+        {
+          schema: "smart-ship.github-admission-result.v1",
+          status: "unknown",
+          request: request,
+          error: error,
+        }
+      }
+    }
+  }
+  return {status: evidence.status, receipt: effect_receipt(json_stringify(evidence))}
+}
+
+/** Reserve once, commit the fenced dispatch, and let GitHub enforce its effective branch policy. */
+pub fn submit_github_admission(
+  harness: Harness,
+  configuration: GithubAdmissionConfiguration,
+  submission: GithubAdmissionSubmission,
+) -> GithubAdmissionDispatch {
+  const config = configuration.installation
+  const previous = read_state(harness.process, config.store)
+  const state = previous.state
+  if state == nil || state.authority.installation != config.policy.installation
+    || state.authority.controller != config.controller
+    || state.authority.policy_digest != policy_digest(config.policy) {
+    return not_started(previous, "installation does not own this authority and policy")
+  }
+  const request = admission_effect(submission.admission)
+  const parts = request.repository.split("/")
+  const change = request.admission.record.source.change
+  if configuration.token_reference.trim() == ""
+    || len(parts) != 2
+    || !parts.all({ part -> part != "" })
+    || regex_match("^[1-9][0-9]{0,14}$", change) == nil {
+    return not_started(
+      previous,
+      "GitHub admission requires a credential reference, repository and canonical pull request number",
+    )
+  }
+  const target: GithubTarget = {owner: parts[0]!, repo: parts[1]!, pull_number: to_int(change)}
+  const existing = state.effects.find({ effect -> effect.request == request })
+  if existing != nil {
+    return not_started(
+      previous,
+      "admission was already reserved; inspect its recorded outcome",
+      existing,
+    )
+  }
+  const reserved = reserve_effect(state, submission.fence, request, config.policy)
+  if is_err(reserved) {
+    return not_started(previous, "admission was not qualified")
+      + {admission_refusal: unwrap_err(reserved)}
+  }
+  const next: Controller = unwrap(reserved)
+  const committed = commit_state(
+    harness.process,
+    config.store,
+    prepare_state(harness.process, config.store, previous, next),
+  )
+  if committed.status != "committed" {
+    return not_started(previous, "admission reservation is " + committed.status)
+  }
+  const dispatch = dispatch_reserved_effect(
+    pick(harness, ["process", "random"]),
+    config.store,
+    pick(next.authority, ["installation", "generation", "revision", "controller"]),
+    request,
+    { effect ->
+      github_outcome(
+        harness,
+        configuration,
+        schema_expect(effect, schema_of(AdmissionEffect)),
+        target,
+      )
+    },
+  )
+  return {dispatch: dispatch, reason: nil, admission_refusal: nil}
+}

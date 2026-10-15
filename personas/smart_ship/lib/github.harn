@@ -1,3 +1,13 @@
+pub import {
+  GithubAdmissionConfiguration,
+  GithubAdmissionConfirmed,
+  GithubAdmissionDispatch,
+  GithubAdmissionEvidence,
+  GithubAdmissionRefused,
+  GithubAdmissionSubmission,
+  GithubAdmissionUnknown,
+  submit_github_admission,
+} from "./github_effect"
 import {
   Review,
   ReviewActor,

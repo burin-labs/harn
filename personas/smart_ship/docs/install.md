@@ -86,6 +86,32 @@ times, platform approval, and thread resolution separately. Unknown facts stay
 unknown.
 The observation supplies review evidence; it does not admit or merge the change.
 
+## Integrate a qualified GitHub change
+
+Qualify the release guard and transfer exclusive landing ownership before
+activating this adapter. GitHub continues to enforce effective branch rules,
+including a required merge queue. The command does not change repository rules.
+
+Save a `GithubAdmissionConfiguration` in a trusted file outside submitted
+artifacts. Its `installation` field contains your qualified `Installation`
+document; `token_reference` names a host secret, and `method` selects `merge`,
+`squash`, or `rebase`. Keep Git authentication with the host's normal credential
+store. Save the signed witness and current authority fence as a
+`GithubAdmissionSubmission` in `submission.json`.
+
+```sh
+HARN_EGRESS_ALLOW=api.github.com,github.com harn run --allow-process-network .smart-ship-source/personas/smart_ship/github-effect-cli.harn -- github-effect.json submission.json
+```
+
+Inspect `dispatch` and the typed `admission_refusal`. A confirmed dispatch
+retains the provider's integrated commit in the durable receipt's JSON body.
+Use that actual commit and resolve its tree when forming the next verification
+snapshot. Keep the release checkpoint held until complete verification passes.
+An uncertain dispatch requires reconciliation; submitting the same admission
+again reads its recorded outcome without contacting GitHub. A stop or stale
+fence prevents a new dispatch, while an already committed dispatch can finish
+and retain its measured result.
+
 ## Uninstall
 
 Disable the installation's event triggers, drain admitted work, and reconcile

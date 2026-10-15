@@ -1,0 +1,333 @@
+import { git } from "../fixtures/neutral"
+import { digest, execution, fixture, reviewed_admission } from "../fixtures/support"
+import {
+  GithubAdmissionConfiguration,
+  GithubAdmissionConfirmed,
+  GithubAdmissionEvidence,
+  GithubAdmissionSubmission,
+  submit_github_admission,
+} from "../lib/github_effect"
+import {
+  Controller,
+  admission_bytes,
+  admission_effect,
+  commit_state,
+  control,
+  initialize_installation,
+  prepare_state,
+  read_state,
+  verify_admission,
+} from "../lib/main"
+
+const BASE = "https://github-api.test"
+
+const REPOSITORY = "acme/product"
+
+const INTEGRATED = "a".repeat(40)
+
+fn main(harness: Harness) {
+  require len(argv) == 2, "pass the report path and scenario"
+  if argv[1] == "receipt" {
+    check_connector_merge_receipt_restart_duplicate(harness)
+  } else if argv[1] == "controls" {
+    check_controls_after_positive(harness)
+  } else if argv[1] == "uncertainty" {
+    check_refusal_and_uncertainty(harness)
+  } else {
+    throw "unknown effect scenario"
+  }
+  harness.fs.write_text(argv[0], json_stringify({status: "passed", scenario: argv[1]}))
+}
+
+type Setup = {
+  root: string,
+  private_key: string,
+  configuration: GithubAdmissionConfiguration,
+  submission: GithubAdmissionSubmission,
+}
+
+type MergeBody = {sha: string, merge_method: string}
+
+fn setup(harness: Harness) -> Setup {
+  const root = harness.fs.mkdtemp_in_workspace("smart-ship-github-effect-")
+  const remote = path_join(root, "remote.git")
+  const workspace = path_join(root, "owner.git")
+  git(harness.process, root, ["init", "--bare", "--quiet", remote])
+  git(harness.process, root, ["init", "--bare", "--quiet", workspace])
+  git(harness.process, workspace, ["config", "user.name", "Smart Ship Fixture"])
+  git(harness.process, workspace, ["config", "user.email", "fixture@example.invalid"])
+  const f = fixture(harness.random)
+  const policy = f.policy
+    + {
+      repositories: [REPOSITORY],
+      admission_rules: f.policy.admission_rules.map({ rule -> rule + {repository: REPOSITORY} }),
+    }
+  const installation = {
+    schema: "smart-ship.installation.v1",
+    policy: policy,
+    controller: digest("controller"),
+    store: {
+      workspace: workspace,
+      remote: remote,
+      ref: "refs/heads/authority",
+      timeout_ms: 10000,
+      signed_commits: false,
+    },
+  }
+  const initialized = initialize_installation(harness.process, installation)
+  const initial = initialized.state!
+  const active = unwrap(
+    control(
+      initial,
+      pick(initial.authority, ["installation", "generation", "revision", "controller"]),
+      "active",
+    ),
+  )
+  require commit_state(
+    harness.process,
+    installation.store,
+    prepare_state(harness.process, installation.store, initialized, active),
+  ).status
+    == "committed",
+    "fixture activation did not commit"
+  const original = execution(f)
+  const signed = reviewed_admission(
+    policy,
+    f.private_key,
+    {id: "7", base: "b".repeat(40)},
+    original
+      + {
+        source: original.source + {repository: REPOSITORY},
+        requirement: original.requirement + {repository: REPOSITORY},
+      },
+  )
+  return {
+    root: root,
+    private_key: f.private_key,
+    configuration: {
+      installation: installation,
+      token_reference: "fixture/github-token",
+      method: "squash",
+      api_base_url: BASE,
+    },
+    submission: {
+      fence: pick(active.authority, ["installation", "generation", "revision", "controller"]),
+      admission: signed,
+    },
+  }
+}
+
+fn mock_merge(testing: HarnessTesting, s: Setup, status: int = 200, changed_head: bool = false) {
+  testing.http_mock_clear()
+  const source = s.submission.admission.record.source
+  testing.http_mock(
+    "GET",
+    BASE + "/repos/" + REPOSITORY + "/pulls/7",
+    {
+      status: 200,
+      body: json_stringify(
+        {
+          number: 7,
+          state: "open",
+          draft: false,
+          mergeable: true,
+          mergeable_state: "clean",
+          head: {
+            sha: if changed_head {
+              "c".repeat(40)
+            } else {
+              source.head
+            },
+            ref: "feature",
+            repo: {full_name: REPOSITORY},
+          },
+          base: {sha: source.base, ref: "main", repo: {full_name: REPOSITORY}},
+        },
+      ),
+    },
+  )
+  testing.http_mock(
+    "GET",
+    BASE + "/repos/" + REPOSITORY + "/branches/main/protection",
+    {
+      status: 200,
+      body: json_stringify({required_pull_request_reviews: {required_approving_review_count: 1}}),
+    },
+  )
+  testing.http_mock(
+    "PUT",
+    BASE + "/repos/" + REPOSITORY + "/pulls/7/merge",
+    {
+      status: status,
+      body: json_stringify(
+        if status == 200 {
+          {merged: true, sha: INTEGRATED}
+        } else {
+          {message: "fixture policy or transport refusal"}
+        },
+      ),
+    },
+  )
+}
+
+fn save(process: HarnessProcess, s: Setup, state: Controller) {
+  const store = s.configuration.installation.store
+  require commit_state(
+    process,
+    store,
+    prepare_state(process, store, read_state(process, store), state),
+  ).status
+    == "committed",
+    "fixture control did not commit"
+}
+
+fn check_connector_merge_receipt_restart_duplicate(harness: Harness) {
+  require harness.secrets.read("fixture/github-token") == "synthetic-fixture-token",
+    "parent fixture secret is unavailable"
+  const s = setup(harness)
+  defer {
+    harness.fs.delete(s.root)
+  }
+  mock_merge(harness.testing, s)
+  const result = submit_github_admission(harness, s.configuration, s.submission)
+  require result.dispatch.status == "settled" && result.dispatch.dispatch_started
+    && result.dispatch.outcome?.status == "confirmed",
+    "connector did not confirm its dispatch"
+  const calls = harness.testing.http_mock_calls()
+  const puts = calls.filter({ call -> call.method == "PUT" })
+  require len(puts) == 1, "the real connector mutation must fire exactly once"
+  const body: MergeBody = schema_expect(json_parse(puts[0]!.body), schema_of(MergeBody))
+  require body.sha == s.submission.admission.record.source.head && body.merge_method == "squash",
+    "mutation lost its verified head or configured method"
+  const durable = read_state(harness.process, s.configuration.installation.store).state!
+  const evidence: GithubAdmissionEvidence = schema_expect(
+    json_parse(durable.effects[0]!.receipt!.body),
+    schema_of(GithubAdmissionEvidence),
+  )
+  require evidence.status == "confirmed", "durable provider evidence is not confirmed"
+  require schema_expect(evidence, schema_of(GithubAdmissionConfirmed)).provider.merge.sha
+    == INTEGRATED,
+    "durable receipt lost the integrated commit"
+  const repeated = submit_github_admission(harness, s.configuration, s.submission)
+  require !repeated.dispatch.dispatch_started
+    && repeated.dispatch.outcome == result.dispatch.outcome
+    && harness.testing.http_mock_calls() == calls,
+    "duplicate dispatch changed the provider or lost its receipt"
+}
+
+fn check_controls_after_positive(harness: Harness) {
+  const positive = setup(harness)
+  defer {
+    harness.fs.delete(positive.root)
+  }
+  mock_merge(harness.testing, positive)
+  require submit_github_admission(harness, positive.configuration, positive.submission).dispatch
+    .dispatch_started,
+    "positive dispatch was not reached"
+  require len(harness.testing.http_mock_calls()) >= 3, "provider observation was not primed"
+  for mode in ["stopped", "stale", "invalid-signature"] {
+    const s = setup(harness)
+    defer {
+      harness.fs.delete(s.root)
+    }
+    mock_merge(harness.testing, s)
+    const state = read_state(harness.process, s.configuration.installation.store).state!
+    if mode == "stopped" {
+      save(harness.process, s, unwrap(control(state, s.submission.fence, "stopped")))
+    }
+    const submission = if mode == "stale" {
+      s.submission + {fence: s.submission.fence + {generation: 99}}
+    } else if mode == "invalid-signature" {
+      s.submission + {admission: s.submission.admission + {signature: "00".repeat(64)}}
+    } else {
+      s.submission
+    }
+    const refused = submit_github_admission(
+      harness,
+      s.configuration + {token_reference: "fixture/missing"},
+      submission,
+    )
+    require !refused.dispatch.dispatch_started && harness.testing.http_mock_calls() == [],
+      "control reached dispatch: "
+      + mode
+    if mode == "invalid-signature" {
+      const admission = refused.admission_refusal?.admission
+      require admission != nil && admission.status == "invalid"
+        && admission.invalid.contains("admission-signature")
+        && admission.checks.required > 0,
+        "signature refusal lost its typed inventory and failing identity"
+    }
+  }
+}
+
+fn check_refusal_and_uncertainty(harness: Harness) {
+  for mode in ["changed-head", "protected", "uncertain"] {
+    const s = setup(harness)
+    defer {
+      harness.fs.delete(s.root)
+    }
+    mock_merge(
+      harness.testing,
+      s,
+      if mode == "protected" {
+        405
+      } else if mode == "uncertain" {
+        500
+      } else {
+        200
+      },
+      mode == "changed-head",
+    )
+    const result = submit_github_admission(harness, s.configuration, s.submission)
+    require result.dispatch.dispatch_started, "provider refusal was not observed"
+    const expected_status = if mode == "uncertain" {
+      "unknown"
+    } else {
+      "refused"
+    }
+    const expected_dispatch = if mode == "uncertain" {
+      "reconciliation_required"
+    } else {
+      "settled"
+    }
+    require result.dispatch.outcome?.status == expected_status
+      && result.dispatch.status == expected_dispatch,
+      "refusal and uncertainty were conflated: "
+      + mode
+    const calls = harness.testing.http_mock_calls()
+    const expected_puts = if mode == "changed-head" {
+      0
+    } else {
+      1
+    }
+    require len(calls.filter({ call -> call.method == "PUT" })) == expected_puts,
+      "unexpected mutation count: "
+      + mode
+    const repeated = submit_github_admission(harness, s.configuration, s.submission)
+    require !repeated.dispatch.dispatch_started && harness.testing.http_mock_calls() == calls
+      && repeated.dispatch.outcome == result.dispatch.outcome,
+      "refused or uncertain operation redispatched: "
+      + mode
+    if mode == "uncertain" {
+      const record = s.submission.admission.record
+        + {admitted_at_ms: s.submission.admission.record.admitted_at_ms + 1}
+      const refreshed = s.submission.admission
+        + {record: record, signature: ed25519_sign(s.private_key, admission_bytes(record))}
+      const qualified = verify_admission(refreshed, s.configuration.installation.policy)
+      require qualified.status == "admitted", json_stringify(qualified)
+      require admission_effect(refreshed) != admission_effect(s.submission.admission),
+        "refreshed witness did not change the request identity"
+      const current = read_state(harness.process, s.configuration.installation.store).state!
+      const alias = submit_github_admission(
+        harness,
+        s.configuration,
+        {
+          fence: pick(current.authority, ["installation", "generation", "revision", "controller"]),
+          admission: refreshed,
+        },
+      )
+      require !alias.dispatch.dispatch_started && harness.testing.http_mock_calls() == calls,
+        "a fresh valid admission witness redispatched the same uncertain change"
+    }
+  }
+}

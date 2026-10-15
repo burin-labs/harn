@@ -17,6 +17,30 @@ pub type RerunEffect = EffectTarget & {kind: "rerun"}
 /** A digest cannot stand in for an admission record at the mutation boundary. */
 pub type EffectRequest = AdmissionEffect | ReleaseEffect | RerunEffect
 
+/** Provider evidence travels with durable state rather than an unavailable hash alone. */
+pub type EffectReceipt = {schema: "smart-ship.effect-receipt.v1", body: string, digest: string}
+
+/**
+ * Canonical JSON retains provider-specific evidence without adding forge fields to the controller.
+ */
+pub fn effect_receipt(body: string) -> EffectReceipt {
+  require len(body) > 0 && len(body) <= 4194304, "effect receipt exceeds its size limit"
+  const canonical = json_stringify(json_parse(body))
+  return {
+    schema: "smart-ship.effect-receipt.v1",
+    body: canonical,
+    digest: "sha256:" + sha256_hex(canonical),
+  }
+}
+
+/** Validate evidence at the effect boundary before it can settle durable authority. */
+pub fn effect_receipt_valid(receipt: EffectReceipt) -> bool {
+  const decoded = try {
+    effect_receipt(receipt.body)
+  }
+  return is_ok(decoded) && unwrap(decoded) == receipt
+}
+
 /** Unmeasured evidence remains nil; measured refusals retain complete counts and names. */
 pub type EffectRefusal = {
   reason: string,

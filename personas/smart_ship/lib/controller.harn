@@ -1,13 +1,15 @@
 pub import {
   AdmissionEffect,
+  EffectReceipt,
   EffectRefusal,
   EffectRequest,
   EffectTarget,
   ReleaseEffect,
   RerunEffect,
   admission_effect,
+  effect_receipt,
 } from "./effect_contract"
-import { qualify_admission_effect } from "./effect_contract"
+import { effect_receipt_valid, qualify_admission_effect } from "./effect_contract"
 import {
   checkpoint_id,
   is_digest,
@@ -102,7 +104,7 @@ pub type Effect = {
   policy_digest: string,
   status: "reserved" | "dispatching" | "unknown" | "confirmed" | "refused",
   dispatch_id: string?,
-  receipt: string?,
+  receipt: EffectReceipt?,
 }
 
 fn unresolved_effect(effect: Effect) -> bool {
@@ -304,11 +306,11 @@ pub fn settle_effect(
   fence: Fence,
   request: EffectRequest,
   status: "unknown" | "confirmed" | "refused",
-  receipt: string?,
+  receipt: EffectReceipt?,
 ) -> Result<Controller, string> {
   if !authorized(state, fence)
-    || (status != "unknown" && (receipt == nil || !is_digest(receipt)))
-    || (status == "unknown" && receipt != nil) {
+    || (status != "unknown" && receipt == nil)
+    || (receipt != nil && !effect_receipt_valid(receipt)) {
     return Err("effect settlement requires current authority and an observed receipt")
   }
   const effect = state.effects.find({ item -> item.request == request })

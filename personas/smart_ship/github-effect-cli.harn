@@ -1,0 +1,22 @@
+import {
+  GithubAdmissionConfiguration,
+  GithubAdmissionSubmission,
+  submit_github_admission,
+} from "./lib/github_effect"
+
+fn main(harness: Harness) {
+  require len(argv) == 2, "pass trusted configuration and signed submission files"
+  const settings = harness.fs.read_text(argv[0])
+  const payload = harness.fs.read_text(argv[1])
+  require len(settings) <= 1048576 && len(payload) <= 16777216,
+    "admission input exceeds its size limit"
+  const configuration: GithubAdmissionConfiguration = schema_expect(
+    json_parse(settings),
+    schema_of(GithubAdmissionConfiguration),
+  )
+  const submission: GithubAdmissionSubmission = schema_expect(
+    json_parse(payload),
+    schema_of(GithubAdmissionSubmission),
+  )
+  harness.stdio.println(json_stringify(submit_github_admission(harness, configuration, submission)))
+}
