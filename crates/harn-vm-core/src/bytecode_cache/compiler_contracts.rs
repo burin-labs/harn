@@ -26,7 +26,11 @@ fn with_identity<R>(read: impl FnOnce(&Cached) -> R) -> R {
         .as_ref()
         .is_some_and(|entry| Arc::ptr_eq(&entry.manifest, &manifest))
     {
-        let contracts = fingerprint_entries(&manifest);
+        let mut contracts = Sha256::new();
+        contracts.update(b"harn.complete-builtin-contracts.v1\0");
+        contracts.update(fingerprint_entries(&manifest));
+        contracts.update(runtime_contracts());
+        let contracts: [u8; 32] = contracts.finalize().into();
         let mut compiler = Sha256::new();
         compiler.update(b"harn.compiler-with-contracts.v1\0");
         compiler.update(super::CODEGEN_FINGERPRINT.as_bytes());
@@ -56,6 +60,26 @@ fn fingerprint_entries(entries: &[&BuiltinManifestEntry]) -> [u8; 32] {
     let mut digest = ContractHasher(Sha256::new());
     digest.write(b"harn.builtin-contracts.v1\0");
     entries.hash(&mut digest);
+    digest.0.finalize().into()
+}
+
+fn runtime_contracts() -> &'static [u8; 32] {
+    static RUNTIME: OnceLock<[u8; 32]> = OnceLock::new();
+    RUNTIME.get_or_init(|| fingerprint_runtime_defs(crate::vm::all_builtin_defs()))
+}
+
+fn fingerprint_runtime_defs(definitions: &[&crate::vm::VmBuiltinDef]) -> [u8; 32] {
+    let mut definitions = definitions
+        .iter()
+        .copied()
+        .filter(|def| def.runtime_only)
+        .collect::<Vec<_>>();
+    definitions.sort_unstable_by_key(|def| def.sig.name);
+    let mut digest = ContractHasher(Sha256::new());
+    digest.write(b"harn.runtime-only-builtin-contracts.v1\0");
+    for definition in definitions {
+        (definition.sig, definition.contract, definition.aliases).hash(&mut digest);
+    }
     digest.0.finalize().into()
 }
 
@@ -125,5 +149,26 @@ mod tests {
             fingerprint_entries(&[&neighbor, &PURE])
         );
         assert_ne!(fingerprint_entries(&[&PURE]), fingerprint_entries(&[]));
+    }
+
+    #[test]
+    fn runtime_only_authority_is_part_of_artifact_identity() {
+        let internal = crate::vm::VmBuiltinDef {
+            contract: BuiltinContract::RUNTIME_INTERNAL,
+            runtime_only: true,
+            ..crate::vm::VmBuiltinDef::new(SIGNATURE, crate::vm::VmBuiltinHandler::None)
+        };
+        let stdlib = crate::vm::VmBuiltinDef {
+            contract: BuiltinContract::STDLIB_INTERNAL,
+            ..internal
+        };
+        assert_ne!(
+            fingerprint_runtime_defs(&[&internal]),
+            fingerprint_runtime_defs(&[&stdlib])
+        );
+        assert_ne!(
+            fingerprint_runtime_defs(&[&internal]),
+            fingerprint_runtime_defs(&[])
+        );
     }
 }

@@ -137,6 +137,9 @@ pub const HARN_VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const CODEGEN_FINGERPRINT: &str = env!("HARN_CODEGEN_FINGERPRINT");
 
 mod compiler_contracts;
+#[cfg(test)]
+#[path = "bytecode_cache_contract_tests.rs"]
+mod contract_tests;
 pub use compiler_contracts::compiler_fingerprint;
 
 /// Conventional extension for entry-chunk cache files.

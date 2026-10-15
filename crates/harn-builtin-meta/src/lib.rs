@@ -419,7 +419,7 @@ impl core::fmt::Display for BuiltinSignature {
 
 /// Public view of one builtin used by `harn-lint` and other crates that need
 /// just identifier + return-type hints (no parameter types).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BuiltinMetadata {
     pub name: &'static str,
     pub return_types: &'static [&'static str],
