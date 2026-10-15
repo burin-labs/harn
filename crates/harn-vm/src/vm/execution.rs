@@ -117,15 +117,15 @@ impl Vm {
         let deadline = Instant::now().checked_add(timeout).ok_or_else(|| {
             VmError::Runtime("execution timeout exceeds the platform clock range".to_string())
         })?;
-        crate::orchestration::scope_ambient_transaction(async {
-            let pipeline_checkpoint = crate::orchestration::checkpoint_pipeline_lifecycle();
-            let deadline_guard = self.execution_deadline.install(deadline);
-            let result = crate::tracing::checkpoint_future(self.execute_top_level(entry)).await;
-            deadline_guard.complete();
-            pipeline_checkpoint.complete();
-            result
-        })
-        .await
+        let runtime = Arc::clone(&self.runtime);
+        runtime.execute_timed(self, entry, deadline).await
+    }
+
+    pub(crate) fn install_execution_deadline(
+        &self,
+        deadline: Instant,
+    ) -> super::execution_deadline::ExecutionDeadlineGuard {
+        self.execution_deadline.install(deadline)
     }
 
     /// Execute a shared compiled chunk without cloning its bytecode.

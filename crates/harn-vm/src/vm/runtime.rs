@@ -42,6 +42,12 @@ pub(crate) trait VmRuntime: Any + Send + Sync {
         cx: &mut std::task::Context<'_>,
         continuation: &mut dyn FnMut(&mut std::task::Context<'_>) -> std::task::Poll<()>,
     ) -> std::task::Poll<()>;
+    fn execute_timed<'a>(
+        &'a self,
+        vm: &'a mut super::Vm,
+        entry: super::TopLevelEntry,
+        deadline: std::time::Instant,
+    ) -> Pin<Box<dyn Future<Output = Result<VmValue, VmError>> + Send + 'a>>;
     fn task_cleanup(&self, execution_id: &crate::ExecutionId) -> Arc<dyn VmTaskCleanup>;
     fn start_span(&self, kind: VmSpanKind, name: String) -> super::ScopeSpan;
     fn builtin_span(&self, name: &str) -> Option<super::ScopeSpan>;

@@ -56,6 +56,14 @@ impl VmRuntime for RefusingRuntime {
     ) -> std::task::Poll<()> {
         self.native.poll_async_builtin(cx, continuation)
     }
+    fn execute_timed<'a>(
+        &'a self,
+        vm: &'a mut Vm,
+        entry: crate::vm::TopLevelEntry,
+        deadline: std::time::Instant,
+    ) -> Pin<Box<dyn Future<Output = Result<VmValue, VmError>> + Send + 'a>> {
+        self.native.execute_timed(vm, entry, deadline)
+    }
     fn start_span(&self, kind: crate::vm::VmSpanKind, name: String) -> crate::vm::ScopeSpan {
         self.native.start_span(kind, name)
     }

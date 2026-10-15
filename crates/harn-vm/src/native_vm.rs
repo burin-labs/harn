@@ -12,6 +12,7 @@ mod lifecycle;
 mod step_lifecycle;
 pub(crate) mod subtask;
 mod task_cleanup;
+mod timed_execution;
 mod tracing;
 
 #[derive(Clone)]
@@ -114,6 +115,15 @@ impl VmRuntime for NativeExecutionState {
         continuation: &mut dyn FnMut(&mut std::task::Context<'_>) -> std::task::Poll<()>,
     ) -> std::task::Poll<()> {
         crate::stdlib::pool::with_pool_registry_poll(&self.pool_registry, || continuation(cx))
+    }
+
+    fn execute_timed<'a>(
+        &'a self,
+        vm: &'a mut Vm,
+        entry: crate::vm::TopLevelEntry,
+        deadline: std::time::Instant,
+    ) -> Pin<Box<dyn Future<Output = Result<VmValue, VmError>> + Send + 'a>> {
+        Box::pin(timed_execution::execute(vm, entry, deadline))
     }
 
     fn start_span(&self, kind: crate::vm::VmSpanKind, name: String) -> crate::vm::ScopeSpan {
