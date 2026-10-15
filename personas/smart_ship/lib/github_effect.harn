@@ -4,6 +4,7 @@ import { EffectDispatch, EffectOutcome, dispatch_reserved_effect } from "./effec
 import { StateRead, commit_state, prepare_state, read_state } from "./git_store"
 import { policy_digest } from "./identity"
 import { Installation } from "./installation"
+import { fence_matches } from "./promotion"
 import { Fence, SignedAdmission } from "./types"
 import {
   GithubConnectorError,
@@ -77,7 +78,11 @@ fn not_started(
   }
   return {
     dispatch: {
-      status: "not_started",
+      status: if existing != nil && ["dispatching", "unknown"].contains(existing.status) {
+        "reconciliation_required"
+      } else {
+        "not_started"
+      },
       dispatch_started: false,
       state_commit: previous.commit,
       outcome: outcome,
@@ -171,26 +176,42 @@ pub fn submit_github_admission(
   }
   const target: GithubTarget = {owner: parts[0]!, repo: parts[1]!, pull_number: to_int(change)}
   const existing = state.effects.find({ effect -> effect.request == request })
+  let next: Controller = state
   if existing != nil {
-    return not_started(
-      previous,
-      "admission was already reserved; inspect its recorded outcome",
-      existing,
+    if existing.status != "reserved" {
+      return not_started(
+        previous,
+        "admission already has a dispatch outcome; inspect its receipt",
+        existing,
+      )
+    }
+    if !fence_matches(state.authority, submission.fence) {
+      return not_started(
+        previous,
+        "resuming a reservation requires the current authority fence",
+        existing,
+      )
+    }
+  } else {
+    const reserved = reserve_effect(state, submission.fence, request, config.policy)
+    if is_err(reserved) {
+      return not_started(previous, "admission was not qualified")
+        + {admission_refusal: unwrap_err(reserved)}
+    }
+    next = unwrap(reserved)
+    const committed = commit_state(
+      harness.process,
+      config.store,
+      prepare_state(harness.process, config.store, previous, next),
     )
-  }
-  const reserved = reserve_effect(state, submission.fence, request, config.policy)
-  if is_err(reserved) {
-    return not_started(previous, "admission was not qualified")
-      + {admission_refusal: unwrap_err(reserved)}
-  }
-  const next: Controller = unwrap(reserved)
-  const committed = commit_state(
-    harness.process,
-    config.store,
-    prepare_state(harness.process, config.store, previous, next),
-  )
-  if committed.status != "committed" {
-    return not_started(previous, "admission reservation is " + committed.status)
+    if committed.status != "committed" {
+      const unresolved = not_started(previous, "admission reservation is " + committed.status)
+      return if committed.status == "unknown" {
+        unresolved + {dispatch: unresolved.dispatch + {status: "reconciliation_required"}}
+      } else {
+        unresolved
+      }
+    }
   }
   const dispatch = dispatch_reserved_effect(
     pick(harness, ["process", "random"]),

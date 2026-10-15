@@ -1,5 +1,6 @@
 import { git } from "../fixtures/neutral"
 import { digest, execution, fixture, reviewed_admission } from "../fixtures/support"
+import { run_github_effect_command } from "../github-effect-cli"
 import {
   GithubAdmissionConfiguration,
   GithubAdmissionConfirmed,
@@ -16,6 +17,7 @@ import {
   initialize_installation,
   prepare_state,
   read_state,
+  reserve_effect,
   verify_admission,
 } from "../lib/main"
 
@@ -33,6 +35,8 @@ fn main(harness: Harness) {
     check_controls_after_positive(harness)
   } else if argv[1] == "uncertainty" {
     check_refusal_and_uncertainty(harness)
+  } else if argv[1] == "reservation" {
+    check_reserved_admission_resumes(harness)
   } else {
     throw "unknown effect scenario"
   }
@@ -189,7 +193,11 @@ fn check_connector_merge_receipt_restart_duplicate(harness: Harness) {
     harness.fs.delete(s.root)
   }
   mock_merge(harness.testing, s)
-  const result = submit_github_admission(harness, s.configuration, s.submission)
+  const settings = path_join(s.root, "trusted.json")
+  const submission = path_join(s.root, "submission.json")
+  harness.fs.write_text(settings, json_stringify(s.configuration))
+  harness.fs.write_text(submission, json_stringify(s.submission))
+  const result = run_github_effect_command(harness, [settings, submission])
   require result.dispatch.status == "settled" && result.dispatch.dispatch_started
     && result.dispatch.outcome?.status == "confirmed",
     "connector did not confirm its dispatch"
@@ -213,6 +221,76 @@ fn check_connector_merge_receipt_restart_duplicate(harness: Harness) {
     && repeated.dispatch.outcome == result.dispatch.outcome
     && harness.testing.http_mock_calls() == calls,
     "duplicate dispatch changed the provider or lost its receipt"
+  harness.testing.http_mock_clear()
+  harness.fs.write_text(submission, "{}")
+  const malformed = try {
+    run_github_effect_command(harness, [settings, submission])
+  }
+  require is_err(malformed) && harness.testing.http_mock_calls() == [],
+    "the public command reached a provider with a malformed signed submission"
+}
+
+fn check_reserved_admission_resumes(harness: Harness) {
+  const s = setup(harness)
+  defer {
+    harness.fs.delete(s.root)
+  }
+  const previous = read_state(harness.process, s.configuration.installation.store).state!
+  const reserved = unwrap(
+    reserve_effect(
+      previous,
+      s.submission.fence,
+      admission_effect(s.submission.admission),
+      s.configuration.installation.policy,
+    ),
+  )
+  save(harness.process, s, reserved)
+  mock_merge(harness.testing, s)
+  const stale = submit_github_admission(harness, s.configuration, s.submission)
+  require !stale.dispatch.dispatch_started && harness.testing.http_mock_calls() == [],
+    "resuming a reservation silently renewed a stale fence"
+  const resumed = submit_github_admission(
+    harness,
+    s.configuration,
+    s.submission
+      + {fence: pick(reserved.authority, ["installation", "generation", "revision", "controller"])},
+  )
+  require resumed.dispatch.dispatch_started && resumed.dispatch.status == "settled",
+    "a committed reservation with no dispatch claim cannot resume after restart"
+  require len(harness.testing.http_mock_calls().filter({ call -> call.method == "PUT" })) == 1,
+    "reservation recovery did not reach exactly one actual connector mutation"
+  const stopped = setup(harness)
+  defer {
+    harness.fs.delete(stopped.root)
+  }
+  const state = read_state(harness.process, stopped.configuration.installation.store).state!
+  const pending = unwrap(
+    reserve_effect(
+      state,
+      stopped.submission.fence,
+      admission_effect(stopped.submission.admission),
+      stopped.configuration.installation.policy,
+    ),
+  )
+  save(harness.process, stopped, pending)
+  const halted = unwrap(
+    control(
+      pending,
+      pick(pending.authority, ["installation", "generation", "revision", "controller"]),
+      "stopped",
+    ),
+  )
+  save(harness.process, stopped, halted)
+  mock_merge(harness.testing, stopped)
+  const refused = submit_github_admission(
+    harness,
+    stopped.configuration + {token_reference: "fixture/missing"},
+    stopped.submission
+      + {fence: pick(halted.authority, ["installation", "generation", "revision", "controller"])},
+  )
+  require !refused.dispatch.dispatch_started && refused.dispatch.status == "reconciliation_required"
+    && harness.testing.http_mock_calls() == [],
+    "stopped reservation reached a provider"
 }
 
 fn check_controls_after_positive(harness: Harness) {

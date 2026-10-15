@@ -34,3 +34,7 @@ pipeline test_github_effect_stop_stale_and_signature_controls_after_positive(har
 pipeline test_github_effect_definite_refusal_and_uncertain_outcomes(harness: Harness) {
   run_case(harness, "uncertainty")
 }
+
+pipeline test_github_effect_resumes_a_reserved_but_undispatched_admission(harness: Harness) {
+  run_case(harness, "reservation")
+}

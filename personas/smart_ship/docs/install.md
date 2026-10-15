@@ -111,6 +111,10 @@ An uncertain dispatch requires reconciliation; submitting the same admission
 again reads its recorded outcome without contacting GitHub. A stop or stale
 fence prevents a new dispatch, while an already committed dispatch can finish
 and retain its measured result.
+If a process stopped after reserving an admission but before claiming its
+dispatch, inspect the current authority fence and resubmit the same signed
+witness with that fence. The existing owner claims the reservation once.
+An operation already marked `dispatching` or `unknown` requires reconciliation.
 
 ## Uninstall
 
