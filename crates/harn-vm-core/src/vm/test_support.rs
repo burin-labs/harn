@@ -1,5 +1,34 @@
 use super::{TaskScope, Vm};
 use crate::{VmError, VmValue};
+
+pub fn reset_stdlib_cache_for_test() {
+    super::stdlib_artifact::reset_stdlib_module_artifact_cache();
+}
+
+pub fn stdlib_cached_ptr_for_test(module: &str) -> Option<usize> {
+    let source = harn_modules::stdlib_catalog()
+        .source(module)
+        .expect("stdlib module exists");
+    super::stdlib_artifact::stdlib_module_artifact_cache_ptr(module, source)
+}
+
+pub fn module_interface_resolution_count_for_test() -> u64 {
+    crate::module_artifact::INTERFACE_RESOLUTIONS.with(std::cell::Cell::get)
+}
+
+pub fn stdlib_warm_lock_file_for_test() -> &'static str {
+    super::stdlib_artifact::STDLIB_WARM_LOCK_FILE
+}
+
+pub fn compile_stdlib_source_for_test(
+    path: &std::path::Path,
+    source: &str,
+    context: &crate::module_artifact::ModuleCompilationContext,
+) -> Result<crate::module_artifact::ModuleArtifact, VmError> {
+    crate::module_artifact::compile_embedded_stdlib_module_artifact_from_source_with_context(
+        path, source, context,
+    )
+}
 impl Vm {
     pub fn register_spawned_task_for_test(&mut self, public_id: String, task: crate::VmTaskHandle) {
         self.register_spawned_task(public_id, task);

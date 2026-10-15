@@ -101,7 +101,7 @@ mod tests {
         let path = root.path().join("main.harn");
         // The caller's root buffer wins over the different disk contents.
         std::fs::write(&path, "this is not a valid pipeline").unwrap();
-        let source = "import {Options, options} from \"./facade.harn\"\npipeline custom(harness: Harness) { const value: Options = {count: 1}; const validated = options(value); assert_eq(validated.count, 1) }";
+        let source = "import {Options, options} from \"./facade.harn\"\npipeline custom(harness: Harness) { const value: Options = {count: 1}; const validated = options(value); return validated.count }";
         assert!(compile_source(source).unwrap_err().contains("Options"));
         compile_source_at_path(source, &path, Some("custom")).unwrap();
         let invalid = source.replace("count: 1", "count: \"wrong\"");

@@ -1,6 +1,8 @@
 //! Interpreter behavior exercised with the native execution runtime.
 
 use crate::*;
+mod compiler_native_contracts;
+mod stdlib_cache;
 mod task_cleanup;
 mod timed_execution;
 

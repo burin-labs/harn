@@ -881,8 +881,10 @@ mod tests {
                     r"
 pipeline default(harness: Harness) {
   let total = 0
-  for i in 0..=10000 {
+  let i = 0
+  while i <= 10000 {
     total = total + i
+    i = i + 1
   }
   return total
 }

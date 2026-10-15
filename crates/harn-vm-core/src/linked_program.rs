@@ -682,26 +682,6 @@ mod tests {
     }
 
     #[test]
-    fn closed_link_preserves_embedded_stdlib_authority() {
-        let dir = tempfile::tempdir().unwrap();
-        let entry = dir.path().join("entry.harn");
-        fs::write(
-            &entry,
-            r#"
-            import { ansi_enabled } from "std/ansi"
-            fn main() { ansi_enabled() }
-            "#,
-        )
-        .unwrap();
-
-        let linked = link_program(&entry, dir.path()).expect("embedded stdlib link succeeds");
-        assert_eq!(
-            linked.modules[Path::new("<std>/ansi")].provenance,
-            ModuleProvenance::EmbeddedStdlib
-        );
-    }
-
-    #[test]
     fn closed_link_retains_private_callable_closure_and_initializer_roots() {
         let dir = tempfile::tempdir().unwrap();
         let library = dir.path().join("library.harn");

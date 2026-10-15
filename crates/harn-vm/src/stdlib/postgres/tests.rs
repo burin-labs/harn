@@ -1,10 +1,9 @@
 use super::*;
-use crate::NativeBuiltinCtxExt;
 
 #[path = "describe_tests.rs"]
 mod describe_tests;
 
-use crate::{compile_source, register_vm_stdlib};
+use crate::{compile_source, register_vm_stdlib, NativeBuiltinCtxExt};
 
 fn live_postgres_url() -> String {
     let url = std::env::var("HARN_TEST_POSTGRES_URL")

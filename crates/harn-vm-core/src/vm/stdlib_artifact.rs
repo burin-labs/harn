@@ -35,12 +35,12 @@ fn stdlib_module_artifact_cache() -> &'static Cache<String, Arc<PreparedModuleAr
     })
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "vm-test-support"))]
 pub(super) fn reset_stdlib_module_artifact_cache() {
     stdlib_module_artifact_cache().clear();
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "vm-test-support"))]
 pub(super) fn stdlib_module_artifact_cache_ptr(module: &str, source: &str) -> Option<usize> {
     let key = stdlib_artifact_cache_key(module, source);
     stdlib_module_artifact_cache()

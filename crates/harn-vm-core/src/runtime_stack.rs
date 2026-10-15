@@ -26,7 +26,7 @@ mod tests {
     /// negative-control fixtures spell out every bypass.
     const EXEMPT: [&str; 2] = [
         "harn-parser/src/runtime_stack.rs",
-        "harn-vm/src/runtime_stack.rs",
+        "harn-vm-core/src/runtime_stack.rs",
     ];
 
     /// Ways to create a thread that bypass the owner: `std::thread::spawn`,
@@ -115,7 +115,13 @@ mod tests {
             .parent()
             .expect("harn-vm lives below crates");
         let reaching = crates_that_reach_the_parser(crates_dir);
-        for expected in ["harn-modules", "harn-vm", "harn-cli", "harn-serve"] {
+        for expected in [
+            "harn-modules",
+            "harn-vm-core",
+            "harn-vm",
+            "harn-cli",
+            "harn-serve",
+        ] {
             assert!(
                 reaching.iter().any(|name| name == expected),
                 "{expected} reaches the parser but the dependency walk missed it: {reaching:?}"

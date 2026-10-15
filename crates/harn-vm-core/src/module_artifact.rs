@@ -624,7 +624,7 @@ pub(crate) fn compile_embedded_stdlib_module_artifact_from_source(
 // still pays for it produces exactly the same artifact as one that does not,
 // so no output distinguishes them; only the work differs, and this counts it.
 // Thread-local so tests running in parallel cannot perturb each other.
-#[cfg(test)]
+#[cfg(any(test, feature = "vm-test-support"))]
 thread_local! {
     pub(crate) static INTERFACE_RESOLUTIONS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
     /// Every module parse this crate performs, whatever asked for it.
@@ -638,7 +638,7 @@ pub fn module_compilation_context_for_source(
     source_path: &Path,
     source: &str,
 ) -> Result<ModuleCompilationContext, VmError> {
-    #[cfg(test)]
+    #[cfg(any(test, feature = "vm-test-support"))]
     INTERFACE_RESOLUTIONS.with(|count| count.set(count.get() + 1));
     let program = parse_module_source(source_path, source)?;
     Ok(imported_symbol_projection_for_program(
@@ -861,7 +861,7 @@ fn parse_module_source(
     source_path: &Path,
     source: &str,
 ) -> Result<Vec<harn_parser::SNode>, VmError> {
-    #[cfg(test)]
+    #[cfg(any(test, feature = "vm-test-support"))]
     MODULE_PARSES.with(|count| count.set(count.get() + 1));
     let mut lexer = harn_lexer::Lexer::new(source);
     let tokens = lexer.tokenize().map_err(|e| {
@@ -1103,36 +1103,6 @@ pub fn call() { return lib.greet() }
             &harn_parser::NamespaceDemand::Members(std::collections::BTreeSet::from([
                 "greet".to_string(),
             ]))
-        );
-    }
-
-    #[test]
-    fn ordinary_modules_cannot_name_privileged_wire_builtins() {
-        let source = r#"fn probe() { return host_call("project.scan", {}) }"#;
-        let error = compile_module_artifact_from_source(Path::new("<test>/user.harn"), source)
-            .expect_err("a tail call must not acquire wire authority");
-        assert!(
-            error.to_string().contains("not callable source API"),
-            "{error}"
-        );
-    }
-
-    #[test]
-    fn embedded_stdlib_can_wrap_runtime_internal_builtins_without_exposing_them() {
-        let source = r#"pub fn ansi_enabled() { return __ansi_enabled("stdout") }"#;
-        let context = ModuleCompilationContext::default();
-        compile_embedded_stdlib_module_artifact_from_source_with_context(
-            Path::new("<stdlib>/ansi.harn"),
-            source,
-            &context,
-        )
-        .expect("embedded stdlib wrapper compiles");
-
-        let error = compile_module_artifact_from_source(Path::new("<test>/user.harn"), source)
-            .expect_err("ordinary source must not acquire stdlib authority");
-        assert!(
-            error.to_string().contains("not callable source API"),
-            "{error}"
         );
     }
 

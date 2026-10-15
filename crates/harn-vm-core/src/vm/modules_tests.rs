@@ -21,13 +21,6 @@ fn cache_test_guard() -> MutexGuard<'static, ()> {
         .unwrap()
 }
 
-fn cached_stdlib_module_ptr(module: &str) -> Option<usize> {
-    let source = harn_modules::stdlib_catalog()
-        .source(module)
-        .expect("stdlib module source exists");
-    stdlib_module_artifact_cache_ptr(module, source)
-}
-
 #[test]
 fn child_cow_module_cache_reuses_loaded_module_arcs_but_fresh_roots_do_not() {
     let runtime = tokio::runtime::Builder::new_current_thread()
@@ -176,127 +169,6 @@ fn failed_read_does_not_leak_module_counts_to_next_vm() {
         assert_eq!(next_recorder.snapshot().modules_loaded, 1);
         assert_eq!(failed_recorder.snapshot().modules_loaded, 0);
     });
-}
-
-#[test]
-fn stdlib_artifact_cache_reuses_compilation_with_fresh_vm_state() {
-    let _guard = cache_test_guard();
-    reset_stdlib_module_artifact_cache();
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .expect("runtime builds");
-
-    let (first_exports, second_exports, first_state_weak, second_state_weak) =
-        runtime.block_on(async {
-            let mut first_vm = super::super::test_runtime::new_vm();
-            let first_exports = first_vm
-                .load_module_exports_from_import("std/agent/prompts")
-                .await
-                .expect("first stdlib import succeeds");
-            let first_state = first_exports
-                .get("render_agent_prompt")
-                .expect("first export exists")
-                .module_state()
-                .expect("first module state stays live while VM owns module");
-            let first_state_weak = Arc::downgrade(&first_state);
-            let first_state_ptr = Arc::as_ptr(&first_state);
-
-            let mut second_vm = super::super::test_runtime::new_vm();
-            let second_exports = second_vm
-                .load_module_exports_from_import("std/agent/prompts")
-                .await
-                .expect("second stdlib import succeeds");
-            let second_state = second_exports
-                .get("render_agent_prompt")
-                .expect("second export exists")
-                .module_state()
-                .expect("second module state stays live while VM owns module");
-            let second_state_weak = Arc::downgrade(&second_state);
-
-            assert_ne!(first_state_ptr, Arc::as_ptr(&second_state));
-            (
-                first_exports,
-                second_exports,
-                first_state_weak,
-                second_state_weak,
-            )
-        });
-    let first_cached =
-        cached_stdlib_module_ptr("agent/prompts").expect("first import cached stdlib artifact");
-    assert_eq!(
-        cached_stdlib_module_ptr("agent/prompts"),
-        Some(first_cached)
-    );
-
-    let first = first_exports
-        .get("render_agent_prompt")
-        .expect("first export exists");
-    let second = second_exports
-        .get("render_agent_prompt")
-        .expect("second export exists");
-
-    assert!(!Arc::ptr_eq(first, second));
-    assert!(Arc::ptr_eq(&first.func, &second.func));
-    assert!(Arc::ptr_eq(&first.func.chunk, &second.func.chunk));
-    assert!(first.module_state().is_none());
-    assert!(second.module_state().is_none());
-    assert!(first_state_weak.upgrade().is_none());
-    assert!(second_state_weak.upgrade().is_none());
-}
-
-#[test]
-fn warm_stdlib_disk_hit_resolves_no_imported_interface() {
-    // The regression this pins: deriving a stdlib module's cache identity used
-    // to require resolving its imported interface, which lexes and parses the
-    // module. That ran ahead of the lookup, so every warm process re-parsed the
-    // whole stdlib closure to compute the key for artifacts it then loaded from
-    // disk without parsing anything.
-    let _guard = cache_test_guard();
-    let cache = tempfile::tempdir().expect("temp cache dir");
-    let previous = std::env::var_os(crate::bytecode_cache::CACHE_DIR_ENV);
-    std::env::set_var(crate::bytecode_cache::CACHE_DIR_ENV, cache.path());
-
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .expect("runtime builds");
-    let load_once = || {
-        reset_stdlib_module_artifact_cache();
-        runtime.block_on(async {
-            super::super::test_runtime::new_vm()
-                .load_module_exports_from_import("std/agent/prompts")
-                .await
-                .expect("stdlib import succeeds");
-        });
-    };
-    let resolutions_during = |load: &dyn Fn()| {
-        let before = crate::module_artifact::INTERFACE_RESOLUTIONS.with(std::cell::Cell::get);
-        load();
-        crate::module_artifact::INTERFACE_RESOLUTIONS.with(std::cell::Cell::get) - before
-    };
-
-    // Cold: nothing is on disk yet, so the compile needs the interface. This
-    // arm is the counter's positive control — without it a seam that never
-    // increments would pass the warm assertion vacuously.
-    let cold = resolutions_during(&load_once);
-    assert!(
-        cold > 0,
-        "a cold stdlib load must resolve the interface it compiles against"
-    );
-
-    // Warm: same sources, same key, artifacts now on disk. Resetting the
-    // in-process artifact cache forces the lookup to go back to disk.
-    let warm = resolutions_during(&load_once);
-    assert_eq!(
-        warm, 0,
-        "a warm stdlib load must not parse the modules it loads from disk"
-    );
-
-    match previous {
-        Some(value) => std::env::set_var(crate::bytecode_cache::CACHE_DIR_ENV, value),
-        None => std::env::remove_var(crate::bytecode_cache::CACHE_DIR_ENV),
-    }
 }
 
 #[test]
@@ -528,46 +400,6 @@ fn prepared_importer_reloads_changed_dependency() {
 }
 
 #[test]
-fn stdlib_artifact_cache_is_process_wide_across_threads() {
-    let _guard = cache_test_guard();
-    reset_stdlib_module_artifact_cache();
-
-    let handle = crate::runtime_stack::builder()
-        .name("stdlib-cache-probe".to_string())
-        .spawn(|| {
-            let runtime = tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .expect("runtime builds");
-            runtime.block_on(async {
-                let mut vm = super::super::test_runtime::new_vm();
-                vm.load_module_exports_from_import("std/agent/prompts")
-                    .await
-                    .expect("thread stdlib import succeeds");
-            });
-        })
-        .expect("spawn stdlib cache probe");
-    handle.join().expect("thread joins");
-    let thread_cached =
-        cached_stdlib_module_ptr("agent/prompts").expect("thread import cached stdlib artifact");
-
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .expect("runtime builds");
-    runtime.block_on(async {
-        let mut vm = super::super::test_runtime::new_vm();
-        vm.load_module_exports_from_import("std/agent/prompts")
-            .await
-            .expect("main-thread stdlib import succeeds");
-    });
-    assert_eq!(
-        cached_stdlib_module_ptr("agent/prompts"),
-        Some(thread_cached)
-    );
-}
-
-#[test]
 fn module_closures_release_state_after_vm_drop() {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -583,7 +415,7 @@ fn module_closures_release_state_after_vm_drop() {
 let payload = "x" * 1024
 
 pub fn touch() {
-  return len(payload)
+  return payload.len()
 }
 "#,
             )

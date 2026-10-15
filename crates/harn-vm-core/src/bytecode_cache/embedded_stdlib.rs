@@ -111,10 +111,7 @@ mod tests {
         Box::leak(rows.into_boxed_slice())
     }
 
-    fn key_for(module: &str) -> CacheKey {
-        let source = harn_modules::stdlib_catalog()
-            .source(module)
-            .expect("stdlib module exists");
+    fn key_for(source: &str) -> CacheKey {
         CacheKey::from_embedded_stdlib_module_content_hash(
             ModuleSource::from_text(source).sha256(),
             ModuleProvenance::EmbeddedStdlib,
@@ -123,15 +120,13 @@ mod tests {
 
     #[test]
     fn a_compiled_artifact_answers_its_own_key_and_refuses_another_build() {
-        let module = "agent/loop";
-        let source = harn_modules::stdlib_catalog()
-            .source(module)
-            .expect("stdlib module exists");
+        let module = "cache-fixture";
+        let source = "pub fn answer() { return 41 }";
         let compiled =
-            crate::vm::compile_stdlib_module_artifact(module, source).expect("agent/loop compiles");
-        let key = key_for(module);
+            crate::vm::compile_stdlib_module_artifact(module, source).expect("fixture compiles");
+        let key = key_for(source);
         let table = leak(vec![(compiled.file_name.clone(), compiled.bytes.clone())]);
-        let synthetic = Path::new("<stdlib>/agent/loop.harn");
+        let synthetic = Path::new("<stdlib>/cache-fixture.harn");
         assert!(
             lookup(table, &key, synthetic).is_some(),
             "the producer and the loader must agree on the key"

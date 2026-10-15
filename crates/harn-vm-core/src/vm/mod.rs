@@ -40,6 +40,12 @@ mod test_support;
 #[cfg(feature = "vm-test-support")]
 #[doc(hidden)]
 pub use test_support::{abort_task_for_test, VmDeadlineProbe};
+#[cfg(feature = "vm-test-support")]
+#[doc(hidden)]
+pub use test_support::{
+    compile_stdlib_source_for_test, module_interface_resolution_count_for_test,
+    reset_stdlib_cache_for_test, stdlib_cached_ptr_for_test, stdlib_warm_lock_file_for_test,
+};
 mod tool_callable;
 mod work;
 

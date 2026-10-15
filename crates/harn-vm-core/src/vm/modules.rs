@@ -28,7 +28,7 @@ pub use visibility::resolve_module_import_path;
 #[cfg(test)]
 use super::stdlib_artifact::{
     acquire_stdlib_warm_lock, reset_stdlib_module_artifact_cache, stdlib_artifact_get_or_prepare,
-    stdlib_module_artifact_cache_ptr, STDLIB_WARM_LOCK_FILE,
+    STDLIB_WARM_LOCK_FILE,
 };
 
 fn verified_package_source(bytes: Vec<u8>, path: &Path) -> Result<String, VmError> {
