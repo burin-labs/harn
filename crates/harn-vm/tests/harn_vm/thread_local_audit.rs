@@ -44,11 +44,13 @@ fn thread_local_audit_tracks_every_vm_thread_local_site() {
     let crates_dir = manifest_dir.parent().expect("crate under crates/");
     let audit_path = manifest_dir.join("thread_local_audit.toml");
 
-    // The kernel runs on VM threads and owns state the VM used to hold itself
-    // (the regex cache moved there when native and portable execution stopped
-    // keeping parallel copies). Scan it here so relocating a thread-local into
-    // a sibling crate cannot launder it out of this audit.
-    let source_dirs = [manifest_dir.join("src"), crates_dir.join("harn-kernel/src")];
+    // Follow interpreter state into its owning crates, so moving a declaration
+    // out of the native adapter cannot remove it from the migration audit.
+    let source_dirs = [
+        manifest_dir.join("src"),
+        crates_dir.join("harn-vm-core/src"),
+        crates_dir.join("harn-kernel/src"),
+    ];
     let actual = scan_thread_local_sites(&manifest_dir, &source_dirs);
     let audit = parse_audit(&audit_path);
 
