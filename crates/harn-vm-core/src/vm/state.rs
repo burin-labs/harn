@@ -1033,7 +1033,7 @@ impl Vm {
 
     /// Create a child VM that shares builtins and env but has fresh execution state.
     /// Used for parallel/spawn to fork the VM for concurrent tasks.
-    pub(crate) fn child_vm(&self) -> Vm {
+    pub fn child_vm(&self) -> Vm {
         Vm {
             runtime: self.runtime.fork_child(),
             stack: Vec::with_capacity(64),

@@ -4,6 +4,7 @@ mod core;
 mod diff;
 mod env;
 mod error;
+mod error_convert;
 mod handles;
 mod harness;
 mod host_object;

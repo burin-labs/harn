@@ -234,6 +234,7 @@ impl ToolCallErrorCategory {
             // wire bucket.
             | Internal::Internal
             | Internal::Generic => Self::HostBridgeError,
+            _ => Self::HostBridgeError,
         }
     }
 }

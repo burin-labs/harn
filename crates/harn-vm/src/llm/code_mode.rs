@@ -41,6 +41,7 @@
 //!    Untrusted results are still subject to taint because they flow through
 //!    the same gated dispatch.
 
+#[cfg(test)]
 use crate::native_vm::NativeBuiltinCtxExt;
 use std::collections::BTreeSet;
 use std::sync::atomic::{AtomicUsize, Ordering};

@@ -751,22 +751,24 @@ fn spawn_child(
 
     let task = spec.task.clone();
     let mut child_vm = base_vm.child_vm_for_host();
-    child_vm.runtime_context = base_vm.runtime_context.child_task(
+    child_vm.set_child_task_context(
         format!(
             "{}:supervisor:{}:{}",
-            base_vm.runtime_context.task_id, supervisor_id, spec.name
+            base_vm.runtime_context().task_id,
+            supervisor_id,
+            spec.name
         ),
         format!("supervisor {}", spec.kind),
         Some(supervisor_id.clone()),
     );
-    child_vm.cancel_token = Some(cancel_token);
+    child_vm.install_cancel_token(cancel_token);
     let child_ctx = child_context_value(&supervisor_id, &spec, generation);
     let join = tokio::task::spawn_local(async move {
         let result = child_vm
             .call_closure_pub(&task, &[child_ctx])
             .await
             .map_err(|error| error.to_string());
-        let output = std::mem::take(&mut child_vm.output);
+        let output = child_vm.take_output();
         let _ = tx.send(SupervisorMsg::ChildExited {
             index,
             generation,

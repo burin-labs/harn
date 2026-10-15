@@ -1,6 +1,7 @@
 //! Inbox delivery, command updates, feedback, and reminder mutation.
 
 use super::*;
+#[cfg(test)]
 use crate::native_vm::NativeBuiltinCtxExt;
 
 /// Deterministic "should the loop auto-continue this truncated turn?" gate.

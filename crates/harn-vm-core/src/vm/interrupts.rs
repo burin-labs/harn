@@ -221,7 +221,7 @@ impl Vm {
     /// every cancellation is a signal at all.
     ///
     /// Returns whether handlers ran.
-    pub(crate) async fn dispatch_handlers_for_observed_cancel(&mut self) -> Result<bool, VmError> {
+    pub async fn dispatch_handlers_for_observed_cancel(&mut self) -> Result<bool, VmError> {
         // Replay is refused here, in the one function every observer calls,
         // rather than at each caller. Handlers ran when the run was live and
         // their effects are recorded; running them again repeats those

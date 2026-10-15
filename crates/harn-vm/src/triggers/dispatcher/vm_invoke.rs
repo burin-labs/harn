@@ -272,8 +272,7 @@ struct DispatchProcessContextGuard {
 impl DispatchProcessContextGuard {
     fn install(vm: &crate::vm::Vm) -> Self {
         let execution_source_dir = vm
-            .source_dir
-            .as_ref()
+            .source_dir()
             .map(|path| path.to_string_lossy().into_owned());
         let fallback_project_root = vm
             .explicit_project_root()

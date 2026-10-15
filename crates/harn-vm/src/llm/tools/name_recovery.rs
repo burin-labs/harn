@@ -3,6 +3,7 @@
 //! never auto-dispatches: the model must reissue the named call through the
 //! normal policy and approval path.
 
+#[cfg(test)]
 use crate::native_vm::NativeBuiltinCtxExt;
 use std::collections::BTreeSet;
 

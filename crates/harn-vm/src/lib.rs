@@ -158,7 +158,6 @@ pub mod record_filter;
 pub mod redact;
 pub mod run_events;
 pub mod runtime_context;
-pub(crate) use harn_vm_core::runtime_guards;
 pub use harn_vm_core::runtime_limits;
 pub mod runtime_paths;
 pub(crate) mod runtime_sqlite;
@@ -188,7 +187,6 @@ pub use stdlib::session_change::{
 pub use stdlib::session_store::{open_canonical_store, open_canonical_store_for_maintenance};
 pub mod step_runtime;
 pub mod store;
-pub(crate) use harn_vm_core::synchronization;
 pub mod tenant;
 pub(crate) mod term;
 pub(crate) mod test_env;

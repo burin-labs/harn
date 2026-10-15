@@ -223,7 +223,7 @@ impl VmChannelCloseState {
         true
     }
 
-    pub(crate) fn is_closed(&self) -> bool {
+    pub fn is_closed(&self) -> bool {
         self.closed.load(Ordering::SeqCst)
     }
 
@@ -237,11 +237,11 @@ impl VmChannelHandle {
         self.close.close()
     }
 
-    pub(crate) fn is_closed(&self) -> bool {
+    pub fn is_closed(&self) -> bool {
         self.close.is_closed()
     }
 
-    pub(crate) fn subscribe_closed(&self) -> tokio::sync::watch::Receiver<bool> {
+    pub fn subscribe_closed(&self) -> tokio::sync::watch::Receiver<bool> {
         self.close.subscribe()
     }
 }
@@ -313,7 +313,7 @@ pub struct VmSyncPermitHandle {
 }
 
 impl VmSyncPermitHandle {
-    pub(crate) fn release(&self) -> bool {
+    pub fn release(&self) -> bool {
         self.lease.release()
     }
 

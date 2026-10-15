@@ -716,7 +716,7 @@ impl Vm {
     }
 
     /// Returns true if `v` is callable via `call_callable_value`.
-    pub(crate) fn is_callable_value(v: &VmValue) -> bool {
+    pub fn is_callable_value(v: &VmValue) -> bool {
         matches!(
             v,
             VmValue::Closure(_) | VmValue::BuiltinRef(_) | VmValue::BuiltinRefId(_)

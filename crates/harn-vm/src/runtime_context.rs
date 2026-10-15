@@ -1,6 +1,6 @@
 use std::cell::RefCell;
 
-use crate::value::{VmError, VmValue};
+use crate::value::VmValue;
 
 pub use crate::vm::RuntimeContext;
 pub(crate) use crate::vm::{runtime_context_clear, runtime_context_get, runtime_context_set};

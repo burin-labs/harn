@@ -51,7 +51,7 @@ impl RuntimeEffectState {
         self.cache.clear();
     }
 
-    pub(crate) fn record_specs(
+    pub fn record_specs(
         &mut self,
         specs: &'static [harn_builtin_meta::EffectSpec],
         args: &[VmValue],

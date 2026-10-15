@@ -789,7 +789,7 @@ impl super::super::Vm {
         Ok(())
     }
 
-    pub(crate) fn push_deadline_after(&mut self, duration: Duration) {
+    pub fn push_deadline_after(&mut self, duration: Duration) {
         let deadline = Instant::now() + duration;
         self.deadlines.push((deadline, self.frames.len()));
     }
