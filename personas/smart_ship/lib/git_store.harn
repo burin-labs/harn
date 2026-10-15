@@ -1,0 +1,197 @@
+import { git_env_remove, git_noninteractive_env } from "std/git"
+import { Controller } from "./controller"
+import { is_git_id } from "./identity"
+
+/**
+ * A private bare object workspace and a configured remote; credentials stay in Git's host store.
+ */
+pub type GitStore = {
+  workspace: string,
+  remote: string,
+  ref: string,
+  timeout_ms: int,
+  signed_commits: bool,
+}
+
+/** The remote commit is the compare-and-swap revision, independent of local files or leases. */
+pub type StateRead = {commit: string?, state: Controller?}
+
+/** Keep the prepared commit across retries, including an uncertain network result. */
+pub type StateWrite = {expected: string?, commit: string, state: Controller}
+
+/** Unknown is distinct from an observed competing commit or a confirmed write. */
+pub type CommitResult = {
+  status: "committed" | "conflict" | "unknown",
+  commit: string,
+  observed: string?,
+}
+
+fn check_store(process: HarnessProcess, store: GitStore) {
+  require store.workspace != "" && store.remote != "" && !store.remote.starts_with("-")
+    && store.ref.starts_with("refs/heads/")
+    && store.timeout_ms > 0,
+    "store requires a private workspace, remote, branch ref, and timeout"
+  if store.remote.contains("://") {
+    const location = url_parse(store.remote)
+    require ["http", "https", "ssh", "git", "file"].contains(location.scheme)
+      && location.password == nil
+      && location.query == nil
+      && location.fragment == nil
+      && (location.username == nil || location.scheme == "ssh"),
+      "state remote must use host-managed credentials without URL tokens"
+  } else {
+    require !store.remote.contains("::"), "state remote helpers are unsupported"
+  }
+  const ref = process.run({program: "git", args: ["check-ref-format", store.ref]})
+  require ref.success && ref.exit_code == 0, "state branch ref is invalid"
+  const bare = process.run(
+    {program: "git", args: ["rev-parse", "--is-bare-repository"], cwd: store.workspace},
+  )
+  require bare.success && bare.exit_code == 0 && bare.stdout.trim() == "true",
+    "state object workspace must be a bare Git repository"
+}
+
+fn run(process: HarnessProcess, store: GitStore, args: list<string>, stdin: string = "") -> string {
+  const result = process.run(
+    {
+      program: "git",
+      args: args,
+      cwd: store.workspace,
+      stdin: stdin,
+      timeout_ms: store.timeout_ms,
+      env_remove: git_env_remove(),
+      env: git_noninteractive_env(),
+    },
+  )
+  require result.success && result.exit_code == 0, "state Git operation failed: " + result.stderr
+  return result.stdout.trim()
+}
+
+fn remote_commit(process: HarnessProcess, store: GitStore) -> string? {
+  const output = run(process, store, ["ls-remote", "--refs", "--", store.remote, store.ref])
+  if output == "" {
+    return nil
+  }
+  const lines = output.split("\n")
+  require len(lines) == 1, "state branch census is ambiguous"
+  const fields = output.split("\t")
+  const commit = fields[0]
+  require len(fields) == 2 && fields[1] == store.ref && commit != nil && is_git_id(commit),
+    "state branch identity is malformed"
+  return commit
+}
+
+/**
+ * Read the exact reported remote object, never whatever a local tracking branch happens to name.
+ */
+pub fn read_state(process: HarnessProcess, store: GitStore) -> StateRead {
+  check_store(process, store)
+  const commit = remote_commit(process, store)
+  if commit == nil {
+    return {commit: nil, state: nil}
+  }
+  run(process, store, ["fetch", "--quiet", "--no-write-fetch-head", "--", store.remote, commit])
+  const text = run(process, store, ["show", commit + ":state.json"])
+  const state: Controller = schema_expect(json_parse(text), schema_of(Controller))
+  return {commit: commit, state: state}
+}
+
+/** Prepare immutable objects without moving a ref. Git's configured signing policy applies. */
+pub fn prepare_state(
+  process: HarnessProcess,
+  store: GitStore,
+  previous: StateRead,
+  next: Controller,
+) -> StateWrite {
+  check_store(process, store)
+  const old = previous.state
+  require previous.commit == nil == (old == nil), "state source is incomplete"
+  if old != nil {
+    require next.authority.installation == old.authority.installation
+      && next.authority.revision == old.authority.revision + 1,
+      "state transition must advance one revision in the same installation"
+  }
+  const blob = run(process, store, ["hash-object", "-w", "--stdin"], json_stringify(next))
+  require is_git_id(blob), "state blob identity is malformed"
+  const tree = run(process, store, ["mktree"], "100644 blob " + blob + "\tstate.json\n")
+  require is_git_id(tree), "state tree identity is malformed"
+  const parent = previous.commit
+  const args = ["commit-tree", tree] + if store.signed_commits {
+    ["-S"]
+  } else {
+    []
+  }
+    + if parent == nil {
+      []
+    } else {
+      ["-p", parent]
+    }
+  const commit = run(
+    process,
+    store,
+    args,
+    "Smart Ship authority revision " + to_string(next.authority.revision) + "\n",
+  )
+  require is_git_id(commit), "state commit identity is malformed"
+  return {expected: parent, commit: commit, state: next}
+}
+
+/** A non-force push of a single-parent commit atomically rejects competing remote writers. */
+pub fn commit_state(process: HarnessProcess, store: GitStore, write: StateWrite) -> CommitResult {
+  check_store(process, store)
+  require is_git_id(write.commit) && (write.expected == nil || is_git_id(write.expected)),
+    "prepared state identity is invalid"
+  const parents = run(process, store, ["rev-list", "--parents", "-n", "1", write.commit]).split(" ")
+  require parents
+    == [write.commit]
+      + if write.expected == nil {
+        []
+      } else {
+        [write.expected]
+      },
+    "prepared state must have exactly the expected parent"
+  const payload = run(process, store, ["show", write.commit + ":state.json"])
+  require payload == json_stringify(write.state), "prepared state payload changed"
+  const before = try {
+    remote_commit(process, store)
+  }
+  if !is_ok(before) {
+    return {status: "unknown", commit: write.commit, observed: nil}
+  }
+  const observed = unwrap(before)
+  if observed == write.commit {
+    return {status: "committed", commit: write.commit, observed: observed}
+  }
+  if observed != write.expected {
+    return {status: "conflict", commit: write.commit, observed: observed}
+  }
+  // No force, no plus refspec, no merge: sibling writes cannot both be accepted.
+  process.run(
+    {
+      program: "git",
+      args: ["push", "--porcelain", "--", store.remote, write.commit + ":" + store.ref],
+      cwd: store.workspace,
+      timeout_ms: store.timeout_ms,
+      env_remove: git_env_remove(),
+      env: git_noninteractive_env(),
+    },
+  )
+  const after = try {
+    remote_commit(process, store)
+  }
+  if !is_ok(after) {
+    return {status: "unknown", commit: write.commit, observed: nil}
+  }
+  const confirmed = unwrap(after)
+  return {
+    status: if confirmed == write.commit {
+      "committed"
+    } else if confirmed != write.expected {
+      "conflict"
+    } else {
+      "unknown"
+    },
+    commit: write.commit,
+    observed: confirmed,
+  }
+}

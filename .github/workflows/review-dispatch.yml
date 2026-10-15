@@ -12,6 +12,7 @@
 #
 #   REVIEW_DISPATCH_REPOSITORY   the review repository's name, in this owner
 #   REVIEW_DISPATCH_WORKFLOW     the review workflow's file name there
+#   REVIEW_DISPATCH_REF          the measured branch of the review workflow
 #
 # A fork, a draft, a bot-authored pull request, or an unconfigured repository
 # still runs this job, under a name that says it was skipped and why, and mints
@@ -59,7 +60,7 @@ jobs:
       ${{ github.event.pull_request.head.repo.full_name != github.repository && 'Automatic review: skipped (fork)'
       || github.event.pull_request.draft && 'Automatic review: skipped (draft)'
       || github.event.pull_request.user.type == 'Bot' && 'Automatic review: skipped (bot author)'
-      || (vars.REVIEW_DISPATCH_REPOSITORY == '' || vars.REVIEW_DISPATCH_WORKFLOW == '') && 'Automatic review: skipped (not configured)'
+      || (vars.REVIEW_DISPATCH_REPOSITORY == '' || vars.REVIEW_DISPATCH_WORKFLOW == '' || vars.REVIEW_DISPATCH_REF == '') && 'Automatic review: skipped (not configured)'
       || 'Automatic review: requested' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -70,7 +71,8 @@ jobs:
         && !github.event.pull_request.draft
         && github.event.pull_request.user.type != 'Bot'
         && vars.REVIEW_DISPATCH_REPOSITORY != ''
-        && vars.REVIEW_DISPATCH_WORKFLOW != '' }}
+        && vars.REVIEW_DISPATCH_WORKFLOW != ''
+        && vars.REVIEW_DISPATCH_REF != '' }}
     steps:
       - name: Say why no review was requested
         if: env.ELIGIBLE != 'true'
@@ -80,6 +82,7 @@ jobs:
           AUTHOR_TYPE: ${{ github.event.pull_request.user.type }}
           REVIEW_REPOSITORY_NAME: ${{ vars.REVIEW_DISPATCH_REPOSITORY }}
           REVIEW_WORKFLOW: ${{ vars.REVIEW_DISPATCH_WORKFLOW }}
+          REVIEW_REF: ${{ vars.REVIEW_DISPATCH_REF }}
         run: |
           set -euo pipefail
           if [ "$FROM_FORK" = "true" ]; then
@@ -88,8 +91,8 @@ jobs:
             echo "::notice title=Automatic review skipped::The pull request is a draft. Marking it ready for review requests a review."
           elif [ "$AUTHOR_TYPE" = "Bot" ]; then
             echo "::notice title=Automatic review skipped::The pull request was opened by a bot, and no person triggered this review."
-          elif [ -z "$REVIEW_REPOSITORY_NAME" ] || [ -z "$REVIEW_WORKFLOW" ]; then
-            echo "::warning title=Automatic review not configured::Set the repository variables REVIEW_DISPATCH_REPOSITORY and REVIEW_DISPATCH_WORKFLOW to request reviews."
+          elif [ -z "$REVIEW_REPOSITORY_NAME" ] || [ -z "$REVIEW_WORKFLOW" ] || [ -z "$REVIEW_REF" ]; then
+            echo "::warning title=Automatic review not configured::Set REVIEW_DISPATCH_REPOSITORY, REVIEW_DISPATCH_WORKFLOW, and the measured REVIEW_DISPATCH_REF to request reviews."
           fi
 
       # Scoped to the review repository alone, and to dispatching workflows
@@ -114,19 +117,15 @@ jobs:
           TARGET_REPOSITORY: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          # Optional: the review workflow's branch. Unset means its default
-          # branch; a branch is set only to prove a reviewer change before it
-          # lands there.
+          # Explicit because the actions-only App cannot infer the private
+          # review repository's default branch through GraphQL.
           REVIEW_REF: ${{ vars.REVIEW_DISPATCH_REF }}
         run: |
           set -euo pipefail
-          ref_args=()
-          if [ -n "${REVIEW_REF:-}" ]; then
-            ref_args=(--ref "$REVIEW_REF")
-          fi
+          : "${REVIEW_REF:?the measured review workflow ref is required}"
           gh workflow run "$REVIEW_WORKFLOW" \
             --repo "$REVIEW_REPOSITORY" \
-            "${ref_args[@]}" \
+            --ref "$REVIEW_REF" \
             -f repository="$TARGET_REPOSITORY" \
             -f pr="$PR_NUMBER" \
             -f head_sha="$HEAD_SHA"
@@ -139,6 +138,7 @@ jobs:
       github.event_name != 'pull_request_target'
       && vars.REVIEW_DISPATCH_REPOSITORY != ''
       && vars.REVIEW_DISPATCH_WORKFLOW != ''
+      && vars.REVIEW_DISPATCH_REF != ''
     runs-on: ubuntu-24.04
     # Four requests spaced 90 seconds apart, plus one read per waiting head.
     timeout-minutes: 15

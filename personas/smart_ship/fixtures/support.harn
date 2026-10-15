@@ -1,0 +1,126 @@
+import {
+  Authority,
+  Execution,
+  Fence,
+  Policy,
+  Proof,
+  Requirement,
+  Snapshot,
+  execution_bytes,
+  freeze_snapshot,
+  policy_digest,
+} from "../lib/main"
+
+pub type Fixture = {
+  policy: Policy,
+  snapshot: Snapshot,
+  authority: Authority,
+  fence: Fence,
+  private_key: string,
+}
+
+type SigningKey = {private: string, public: string}
+
+pub fn digest(label: string) -> string {
+  return "sha256:" + sha256_hex(label)
+}
+
+pub fn fixture(random: HarnessRandom) -> Fixture {
+  const keys: SigningKey = schema_expect(random.ed25519_keypair(), schema_of(SigningKey))
+  const policy: Policy = {
+    schema: "smart-ship.policy.v1",
+    installation: "neutral",
+    repositories: ["project"],
+    verifier_keys: [{id: "executor", public_key: keys.public, trust_domain: "local"}],
+    checkpoint_keys: [{id: "publisher", public_key: keys.public, trust_domain: "neutral"}],
+    max_changes: 10,
+    max_unverified_ms: 600000,
+    max_repair_attempts: 3,
+    max_repair_usd: 5.0,
+  }
+  const requirement: Requirement = {
+    id: "tests",
+    execution_request: digest("fixture verification dispatch"),
+    kind: "check",
+    repository: "project",
+    input_digest: digest("inputs"),
+    runtime_digest: digest("runtime"),
+    environment_digest: digest("environment"),
+    coverage_digest: digest("full suite"),
+    trust_domain: "local",
+    reuse_allowed: true,
+    artifacts: ["binary"],
+  }
+  const snapshot: Snapshot = {
+    schema: "smart-ship.snapshot.v1",
+    installation: "neutral",
+    sequence: 1,
+    generation: 1,
+    policy_digest: policy_digest(policy),
+    previous_checkpoint: "",
+    created_at_ms: 1000,
+    sources: [{repository: "project", commit: sha256_hex("commit"), tree: sha256_hex("tree")}],
+    changes: [
+      {
+        id: "change-1",
+        repository: "project",
+        head: sha256_hex("head"),
+        integrated_commit: sha256_hex("commit"),
+        review_receipt: digest("review"),
+        admission_receipt: digest("admission"),
+      },
+    ],
+    requirements: [requirement],
+    inventory_complete: true,
+  }
+  const authority: Authority = {
+    installation: "neutral",
+    generation: 1,
+    revision: 1,
+    controller: "owner",
+    mode: "active",
+    previous_checkpoint: "",
+    promoted_sequence: 0,
+    held_repositories: [],
+  }
+  return {
+    policy: policy,
+    snapshot: freeze_snapshot(snapshot),
+    authority: authority,
+    fence: {installation: "neutral", generation: 1, revision: 1, controller: "owner"},
+    private_key: keys.private,
+  }
+}
+
+pub fn execution(fixture: Fixture) -> Execution {
+  const requirement = fixture.snapshot.requirements[0]
+  const source = fixture.snapshot.sources[0]
+  if requirement == nil || source == nil {
+    throw "fixture requires one job and one source"
+  }
+  return {
+    schema: "smart-ship.execution.v1",
+    installation: "neutral",
+    requirement: requirement,
+    source: source,
+    run: "run-1",
+    attempt: 1,
+    job: "job-1",
+    result: "passed",
+    log_digest: digest("test output"),
+    artifacts: [{name: "binary", digest: digest("binary bytes")}],
+    tests: nil,
+    started_at_ms: 1000,
+    completed_at_ms: 2000,
+  }
+}
+
+pub fn proof(fixture: Fixture, original: Execution) -> Proof {
+  return {
+    requirement: original.requirement.id,
+    mode: "executed",
+    original: original,
+    signer: "executor",
+    signature: ed25519_sign(fixture.private_key, execution_bytes(original)),
+  }
+}

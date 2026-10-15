@@ -1,0 +1,121 @@
+import { EffectRequest, begin_effect, settle_effect } from "./controller"
+import { GitStore, commit_state, prepare_state, read_state } from "./git_store"
+import { is_digest } from "./identity"
+import { Fence } from "./types"
+
+/** Only the effect owner receives these handles; dispatch identities come from its own entropy. */
+pub type EffectOwnerHost = {process: HarnessProcess, random: HarnessRandom}
+
+/** Provider evidence is separate from confirmation that its receipt reached durable state. */
+pub type EffectOutcome = {status: "confirmed" | "refused" | "unknown", receipt: string?}
+
+/** A started dispatch is never retried from its reservation, even if settlement is uncertain. */
+pub type EffectDispatch = {
+  status: "not_started" | "settled" | "reconciliation_required",
+  dispatch_started: bool,
+  state_commit: string?,
+  outcome: EffectOutcome?,
+}
+
+fn outcome_valid(outcome: EffectOutcome) -> bool {
+  return if outcome.status == "unknown" {
+    outcome.receipt == nil
+  } else {
+    outcome.receipt != nil && is_digest(outcome.receipt)
+  }
+}
+
+/**
+ * Run only in the privileged effect owner. The callback retains provider credentials there;
+ * workers submit requests and fences. The remote CAS is the dispatch commitment boundary.
+ * Stop before commitment refuses dispatch; an already committed provider action requires a
+ * measured terminal receipt. Transfer is barred throughout dispatch and uncertain recovery.
+ */
+pub fn dispatch_reserved_effect(
+  host: EffectOwnerHost,
+  store: GitStore,
+  fence: Fence,
+  request: EffectRequest,
+  dispatch: fn(EffectRequest) -> EffectOutcome,
+) -> EffectDispatch {
+  const process = host.process
+  const previous = read_state(process, store)
+  const state = previous.state
+  if state == nil {
+    return {
+      status: "not_started",
+      dispatch_started: false,
+      state_commit: previous.commit,
+      outcome: nil,
+    }
+  }
+  // Distinct actors must prepare distinct commits, even within one Git timestamp second.
+  const dispatch_id = "sha256:" + sha256_hex(host.random.uuid())
+  const started = begin_effect(state, fence, request, dispatch_id)
+  if is_err(started) {
+    return {
+      status: "not_started",
+      dispatch_started: false,
+      state_commit: previous.commit,
+      outcome: nil,
+    }
+  }
+  const prepared = prepare_state(process, store, previous, unwrap(started))
+  const committed = commit_state(process, store, prepared)
+  if committed.status != "committed" {
+    return {
+      status: "not_started",
+      dispatch_started: false,
+      state_commit: committed.observed,
+      outcome: nil,
+    }
+  }
+  // Only the actor that committed reserved -> dispatching may invoke this callback.
+  const attempted = try {
+    const measured: EffectOutcome = schema_expect(dispatch(request), schema_of(EffectOutcome))
+    require outcome_valid(measured), "provider result does not contain valid terminal evidence"
+    measured
+  }
+  const outcome: EffectOutcome = if is_ok(attempted) {
+    unwrap(attempted)
+  } else {
+    {status: "unknown", receipt: nil}
+  }
+  const settlement = try {
+    const current = read_state(process, store)
+    const current_state = current.state
+    require current_state != nil
+      && current_state.authority.installation == fence.installation
+      && current_state.authority.generation == fence.generation
+      && current_state.authority.controller == fence.controller,
+      "dispatch settlement authority changed"
+    const next = unwrap(
+      settle_effect(
+        current_state,
+        pick(current_state.authority, ["installation", "generation", "revision", "controller"]),
+        request,
+        outcome.status,
+        outcome.receipt,
+      ),
+    )
+    commit_state(process, store, prepare_state(process, store, current, next))
+  }
+  if is_ok(settlement) && unwrap(settlement).status == "committed" {
+    return {
+      status: if outcome.status == "unknown" {
+        "reconciliation_required"
+      } else {
+        "settled"
+      },
+      dispatch_started: true,
+      state_commit: unwrap(settlement).observed,
+      outcome: outcome,
+    }
+  }
+  return {
+    status: "reconciliation_required",
+    dispatch_started: true,
+    state_commit: prepared.commit,
+    outcome: outcome,
+  }
+}

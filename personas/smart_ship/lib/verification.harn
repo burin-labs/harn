@@ -1,0 +1,239 @@
+import {
+  execution_bytes,
+  is_digest,
+  is_git_id,
+  policy_digest,
+  requirement_identity,
+  snapshot_verification_id,
+  source_identity,
+  verification_request,
+} from "./identity"
+import { Execution, Policy, Proof, Requirement, Snapshot, Verification } from "./types"
+
+fn duplicate(values: list<string>) -> bool {
+  return values.any({ value -> len(values.filter({ other -> other == value })) > 1 })
+}
+
+fn requirement_valid(requirement: Requirement) -> bool {
+  return requirement.id != "" && requirement.repository != "" && requirement.trust_domain != ""
+    && is_digest(requirement.execution_request)
+    && is_digest(requirement.input_digest)
+    && is_digest(requirement.runtime_digest)
+    && is_digest(requirement.environment_digest)
+    && is_digest(requirement.coverage_digest)
+    && !duplicate(requirement.artifacts)
+    && !requirement.artifacts.contains("")
+}
+
+/** Validate installation policy before accepting any submitted work. */
+pub fn policy_errors(policy: Policy) -> list<string> {
+  let errors: list<string> = []
+  if policy.installation == "" || len(policy.repositories) == 0
+    || policy.repositories.contains("")
+    || duplicate(policy.repositories) {
+    errors = errors + ["installation and unique repositories are required"]
+  }
+  if policy.max_changes < 1 || policy.max_unverified_ms < 1
+    || policy.max_repair_attempts < 0
+    || policy.max_repair_usd < 0.0 {
+    errors = errors + ["work and repair budgets are invalid"]
+  }
+  for keys in [policy.verifier_keys, policy.checkpoint_keys] {
+    if len(keys) == 0 || duplicate(keys.map({ key -> key.id }))
+      || keys.any(
+        { key ->
+          key.id == "" || key.trust_domain == ""
+            || regex_match("^[0-9a-f]{64}$", key.public_key) == nil
+        },
+      ) {
+      errors = errors + ["unique, named verification and checkpoint keys are required"]
+    }
+  }
+  return errors
+}
+
+fn coverage_errors(snapshot: Snapshot, policy: Policy) -> list<string> {
+  let errors: list<string> = []
+  if !snapshot.inventory_complete || len(snapshot.requirements) == 0 {
+    errors = errors + ["required job inventory is incomplete or empty"]
+  }
+  if len(snapshot.sources) == 0
+    || duplicate(snapshot.sources.map({ source -> source.repository })) {
+    errors = errors + ["source inventory is incomplete or duplicated"]
+  }
+  for source in snapshot.sources {
+    if !policy.repositories.contains(source.repository)
+      || !is_git_id(source.commit)
+      || !is_git_id(source.tree) {
+      errors = errors + ["invalid source: " + source.repository]
+    }
+    if !snapshot.requirements.any({ requirement -> requirement.repository == source.repository }) {
+      errors = errors + ["uncovered source: " + source.repository]
+    }
+  }
+  const repositories = snapshot.sources.map({ source -> source.repository })
+  const frontier = snapshot_verification_id(snapshot)
+  if duplicate(snapshot.requirements.map({ requirement -> requirement.id })) {
+    errors = errors + ["required job inventory contains duplicates"]
+  }
+  for requirement in snapshot.requirements {
+    if !requirement_valid(requirement) || !repositories.contains(requirement.repository)
+      || requirement.execution_request != verification_request(frontier, requirement.id) {
+      errors = errors + ["invalid required job: " + requirement.id]
+    }
+  }
+  return errors
+}
+
+fn change_errors(snapshot: Snapshot, policy: Policy) -> list<string> {
+  let errors: list<string> = []
+  const repositories = snapshot.sources.map({ source -> source.repository })
+  if len(snapshot.changes) > policy.max_changes
+    || duplicate(snapshot.changes.map({ change -> change.id })) {
+    errors = errors + ["change inventory exceeds its budget or contains duplicates"]
+  }
+  for change in snapshot.changes {
+    if change.id == "" || !repositories.contains(change.repository) || !is_git_id(change.head)
+      || !is_git_id(change.integrated_commit)
+      || !is_digest(change.review_receipt)
+      || !is_digest(change.admission_receipt) {
+      errors = errors + ["invalid admitted change: " + change.id]
+    }
+  }
+  return errors
+}
+
+fn snapshot_errors(snapshot: Snapshot, policy: Policy) -> list<string> {
+  let errors = policy_errors(policy) + coverage_errors(snapshot, policy)
+    + change_errors(snapshot, policy)
+  if snapshot.installation != policy.installation
+    || snapshot.policy_digest != policy_digest(policy) {
+    errors = errors + ["snapshot policy or installation differs"]
+  }
+  if snapshot.sequence < 1 || snapshot.generation < 1 || snapshot.created_at_ms < 0 {
+    errors = errors + ["snapshot sequence, generation, or time is invalid"]
+  }
+  return errors
+}
+
+fn tests_valid(original: Execution) -> bool {
+  const tests = original.tests
+  if tests != nil
+    && (!is_digest(tests.report_digest) || tests.total < 0
+      || tests.passed < 0
+      || tests.failed < 0
+      || tests.skipped < 0
+      || tests.total != tests.passed + tests.failed + tests.skipped) {
+    return false
+  }
+  if original.requirement.kind == "tests" && original.result == "passed" {
+    return tests != nil && tests.passed > 0 && tests.failed == 0
+  }
+  if original.result == "passed" && tests != nil && tests.failed > 0 {
+    return false
+  }
+  return true
+}
+
+fn provenance_valid(original: Execution) -> bool {
+  return original.run != "" && original.attempt > 0 && original.job != ""
+    && is_digest(original.requirement.execution_request)
+    && original.source.repository == original.requirement.repository
+    && is_git_id(original.source.commit)
+    && is_git_id(original.source.tree)
+    && is_digest(original.log_digest)
+    && tests_valid(original)
+    && original.started_at_ms >= 0
+    && original.completed_at_ms >= original.started_at_ms
+    && !duplicate(original.artifacts.map({ artifact -> artifact.name }))
+    && original.artifacts.all({ artifact -> artifact.name != "" && is_digest(artifact.digest) })
+    && (original.result != "passed"
+      || original.requirement.artifacts.all(
+        { name -> original.artifacts.any({ artifact -> artifact.name == name }) },
+      ))
+}
+
+fn proof_valid(proof: Proof, requirement: Requirement, snapshot: Snapshot, policy: Policy) -> bool {
+  const original = proof.original
+  if original.installation != policy.installation || !provenance_valid(original)
+    || requirement_identity(original.requirement) != requirement_identity(requirement)
+    || (proof.mode == "reused" && !requirement.reuse_allowed)
+    || proof.mode == "executed"
+      != (original.requirement.execution_request == requirement.execution_request) {
+    return false
+  }
+  const key = policy.verifier_keys.find({ candidate -> candidate.id == proof.signer })
+  if key == nil || key.trust_domain != requirement.trust_domain {
+    return false
+  }
+  const authenticated = try {
+    ed25519_verify(key.public_key, execution_bytes(original), proof.signature)
+  }
+  if !is_ok(authenticated) || !unwrap(authenticated) {
+    return false
+  }
+  const source = snapshot.sources.find(
+    { candidate -> candidate.repository == requirement.repository },
+  )
+  return proof.mode == "reused"
+    || (source != nil && source_identity(original.source) == source_identity(source))
+}
+
+/**
+ * Judge every required job using its signed original execution. Missing observations stay pending.
+ */
+pub fn verify(snapshot: Snapshot, proofs: list<Proof>, policy: Policy) -> Verification {
+  let invalid = snapshot_errors(snapshot, policy)
+  let pending: list<string> = []
+  let failed: list<string> = []
+  let infrastructure_failed: list<string> = []
+  let executed = 0
+  let reused = 0
+  for proof in proofs {
+    if !snapshot.requirements.any({ requirement -> requirement.id == proof.requirement }) {
+      invalid = invalid + ["unknown proof: " + proof.requirement]
+    }
+  }
+  for requirement in snapshot.requirements {
+    const matches = proofs.filter({ proof -> proof.requirement == requirement.id })
+    const proof = matches[0]
+    if len(matches) == 0 {
+      pending = pending + [requirement.id]
+    } else if proof == nil || len(matches) != 1
+      || !proof_valid(proof, requirement, snapshot, policy) {
+      invalid = invalid + [requirement.id]
+    } else {
+      if proof.mode == "executed" {
+        executed = executed + 1
+      } else {
+        reused = reused + 1
+      }
+      if proof.original.result == "failed" {
+        failed = failed + [requirement.id]
+      } else if proof.original.result == "infrastructure_failed" {
+        infrastructure_failed = infrastructure_failed + [requirement.id]
+      } else if proof.original.result == "cancelled" {
+        pending = pending + [requirement.id]
+      }
+    }
+  }
+  const status = if len(invalid) > 0 {
+    "invalid"
+  } else if len(failed) > 0 || len(infrastructure_failed) > 0 {
+    "failed"
+  } else if len(pending) > 0 {
+    "pending"
+  } else {
+    "verified"
+  }
+  return {
+    status: status,
+    required: len(snapshot.requirements),
+    executed: executed,
+    reused: reused,
+    pending: pending,
+    failed: failed,
+    infrastructure_failed: infrastructure_failed,
+    invalid: invalid,
+  }
+}

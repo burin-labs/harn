@@ -1,0 +1,121 @@
+import {
+  Authority,
+  Checkpoint,
+  JobRun,
+  Snapshot,
+  bind_job,
+  checkpoint_id,
+  execute_job,
+  freeze_snapshot,
+  prepare_job,
+  promote,
+  run_job,
+} from "../lib/main"
+import { Stack, git, job, project, snapshot } from "./neutral"
+import { Fixture, digest, fixture } from "./support"
+
+pub type Interaction = {
+  root: string,
+  stack: Stack,
+  fixture: Fixture,
+  checkpoint: Checkpoint,
+  authority: Authority,
+  candidate: Snapshot,
+  baseline: JobRun,
+  combined: JobRun,
+}
+
+/** Both ordinary tests and live repair use this exact source construction and verification path. */
+pub fn prepare_interaction(harness: Harness, stack: Stack) -> Interaction {
+  const f = fixture(harness.random)
+  const root = project(pick(harness, ["fs", "process"]), stack)
+  let prepared = false
+  defer {
+    if !prepared {
+      harness.fs.delete(root)
+    }
+  }
+  const local = pick(harness, ["clock", "fs", "process", "random", "system"])
+  const signer = {id: "executor", private_key: f.private_key}
+  const command_host = pick(harness, ["env", "system"])
+  const baseline_plan = prepare_job(local, job(command_host, stack, root, "baseline", 10))
+  const baseline_snapshot = freeze_snapshot(
+    snapshot(f, baseline_plan) + {created_at_ms: harness.clock.now_ms()},
+  )
+  const baseline = execute_job(local, bind_job(baseline_plan, baseline_snapshot), signer)
+  require baseline.proof.original.result == "passed", "baseline failed"
+  require baseline.proof.original.tests != nil && baseline.proof.original.tests.passed == 4,
+    "baseline did not execute all four cases"
+  const accepted = promote(baseline_snapshot, [baseline.proof], f.policy, f.authority, f.fence)
+  const checkpoint = accepted.checkpoint
+  if checkpoint == nil {
+    throw "baseline did not qualify: " + accepted.reason
+  }
+  const base = baseline.proof.original.source.commit
+  const previous = checkpoint_id(checkpoint)
+  const authority = f.authority + {previous_checkpoint: previous, promoted_sequence: 1}
+  harness.fs.write_text(path_join(root, stack.capacity_path), stack.capacity_change)
+  git(harness.process, root, ["add", stack.capacity_path])
+  git(harness.process, root, ["commit", "--quiet", "-m", "reduce idle capacity"])
+  const change_a = git(harness.process, root, ["rev-parse", "HEAD"])
+  require run_job(local, job(command_host, stack, root, "change-a"), signer).proof.original.result
+    == "passed",
+    "change A failed independently"
+  git(harness.process, root, ["checkout", "--quiet", "--detach", base])
+  harness.fs.write_text(path_join(root, stack.workers_path), stack.workers_change)
+  git(harness.process, root, ["add", stack.workers_path])
+  git(harness.process, root, ["commit", "--quiet", "-m", "serve three workers"])
+  const change_b = git(harness.process, root, ["rev-parse", "HEAD"])
+  require run_job(local, job(command_host, stack, root, "change-b", 10), signer).proof.original
+    .result
+    == "passed",
+    "change B failed independently"
+  git(harness.process, root, ["cherry-pick", "--quiet", change_a])
+  const combined_plan = prepare_job(local, job(command_host, stack, root, "combined"))
+  const candidate = freeze_snapshot(
+    snapshot(f, combined_plan)
+      + {
+        previous_checkpoint: previous,
+        sequence: 2,
+        created_at_ms: harness.clock.now_ms(),
+        changes: [
+          {
+            id: "change-a",
+            repository: "project",
+            head: change_a,
+            integrated_commit: combined_plan.source.commit,
+            review_receipt: digest("fixture review A"),
+            admission_receipt: digest("fixture admission A"),
+          },
+          {
+            id: "change-b",
+            repository: "project",
+            head: change_b,
+            integrated_commit: change_b,
+            review_receipt: digest("fixture review B"),
+            admission_receipt: digest("fixture admission B"),
+          },
+        ],
+      },
+  )
+  const combined = execute_job(local, bind_job(combined_plan, candidate), signer)
+  require combined.proof.original.result == "failed" && combined.proof.original.tests != nil
+    && combined.proof.original.tests.failed == 1,
+    "combined interaction failure was not observed"
+  const held = promote(candidate, [combined.proof], f.policy, authority, f.fence)
+  require held.status == "refused" && held.verification.failed == ["tests"]
+    && held.checkpoint == nil
+    && authority.previous_checkpoint == previous,
+    "failed interaction advanced the checkpoint"
+  prepared = true
+  return {
+    root: root,
+    stack: stack,
+    fixture: f,
+    checkpoint: checkpoint,
+    authority: authority,
+    candidate: candidate,
+    baseline: baseline,
+    combined: combined,
+  }
+}

@@ -1,0 +1,21 @@
+[package]
+name = "harn-smart-ship"
+version = "0.1.0"
+description = "Grouped verification, forward repair, and proven release checkpoints for ordinary Git projects."
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/burin-labs/harn"
+provenance = "https://github.com/burin-labs/harn/tree/main/personas/smart_ship"
+harn = ">=0.10.166,<0.11"
+docs_url = "docs/api.md"
+permissions = []
+host_requirements = []
+
+[exports]
+lib = "lib/main.harn"
+github = "lib/github.harn"
+
+[tests]
+roots = ["tests"]
+
+[dependencies]
+harn-github-connector = { git = "https://github.com/burin-labs/harn-github-connector", tag = "v0.10.0", registry = "https://packages.harnlang.com/harn-package-index.toml", registry_name = "@burin/github-connector", registry_version = "0.10.0", registry_commit = "17887fc56b15b0544602c18b1228d74f976ca594", registry_provenance = "https://github.com/burin-labs/harn-github-connector/releases/tag/v0.10.0" }
