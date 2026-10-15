@@ -1,4 +1,4 @@
-//! Aggregate provider/model catalog document: `ProvidersConfig`, its overlay
+//! Provider/model catalog document: `ProvidersConfig`, its overlay
 //! merge semantics, field-wise `[patch.models]` application, and the
 //! tier/inference rule DTOs.
 use std::collections::BTreeMap;

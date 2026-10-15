@@ -1,4 +1,4 @@
-//! Typed audit contract for provider usage-accounting declarations.
+//! Audit contract for provider usage-accounting declarations.
 //!
 //! The public provider catalog keeps its stable v9 projection: two optional
 //! booleans consumed by existing hosts. This source-only registry owns the

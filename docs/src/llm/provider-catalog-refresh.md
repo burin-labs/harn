@@ -535,10 +535,10 @@ reasoning_effort_levels = ["low", "high", "max"]  # measured, not asserted
 
 Harn authors edit small TOML fragments under
 `crates/harn-vm/src/llm/catalog_sources/`. Harn generates the embedded
-runtime snapshot at `crates/harn-vm/src/llm/providers.toml` from those
+runtime snapshot at `crates/harn-provider-catalog/src/providers.toml` from those
 fragments. Provider capability rules use the same pattern:
 `crates/harn-vm/src/llm/capability_sources/` generates
-`crates/harn-vm/src/llm/capabilities.toml`.
+`crates/harn-provider-catalog/src/capabilities.toml`.
 
 `00-base.toml` names the `default_provider`, used when a call names neither a
 provider nor a model. `40-defaults/provider-models.toml` records each
@@ -561,8 +561,8 @@ harn provider catalog generate
 harn provider catalog generate --check
 ```
 
-Direct edits to `crates/harn-vm/src/llm/providers.toml` and
-`crates/harn-vm/src/llm/capabilities.toml` are invalid. The files are
+Direct edits to `crates/harn-provider-catalog/src/providers.toml` and
+`crates/harn-provider-catalog/src/capabilities.toml` are invalid. The files are
 checked in so Harn can still embed known-good offline snapshots with
 `include_str!`, but `make check-provider-catalog` proves every checked-in
 provider catalog projection matches the fragments.
@@ -813,7 +813,7 @@ When harn-serve is not running, clients can still use the checked-in
 baseline. Product and user overlays should be composed in this order,
 with later layers winning per key:
 
-1. Harn's bundled provider catalog (`crates/harn-vm/src/llm/providers.toml`,
+1. Harn's bundled provider catalog (`crates/harn-provider-catalog/src/providers.toml`,
    generated from `crates/harn-vm/src/llm/catalog_sources/`, or the
    generated `provider-catalog.json` when the client cannot load TOML
    directly)

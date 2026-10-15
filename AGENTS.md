@@ -150,8 +150,8 @@ live in [Engineering principles](docs/src/dev/engineering-principles.md):
 
 - Model rows are `crates/harn-vm/src/llm/catalog_sources/`; capability rules are
   `crates/harn-vm/src/llm/capability_sources/`. Both aggregate into
-  `crates/harn-vm/src/llm/providers.toml` and
-  `crates/harn-vm/src/llm/capabilities.toml`, which are generated along with
+  `crates/harn-provider-catalog/src/providers.toml` and
+  `crates/harn-provider-catalog/src/capabilities.toml`, which are generated along with
   everything under `spec/provider-catalog/` and the provider docs. Edit the
   source fragments only.
 - Regenerate with `make gen-provider-catalog`, `make gen-provider-matrix`, and

@@ -1,7 +1,7 @@
 //! providers.toml parse diagnostics: unknown fields must be reported with
 //! the path that produced them, and current schema fields must stay silent.
 
-use super::super::*;
+use super::*;
 
 fn diagnostic_texts(src: &str) -> Vec<String> {
     parse_config_toml_with_diagnostics(src)

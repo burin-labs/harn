@@ -3,6 +3,7 @@
 
 pub mod artifact;
 pub mod capabilities;
+pub mod config;
 pub mod data_controls;
 pub mod model_def;
 pub mod model_operation;
@@ -15,3 +16,8 @@ pub use model_def::*;
 pub use model_operation::*;
 pub use presentation::*;
 pub use pricing::*;
+
+/// Generated provider snapshot packaged with this crate.
+pub const EMBEDDED_PROVIDERS_TOML: &str = include_str!("providers.toml");
+/// Generated capability snapshot packaged with this crate.
+pub const EMBEDDED_CAPABILITIES_TOML: &str = include_str!("capabilities.toml");

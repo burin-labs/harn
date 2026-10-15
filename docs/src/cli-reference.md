@@ -2181,7 +2181,7 @@ The command exits non-zero and lists suggested defaults when catalog rows need
 coverage.
 
 `promote-from-eval` ingests the parity overlay emitted by
-`harn eval coding-agent` and updates `crates/harn-vm/src/llm/capabilities.toml`
+`harn eval coding-agent` and updates `crates/harn-provider-catalog/src/capabilities.toml`
 with exact-model `preferred_tool_format`, `tool_mode_parity`, and
 `tool_mode_parity_notes` rows. The edit is idempotent.
 

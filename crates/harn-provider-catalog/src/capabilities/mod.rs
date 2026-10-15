@@ -31,6 +31,15 @@ pub use rule::{
     rule_tool_mode_parity, rule_vision, MatchedCapabilityRule, ProviderRule,
 };
 
+/// The immutable packaged capability program, parsed once at its owner.
+pub fn builtin_file() -> &'static CapabilitiesFile {
+    static BUILTIN: std::sync::OnceLock<CapabilitiesFile> = std::sync::OnceLock::new();
+    BUILTIN.get_or_init(|| {
+        toml::from_str(crate::EMBEDDED_CAPABILITIES_TOML)
+            .expect("embedded capabilities.toml must parse")
+    })
+}
+
 /// Identity and adapter features for one capability lookup. `model` is the
 /// provider's capability identity, including any configured wire-model alias.
 pub struct CapabilityRoute<'a> {

@@ -788,9 +788,7 @@ fn retired_groq_llama_models_are_absent_from_bundled_catalog() {
     assert_eq!(active.provider, "groq");
 }
 
-mod diagnostics;
 mod embedded_catalog;
-mod overlays;
 mod provider_prefix;
 mod tool_protocol;
 

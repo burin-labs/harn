@@ -25,10 +25,8 @@
 //! public [`lookup`] entry points). Every previously-public item is re-exported
 //! here so `capabilities::X` paths resolve unchanged.
 
-/// Generated shipped default rules. Compiled into the binary at build time.
-pub(super) const BUILTIN_TOML: &str = include_str!("../capabilities.toml");
 /// Generated provider/model snapshot built from catalog_sources/**/*.toml.
-pub(super) const BUILTIN_PROVIDERS_TOML: &str = include_str!("../providers.toml");
+pub(super) const BUILTIN_PROVIDERS_TOML: &str = harn_provider_catalog::EMBEDDED_PROVIDERS_TOML;
 
 mod admission;
 mod audit;

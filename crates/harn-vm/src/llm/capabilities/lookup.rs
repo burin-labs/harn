@@ -1,23 +1,16 @@
 //! Lookup and user-override facade: owns public lookup helpers.
 
 use std::collections::BTreeSet;
-use std::sync::OnceLock;
 
 use serde::Deserialize;
 
 use super::model::{Capabilities, CapabilitiesFile, ProviderLimits};
 use super::overrides::{current_user_overrides, set_user_overrides as set_context_overrides};
 use super::rule::resolve_with_features;
-use super::BUILTIN_TOML;
 use harn_provider_catalog::capabilities::{CapabilityRoute, CapabilityRules};
 
-static BUILTIN: OnceLock<CapabilitiesFile> = OnceLock::new();
-
 pub(super) fn builtin() -> &'static CapabilitiesFile {
-    BUILTIN.get_or_init(|| {
-        toml::from_str::<CapabilitiesFile>(BUILTIN_TOML)
-            .expect("capabilities.toml must parse at build time")
-    })
+    harn_provider_catalog::capabilities::builtin_file()
 }
 
 /// The shipped (built-in) capability matrix. Public so the footgun gate in

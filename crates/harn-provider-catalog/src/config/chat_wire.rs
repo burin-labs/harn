@@ -45,7 +45,7 @@ pub struct ProviderChatWireContract {
 }
 
 impl ChatWireSources {
-    pub(super) fn apply(&mut self, definition: &ProviderDef, layer: &ProviderConfigLayer) {
+    pub fn apply(&mut self, definition: &ProviderDef, layer: &ProviderConfigLayer) {
         match definition.chat_wire_overlay() {
             ChatWireOverlay::Endpoint => {
                 self.chat_endpoint = Some(layer.clone());
@@ -56,7 +56,7 @@ impl ChatWireSources {
         }
     }
 
-    pub(super) fn contract(self, definition: &ProviderDef) -> ProviderChatWireContract {
+    pub fn contract(self, definition: &ProviderDef) -> ProviderChatWireContract {
         ProviderChatWireContract {
             chat_endpoint: definition.chat_endpoint.clone(),
             chat_api_adapter: definition
@@ -67,9 +67,9 @@ impl ChatWireSources {
     }
 }
 
-pub(super) type ProviderChatWireSources = BTreeMap<String, ChatWireSources>;
+pub type ProviderChatWireSources = BTreeMap<String, ChatWireSources>;
 
-pub(super) fn apply_chat_wire_sources(
+pub fn apply_chat_wire_sources(
     sources: &mut ProviderChatWireSources,
     config: &ProvidersConfig,
     layer: ProviderConfigLayer,

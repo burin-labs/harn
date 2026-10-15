@@ -6,7 +6,7 @@
 #
 # The files under capability_sources/ are the source of truth for Harn's
 # built-in provider/model capability rules. `harn provider catalog generate`
-# concatenates these fragments into llm/capabilities.toml and every checked-in
+# concatenates these fragments into harn-provider-catalog/src/capabilities.toml and every checked-in
 # provider catalog projection. The capability TOML is compiled into the VM with
 # include_str!.
 #

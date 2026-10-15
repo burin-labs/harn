@@ -519,7 +519,7 @@ pub(crate) fn latency_p50_ms_for(provider: &str) -> Option<u64> {
 
 /// Recover the *authored* decimal value of a catalog rate that was parsed
 /// from a TOML float literal. The pricing catalog
-/// (`crates/harn-vm/src/llm/providers.toml`) writes short, human-authored
+/// (`crates/harn-provider-catalog/src/providers.toml`) writes short, human-authored
 /// decimals like `input_per_mtok = 0.15`; TOML deserializes them to `f64`,
 /// which cannot store `0.15` exactly. Rust's `{}` float formatter emits the
 /// *shortest* decimal string that round-trips to the same `f64` — for these

@@ -1844,7 +1844,7 @@ Semantics:
 ### Provider capabilities (data-driven matrix)
 
 The per-provider / per-model capability surface lives in a shipped
-TOML table (`crates/harn-vm/src/llm/capabilities.toml`), overridable
+TOML table (`crates/harn-provider-catalog/src/capabilities.toml`), overridable
 per-project via `[[capabilities.provider.<name>]]` in `harn.toml`:
 
 ```toml

@@ -18,6 +18,7 @@ mkdir -p \
   "$work/.githooks" \
   "$work/crates/harn-lint/src" \
   "$work/crates/harn-other/src" \
+  "$work/crates/harn-provider-catalog/src" \
   "$work/crates/harn-vm/src/llm/capability_sources/20-providers" \
   "$work/spec/provider-catalog"
 
@@ -92,7 +93,7 @@ TOML
 printf 'pub mod obsolete;\npub fn base() {}\n' > "$work/crates/harn-lint/src/lib.rs"
 printf 'pub fn removable() {}\n' > "$work/crates/harn-lint/src/obsolete.rs"
 printf 'pub fn other() {}\n' > "$work/crates/harn-other/src/lib.rs"
-printf 'base = true\n' > "$work/crates/harn-vm/src/llm/capabilities.toml"
+printf 'base = true\n' > "$work/crates/harn-provider-catalog/src/capabilities.toml"
 printf 'base = true\n' > "$work/crates/harn-vm/src/llm/capability_sources/20-providers/20-local-ollama.toml"
 printf '{}\n' > "$work/spec/provider-catalog/provider-catalog.json"
 
@@ -210,11 +211,11 @@ if ! diff -u "$tmp_root/expected-full-pre-push.txt" "$record"; then
 fi
 
 git -C "$work" checkout --quiet -B provider-catalog-feature origin/main
-printf 'base = false\n' > "$work/crates/harn-vm/src/llm/capabilities.toml"
+printf 'base = false\n' > "$work/crates/harn-provider-catalog/src/capabilities.toml"
 printf 'native_tools = true\n' > "$work/crates/harn-vm/src/llm/capability_sources/20-providers/20-local-ollama.toml"
 printf '{"models":[]}\n' > "$work/spec/provider-catalog/provider-catalog.json"
 git -C "$work" add \
-  crates/harn-vm/src/llm/capabilities.toml \
+  crates/harn-provider-catalog/src/capabilities.toml \
   crates/harn-vm/src/llm/capability_sources/20-providers/20-local-ollama.toml \
   spec/provider-catalog/provider-catalog.json
 git -C "$work" commit --quiet --no-verify -m "update provider catalog data"
@@ -393,7 +394,7 @@ if [[ -s "$record" ]]; then
 fi
 
 cat > "$tmp_root/provider-catalog-files.txt" <<'EOF'
-crates/harn-vm/src/llm/capabilities.toml
+crates/harn-provider-catalog/src/capabilities.toml
 crates/harn-vm/src/llm/capability_sources/20-providers/20-local-ollama.toml
 spec/provider-catalog/provider-catalog.json
 EOF

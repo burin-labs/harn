@@ -29,7 +29,7 @@ use serde::{Deserialize, Serialize};
 
 use super::ProvidersConfig;
 
-pub use harn_provider_catalog::{
+pub use crate::{
     DataControlDef, DataControlDialect, DataControlEffect, DataControlLocation, DataControlScope,
     DataControlValue, DataControlsDef, ModelDataControlsDef, RetentionDefault, TrainingDefault,
 };

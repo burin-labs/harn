@@ -49,7 +49,7 @@ use std::collections::BTreeMap;
 use harn_glob::match_name as glob_match;
 use serde::Serialize;
 
-use super::catalog::is_logical_model_selector;
+use super::is_logical_model_selector;
 use super::{DataControlsPolicy, ModelDef, ProvidersConfig};
 
 /// One overlay entry that no longer earns its keep.
@@ -172,7 +172,7 @@ pub fn audit_overlay(baseline: &ProvidersConfig, overlay: &ProvidersConfig) -> V
 /// `overlay_audit_tests::every_config_section_is_auditable` asserts: a section
 /// the audit cannot address is a section whose entries can never be reported.
 #[cfg(test)]
-pub(super) fn strip_all_auditable_entries(overlay: &ProvidersConfig) -> ProvidersConfig {
+pub fn strip_all_auditable_entries(overlay: &ProvidersConfig) -> ProvidersConfig {
     let mut stripped = overlay.clone();
     for section in SECTIONS {
         for key in (section.keys)(overlay) {

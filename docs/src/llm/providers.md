@@ -519,7 +519,7 @@ that provider declares them itself.
 ### Capability matrix + `harn.toml` overrides
 
 The provider support table is generated from
-`crates/harn-vm/src/llm/capabilities.toml` and matched against the
+`crates/harn-provider-catalog/src/capabilities.toml` and matched against the
 `(provider, model)` pair at call time. Scripts can query the effective
 capability surface without carrying vendor-specific knowledge:
 
@@ -602,7 +602,7 @@ but do not override runtime capability resolution.
 `.harn-runs/coding-agent-bench/latest/tool_mode_parity_overlay.toml`, and
 `harn provider capabilities promote-from-eval <overlay>` applies those
 deterministic parity verdicts back into
-`crates/harn-vm/src/llm/capabilities.toml`.
+`crates/harn-provider-catalog/src/capabilities.toml`.
 
 The matrix also records format preferences that prompt renderers can use
 without branching on provider names: XML vs. Markdown section scaffolding,

@@ -18,8 +18,8 @@ fn catalog_renderers_read_source_changes_without_rebuilding() {
     fs::create_dir_all(sources.join("catalog_sources")).unwrap();
     fs::write(
         sources.join("catalog_sources/catalog.toml"),
-        concat!(
-            include_str!("../../../harn-vm/src/llm/providers.toml"),
+        format!("{}{}",
+            harn_provider_catalog::EMBEDDED_PROVIDERS_TOML,
             "\n[providers.mock]\ndisplay_name = \"Mock source fixture\"\nauth_style = \"none\"\nfeatures = [\"wire_model_capabilities\"]\n\n[models.\"mock/source-falsifier-8062\"]\nname = \"Source falsifier 8062\"\nprovider = \"mock\"\nwire_model = \"source-wire-route-8062\"\ncontext_window = 8192\n"
         ).replacen("unverified = [", "unverified = [\"mock\",", 1)
             .replacen("featured_providers = [", "featured_providers = [\"mock\",", 1)

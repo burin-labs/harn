@@ -1,7 +1,7 @@
 //! Overlay and `[patch.models]` merge semantics: which layer wins, what
 //! survives a whole-row replacement, and how a dangling patch behaves.
 
-use super::super::*;
+use super::*;
 use serde::Deserialize;
 
 #[test]

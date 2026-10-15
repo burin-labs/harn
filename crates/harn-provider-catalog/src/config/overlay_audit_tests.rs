@@ -1,4 +1,4 @@
-//! Behaviour of the overlay redundancy audit, plus the structural guard that
+//! Behavior of the overlay redundancy audit, plus the structural guard that
 //! keeps its section table in step with `ProvidersConfig`.
 
 use super::overlay_audit::strip_all_auditable_entries;
