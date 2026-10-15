@@ -3495,6 +3495,7 @@ dependencies = [
  "harn-modules",
  "harn-package",
  "harn-parser",
+ "harn-prompt-syntax",
  "harn-rules",
  "harn-rules-hostlib",
  "harn-serve",
@@ -3770,6 +3771,7 @@ dependencies = [
  "harn-lexer",
  "harn-modules",
  "harn-parser",
+ "harn-prompt-syntax",
  "harn-rules",
  "harn-vm",
  "libloading 0.9.0",
@@ -3800,6 +3802,7 @@ dependencies = [
  "harn-lint",
  "harn-modules",
  "harn-parser",
+ "harn-prompt-syntax",
  "harn-rules",
  "harn-stdlib",
  "harn-vm",
@@ -3932,6 +3935,10 @@ dependencies = [
  "harn-vm",
  "tokio",
 ]
+
+[[package]]
+name = "harn-prompt-syntax"
+version = "0.10.166"
 
 [[package]]
 name = "harn-provider-catalog"
@@ -4162,6 +4169,7 @@ dependencies = [
  "harn-modules",
  "harn-opcode-macros",
  "harn-parser",
+ "harn-prompt-syntax",
  "harn-provider-catalog",
  "harn-session-store",
  "harn-sqlite",

@@ -9,12 +9,10 @@ use super::error::TemplateError;
 use super::expr_parser::parse_expr;
 use super::lexer::{tokenize, Token};
 use super::outline::{OutlineBlock, OutlineBlockKind};
-use super::sections;
-use crate::runtime_limits::RuntimeLimits;
 
-const TEMPLATE_AST_MAX_DEPTH: usize = RuntimeLimits::DEFAULT.max_template_ast_depth;
+const TEMPLATE_AST_MAX_DEPTH: usize = crate::MAX_AST_DEPTH;
 
-pub(super) fn parse(src: &str) -> Result<Vec<Node>, TemplateError> {
+pub fn parse(src: &str) -> Result<Vec<Node>, TemplateError> {
     Ok(parse_all(src)?.0)
 }
 
@@ -362,7 +360,7 @@ impl<'a> Parser<'a> {
     fn parse_section(&mut self, spec: &str, site: DirectiveSite) -> Result<Node, TemplateError> {
         let DirectiveSite { line, col, .. } = site;
         let (name, rest) = parse_section_name(spec, line, col)?;
-        if !sections::is_builtin_section(&name) {
+        if !super::vocabulary::SECTIONS.contains(&name.as_str()) {
             return Err(TemplateError::new(
                 line,
                 col,

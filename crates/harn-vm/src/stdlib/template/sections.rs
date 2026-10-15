@@ -1,7 +1,6 @@
 use crate::value::VmValue;
 
 use super::error::TemplateError;
-use super::vocabulary::SECTIONS;
 
 pub(super) struct SectionRender {
     pub(super) text: String,
@@ -24,10 +23,6 @@ struct SectionProfile {
     text_tool_wire_format_supported: bool,
     prefers_role_developer: bool,
     structured_output_mode: String,
-}
-
-pub(super) fn is_builtin_section(name: &str) -> bool {
-    SECTIONS.contains(&name)
 }
 
 pub(super) fn render_section(

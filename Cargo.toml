@@ -13,6 +13,7 @@ members = [
     "crates/harn-languages",
     "crates/harn-secret-catalog",
     "crates/harn-provider-catalog",
+    "crates/harn-prompt-syntax",
     "crates/harn-terminal",
     "crates/harn-test-runner",
     "crates/harn-lexer",

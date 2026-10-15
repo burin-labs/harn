@@ -172,6 +172,13 @@ kernel-check:
 kernel-test:
 	$(HARN_CARGO_CMD) nextest run -p harn-kernel $(KERNEL_TEST_ARGS)
 
+.PHONY: prompt-syntax-test provider-catalog-test
+prompt-syntax-test:
+	$(HARN_CARGO_CMD) nextest run -p harn-prompt-syntax $(PROMPT_SYNTAX_TEST_ARGS)
+
+provider-catalog-test:
+	$(HARN_CARGO_CMD) nextest run -p harn-provider-catalog $(PROVIDER_CATALOG_TEST_ARGS)
+
 # The corpus is included from harn-kernel/testdata by both this native-VM test
 # and the browser-Wasm tests. It must stay one data source with three adapters.
 kernel-vm-parity:

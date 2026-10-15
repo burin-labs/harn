@@ -1903,6 +1903,19 @@
       "reason": "DUP: the interactive default and non-interactive selection now share preferred_choice_index; the retained test drives the same fixture through provider selection and asserts the chosen provider.",
       "retainedPath": "crates/harn-cli/src/commands/quickstart.rs",
       "retainedName": "non_interactive_prefers_available_remote_provider"
+    },
+    {
+      "path": "crates/harn-vm/src/stdlib/template/filters.rs",
+      "name": "dispatch_covers_exactly_the_declared_filters",
+      "reason": "FilterId and FILTERS are generated from one declaration, and native evaluation exhaustively matches FilterId. The compiler now rejects a missing implementation instead of a test inferring dispatch from error prose.",
+      "retainedPath": "crates/harn-vm/src/stdlib/template/filters.rs"
+    },
+    {
+      "path": "crates/harn-vm/src/stdlib/template/tests.rs",
+      "name": "stdlib_template_cache_reuses_parsed_asset",
+      "reason": "An unchanged entry count also passes when parsing runs twice without caching, so it does not prove the claimed reuse. Keep observable content invalidation and embedded-asset rendering instead.",
+      "retainedPath": "crates/harn-vm/src/stdlib/template/tests.rs",
+      "retainedName": "filesystem_template_cache_invalidates_when_contents_change"
     }
   ],
   "retainedScenarios": [

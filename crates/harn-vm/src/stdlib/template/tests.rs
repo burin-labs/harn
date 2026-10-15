@@ -359,21 +359,8 @@ fn stdlib_prompt_provenance_uses_stable_template_uris() {
 }
 
 #[test]
-fn stdlib_template_cache_reuses_parsed_asset() {
-    super::assets::reset_template_cache();
-    let asset = TemplateAsset::render_target("std/workflow/prompts/stage.harn.prompt").unwrap();
-    let bindings = dict(&[("name", s("triage")), ("goal", s("Sort the queue."))]);
-    let first = render_asset_result(&asset, Some(&bindings)).unwrap();
-    let count_after_first = super::assets::template_cache_len();
-    let second = render_asset_result(&asset, Some(&bindings)).unwrap();
-    assert_eq!(first, second);
-    assert_eq!(count_after_first, super::assets::template_cache_len());
-}
-
-#[test]
 fn filesystem_template_cache_invalidates_when_contents_change() {
     use std::fs;
-    super::assets::reset_template_cache();
     let dir = tempdir();
     let path = dir.path().join("main.prompt");
     fs::write(&path, "one {{x}}").unwrap();
@@ -388,7 +375,6 @@ fn filesystem_template_cache_invalidates_when_contents_change() {
         render_asset_result(&second, Some(&dict(&[("x", s("render"))]))).unwrap(),
         "two render"
     );
-    assert_eq!(super::assets::template_cache_len(), 2);
 }
 
 #[test]
