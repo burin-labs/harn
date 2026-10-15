@@ -19,8 +19,8 @@ pub use config::{
 #[cfg(test)]
 pub(crate) use harn_orchestration::compaction::RECAP_HEADER_SENTINEL;
 use harn_orchestration::compaction::{
-    apply_model_visible_policy, is_pinned_content, is_prior_recap, latest_pinned_indices,
-    message_content_bytes, observation_mask_compaction_with_callback, select_compaction_window,
+    apply_model_visible_policy, is_prior_recap, latest_pinned_indices, message_content_bytes,
+    observation_mask_compaction_with_callback, select_compaction_window,
     truncate_compaction_summary, truncate_compaction_summary_with_context, CompactionSummary,
     CLASSIFIED_RECAP_HEADER_SENTINEL,
 };

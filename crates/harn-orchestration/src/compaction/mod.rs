@@ -493,7 +493,7 @@ pub const NO_COMPACT_MARKER: &str = "[no-compact]";
 pub const MAX_PINNED_SEGMENTS: usize = 3;
 
 /// Whether a content body carries the host's `[no-compact]` pin marker.
-pub fn is_pinned_content(content: &str) -> bool {
+fn is_pinned_content(content: &str) -> bool {
     content.contains(NO_COMPACT_MARKER)
 }
 
