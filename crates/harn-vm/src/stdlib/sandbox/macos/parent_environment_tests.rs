@@ -6,7 +6,7 @@ const CANARY: &str = "public-nonsecret-controller-canary";
 
 // Only booleans and syscall status leave the reader. Never print the environment
 // buffer, which could contain unrelated host secrets in a regressed build.
-const READER: &str = r#"
+const READER: &str = r"
 import ctypes, json, os, subprocess, time
 libc = ctypes.CDLL(None, use_errno=True)
 result = []
@@ -23,7 +23,7 @@ for selector in [38, 49]:
 assert time.monotonic() > 0
 assert subprocess.check_output(['/bin/echo', 'child-command'], text=True).strip() == 'child-command'
 print(json.dumps(result))
-"#;
+";
 
 #[test]
 fn confined_child_cannot_read_the_hosts_launch_environment() {
