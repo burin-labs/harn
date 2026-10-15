@@ -6,6 +6,16 @@ use harn_parser::Parser;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::{sync::Arc, time::Duration};
 
+struct ChildLifetime(Option<tokio::sync::oneshot::Sender<()>>);
+
+impl Drop for ChildLifetime {
+    fn drop(&mut self) {
+        if let Some(sender) = self.0.take() {
+            let _ = sender.send(());
+        }
+    }
+}
+
 fn compile_harn(source: &str) -> Chunk {
     let mut lexer = Lexer::new(source);
     let tokens = lexer.tokenize().unwrap();
@@ -31,12 +41,17 @@ async fn dropping_timed_execution_restores_ambient_state_and_poison_vm_reuse() {
             let child_started = Arc::new(AtomicBool::new(false));
             let child_effect = Arc::new(AtomicBool::new(false));
             let child_release = Arc::new(tokio::sync::Notify::new());
+            let (child_stopped_tx, child_stopped_rx) = tokio::sync::oneshot::channel();
+            let child_stopped_tx = Arc::new(std::sync::Mutex::new(Some(child_stopped_tx)));
             let (ambient_started_tx, ambient_started_rx) = tokio::sync::oneshot::channel();
             let ambient_started_tx = Arc::new(std::sync::Mutex::new(Some(ambient_started_tx)));
             let started_for_builtin = Arc::clone(&child_started);
             vm.register_builtin("child_started", move |_args, _output| {
                 started_for_builtin.store(true, Ordering::Release);
-                Ok(VmValue::Nil)
+                Ok(VmValue::resource(crate::VmResourceHandle::new(
+                    "cancellation-child",
+                    ChildLifetime(Some(child_stopped_tx.lock().unwrap().take().unwrap())),
+                )))
             });
             let effect_for_builtin = Arc::clone(&child_effect);
             vm.register_builtin("child_effect", move |_args, _output| {
@@ -140,9 +155,9 @@ pub fn cancellation_entry(agent: HarnessAgent) {
 fn cancelled_step(agent: HarnessAgent) {
   agent.pipeline_on_finish({ _h, value -> value })
   const child = spawn {
-child_started()
+    const lifetime = child_started()
 wait_for_child_release()
-child_effect()
+    child_effect(lifetime)
   }
   strand_ambient_state()
   wait_forever()
@@ -299,9 +314,7 @@ child_effect()
 
             drop(vm);
             child_release.notify_one();
-            for _ in 0..10 {
-                tokio::task::yield_now().await;
-            }
+            child_stopped_rx.await.expect("the child lifetime must terminate");
             assert!(
                 !child_effect.load(Ordering::Acquire),
                 "dropping an abandoned VM must abort spawned side effects"
