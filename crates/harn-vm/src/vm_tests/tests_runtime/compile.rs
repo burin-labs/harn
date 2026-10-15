@@ -32,7 +32,7 @@ pipeline selected(harness: Harness, task: unknown) {
                 let program = parser.parse().unwrap();
                 let chunk = Compiler::new().compile_named(&program, "selected").unwrap();
 
-                let mut vm = Vm::new();
+                let mut vm = crate::new_vm();
                 register_vm_stdlib(&mut vm);
                 let result = vm.execute(&chunk).await.unwrap();
 
@@ -58,7 +58,7 @@ fn callable_entry_invokes_pipeline_with_explicit_typed_values() {
                     .compile_named_pipeline_entry(&program, "selected", None)
                     .unwrap();
 
-                let mut vm = Vm::new();
+                let mut vm = crate::new_vm();
                 register_vm_stdlib(&mut vm);
                 vm.set_harness(crate::Harness::real());
                 assert!(matches!(
@@ -71,7 +71,7 @@ fn callable_entry_invokes_pipeline_with_explicit_typed_values() {
                     Ok(VmValue::Int(42))
                 ));
 
-                let mut wrong_type = Vm::new();
+                let mut wrong_type = crate::new_vm();
                 register_vm_stdlib(&mut wrong_type);
                 wrong_type.set_harness(crate::Harness::real());
                 let error = wrong_type
@@ -122,7 +122,7 @@ pipeline second(harness: Harness, value: int) { return seed + value + 1 }
                 let fixture = batch.functions.into_iter().next().unwrap().unwrap();
 
                 for (entry, expected) in pipelines.iter().zip([42, 43]) {
-                    let mut vm = Vm::new();
+                    let mut vm = crate::new_vm();
                     register_vm_stdlib(&mut vm);
                     vm.set_harness(crate::Harness::real());
                     assert!(matches!(
@@ -136,7 +136,7 @@ pipeline second(harness: Harness, value: int) { return seed + value + 1 }
                     ));
                 }
 
-                let mut vm = Vm::new();
+                let mut vm = crate::new_vm();
                 register_vm_stdlib(&mut vm);
                 assert!(matches!(
                     vm.execute_callable_entry_with_timeout(
@@ -176,7 +176,7 @@ pipeline selected(harness: Harness, fx: {calls: int}, value: int) {
                     .compile_named_pipeline_entry(&program, "selected", Some("fixture"))
                     .unwrap();
 
-                let mut vm = Vm::new();
+                let mut vm = crate::new_vm();
                 register_vm_stdlib(&mut vm);
                 vm.set_harness(crate::Harness::real());
                 assert!(matches!(
@@ -215,7 +215,7 @@ pipeline selected(harness: Harness, fx: {label: string}, value: int) {
                     .compile_named_pipeline_entry(&program, "selected", Some("fixture"))
                     .unwrap();
 
-                let mut vm = Vm::new();
+                let mut vm = crate::new_vm();
                 register_vm_stdlib(&mut vm);
                 vm.set_harness(crate::Harness::real());
                 assert_eq!(

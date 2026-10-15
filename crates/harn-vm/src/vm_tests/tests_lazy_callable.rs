@@ -5,7 +5,7 @@ use crate::stdlib::register_vm_stdlib;
 use crate::{LazyPipelineCallable, LazyVmCallable, Vm, VmCallable, VmValue};
 
 fn pipeline_vm() -> Vm {
-    let mut vm = Vm::new();
+    let mut vm = crate::new_vm();
     register_vm_stdlib(&mut vm);
     vm
 }
@@ -52,7 +52,7 @@ pub fn current() -> int {
     };
 
     runtime.block_on(async {
-        let root = Vm::new();
+        let root = crate::new_vm();
         let mut first = root.child_vm();
         let first_call = first
             .resolve_callable(&callable)
@@ -89,7 +89,7 @@ pub fn current() -> int {
             "{current_value:?}"
         );
 
-        let mut fresh = Vm::new();
+        let mut fresh = crate::new_vm();
         let fresh_call = fresh
             .resolve_callable(&callable)
             .await
@@ -121,7 +121,7 @@ async fn lazy_callable_preparation_caches_a_terminal_failure_across_clones() {
         .map(|_| {
             let callable = callable.clone();
             tokio::spawn(async move {
-                let mut vm = Vm::new();
+                let mut vm = crate::new_vm();
                 vm.resolve_callable(&callable).await
             })
         })

@@ -11,7 +11,7 @@ use super::harness::*;
 use crate::vm::*;
 #[test]
 fn runtime_error_renderer_normalizes_frame_paths() {
-    let mut vm = Vm::new();
+    let mut vm = crate::new_vm();
     vm.set_source_info(
         "/workspace/pipelines/mode/../mode/auto.harn",
         "const run = agent_loop(message, system_prompt, opts)\n",

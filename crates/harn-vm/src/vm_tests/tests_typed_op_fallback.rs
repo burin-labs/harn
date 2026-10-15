@@ -37,7 +37,7 @@ fn run(source: &str, options: CompilerOptions) -> Result<String, String> {
                 let chunk = Compiler::with_options(options)
                     .compile(&program)
                     .map_err(|e| e.to_string())?;
-                let mut vm = Vm::new();
+                let mut vm = crate::new_vm();
                 register_vm_stdlib(&mut vm);
                 vm.execute(&chunk).await.map_err(|e| e.to_string())?;
                 Ok(vm.output().trim_end().to_string())

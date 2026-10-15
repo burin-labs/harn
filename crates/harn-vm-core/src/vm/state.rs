@@ -938,6 +938,10 @@ impl Vm {
         self.runtime_limits
     }
 
+    pub fn set_runtime_limits(&mut self, limits: RuntimeLimits) {
+        self.runtime_limits = limits;
+    }
+
     /// Return a host/debug report describing the VM's effective runtime limits.
     pub fn runtime_limit_report(&self) -> crate::RuntimeLimitsReport {
         self.runtime_limits.report()

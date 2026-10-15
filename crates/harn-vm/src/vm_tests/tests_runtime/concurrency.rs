@@ -424,7 +424,7 @@ fn test_host_signal_token_dispatches_matching_signal() {
         .build()
         .unwrap();
     rt.block_on(async {
-        let mut vm = Vm::new();
+        let mut vm = crate::new_vm();
         vm.register_builtin("term_marker", |_, out| {
             out.push_str("[harn] term\n");
             Ok(VmValue::Nil)
@@ -845,7 +845,7 @@ await(handle)
             let cancel_token = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
             let vm_cancel_token = cancel_token.clone();
             let handle = tokio::task::spawn_local(async move {
-                let mut vm = Vm::new();
+                let mut vm = crate::new_vm();
                 register_vm_stdlib(&mut vm);
                 vm.register_builtin("mark", move |_, _| {
                     marker_for_builtin.store(true, std::sync::atomic::Ordering::SeqCst);
@@ -977,7 +977,7 @@ fn test_a_child_machine_carries_the_cancel_token_and_no_handlers() {
         let local = tokio::task::LocalSet::new();
         local
             .run_until(async {
-                let mut parent = Vm::new();
+                let mut parent = crate::new_vm();
                 register_vm_stdlib(&mut parent);
                 parent.register_builtin("never_runs", |_, out| {
                     out.push_str("[harn] child dispatched\n");
@@ -1062,7 +1062,7 @@ pipeline t(harness: Harness) {
                 let program = parser.parse().unwrap();
                 let chunk = Compiler::new().compile(&program).unwrap();
 
-                let mut vm = Vm::new();
+                let mut vm = crate::new_vm();
                 register_vm_stdlib(&mut vm);
                 vm.set_harness(crate::Harness::real());
                 vm.register_builtin("replay_probe", |_, out| {

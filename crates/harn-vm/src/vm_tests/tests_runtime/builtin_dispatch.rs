@@ -102,7 +102,7 @@ fn test_direct_builtin_call_falls_back_to_bridge() {
                 )
                 .unwrap();
 
-                let mut host_vm = Vm::new();
+                let mut host_vm = crate::new_vm();
                 register_vm_stdlib(&mut host_vm);
                 let bridge = crate::bridge::HostBridge::from_harn_module(host_vm, &host_path)
                     .await
@@ -115,7 +115,7 @@ fn test_direct_builtin_call_falls_back_to_bridge() {
                 let program = parser.parse().unwrap();
                 let chunk = Compiler::new().compile(&program).unwrap();
 
-                let mut vm = Vm::new();
+                let mut vm = crate::new_vm();
                 register_vm_stdlib(&mut vm);
                 vm.set_bridge(Arc::new(bridge));
                 vm.execute(&chunk).await.unwrap();

@@ -64,7 +64,7 @@ pub fn json_to_vm_value(jv: &serde_json::Value) -> VmValue {
 }
 
 /// Convert a VmValue dict to serde_json::Value for API payloads.
-pub(crate) fn vm_value_dict_to_json(dict: &super::DictMap) -> serde_json::Value {
+pub fn vm_value_dict_to_json(dict: &super::DictMap) -> serde_json::Value {
     let mut map = serde_json::Map::new();
     for (k, v) in dict {
         map.insert(k.to_string(), vm_value_to_json(v));

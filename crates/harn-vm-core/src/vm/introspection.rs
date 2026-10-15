@@ -15,6 +15,23 @@ impl Vm {
         &self.runtime_context
     }
 
+    pub fn set_child_task_context(
+        &mut self,
+        task_id: impl Into<String>,
+        name: impl Into<String>,
+        group: Option<String>,
+    ) {
+        self.runtime_context = self.runtime_context.child_task(task_id, name, group);
+    }
+
+    pub fn cancellation_token(&self) -> Option<std::sync::Arc<std::sync::atomic::AtomicBool>> {
+        self.cancel_token.clone()
+    }
+
+    pub fn wait_for_graph(&self) -> &std::sync::Arc<crate::wait_for_graph::VmWaitForGraph> {
+        &self.wait_for_graph
+    }
+
     pub fn output_mut(&mut self) -> &mut String {
         &mut self.output
     }
@@ -29,6 +46,10 @@ impl Vm {
 
     pub fn active_task_ids(&self) -> impl Iterator<Item = &str> {
         self.spawned_tasks.keys().map(String::as_str)
+    }
+
+    pub fn inline_cache_entries(&self) -> impl Iterator<Item = &crate::InlineCacheEntry> {
+        self.inline_cache_sets.iter().flatten()
     }
 
     /// Return all registered builtin names (sync + async).

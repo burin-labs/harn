@@ -119,7 +119,7 @@ mod tests {
             .expect("adaptive op registers inline-cache slot");
         let slot_count = chunk.inline_cache_slot_count();
 
-        let mut vm = Vm::new();
+        let mut vm = crate::vm::test_runtime::new_vm();
         let cache_set = vm.inline_cache_set_index_for_chunk(&chunk);
         assert_eq!(cache_set, vm.inline_cache_set_index_for_chunk(&chunk));
 

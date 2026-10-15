@@ -15,7 +15,7 @@ use std::collections::HashSet;
 use std::path::Path;
 
 use crate::vm::*;
-pub(in crate::vm) fn run_harn(source: &str) -> (String, VmValue) {
+pub(in crate::vm_tests) fn run_harn(source: &str) -> (String, VmValue) {
     run_harn_with_options(source, CompilerOptions::optimized())
 }
 
@@ -34,7 +34,7 @@ pub(super) fn run_harn_with_options(source: &str, options: CompilerOptions) -> (
                 let program = parser.parse().unwrap();
                 let chunk = Compiler::with_options(options).compile(&program).unwrap();
 
-                let mut vm = Vm::new();
+                let mut vm = crate::new_vm();
                 register_vm_stdlib(&mut vm);
                 vm.set_harness(crate::Harness::real());
                 let result = vm.execute(&chunk).await.unwrap();
@@ -63,7 +63,7 @@ pub(super) fn run_harn_with_legacy_ambient_capabilities(source: &str) -> (String
                 .compile(&program)
                 .unwrap();
 
-                let mut vm = Vm::new();
+                let mut vm = crate::new_vm();
                 vm.set_harness(crate::Harness::real());
                 let root = vm.root_harness_value().expect("test installs root Harness");
                 vm.set_global("harness", root);
@@ -75,7 +75,7 @@ pub(super) fn run_harn_with_legacy_ambient_capabilities(source: &str) -> (String
     })
 }
 
-pub(in crate::vm) fn run_harn_result_display_with_options(
+pub(in crate::vm_tests) fn run_harn_result_display_with_options(
     source: &str,
     options: CompilerOptions,
 ) -> Result<(String, String), String> {
@@ -95,7 +95,7 @@ pub(in crate::vm) fn run_harn_result_display_with_options(
                     .compile(&program)
                     .map_err(|error| error.to_string())?;
 
-                let mut vm = Vm::new();
+                let mut vm = crate::new_vm();
                 register_vm_stdlib(&mut vm);
                 vm.set_harness(crate::Harness::real());
                 let result = vm
@@ -125,15 +125,11 @@ pub(super) fn run_harn_with_inline_cache_entries(
                 let program = parser.parse().unwrap();
                 let chunk = Compiler::new().compile(&program).unwrap();
 
-                let mut vm = Vm::new();
+                let mut vm = crate::new_vm();
                 register_vm_stdlib(&mut vm);
                 vm.set_harness(crate::Harness::real());
                 let result = vm.execute(&chunk).await.unwrap();
-                let inline_cache_entries = vm
-                    .inline_cache_sets
-                    .iter()
-                    .flat_map(|entries| entries.iter().cloned())
-                    .collect();
+                let inline_cache_entries = vm.inline_cache_entries().cloned().collect();
                 (inline_cache_entries, vm.output().to_string(), result)
             })
             .await
@@ -144,7 +140,10 @@ pub(super) fn run_output(source: &str) -> String {
     run_harn(source).0.trim_end().to_string()
 }
 
-pub(in crate::vm) fn run_harn_at(path: &Path, source: &str) -> Result<(String, VmValue), VmError> {
+pub(in crate::vm_tests) fn run_harn_at(
+    path: &Path,
+    source: &str,
+) -> Result<(String, VmValue), VmError> {
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -159,7 +158,7 @@ pub(in crate::vm) fn run_harn_at(path: &Path, source: &str) -> Result<(String, V
                 let program = parser.parse().unwrap();
                 let chunk = Compiler::new().compile(&program).unwrap();
 
-                let mut vm = Vm::new();
+                let mut vm = crate::new_vm();
                 register_vm_stdlib(&mut vm);
                 vm.set_harness(crate::Harness::real());
                 vm.set_source_info(&path.display().to_string(), source);
@@ -188,7 +187,7 @@ pub(super) fn run_harn_result(source: &str) -> Result<(String, VmValue), VmError
                 let program = parser.parse().unwrap();
                 let chunk = Compiler::new().compile(&program).unwrap();
 
-                let mut vm = Vm::new();
+                let mut vm = crate::new_vm();
                 register_vm_stdlib(&mut vm);
                 vm.set_harness(crate::Harness::real());
                 let result = vm.execute(&chunk).await?;
@@ -198,7 +197,7 @@ pub(super) fn run_harn_result(source: &str) -> Result<(String, VmValue), VmError
     })
 }
 
-pub(in crate::vm) async fn run_harn_result_async(
+pub(in crate::vm_tests) async fn run_harn_result_async(
     source: &str,
 ) -> Result<(String, VmValue), VmError> {
     let mut lexer = Lexer::new(source);
@@ -207,7 +206,7 @@ pub(in crate::vm) async fn run_harn_result_async(
     let program = parser.parse().unwrap();
     let chunk = Compiler::new().compile(&program).unwrap();
 
-    let mut vm = Vm::new();
+    let mut vm = crate::new_vm();
     register_vm_stdlib(&mut vm);
     vm.set_harness(crate::Harness::real());
     let result = vm.execute(&chunk).await?;
@@ -232,7 +231,7 @@ where
                 let program = parser.parse().unwrap();
                 let chunk = Compiler::new().compile(&program).unwrap();
 
-                let mut vm = Vm::new();
+                let mut vm = crate::new_vm();
                 register_vm_stdlib(&mut vm);
                 vm.set_harness(crate::Harness::real());
                 setup(&mut vm);
@@ -267,7 +266,7 @@ pub(super) fn run_vm(source: &str) -> String {
                 let mut parser = Parser::new(tokens);
                 let program = parser.parse().unwrap();
                 let chunk = Compiler::new().compile(&program).unwrap();
-                let mut vm = Vm::new();
+                let mut vm = crate::new_vm();
                 register_vm_stdlib(&mut vm);
                 vm.set_harness(crate::Harness::real());
                 vm.execute(&chunk).await.unwrap();
@@ -291,7 +290,7 @@ pub(super) fn run_vm_err(source: &str) -> String {
                 let mut parser = Parser::new(tokens);
                 let program = parser.parse().unwrap();
                 let chunk = Compiler::new().compile(&program).unwrap();
-                let mut vm = Vm::new();
+                let mut vm = crate::new_vm();
                 register_vm_stdlib(&mut vm);
                 vm.set_harness(crate::Harness::real());
                 match vm.execute(&chunk).await {
@@ -322,7 +321,7 @@ pub(super) fn run_harn_with_denied(
                 let program = parser.parse().unwrap();
                 let chunk = Compiler::new().compile(&program).unwrap();
 
-                let mut vm = Vm::new();
+                let mut vm = crate::new_vm();
                 register_vm_stdlib(&mut vm);
                 vm.set_harness(crate::Harness::real());
                 vm.set_denied_builtins(denied);

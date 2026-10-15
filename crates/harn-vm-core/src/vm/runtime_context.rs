@@ -48,10 +48,7 @@ impl Default for RuntimeContext {
     }
 }
 
-pub(crate) fn runtime_context_get(
-    vm: &crate::vm::Vm,
-    args: &[VmValue],
-) -> Result<VmValue, VmError> {
+pub fn runtime_context_get(vm: &crate::vm::Vm, args: &[VmValue]) -> Result<VmValue, VmError> {
     let key = require_key(args, "HarnessRuntime.context_get")?;
     Ok(vm
         .runtime_context
@@ -62,10 +59,7 @@ pub(crate) fn runtime_context_get(
         .unwrap_or(VmValue::Nil))
 }
 
-pub(crate) fn runtime_context_set(
-    vm: &mut crate::vm::Vm,
-    args: &[VmValue],
-) -> Result<VmValue, VmError> {
+pub fn runtime_context_set(vm: &mut crate::vm::Vm, args: &[VmValue]) -> Result<VmValue, VmError> {
     let key = require_key(args, "HarnessRuntime.context_set")?;
     let value = args.get(1).cloned().unwrap_or(VmValue::Nil);
     Ok(vm
@@ -75,10 +69,7 @@ pub(crate) fn runtime_context_set(
         .unwrap_or(VmValue::Nil))
 }
 
-pub(crate) fn runtime_context_clear(
-    vm: &mut crate::vm::Vm,
-    args: &[VmValue],
-) -> Result<VmValue, VmError> {
+pub fn runtime_context_clear(vm: &mut crate::vm::Vm, args: &[VmValue]) -> Result<VmValue, VmError> {
     let key = require_key(args, "HarnessRuntime.context_clear")?;
     Ok(vm
         .runtime_context

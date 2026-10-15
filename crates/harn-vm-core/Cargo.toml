@@ -33,7 +33,6 @@ chrono = "0.4"
 futures = "0.3"
 imbl = { version = "7", features = ["serde"] }
 jsonschema.workspace = true
-libc = "0.2"
 linkme = "0.3"
 parking_lot = "0.12"
 pin-project-lite = "0.2"
@@ -48,7 +47,6 @@ sha2 = "0.11"
 stacker = "0.1"
 strsim = "0.11"
 strip-ansi-escapes = "0.2"
-sysinfo = { version = "0.39", default-features = false, features = ["system", "component"] }
 thiserror = "2"
 tracing = "0.1"
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync", "time", "test-util", "process", "io-util", "io-std", "macros"] }
@@ -60,13 +58,11 @@ uuid = { version = "1", features = ["serde", "v4", "v5", "v7"] }
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61.2", features = [
     "Win32_Foundation",
-    "Win32_Security",
-    "Win32_System_Diagnostics_ToolHelp",
-    "Win32_System_JobObjects",
-    "Win32_System_Threading",
+    "Win32_Storage_FileSystem",
 ] }
 
 [dev-dependencies]
+harn-modules = { path = "../harn-modules", version = "=0.10.167", features = ["bundled-stdlib"] }
 proptest = "1"
 static_assertions = "1.1"
 tempfile = "3"

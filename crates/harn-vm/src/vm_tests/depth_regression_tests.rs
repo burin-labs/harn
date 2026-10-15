@@ -15,9 +15,9 @@ fn execute_with_limits(source: &str, limits: RuntimeLimits) -> (Vm, Result<VmVal
         let local = tokio::task::LocalSet::new();
         local
             .run_until(async {
-                let mut vm = Vm::new();
+                let mut vm = crate::new_vm();
                 register_vm_stdlib(&mut vm);
-                vm.runtime_limits = limits;
+                vm.set_runtime_limits(limits);
                 let result = vm.execute(&chunk).await;
                 (vm, result)
             })

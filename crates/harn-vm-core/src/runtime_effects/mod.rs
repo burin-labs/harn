@@ -119,7 +119,7 @@ impl ExecutedEffectRecorder {
     }
 }
 
-pub(crate) fn runtime_effects_from_contract(
+pub fn runtime_effects_from_contract(
     specs: &[harn_builtin_meta::EffectSpec],
     args: &[VmValue],
 ) -> Vec<EffectRecord> {
@@ -175,7 +175,7 @@ pub(crate) fn runtime_effects_from_contract(
     records
 }
 
-pub(crate) fn effect_kind_from_contract(kind: harn_builtin_meta::EffectKind) -> EffectKind {
+pub fn effect_kind_from_contract(kind: harn_builtin_meta::EffectKind) -> EffectKind {
     use harn_builtin_meta::EffectKind as ContractKind;
     match kind {
         ContractKind::Stdio => EffectKind::Stdio,
@@ -205,7 +205,7 @@ pub(crate) fn effect_kind_from_contract(kind: harn_builtin_meta::EffectKind) -> 
     }
 }
 
-pub(crate) fn effect_scope_from_contract(access: harn_builtin_meta::EffectAccess) -> EffectScope {
+pub fn effect_scope_from_contract(access: harn_builtin_meta::EffectAccess) -> EffectScope {
     match access {
         harn_builtin_meta::EffectAccess::Read => EffectScope::Read,
         harn_builtin_meta::EffectAccess::Write => EffectScope::Write,

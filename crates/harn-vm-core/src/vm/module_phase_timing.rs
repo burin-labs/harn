@@ -239,7 +239,7 @@ mod tests {
 
     #[test]
     fn child_vms_share_recorder_but_baselines_start_disabled() {
-        let mut vm = Vm::new();
+        let mut vm = crate::vm::test_runtime::new_vm();
         assert!(vm.module_phase_recorder().is_none());
 
         let recorder = vm.enable_module_phase_timing();
@@ -325,7 +325,7 @@ mod tests {
         )
         .expect("write importer");
 
-        let mut vm = Vm::new();
+        let mut vm = crate::vm::test_runtime::new_vm();
         let recorder = vm.enable_module_phase_timing();
         let mut first = vm.child_vm();
         let mut second = vm.child_vm();

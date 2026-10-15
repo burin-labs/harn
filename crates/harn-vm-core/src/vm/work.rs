@@ -67,7 +67,7 @@ mod tests {
 
     #[tokio::test]
     async fn counts_dispatched_instructions_not_operand_bytes_across_children() {
-        let mut vm = Vm::new();
+        let mut vm = crate::vm::test_runtime::new_vm();
         assert!(vm.recorders.is_none());
         let recorder = vm.enable_work_recording();
         assert_eq!(recorder.snapshot().vm_steps, 0);
@@ -87,12 +87,12 @@ mod tests {
         assert_eq!(recorder.snapshot().vm_steps, 8);
         assert_eq!(vm.enable_work_recording().snapshot(), recorder.snapshot());
         assert!(vm.baseline().instantiate().recorders.is_none());
-        assert!(Vm::new().recorders.is_none());
+        assert!(crate::vm::test_runtime::new_vm().recorders.is_none());
     }
 
     #[tokio::test]
     async fn debugger_counts_the_same_steps_and_failure_counts_its_dispatch() {
-        let mut vm = Vm::new();
+        let mut vm = crate::vm::test_runtime::new_vm();
         let recorder = vm.enable_work_recording();
         vm.start(&four_steps()).unwrap();
         for _ in 0..4 {
@@ -102,7 +102,7 @@ mod tests {
 
         let mut failing = Chunk::new();
         failing.emit(Op::Add, 1);
-        let mut vm = Vm::new();
+        let mut vm = crate::vm::test_runtime::new_vm();
         let recorder = vm.enable_work_recording();
         assert!(matches!(
             vm.execute(&failing).await,
@@ -110,7 +110,7 @@ mod tests {
         ));
         assert_eq!(recorder.snapshot().vm_steps, 1);
 
-        let mut vm = Vm::new();
+        let mut vm = crate::vm::test_runtime::new_vm();
         let recorder = vm.enable_work_recording();
         vm.execute(&Chunk::new()).await.unwrap();
         assert_eq!(recorder.snapshot().vm_steps, 0);

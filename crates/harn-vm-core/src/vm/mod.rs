@@ -36,25 +36,7 @@ mod tool_callable;
 mod work;
 
 #[cfg(test)]
-mod depth_regression_tests;
-#[cfg(test)]
-mod tests_debug;
-#[cfg(test)]
-mod tests_lazy_callable;
-#[cfg(test)]
-mod tests_lexical_block;
-#[cfg(test)]
-mod tests_lexical_capture;
-#[cfg(test)]
-mod tests_package_runtime;
-#[cfg(test)]
-mod tests_runtime;
-#[cfg(test)]
-mod tests_runtime_process_exit;
-#[cfg(test)]
-mod tests_typed_op_fallback;
-#[cfg(test)]
-mod tests_value_calls;
+mod test_runtime;
 
 pub(crate) use async_builtin::run_async_builtin_with;
 pub use async_builtin::{AsyncBuiltinCtx, VmCallSite};
@@ -62,7 +44,7 @@ pub use builtin::{VmBuiltinArity, VmBuiltinKind, VmBuiltinMetadata};
 pub use builtin_def::{
     AsyncBuiltinFuture, AsyncHandler, SyncHandler, VmBuiltinDef, VmBuiltinHandler, ALL_BUILTIN_DEFS,
 };
-pub(crate) use builtin_manifest::builtin_policy_metadata;
+pub use builtin_manifest::builtin_policy_metadata;
 pub use builtin_manifest::{
     all_builtin_defs, all_builtin_manifest, builtin_for_harness_path, builtin_manifest_entry,
     capability_method_manifest_entry, harness_method_for_builtin,
@@ -80,7 +62,7 @@ pub use runtime::{
     BuiltinGateDecision, VmBuiltinBridge, VmRuntime, VmRuntimeBaseline, VmSpanKind, VmTaskCleanup,
 };
 pub use runtime_context::RuntimeContext;
-pub(crate) use runtime_context::{runtime_context_clear, runtime_context_get, runtime_context_set};
+pub use runtime_context::{runtime_context_clear, runtime_context_get, runtime_context_set};
 pub use runtime_scope::{scope_runtime, VmExecutionScope};
 pub use state::{Vm, VmBaseline};
 pub(crate) use stdlib_artifact::prepare_stdlib_module_artifact;
