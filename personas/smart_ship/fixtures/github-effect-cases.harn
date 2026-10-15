@@ -1,5 +1,11 @@
 import { git } from "../fixtures/neutral"
-import { digest, execution, fixture, reviewed_admission } from "../fixtures/support"
+import {
+  digest,
+  execution,
+  finish_reviewed_admission,
+  fixture,
+  reviewed_request,
+} from "../fixtures/support"
 import { run_github_effect_command } from "../github-effect-cli"
 import {
   GithubAdmissionConfiguration,
@@ -19,6 +25,7 @@ import {
   prepare_state,
   read_state,
   reserve_effect,
+  scope_bytes,
   verify_admission,
 } from "../lib/main"
 
@@ -40,6 +47,10 @@ fn main(harness: Harness) {
     check_reserved_admission_resumes(harness)
   } else if argv[1] == "review-withdrawal" {
     check_review_withdrawal(harness)
+  } else if argv[1] == "source-binding" {
+    check_signed_source_binding(harness)
+  } else if argv[1] == "rule-binding" {
+    check_signed_rule_binding(harness)
   } else {
     throw "unknown effect scenario"
   }
@@ -55,7 +66,7 @@ type Setup = {
 
 type MergeBody = {sha: string, merge_method: string}
 
-fn setup(harness: Harness) -> Setup {
+fn setup(harness: Harness, multiple_rules: bool = false) -> Setup {
   const root = harness.fs.mkdtemp_in_workspace("smart-ship-github-effect-")
   const remote = path_join(root, "remote.git")
   const workspace = path_join(root, "owner.git")
@@ -64,11 +75,29 @@ fn setup(harness: Harness) -> Setup {
   git(harness.process, workspace, ["config", "user.name", "Smart Ship Fixture"])
   git(harness.process, workspace, ["config", "user.email", "fixture@example.invalid"])
   const f = fixture(harness.random)
-  const policy = f.policy
+  const original_policy = f.policy
     + {
       repositories: [REPOSITORY],
-      admission_rules: f.policy.admission_rules.map({ rule -> rule + {repository: REPOSITORY} }),
+      admission_rules: f.policy.admission_rules.map(
+        { rule -> rule + {repository: REPOSITORY, repository_id: "fixture-repository"} },
+      ),
     }
+  const strong = original_policy.admission_rules[0]!
+  const policy = if multiple_rules {
+    original_policy
+      + {
+        admission_rules: [
+          strong
+            + {
+              id: "other-rule",
+              review: strong.review + {trusted_actor_ids: ["untrusted-reviewer"]},
+            },
+          strong,
+        ],
+      }
+  } else {
+    original_policy
+  }
   const installation = {
     schema: "smart-ship.installation.v1",
     policy: policy,
@@ -98,10 +127,31 @@ fn setup(harness: Harness) -> Setup {
     == "committed",
     "fixture activation did not commit"
   const original = execution(f)
-  const signed = reviewed_admission(
+  const request = reviewed_request(
     policy,
     f.private_key,
     {id: "7", base: "b".repeat(40)},
+    original
+      + {
+        source: original.source + {repository: REPOSITORY},
+        requirement: original.requirement + {repository: REPOSITORY},
+      },
+  )
+  const scope = request.scope.scope + {rule: strong.id}
+  const bound = request
+    + {
+      source: request.source
+        + {
+          author: {id: "fixture-author", name: "author", kind: "User"},
+          head_repository_id: "fixture-repository",
+          base_repository_id: "fixture-repository",
+        },
+      scope: request.scope
+        + {scope: scope, signature: ed25519_sign(f.private_key, scope_bytes(scope))},
+    }
+  const signed = finish_reviewed_admission(
+    bound,
+    f.private_key,
     original
       + {
         source: original.source + {repository: REPOSITORY},
@@ -129,20 +179,43 @@ fn mock_merge(
   s: Setup,
   status: int = 200,
   changed_head: bool = false,
-  review_mode: "approved" | "withdrawn" | "unresolved" | "missing" = "approved",
+  review_mode: "approved" \
+    | "withdrawn" \
+    | "unresolved" \
+    | "missing" \
+    | "changed-base" \
+    | "changed-repository" = "approved",
 ) {
   testing.http_mock_clear()
   const source = s.submission.admission.record.source
   const identity = {
     number: 7,
     headRefOid: source.head,
-    baseRefOid: source.base,
+    baseRefOid: if review_mode == "changed-base" {
+      "d".repeat(40)
+    } else {
+      source.base
+    },
     reviewDecision: "APPROVED",
     author: {id: "fixture-author", login: "author", type: "User"},
     state: "OPEN",
     isDraft: false,
-    headRepository: {id: "fixture-repository", nameWithOwner: REPOSITORY},
-    baseRepository: {id: "fixture-repository", nameWithOwner: REPOSITORY},
+    headRepository: {
+      id: if review_mode == "changed-repository" {
+        "replacement"
+      } else {
+        "fixture-repository"
+      },
+      nameWithOwner: REPOSITORY,
+    },
+    baseRepository: {
+      id: if review_mode == "changed-repository" {
+        "replacement"
+      } else {
+        "fixture-repository"
+      },
+      nameWithOwner: REPOSITORY,
+    },
   }
   const reviews = [
     {
@@ -284,6 +357,55 @@ fn check_review_withdrawal(harness: Harness) {
     require !repeated.dispatch.dispatch_started && harness.testing.http_mock_calls() == calls,
       "refused review was silently requalified on duplicate delivery"
   }
+}
+
+fn check_signed_source_binding(harness: Harness) {
+  for mode in ["changed-base", "changed-repository"] {
+    const s = setup(harness)
+    defer {
+      harness.fs.delete(s.root)
+    }
+    require verify_admission(s.submission.admission, s.configuration.installation.policy).status
+      == "admitted",
+      "source-binding control must have a valid signed admission"
+    mock_merge(harness.testing, s, 200, false, mode)
+    const result = submit_github_admission(harness, s.configuration, s.submission)
+    require result.dispatch.outcome?.status == "refused"
+      && len(harness.testing.http_mock_calls().filter({ call -> call.method == "PUT" })) == 0,
+      "fresh review of a different signed source reached merge: "
+      + mode
+    const evidence: GithubAdmissionReviewRefused = schema_expect(
+      json_parse(result.dispatch.outcome!.receipt!.body),
+      schema_of(GithubAdmissionReviewRefused),
+    )
+    require evidence.review.decision.invalid.contains("admission-source-binding")
+      && evidence.review.decision.observed_reviews == 2,
+      "source refusal lost its measured binding decision"
+  }
+}
+
+fn check_signed_rule_binding(harness: Harness) {
+  const s = setup(harness, true)
+  defer {
+    harness.fs.delete(s.root)
+  }
+  require verify_admission(s.submission.admission, s.configuration.installation.policy).status
+    == "admitted",
+    "multiple-rule control must have a valid signed admission"
+  mock_merge(harness.testing, s, 200, false, "withdrawn")
+  const result = submit_github_admission(harness, s.configuration, s.submission)
+  require result.dispatch.outcome?.status == "refused"
+    && len(harness.testing.http_mock_calls().filter({ call -> call.method == "PUT" })) == 0,
+    "fresh review used a different repository rule than the signed scope"
+  const evidence: GithubAdmissionReviewRefused = schema_expect(
+    json_parse(result.dispatch.outcome!.receipt!.body),
+    schema_of(GithubAdmissionReviewRefused),
+  )
+  require evidence.review.decision.invalid == []
+    && evidence.review.decision.pending.contains("independent-exact-head-approvals")
+    && evidence.review.decision.approvers == []
+    && evidence.review.decision.observed_reviews == 2,
+    "rule-binding control did not reach the signed rule's trusted approval decision"
 }
 
 fn save(process: HarnessProcess, s: Setup, state: Controller) {

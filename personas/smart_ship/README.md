@@ -96,7 +96,8 @@ The GitHub effect adapter reserves signed admissions through this same owner,
 reads the current complete review and thread census, and applies the installation's
 review policy before committing dispatch. A dismissed trusted approval, unresolved
 thread, or missing census refuses the admission. The dispatch commitment rechecks
-authority after those reads. The published connector binds the merge to the verified
+authority after those reads. The fresh source must match the signed source, and the
+signed scope selects the installation's review rule. The published connector binds the merge to the verified
 head; GitHub enforces its effective branch rules. Review reads and the merge are
 separate API operations, so GitHub's branch rules govern changes after the final read.
 Durable effect receipts retain the fresh review decision, canonical provider JSON,

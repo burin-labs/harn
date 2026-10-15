@@ -42,3 +42,11 @@ pipeline test_github_effect_resumes_a_reserved_but_undispatched_admission(harnes
 pipeline test_github_effect_refreshes_trusted_review_before_mutation(harness: Harness) {
   run_case(harness, "review-withdrawal")
 }
+
+pipeline test_github_effect_rejects_changed_signed_source(harness: Harness) {
+  run_case(harness, "source-binding")
+}
+
+pipeline test_github_effect_uses_the_signed_scope_review_rule(harness: Harness) {
+  run_case(harness, "rule-binding")
+}

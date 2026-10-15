@@ -261,7 +261,11 @@ pub fn submit_github_admission(
       },
     },
   )
-  const rule = config.policy.admission_rules.find({ row -> row.repository == request.repository })!
+  const rule = config.policy.admission_rules.find(
+    { row ->
+      row.id == request.admission.record.scope.scope.rule && row.repository == request.repository
+    },
+  )!
   const dispatch = dispatch_reserved_effect(
     pick(harness, ["process", "random"]),
     config.store,
@@ -279,15 +283,23 @@ pub fn submit_github_admission(
         return {status: "refused", receipt: effect_receipt(json_stringify(refusal))}
       }
       const observation = unwrap(observed)
+      const review = review_admission(observation.source, rule.review, observation.reviews)
+      const decision: ReviewAdmission = if observation.source == request.admission.record.source {
+        review
+      } else {
+        review
+          + {
+            status: "invalid",
+            approvers: [],
+            invalid: review.invalid + ["admission-source-binding"],
+          }
+      }
       github_outcome(
         harness,
         configuration,
         schema_expect(effect, schema_of(AdmissionEffect)),
         target,
-        {
-          observation: observation,
-          decision: review_admission(observation.source, rule.review, observation.reviews),
-        },
+        {observation: observation, decision: decision},
       )
     },
   )
