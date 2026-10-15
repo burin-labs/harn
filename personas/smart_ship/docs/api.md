@@ -262,6 +262,18 @@ Only the effect owner receives these handles; dispatch identities come from its 
 pub type EffectOwnerHost = {process: HarnessProcess, random: HarnessRandom}
 ```
 
+### type `EffectRefusal`
+
+Unmeasured evidence remains nil; measured refusals retain complete counts and names.
+
+```harn
+pub type EffectRefusal = {
+  reason: string,
+  admission: AdmissionVerification?,
+  verification: Verification?,
+}
+```
+
 ### type `EffectRequest`
 
 A digest cannot stand in for an admission record at the mutation boundary.
@@ -1327,7 +1339,7 @@ pub fn requirement_identity(requirement: JobInputs) -> string {
 
 ### fn `reserve_effect`
 
-Persist the reservation with CAS before starting an idempotent, source-guarded forge action.
+Persist the qualified reservation with CAS; refusals retain any measured evidence.
 
 ```harn
 pub fn reserve_effect(
@@ -1335,7 +1347,7 @@ pub fn reserve_effect(
   fence: Fence,
   request: EffectRequest,
   policy: Policy,
-) -> Result<Controller, string> {
+) -> Result<Controller, EffectRefusal> {
 }
 ```
 

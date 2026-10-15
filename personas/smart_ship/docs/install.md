@@ -120,6 +120,10 @@ Commit the returned state through the Git compare-and-swap owner before calling
 `dispatch_reserved_effect`. An unsigned digest cannot authorize admission.
 Release requests must name the exact `checkpoint_id` in `input_digest` and a
 source in that fully verified checkpoint.
+Read admission refusals through `EffectRefusal.admission` and checkpoint
+refusals through `EffectRefusal.verification`. These retain required counts,
+pending and failing job names, and invalid evidence. A nil field means that
+qualification was not measured for that stage.
 
 Each authority generation freezes `policy_digest`. To change policy, drain
 pending and active verification, reconcile external effects, and resolve work

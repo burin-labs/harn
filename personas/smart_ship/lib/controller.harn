@@ -1,12 +1,13 @@
 pub import {
   AdmissionEffect,
+  EffectRefusal,
   EffectRequest,
   EffectTarget,
   ReleaseEffect,
   RerunEffect,
   admission_effect,
 } from "./effect_contract"
-import { admission_effect_valid } from "./effect_contract"
+import { qualify_admission_effect } from "./effect_contract"
 import {
   checkpoint_id,
   is_digest,
@@ -16,7 +17,16 @@ import {
   snapshot_id,
 } from "./identity"
 import { fence_matches, promote } from "./promotion"
-import { Authority, Checkpoint, Fence, Policy, Proof, Snapshot, Verification } from "./types"
+import {
+  AdmissionVerification,
+  Authority,
+  Checkpoint,
+  Fence,
+  Policy,
+  Proof,
+  Snapshot,
+  Verification,
+} from "./types"
 import { policy_errors, verify } from "./verification"
 
 /** An unreported attempt retains its full allowance, even after revocation or expiry. */
@@ -174,13 +184,22 @@ fn advance(state: Controller) -> Controller {
   return next
 }
 
-/** Persist the reservation with CAS before starting an idempotent, source-guarded forge action. */
+/** Construct a refusal without turning unmeasured evidence into a measured zero. */
+fn effect_refusal(
+  reason: string,
+  admission: AdmissionVerification? = nil,
+  verification: Verification? = nil,
+) -> EffectRefusal {
+  return {reason: reason, admission: admission, verification: verification}
+}
+
+/** Persist the qualified reservation with CAS; refusals retain any measured evidence. */
 pub fn reserve_effect(
   state: Controller,
   fence: Fence,
   request: EffectRequest,
   policy: Policy,
-) -> Result<Controller, string> {
+) -> Result<Controller, EffectRefusal> {
   if !authorized(state, fence) || state.authority.mode != "active"
     || !policy_matches(state, policy)
     || !policy.repositories.contains(request.repository)
@@ -188,25 +207,33 @@ pub fn reserve_effect(
     || !is_git_id(request.source)
     || !is_digest(request.input_digest)
     || state.authority.held_repositories.contains(request.repository) {
-    return Err("external effect authority or source identity is invalid")
+    return Err(effect_refusal("external effect authority or source identity is invalid"))
   }
-  if !admission_effect_valid(request, policy) {
-    return Err(
-      "external admission requires its qualified signed record and exact dispatch identity",
-    )
+  const admission = qualify_admission_effect(request, policy)
+  if admission != nil && admission.status != "admitted" {
+    return Err(effect_refusal("external admission is not qualified", admission))
   }
-  if request.kind == "release"
-    && (state.checkpoint == nil
-      || request.input_digest != checkpoint_id(state.checkpoint)
-      || policy_digest(state.checkpoint.policy) != state.authority.policy_digest
-      || verify(state.checkpoint.snapshot, state.checkpoint.proofs, policy).status != "verified"
-      || !state.checkpoint.snapshot.sources.any(
+  if request.kind == "release" {
+    const checkpoint = state.checkpoint
+    if checkpoint == nil
+      || request.input_digest != checkpoint_id(checkpoint)
+      || policy_digest(checkpoint.policy) != state.authority.policy_digest
+      || !checkpoint.snapshot.sources.any(
         { source -> source.repository == request.repository && source.commit == request.source },
-      )) {
-    return Err("release request does not name the exact complete proven checkpoint")
+      ) {
+      return Err(effect_refusal("release request does not name the exact proven checkpoint"))
+    }
+    const verification = verify(checkpoint.snapshot, checkpoint.proofs, policy)
+    if verification.status != "verified" {
+      return Err(
+        effect_refusal("release checkpoint verification is not complete", nil, verification),
+      )
+    }
   }
   if state.effects.any({ effect -> effect.request == request }) {
-    return Err("external effect is already recorded; reconcile its original request")
+    return Err(
+      effect_refusal("external effect is already recorded; reconcile its original request"),
+    )
   }
   if state.effects.any(
     { effect ->
@@ -214,7 +241,7 @@ pub fn reserve_effect(
         && unresolved_effect(effect)
     },
   ) {
-    return Err("repository already has an unresolved external effect")
+    return Err(effect_refusal("repository already has an unresolved external effect"))
   }
   let next = advance(state)
   next.effects = next.effects

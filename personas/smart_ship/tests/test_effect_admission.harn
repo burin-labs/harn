@@ -58,6 +58,11 @@ pipeline test_unsigned_admission_cannot_reach_the_external_dispatch_boundary(har
   assert(effect_authorized(reserved, reserved.effects[0]!))
   const dispatching = unwrap(begin_effect(reserved, fence(reserved), request, digest("dispatch")))
   assert_eq(dispatching.effects[0]!.status, "dispatching")
+  const target = unwrap_err(
+    reserve_effect(state, fence(state), request + {input_digest: digest("wrong target")}, f.policy),
+  )
+  assert_eq(target.admission!.invalid, ["admission-effect-target"])
+  assert_eq(target.admission!.checks.required, 1)
   for altered in [
     request + {source: sha256_hex("foreign head")},
     request + {repository: "foreign"},
@@ -75,7 +80,14 @@ pipeline test_unsigned_admission_cannot_reach_the_external_dispatch_boundary(har
     signer: signed.signer,
     signature: ed25519_sign(f.private_key, admission_bytes(partial_record)),
   }
-  assert(is_err(reserve_effect(state, fence(state), admission_effect(partial), f.policy)))
+  const refusal = unwrap_err(
+    reserve_effect(state, fence(state), admission_effect(partial), f.policy),
+  )
+  assert_eq(refusal.admission!.status, "pending")
+  assert_eq(refusal.admission!.checks.required, 1)
+  assert_eq(refusal.admission!.checks.pending, ["tests"])
+  assert_eq(refusal.admission!.checks.invalid, [])
+  assert_eq(refusal.verification, nil)
 }
 
 pipeline test_release_requires_the_exact_complete_checkpoint_under_frozen_policy(harness: Harness) {
@@ -106,16 +118,18 @@ pipeline test_release_requires_the_exact_complete_checkpoint_under_frozen_policy
     ),
   )
   const partial = checkpoint + {proofs: []}
-  assert(
-    is_err(
-      reserve_effect(
-        settled + {checkpoint: partial},
-        fence(settled),
-        request + {input_digest: checkpoint_id(partial)},
-        f.policy,
-      ),
+  const refusal = unwrap_err(
+    reserve_effect(
+      settled + {checkpoint: partial},
+      fence(settled),
+      request + {input_digest: checkpoint_id(partial)},
+      f.policy,
     ),
   )
+  assert_eq(refusal.verification!.status, "pending")
+  assert_eq(refusal.verification!.required, 1)
+  assert_eq(refusal.verification!.pending, ["tests"])
+  assert_eq(refusal.admission, nil)
   assert(is_err(reserve_effect(settled, fence(settled), request, f.policy + {max_changes: 20})))
 }
 
