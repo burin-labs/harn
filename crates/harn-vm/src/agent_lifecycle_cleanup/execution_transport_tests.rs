@@ -1,4 +1,5 @@
 use super::*;
+use crate::native_vm::NativeCleanupTestExt;
 use crate::native_vm::NativeVmState;
 use std::sync::atomic::{AtomicUsize, Ordering};
 

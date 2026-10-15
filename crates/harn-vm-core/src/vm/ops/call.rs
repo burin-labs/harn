@@ -101,7 +101,7 @@ impl super::super::Vm {
         )
     }
 
-    pub(in crate::vm::ops) async fn try_call_special_name(
+    pub(in crate::vm) async fn try_call_special_name(
         &mut self,
         name: &str,
         args: &[VmValue],

@@ -105,7 +105,7 @@ fn every_pure_registry_row_is_handled_by_the_plain_dispatch() {
 
 #[tokio::test]
 async fn every_mutating_registry_row_is_handled_by_the_mutating_dispatch() {
-    let mut vm = crate::vm::Vm::new();
+    let mut vm = crate::vm::test_runtime::new_vm();
     let receivers = [
         (
             MethodReceiver::List,

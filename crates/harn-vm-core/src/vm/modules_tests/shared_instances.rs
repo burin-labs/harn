@@ -30,7 +30,7 @@ async fn call_export(vm: &mut Vm, loaded: &LoadedModule, name: &str) -> VmValue 
 fn shared_instances_follow_source_identity_and_preserve_mutable_state_isolation() {
     let runtime = runtime();
     runtime.block_on(async {
-        let root = Vm::new();
+        let root = super::super::super::test_runtime::new_vm();
         let synthetic = stdlib_path("shared_instance_probe");
         let v1 = leaked("pub fn version() -> int {\n  return 1\n}\n");
         let v2 = leaked("pub fn version() -> int {\n  return 2\n}\n");
@@ -68,7 +68,7 @@ fn shared_instances_follow_source_identity_and_preserve_mutable_state_isolation(
         );
 
         // A fresh root shares nothing with this execution tree.
-        let isolated = Vm::new();
+        let isolated = super::super::super::test_runtime::new_vm();
         assert!(isolated.shared_module_instance(&synthetic, v1).is_none());
 
         // Mutable top-level state is never shared: each cold child keeps

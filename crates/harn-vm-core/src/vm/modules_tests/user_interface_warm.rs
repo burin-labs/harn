@@ -81,7 +81,7 @@ fn age(path: &Path) {
 /// answer.
 fn import_fresh(runtime: &tokio::runtime::Runtime, root: &Path) -> Vec<String> {
     runtime.block_on(async {
-        let mut vm = Vm::new();
+        let mut vm = super::super::super::test_runtime::new_vm();
         let exports = vm.load_module_exports(root).await.expect("root imports");
         exports.into_keys().collect()
     })

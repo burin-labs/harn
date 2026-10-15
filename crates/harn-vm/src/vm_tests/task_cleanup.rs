@@ -64,7 +64,7 @@ async fn scoped_first_child_failure_releases_its_lifecycle_owner() {
     crate::agent_sessions::reset_session_store();
     crate::llm::agent_session_host::reset_agent_session_host_state();
     let root = tempfile::tempdir().expect("temp root");
-    let mut vm = crate::vm::Vm::new();
+    let mut vm = crate::new_vm();
     let session_id = "scope-failed-child-cleanup";
     let task_id = "task_scope_failed_child";
     install_claimed_journal(&vm, root.path(), session_id, task_id).await;
@@ -74,14 +74,9 @@ async fn scoped_first_child_failure_releases_its_lifecycle_owner() {
         "public-scope-child".to_string(),
         failed_task(task_id, "scope boom"),
     );
-    vm.task_scopes.push(crate::vm::TaskScope {
-        task_ids: vec!["public-scope-child".to_string()],
-        frame_depth: 0,
-        env_scope_depth: 0,
-    });
 
     let error = vm
-        .execute_task_scope_exit()
+        .join_task_scope_for_test(vec!["public-scope-child".to_string()])
         .await
         .expect_err("scope must propagate its first child failure");
     assert_eq!(error.to_string(), "Runtime error: scope boom");
@@ -95,7 +90,7 @@ async fn graceful_cancel_early_failure_releases_its_lifecycle_owner() {
     crate::agent_sessions::reset_session_store();
     crate::llm::agent_session_host::reset_agent_session_host_state();
     let root = tempfile::tempdir().expect("temp root");
-    let mut vm = crate::vm::Vm::new();
+    let mut vm = crate::new_vm();
     crate::stdlib::register_vm_stdlib(&mut vm);
     let session_id = "graceful-cancel-failed-child-cleanup";
     let task_id = "task_graceful_cancel_failed_child";
@@ -106,8 +101,8 @@ async fn graceful_cancel_early_failure_releases_its_lifecycle_owner() {
         "public-graceful-child".to_string(),
         failed_task(task_id, "graceful boom"),
     );
-    let handled = vm
-        .try_call_special_name(
+    let result = vm
+        .call_special_for_test(
             "cancel_graceful",
             &[
                 VmValue::task_handle("public-graceful-child"),
@@ -116,8 +111,6 @@ async fn graceful_cancel_early_failure_releases_its_lifecycle_owner() {
         )
         .await
         .expect("cancel_graceful executes");
-    assert!(handled);
-    let result = vm.stack.last().expect("cancel result");
     assert!(matches!(
         result,
         VmValue::EnumVariant(variant) if variant.is_variant("Result", "Err")

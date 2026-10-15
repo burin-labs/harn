@@ -677,7 +677,7 @@ impl super::super::Vm {
     /// `TaskScopeExit`: close the innermost nursery — join every task still
     /// bound to it. The first task error cancels the remaining siblings and
     /// propagates out of the `scope { }` block.
-    pub(super) async fn execute_task_scope_exit(&mut self) -> Result<(), VmError> {
+    pub(in crate::vm) async fn execute_task_scope_exit(&mut self) -> Result<(), VmError> {
         let Some(scope) = self.task_scopes.pop() else {
             return Ok(());
         };

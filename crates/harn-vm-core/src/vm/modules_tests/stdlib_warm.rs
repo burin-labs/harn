@@ -34,8 +34,7 @@ fn warm_embedded_stdlib_leaves_the_agent_stack_on_disk() {
         .expect("runtime builds");
     let before = crate::module_artifact::INTERFACE_RESOLUTIONS.with(std::cell::Cell::get);
     runtime.block_on(async {
-        let mut vm = Vm::new();
-        crate::stdlib::register_vm_stdlib(&mut vm);
+        let mut vm = super::super::super::test_runtime::new_vm();
         vm.load_module_exports_from_import("std/agent/loop")
             .await
             .expect("stdlib import succeeds");

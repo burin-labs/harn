@@ -50,6 +50,7 @@ pub use runtime_limits::{
     RuntimeLimitDescription, RuntimeLimitEntry, RuntimeLimits, RuntimeLimitsReport,
 };
 pub use runtime_stack::{on_vm_stack, RUNTIME_STACK_SIZE};
+pub use source_compile::compile_source;
 pub use value::*;
 pub use vm::flight_recorder;
 pub use vm::*;

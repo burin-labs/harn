@@ -62,7 +62,7 @@ impl ExecutionDeadlineState {
             .then(|| self.origin + std::time::Duration::from_nanos(encoded.saturating_sub(1)))
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "vm-test-support"))]
     pub(crate) fn encoded_offset_for_test(&self) -> u64 {
         self.deadline_offset.load(Ordering::Acquire)
     }

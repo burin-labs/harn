@@ -135,8 +135,9 @@ impl AsyncBuiltinCtx {
         self.child.lock().execution_deadline.pause(clock)
     }
 
-    #[cfg(test)]
-    pub(crate) fn execution_deadline_offset_for_test(&self) -> u64 {
+    #[cfg(any(test, feature = "vm-test-support"))]
+    #[doc(hidden)]
+    pub fn execution_deadline_offset_for_test(&self) -> u64 {
         self.child
             .lock()
             .execution_deadline

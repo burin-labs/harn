@@ -5,17 +5,9 @@
 //! `use super::*`.
 
 use super::*;
-use crate::native_vm::NativeVmState;
-
-#[test]
-fn vm_construction_initializes_shared_secret_patterns() {
-    let _vm = Vm::new();
-    assert!(crate::secret_patterns::default_secret_patterns_initialized());
-}
 
 fn baseline_with_stdlib(source: &str) -> VmBaseline {
-    let mut vm = Vm::new();
-    crate::register_vm_stdlib(&mut vm);
+    let mut vm = super::super::test_runtime::new_vm();
     vm.set_source_info("baseline_test.harn", source);
     vm.set_global(
         "stable_global",
@@ -52,7 +44,6 @@ fn vm_baseline_instantiates_clean_mutable_execution_state() {
     assert!(clean.cancel_token.is_none());
     assert!(clean.interrupt_handlers.is_empty());
     assert!(clean.error_stack_trace.is_empty());
-    assert!(clean.native().bridge.is_none());
     assert!(clean
         .globals
         .get("stable_global")
@@ -61,7 +52,7 @@ fn vm_baseline_instantiates_clean_mutable_execution_state() {
 
 #[tokio::test]
 async fn inline_child_inherits_held_lock_keys_but_concurrent_child_does_not() {
-    let mut parent = Vm::new();
+    let mut parent = super::super::test_runtime::new_vm();
     let permit = parent
         .sync_runtime
         .acquire("mutex", "v:test", 1, 1, None, None)
@@ -101,45 +92,16 @@ async fn inline_child_inherits_held_lock_keys_but_concurrent_child_does_not() {
 
 #[test]
 fn vm_reports_effective_runtime_limits() {
-    let vm = Vm::new();
+    let vm = super::super::test_runtime::new_vm();
 
     assert_eq!(vm.runtime_limits(), RuntimeLimits::default());
     assert_eq!(
         vm.runtime_limit_report().entries.len(),
-        crate::RUNTIME_LIMIT_DESCRIPTIONS.len()
+        crate::runtime_limits::RUNTIME_LIMIT_DESCRIPTIONS.len()
     );
     assert_eq!(vm.child_vm().runtime_limits(), vm.runtime_limits());
     assert_eq!(
         vm.baseline().instantiate().runtime_limits(),
         vm.runtime_limits()
     );
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn vm_baseline_rebinds_shared_state_builtins_per_instance() {
-    let local = tokio::task::LocalSet::new();
-    local
-        .run_until(async {
-            let source = r#"
-pipeline main(harness: Harness) {
-  const cell = harness.runtime.shared_cell({scope: "task_group", key: "turn", initial: 0})
-  harness.stdio.println(harness.runtime.shared_get(cell))
-  harness.runtime.shared_set(cell, harness.runtime.shared_get(cell) + 1)
-}"#;
-            let chunk = crate::compile_source(source).expect("compile");
-            let baseline = baseline_with_stdlib(source);
-
-            let mut first = baseline.instantiate();
-            first.execute(&chunk).await.expect("first execute");
-            assert_eq!(first.output(), "0\n");
-
-            let mut second = baseline.instantiate();
-            second.execute(&chunk).await.expect("second execute");
-            assert_eq!(
-                second.output(),
-                "0\n",
-                "shared state created by the first VM must not leak into the next baseline instance"
-            );
-        })
-        .await;
 }

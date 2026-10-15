@@ -285,6 +285,7 @@ async-io = { version = "2.6", optional = true }
 zbus = { version = "5.17", default-features = false, features = ["async-io"], optional = true }
 
 [dev-dependencies]
+harn-vm-core = { path = "../harn-vm-core", version = "=0.10.167", features = ["vm-test-support"] }
 criterion = "0.8"
 harn-clock = { path = "../harn-clock", version = "=0.10.167", features = ["test-support"] }
 harn-modules = { path = "../harn-modules", version = "=0.10.167", features = ["bundled-stdlib"] }
