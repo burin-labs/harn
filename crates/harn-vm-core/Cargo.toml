@@ -48,7 +48,7 @@ strsim = "0.11"
 strip-ansi-escapes = "0.2"
 thiserror = "2"
 tracing = "0.1"
-tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync", "time", "test-util", "process", "io-util", "io-std", "macros"] }
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync", "time", "macros"] }
 uuid = { version = "1", features = ["serde", "v4", "v5", "v7"] }
 
 [target.'cfg(windows)'.dependencies]
@@ -58,6 +58,7 @@ windows-sys = { version = "0.61.2", features = [
 ] }
 
 [dev-dependencies]
+tokio = { version = "1", features = ["test-util"] }
 walkdir = "2"
 harn-modules = { path = "../harn-modules", version = "=0.10.167", features = ["bundled-stdlib"] }
 proptest = "1"
