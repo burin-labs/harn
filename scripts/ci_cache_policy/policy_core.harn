@@ -1549,6 +1549,82 @@ pub fn effective_job_env(workflow: dict, job: dict, key: string) -> string {
   return trim(to_string(value))
 }
 
+/** Explicit workflow variables hashed by the pinned Rust cache action. */
+fn rust_cache_environment(
+  workflow: dict,
+  job: dict,
+  step: dict,
+  matrix: dict = {},
+) -> dict<string, string> {
+  const declared = {...workflow?.env ?? {}, ...job?.env ?? {}, ...step?.env ?? {}}
+  let environment: dict<string, string> = {}
+  for key in declared.keys().sorted() {
+    // Swatinem c193711: src/config.ts defaults, matched by prefix.
+    if !["CARGO", "CC", "CFLAGS", "CXX", "CMAKE", "RUST"].any(
+      { prefix -> key.starts_with(prefix) },
+    ) {
+      continue
+    }
+    let value = to_string(declared[key])
+    for name in matrix.keys() {
+      value = replace(value, "$" + "{{ matrix.${name} }}", to_string(matrix[name]))
+    }
+    if value != "" {
+      environment[key] = value
+    }
+  }
+  return environment
+}
+
+/** Match the three merge-gate build graphs to their cache writers. */
+pub fn linux_cache_environment_errors(workflows: dict) -> list<string> {
+  const refresh = workflows["rust-cache-refresh.yml"] ?? {}
+  let writers: dict<string, dict<string, string>> = {}
+  for job in (refresh?.jobs ?? {}).values() {
+    for row in job?.strategy?.matrix?.include ?? [] {
+      for step in matching_steps(job, RUST_CACHE_ACTION) {
+        const family = replace(cache_family(step), "$" + "{{ matrix.cache_key }}", row.cache_key)
+        writers[family] = rust_cache_environment(refresh, job, step, row)
+      }
+    }
+  }
+  let errors: list<string> = []
+  for workflow in workflows.keys().sorted() {
+    if workflow != "ci.yml" {
+      continue
+    }
+    const document = workflows[workflow]
+    for name in (document?.jobs ?? {}).keys().sorted() {
+      if !["rust-cli", "rust-check-inputs", "package-audit"].contains(name) {
+        continue
+      }
+      const job = document.jobs[name]
+      for step in matching_steps(job, RUST_CACHE_ACTION) {
+        const family = cache_family(step)
+        const writer = writers[family]
+        if writer == nil {
+          errors = errors + ["${workflow}:${name}:${family} has no Rust cache environment writer"]
+          continue
+        }
+        if save_requested(step) {
+          continue
+        }
+        const reader = rust_cache_environment(document, job, step)
+        if reader != writer {
+          errors = errors
+            + [
+              "${workflow}:${name}:${family} compiler environment differs from its Rust cache writer: reader="
+                + json_stringify(reader)
+                + " writer="
+                + json_stringify(writer),
+            ]
+        }
+      }
+    }
+  }
+  return errors
+}
+
 pub fn cache_key_inputs(
   workflow: dict,
   job: dict,
@@ -1783,6 +1859,7 @@ pub fn ci_cache_policy_errors(
     }
   }
   return errors + rust_cache_reader_errors(policy, workflows)
+    + linux_cache_environment_errors(workflows)
 }
 
 /**

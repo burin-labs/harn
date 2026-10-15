@@ -26,9 +26,6 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
-  # Match Cargo.toml across hosted and self-hosted runner defaults. The Rust
-  # artifact contract test checks this projection against the manifest.
-  CARGO_PROFILE_DEV_DEBUG: line-tables-only
   # A cold merge-group producer can take more than 15 minutes to publish its
   # exact-run artifacts. The waits that remain (the security barrier and the
   # lanes that overlap real work with the build) share this bounded policy,
