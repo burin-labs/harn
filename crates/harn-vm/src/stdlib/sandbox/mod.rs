@@ -554,7 +554,11 @@ fn create_dir_all_scoped_target(target: &ScopedMutationTarget) -> io::Result<()>
         match open_dir_at(current.as_raw_fd(), &component) {
             Ok(next) => current = next,
             Err(error) if error.kind() == io::ErrorKind::NotFound => {
-                mkdirat_name(current.as_raw_fd(), &component)?;
+                if let Err(error) = mkdirat_name(current.as_raw_fd(), &component) {
+                    if error.kind() != io::ErrorKind::AlreadyExists {
+                        return Err(error);
+                    }
+                }
                 let next = open_dir_at(current.as_raw_fd(), &component)?;
                 current = next;
             }

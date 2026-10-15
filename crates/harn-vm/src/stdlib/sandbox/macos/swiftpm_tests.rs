@@ -20,6 +20,8 @@ fn generated_launchers_execute_the_same_arguments_as_direct_adaptation() {
             &["run", "app", "", "--", "--cache-path=application-option"],
         ),
         ("swift", &["--version"]),
+        ("swift", &["test", "--toolset", "custom.json"]),
+        ("swift", &["test", "--toolchain=custom"]),
         ("swift", &[]),
         (
             "swift",
@@ -48,31 +50,37 @@ fn generated_launchers_execute_the_same_arguments_as_direct_adaptation() {
         ("xcrun", &["--sdk", "swift", "clang", "--version"]),
         ("xcrun", &["--future-option", "swift", "test"]),
     ];
-    for (name, raw_args) in cases {
-        let target = ScopedMutationTarget {
-            root: workspace.path().to_path_buf(),
-            relative: PathBuf::from(format!("launchers/{name}")),
-        };
-        write_launcher(&target, launcher_source(name, &real).as_bytes()).unwrap();
-        let args = raw_args
-            .iter()
-            .map(|arg| arg.to_string())
-            .collect::<Vec<_>>();
-        let output = std::process::Command::new(target.root.join(&target.relative))
-            .args(&args)
-            .output()
-            .unwrap();
-        assert!(
-            output.status.success(),
-            "{name} {args:?}: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        let stdout = String::from_utf8(output.stdout).unwrap();
-        let actual = stdout
-            .split_terminator('\0')
-            .map(str::to_string)
-            .collect::<Vec<_>>();
-        assert_eq!(actual, compatible_args(name, &args), "{name} {args:?}");
+    for toolset in [None, Some(Path::new("/private/compiler toolset's.json"))] {
+        for (name, raw_args) in cases {
+            let target = ScopedMutationTarget {
+                root: workspace.path().to_path_buf(),
+                relative: PathBuf::from(format!("launchers/{name}")),
+            };
+            write_adapter_file(&target, launcher_source(name, &real, toolset).as_bytes()).unwrap();
+            let args = raw_args
+                .iter()
+                .map(|arg| arg.to_string())
+                .collect::<Vec<_>>();
+            let output = std::process::Command::new(target.root.join(&target.relative))
+                .args(&args)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{name} {args:?}: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let stdout = String::from_utf8(output.stdout).unwrap();
+            let actual = stdout
+                .split_terminator('\0')
+                .map(str::to_string)
+                .collect::<Vec<_>>();
+            assert_eq!(
+                actual,
+                compatible_args_with_toolset(name, &args, toolset),
+                "{name} {args:?}"
+            );
+        }
     }
 }
 
@@ -86,8 +94,12 @@ fn path_adaptation_preserves_selected_tools_and_is_idempotent() {
         "#!/bin/sh\nprintf selected-toolchain\n",
     );
     let original = tools.display().to_string();
-    let first = adapted_path(workspace.path(), &original).unwrap().unwrap();
-    let second = adapted_path(workspace.path(), &first).unwrap().unwrap();
+    let first = adapted_path(workspace.path(), &original, None)
+        .unwrap()
+        .unwrap();
+    let second = adapted_path(workspace.path(), &first, None)
+        .unwrap()
+        .unwrap();
     assert_eq!(first, second);
     assert_eq!(std::env::split_paths(&first).count(), 2);
     let adapter = std::env::split_paths(&first).next().unwrap().join("swift");
@@ -110,7 +122,7 @@ fn adapter_creation_refuses_a_symlinked_cache_parent() {
         workspace.path().join(".harn-toolchain-cache"),
     )
     .unwrap();
-    let result = adapted_path(workspace.path(), "/usr/bin:/bin");
+    let result = adapted_path(workspace.path(), "/usr/bin:/bin", None);
     assert!(
         result.is_err(),
         "a workspace symlink must not redirect adapter writes"

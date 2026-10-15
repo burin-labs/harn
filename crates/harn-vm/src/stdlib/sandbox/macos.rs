@@ -14,6 +14,7 @@
 use std::path::Path;
 use std::process::{Command, Output};
 
+#[cfg(test)]
 use self::swiftpm::compatible_args as macos_sandbox_compatible_args;
 use super::{
     normalized_process_roots, policy_allows_child_writes, policy_allows_network,
@@ -31,6 +32,7 @@ mod parent_environment;
 pub(super) mod private_temp;
 mod self_confinement;
 pub(super) mod swiftpm;
+mod swiftpm_toolset;
 mod toolchain_roots;
 
 const SANDBOX_EXEC_PATH: &str = "/usr/bin/sandbox-exec";
@@ -138,7 +140,11 @@ fn wrap_with_sandbox_exec(
             nested::report_inherited();
             return Ok(PrepareOutcome::WrappedExec {
                 wrapper: program.to_string(),
-                args: macos_sandbox_compatible_args(program, args),
+                args: swiftpm::prepare_args(program, args, policy).map_err(|error| {
+                    super::sandbox_rejection(format!(
+                        "cannot prepare confined SwiftPM command: {error}"
+                    ))
+                })?,
             });
         }
         nested::Nesting::Unenforceable(narrowing) => {
@@ -157,7 +163,11 @@ fn wrap_with_sandbox_exec(
         "--".to_string(),
         program.to_string(),
     ];
-    wrapped_args.extend(macos_sandbox_compatible_args(program, args));
+    wrapped_args.extend(
+        swiftpm::prepare_args(program, args, policy).map_err(|error| {
+            super::sandbox_rejection(format!("cannot prepare confined SwiftPM command: {error}"))
+        })?,
+    );
     Ok(PrepareOutcome::WrappedExec {
         wrapper: SANDBOX_EXEC_PATH.to_string(),
         args: wrapped_args,

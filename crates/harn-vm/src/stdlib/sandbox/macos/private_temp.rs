@@ -13,7 +13,12 @@ use crate::orchestration::CapabilityPolicy;
 
 const SUFFIX_ENV: &str = "DIRHELPER_USER_DIR_SUFFIX";
 
-pub(super) fn prepare(policy: &CapabilityPolicy) -> io::Result<Option<String>> {
+pub(super) struct Binding {
+    pub directory: PathBuf,
+    pub suffix: String,
+}
+
+pub(super) fn prepare(policy: &CapabilityPolicy) -> io::Result<Option<Binding>> {
     let Some(temp) = super::super::workspace_local_tmpdir(policy) else {
         return Ok(None);
     };
@@ -27,7 +32,11 @@ pub(super) fn prepare(policy: &CapabilityPolicy) -> io::Result<Option<String>> {
         ));
     }
     let base = native_temp_base()?;
-    prepare_in(&base, &target).map(Some)
+    let suffix = prepare_in(&base, &target)?;
+    Ok(Some(Binding {
+        directory: target,
+        suffix,
+    }))
 }
 
 pub(in crate::stdlib::sandbox) fn inject_env(
@@ -41,8 +50,8 @@ pub(in crate::stdlib::sandbox) fn inject_env(
         return;
     }
     match prepare(policy) {
-        Ok(Some(suffix)) if !env.iter().any(|(key, _)| key == SUFFIX_ENV) => {
-            env.push((SUFFIX_ENV.to_string(), suffix));
+        Ok(Some(binding)) if !env.iter().any(|(key, _)| key == SUFFIX_ENV) => {
+            env.push((SUFFIX_ENV.to_string(), binding.suffix));
         }
         Ok(_) => {}
         Err(error) => super::super::warn_once(

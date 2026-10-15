@@ -588,6 +588,14 @@ so ordinary project scripts receive those defaults too. SDK and toolchain
 selection, explicit SwiftPM options, and arguments after `--` are preserved.
 The launchers grant no additional file or network access.
 
+On Xcode 27, Swift Build clears the environment of compiler and linker jobs.
+For the default toolchain, Harn supplies a SwiftPM `--toolset` pointing to a
+workspace-local launcher for that same installed compiler. The launcher restores
+the private temporary-directory settings before executing the compiler; adjacent
+frontend and library paths remain read-only links to the installed toolchain.
+This keeps the default build backend. An explicit `--toolset` or `--toolchain`
+takes precedence over this compiler launcher.
+
 A script that replaces `PATH` or invokes an absolute Swift path bypasses the
 launcher. This includes a path previously returned by `xcrun --find swift`;
 lookup-only commands retain their original output. Such a script must supply
