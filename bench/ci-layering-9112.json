@@ -52,6 +52,42 @@
       ]
     }
   ],
+  "latestSuccessfulWorkflowPhases": {
+    "runId": 38687991698,
+    "sourceCommit": "c4f2c6f9a7219dc38fda7875467080bf0af3315d",
+    "workflowSeconds": 1089,
+    "jobsRead": 52,
+    "jobsWithStartAndCompletion": 52,
+    "cliProducer": {
+      "jobId": 116267269824,
+      "runnerGroup": "GitHub Actions",
+      "runnerLabels": ["ubuntu-24.04"],
+      "elapsedSeconds": 925,
+      "rustCacheSetupSeconds": 37,
+      "portableCliBuildSeconds": 860,
+      "artifactUploadSeconds": 4
+    },
+    "longestJob": {
+      "name": "Release residual audit",
+      "jobId": 116267269517,
+      "elapsedSeconds": 1030,
+      "aotGenerationSeconds": 354,
+      "sharedCliWaitSeconds": 551,
+      "auditSeconds": 93
+    },
+    "otherPhases": [
+      {"jobId": 116267269820, "name": "VS Code extension", "elapsedSeconds": 950, "sharedCliWaitSeconds": 925},
+      {"jobId": 116267269877, "name": "Stack frame budget", "elapsedSeconds": 941, "censusSeconds": 339, "sharedCliWaitSeconds": 568},
+      {"jobId": 116267269775, "name": "Rust workspace tests", "elapsedSeconds": 712, "securityArchiveBuildSeconds": 656, "testRunSeconds": 26},
+      {"jobId": 116267269527, "name": "Verify publishable crates", "elapsedSeconds": 747, "packageChecksSeconds": 688}
+    ],
+    "interpretation": "The shared CLI producer remains a build bottleneck. The editor job spends almost all its time waiting for that artifact, and the longest job finishes its audit after that same wait.",
+    "limitations": [
+      "GitHub step timestamps measure complete script phases; the 860-second build phase is not a rustc unit duration.",
+      "This run used the hosted fallback. The measured Kache experiment and the deployed persistent Kache store apply to owned runners, so their timings do not describe this producer.",
+      "Only one workflow was decomposed into phases. These observations identify a live bottleneck, not a controlled causal comparison."
+    ]
+  },
   "workflowMethod": {
     "selection": "Latest five completed successful ci.yml merge_group runs at each checkpoint, in API recency order.",
     "elapsed": "GitHub workflow updatedAt minus startedAt after terminal success, excluding queue admission wait.",
