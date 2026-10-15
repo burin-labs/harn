@@ -5,7 +5,7 @@
 //! out, and the receipt metadata fields derived from them. `compaction.rs`
 //! consumes the typed struct and never re-reads the raw option dict.
 
-use crate::value::{VmDictExt, VmError, VmValue};
+use harn_vm_core::value::{VmDictExt, VmError, VmValue};
 use serde::{Deserialize, Serialize};
 
 const COMPACTION_POLICY_KEYS: &[&str] = &[
@@ -49,7 +49,7 @@ impl CompactionPolicy {
             || self.author.is_some()
     }
 
-    pub(crate) fn has_prompt_directives(&self) -> bool {
+    pub fn has_prompt_directives(&self) -> bool {
         self.instructions
             .as_deref()
             .is_some_and(|value| !value.trim().is_empty())
@@ -130,7 +130,7 @@ impl CompactionPolicy {
         Some(serde_json::Value::Object(map))
     }
 
-    pub(crate) fn prompt_directives(&self) -> Option<String> {
+    pub fn prompt_directives(&self) -> Option<String> {
         if !self.has_prompt_directives() {
             return None;
         }
@@ -152,7 +152,7 @@ impl CompactionPolicy {
         Some(parts.join("\n"))
     }
 
-    pub(crate) fn is_model_visible_scope(&self) -> bool {
+    pub fn is_model_visible_scope(&self) -> bool {
         matches!(
             self.scope.as_deref(),
             Some("model_visible" | "summary" | "transcript")
@@ -165,7 +165,7 @@ pub fn compaction_policy_option_keys() -> &'static [&'static str] {
 }
 
 pub fn compaction_policy_to_vm_value(policy: &CompactionPolicy) -> VmValue {
-    let mut map = crate::value::DictMap::new();
+    let mut map = harn_vm_core::value::DictMap::new();
     if let Some(instructions) = policy.instructions.as_ref() {
         map.put_str("instructions", instructions.clone());
     }
@@ -176,7 +176,7 @@ pub fn compaction_policy_to_vm_value(policy: &CompactionPolicy) -> VmValue {
         map.put_str("scope", scope.clone());
     }
     map.insert(
-        crate::value::intern_key("preserve"),
+        harn_vm_core::value::intern_key("preserve"),
         VmValue::List(std::sync::Arc::new(
             policy
                 .preserve
@@ -186,7 +186,7 @@ pub fn compaction_policy_to_vm_value(policy: &CompactionPolicy) -> VmValue {
         )),
     );
     map.insert(
-        crate::value::intern_key("drop"),
+        harn_vm_core::value::intern_key("drop"),
         VmValue::List(std::sync::Arc::new(
             policy
                 .drop_items
@@ -197,7 +197,7 @@ pub fn compaction_policy_to_vm_value(policy: &CompactionPolicy) -> VmValue {
     );
     if let Some(extend_default_instructions) = policy.extend_default_instructions {
         map.insert(
-            crate::value::intern_key("extend_default_instructions"),
+            harn_vm_core::value::intern_key("extend_default_instructions"),
             VmValue::Bool(extend_default_instructions),
         );
     }
@@ -208,7 +208,7 @@ pub fn compaction_policy_to_vm_value(policy: &CompactionPolicy) -> VmValue {
 }
 
 pub fn parse_compaction_policy_options(
-    options: Option<&crate::value::DictMap>,
+    options: Option<&harn_vm_core::value::DictMap>,
     builtin: &str,
 ) -> Result<CompactionPolicy, VmError> {
     let mut policy = options
@@ -256,7 +256,7 @@ fn parse_compaction_policy_value(
 
 fn apply_compaction_policy_fields(
     policy: &mut CompactionPolicy,
-    map: &crate::value::DictMap,
+    map: &harn_vm_core::value::DictMap,
     builtin: &str,
 ) -> Result<(), VmError> {
     if let Some(value) = optional_policy_string(map, "instructions", builtin)? {
@@ -284,7 +284,7 @@ fn apply_compaction_policy_fields(
 }
 
 fn optional_policy_string(
-    map: &crate::value::DictMap,
+    map: &harn_vm_core::value::DictMap,
     key: &str,
     builtin: &str,
 ) -> Result<Option<String>, VmError> {
@@ -306,7 +306,7 @@ fn optional_policy_string(
 }
 
 fn optional_policy_bool(
-    map: &crate::value::DictMap,
+    map: &harn_vm_core::value::DictMap,
     key: &str,
     builtin: &str,
 ) -> Result<Option<bool>, VmError> {
