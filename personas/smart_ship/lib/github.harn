@@ -25,3 +25,8 @@ pub import {
   read_github_ci_artifacts,
   replay_github_ci,
 } from "./github_ci"
+pub import {
+  GithubIssuerConfiguration,
+  GithubIssuerSettings,
+  load_github_issuer,
+} from "./github_issuer"

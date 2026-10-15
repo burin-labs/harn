@@ -45,7 +45,10 @@ the second joins the original provider census with actual signed `JobRun`
 artifacts. `assess_admission` uses the final verifier before an issuer key is
 read. Assessment alone grants no admission authority. The
 `admission-cli.harn` command reads live CI and current reviews, then optionally
-issues a signed receipt. Hosted sandbox qualification remains in progress.
+issues a signed receipt. Its trusted issuer configuration and public policy
+are separate from submitted evidence; a submission cannot select its own
+signing authority. Current review is the last provider read before pure
+requalification and signing. Hosted sandbox qualification remains in progress.
 
 ## Verify the package
 

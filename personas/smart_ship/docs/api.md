@@ -185,12 +185,36 @@ Preserve actual bounded provider responses, including the complete artifact-list
 pub type GithubCiRead = {endpoint: string, response: unknown}
 ```
 
+### type `GithubIssuerConfiguration`
+
+One canonical policy file supplies the scope preparer and admission issuer.
+
+```harn
+pub type GithubIssuerConfiguration = {policy: Policy, settings: GithubIssuerSettings}
+```
+
+### type `GithubIssuerSettings`
+
+Host-owned settings are separate from every submitted or downloaded admission request.
+
+```harn
+pub type GithubIssuerSettings = {
+  policy_file: string,
+  producer_policy: GithubCiProducerPolicy,
+  run_name: string,
+  jobs: list<GithubCiJob>,
+  token_secret: string,
+  issuer: {id: string, secret: string},
+}
+```
+
 ### fn `assess_github_ci`
 
 Live reads and archived replay enter this same original-run and signed-execution boundary.
 
 ```harn
 pub fn assess_github_ci(
+  trusted: Policy,
   source: ProofSource,
   policy: ProducerPolicy,
   producer: Run,
@@ -232,6 +256,15 @@ pub fn github_reviewed_change(census: GithubPullRequestReviewCensus) -> Reviewed
 }
 ```
 
+### fn `load_github_issuer`
+
+Load trusted issuer settings and public policy before reading any credential or submitted evidence.
+
+```harn
+pub fn load_github_issuer(fs: HarnessFs, path: string) -> GithubIssuerConfiguration {
+}
+```
+
 ### fn `read_github_ci_artifacts`
 
 Download actual stock results through the connector's bounded, digest-checked archive reader.
@@ -266,6 +299,7 @@ Requalify recorded observations without inventing provider pages or granting liv
 
 ```harn
 pub fn replay_github_ci(
+  trusted: Policy,
   archive: GithubCiAssessment,
   policy: GithubCiProducerPolicy,
   jobs: list<GithubCiJob>,
@@ -1164,6 +1198,15 @@ Derive the external target and dispatch identity from the full signed admission.
 
 ```harn
 pub fn admission_effect(signed: SignedAdmission) -> AdmissionEffect {
+}
+```
+
+### fn `admission_policy_matches`
+
+Compare submitted policy provenance with an independently selected installation policy.
+
+```harn
+pub fn admission_policy_matches(request: AdmissionRequest, policy: Policy) -> bool {
 }
 ```
 

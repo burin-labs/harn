@@ -16,6 +16,7 @@ import { ReviewAdmission } from "./review"
 import {
   AdmissionRecord,
   AdmissionRule,
+  AdmissionRequest,
   AdmissionVerification,
   Execution,
   Policy,
@@ -348,6 +349,13 @@ fn admission_time_errors(record: AdmissionRecord) -> list<string> {
   return invalid
 }
 
+/** Compare submitted policy provenance with an independently selected installation policy. */
+pub fn admission_policy_matches(request: AdmissionRequest, policy: Policy) -> bool {
+  return request.installation == policy.installation
+    && request.policy_digest == policy_digest(policy)
+    && policy_digest(request.policy) == request.policy_digest
+}
+
 type AdmissionAuthentication = {rule: AdmissionRule?, invalid: list<string>}
 
 fn authenticate_record(
@@ -358,9 +366,7 @@ fn authenticate_record(
   const scope = record.scope.scope
   const rule = policy.admission_rules.find({ candidate -> candidate.id == scope.rule })
   let invalid = initial_errors + admission_time_errors(record)
-  if record.installation != policy.installation || record.policy_digest != policy_digest(policy)
-    || policy_digest(record.policy) != record.policy_digest
-    || scope.installation != record.installation
+  if !admission_policy_matches(record, policy) || scope.installation != record.installation
     || scope.policy_digest != record.policy_digest
     || scope.source.repository != record.source.repository
     || scope.reviewed_head != record.source.head

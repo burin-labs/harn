@@ -216,7 +216,16 @@ pipeline test_original_ci_retains_actual_tested_source_and_job_then_signs_same_a
   harness: Harness,
 ) {
   const f = ci_fixture(harness.random)
-  const actual = assess_github_ci(source(f), POLICY, f.producer, f.request, JOBS, f.artifacts, 7000)
+  const actual = assess_github_ci(
+    f.request.policy,
+    source(f),
+    POLICY,
+    f.producer,
+    f.request,
+    JOBS,
+    f.artifacts,
+    7000,
+  )
   assert_eq(actual.assessment.status, "admitted")
   assert_eq(actual.assessment.checks.required, 1)
   assert_eq(actual.assessment.checks.executed, 1)
@@ -233,6 +242,7 @@ pipeline test_original_ci_retains_actual_tested_source_and_job_then_signs_same_a
   }
   assert_eq(verify_admission(signed, f.request.policy), actual.assessment)
   const replay = assess_github_ci(
+    f.request.policy,
     source(f),
     POLICY,
     f.producer,
@@ -248,7 +258,16 @@ pipeline test_archive_replays_complete_measured_artifact_census_without_invented
   harness: Harness,
 ) {
   const f = ci_fixture(harness.random)
-  const actual = assess_github_ci(source(f), POLICY, f.producer, f.request, JOBS, f.artifacts, 7000)
+  const actual = assess_github_ci(
+    f.request.policy,
+    source(f),
+    POLICY,
+    f.producer,
+    f.request,
+    JOBS,
+    f.artifacts,
+    7000,
+  )
   assert_eq(len(actual.source_reads), 2)
   const measured = schema_expect(actual.source_reads[0]!.response, schema_of(ArtifactPage))
   assert_eq(measured.total_count, 2)
@@ -256,12 +275,12 @@ pipeline test_archive_replays_complete_measured_artifact_census_without_invented
     measured.artifacts.map({ artifact -> artifact.name }),
     ["ci-job-inputs-10-2", "python-result"],
   )
-  assert_eq(replay_github_ci(actual, POLICY, JOBS), actual)
+  assert_eq(replay_github_ci(f.request.policy, actual, POLICY, JOBS), actual)
   for reads in [[], actual.source_reads.slice(1), actual.source_reads + actual.source_reads] {
     assert(
       is_err(
         try {
-          replay_github_ci(actual + {source_reads: reads}, POLICY, JOBS)
+          replay_github_ci(f.request.policy, actual + {source_reads: reads}, POLICY, JOBS)
         },
       ),
     )
@@ -270,11 +289,149 @@ pipeline test_archive_replays_complete_measured_artifact_census_without_invented
 
 pipeline test_green_provider_job_without_structured_execution_stays_pending(harness: Harness) {
   const f = ci_fixture(harness.random)
-  const actual = assess_github_ci(source(f), POLICY, f.producer, f.request, JOBS, [], 7000)
+  const actual = assess_github_ci(
+    f.request.policy,
+    source(f),
+    POLICY,
+    f.producer,
+    f.request,
+    JOBS,
+    [],
+    7000,
+  )
   assert_eq(actual.assessment.status, "pending")
   assert_eq(actual.assessment.checks.required, 1)
   assert_eq(actual.assessment.checks.executed, 0)
   assert_eq(actual.assessment.checks.pending, ["tests"])
+}
+
+pipeline test_submitted_signing_policy_cannot_authorize_itself_before_provider_reads(
+  harness: Harness,
+) {
+  const trusted = ci_fixture(harness.random)
+  const submitted = ci_fixture(harness.random)
+  let reads = 0
+  const guarded: ProofSource = {
+    json: fn(endpoint) {
+      reads += 1
+      return source(submitted).json(endpoint)
+    },
+    registration: source(submitted).registration,
+  }
+  const self_authorized = assess_github_ci(
+    submitted.request.policy,
+    guarded,
+    POLICY,
+    submitted.producer,
+    submitted.request,
+    JOBS,
+    submitted.artifacts,
+    7000,
+  )
+  assert_eq(self_authorized.assessment.status, "admitted")
+  assert_eq(reads, 2)
+  reads = 0
+  const refused = try {
+    assess_github_ci(
+      trusted.request.policy,
+      guarded,
+      POLICY,
+      submitted.producer,
+      submitted.request,
+      JOBS,
+      submitted.artifacts,
+      7000,
+    )
+  }
+  assert(is_err(refused))
+  assert_eq(reads, 0)
+}
+
+pipeline test_final_review_refresh_requalifies_measured_ci_without_another_provider_read(
+  harness: Harness,
+) {
+  const f = ci_fixture(harness.random)
+  const original = assess_github_ci(
+    f.request.policy,
+    source(f),
+    POLICY,
+    f.producer,
+    f.request,
+    JOBS,
+    f.artifacts,
+    7000,
+  )
+  assert_eq(original.assessment.status, "admitted")
+  const changed = f.request.reviews
+    + {
+      platform_decision: "changes_requested",
+      reviews: f.request.reviews.reviews.map({ review -> review + {state: "changes_requested"} }),
+    }
+  const refreshed = replay_github_ci(
+    f.request.policy,
+    original + {record: original.record + {reviews: changed, admitted_at_ms: 8000}},
+    POLICY,
+    JOBS,
+  )
+  assert_eq(refreshed.assessment.status, "failed")
+  assert(len(refreshed.assessment.review!.failed) > 0)
+  assert_eq(refreshed.assessment.checks.executed, 1)
+  assert_eq(refreshed.source_reads, original.source_reads)
+  assert_eq(refreshed.record.proofs, original.record.proofs)
+}
+
+pipeline test_public_issuer_command_refuses_submitted_policy_before_credential_access(
+  harness: Harness,
+) {
+  const f = ci_fixture(harness.random)
+  const forged = ci_fixture(harness.random)
+  const root = harness.fs.mkdtemp_in_workspace("admission-trusted-config-")
+  defer {
+    harness.fs.delete(root)
+  }
+  harness.fs.write_text(path_join(root, "policy.json"), json_stringify(f.request.policy))
+  const config = {
+    policy_file: "policy.json",
+    producer_policy: POLICY,
+    run_name: "Verify",
+    jobs: JOBS,
+    token_secret: "fixture/absent-read-token",
+    issuer: {id: "admitter", secret: "fixture/absent-issuer"},
+  }
+  harness.fs.write_text(path_join(root, "issuer.json"), json_stringify(config))
+  const submission = {
+    action: "issue",
+    request: forged.request,
+    producer: {run_id: 10, attempt: 2},
+    issuer: {id: "attacker", secret: "fixture/attacker-choice-must-be-ignored"},
+  }
+  harness.fs.write_text(path_join(root, "submission.json"), json_stringify(submission))
+  const command = {
+    program: harness.env.get("HARN_BIN") ?? "harn",
+    args: [
+      "run",
+      "--standalone",
+      "--read-only-root",
+      root,
+      path_join(harness.fs.runtime_paths().asset_root, "../admission-cli.harn"),
+      "--",
+      path_join(root, "issuer.json"),
+      path_join(root, "submission.json"),
+    ],
+    timeout_ms: 30000,
+  }
+  const result = harness.process.run(command)
+  assert(result.exit_code != 0 && !result.success)
+  assert(result.stderr.contains("submitted admission differs from the trusted installation policy"))
+  assert(!result.stderr.contains("fixture/absent-read-token"))
+  assert(!result.stderr.contains("fixture/attacker-choice-must-be-ignored"))
+  harness.fs.write_text(
+    path_join(root, "submission.json"),
+    json_stringify(submission + {request: f.request}),
+  )
+  const valid_policy = harness.process.run(command)
+  assert(valid_policy.exit_code != 0)
+  assert(valid_policy.stderr.contains("fixture/absent-read-token"), valid_policy.stderr)
 }
 
 pipeline test_current_review_and_head_remain_required_after_original_ci_passes(harness: Harness) {
@@ -284,13 +441,31 @@ pipeline test_current_review_and_head_remain_required_after_original_ci_passes(h
       reviews: f.request.reviews
         + {declared_reviews: 0, reviews: [], platform_decision: "review_required"},
     }
-  const pending = assess_github_ci(source(f), POLICY, f.producer, waiting, JOBS, f.artifacts, 7000)
+  const pending = assess_github_ci(
+    f.request.policy,
+    source(f),
+    POLICY,
+    f.producer,
+    waiting,
+    JOBS,
+    f.artifacts,
+    7000,
+  )
   assert_eq(pending.assessment.status, "pending")
   assert_eq(pending.assessment.checks.executed, 1)
   assert_eq(pending.assessment.checks.pending, [])
   assert_eq(pending.assessment.review!.observed_reviews, 0)
   const moved = f.request + {source: f.request.source + {head: "e".repeat(40)}}
-  const invalid = assess_github_ci(source(f), POLICY, f.producer, moved, JOBS, f.artifacts, 7000)
+  const invalid = assess_github_ci(
+    f.request.policy,
+    source(f),
+    POLICY,
+    f.producer,
+    moved,
+    JOBS,
+    f.artifacts,
+    7000,
+  )
   assert_eq(invalid.assessment.status, "invalid")
   assert(invalid.assessment.invalid.contains("admission-source-or-policy"))
 }
@@ -351,6 +526,7 @@ pipeline test_every_matrix_leg_requires_its_own_original_execution(harness: Harn
     }
   const artifacts = [{requirement: "tests", result: Ok(rebound)}]
   const partial = assess_github_ci(
+    f.request.policy,
     source(matrix, 3),
     POLICY,
     matrix.producer,
@@ -365,6 +541,7 @@ pipeline test_every_matrix_leg_requires_its_own_original_execution(harness: Harn
   assert_eq(partial.assessment.checks.executed, 1)
   assert_eq(partial.assessment.checks.pending, ["typescript"])
   const missing_leg = assess_github_ci(
+    f.request.policy,
     source(matrix + {census: f.census}),
     POLICY,
     matrix.producer,
@@ -383,6 +560,7 @@ pipeline test_actual_result_signature_and_exact_provider_attempt_are_required(ha
   const receipt = unwrap(f.artifacts[0]!.result)
   const forged = receipt + {data: receipt.data + {proof: receipt.data.proof + {signature: ""}}}
   const invalid = assess_github_ci(
+    f.request.policy,
     source(f),
     POLICY,
     f.producer,
@@ -404,6 +582,7 @@ pipeline test_actual_result_signature_and_exact_provider_attempt_are_required(ha
       is_err(
         try {
           assess_github_ci(
+            f.request.policy,
             source(f),
             POLICY,
             f.producer,
@@ -433,6 +612,7 @@ pipeline test_wrong_workflow_source_mixed_census_and_poisoned_reuse_cannot_admit
       is_err(
         try {
           assess_github_ci(
+            f.request.policy,
             source(changed),
             POLICY,
             changed.producer,
@@ -448,7 +628,16 @@ pipeline test_wrong_workflow_source_mixed_census_and_poisoned_reuse_cannot_admit
   assert(
     is_err(
       try {
-        assess_github_ci(source(f, 3), POLICY, f.producer, f.request, JOBS, f.artifacts, 7000)
+        assess_github_ci(
+          f.request.policy,
+          source(f, 3),
+          POLICY,
+          f.producer,
+          f.request,
+          JOBS,
+          f.artifacts,
+          7000,
+        )
       },
     ),
   )
@@ -462,6 +651,7 @@ pipeline test_wrong_workflow_source_mixed_census_and_poisoned_reuse_cannot_admit
         },
     }
   const actual = assess_github_ci(
+    f.request.policy,
     source(poisoned),
     POLICY,
     f.producer,

@@ -1,7 +1,7 @@
 import { prepare_admission, requirement_identity, source_identity } from "./identity"
 import { JobRun } from "./local"
-import { AdmissionRecord, AdmissionRequest, AdmissionVerification, Proof } from "./types"
-import { assess_admission } from "./verification"
+import { AdmissionRecord, AdmissionRequest, AdmissionVerification, Policy, Proof } from "./types"
+import { admission_policy_matches, assess_admission } from "./verification"
 import {
   OriginalRunInspection,
   ProducerPolicy,
@@ -100,6 +100,7 @@ pub fn github_ci_identities(
 /** Live reads and archived replay enter this same original-run and signed-execution boundary. */
 @complexity(allow)
 pub fn assess_github_ci(
+  trusted: Policy,
   source: ProofSource,
   policy: ProducerPolicy,
   producer: Run,
@@ -108,6 +109,8 @@ pub fn assess_github_ci(
   artifacts: list<GithubCiArtifact>,
   at_ms: int,
 ) -> GithubCiAssessment {
+  require admission_policy_matches(request, trusted),
+    "submitted admission differs from the trusted installation policy"
   const wanted = github_ci_identities(request, jobs)
   require policy.repository == request.scope.scope.source.repository,
     "GitHub CI producer policy differs from the trusted source repository"
@@ -184,18 +187,19 @@ pub fn assess_github_ci(
     }
   }
   const record: AdmissionRecord = request
-    + {schema: "smart-ship.admission.v1", proofs: proofs, admitted_at_ms: at_ms}
+    + {schema: "smart-ship.admission.v1", policy: trusted, proofs: proofs, admitted_at_ms: at_ms}
   return {
     inspection: inspection,
     source_reads: reads,
     artifacts: artifacts,
     record: record,
-    assessment: assess_admission(record, request.policy),
+    assessment: assess_admission(record, trusted),
   }
 }
 
 /** Requalify recorded observations without inventing provider pages or granting live authority. */
 pub fn replay_github_ci(
+  trusted: Policy,
   archive: GithubCiAssessment,
   policy: GithubCiProducerPolicy,
   jobs: list<GithubCiJob>,
@@ -216,6 +220,7 @@ pub fn replay_github_ci(
     },
   }
   const result = assess_github_ci(
+    trusted,
     source,
     policy,
     archive.inspection.producer,

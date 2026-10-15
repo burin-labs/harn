@@ -123,7 +123,20 @@ job legs start. Each leg must use `job-cli.harn` with its actual numeric
 GitHub run ID as a string and its actual attempt number. Upload each complete
 `JobRun` as a single JSON member using the declared artifact name.
 
-Save a public JSON request file with these fields:
+Keep a trusted `issuer.json` configuration beside the installation's public
+`policy.json`. Pass this configuration separately from every submitted or
+downloaded admission file. Its fields are:
+
+| Field | Value |
+| --- | --- |
+| `policy_file` | Path to the canonical public policy, relative to `issuer.json` |
+| `producer_policy` | Trusted repository, workflow filename, allowed events, registrar job and step |
+| `run_name` | The trusted workflow's display name |
+| `jobs` | Logical job IDs and their complete list of exact leg bindings |
+| `token_secret` | A read-only GitHub credential reference |
+| `issuer` | The enrolled issuer's `{id, secret}` reference |
+
+The submitted `admission.json` contains only:
 
 | Field | Value |
 | --- | --- |
@@ -131,11 +144,6 @@ Save a public JSON request file with these fields:
 | `request` | The complete `AdmissionRequest` with its signed scope |
 | `producer.run_id` | The original executing GitHub run ID |
 | `producer.attempt` | Its original attempt number |
-| `producer_policy` | Trusted repository, workflow filename, allowed events, registrar job and step |
-| `run_name` | The trusted workflow's display name |
-| `jobs` | Logical job IDs and their complete list of exact leg bindings |
-| `token_secret` | A read-only GitHub credential reference |
-| `issuer` | For `issue`, the enrolled issuer's `{id, secret}` reference |
 
 A job binding contains `id` and `legs`. Each leg names its `requirement`,
 exact GitHub job `name`, `artifact_name`, and JSON `member_name`. Bind every
@@ -143,10 +151,10 @@ scope requirement once. A logical matrix job requires every declared leg;
 one successful leg cannot stand in for the rest.
 
 ```sh
-harn run --allow-process-network vendor/smart-ship/admission-cli.harn -- admission.json > admission-result.json
+harn run --allow-process-network vendor/smart-ship/admission-cli.harn -- issuer.json admission.json > admission-result.json
 ```
 
-Grant the request file as a read root and a scratch directory as a write
+Grant the configuration, public policy and request files as read roots, and a scratch directory as a write
 root when they are outside the runner's workspace. Supply credentials through
 the host secret store or bounded parent-secret stdin channel. Candidate
 commands must never receive the GitHub token or admission issuer key.
@@ -155,8 +163,11 @@ The result retains `observation` with the provider's complete job census,
 registration receipt, downloaded artifact receipts, signed stock results,
 and assessment. The API workflow head stays separate from the tested commit
 and tree. Original run, attempt, job IDs, source and input identities must
-agree. The command reads current exact-head reviews after downloading the
-stock results. A changed head or base refuses the old signed scope.
+agree. A submitted policy must match the independently loaded installation
+policy before any credential read. The command collects all CI observations,
+then reads current exact-head reviews as its final provider read. It
+requalifies the measured CI archive with those current reviews before signing,
+without another network read. A changed head or base refuses the old signed scope.
 
 `inspect` returns `admission: null`. `issue` reads the issuer key only after
 all checks pass, then returns the signed admission alongside its observation.
@@ -167,7 +178,7 @@ result for audit and replay through `assess_github_ci`.
 
 The observation's `source_reads` retains the actual artifact-list and job-list
 responses, including unrelated artifacts and every measured page.
-`replay_github_ci(observation, producer_policy, jobs)` requalifies those exact
+`replay_github_ci(trusted_policy, observation, producer_policy, jobs)` requalifies those exact
 observations through the same shared reader. Missing, reordered or unused
 responses refuse. Replay checks the archived decision; it does not claim a
 fresh provider read or grant permission to issue a live admission.
