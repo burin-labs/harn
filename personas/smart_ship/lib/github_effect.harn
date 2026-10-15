@@ -26,6 +26,20 @@ pub type GithubAdmissionConfiguration = {
 /** A complete signed witness and the authority revision the submitter observed. */
 pub type GithubAdmissionSubmission = {fence: Fence, admission: SignedAdmission}
 
+/** Bind recovery to effective nonsecret provider settings; secret values never enter state. */
+pub fn github_admission_binding(configuration: GithubAdmissionConfiguration) -> string {
+  return "sha256:"
+    + sha256_hex(
+      json_stringify(
+        {
+          api_base_url: configuration.api_base_url ?? "https://api.github.com",
+          token_reference: configuration.token_reference,
+          method: configuration.method,
+        },
+      ),
+    )
+}
+
 /** The complete fresh review census and the installation's decision travel with the result. */
 pub type GithubAdmissionReview = {observation: ReviewedChangeObservation, decision: ReviewAdmission}
 
@@ -207,12 +221,20 @@ pub fn submit_github_admission(
   }
   const target: GithubTarget = {owner: parts[0]!, repo: parts[1]!, pull_number: to_int(change)}
   const existing = state.effects.find({ effect -> effect.request == request })
+  const binding = github_admission_binding(configuration)
   let next: Controller = state
   if existing != nil {
     if existing.status != "reserved" {
       return not_started(
         previous,
         "admission already has a dispatch outcome; inspect its receipt",
+        existing,
+      )
+    }
+    if existing.dispatch_binding != binding {
+      return not_started(
+        previous,
+        "reserved provider configuration differs from this invocation",
         existing,
       )
     }
@@ -224,7 +246,7 @@ pub fn submit_github_admission(
       )
     }
   } else {
-    const reserved = reserve_effect(state, submission.fence, request, config.policy)
+    const reserved = reserve_effect(state, submission.fence, request, config.policy, binding)
     if is_err(reserved) {
       return not_started(previous, "admission was not qualified")
         + {admission_refusal: unwrap_err(reserved)}
@@ -302,6 +324,7 @@ pub fn submit_github_admission(
         {observation: observation, decision: decision},
       )
     },
+    binding,
   )
   return {dispatch: dispatch, reason: nil, admission_refusal: nil}
 }

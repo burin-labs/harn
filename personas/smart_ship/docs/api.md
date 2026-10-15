@@ -115,6 +115,15 @@ pub type GithubAdmissionUnknown = {
 }
 ```
 
+### fn `github_admission_binding`
+
+Bind recovery to effective nonsecret provider settings; secret values never enter state.
+
+```harn
+pub fn github_admission_binding(configuration: GithubAdmissionConfiguration) -> string {
+}
+```
+
 ### fn `github_reviewed_change`
 
 Normalize the connector's complete exact-head census for live reads and deterministic replay.
@@ -349,6 +358,7 @@ pub type Effect = {
   controller: string,
   policy_digest: string,
   status: "reserved" | "dispatching" | "unknown" | "confirmed" | "refused",
+  dispatch_binding: string?,
   dispatch_id: string?,
   receipt: EffectReceipt?,
 }
@@ -1035,6 +1045,7 @@ pub fn begin_effect(
   fence: Fence,
   request: EffectRequest,
   dispatch_id: string,
+  dispatch_binding: string? = nil,
 ) -> Result<Controller, string> {
 }
 ```
@@ -1171,6 +1182,7 @@ pub fn dispatch_reserved_effect(
   fence: Fence,
   request: EffectRequest,
   dispatch: fn(EffectRequest) -> EffectOutcome,
+  dispatch_binding: string? = nil,
 ) -> EffectDispatch {
 }
 ```
@@ -1485,6 +1497,7 @@ pub fn reserve_effect(
   fence: Fence,
   request: EffectRequest,
   policy: Policy,
+  dispatch_binding: string? = nil,
 ) -> Result<Controller, EffectRefusal> {
 }
 ```

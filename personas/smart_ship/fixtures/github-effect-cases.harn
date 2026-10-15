@@ -13,6 +13,7 @@ import {
   GithubAdmissionEvidence,
   GithubAdmissionReviewRefused,
   GithubAdmissionSubmission,
+  github_admission_binding,
   submit_github_admission,
 } from "../lib/github_effect"
 import {
@@ -21,6 +22,7 @@ import {
   admission_effect,
   commit_state,
   control,
+  dispatch_reserved_effect,
   initialize_installation,
   prepare_state,
   read_state,
@@ -51,6 +53,8 @@ fn main(harness: Harness) {
     check_signed_source_binding(harness)
   } else if argv[1] == "rule-binding" {
     check_signed_rule_binding(harness)
+  } else if argv[1] == "configuration-binding" {
+    check_reserved_configuration_binding(harness)
   } else {
     throw "unknown effect scenario"
   }
@@ -408,6 +412,52 @@ fn check_signed_rule_binding(harness: Harness) {
     "rule-binding control did not reach the signed rule's trusted approval decision"
 }
 
+fn check_reserved_configuration_binding(harness: Harness) {
+  const s = setup(harness)
+  defer {
+    harness.fs.delete(s.root)
+  }
+  const state = read_state(harness.process, s.configuration.installation.store).state!
+  const reserved = unwrap(
+    reserve_effect(
+      state,
+      s.submission.fence,
+      admission_effect(s.submission.admission),
+      s.configuration.installation.policy,
+      github_admission_binding(s.configuration),
+    ),
+  )
+  save(harness.process, s, reserved)
+  const fence = pick(reserved.authority, ["installation", "generation", "revision", "controller"])
+  const mismatched_claim = dispatch_reserved_effect(
+    pick(harness, ["process", "random"]),
+    s.configuration.installation.store,
+    fence,
+    admission_effect(s.submission.admission),
+    { _effect -> {status: "unknown", receipt: nil} },
+    digest("different-provider-configuration"),
+  )
+  require !mismatched_claim.dispatch_started,
+    "the generic dispatch claim ignored the reservation's provider binding"
+  for configuration in [
+    s.configuration + {method: "merge"},
+    s.configuration + {token_reference: "fixture/missing"},
+    s.configuration + {api_base_url: BASE + "/other"},
+  ] {
+    mock_merge(harness.testing, s)
+    const result = submit_github_admission(harness, configuration, s.submission + {fence: fence})
+    require !result.dispatch.dispatch_started && harness.testing.http_mock_calls() == [],
+      "a reservation resumed with different provider settings"
+    require read_state(harness.process, s.configuration.installation.store).state == reserved,
+      "refusing changed provider settings modified or consumed the reservation"
+  }
+  mock_merge(harness.testing, s)
+  const resumed = submit_github_admission(harness, s.configuration, s.submission + {fence: fence})
+  require resumed.dispatch.outcome?.status == "confirmed"
+    && len(harness.testing.http_mock_calls().filter({ call -> call.method == "PUT" })) == 1,
+    "the original bound provider settings could not resume exactly once"
+}
+
 fn save(process: HarnessProcess, s: Setup, state: Controller) {
   const store = s.configuration.installation.store
   require commit_state(
@@ -476,6 +526,7 @@ fn check_reserved_admission_resumes(harness: Harness) {
       s.submission.fence,
       admission_effect(s.submission.admission),
       s.configuration.installation.policy,
+      github_admission_binding(s.configuration),
     ),
   )
   save(harness.process, s, reserved)
@@ -504,6 +555,7 @@ fn check_reserved_admission_resumes(harness: Harness) {
       stopped.submission.fence,
       admission_effect(stopped.submission.admission),
       stopped.configuration.installation.policy,
+      github_admission_binding(stopped.configuration),
     ),
   )
   save(harness.process, stopped, pending)

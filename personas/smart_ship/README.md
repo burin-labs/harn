@@ -107,6 +107,11 @@ uncertain responses remain a transfer barrier. Configure and activate this
 adapter only after qualifying the installation's release guard and exclusive
 landing ownership.
 
+The reservation also binds the merge method, API endpoint and credential reference.
+Recovery checks that nonsecret identity before reading credentials or contacting a
+provider, and the generic dispatch claim enforces the same binding. Rotating a
+credential's value at its recorded reference does not put that value into state.
+
 The Python and TypeScript fixtures execute ordinary commands against clean Git
 sources. Each reviewed change passes independently; their combination fails one
 test. `fixtures/live_repair.harn` uses a real configured model, independently

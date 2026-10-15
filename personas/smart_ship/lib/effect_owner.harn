@@ -34,6 +34,7 @@ pub fn dispatch_reserved_effect(
   fence: Fence,
   request: EffectRequest,
   dispatch: fn(EffectRequest) -> EffectOutcome,
+  dispatch_binding: string? = nil,
 ) -> EffectDispatch {
   const process = host.process
   const previous = read_state(process, store)
@@ -48,7 +49,7 @@ pub fn dispatch_reserved_effect(
   }
   // Distinct actors must prepare distinct commits, even within one Git timestamp second.
   const dispatch_id = "sha256:" + sha256_hex(host.random.uuid())
-  const started = begin_effect(state, fence, request, dispatch_id)
+  const started = begin_effect(state, fence, request, dispatch_id, dispatch_binding)
   if is_err(started) {
     return {
       status: "not_started",

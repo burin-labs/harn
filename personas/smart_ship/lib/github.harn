@@ -8,6 +8,7 @@ pub import {
   GithubAdmissionReviewRefused,
   GithubAdmissionSubmission,
   GithubAdmissionUnknown,
+  github_admission_binding,
   submit_github_admission,
 } from "./github_effect"
 pub import { github_reviewed_change, read_github_reviewed_change } from "./github_review"
