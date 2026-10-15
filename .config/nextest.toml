@@ -48,6 +48,11 @@ fail-fast = false
 failure-output = "immediate-final"
 success-output = "never"
 
+# Required release proof keeps CI's inventory and budgets, and requires actual
+# process confinement in the product checks instead of accepting host refusal.
+[profile.native-qualification]
+inherits = "ci"
+
 # E2E profile: subprocess-spawning integration tests — CLI invocation, signal
 # handling, MCP server launch, real ProcessHandle, real process tools.
 # Run with `make test-e2e` or

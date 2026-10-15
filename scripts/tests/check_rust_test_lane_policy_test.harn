@@ -8,6 +8,53 @@ const WRAPPED = "scripts/ci/run_rust_test_lane.sh cargo nextest run --workspace"
 
 const RAW = "cargo nextest run --workspace --test-threads=8"
 
+pipeline test_native_qualification_cannot_fall_back_to_compatibility_or_empty_scope() {
+  const policy: NativeQualificationPolicy = {
+    schema: "harn.native_qualification.v1",
+    profile: "native-qualification",
+    inherits: "ci",
+  }
+  const positive: NativeQualificationObservation = {
+    step_count: 1,
+    command: native_qualification_command(policy),
+    conditional: false,
+    profile_exact: true,
+  }
+  assert_eq(native_qualification_violations(positive, policy), [])
+  for invalid in [
+    positive + {step_count: 0},
+    positive + {step_count: 2},
+    positive + {conditional: true},
+    positive + {profile_exact: false},
+    positive + {command: WRAPPED + " --profile ci"},
+  ] {
+    assert(
+      len(native_qualification_violations(invalid, policy)) > 0,
+      "unmeasured or compatibility-only proof cannot qualify",
+    )
+  }
+  const document = {
+    jobs: {
+      nextest: {
+        steps: [{name: "Run workspace nextest", run: native_qualification_command(policy)}],
+      },
+    },
+  }
+  const good = {profile: {"native-qualification": {inherits: "ci"}}}
+  assert_eq(native_qualification_observation(document, good, policy), positive)
+  const overrides = {
+    profile: {"native-qualification": {inherits: "ci", "default-filter": "none()"}},
+  }
+  assert(
+    native_qualification_observation(document, overrides, policy).profile_exact == false,
+    "qualification cannot omit CI inventory",
+  )
+  assert(
+    native_qualification_observation({}, good, policy).step_count == 0,
+    "missing workflow is measured absence",
+  )
+}
+
 // nextest applies the first matching override per setting, so the Windows
 // platform budget only fills the gap left by every per-test budget while it is
 // the last `slow-timeout` override. One added below it would be shadowed on

@@ -124,6 +124,29 @@ pub(crate) fn confine_workspace_holds_the_server_and_its_commands_to_the_workspa
     fs::create_dir_all(&workspace).unwrap();
     fs::create_dir_all(&outside).unwrap();
 
+    #[cfg(target_os = "macos")]
+    if let Some(refusal) = crate::test_util::process::unavailable_worktree_sandbox() {
+        let output = harn_e2e_command()
+            .current_dir(&workspace)
+            .args(["serve", "acp", "--confine-workspace"])
+            .arg(&workspace)
+            .output()
+            .expect("reach the actual confined ACP startup");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            !output.status.success(),
+            "an unsupported host cannot start a confined server"
+        );
+        assert!(stderr.contains(&refusal.to_string()), "{stderr}");
+        assert!(
+            output.stdout.is_empty(),
+            "the refused server cannot serve a session"
+        );
+        assert!(!workspace.join("inside-probe").exists());
+        assert!(!outside.join("outside-probe").exists());
+        return;
+    }
+
     let (init, receipt, inside, escaped) = run_writes(&workspace, &outside, true);
     let state = &init["agentCapabilities"]["_meta"]["harn"]["processConfinement"];
     assert_eq!(state["state"], "confined", "{init:#}");
