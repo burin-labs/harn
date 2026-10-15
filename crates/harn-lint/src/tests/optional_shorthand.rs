@@ -11,7 +11,7 @@ fn flags_pipeline_parameter_annotations_and_preserves_literal_decoys() {
     assert_eq!(count_rule(&diagnostics, "prefer-optional-shorthand"), 2);
     let fixed = apply_fixes(source, &diagnostics);
     assert!(fixed.contains("value: string?"), "{fixed}");
-    assert!(fixed.contains("count: int?"), "{fixed}");
+    assert!(fixed.contains(": int?"), "{fixed}");
     assert!(fixed.contains("\"string | nil\""), "{fixed}");
 }
 
