@@ -91,6 +91,7 @@ otel = [
 testbench-wasi = ["dep:wasmtime", "dep:wasmtime-wasi", "dep:wat", "dep:tempfile"]
 
 [dependencies]
+harn-vm-core = { path = "../harn-vm-core", version = "=0.10.167" }
 harn-builtin-meta = { path = "../harn-builtin-meta", version = "=0.10.167" }
 harn-builtin-registry = { path = "../harn-builtin-registry", version = "=0.10.167" }
 harn-capability-contracts = { path = "../harn-capability-contracts", version = "=0.10.167" }
@@ -332,5 +333,3 @@ harness = false
 [lints]
 workspace = true
 
-[build-dependencies]
-sha2 = "0.11"

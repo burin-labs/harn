@@ -10,7 +10,7 @@ use crate::VmValue;
 ///
 /// Child VMs clone the recorder `Arc` and start with an empty memo so repeat
 /// materialization stays local while evidence still converges on one receipt.
-pub(crate) struct RuntimeEffectState {
+pub struct RuntimeEffectState {
     pub(crate) recorder: Arc<Mutex<ExecutedEffectRecorder>>,
     pub(crate) cache: RuntimeEffectCallCache,
 }

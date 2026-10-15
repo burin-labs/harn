@@ -49,13 +49,13 @@ pub(crate) type LazyCallableModuleCache =
     Arc<VmMutex<BTreeMap<PathBuf, Vec<LazyCallableCacheSlot>>>>;
 
 /// A runtime-owned span closed when the interpreter leaves its scope.
-pub(crate) struct ScopeSpan {
+pub struct ScopeSpan {
     id: u64,
     end: fn(u64),
 }
 
 impl ScopeSpan {
-    pub(crate) fn new(id: u64, end: fn(u64)) -> Self {
+    pub fn new(id: u64, end: fn(u64)) -> Self {
         Self { id, end }
     }
 }
@@ -757,18 +757,18 @@ impl Vm {
         Ok(false)
     }
 
-    pub(crate) fn runtime(&self) -> &dyn super::VmRuntime {
+    pub fn runtime(&self) -> &dyn super::VmRuntime {
         self.runtime.as_ref()
     }
 
-    pub(crate) fn runtime_mut(&mut self) -> &mut dyn super::VmRuntime {
+    pub fn runtime_mut(&mut self) -> &mut dyn super::VmRuntime {
         if Arc::get_mut(&mut self.runtime).is_none() {
             self.runtime = self.runtime.fork_child();
         }
         Arc::get_mut(&mut self.runtime).expect("forked runtime has one owner")
     }
 
-    pub(crate) fn with_runtime(runtime: Arc<dyn super::VmRuntime>) -> Self {
+    pub fn with_runtime(runtime: Arc<dyn super::VmRuntime>) -> Self {
         Self {
             runtime,
             stack: Vec::with_capacity(256),

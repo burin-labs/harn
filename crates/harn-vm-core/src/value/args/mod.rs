@@ -36,17 +36,7 @@
 //! Accessors borrow from the argument slice instead of allocating, so the
 //! success path of a builtin costs no `String` per argument.
 //!
-//! The vocabulary is deliberately complete: a reader exists for every shape a
-//! builtin may demand, independent of which builtin families a given build
-//! compiles. A feature-sliced build (`default-features = false`, as
-//! `harn-lsp` and other focused embedders take it) drops the builtins behind
-//! `content`, `sqlite`, and the rest, and the readers only those builtins
-//! call then have no caller — the contract working as designed, not rot.
-//! Gating each reader on its callers' feature families would couple this
-//! module to every slice and break again on the next one, so `dead_code` is
-//! silenced outside `full` instead. A `full` build still lints normally, so a
-//! reader that no builtin calls in any configuration is still a hard error.
-#![cfg_attr(not(feature = "full"), allow(dead_code))]
+//! Argument readers are shared by interpreter mechanics and execution backends.
 
 mod options;
 mod tag;
@@ -58,8 +48,8 @@ use std::time::Duration as StdDuration;
 
 use crate::value::{DictMap, VmClosure, VmError, VmValue};
 
-pub(crate) use options::Options;
-pub(crate) use tag::Expected;
+pub use options::Options;
+pub use tag::Expected;
 
 /// Whether an argument failure bubbles as a runtime error or as a value the
 /// script can `try` / `recover`.
@@ -69,14 +59,14 @@ pub(crate) use tag::Expected;
 /// sessions, connectors, HTTP — use [`ErrorKind::Thrown`] so scripts can
 /// catch them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum ErrorKind {
+pub enum ErrorKind {
     Runtime,
     TypeError,
     Thrown,
 }
 
 impl ErrorKind {
-    pub(crate) fn err(self, message: impl Into<String>) -> VmError {
+    pub fn err(self, message: impl Into<String>) -> VmError {
         match self {
             Self::Runtime => VmError::Runtime(message.into()),
             Self::TypeError => VmError::TypeError(message.into()),
@@ -86,7 +76,7 @@ impl ErrorKind {
 }
 
 /// Build a `{fn_name}: {message}` error of the requested kind.
-pub(crate) fn fn_err(fn_name: &str, kind: ErrorKind, message: impl std::fmt::Display) -> VmError {
+pub fn fn_err(fn_name: &str, kind: ErrorKind, message: impl std::fmt::Display) -> VmError {
     kind.err(format!("{fn_name}: {message}"))
 }
 
@@ -95,16 +85,16 @@ pub(crate) fn fn_err(fn_name: &str, kind: ErrorKind, message: impl std::fmt::Dis
 /// Constructing errors through this type rather than `format!` at the call
 /// site is what keeps the wording uniform; it is also what lets the
 /// vocabulary drift test know where to look.
-pub(crate) struct ArgError;
+pub struct ArgError;
 
 impl ArgError {
     /// `{fn}: `{name}` is required`
-    pub(crate) fn required(fn_name: &str, kind: ErrorKind, name: &str) -> VmError {
+    pub fn required(fn_name: &str, kind: ErrorKind, name: &str) -> VmError {
         fn_err(fn_name, kind, format_args!("`{name}` is required"))
     }
 
     /// ``{fn}: `{name}` must be a string, got int``
-    pub(crate) fn wrong_type(
+    pub fn wrong_type(
         fn_name: &str,
         kind: ErrorKind,
         name: &str,
@@ -119,7 +109,7 @@ impl ArgError {
     }
 
     /// ``{fn}: `{name}` must be a string or nil, got int``
-    pub(crate) fn wrong_type_optional(
+    pub fn wrong_type_optional(
         fn_name: &str,
         kind: ErrorKind,
         name: &str,
@@ -134,12 +124,12 @@ impl ArgError {
     }
 
     /// ``{fn}: `{name}` must not be empty``
-    pub(crate) fn empty(fn_name: &str, kind: ErrorKind, name: &str) -> VmError {
+    pub fn empty(fn_name: &str, kind: ErrorKind, name: &str) -> VmError {
         fn_err(fn_name, kind, format_args!("`{name}` must not be empty"))
     }
 
     /// ``{fn}: `{name}` must be one of `a`, `b`; got `c` ``
-    pub(crate) fn not_one_of(
+    pub fn not_one_of(
         fn_name: &str,
         kind: ErrorKind,
         name: &str,
@@ -160,7 +150,7 @@ impl ArgError {
 
     /// ``{fn}: `{name}` {constraint}`` — for range and shape rules a type
     /// alone cannot express, e.g. `must be >= 0`.
-    pub(crate) fn constraint(
+    pub fn constraint(
         fn_name: &str,
         kind: ErrorKind,
         name: &str,
@@ -188,7 +178,7 @@ fn describe(value: &VmValue) -> &'static str {
 /// caller that takes `builtin: &str` to leak that lifetime into what it
 /// returns.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct Args<'name, 'a> {
+pub struct Args<'name, 'a> {
     fn_name: &'name str,
     values: &'a [VmValue],
     kind: ErrorKind,
@@ -196,7 +186,7 @@ pub(crate) struct Args<'name, 'a> {
 
 impl<'name, 'a> Args<'name, 'a> {
     /// A reader whose failures bubble as `VmError::TypeError`.
-    pub(crate) fn new(fn_name: &'name str, values: &'a [VmValue]) -> Self {
+    pub fn new(fn_name: &'name str, values: &'a [VmValue]) -> Self {
         Self {
             fn_name,
             values,
@@ -205,7 +195,7 @@ impl<'name, 'a> Args<'name, 'a> {
     }
 
     /// A reader whose failures are catchable by `try` / `recover`.
-    pub(crate) fn thrown(fn_name: &'name str, values: &'a [VmValue]) -> Self {
+    pub fn thrown(fn_name: &'name str, values: &'a [VmValue]) -> Self {
         Self {
             fn_name,
             values,
@@ -214,7 +204,7 @@ impl<'name, 'a> Args<'name, 'a> {
     }
 
     /// A reader whose failures bubble as `VmError::Runtime`.
-    pub(crate) fn runtime(fn_name: &'name str, values: &'a [VmValue]) -> Self {
+    pub fn runtime(fn_name: &'name str, values: &'a [VmValue]) -> Self {
         Self {
             fn_name,
             values,
@@ -224,10 +214,7 @@ impl<'name, 'a> Args<'name, 'a> {
 
     /// An [`Options`] reader over a bag already in hand, for the parsers
     /// that receive `Option<&DictMap>` rather than the raw argument slice.
-    pub(crate) fn runtime_options(
-        fn_name: &'name str,
-        dict: Option<&'a DictMap>,
-    ) -> Options<'name, 'a> {
+    pub fn runtime_options(fn_name: &'name str, dict: Option<&'a DictMap>) -> Options<'name, 'a> {
         Options::new(fn_name, ErrorKind::Runtime, dict)
     }
 
@@ -238,7 +225,7 @@ impl<'name, 'a> Args<'name, 'a> {
     /// parallel set of value-level helpers. `None` reads as a missing
     /// argument, so a caller holding an `Option` does not need its own
     /// guard clause before every check.
-    pub(crate) fn single(fn_name: &'name str, kind: ErrorKind, value: Option<&'a VmValue>) -> Self {
+    pub fn single(fn_name: &'name str, kind: ErrorKind, value: Option<&'a VmValue>) -> Self {
         Self {
             fn_name,
             values: value.map_or(&[], std::slice::from_ref),
@@ -246,21 +233,21 @@ impl<'name, 'a> Args<'name, 'a> {
         }
     }
 
-    pub(crate) fn fn_name(&self) -> &'name str {
+    pub fn fn_name(&self) -> &'name str {
         self.fn_name
     }
 
-    pub(crate) fn kind(&self) -> ErrorKind {
+    pub fn kind(&self) -> ErrorKind {
         self.kind
     }
 
     /// Build an error in this reader's kind, prefixed with the builtin name.
-    pub(crate) fn err(&self, message: impl std::fmt::Display) -> VmError {
+    pub fn err(&self, message: impl std::fmt::Display) -> VmError {
         fn_err(self.fn_name, self.kind, message)
     }
 
     /// The raw value at `index`, treating `Nil` as absent.
-    pub(crate) fn get(&self, index: usize) -> Option<&'a VmValue> {
+    pub fn get(&self, index: usize) -> Option<&'a VmValue> {
         match self.values.get(index) {
             None | Some(VmValue::Nil) => None,
             Some(value) => Some(value),
@@ -269,12 +256,12 @@ impl<'name, 'a> Args<'name, 'a> {
 
     /// The raw value at `index`, distinguishing an explicit `Nil` from a
     /// missing argument. Only needed by builtins where `nil` means something.
-    pub(crate) fn raw(&self, index: usize) -> Option<&'a VmValue> {
+    pub fn raw(&self, index: usize) -> Option<&'a VmValue> {
         self.values.get(index)
     }
 
     /// Reject a call outside `min..=max` arguments before reading anything.
-    pub(crate) fn arity(&self, min: usize, max: usize) -> Result<(), VmError> {
+    pub fn arity(&self, min: usize, max: usize) -> Result<(), VmError> {
         let count = self.values.len();
         if count >= min && count <= max {
             return Ok(());
@@ -289,7 +276,7 @@ impl<'name, 'a> Args<'name, 'a> {
 
     /// Reject a call with fewer than `min` arguments, for builtins that take
     /// a variable number.
-    pub(crate) fn min_arity(&self, min: usize) -> Result<(), VmError> {
+    pub fn min_arity(&self, min: usize) -> Result<(), VmError> {
         let count = self.values.len();
         if count >= min {
             return Ok(());
@@ -316,7 +303,7 @@ impl<'name, 'a> Args<'name, 'a> {
 
     /// A required string, borrowed. Empty strings are allowed; use
     /// [`Args::non_empty_string`] when they are not.
-    pub(crate) fn string(&self, index: usize, name: &str) -> Result<&'a str, VmError> {
+    pub fn string(&self, index: usize, name: &str) -> Result<&'a str, VmError> {
         match self.required_at(index, name)? {
             VmValue::String(text) => Ok(text.as_str()),
             other => Err(self.wrong(name, Expected::STRING, other)),
@@ -325,7 +312,7 @@ impl<'name, 'a> Args<'name, 'a> {
 
     /// A required string that must have non-whitespace content. The returned
     /// slice is trimmed.
-    pub(crate) fn non_empty_string(&self, index: usize, name: &str) -> Result<&'a str, VmError> {
+    pub fn non_empty_string(&self, index: usize, name: &str) -> Result<&'a str, VmError> {
         let text = self.string(index, name)?.trim();
         if text.is_empty() {
             return Err(ArgError::empty(self.fn_name, self.kind, name));
@@ -334,7 +321,7 @@ impl<'name, 'a> Args<'name, 'a> {
     }
 
     /// An optional string. Missing and `nil` both read as `None`.
-    pub(crate) fn opt_string(&self, index: usize, name: &str) -> Result<Option<&'a str>, VmError> {
+    pub fn opt_string(&self, index: usize, name: &str) -> Result<Option<&'a str>, VmError> {
         match self.get(index) {
             None => Ok(None),
             Some(VmValue::String(text)) => Ok(Some(text.as_str())),
@@ -346,14 +333,14 @@ impl<'name, 'a> Args<'name, 'a> {
 
     /// A required int. Floats are rejected; use [`Args::number`] where a
     /// float is genuinely acceptable.
-    pub(crate) fn int(&self, index: usize, name: &str) -> Result<i64, VmError> {
+    pub fn int(&self, index: usize, name: &str) -> Result<i64, VmError> {
         match self.required_at(index, name)? {
             VmValue::Int(value) => Ok(*value),
             other => Err(self.wrong(name, Expected::INT, other)),
         }
     }
 
-    pub(crate) fn opt_int(&self, index: usize, name: &str) -> Result<Option<i64>, VmError> {
+    pub fn opt_int(&self, index: usize, name: &str) -> Result<Option<i64>, VmError> {
         match self.get(index) {
             None => Ok(None),
             Some(VmValue::Int(value)) => Ok(Some(*value)),
@@ -369,7 +356,7 @@ impl<'name, 'a> Args<'name, 'a> {
     /// LLM response carries `3` as `Float(3.0)`. Builtins that read such
     /// dicts use this; builtins whose argument is written directly in Harn
     /// source use [`Args::int`], which rejects `3.0` and says so.
-    pub(crate) fn whole_int(&self, index: usize, name: &str) -> Result<i64, VmError> {
+    pub fn whole_int(&self, index: usize, name: &str) -> Result<i64, VmError> {
         match self.required_at(index, name)? {
             VmValue::Int(value) => Ok(*value),
             VmValue::Float(value) if value.fract() == 0.0 => Ok(*value as i64),
@@ -378,7 +365,7 @@ impl<'name, 'a> Args<'name, 'a> {
     }
 
     /// A required string restricted to a closed set of spellings.
-    pub(crate) fn enum_string(
+    pub fn enum_string(
         &self,
         index: usize,
         name: &str,
@@ -397,14 +384,14 @@ impl<'name, 'a> Args<'name, 'a> {
         ))
     }
 
-    pub(crate) fn bool(&self, index: usize, name: &str) -> Result<bool, VmError> {
+    pub fn bool(&self, index: usize, name: &str) -> Result<bool, VmError> {
         match self.required_at(index, name)? {
             VmValue::Bool(value) => Ok(*value),
             other => Err(self.wrong(name, Expected::BOOL, other)),
         }
     }
 
-    pub(crate) fn opt_bool(&self, index: usize, name: &str) -> Result<Option<bool>, VmError> {
+    pub fn opt_bool(&self, index: usize, name: &str) -> Result<Option<bool>, VmError> {
         match self.get(index) {
             None => Ok(None),
             Some(VmValue::Bool(value)) => Ok(Some(*value)),
@@ -412,11 +399,11 @@ impl<'name, 'a> Args<'name, 'a> {
         }
     }
 
-    pub(crate) fn bool_or(&self, index: usize, name: &str, default: bool) -> Result<bool, VmError> {
+    pub fn bool_or(&self, index: usize, name: &str, default: bool) -> Result<bool, VmError> {
         Ok(self.opt_bool(index, name)?.unwrap_or(default))
     }
 
-    pub(crate) fn float(&self, index: usize, name: &str) -> Result<f64, VmError> {
+    pub fn float(&self, index: usize, name: &str) -> Result<f64, VmError> {
         match self.required_at(index, name)? {
             VmValue::Float(value) => Ok(*value),
             other => Err(self.wrong(name, Expected::FLOAT, other)),
@@ -425,18 +412,14 @@ impl<'name, 'a> Args<'name, 'a> {
 
     // ---- containers -------------------------------------------------------
 
-    pub(crate) fn dict(&self, index: usize, name: &str) -> Result<&'a DictMap, VmError> {
+    pub fn dict(&self, index: usize, name: &str) -> Result<&'a DictMap, VmError> {
         match self.required_at(index, name)? {
             VmValue::Dict(dict) => Ok(dict.as_ref()),
             other => Err(self.wrong(name, Expected::DICT, other)),
         }
     }
 
-    pub(crate) fn opt_dict(
-        &self,
-        index: usize,
-        name: &str,
-    ) -> Result<Option<&'a DictMap>, VmError> {
+    pub fn opt_dict(&self, index: usize, name: &str) -> Result<Option<&'a DictMap>, VmError> {
         match self.get(index) {
             None => Ok(None),
             Some(VmValue::Dict(dict)) => Ok(Some(dict.as_ref())),
@@ -444,7 +427,7 @@ impl<'name, 'a> Args<'name, 'a> {
         }
     }
 
-    pub(crate) fn list(&self, index: usize, name: &str) -> Result<&'a [VmValue], VmError> {
+    pub fn list(&self, index: usize, name: &str) -> Result<&'a [VmValue], VmError> {
         match self.required_at(index, name)? {
             VmValue::List(list) => Ok(list.as_slice()),
             other => Err(self.wrong(name, Expected::LIST, other)),
@@ -453,7 +436,7 @@ impl<'name, 'a> Args<'name, 'a> {
 
     /// A required list as the shared handle rather than a slice, for callers
     /// that pass the list along without copying it.
-    pub(crate) fn list_shared(
+    pub fn list_shared(
         &self,
         index: usize,
         name: &str,
@@ -464,11 +447,7 @@ impl<'name, 'a> Args<'name, 'a> {
         }
     }
 
-    pub(crate) fn opt_list(
-        &self,
-        index: usize,
-        name: &str,
-    ) -> Result<Option<&'a [VmValue]>, VmError> {
+    pub fn opt_list(&self, index: usize, name: &str) -> Result<Option<&'a [VmValue]>, VmError> {
         match self.get(index) {
             None => Ok(None),
             Some(VmValue::List(list)) => Ok(Some(list.as_slice())),
@@ -481,11 +460,11 @@ impl<'name, 'a> Args<'name, 'a> {
     /// The element type is checked here rather than by the caller, so a
     /// `["a", 3]` argument fails at the boundary with the element's own type
     /// named instead of silently stringifying.
-    pub(crate) fn string_list(&self, index: usize, name: &str) -> Result<Vec<&'a str>, VmError> {
+    pub fn string_list(&self, index: usize, name: &str) -> Result<Vec<&'a str>, VmError> {
         self.collect_string_list(self.list(index, name)?, name)
     }
 
-    pub(crate) fn opt_string_list(
+    pub fn opt_string_list(
         &self,
         index: usize,
         name: &str,
@@ -511,7 +490,7 @@ impl<'name, 'a> Args<'name, 'a> {
 
     // ---- bytes ------------------------------------------------------------
 
-    pub(crate) fn bytes(&self, index: usize, name: &str) -> Result<&'a [u8], VmError> {
+    pub fn bytes(&self, index: usize, name: &str) -> Result<&'a [u8], VmError> {
         match self.required_at(index, name)? {
             VmValue::Bytes(bytes) => Ok(bytes.as_slice()),
             other => Err(self.wrong(name, Expected::BYTES, other)),
@@ -519,7 +498,7 @@ impl<'name, 'a> Args<'name, 'a> {
     }
 
     /// Bytes, or a string taken as its UTF-8 bytes.
-    pub(crate) fn bytes_or_string(&self, index: usize, name: &str) -> Result<&'a [u8], VmError> {
+    pub fn bytes_or_string(&self, index: usize, name: &str) -> Result<&'a [u8], VmError> {
         match self.required_at(index, name)? {
             VmValue::Bytes(bytes) => Ok(bytes.as_slice()),
             VmValue::String(text) => Ok(text.as_bytes()),
@@ -529,7 +508,7 @@ impl<'name, 'a> Args<'name, 'a> {
 
     // ---- closures ---------------------------------------------------------
 
-    pub(crate) fn closure(&self, index: usize, name: &str) -> Result<&'a VmClosure, VmError> {
+    pub fn closure(&self, index: usize, name: &str) -> Result<&'a VmClosure, VmError> {
         match self.required_at(index, name)? {
             VmValue::Closure(closure) => Ok(closure.as_ref()),
             other => Err(self.wrong(name, Expected::CLOSURE, other)),
@@ -544,12 +523,12 @@ impl<'name, 'a> Args<'name, 'a> {
     /// Waitpoints, monitors, HITL, and the storage connectors all accept this
     /// trio; keeping the edge cases (negative, infinite, out-of-range float)
     /// in one place is why they agree.
-    pub(crate) fn millis(&self, index: usize, name: &str) -> Result<u64, VmError> {
+    pub fn millis(&self, index: usize, name: &str) -> Result<u64, VmError> {
         let value = self.required_at(index, name)?;
         self.millis_from(value, name)
     }
 
-    pub(crate) fn duration(&self, index: usize, name: &str) -> Result<StdDuration, VmError> {
+    pub fn duration(&self, index: usize, name: &str) -> Result<StdDuration, VmError> {
         self.millis(index, name).map(StdDuration::from_millis)
     }
 
@@ -582,7 +561,7 @@ impl<'name, 'a> Args<'name, 'a> {
     /// A dict argument, converted to a JSON object. Missing or `nil` yields
     /// an empty object, which is what the observability and timing builtins
     /// want from an absent attribute bag.
-    pub(crate) fn json_object(
+    pub fn json_object(
         &self,
         index: usize,
         name: &str,
@@ -603,7 +582,7 @@ impl<'name, 'a> Args<'name, 'a> {
 
     /// Read a trailing option-bag argument. A missing or `nil` argument
     /// yields an empty bag, so callers need no separate absent case.
-    pub(crate) fn options(&self, index: usize, name: &str) -> Result<Options<'name, 'a>, VmError> {
+    pub fn options(&self, index: usize, name: &str) -> Result<Options<'name, 'a>, VmError> {
         Ok(Options::new(
             self.fn_name,
             self.kind,

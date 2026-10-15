@@ -4,19 +4,19 @@ use std::{any::Any, future::Future, path::Path, pin::Pin, sync::Arc};
 
 use crate::value::{VmError, VmValue};
 
-pub(crate) enum BuiltinGateDecision {
+pub enum BuiltinGateDecision {
     Continue,
     Return(VmValue),
 }
 
-pub(crate) enum VmSpanKind {
+pub enum VmSpanKind {
     Pipeline,
     Import,
     Parallel,
     Spawn,
 }
 
-pub(crate) trait VmBuiltinBridge: Send + Sync {
+pub trait VmBuiltinBridge: Send + Sync {
     fn call_builtin<'a>(
         &'a self,
         name: &'a str,
@@ -24,7 +24,7 @@ pub(crate) trait VmBuiltinBridge: Send + Sync {
     ) -> Pin<Box<dyn Future<Output = Result<VmValue, VmError>> + Send + 'a>>;
 }
 
-pub(crate) trait VmRuntime: Any + Send + Sync {
+pub trait VmRuntime: Any + Send + Sync {
     fn as_any(&self) -> &dyn Any;
     fn as_any_mut(&mut self) -> &mut dyn Any;
     fn fork_child(&self) -> Arc<dyn VmRuntime>;
@@ -118,12 +118,12 @@ pub(crate) trait VmRuntime: Any + Send + Sync {
     ) -> Option<&'static [harn_builtin_meta::EffectSpec]>;
 }
 
-pub(crate) trait VmRuntimeBaseline: Send + Sync {
+pub trait VmRuntimeBaseline: Send + Sync {
     fn instantiate(&self, source_dir: Option<&Path>) -> Arc<dyn VmRuntime>;
 }
 
 /// Retained cleanup ownership for one execution, independent of later scopes.
-pub(crate) trait VmTaskCleanup: Send + Sync {
+pub trait VmTaskCleanup: Send + Sync {
     fn abandon_task<'a>(
         &'a self,
         task_id: &'a str,

@@ -6,7 +6,7 @@ use crate::value::{VmError, VmValue};
 
 use super::Vm;
 
-pub(crate) enum TopLevelEntry {
+pub enum TopLevelEntry {
     Chunk(ChunkRef),
     Callable {
         bootstrap: ChunkRef,

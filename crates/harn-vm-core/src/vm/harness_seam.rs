@@ -17,11 +17,11 @@ use crate::value::{VmError, VmValue};
 /// The boxed future of one asynchronous harness method call. It is boxed so
 /// a nested call keeps its capability-wide state machine off the executor
 /// stack.
-pub(crate) type HarnessMethodFuture<'a> =
+pub type HarnessMethodFuture<'a> =
     Pin<Box<dyn Future<Output = Result<VmValue, VmError>> + Send + 'a>>;
 
 /// Method dispatch for `Harness` capability handles, as the VM sees it.
-pub(crate) trait HarnessMethods: Send + Sync {
+pub trait HarnessMethods: Send + Sync {
     /// Run `handle.method(args)` with the receiver's clock scoped around it.
     fn call<'a>(
         &self,
@@ -44,7 +44,7 @@ pub(crate) trait HarnessMethods: Send + Sync {
 }
 
 impl Vm {
-    pub(crate) async fn call_harness_method(
+    pub async fn call_harness_method(
         &mut self,
         handle: &VmHarness,
         method: &str,

@@ -8,7 +8,7 @@ use std::{
 
 /// Poll the continuation exactly once with this execution's context installed.
 /// Context must be restored before returning, including during unwinding.
-pub(crate) trait VmExecutionScope: Send {
+pub trait VmExecutionScope: Send {
     fn poll(
         &mut self,
         cx: &mut Context<'_>,
@@ -73,17 +73,14 @@ impl VmExecutionScope for SourceDirExecutionScope {
 }
 
 pin_project_lite::pin_project! {
-    pub(crate) struct RuntimeScoped<F, S> {
+    pub struct RuntimeScoped<F, S> {
         #[pin]
         inner: F,
         scope: S,
     }
 }
 
-pub(crate) fn scope_runtime<F: Future, S: VmExecutionScope>(
-    scope: S,
-    inner: F,
-) -> RuntimeScoped<F, S> {
+pub fn scope_runtime<F: Future, S: VmExecutionScope>(scope: S, inner: F) -> RuntimeScoped<F, S> {
     RuntimeScoped { inner, scope }
 }
 

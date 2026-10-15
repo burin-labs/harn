@@ -1,4 +1,4 @@
-#[path = "../../build_support/codegen_fingerprint.rs"]
+#[path = "../build_support/codegen_fingerprint.rs"]
 mod codegen_fingerprint_impl;
 
 use std::fs;
@@ -13,8 +13,8 @@ fn codegen_fingerprint_is_checkout_path_stable() {
     seed_compiler_sources(left.path(), "return 1;");
     seed_compiler_sources(right.path(), "return 1;");
 
-    let left_hash = fingerprint_inputs(&compiler_inputs(&left.path().join("harn-vm")));
-    let right_hash = fingerprint_inputs(&compiler_inputs(&right.path().join("harn-vm")));
+    let left_hash = fingerprint_inputs(&compiler_inputs(&left.path().join("harn-vm-core")));
+    let right_hash = fingerprint_inputs(&compiler_inputs(&right.path().join("harn-vm-core")));
 
     assert_eq!(
         left_hash, right_hash,
@@ -26,15 +26,15 @@ fn codegen_fingerprint_is_checkout_path_stable() {
 fn codegen_fingerprint_tracks_derived_interface_owners() {
     let root = tempfile::tempdir().unwrap();
     seed_compiler_sources(root.path(), "return 1;");
-    let manifest = root.path().join("harn-vm");
+    let manifest = root.path().join("harn-vm-core");
     let baseline = fingerprint_inputs(&compiler_inputs(&manifest));
 
     for relative in [
         "harn-modules/src/package_imports.rs",
-        "harn-vm/src/bytecode_cache/graph.rs",
-        "harn-vm/src/bytecode_cache/interface.rs",
-        "harn-vm/src/context_manifest.rs",
-        "harn-vm/src/module_source.rs",
+        "harn-vm-core/src/bytecode_cache/graph.rs",
+        "harn-vm-core/src/bytecode_cache/interface.rs",
+        "harn-vm-core/src/context_manifest.rs",
+        "harn-vm-core/src/module_source.rs",
     ] {
         let path = root.path().join(relative);
         let original = fs::read(&path).unwrap();
@@ -70,8 +70,8 @@ fn codegen_fingerprint_changes_when_input_content_changes() {
     seed_compiler_sources(left.path(), "return 1;");
     seed_compiler_sources(right.path(), "return 2;");
 
-    let left_hash = fingerprint_inputs(&compiler_inputs(&left.path().join("harn-vm")));
-    let right_hash = fingerprint_inputs(&compiler_inputs(&right.path().join("harn-vm")));
+    let left_hash = fingerprint_inputs(&compiler_inputs(&left.path().join("harn-vm-core")));
+    let right_hash = fingerprint_inputs(&compiler_inputs(&right.path().join("harn-vm-core")));
 
     assert_ne!(
         left_hash, right_hash,
@@ -86,8 +86,8 @@ fn codegen_fingerprint_is_line_ending_stable() {
     seed_compiler_sources(left.path(), "fn compile() {\n    return;\n}\n");
     seed_compiler_sources(right.path(), "fn compile() {\r\n    return;\r\n}\r\n");
 
-    let left_hash = fingerprint_inputs(&compiler_inputs(&left.path().join("harn-vm")));
-    let right_hash = fingerprint_inputs(&compiler_inputs(&right.path().join("harn-vm")));
+    let left_hash = fingerprint_inputs(&compiler_inputs(&left.path().join("harn-vm-core")));
+    let right_hash = fingerprint_inputs(&compiler_inputs(&right.path().join("harn-vm-core")));
 
     assert_eq!(
         left_hash, right_hash,
@@ -102,13 +102,13 @@ fn codegen_fingerprint_tracks_module_artifact_compilation() {
     seed_compiler_sources(left.path(), "return 1;");
     seed_compiler_sources(right.path(), "return 1;");
     fs::write(
-        right.path().join("harn-vm/src/module_artifact.rs"),
+        right.path().join("harn-vm-core/src/module_artifact.rs"),
         "pub fn changed_artifact_compiler() {}",
     )
     .unwrap();
 
-    let left_hash = fingerprint_inputs(&compiler_inputs(&left.path().join("harn-vm")));
-    let right_hash = fingerprint_inputs(&compiler_inputs(&right.path().join("harn-vm")));
+    let left_hash = fingerprint_inputs(&compiler_inputs(&left.path().join("harn-vm-core")));
+    let right_hash = fingerprint_inputs(&compiler_inputs(&right.path().join("harn-vm-core")));
 
     assert_ne!(
         left_hash, right_hash,
@@ -122,19 +122,25 @@ fn seed_compiler_sources(root: &Path, compiler_body: &str) {
         ("harn-parser/src/lib.rs", "pub fn parse() {}"),
         ("harn-ir/src/lib.rs", "pub fn lower() {}"),
         ("harn-kernel/src/compiler/state.rs", compiler_body),
-        ("harn-vm/src/compiler.rs", "pub struct Compiler;"),
-        ("harn-vm/src/chunk.rs", "pub struct Chunk;"),
-        ("harn-vm/src/chunk/portable.rs", "pub fn adapt() {}"),
+        ("harn-vm-core/src/compiler.rs", "pub struct Compiler;"),
+        ("harn-vm-core/src/chunk.rs", "pub struct Chunk;"),
+        ("harn-vm-core/src/chunk/portable.rs", "pub fn adapt() {}"),
         ("harn-modules/src/package_imports.rs", "pub fn resolve() {}"),
-        ("harn-vm/src/bytecode_cache/graph.rs", "pub fn derive() {}"),
         (
-            "harn-vm/src/bytecode_cache/interface.rs",
+            "harn-vm-core/src/bytecode_cache/graph.rs",
+            "pub fn derive() {}",
+        ),
+        (
+            "harn-vm-core/src/bytecode_cache/interface.rs",
             "pub fn recall() {}",
         ),
-        ("harn-vm/src/context_manifest.rs", "pub fn validate() {}"),
-        ("harn-vm/src/module_source.rs", "pub fn identity() {}"),
         (
-            "harn-vm/src/module_artifact.rs",
+            "harn-vm-core/src/context_manifest.rs",
+            "pub fn validate() {}",
+        ),
+        ("harn-vm-core/src/module_source.rs", "pub fn identity() {}"),
+        (
+            "harn-vm-core/src/module_artifact.rs",
             "pub fn compile_artifact() {}",
         ),
     ];

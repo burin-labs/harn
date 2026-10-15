@@ -10,7 +10,7 @@ use harn_vm::Compiler;
 #[path = "../../harn-cli/build_support/cli_aot_manifest.rs"]
 #[allow(dead_code)]
 mod cli_aot_manifest;
-#[path = "../../harn-vm/build_support/codegen_fingerprint.rs"]
+#[path = "../../harn-vm-core/build_support/codegen_fingerprint.rs"]
 #[allow(dead_code)]
 mod codegen_fingerprint;
 
@@ -169,7 +169,7 @@ fn checkout_contract(workspace_root: &Path) -> Result<CheckoutContract, String> 
         .map_err(|error| format!("parse {}: {error}", workspace_manifest_path.display()))?;
     let harn_version = workspace_manifest.workspace.package.version;
 
-    let vm_manifest_dir = workspace_root.join("crates/harn-vm");
+    let vm_manifest_dir = workspace_root.join("crates/harn-vm-core");
     let compiler_inputs = codegen_fingerprint::compiler_inputs(&vm_manifest_dir);
     let compiler_fingerprint = codegen_fingerprint::fingerprint_inputs(&compiler_inputs);
     Ok(CheckoutContract {

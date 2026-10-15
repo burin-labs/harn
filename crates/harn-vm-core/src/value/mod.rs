@@ -1,4 +1,4 @@
-pub(crate) mod args;
+pub mod args;
 mod build;
 mod core;
 mod diff;

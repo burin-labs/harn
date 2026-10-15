@@ -3,7 +3,7 @@
 mod cache;
 mod state;
 
-pub(crate) use state::RuntimeEffectState;
+pub use state::RuntimeEffectState;
 
 use crate::VmValue;
 use cache::resolve_runtime_resources;

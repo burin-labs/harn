@@ -20,7 +20,7 @@ use std::fmt;
 /// variant when a builtin needs to require a type not here yet; the
 /// canonical-tag test will reject a spelling the runtime does not produce.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum TypeTag {
+pub enum TypeTag {
     String,
     Bytes,
     Int,
@@ -35,7 +35,7 @@ pub(crate) enum TypeTag {
 
 impl TypeTag {
     /// The tag `type_of` returns for this type.
-    pub(crate) const fn tag(self) -> &'static str {
+    pub const fn tag(self) -> &'static str {
         match self {
             Self::String => "string",
             Self::Bytes => "bytes",
@@ -52,7 +52,7 @@ impl TypeTag {
 
     /// Every variant, so the canonical-tag test cannot miss one.
     #[cfg(test)]
-    pub(crate) const ALL: &'static [Self] = &[
+    pub const ALL: &'static [Self] = &[
         Self::String,
         Self::Bytes,
         Self::Int,
@@ -74,7 +74,7 @@ impl fmt::Display for TypeTag {
 
 /// Whether `tag` is a string `type_of` can actually return.
 #[cfg(test)]
-pub(crate) fn tag_is_canonical(tag: &str) -> bool {
+pub fn tag_is_canonical(tag: &str) -> bool {
     harn_builtin_meta::runtime_type_tags::ALL.contains(&tag)
 }
 
@@ -83,7 +83,7 @@ pub(crate) fn tag_is_canonical(tag: &str) -> bool {
 /// Composed from [`TypeTag`]s rather than free text so a union or element
 /// type cannot smuggle in a non-canonical spelling.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Expected {
+pub enum Expected {
     /// Exactly one type: `must be a dict`.
     One(TypeTag),
     /// Either of two: `must be bytes or a string`.
@@ -93,19 +93,19 @@ pub(crate) enum Expected {
 }
 
 impl Expected {
-    pub(crate) const STRING: Self = Self::One(TypeTag::String);
-    pub(crate) const BYTES: Self = Self::One(TypeTag::Bytes);
-    pub(crate) const INT: Self = Self::One(TypeTag::Int);
-    pub(crate) const BOOL: Self = Self::One(TypeTag::Bool);
-    pub(crate) const FLOAT: Self = Self::One(TypeTag::Float);
-    pub(crate) const LIST: Self = Self::One(TypeTag::List);
-    pub(crate) const DICT: Self = Self::One(TypeTag::Dict);
-    pub(crate) const CLOSURE: Self = Self::One(TypeTag::Closure);
-    pub(crate) const INT_OR_FLOAT: Self = Self::Either(TypeTag::Int, TypeTag::Float);
-    pub(crate) const STRING_LIST: Self = Self::ListOf(TypeTag::String);
-    pub(crate) const LIST_OR_SET: Self = Self::Either(TypeTag::List, TypeTag::Set);
-    pub(crate) const BYTES_OR_STRING: Self = Self::Either(TypeTag::Bytes, TypeTag::String);
-    pub(crate) const DURATION_OR_INT: Self = Self::Either(TypeTag::Duration, TypeTag::Int);
+    pub const STRING: Self = Self::One(TypeTag::String);
+    pub const BYTES: Self = Self::One(TypeTag::Bytes);
+    pub const INT: Self = Self::One(TypeTag::Int);
+    pub const BOOL: Self = Self::One(TypeTag::Bool);
+    pub const FLOAT: Self = Self::One(TypeTag::Float);
+    pub const LIST: Self = Self::One(TypeTag::List);
+    pub const DICT: Self = Self::One(TypeTag::Dict);
+    pub const CLOSURE: Self = Self::One(TypeTag::Closure);
+    pub const INT_OR_FLOAT: Self = Self::Either(TypeTag::Int, TypeTag::Float);
+    pub const STRING_LIST: Self = Self::ListOf(TypeTag::String);
+    pub const LIST_OR_SET: Self = Self::Either(TypeTag::List, TypeTag::Set);
+    pub const BYTES_OR_STRING: Self = Self::Either(TypeTag::Bytes, TypeTag::String);
+    pub const DURATION_OR_INT: Self = Self::Either(TypeTag::Duration, TypeTag::Int);
 }
 
 /// `a` or `an`, by the tag's first letter. Written out rather than pulled

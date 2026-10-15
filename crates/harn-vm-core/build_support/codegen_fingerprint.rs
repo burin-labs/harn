@@ -16,8 +16,8 @@ const SOURCE_ROOTS: &[&str] = &[
     "harn-ir/src",
     "harn-kernel/src",
     "harn-modules/src",
-    "harn-vm/src/chunk",
-    "harn-vm/src/bytecode_cache",
+    "harn-vm-core/src/chunk",
+    "harn-vm-core/src/bytecode_cache",
 ];
 
 const SOURCE_FILES: &[&str] = &[
@@ -45,7 +45,7 @@ pub fn compiler_inputs(manifest_dir: &Path) -> Vec<CompilerInput> {
         let disk_path = manifest_dir.join("src").join(file_name);
         if disk_path.is_file() {
             inputs.push(CompilerInput {
-                logical_path: format!("harn-vm/src/{file_name}"),
+                logical_path: format!("harn-vm-core/src/{file_name}"),
                 disk_path,
             });
         }

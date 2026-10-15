@@ -29,7 +29,7 @@ mod scope;
 mod state;
 mod stdlib_artifact;
 mod stdlib_export;
-pub(crate) mod step_context;
+pub mod step_context;
 pub mod subtask;
 mod task_cleanup;
 mod tool_callable;
@@ -68,18 +68,18 @@ pub use builtin_manifest::{
     capability_method_manifest_entry, harness_method_for_builtin,
     recorded_effect_builtin_manifest_entry,
 };
-pub(crate) use callable_entry::TopLevelEntry;
+pub use callable_entry::TopLevelEntry;
 pub use debug::{DebugAction, DebugState};
-pub(crate) use harness_seam::{HarnessMethodFuture, HarnessMethods};
+pub use harness_seam::{HarnessMethodFuture, HarnessMethods};
 pub use module_phase_timing::{ModulePhaseRecorder, ModulePhaseStats};
 pub use modules::resolve_module_import_path;
 pub(crate) use registration::VmBuiltinRegistration;
-pub(crate) use runtime::{
+pub use runtime::{
     BuiltinGateDecision, VmBuiltinBridge, VmRuntime, VmRuntimeBaseline, VmSpanKind, VmTaskCleanup,
 };
 pub use runtime_context::RuntimeContext;
 pub(crate) use runtime_context::{runtime_context_clear, runtime_context_get, runtime_context_set};
-pub(crate) use runtime_scope::{scope_runtime, VmExecutionScope};
+pub use runtime_scope::{scope_runtime, VmExecutionScope};
 pub use state::{Vm, VmBaseline};
 pub(crate) use stdlib_artifact::prepare_stdlib_module_artifact;
 pub use stdlib_artifact::{warm_embedded_stdlib, StdlibWarmReport};
@@ -93,7 +93,7 @@ pub use work::{VmWork, VmWorkRecorder};
 
 pub(crate) use call_args::CallArgs;
 pub(crate) use ops::{CaughtError, ExceptionHandler};
+pub use state::ScopeSpan;
 pub(crate) use state::{
-    CallFrame, InterruptHandler, IterState, LocalSlot, ScopeSpan, TaskScope, VmBuiltinDispatch,
-    VmBuiltinEntry,
+    CallFrame, InterruptHandler, IterState, LocalSlot, TaskScope, VmBuiltinDispatch, VmBuiltinEntry,
 };

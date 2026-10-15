@@ -41,7 +41,7 @@ pub enum StepErrorBoundary {
     Escalate,
 }
 
-pub(crate) enum StepBoundaryDecision {
+pub enum StepBoundaryDecision {
     Continue { message: String },
     Throw(VmError),
 }
@@ -65,7 +65,7 @@ pub struct ActiveStep {
 }
 
 impl ActiveStep {
-    pub(crate) fn new(
+    pub fn new(
         frame_depth: usize,
         definition: Arc<StepDefinition>,
         persona: Option<String>,
@@ -88,7 +88,7 @@ impl ActiveStep {
         }
     }
 
-    pub(crate) fn total_tokens(&self) -> u64 {
+    pub fn total_tokens(&self) -> u64 {
         self.input_tokens.saturating_add(self.output_tokens)
     }
 }
@@ -100,21 +100,21 @@ pub struct ActivePersona {
 }
 
 #[derive(Clone, Default)]
-pub(crate) struct ActiveContextSnapshot {
-    pub(crate) steps: Vec<ActiveStep>,
-    pub(crate) personas: Vec<ActivePersona>,
+pub struct ActiveContextSnapshot {
+    pub steps: Vec<ActiveStep>,
+    pub personas: Vec<ActivePersona>,
 }
 
 /// Retain the exact caller context inline while the runtime suspends it.
 /// The runtime's restorer decides whether this guard still owns the scope.
-pub(crate) struct ActiveContextGuard {
+pub struct ActiveContextGuard {
     id: u64,
     outer: Option<ActiveContextSnapshot>,
     restore: fn(u64, ActiveContextSnapshot),
 }
 
 impl ActiveContextGuard {
-    pub(crate) fn new(
+    pub fn new(
         id: u64,
         outer: ActiveContextSnapshot,
         restore: fn(u64, ActiveContextSnapshot),
