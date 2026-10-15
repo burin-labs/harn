@@ -133,6 +133,31 @@ impl VmRuntime for NativeExecutionState {
         crate::stdlib::set_thread_source_dir(dir);
     }
 
+    fn enter_source_dir(&self, dir: Option<&Path>) -> Option<std::path::PathBuf> {
+        crate::stdlib::process::enter_frame_source_dir(dir)
+    }
+
+    fn is_step_function(&self, name: &str) -> bool {
+        crate::step_runtime::is_step_function(name)
+    }
+
+    fn is_tracked_function(&self, name: &str) -> bool {
+        crate::step_runtime::is_tracked_function(name)
+    }
+
+    fn enter_function(&self, name: &str, frame_depth: usize, args: &[VmValue]) {
+        crate::step_runtime::maybe_push_active_persona(name, frame_depth);
+        crate::step_runtime::maybe_push_active_step(name, frame_depth, args);
+    }
+
+    fn prune_frames(&self, frame_depth: usize) {
+        crate::step_runtime::prune_below_frame(frame_depth);
+    }
+
+    fn suspend_active_context(&self) -> crate::vm::step_context::ActiveContextGuard {
+        crate::step_runtime::suspend_active_context()
+    }
+
     fn denied_builtin_family(
         &self,
         mut denied: std::collections::HashSet<String>,

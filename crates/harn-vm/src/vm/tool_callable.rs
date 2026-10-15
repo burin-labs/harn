@@ -97,9 +97,7 @@ impl Vm {
         args_start: usize,
         stack_truncate_to: usize,
     ) -> Result<(), VmError> {
-        if closure.func.is_generator
-            || crate::step_runtime::step_definition_for_function(&closure.func.name).is_some()
-        {
+        if closure.func.is_generator || self.runtime.is_step_function(&closure.func.name) {
             let args = self.take_stack_args_from(args_start)?;
             self.stack.truncate(stack_truncate_to);
             self.call_user_closure(closure, args).await?;

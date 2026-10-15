@@ -48,6 +48,12 @@ pub(crate) trait VmRuntime: Any + Send + Sync {
     fn clear_pipeline_finish(&self);
     fn rebind_execution_state(&self, vm: &mut super::Vm);
     fn set_source_dir(&self, dir: &Path);
+    fn enter_source_dir(&self, dir: Option<&Path>) -> Option<std::path::PathBuf>;
+    fn is_step_function(&self, name: &str) -> bool;
+    fn is_tracked_function(&self, name: &str) -> bool;
+    fn enter_function(&self, name: &str, frame_depth: usize, args: &[VmValue]);
+    fn prune_frames(&self, frame_depth: usize);
+    fn suspend_active_context(&self) -> super::step_context::ActiveContextGuard;
     fn denied_builtin_family(
         &self,
         denied: std::collections::HashSet<String>,

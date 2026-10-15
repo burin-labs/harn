@@ -345,7 +345,7 @@ impl super::super::Vm {
         payload: VmValue,
     ) -> Pin<Box<dyn Future<Output = Result<VmValue, VmError>> + Send + 'a>> {
         Box::pin(async move {
-            let active_context = crate::step_runtime::suspend_active_context();
+            let active_context = self.runtime.suspend_active_context();
             let result = self
                 .call_closure_args(handler, CallArgs::One(&payload))
                 .await;
@@ -650,8 +650,7 @@ impl super::super::Vm {
     }
 
     fn direct_call_cacheable(closure: &VmClosure) -> bool {
-        !closure.func.is_generator
-            && crate::step_runtime::step_definition_for_function(&closure.func.name).is_none()
+        !closure.func.is_generator && !self.runtime.is_step_function(&closure.func.name)
     }
 
     fn try_cached_direct_call(
@@ -1077,8 +1076,7 @@ impl super::super::Vm {
             self.runtime.set_source_dir(dir);
         }
 
-        let saved_source_dir =
-            crate::stdlib::process::enter_frame_source_dir(closure.source_dir.as_deref());
+        let saved_source_dir = self.runtime.enter_source_dir(closure.source_dir.as_deref());
 
         call_env.push_scope();
         let debugger = self.debugger_attached();
@@ -1157,7 +1155,7 @@ impl super::super::Vm {
     /// observe.
     pub(super) fn execute_tail_call_sync(&mut self) -> Option<Result<(), VmError>> {
         let frame = self.frames.last().unwrap();
-        if crate::step_runtime::is_tracked_function(&frame.fn_name) {
+        if self.runtime.is_tracked_function(&frame.fn_name) {
             return None;
         }
         if self.current_frame_has_exception_handler() {
@@ -1177,7 +1175,7 @@ impl super::super::Vm {
         if closure.func.is_generator {
             return None;
         }
-        if crate::step_runtime::is_tracked_function(&closure.func.name) {
+        if self.runtime.is_tracked_function(&closure.func.name) {
             return None;
         }
 
@@ -1239,8 +1237,8 @@ impl super::super::Vm {
                 .last()
                 .map(|frame| frame.fn_name.clone())
                 .unwrap_or_default();
-            if crate::step_runtime::is_tracked_function(&current_fn_name)
-                || crate::step_runtime::is_tracked_function(&closure.func.name)
+            if self.runtime.is_tracked_function(&current_fn_name)
+                || self.runtime.is_tracked_function(&closure.func.name)
                 || self.current_frame_has_exception_handler()
             {
                 // Persona/step lifecycle state is frame-owned. Keep those

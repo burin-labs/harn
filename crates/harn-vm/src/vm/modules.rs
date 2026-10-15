@@ -664,7 +664,7 @@ impl Vm {
             // the persona/step context here and restore it after init
             // so module loading is invisible to the step-tracking
             // surface.
-            let active_context = crate::step_runtime::suspend_active_context();
+            let active_context = self.runtime.suspend_active_context();
             let init_result: Result<(), VmError> = async {
                 for chunk in &artifact.type_schema_init_chunks {
                     self.run_chunk(Arc::clone(chunk)).await?;

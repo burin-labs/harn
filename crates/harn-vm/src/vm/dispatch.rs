@@ -610,8 +610,8 @@ impl Vm {
         args: CallArgs<'_>,
     ) -> Result<VmValue, VmError> {
         let saved_handlers = std::mem::take(&mut self.exception_handlers);
-        let active_context = (!crate::step_runtime::is_tracked_function(&closure.func.name))
-            .then(crate::step_runtime::suspend_active_context);
+        let active_context = (!self.runtime.is_tracked_function(&closure.func.name))
+            .then(|| self.runtime.suspend_active_context());
 
         let target_frame_depth = self.frames.len();
         let frame_result = self.push_closure_frame_args(closure, &args);
