@@ -708,7 +708,8 @@ fn empty_tool_list_value() -> VmValue {
 fn current_vm_host_bridge(
     ctx: Option<&AsyncBuiltinCtx>,
 ) -> Option<std::sync::Arc<crate::bridge::HostBridge>> {
-    ctx.and_then(|ctx| ctx.child_vm().bridge.clone())
+    use crate::native_vm::NativeVmState;
+    ctx.and_then(|ctx| ctx.child_vm().native().bridge.clone())
 }
 
 #[cfg(test)]

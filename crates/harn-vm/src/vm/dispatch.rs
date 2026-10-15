@@ -1,3 +1,4 @@
+use crate::native_vm::NativeVmState;
 use std::future::Future;
 use std::sync::Arc;
 
@@ -90,8 +91,7 @@ impl Vm {
         direct_id: Option<BuiltinId>,
         name: &str,
     ) -> Option<Result<ResolvedSyncBuiltin, VmError>> {
-        if crate::autonomy::needs_async_side_effect_enforcement(name)
-            || Self::is_runtime_context_builtin(name)
+        if self.runtime.requires_async_builtin_gate(name) || Self::is_runtime_context_builtin(name)
         {
             return None;
         }
@@ -106,14 +106,13 @@ impl Vm {
         }
         .or_else(|| {
             self.builtins.get(name).cloned().map(|builtin| {
-                let recorded_effects = crate::stdlib::recorded_effect_builtin_manifest_entry(name)
-                    .map(|entry| entry.contract.effects);
+                let recorded_effects = self.runtime.builtin_effects(name);
                 (VmBuiltinDispatch::Sync(builtin), recorded_effects)
             })
         });
 
         let Some(dispatch) = dispatch else {
-            if self.async_builtins.contains_key(name) || self.bridge.is_some() {
+            if self.async_builtins.contains_key(name) || self.runtime.builtin_bridge().is_some() {
                 return None;
             }
             let all_builtins = self
@@ -142,8 +141,9 @@ impl Vm {
     }
 
     fn validate_sync_builtin_args(
+        runtime: &dyn super::VmRuntime,
         denied_builtins: &std::collections::HashSet<String>,
-        runtime_effects: &mut crate::orchestration::RuntimeEffectState,
+        runtime_effects: &mut crate::runtime_effects::RuntimeEffectState,
         name: &str,
         args: &[VmValue],
         recorded_effects: Option<&'static [harn_builtin_meta::EffectSpec]>,
@@ -154,7 +154,7 @@ impl Vm {
                 category: ErrorCategory::ToolRejected,
             });
         }
-        crate::orchestration::enforce_current_policy_for_builtin(name, args)?;
+        runtime.gate_sync_builtin(name, args)?;
         if let Some(specs) = recorded_effects {
             runtime_effects.record_specs(specs, args);
         }
@@ -178,8 +178,7 @@ impl Vm {
             VmBuiltinEntry {
                 name: std::sync::Arc::from(name),
                 dispatch,
-                recorded_effects: crate::stdlib::recorded_effect_builtin_manifest_entry(name)
-                    .map(|entry| entry.contract.effects),
+                recorded_effects: self.runtime.builtin_effects(name),
             },
         );
     }
@@ -711,7 +710,7 @@ impl Vm {
                 self.call_closure_args(&handler, args).await
             }
             VmValue::BuiltinRef(name) => {
-                if !crate::autonomy::needs_async_side_effect_enforcement(name) {
+                if !self.runtime.requires_async_builtin_gate(name) {
                     if let Some(result) = self.call_sync_builtin_by_ref_args(name, &args) {
                         return result;
                     }
@@ -765,7 +764,7 @@ impl Vm {
             return self.call_closure(closure, args).await;
         }
 
-        let registry = self.pool_registry.clone();
+        let registry = self.native().pool_registry.clone();
         let ambient = self.prepare_top_level_ambient();
         let call = crate::stdlib::pool::with_pool_registry_scope(registry, async {
             self.call_closure(closure, args).await
@@ -874,6 +873,7 @@ impl Vm {
         let _observe = Self::observe_builtin_call(name);
         if let Err(error) = args.with_slice(|slice| {
             Self::validate_sync_builtin_args(
+                self.runtime.as_ref(),
                 &self.denied_builtins,
                 &mut self.runtime_effects,
                 name,
@@ -912,6 +912,7 @@ impl Vm {
 
         let _observe = Self::observe_builtin_call(name);
         if let Err(error) = Self::validate_sync_builtin_args(
+            self.runtime.as_ref(),
             &self.denied_builtins,
             &mut self.runtime_effects,
             name,
@@ -937,7 +938,7 @@ impl Vm {
     ) -> Result<VmValue, VmError> {
         let _observe = Self::observe_builtin_call(name);
 
-        crate::tool_registry::preparation_scope::enforce_contract(
+        self.runtime.gate_preparation(
             name,
             self.builtin_metadata
                 .get(name)
@@ -952,21 +953,15 @@ impl Vm {
                 category: ErrorCategory::ToolRejected,
             });
         }
-        let autonomy =
-            if enforce_contract && crate::autonomy::needs_async_side_effect_enforcement(name) {
-                crate::autonomy::enforce_builtin_side_effect_boxed(name, &args).await?
-            } else {
-                None
-            };
-        if let Some(crate::autonomy::AutonomyDecision::Skip(value)) = autonomy {
-            return Ok(value);
-        }
         if enforce_contract {
-            if !matches!(
-                autonomy,
-                Some(crate::autonomy::AutonomyDecision::AllowApproved)
-            ) {
-                crate::orchestration::enforce_current_policy_for_builtin(name, &args)?;
+            if self.runtime.requires_async_builtin_gate(name) {
+                if let super::BuiltinGateDecision::Return(value) =
+                    self.runtime.gate_async_builtin(name, &args).await?
+                {
+                    return Ok(value);
+                }
+            } else {
+                self.runtime.gate_sync_builtin(name, &args)?;
             }
             self.record_builtin_contract_effects(name, &args);
         }
@@ -988,21 +983,11 @@ impl Vm {
                 .await
         } else if let Some(result) = self.try_dispatch_runtime_context_builtin(name, &args) {
             result
-        } else if let Some(bridge) = &self.bridge {
+        } else if let Some(bridge) = self.runtime.builtin_bridge() {
             if enforce_contract {
-                crate::orchestration::enforce_current_policy_for_bridge_builtin(name)?;
+                self.runtime.gate_bridge_builtin(name)?;
             }
-            let args_json: Vec<serde_json::Value> = args
-                .iter()
-                .map(crate::value::json::vm_value_to_json)
-                .collect();
-            let result = bridge
-                .call(
-                    "builtin_call",
-                    serde_json::json!({"name": name, "args": args_json}),
-                )
-                .await?;
-            Ok(crate::bridge::json_result_to_vm_value(&result))
+            bridge.call_builtin(name, &args).await
         } else {
             let all_builtins = self
                 .builtins

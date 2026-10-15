@@ -1,3 +1,4 @@
+use crate::native_vm::NativeVmState;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -105,13 +106,13 @@ impl Vm {
         self.capture_agent_cleanup_runtimes();
         crate::orchestration::AmbientExecutionScope::capture_for_top_level_execution(
             self.execution_id.clone(),
-            self.llm_mock_context.clone(),
-            self.worker_registry.clone(),
-            self.daemon_registry.clone(),
-            self.trigger_registry.clone(),
-            self.session_runtime.clone(),
-            self.tracing_runtime.clone(),
-            self.agent_host_session_runtime.clone(),
+            self.native().llm_mock_context.clone(),
+            self.native().worker_registry.clone(),
+            self.native().daemon_registry.clone(),
+            self.native().trigger_registry.clone(),
+            self.native().session_runtime.clone(),
+            self.native().tracing_runtime.clone(),
+            self.native().agent_host_session_runtime.clone(),
         )
     }
 
@@ -146,7 +147,7 @@ impl Vm {
         entry: TopLevelEntry,
     ) -> Result<VmValue, VmError> {
         self.ensure_execution_available()?;
-        let registry = self.pool_registry.clone();
+        let registry = self.native().pool_registry.clone();
         let ambient = self.prepare_top_level_ambient();
         let execution = crate::stdlib::pool::with_pool_registry_scope(registry, async {
             self.execute_entry_scoped(entry).await

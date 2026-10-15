@@ -7,6 +7,7 @@
 //! halves, keyed by trigger id in a thread-local table so a worker that resumes
 //! early cancels its own timeout.
 
+use crate::native_vm::NativeVmState;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
@@ -223,8 +224,8 @@ async fn schedule_auto_resume_timeout(
     cancel_auto_resume_timeout(handle.id.as_str());
     let event_log = ensure_trigger_event_log();
     let base_vm = ctx.child_vm();
-    let worker_registry = base_vm.worker_registry.clone();
-    let pool_registry = base_vm.pool_registry.clone();
+    let worker_registry = base_vm.native().worker_registry.clone();
+    let pool_registry = base_vm.native().pool_registry.clone();
     let harness_inner = base_vm.harness().map(|harness| Arc::clone(harness.inner()));
     let duration = Duration::from_secs(timeout.duration_minutes.saturating_mul(60));
     let harness_inner =

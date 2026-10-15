@@ -9,7 +9,7 @@
 //! opaque tool rejection.
 //!
 //! These bodies reach layers above the VM, so the VM calls them only through
-//! its `HarnessMethods` seam, which [`install`] fills.
+//! its required `HarnessMethods` seam.
 
 use crate::value::VmDictExt;
 use std::time::Duration;
@@ -60,9 +60,8 @@ impl HarnessMethods for StdHarnessMethods {
 
 static STD_HARNESS_METHODS: StdHarnessMethods = StdHarnessMethods;
 
-/// Install these methods behind the VM's harness method seam.
-pub(crate) fn install() {
-    crate::vm::install_harness_methods(&STD_HARNESS_METHODS);
+pub(crate) fn runtime_methods() -> &'static dyn HarnessMethods {
+    &STD_HARNESS_METHODS
 }
 
 /// Outcome of `evaluate_net_policy_for_method`. `Allow` means the

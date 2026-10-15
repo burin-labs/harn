@@ -5,6 +5,7 @@
 //! `use super::*`.
 
 use super::*;
+use crate::native_vm::NativeVmState;
 
 #[test]
 fn vm_construction_initializes_shared_secret_patterns() {
@@ -51,7 +52,7 @@ fn vm_baseline_instantiates_clean_mutable_execution_state() {
     assert!(clean.cancel_token.is_none());
     assert!(clean.interrupt_handlers.is_empty());
     assert!(clean.error_stack_trace.is_empty());
-    assert!(clean.bridge.is_none());
+    assert!(clean.native().bridge.is_none());
     assert!(clean
         .globals
         .get("stable_global")

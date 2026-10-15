@@ -1410,10 +1410,30 @@ impl HostBridge {
     }
 }
 
-/// Convert a serde_json::Value to a VmValue.
-pub fn json_result_to_vm_value(val: &serde_json::Value) -> VmValue {
-    crate::stdlib::json_to_vm_value(val)
+impl crate::vm::VmBuiltinBridge for HostBridge {
+    fn call_builtin<'a>(
+        &'a self,
+        name: &'a str,
+        args: &'a [VmValue],
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<VmValue, VmError>> + Send + 'a>>
+    {
+        Box::pin(async move {
+            let args_json: Vec<serde_json::Value> = args
+                .iter()
+                .map(crate::value::json::vm_value_to_json)
+                .collect();
+            let result = self
+                .call(
+                    "builtin_call",
+                    serde_json::json!({"name": name, "args": args_json}),
+                )
+                .await?;
+            Ok(crate::value::json::json_to_vm_value(&result))
+        })
+    }
 }
+
+pub use crate::value::json::json_to_vm_value as json_result_to_vm_value;
 
 fn parse_host_tools_list_response(
     result: serde_json::Value,

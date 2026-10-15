@@ -1,4 +1,5 @@
 use super::Vm;
+use crate::native_vm::NativeVmState;
 
 impl Vm {
     /// Install an explicit decision recording/replay scope. Child VMs inherit
@@ -7,7 +8,7 @@ impl Vm {
         &mut self,
         scope: crate::llm::decision::replay::EvaluationReplayScope,
     ) {
-        self.evaluation.replay = Some(scope);
+        self.native_mut().evaluation.replay = Some(scope);
     }
 
     /// Enable exact, value-free source-path recording for this VM execution
@@ -29,7 +30,7 @@ impl Vm {
         // record, so the collector is cleared at the top-level boundary that
         // mints the new execution identity.
         crate::llm::reset_reasoning_receipts();
-        self.evaluation.journal = std::sync::Arc::default();
+        self.native_mut().evaluation.journal = std::sync::Arc::default();
         self.flight_recorder = self.flight_recorder_max_events.map(|max_events| {
             crate::flight_recorder::FlightRecorder::new(self.execution_id.clone(), max_events)
         });
@@ -56,7 +57,8 @@ impl Vm {
         gaps: Vec<crate::orchestration::RunEvidenceGapRecord>,
     ) -> crate::orchestration::ExecutionEvidenceRecord {
         let mut gaps = gaps;
-        let (evaluation_receipts, evaluation_dropped) = self.evaluation.journal.lock().snapshot();
+        let (evaluation_receipts, evaluation_dropped) =
+            self.native().evaluation.journal.lock().snapshot();
         if evaluation_dropped > 0 {
             gaps.push(crate::orchestration::RunEvidenceGapRecord {
                 component: "evaluation_receipts".into(),
@@ -76,6 +78,7 @@ impl Vm {
             schema_version: crate::orchestration::EXECUTION_EVIDENCE_SCHEMA_VERSION,
             execution_id: Some(self.execution_id.to_string()),
             trace_spans: self
+                .native()
                 .tracing_runtime
                 .completed_spans_for_execution(&self.execution_id)
                 .iter()
@@ -89,6 +92,7 @@ impl Vm {
 
 #[cfg(test)]
 mod tests {
+    use crate::native_vm::NativeVmState;
     struct TracingRuntimeGuard(std::sync::Arc<crate::tracing::TracingRuntime>);
 
     impl Drop for TracingRuntimeGuard {
@@ -128,10 +132,10 @@ mod tests {
     #[test]
     fn vm_evidence_cannot_capture_the_callers_tracing_runtime() {
         let mut vm = super::Vm::new();
-        vm.tracing_runtime = crate::tracing::fresh_tracing_runtime();
+        vm.native_mut().tracing_runtime = crate::tracing::fresh_tracing_runtime();
         {
             let _execution = crate::enter_execution_scope(vm.execution_id().clone());
-            let _runtime = enter_tracing_runtime(vm.tracing_runtime.clone());
+            let _runtime = enter_tracing_runtime(vm.native().tracing_runtime.clone());
             crate::tracing::set_tracing_enabled(true);
             let span =
                 crate::tracing::span_start(crate::tracing::SpanKind::Pipeline, "owned".to_string());
@@ -161,8 +165,8 @@ mod tests {
     #[test]
     fn vm_evidence_selects_its_execution_from_a_reused_tracing_runtime() {
         let mut vm = super::Vm::new();
-        vm.tracing_runtime = crate::tracing::fresh_tracing_runtime();
-        let _runtime = enter_tracing_runtime(vm.tracing_runtime.clone());
+        vm.native_mut().tracing_runtime = crate::tracing::fresh_tracing_runtime();
+        let _runtime = enter_tracing_runtime(vm.native().tracing_runtime.clone());
         crate::tracing::set_tracing_enabled(true);
 
         let earlier_execution = crate::ExecutionId::mint();

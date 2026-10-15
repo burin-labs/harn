@@ -1028,7 +1028,9 @@ async fn await_due_auto_resume(ctx: &crate::vm::AsyncBuiltinCtx, state: &WorkerS
         .map_or_else(crate::clock_mock::now_ms, |harness| {
             harn_clock::now_wall_ms(harness.inner().clock().as_ref())
         });
+    use crate::native_vm::NativeVmState;
     let Some(mut completion) = vm
+        .native()
         .trigger_registry
         .due_background_completion(&trigger_id, now_unix_ms)
     else {

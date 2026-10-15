@@ -1930,6 +1930,42 @@
       "reason": "SUBSUMED: Repeats full artifact generation and validation, then accepts every error except one prose substring. The retained test rejects every validation error; validation_rejects_local_strengths_inheriting_cloud_decoration still proves this rule fires.",
       "retainedPath": "crates/harn-vm/src/provider_catalog/tests.rs",
       "retainedName": "generated_catalog_validates"
+    },
+    {
+      "path": "crates/harn-vm/src/bridge/tests.rs",
+      "name": "test_json_result_to_vm_value_string",
+      "reason": "SUBSUMED: the bridge converter is now a direct re-export of the value-layer converter. The product-path JSON fixture parses and prints the same string through that converter.",
+      "retainedPath": "conformance/tests/stdlib/json/json_roundtrip.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/bridge/tests.rs",
+      "name": "test_json_result_to_vm_value_dict",
+      "reason": "SUBSUMED: the bridge converter is now a direct re-export. The product-path JSON fixture reads both string and integer object fields through the same value-layer converter.",
+      "retainedPath": "conformance/tests/stdlib/json/json_roundtrip.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/bridge/tests.rs",
+      "name": "test_json_result_to_vm_value_null",
+      "reason": "SUBSUMED: the bridge converter is now a direct re-export. The product-path JSON fixture proves the same converter maps JSON null to Harn nil.",
+      "retainedPath": "conformance/tests/stdlib/json/json_roundtrip.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/bridge/tests.rs",
+      "name": "test_json_result_to_vm_value_nested",
+      "reason": "SUBSUMED: the bridge converter is now a direct re-export. The product-path JSON fixture checks nested object/array values through the converter, while the removed case checked only the array length.",
+      "retainedPath": "conformance/tests/stdlib/json/json_roundtrip.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/vm/harness_seam.rs",
+      "name": "an_uninstalled_seam_is_an_error",
+      "reason": "STRUCTURAL: the process-global optional slot was deleted. Vm construction requires VmRuntime, whose harness_methods method must provide a dispatcher and has no default implementation or absent state.",
+      "retainedPath": "crates/harn-vm/src/vm/runtime.rs"
+    },
+    {
+      "path": "crates/harn-vm/src/vm/harness_seam.rs",
+      "name": "vm_new_installs_the_seam",
+      "reason": "STRUCTURAL: native Vm construction supplies NativeExecutionState directly; there is no installation bit. The JSON conformance fixture reaches native Harness method dispatch through the real constructor.",
+      "retainedPath": "conformance/tests/stdlib/json/json_roundtrip.harn"
     }
   ],
   "retainedScenarios": [

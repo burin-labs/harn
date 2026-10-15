@@ -13,13 +13,11 @@ pub use capability_invocation::enforce_current_policy_for_capability;
 pub(crate) use capability_invocation::scope_read_only_invocation;
 mod consent_capability;
 pub(crate) use consent_capability::is_policy_machinery_consent_call;
-mod effect_call_cache;
 mod effects;
 mod external_roots;
 mod nested_budget;
 mod operator_grant;
 mod run_approval;
-mod runtime_effect_state;
 mod tool_approval_policy;
 pub(crate) mod tool_enforcement;
 mod types;
@@ -38,6 +36,7 @@ use crate::workspace_path::{classify_permission_path, WorkspacePathInfo};
 pub(crate) use capability_lattice::operation_is_covered;
 use capability_lattice::policy_allows_capability;
 
+pub(crate) use crate::runtime_effects::RuntimeEffectState;
 pub use crate::tool_annotations::{ToolArgSchema, ToolKind};
 pub use approval_activity::{
     ActivityKind, ToolPermissionActivityContext, ToolPermissionActivityError,
@@ -86,7 +85,6 @@ pub use run_approval::{
     push_approval_policy, ApprovalAvailability, RunApprovalPolicy, RunAuthorityPosture,
     RunInteractivity, WorkspaceTrust,
 };
-pub(crate) use runtime_effect_state::RuntimeEffectState;
 pub use tool_enforcement::enforce_current_policy_for_tool;
 #[cfg(test)]
 pub(crate) use tool_enforcement::enforce_current_policy_for_tool_with_annotations_and_side_effect_grant;

@@ -264,51 +264,21 @@ pub struct Vm {
     pub(crate) sync_runtime: Arc<crate::synchronization::VmSyncRuntime>,
     /// Shared process-local cells, maps, and mailboxes inherited by child VMs.
     pub(crate) shared_state_runtime: Arc<crate::shared_state::VmSharedStateRuntime>,
-    /// Host-agent workers owned by this VM tree. Child interpreters share the
-    /// registry so delayed triggers and task migration address the same worker
-    /// state without exposing it to a sibling VM execution.
-    pub(crate) worker_registry: Arc<crate::stdlib::agents::agents_workers::WorkerRegistry>,
-    /// Managed agent daemons owned by this VM tree.
-    pub(crate) daemon_registry: Arc<crate::stdlib::agents_daemon::DaemonRegistry>,
-    /// Trigger bindings owned by this VM tree, including dynamic auto-resume
-    /// bindings that may be consumed on a different runtime worker.
-    pub(crate) trigger_registry: Arc<crate::triggers::registry::TriggerRegistryRuntime>,
-    /// Agent transcripts and subscribers owned by this VM tree.
-    pub(crate) session_runtime: Arc<crate::agent_sessions::AgentSessionRuntime>,
-    /// Shared immutable cleanup snapshot survives ambient unwind without
-    /// expanding every inline VM or cloning its resources for each child.
-    pub(crate) cleanup_runtimes: Option<Arc<crate::agent_lifecycle_cleanup::CleanupRuntimes>>,
-    /// Structured spans owned by this VM tree.
-    pub(crate) tracing_runtime: Arc<crate::tracing::TracingRuntime>,
+    /// Required host execution services, forked explicitly for child interpreters.
+    pub(super) runtime: Arc<dyn super::VmRuntime>,
     /// Durable identity shared by every VM in this execution tree.
     pub(crate) execution_id: crate::ExecutionId,
     /// Root VMs mint and close executions; child VMs only contribute evidence.
     pub(crate) owns_execution: bool,
     /// Exact source path recorder shared by this VM tree when explicitly enabled.
     pub(crate) flight_recorder: Option<Arc<crate::flight_recorder::FlightRecorder>>,
-    pub(crate) evaluation: Box<crate::llm::decision::receipt::EvaluationExecutionState>,
     /// Root-only configuration used to create a fresh recorder per execution.
     pub(crate) flight_recorder_max_events: Option<usize>,
-    /// Host-side agent-loop state owned by this VM tree.
-    pub(crate) agent_host_session_runtime:
-        Arc<crate::llm::agent_session_host::AgentHostSessionRuntime>,
-    /// Connector clients and their on-demand resolver owned by this execution
-    /// tree. Keeping this explicit avoids thread-local loss under task
-    /// migration and prevents sibling VM runs from observing each other.
-    pub(crate) connector_clients: Arc<crate::connectors::VmConnectorClients>,
     /// Per-isolate inline cache entries. `inline_cache_set_by_chunk` maps a
     /// compiled chunk identity to an index in this vector at frame entry; the
     /// dispatch loop uses the frame-local index for per-op reads/writes.
     pub(crate) inline_cache_sets: Vec<Vec<crate::chunk::InlineCacheEntry>>,
     pub(crate) inline_cache_set_by_chunk: HashMap<u64, usize>,
-    /// VM-scoped pool registry inherited by child VMs and scoped into Tokio tasks.
-    pub(crate) pool_registry: Arc<crate::stdlib::pool::PoolRegistry>,
-    /// Inline LLM fixtures and observations shared by this VM execution tree.
-    pub(crate) llm_mock_context: crate::llm::mock::LlmMockContext,
-    /// Reader leases opened by package_snapshot_open in this execution tree.
-    /// Child VMs share the registry; the final VM drop releases abandoned
-    /// leases without touching concurrent executions.
-    pub(crate) package_snapshot_registry: Arc<crate::stdlib::PackageSnapshotRegistry>,
     /// Shared task/channel wait graph for this VM execution tree.
     pub(crate) wait_for_graph: Arc<crate::wait_for_graph::VmWaitForGraph>,
     /// Permits acquired by lexical synchronization blocks in this VM.
@@ -414,8 +384,6 @@ pub struct Vm {
     /// Line-coverage accumulator. `Some` only while a coverage session is
     /// active (see [`crate::coverage`]); folded into the global report on drop.
     pub(crate) coverage: Option<crate::coverage::Coverage>,
-    /// Optional bridge for delegating unknown builtins in bridge mode.
-    pub(crate) bridge: Option<Arc<crate::bridge::HostBridge>>,
     /// Builtins denied by sandbox mode (`--deny` / `--allow` flags).
     pub(crate) denied_builtins: Arc<HashSet<String>>,
     /// Cancellation token for cooperative graceful shutdown (set by parent).
@@ -452,7 +420,7 @@ pub struct Vm {
     /// parameter.
     pub(crate) root_harness: Option<VmValue>,
     /// Runtime effect receipt state (shared recorder + per-VM call memo).
-    pub(crate) runtime_effects: crate::orchestration::RuntimeEffectState,
+    pub(crate) runtime_effects: crate::runtime_effects::RuntimeEffectState,
     /// Optional debugger hook invoked when execution advances to a new source line.
     pub(crate) debug_hook: Option<parking_lot::Mutex<Box<DebugHook>>>,
     /// Effective runtime ceilings for this VM execution.
@@ -468,6 +436,7 @@ pub struct Vm {
 /// shared through `Arc` until a per-execution rebind needs copy-on-write.
 #[derive(Clone)]
 pub struct VmBaseline {
+    runtime: Arc<dyn super::VmRuntimeBaseline>,
     builtins: Arc<BTreeMap<String, VmBuiltinFn>>,
     async_builtins: Arc<BTreeMap<String, VmAsyncBuiltinFn>>,
     capability_methods:
@@ -495,6 +464,7 @@ pub struct VmBaseline {
 impl VmBaseline {
     pub fn from_vm(vm: &Vm) -> Self {
         Self {
+            runtime: vm.runtime.baseline(),
             builtins: Arc::clone(&vm.builtins),
             async_builtins: Arc::clone(&vm.async_builtins),
             capability_methods: Arc::clone(&vm.capability_methods),
@@ -518,12 +488,8 @@ impl VmBaseline {
     }
 
     pub fn instantiate(&self) -> Vm {
-        crate::initialize_runtime_assets();
-        if let Some(dir) = &self.source_dir {
-            crate::stdlib::set_thread_source_dir(dir);
-        }
-
         let mut vm = Vm {
+            runtime: self.runtime.instantiate(self.source_dir.as_deref()),
             stack: Vec::with_capacity(256),
             env: VmEnv::new(),
             output: String::new(),
@@ -541,22 +507,10 @@ impl VmBaseline {
             process_exit_request: Arc::new(ProcessExitRequest::new()),
             sync_runtime: Arc::new(crate::synchronization::VmSyncRuntime::new()),
             shared_state_runtime: Arc::new(crate::shared_state::VmSharedStateRuntime::new()),
-            worker_registry: crate::stdlib::agents::agents_workers::active_worker_registry(),
-            daemon_registry: crate::stdlib::agents_daemon::active_daemon_registry(),
-            trigger_registry: crate::triggers::registry::active_trigger_registry(),
-            session_runtime: crate::agent_sessions::active_session_runtime(),
-            cleanup_runtimes: None,
-            tracing_runtime: crate::tracing::active_tracing_runtime(),
             execution_id: crate::observability::execution_scope::mint_execution_scope(),
             owns_execution: true,
-            agent_host_session_runtime:
-                crate::llm::agent_session_host::active_agent_host_session_runtime(),
-            connector_clients: Arc::new(crate::connectors::VmConnectorClients::default()),
             inline_cache_sets: Vec::new(),
             inline_cache_set_by_chunk: HashMap::new(),
-            pool_registry: crate::stdlib::pool::new_pool_registry(),
-            llm_mock_context: crate::llm::mock::LlmMockContext::for_new_vm(),
-            package_snapshot_registry: Arc::new(Default::default()),
             wait_for_graph: Arc::new(crate::wait_for_graph::VmWaitForGraph::new()),
             held_sync_guards: Vec::new(),
             inherited_held_keys: Arc::new(Vec::new()),
@@ -592,9 +546,7 @@ impl VmBaseline {
             source_text: self.source_text.clone(),
             coverage: crate::coverage::for_primary(self.source_file.as_deref()),
             flight_recorder: None,
-            evaluation: Default::default(),
             flight_recorder_max_events: None,
-            bridge: None,
             denied_builtins: Arc::clone(&self.denied_builtins),
             cancel_token: None,
             interrupt_signal_token: None,
@@ -611,12 +563,13 @@ impl VmBaseline {
             project_root: self.project_root.clone(),
             globals: Arc::clone(&self.globals),
             root_harness: self.root_harness.clone(),
-            runtime_effects: crate::orchestration::RuntimeEffectState::fresh(),
+            runtime_effects: crate::runtime_effects::RuntimeEffectState::fresh(),
             debug_hook: None,
             runtime_limits: self.runtime_limits,
         };
 
-        crate::stdlib::rebind_execution_state_builtins(&mut vm);
+        let runtime = vm.runtime.clone();
+        runtime.rebind_execution_state(&mut vm);
         vm
     }
 }
@@ -803,7 +756,23 @@ impl Vm {
 
     pub fn new() -> Self {
         crate::initialize_runtime_assets();
+        Self::with_runtime(Arc::new(crate::native_vm::NativeExecutionState::fresh()))
+    }
+
+    pub(crate) fn runtime(&self) -> &dyn super::VmRuntime {
+        self.runtime.as_ref()
+    }
+
+    pub(crate) fn runtime_mut(&mut self) -> &mut dyn super::VmRuntime {
+        if Arc::get_mut(&mut self.runtime).is_none() {
+            self.runtime = self.runtime.fork_child();
+        }
+        Arc::get_mut(&mut self.runtime).expect("forked runtime has one owner")
+    }
+
+    pub(crate) fn with_runtime(runtime: Arc<dyn super::VmRuntime>) -> Self {
         Self {
+            runtime,
             stack: Vec::with_capacity(256),
             env: VmEnv::new(),
             output: String::new(),
@@ -821,22 +790,10 @@ impl Vm {
             process_exit_request: Arc::new(ProcessExitRequest::new()),
             sync_runtime: Arc::new(crate::synchronization::VmSyncRuntime::new()),
             shared_state_runtime: Arc::new(crate::shared_state::VmSharedStateRuntime::new()),
-            worker_registry: crate::stdlib::agents::agents_workers::active_worker_registry(),
-            daemon_registry: crate::stdlib::agents_daemon::active_daemon_registry(),
-            trigger_registry: crate::triggers::registry::active_trigger_registry(),
-            session_runtime: crate::agent_sessions::active_session_runtime(),
-            cleanup_runtimes: None,
-            tracing_runtime: crate::tracing::active_tracing_runtime(),
             execution_id: crate::observability::execution_scope::mint_execution_scope(),
             owns_execution: true,
-            agent_host_session_runtime:
-                crate::llm::agent_session_host::active_agent_host_session_runtime(),
-            connector_clients: Arc::new(crate::connectors::VmConnectorClients::default()),
             inline_cache_sets: Vec::new(),
             inline_cache_set_by_chunk: HashMap::new(),
-            pool_registry: crate::stdlib::pool::new_pool_registry(),
-            llm_mock_context: crate::llm::mock::LlmMockContext::for_new_vm(),
-            package_snapshot_registry: Arc::new(Default::default()),
             wait_for_graph: Arc::new(crate::wait_for_graph::VmWaitForGraph::new()),
             held_sync_guards: Vec::new(),
             inherited_held_keys: Arc::new(Vec::new()),
@@ -872,9 +829,7 @@ impl Vm {
             source_text: None,
             coverage: crate::coverage::for_primary(None),
             flight_recorder: None,
-            evaluation: Default::default(),
             flight_recorder_max_events: None,
-            bridge: None,
             denied_builtins: Arc::new(HashSet::new()),
             cancel_token: None,
             interrupt_signal_token: None,
@@ -891,7 +846,7 @@ impl Vm {
             project_root: None,
             globals: Arc::new(crate::value::DictMap::new()),
             root_harness: None,
-            runtime_effects: crate::orchestration::RuntimeEffectState::fresh(),
+            runtime_effects: crate::runtime_effects::RuntimeEffectState::fresh(),
             debug_hook: None,
             runtime_limits: RuntimeLimits::default(),
         }
@@ -902,7 +857,7 @@ impl Vm {
     }
 
     /// Typed, runtime-resolved effects attempted by this VM execution tree.
-    pub fn executed_effects(&self) -> Vec<crate::orchestration::EffectRecord> {
+    pub fn executed_effects(&self) -> Vec<crate::runtime_effects::EffectRecord> {
         self.runtime_effects.snapshot()
     }
 
@@ -917,15 +872,16 @@ impl Vm {
         method: &str,
         args: &[VmValue],
     ) {
-        self.runtime_effects
-            .record_capability(capability, method, args);
+        if let Some(effects) = self.runtime.capability_effects(capability, method) {
+            self.runtime_effects.record_specs(effects, args);
+        }
     }
 
     pub(crate) fn record_builtin_contract_effects(&mut self, name: &str, args: &[VmValue]) {
-        let Some(entry) = crate::stdlib::recorded_effect_builtin_manifest_entry(name) else {
+        let Some(effects) = self.runtime.builtin_effects(name) else {
             return;
         };
-        self.record_builtin_effect_specs(entry.contract.effects, args);
+        self.record_builtin_effect_specs(effects, args);
     }
 
     pub(crate) fn record_builtin_effect_specs(
@@ -1011,29 +967,17 @@ impl Vm {
 
     /// Set the bridge for delegating unknown builtins in bridge mode.
     pub fn set_bridge(&mut self, bridge: Arc<crate::bridge::HostBridge>) {
-        self.bridge = Some(bridge);
+        use crate::native_vm::NativeVmState;
+        self.native_mut().bridge = Some(bridge);
     }
 
     /// Set builtins that are denied in sandbox mode.
     /// When called, the given builtin names will produce a permission error.
-    pub fn set_denied_builtins(&mut self, mut denied: HashSet<String>) {
+    pub fn set_denied_builtins(&mut self, denied: HashSet<String>) {
         // A builtin may have a private registry name plus one or more public
         // aliases. Normalize the whole family once so no dispatch path can
         // escape policy merely by using another name for the same handler.
-        let denied_canonical_names = denied
-            .iter()
-            .filter_map(|name| crate::stdlib::builtin_manifest_entry(name))
-            .map(|entry| entry.canonical_name)
-            .collect::<HashSet<_>>();
-        if !denied_canonical_names.is_empty() {
-            denied.extend(
-                crate::stdlib::all_builtin_manifest()
-                    .iter()
-                    .filter(|entry| denied_canonical_names.contains(entry.canonical_name))
-                    .map(|entry| entry.name.to_string()),
-            );
-        }
-        self.denied_builtins = Arc::new(denied);
+        self.denied_builtins = Arc::new(self.runtime.denied_builtin_family(denied));
     }
 
     /// Set source info for error reporting (file path and source text).
@@ -1095,6 +1039,7 @@ impl Vm {
     /// Used for parallel/spawn to fork the VM for concurrent tasks.
     pub(crate) fn child_vm(&self) -> Vm {
         Vm {
+            runtime: self.runtime.fork_child(),
             stack: Vec::with_capacity(64),
             env: self.env.clone(),
             output: String::new(),
@@ -1112,21 +1057,10 @@ impl Vm {
             process_exit_request: Arc::clone(&self.process_exit_request),
             sync_runtime: self.sync_runtime.clone(),
             shared_state_runtime: self.shared_state_runtime.clone(),
-            worker_registry: self.worker_registry.clone(),
-            daemon_registry: self.daemon_registry.clone(),
-            trigger_registry: self.trigger_registry.clone(),
-            session_runtime: self.session_runtime.clone(),
-            cleanup_runtimes: self.cleanup_runtimes.clone(),
-            tracing_runtime: self.tracing_runtime.clone(),
             execution_id: self.execution_id.clone(),
             owns_execution: false,
-            agent_host_session_runtime: self.agent_host_session_runtime.clone(),
-            connector_clients: self.connector_clients.clone(),
             inline_cache_sets: Vec::new(),
             inline_cache_set_by_chunk: HashMap::new(),
-            pool_registry: self.pool_registry.clone(),
-            llm_mock_context: self.llm_mock_context.clone(),
-            package_snapshot_registry: self.package_snapshot_registry.clone(),
             wait_for_graph: self.wait_for_graph.clone(),
             held_sync_guards: Vec::new(),
             inherited_held_keys: Arc::new(Vec::new()),
@@ -1162,9 +1096,7 @@ impl Vm {
             source_text: self.source_text.clone(),
             coverage: crate::coverage::for_primary(self.source_file.as_deref()),
             flight_recorder: self.flight_recorder.clone(),
-            evaluation: self.evaluation.clone(),
             flight_recorder_max_events: None,
-            bridge: self.bridge.clone(),
             denied_builtins: Arc::clone(&self.denied_builtins),
             cancel_token: self.cancel_token.clone(),
             interrupt_signal_token: self.interrupt_signal_token.clone(),
@@ -1181,7 +1113,7 @@ impl Vm {
             project_root: self.project_root.clone(),
             globals: Arc::clone(&self.globals),
             root_harness: self.root_harness.clone(),
-            runtime_effects: crate::orchestration::RuntimeEffectState::with_shared_recorder(
+            runtime_effects: crate::runtime_effects::RuntimeEffectState::with_shared_recorder(
                 Arc::clone(&self.runtime_effects.recorder),
             ),
             debug_hook: None,
@@ -1212,12 +1144,12 @@ impl Vm {
     /// Set the source directory for import resolution and introspection.
     /// Also auto-detects the project root if not already set.
     pub fn set_source_dir(&mut self, dir: &std::path::Path) {
-        let dir = crate::stdlib::process::normalize_context_path(dir);
+        let dir = crate::workspace_path::normalize_context_path(dir);
         self.source_dir = Some(dir.clone());
-        crate::stdlib::set_thread_source_dir(&dir);
+        self.runtime.set_source_dir(&dir);
         // Auto-detect project root if not explicitly set.
         if self.project_root.is_none() {
-            self.project_root = crate::stdlib::process::find_project_root(&dir);
+            self.project_root = harn_modules::manifest_walk::find_project_root(&dir);
         }
     }
 
@@ -1258,7 +1190,8 @@ impl Vm {
 
     /// Install the connector projection owned by this VM execution tree.
     pub fn set_connector_clients(&mut self, clients: crate::connectors::VmConnectorClients) {
-        self.connector_clients = Arc::new(clients);
+        use crate::native_vm::NativeVmState;
+        self.native_mut().connector_clients = Arc::new(clients);
     }
 
     pub(crate) fn harness(&self) -> Option<&crate::harness::VmHarness> {

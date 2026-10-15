@@ -1,4 +1,5 @@
 use super::*;
+use crate::native_vm::NativeVmState;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::agent_events::{
@@ -65,8 +66,8 @@ async fn reused_vm_captures_current_runtimes_and_retains_them_for_children_and_c
             vm.agent_cleanup_runtimes()
         })
         .await;
-    vm.session_runtime = crate::agent_sessions::fresh_session_runtime();
-    vm.agent_host_session_runtime =
+    vm.native_mut().session_runtime = crate::agent_sessions::fresh_session_runtime();
+    vm.native_mut().agent_host_session_runtime =
         crate::llm::agent_session_host::fresh_agent_host_session_runtime();
     let second = new
         .scope(async {
@@ -81,11 +82,11 @@ async fn reused_vm_captures_current_runtimes_and_retains_them_for_children_and_c
     assert_ne!(first_key.host_runtime, second_key.host_runtime);
     assert_eq!(
         second_key.session_runtime,
-        Arc::as_ptr(&vm.session_runtime) as usize
+        Arc::as_ptr(&vm.native().session_runtime) as usize
     );
     assert_eq!(
         second_key.host_runtime,
-        Arc::as_ptr(&vm.agent_host_session_runtime) as usize
+        Arc::as_ptr(&vm.native().agent_host_session_runtime) as usize
     );
     assert_eq!(vm.child_vm().agent_cleanup_runtimes().key(), second_key);
 
@@ -314,8 +315,8 @@ async fn pending_cleanup_after_vm_reuse(drop_instead_of_retry: bool) {
     .await;
 
     let old_before = old_count.load(Ordering::SeqCst);
-    vm.session_runtime = crate::agent_sessions::fresh_session_runtime();
-    vm.agent_host_session_runtime =
+    vm.native_mut().session_runtime = crate::agent_sessions::fresh_session_runtime();
+    vm.native_mut().agent_host_session_runtime =
         crate::llm::agent_session_host::fresh_agent_host_session_runtime();
     new.scope(vm.execute(&chunk)).await.unwrap();
     assert_ne!(vm.execution_id().to_string(), original_execution);

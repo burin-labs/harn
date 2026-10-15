@@ -67,15 +67,16 @@ impl Vm {
     pub(super) fn capture_agent_cleanup_runtimes(&mut self) {
         // Entry reads the VM's current runtimes, never a prior execution's
         // retained snapshot. Drop and scheduling must use this captured owner.
-        self.cleanup_runtimes = Some(Arc::new(
-            self.current_agent_cleanup_runtimes().capture_transport(),
-        ));
+        use crate::native_vm::NativeVmState;
+        let runtimes = self.current_agent_cleanup_runtimes().capture_transport();
+        self.native_mut().cleanup_runtimes = Some(Arc::new(runtimes));
     }
 
     fn retained_agent_cleanup_runtimes(
         &self,
     ) -> Arc<crate::agent_lifecycle_cleanup::CleanupRuntimes> {
-        match &self.cleanup_runtimes {
+        use crate::native_vm::NativeVmState;
+        match &self.native().cleanup_runtimes {
             Some(runtimes) => runtimes.clone(),
             // Never-executed VMs have no originating transport to inherit.
             None => Arc::new(self.current_agent_cleanup_runtimes()),
@@ -83,10 +84,11 @@ impl Vm {
     }
 
     fn current_agent_cleanup_runtimes(&self) -> crate::agent_lifecycle_cleanup::CleanupRuntimes {
+        use crate::native_vm::NativeVmState;
         crate::agent_lifecycle_cleanup::CleanupRuntimes::new(
             self.execution_id.to_string(),
-            self.session_runtime.clone(),
-            self.agent_host_session_runtime.clone(),
+            self.native().session_runtime.clone(),
+            self.native().agent_host_session_runtime.clone(),
         )
     }
 }

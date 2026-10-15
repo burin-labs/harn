@@ -33,7 +33,8 @@
       "package_scripts"
     ],
     [
-      "vm"
+      "vm",
+      "runtime_effects"
     ],
     [
       "llm_config",

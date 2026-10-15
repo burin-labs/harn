@@ -2,8 +2,8 @@
 
 use std::sync::{Arc, Mutex};
 
-use super::effect_call_cache::RuntimeEffectCallCache;
-use super::effects::{EffectRecord, ExecutedEffectRecorder};
+use super::cache::RuntimeEffectCallCache;
+use super::{EffectRecord, ExecutedEffectRecorder};
 use crate::VmValue;
 
 /// Shared execution-tree recorder plus a VM-local receipt memo.
@@ -11,8 +11,8 @@ use crate::VmValue;
 /// Child VMs clone the recorder `Arc` and start with an empty memo so repeat
 /// materialization stays local while evidence still converges on one receipt.
 pub(crate) struct RuntimeEffectState {
-    pub recorder: Arc<Mutex<ExecutedEffectRecorder>>,
-    pub cache: RuntimeEffectCallCache,
+    pub(crate) recorder: Arc<Mutex<ExecutedEffectRecorder>>,
+    pub(crate) cache: RuntimeEffectCallCache,
 }
 
 impl Default for RuntimeEffectState {
@@ -64,18 +64,5 @@ impl RuntimeEffectState {
             .expect("effect recorder poisoned")
             .record(specs, args);
         self.cache.remember(specs, args);
-    }
-
-    pub(crate) fn record_capability(
-        &mut self,
-        capability: harn_builtin_meta::CapabilityId,
-        method: &str,
-        args: &[VmValue],
-    ) {
-        let Some(entry) = crate::stdlib::capability_method_manifest_entry(capability, method)
-        else {
-            return;
-        };
-        self.record_specs(entry.contract.effects, args);
     }
 }

@@ -1,3 +1,4 @@
+use crate::native_vm::NativeVmState;
 use std::collections::{BTreeMap, VecDeque};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -364,7 +365,7 @@ impl super::super::Vm {
                     Some(task_group_id.clone()),
                 );
                 task_ids.push(task_id);
-                let registry = child.pool_registry.clone();
+                let registry = child.native().pool_registry.clone();
                 let closure = closure.clone();
                 futures.push(subtask::prepare(registry, async move {
                     let arg = VmValue::Int(i as i64);
@@ -426,7 +427,7 @@ impl super::super::Vm {
                         Some(task_group_id.clone()),
                     );
                     task_ids.push(task_id);
-                    let registry = child.pool_registry.clone();
+                    let registry = child.native().pool_registry.clone();
                     let closure = closure.clone();
                     let item = item.clone();
                     futures.push(subtask::prepare(registry, async move {
@@ -488,7 +489,7 @@ impl super::super::Vm {
                         "parallel each as stream",
                         Some(task_group_id.clone()),
                     );
-                    let registry = child.pool_registry.clone();
+                    let registry = child.native().pool_registry.clone();
                     let closure = closure.clone();
                     let item = item.clone();
                     futures.push(subtask::prepare(registry, async move {
@@ -500,7 +501,7 @@ impl super::super::Vm {
 
                 let (tx, rx) = tokio::sync::mpsc::channel::<Result<VmValue, VmError>>(1);
                 let cancel = VmStreamCancel::new();
-                let registry = self.pool_registry.clone();
+                let registry = self.native().pool_registry.clone();
                 subtask::spawn(subtask::prepare(
                     registry,
                     stream_capped_unordered(
@@ -549,7 +550,7 @@ impl super::super::Vm {
                         Some(task_group_id.clone()),
                     );
                     task_ids.push(task_id);
-                    let registry = child.pool_registry.clone();
+                    let registry = child.native().pool_registry.clone();
                     let closure = closure.clone();
                     let item = item.clone();
                     futures.push(subtask::prepare(registry, async move {
@@ -634,7 +635,7 @@ impl super::super::Vm {
                     .child_task(runtime_task_id.clone(), "spawn", None);
             let cancel_token = Arc::new(std::sync::atomic::AtomicBool::new(false));
             child.cancel_token = Some(cancel_token.clone());
-            let registry = child.pool_registry.clone();
+            let registry = child.native().pool_registry.clone();
             let scheduled_activity = self.wait_for_graph.register_task(runtime_task_id.clone());
             let handle = subtask::spawn_child(registry, async move {
                 let _scheduled_activity = scheduled_activity;

@@ -2,6 +2,7 @@ use std::future::Future;
 use std::sync::Arc;
 
 use super::Vm;
+use crate::native_vm::NativeVmState;
 
 /// Source identity of the Harn frame invoking an asynchronous host operation.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -46,12 +47,19 @@ impl AsyncBuiltinCtx {
         &self,
         receipt: crate::llm::decision::receipt::EvaluationReceipt,
     ) {
-        self.child.lock().evaluation.journal.lock().record(receipt);
+        self.child
+            .lock()
+            .native()
+            .evaluation
+            .journal
+            .lock()
+            .record(receipt);
     }
 
     pub(crate) fn evaluation_invocation_id(&self) -> String {
         let vm = self.child.lock();
         let id = vm
+            .native()
             .evaluation
             .journal
             .lock()
@@ -62,7 +70,7 @@ impl AsyncBuiltinCtx {
     pub(crate) fn evaluation_replay(
         &self,
     ) -> Option<crate::llm::decision::replay::EvaluationReplayScope> {
-        self.child.lock().evaluation.replay.clone()
+        self.child.lock().native().evaluation.replay.clone()
     }
 
     /// Construct a context for host work that the current VM awaits inline.
@@ -89,12 +97,13 @@ impl AsyncBuiltinCtx {
     /// as the production dispatch scope would; production never calls this.
     #[cfg(test)]
     pub fn for_test(mut vm: Vm) -> Self {
-        vm.worker_registry = crate::stdlib::agents::agents_workers::active_worker_registry();
-        vm.daemon_registry = crate::stdlib::agents_daemon::active_daemon_registry();
-        vm.trigger_registry = crate::triggers::registry::active_trigger_registry();
-        vm.session_runtime = crate::agent_sessions::active_session_runtime();
-        vm.tracing_runtime = crate::tracing::active_tracing_runtime();
-        vm.agent_host_session_runtime =
+        let native = vm.native_mut();
+        native.worker_registry = crate::stdlib::agents::agents_workers::active_worker_registry();
+        native.daemon_registry = crate::stdlib::agents_daemon::active_daemon_registry();
+        native.trigger_registry = crate::triggers::registry::active_trigger_registry();
+        native.session_runtime = crate::agent_sessions::active_session_runtime();
+        native.tracing_runtime = crate::tracing::active_tracing_runtime();
+        native.agent_host_session_runtime =
             crate::llm::agent_session_host::active_agent_host_session_runtime();
         Self::new(vm)
     }
@@ -125,7 +134,7 @@ impl AsyncBuiltinCtx {
     /// Pool tasks may execute on any Tokio worker thread, so pool lookup state
     /// is shared through the VM context rather than thread-local storage.
     pub(crate) fn pool_registry(&self) -> Arc<crate::stdlib::pool::PoolRegistry> {
-        self.child.lock().pool_registry.clone()
+        self.child.lock().native().pool_registry.clone()
     }
 
     pub(crate) fn wait_for_graph(&self) -> Arc<crate::wait_for_graph::VmWaitForGraph> {
@@ -133,7 +142,7 @@ impl AsyncBuiltinCtx {
     }
 
     pub(crate) fn package_snapshot_registry(&self) -> Arc<crate::stdlib::PackageSnapshotRegistry> {
-        self.child.lock().package_snapshot_registry.clone()
+        self.child.lock().native().package_snapshot_registry.clone()
     }
 
     /// Resolve a connector client from this VM tree's eager projection or its
@@ -144,7 +153,7 @@ impl AsyncBuiltinCtx {
         provider: &str,
     ) -> Result<Option<Arc<dyn crate::connectors::ConnectorClient>>, crate::connectors::ClientError>
     {
-        let runtime = self.child.lock().connector_clients.clone();
+        let runtime = self.child.lock().native().connector_clients.clone();
         runtime.resolve(provider).await
     }
 

@@ -1074,7 +1074,7 @@ impl super::super::Vm {
         let parent_env = popped.saved_env;
 
         if let Some(ref dir) = popped.saved_source_dir {
-            crate::stdlib::set_thread_source_dir(dir);
+            self.runtime.set_source_dir(dir);
         }
 
         let saved_source_dir =

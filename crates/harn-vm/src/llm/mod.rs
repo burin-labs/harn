@@ -980,7 +980,8 @@ mod tests {
                     let mut vm = crate::Vm::new();
                     crate::register_vm_stdlib(&mut vm);
                     vm.execute(&chunk).await.expect("execute");
-                    let outer = mock::swap_llm_mock_context(vm.llm_mock_context.clone());
+                    use crate::native_vm::NativeVmState;
+                    let outer = mock::swap_llm_mock_context(vm.native().llm_mock_context.clone());
                     assert!(mock::builtin_llm_mock_active());
                     let _ = mock::swap_llm_mock_context(outer);
                     assert!(vm.builtin_names().iter().any(|name| name == "llm_mock"));

@@ -34,14 +34,7 @@ pub(crate) fn set_thread_source_dir_option(dir: Option<&std::path::Path>) {
     });
 }
 
-pub(crate) fn normalize_context_path(path: &std::path::Path) -> PathBuf {
-    if path.is_absolute() {
-        return path.to_path_buf();
-    }
-    std::env::current_dir()
-        .map(|cwd| cwd.join(path))
-        .unwrap_or_else(|_| path.to_path_buf())
-}
+pub(crate) use crate::workspace_path::normalize_context_path;
 
 /// Per-task ambient-scope swap of the VM source directory. Same rationale as
 /// [`crate::orchestration::swap_thread_execution_context`]: it anchors source-relative path

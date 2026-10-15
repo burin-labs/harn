@@ -3,6 +3,15 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+pub(crate) fn normalize_context_path(path: &Path) -> PathBuf {
+    if path.is_absolute() {
+        return path.to_path_buf();
+    }
+    std::env::current_dir()
+        .map(|cwd| cwd.join(path))
+        .unwrap_or_else(|_| path.to_path_buf())
+}
+
 /// Whether `path` is a standard process I/O device: a stream the process
 /// already holds, not a file in any workspace. The one owner for both the
 /// sandbox's path scoping and the command risk scan, so `2>/dev/null` is not

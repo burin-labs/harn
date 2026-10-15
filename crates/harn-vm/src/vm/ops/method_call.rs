@@ -89,8 +89,9 @@ impl super::super::Vm {
     }
 
     fn try_harness_method_sync_fast(
+        methods: &dyn crate::vm::HarnessMethods,
         output: &mut String,
-        runtime_effects: &mut crate::orchestration::RuntimeEffectState,
+        runtime_effects: &mut crate::runtime_effects::RuntimeEffectState,
         obj: &VmValue,
         method: &str,
         args: &[VmValue],
@@ -98,7 +99,7 @@ impl super::super::Vm {
         let VmValue::Harness(handle) = obj else {
             return None;
         };
-        Self::call_harness_method_sync_fast(output, runtime_effects, handle, method, args)
+        Self::call_harness_method_sync_fast(methods, output, runtime_effects, handle, method, args)
     }
 
     fn method_cache_target(obj: &VmValue, method: &str, argc: usize) -> Option<MethodCacheTarget> {
@@ -231,6 +232,7 @@ impl super::super::Vm {
             let sync_result = {
                 let _interrupt = self.sync_builtin_interrupt_guard();
                 Self::call_harness_method_sync_fast(
+                    self.runtime.harness_methods(),
                     &mut self.output,
                     &mut self.runtime_effects,
                     &handle,
@@ -251,6 +253,7 @@ impl super::super::Vm {
             let sync_result = {
                 let _interrupt = self.sync_builtin_interrupt_guard();
                 Self::try_harness_method_sync_fast(
+                    self.runtime.harness_methods(),
                     &mut self.output,
                     &mut self.runtime_effects,
                     &obj,
@@ -362,6 +365,7 @@ impl super::super::Vm {
             let sync_result = {
                 let _interrupt = self.sync_builtin_interrupt_guard();
                 Self::call_harness_method_sync_fast(
+                    self.runtime.harness_methods(),
                     &mut self.output,
                     &mut self.runtime_effects,
                     &handle,
@@ -401,6 +405,7 @@ impl super::super::Vm {
             let sync_result = {
                 let _interrupt = self.sync_builtin_interrupt_guard();
                 Self::try_harness_method_sync_fast(
+                    self.runtime.harness_methods(),
                     &mut self.output,
                     &mut self.runtime_effects,
                     obj,
@@ -498,6 +503,7 @@ impl super::super::Vm {
             let sync_result = {
                 let _interrupt = self.sync_builtin_interrupt_guard();
                 Self::call_harness_method_sync_fast(
+                    self.runtime.harness_methods(),
                     &mut self.output,
                     &mut self.runtime_effects,
                     &handle,
@@ -517,6 +523,7 @@ impl super::super::Vm {
             let sync_result = {
                 let _interrupt = self.sync_builtin_interrupt_guard();
                 Self::try_harness_method_sync_fast(
+                    self.runtime.harness_methods(),
                     &mut self.output,
                     &mut self.runtime_effects,
                     &obj,

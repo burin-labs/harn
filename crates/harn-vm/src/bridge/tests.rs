@@ -956,52 +956,6 @@ fn session_remind_validation_rejects_unknown_propagate_with_specific_code() {
 }
 
 #[test]
-fn test_json_result_to_vm_value_string() {
-    let val = serde_json::json!("hello");
-    let vm_val = json_result_to_vm_value(&val);
-    assert_eq!(vm_val.display(), "hello");
-}
-
-#[test]
-fn test_json_result_to_vm_value_dict() {
-    let val = serde_json::json!({"name": "test", "count": 42});
-    let vm_val = json_result_to_vm_value(&val);
-    let VmValue::Dict(d) = &vm_val else {
-        unreachable!("Expected Dict, got {:?}", vm_val);
-    };
-    assert_eq!(d.get("name").unwrap().display(), "test");
-    assert_eq!(d.get("count").unwrap().display(), "42");
-}
-
-#[test]
-fn test_json_result_to_vm_value_null() {
-    let val = serde_json::json!(null);
-    let vm_val = json_result_to_vm_value(&val);
-    assert!(matches!(vm_val, VmValue::Nil));
-}
-
-#[test]
-fn test_json_result_to_vm_value_nested() {
-    let val = serde_json::json!({
-        "text": "response",
-        "tool_calls": [
-            {"id": "tc_1", "name": "read_file", "arguments": {"path": "foo.rs"}}
-        ],
-        "input_tokens": 100,
-        "output_tokens": 50,
-    });
-    let vm_val = json_result_to_vm_value(&val);
-    let VmValue::Dict(d) = &vm_val else {
-        unreachable!("Expected Dict, got {:?}", vm_val);
-    };
-    assert_eq!(d.get("text").unwrap().display(), "response");
-    let VmValue::List(list) = d.get("tool_calls").unwrap() else {
-        unreachable!("Expected List for tool_calls");
-    };
-    assert_eq!(list.len(), 1);
-}
-
-#[test]
 fn parse_host_tools_list_accepts_object_wrapper() {
     let tools = parse_host_tools_list_response(serde_json::json!({
         "tools": [

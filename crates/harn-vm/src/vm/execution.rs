@@ -302,7 +302,7 @@ impl Vm {
             while self.frames.len() > handler.frame_depth {
                 if let Some(frame) = self.frames.pop() {
                     if let Some(ref dir) = frame.saved_source_dir {
-                        crate::stdlib::set_thread_source_dir(dir);
+                        self.runtime.set_source_dir(dir);
                     }
                     self.iterators.truncate(frame.saved_iterator_depth);
                     self.env = frame.saved_env;
@@ -465,7 +465,7 @@ impl Vm {
                 self.release_sync_guards_for_frame(self.frames.len());
                 let popped_frame = self.frames.pop().unwrap();
                 if let Some(ref dir) = popped_frame.saved_source_dir {
-                    crate::stdlib::set_thread_source_dir(dir);
+                    self.runtime.set_source_dir(dir);
                 }
                 let current_depth = self.frames.len();
                 crate::step_runtime::prune_below_frame(current_depth);
@@ -545,7 +545,7 @@ impl Vm {
                     if let Some(popped_frame) = self.frames.pop() {
                         self.release_sync_guards_for_frame(self.frames.len() + 1);
                         if let Some(ref dir) = popped_frame.saved_source_dir {
-                            crate::stdlib::set_thread_source_dir(dir);
+                            self.runtime.set_source_dir(dir);
                         }
                         let current_depth = self.frames.len();
                         self.exception_handlers
@@ -620,7 +620,7 @@ impl Vm {
             if let Some(frame) = self.frames.pop() {
                 self.release_sync_guards_for_frame(frame_depth);
                 if let Some(ref dir) = frame.saved_source_dir {
-                    crate::stdlib::set_thread_source_dir(dir);
+                    self.runtime.set_source_dir(dir);
                 }
                 self.iterators.truncate(frame.saved_iterator_depth);
                 self.env = frame.saved_env;
@@ -664,7 +664,7 @@ impl Vm {
                 if let Some(popped) = self.frames.pop() {
                     self.release_sync_guards_for_frame(self.frames.len() + 1);
                     if let Some(ref dir) = popped.saved_source_dir {
-                        crate::stdlib::set_thread_source_dir(dir);
+                        self.runtime.set_source_dir(dir);
                     }
                     let current_depth = self.frames.len();
                     self.exception_handlers
@@ -809,7 +809,7 @@ impl crate::vm::Vm {
                 if let Some(popped_frame) = self.frames.pop() {
                     self.release_sync_guards_for_frame(self.frames.len() + 1);
                     if let Some(ref dir) = popped_frame.saved_source_dir {
-                        crate::stdlib::set_thread_source_dir(dir);
+                        self.runtime.set_source_dir(dir);
                     }
                     let current_depth = self.frames.len();
                     self.exception_handlers

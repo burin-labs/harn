@@ -1,5 +1,6 @@
 use super::*;
 use super::{resume::*, resume_conditions::*};
+use crate::native_vm::NativeVmState;
 
 mod resume_conditions_parse_tests;
 use crate::orchestration::MutationSessionRecord;
@@ -599,7 +600,7 @@ async fn matching_trigger_event_auto_resumes_worker_and_unregisters() {
             // worker uses after resume.
             let mut base_vm = crate::Vm::new();
             crate::register_vm_stdlib(&mut base_vm);
-            base_vm.worker_registry = active_worker_registry();
+            base_vm.native_mut().worker_registry = active_worker_registry();
             let dispatcher = crate::triggers::Dispatcher::with_event_log(base_vm, log);
             let outcomes = dispatcher
                 .dispatch_event(event)
