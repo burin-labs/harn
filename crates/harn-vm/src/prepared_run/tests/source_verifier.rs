@@ -227,6 +227,7 @@ async fn module_and_package_verifiers_execute_the_baseline_through_the_real_proc
     for package in [false, true] {
         for background in [false, true] {
             let fixture = SourceFixture::new();
+            std::fs::remove_file(&fixture.request.source).unwrap();
             let root = &fixture.request.workspace;
             let modules = root.join("modules");
             std::fs::create_dir(&modules).unwrap();
@@ -304,7 +305,10 @@ async fn module_and_package_verifiers_execute_the_baseline_through_the_real_proc
                 .as_str()
                 .unwrap()
                 .contains("KNOWN_FAILING_ASSERTION"));
-            assert!(output["stdout"].as_str().unwrap().contains("BASELINE_"));
+            assert!(
+                output["stdout"].as_str().unwrap().contains("BASELINE_"),
+                "{output}"
+            );
             assert_eq!(
                 output["verifier_receipt"]["executed_material"]["disposition"],
                 "unchanged"
@@ -351,7 +355,7 @@ fn identical_invocations_with_different_material_have_different_authority() {
         "print('DIFFERENT_ADMITTED_RUNNER')\n",
     )
     .unwrap();
-    let second_run = source_run(fixture.request.clone());
+    let second_run = source_run(fixture.request);
     let second = ready(&second_run, intent.clone(), host.clone());
     assert_eq!(first.plan_fingerprint(), second.plan_fingerprint());
     assert_ne!(first.fingerprint(), second.fingerprint());
@@ -446,7 +450,7 @@ async fn canonical_exec_and_spawn_refuse_exit_zero_without_the_declared_entrypoi
             };
             match run.execute(lease).await {
                 ExecutionOutcome::ExecutorFailed { error, .. } => {
-                    assert!(error.contains("execution is unmeasured"), "{error}")
+                    assert!(error.contains("execution is unmeasured"), "{error}");
                 }
                 _ => panic!("exit zero without the entrypoint cannot qualify"),
             }
