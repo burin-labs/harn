@@ -351,6 +351,16 @@ threads-required = "num-test-threads"
 # ---------------------------------------------------------------------------
 # Wall-clock budget tests: reserve the runner while they measure
 # ---------------------------------------------------------------------------
+# The native conformance aggregate executes 25 real process-tool probes in
+# sequence. Exact-source macOS qualification at b1bb46da9052 reached 24 conforming
+# cases before the 120s ceiling killed it under workspace fan-out. The identical
+# test artifact completes all 25 in 31.7s in isolation. Reserve the configured
+# test pool so unrelated tests cannot stretch each child startup across that
+# aggregate budget; keep the 120s hang detector and every conformance assertion.
+[[profile.default.overrides]]
+filter = 'package(=harn-hostlib) and binary(=harn_hostlib) and test(=sandbox_conformance::every_sandbox_conformance_case_holds_on_the_active_backend)'
+threads-required = "num-test-threads"
+
 # This is an explicit 10,000-event wall-clock budget, not merely a functional
 # test. Reserve the runner while it measures so the result describes the FTS
 # query rather than whichever CPU-heavy workspace tests happen to overlap it.
