@@ -24,9 +24,14 @@ pub trait VmBuiltinBridge: Send + Sync {
     ) -> Pin<Box<dyn Future<Output = Result<VmValue, VmError>> + Send + 'a>>;
 }
 
+/// Required execution services supplied by the backend that constructs a VM.
+/// The interpreter has no implicit native backend or permissive policy default.
 pub trait VmRuntime: Any + Send + Sync {
     fn as_any(&self) -> &dyn Any;
     fn as_any_mut(&mut self) -> &mut dyn Any;
+    /// Return a newly owned aggregate with the same configuration and inherited
+    /// handles. This also supplies copy-on-write state when a retained runtime
+    /// handle prevents exclusive access; returning the original Arc is invalid.
     fn fork_child(&self) -> Arc<dyn VmRuntime>;
     fn baseline(&self) -> Arc<dyn VmRuntimeBaseline>;
     fn builtin_bridge(&self) -> Option<&dyn VmBuiltinBridge>;
@@ -37,6 +42,8 @@ pub trait VmRuntime: Any + Send + Sync {
         execution_id: &crate::ExecutionId,
     ) -> Box<dyn super::VmExecutionScope>;
     fn subtask_scope(&self) -> Box<dyn super::VmExecutionScope>;
+    /// Poll the continuation exactly once under the backend's builtin scope,
+    /// restoring the caller's scope before returning its poll result.
     fn poll_async_builtin(
         &self,
         cx: &mut std::task::Context<'_>,
@@ -48,6 +55,8 @@ pub trait VmRuntime: Any + Send + Sync {
         entry: super::TopLevelEntry,
         deadline: std::time::Instant,
     ) -> Pin<Box<dyn Future<Output = Result<VmValue, VmError>> + Send + 'a>>;
+    /// Poll once under the saved source directory, retaining any updated scope
+    /// in `source_dir` and restoring the caller's directory before returning.
     fn poll_source_dir(
         &self,
         source_dir: &mut Option<std::path::PathBuf>,
