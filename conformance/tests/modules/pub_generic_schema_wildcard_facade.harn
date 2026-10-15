@@ -1,0 +1,1 @@
+pub import "pub_generic_schema_wildcard_owner"

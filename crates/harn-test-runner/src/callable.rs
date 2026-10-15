@@ -65,13 +65,12 @@ pub fn prepare_callable_entries(
             .keys()
             .map(String::as_str)
             .collect::<Vec<_>>();
-        let imported_enums = first.imported_enum_candidates.iter().cloned();
         let compiler = if first.trusted_host_dispatch {
             harn_vm::Compiler::new_trusted_host_dispatch()
-                .with_imported_enum_candidates(imported_enums)
         } else {
-            harn_vm::Compiler::new().with_imported_enum_candidates(imported_enums)
+            harn_vm::Compiler::new()
         };
+        let compiler = first.compilation_context.configure_compiler(compiler);
         match compiler.compile_named_callable_entries(&first.program, &requests, &fixture_names) {
             Ok(batch) => {
                 compiled_entries += batch.pipelines.iter().filter(|entry| entry.is_ok()).count();

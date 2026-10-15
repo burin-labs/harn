@@ -25,7 +25,7 @@ use crate::ast::{BindingPattern, DictEntry, MatchArm, Node, SNode, SelectCase, T
 
 /// Walk every node in `program` in pre-order, invoking `visitor` on
 /// each.
-pub fn walk_program(program: &[SNode], visitor: &mut impl FnMut(&SNode)) {
+pub fn walk_program<'a>(program: &'a [SNode], visitor: &mut impl FnMut(&'a SNode)) {
     let mut stack = Vec::with_capacity(program.len());
     push_nodes_reversed(program, &mut stack);
     walk_stack(&mut stack, visitor);
@@ -147,7 +147,7 @@ fn contains_identifier_enum_pattern_node(node: &SNode) -> bool {
 }
 
 /// Visit `node`, then recurse into its children.
-pub fn walk_node(node: &SNode, visitor: &mut impl FnMut(&SNode)) {
+pub fn walk_node<'a>(node: &'a SNode, visitor: &mut impl FnMut(&'a SNode)) {
     let mut stack = vec![node];
     walk_stack(&mut stack, visitor);
 }
@@ -155,14 +155,14 @@ pub fn walk_node(node: &SNode, visitor: &mut impl FnMut(&SNode)) {
 /// Recurse into `node`'s children without re-visiting `node` itself.
 /// Useful when a caller wants to handle the parent specially and then
 /// continue the default traversal.
-pub fn walk_children(node: &SNode, visitor: &mut impl FnMut(&SNode)) {
+pub fn walk_children<'a>(node: &'a SNode, visitor: &mut impl FnMut(&'a SNode)) {
     let mut stack = Vec::new();
     collect_children(node, &mut |child| stack.push(child));
     stack.reverse();
     walk_stack(&mut stack, visitor);
 }
 
-fn walk_stack<'a>(stack: &mut Vec<&'a SNode>, visitor: &mut impl FnMut(&SNode)) {
+fn walk_stack<'a>(stack: &mut Vec<&'a SNode>, visitor: &mut impl FnMut(&'a SNode)) {
     // One scratch buffer reused across the whole walk: collecting children
     // into a fresh Vec per node made every walker pay one heap alloc/free
     // per AST node, which dominated whole-module analyses.

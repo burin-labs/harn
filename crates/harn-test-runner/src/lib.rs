@@ -17,7 +17,7 @@ mod timing;
 #[doc(hidden)]
 pub use callable::{prepare_callable_entries, PreparedCallableCases};
 #[doc(hidden)]
-pub use discovery::{extract_cases_from_program, parse_program, seed_imported_enum_candidates};
+pub use discovery::{extract_cases_from_program, parse_program, seed_compilation_context};
 #[doc(hidden)]
 pub use fixtures::{FixtureScope, TestFixture};
 #[doc(hidden)]

@@ -49,7 +49,7 @@ fn test_case(name: &str) -> TestCase {
         pipeline_name: name.to_string(),
         source: Arc::clone(&source),
         program: Arc::clone(&program),
-        imported_enum_candidates: Arc::new(Vec::new()),
+        compilation_context: Arc::new(Default::default()),
         serial_group: None,
         weight: 1,
         args: Vec::new(),

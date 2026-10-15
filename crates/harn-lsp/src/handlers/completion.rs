@@ -523,7 +523,7 @@ fn resolve_type_alias_from_ast(ty: &TypeExpr, ast: &[harn_parser::SNode]) -> Typ
 
 fn find_type_alias_body(ast: &[harn_parser::SNode], name: &str) -> Option<TypeExpr> {
     let mut found: Option<TypeExpr> = None;
-    visit_nodes(ast, &mut |node| {
+    harn_parser::visit::walk_program(ast, &mut |node| {
         if found.is_some() {
             return;
         }
@@ -560,7 +560,7 @@ fn find_innermost_match_at(
     offset: usize,
 ) -> Option<&harn_parser::SNode> {
     let mut best: Option<&harn_parser::SNode> = None;
-    visit_nodes(ast, &mut |node| {
+    harn_parser::visit::walk_program(ast, &mut |node| {
         if !matches!(node.node, harn_parser::Node::MatchExpr { .. }) {
             return;
         }
@@ -580,25 +580,6 @@ fn find_innermost_match_at(
         }
     });
     best
-}
-
-fn visit_nodes<'a, F>(nodes: &'a [harn_parser::SNode], visitor: &mut F)
-where
-    F: FnMut(&'a harn_parser::SNode),
-{
-    for node in nodes {
-        visit_node(node, visitor);
-    }
-}
-
-fn visit_node<'a, F>(node: &'a harn_parser::SNode, visitor: &mut F)
-where
-    F: FnMut(&'a harn_parser::SNode),
-{
-    visitor(node);
-    for child in harn_parser::visit::immediate_children(node) {
-        visit_node(child, visitor);
-    }
 }
 
 #[cfg(test)]

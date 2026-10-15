@@ -9,6 +9,630 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.167
+
+### Breaking
+
+- Public provider capability types now originate in `harn-provider-catalog`.
+  Their existing `harn_vm::llm::capabilities` import paths remain re-exports,
+  but tools that inspect Rust defining-crate identity will observe the move.
+
+  Migration: Keep existing imports, or import the types directly from
+  `harn_provider_catalog::capabilities`. Regenerate bindings and type-name-based
+  registries that record the defining crate. Harn scripts require no changes.
+- Persona event subscriptions now receive matching webhook and poll deliveries.
+  Routed ingress also enforces event selectors. Subscription deduplication is
+  scoped by tenant and binding, including deliveries received through several routes.
+  Orchestrator startup, reload, rollback, status, and CLI/MCP inspection retain persona
+  subscriptions. Manual firing accepts their binding ids. Restoring an earlier binding
+  definition prefers the serving registration over newer draining or terminated versions.
+  Synthetic firing uses the current provider payload contracts, including package-owned
+  GitHub, Slack, and Linear payloads.
+  A2A push uses task event kinds and preserves wrapped task ids so routed selectors
+  can reach the intended handler.
+  Filtered and duplicate deliveries leave explicit skipped records, so recovery does
+  not classify them as stranded.
+
+  Migration: Rust embedders constructing `TriggerBindingSpec` or `TriggerBinding`
+  must set `ingress_subscription`. Use `false` for targeted bindings and `true`
+  for event subscriptions. Pass runtime extensions as the second argument to
+  `install_collected_manifest_triggers`; it now returns the installed binding
+  specifications rather than `()`.
+  Replace legacy A2A `push` event selectors with the appropriate `a2a.task.*` kinds.
+- Preserve validated requirement IDs, evidence references and pending gaps on
+  completion judge events so hosts can report the owning decision without
+  reconstructing evidence from prose.
+
+  Migration: Rust hosts constructing `AgentEvent::JudgeDecision` must supply
+  `requirement_report: None` when no report is available, or preserve the
+  validated report as `Some(value)`. Exhaustive patterns must bind the new
+  field or include `..`. Serialized events remain compatible with absent
+  reports.
+- **Prepared runs can pin admitted Python verifier material (#9413).** Linux
+  execution captures the interpreter and source before workspace mutation,
+  requires execution evidence, and preserves Python main-module test discovery.
+  Unmeasured execution cannot qualify a verifier.
+
+  Migration: Rust struct literals for `RunIntent` and `RunAuthorityPlanV1` must
+  set `verifier_loaders: Vec::new()` when no verifier is requested.
+  `HostFacts` literals must set `admitted_verifier_loaders: BTreeSet::new()` when
+  the host has admitted none. For an isolated verifier, declare the same typed
+  request in the intent and the host admission set. JSON intents and plans retain
+  an empty verifier list when the field is absent. `CommandPlan` literals must
+  set `literal_argv: None` when the literal invocation is unknown; this field is
+  inspection evidence and never authorizes conversion from shell to direct
+  execution.
+
+  `VerifierLoaderSpec` separates source and module loader configuration from
+  native material. Module loaders capture package entrypoints and declared
+  source dependencies from explicit search roots. The first baseline, including
+  absence, survives goal refresh. Normal completion publishes a typed
+  `verifier_receipt` only after the actual child reaches its declared entrypoint.
+  This is an isolated Python contract; ordinary module commands retain their
+  behavior and don't gain verifier qualification. Pinned execution currently
+  requires Linux.
+
+  Hostlib program lookup now exposes typed absence, filesystem presence, and
+  unmeasured observations against the prepared child's environment. An absent
+  search path, shell startup ambiguity, or filesystem error is not measured
+  absence. Presence does not attest executable identity or Python module
+  provenance; the existing missing-program adapter keeps its behavior.
+
+  `DescriptorTransfer::inherited` now requires a second `reserved` descriptor
+  slice. Name every separately owned startup handle there, or pass `&[]` when
+  none exists. Reserved handles must stay open, retain their separate owner,
+  and never overlap the transferred set. Both sets are checked before ownership
+  is taken; the unsafe caller must still establish exclusive custody.
+- **Builtin methods have one name each, and list, set, and dict mutators now
+  change their receiver.** `xs.push(4)` used to return a copy and leave `xs`
+  unchanged; it now appends to `xs` in place, Swift-style, and `pop()` removes
+  and returns the last element. The mutating methods are list `push`, `pop`,
+  `insert`, `extend`, `clear`, `sort`, `sort_by`, and `reverse`; set `add`,
+  `remove`, and `clear`; dict `remove` and `clear`. They need a `let` binding
+  or a path rooted at one; a `const`, a parameter, or a temporary is a type
+  error (`HARN-OWN-001`). Aliases are gone: `len` replaces `count()` on
+  strings, lists, sets, dicts, and ranges, and `lower`, `upper`, `contains`,
+  `all`, `windows`, `chunks`, `map_keys`, `merge`, `intersection`, and
+  `last_index_of` replace `lowercase`/`to_lower`, `uppercase`/`to_upper`,
+  `includes`, `every`, `window`/`each_cons`/`sliding_window`,
+  `chunk`/`each_slice`, `rekeyed`/`rekey`, `merging`, `intersect`, and
+  `rfind`. A removed spelling is the type error `HARN-NAM-013`. One method
+  registry now owns every method's name, signature, and effect, so `"A".lower()`
+  infers `string` and the builtin method reference is generated from it.
+
+  Source checking and executable packages now share namespace call signatures,
+  including predicate guards and defining-module type aliases. A guarded
+  `value.upper()` accepted by `harn check` also compiles for execution;
+  unguarded calls on numeric or boolean receivers remain type errors.
+
+  Migration: run `harn fix --apply --safety behavior-preserving --code HARN-NAM-013`,
+  which renames removed spellings and rewrites the old copy idioms:
+
+  ```harn
+  // before
+  xs = xs.appending(v)
+  const ordered = xs.sort()
+  name.to_lower()
+  // after
+  xs.push(v)
+  const ordered = xs.sorted()
+  name.lower()
+  ```
+
+  Calls with no mechanical replacement are reported with the replacement to
+  use: `s.adding(v)` becomes `s.add(v)` on a `let` binding or
+  `s.union(set([v]))`, `d.removing(k)` becomes `d.remove(k)` or
+  `omit(d, [k])`, and `xs.first(n)` becomes `xs.take(n)`.
+- `harn-vm` no longer exports `McpServer` or `McpServerReload`; a script's
+  published MCP surface is now `McpScriptRegistry`, which owns its handlers
+  but not a transport. `harn-serve`'s `McpServerConfig` no longer has a public
+  `core` field; build it with `McpServerConfig::new(core)` for exported
+  functions or `McpServerConfig::script(runtime)` for a script registry.
+
+  Migration: replace a hand-run script server with the harn-serve server.
+
+  ```rust
+  // Before
+  let mut server = harn_vm::McpServer::new(name, tools, resources, templates, prompts);
+  server.run(&mut vm).await?;
+
+  // After, inside a tokio LocalSet
+  let registry = harn_vm::McpScriptRegistry::new(name, tools, resources, templates, prompts);
+  let runtime = harn_serve::McpScriptRuntime::spawn_local(registry, vm, ());
+  let server = std::sync::Arc::new(harn_serve::McpServer::new(
+      harn_serve::McpServerConfig::script(runtime),
+  ));
+  server.run_stdio().await?;
+  ```
+- Native chunk constants and local-slot metadata now share their type identity with the portable compiler's canonical records.
+
+  Migration: Existing imports remain valid. `Constant`, `LocalSlotInfo` and `BindingTypeSlot` now have the corresponding
+  `harn_kernel` type identities. Remove conversions or trait implementations that distinguished the two copies.
+- Provider configuration types now have their defining Rust crate in `harn-provider-catalog`.
+  Existing `harn_vm::llm_config` import paths remain reexports.
+
+  Migration: Keep existing imports, or import provider configuration directly from
+  `harn_provider_catalog::config`. Regenerate bindings or persisted type identities
+  that record the defining crate against `harn-provider-catalog`.
+- `DecisionContract` is now defined by `harn-provider-catalog`; its previous `harn-vm`
+  import path remains a re-export.
+
+  Migration: Keep existing imports, or import `DecisionContract` directly from
+  `harn_provider_catalog`. Regenerate bindings that record the defining crate.
+- Prompt-template syntax and tooling records now originate in `harn-prompt-syntax`.
+  The existing `harn_vm::stdlib::template` paths remain re-exports, while Rust
+  defining-crate identity and generated documentation reflect the new owner.
+
+  Migration: Keep existing imports, or import syntax, lint, outline, and filter
+  metadata directly from `harn_prompt_syntax`. Regenerate bindings that record
+  the defining crate. Rendering and Harn prompt syntax are unchanged.
+- `harn_lint::LintOptions` has a new public field, `binding_types`, so a
+  struct literal that names every field no longer compiles. In
+  `harn_parser::analysis`, `ParseOutput` and `TypeCheckOutput` now hold their
+  source, program, and type facts as `Arc`s shared with the cache.
+
+  Migration: end a `LintOptions` literal with `..Default::default()`, or pass
+  the type facts you already have; read shared outputs through `Deref`, and
+  copy one only to own or extend it.
+
+  ```rust
+  // Before
+  let options = LintOptions { file_path: Some(path), /* every field */ };
+  let mut diagnostics = output.diagnostics;
+  diagnostics.extend(extra);
+
+  // After
+  let options = LintOptions {
+      file_path: Some(path),
+      binding_types: Some(&output.binding_types),
+      ..Default::default()
+  };
+  let mut diagnostics = output.diagnostics.to_vec();
+  diagnostics.extend(extra);
+  ```
+- **Code-index graph nodes share their file's strings.** In
+  `harn_hostlib::code_index::Node`, `path` is now `Arc<str>`, shared by every
+  node of a file, and `language` is a `&'static str` from the language
+  registry. Snapshots store each file's path and language once instead of on
+  every node, which makes them smaller and faster to restore, so the first
+  start after upgrading rebuilds the index once.
+
+  Migration: compare and borrow through the shared string, and convert where
+  an owned `String` is needed:
+
+  ```rust
+  if &*node.path == "src/lib.rs" && node.language == "rust" {
+      let owned: String = node.path.to_string();
+  }
+  ```
+- **Ranges are `a..b` and `a..=b`.** `a..b` excludes the end and `a..=b`
+  includes it, as in Rust. The `a to b` and `a to b exclusive` spellings
+  were removed and now report `HARN-PAR-007` with the replacement. Ranges
+  print in the same form (`1..=5`, `0..3`).
+- **`??` binds like Swift's.** It is now looser than arithmetic and range
+  formation and tighter than comparison, so `count ?? 0 + 1` is
+  `count ?? (0 + 1)` (it was `(count ?? 0) + 1`) and `count ?? 0 == 1` is
+  unchanged. Range formation moved too: it binds looser than `+`/`-` and does
+  not chain, so `0..n - 1` is `0..(n - 1)` and `x in 0..n` tests membership.
+- **Domain words are identifiers again.** `to` and `exclusive` are no longer
+  keywords, and `from`, `tool`, `select`, `emit`, `require`, `deadline`,
+  `mutex`, `skill`, and `eval_pack` are contextual: they introduce their
+  construct only in position, so `let tool = ...` and `config.from` work.
+- **Migration:** `harn fix --apply --migrate-operator-syntax <path>` rewrites
+  every range and inserts parentheses wherever the new precedence would
+  regroup an expression, then re-parses each file and refuses any rewrite
+  whose tree differs. Run it once per tree.
+- **Hosts install the standard library.** `harn-vm` and `harn-modules` no
+  longer depend on `harn-stdlib`; they read the embedded stdlib through the new
+  `harn-stdlib-catalog` crate, so editing a stdlib `.harn` file rebuilds only
+  `harn-stdlib` and the binaries that link it instead of the compiler and every
+  crate built on it. `harn_vm::initialize_runtime()` now fails with
+  `RuntimeInitError::StdlibCatalog` when no catalog is installed, and reading
+  the stdlib without one panics with the same message rather than finding an
+  empty library. The standalone `harn-lsp` and `harn-dap` shims build only with
+  their default `standalone` feature; the shipped `harn` binary is unchanged.
+
+  Migration: Rust embedders add a `harn-stdlib` dependency and call
+  `harn_stdlib::install()` before `harn_vm::initialize_runtime()`. Test crates
+  can instead enable `harn-modules`' `bundled-stdlib` feature as a
+  dev-dependency, which installs the bundled catalog on first read:
+
+  ```rust
+  harn_stdlib::install().expect("install the Harn stdlib");
+  harn_vm::initialize_runtime()?;
+  ```
+- **Tool-result adjacency capability removed.** `harn_vm::llm::capabilities::Capabilities`
+  and `ProviderRule` no longer have a `requires_tool_result_adjacency` field, and
+  `provider_capabilities()` no longer reports it. Harn now keeps every tool
+  result next to its call on every route, and a live probe showed OpenAI itself
+  enforces that order, so the field no longer distinguished any route.
+
+  Migration: delete reads of the field. Capability overlays that still set
+  `requires_tool_result_adjacency` load unchanged; the key is ignored.
+- Agent-session events in `.harn/session-store.sqlite` now use payload schema 2:
+  every payload carries a `record` tag (`transcript`, `compaction`, or
+  `message_removed`), and every row carries the
+  `harn.agent_session_event.schema: 2` header. The journal writer and every
+  reader (run-record projection, timeline, recap, restore, spend) decode one
+  typed payload instead of reading JSON pointers. The transcript envelope keeps
+  its field names, so schema-1 rows still read unchanged and scripts that read
+  `payload.transcript_event` keep working. Rows written by schema 2 hash
+  differently in the signed receipt chain because they carry the tag and header.
+- A tool call is one typed fact everywhere: run records, `harn runs report`, and
+  session bundles all carry the run record's `ToolCallRecord`, whose `status`
+  (`open`, `completed`, `failed`, `rejected`) replaces `is_rejected`. The run
+  report is now `harn.run_report.v2` (schema version 2) and its tool-call rows
+  use `tool_use_id` instead of `call_id`. A version-1 report is refused with a
+  schema error. Run records and bundles written with `is_rejected` still read,
+  and a recorded rejection becomes `status: "rejected"`.
+
+  Migration: read `status` instead of `is_rejected`, and `tool_use_id` instead
+  of `call_id` in report tool-call rows; regenerate stored run reports with
+  `harn runs report`.
+
+  ```json
+  // harn.run_report.v1 tool_calls[] row
+  {"agent_id": "run:root", "call_id": "call-1", "tool_name": "add", "is_rejected": false}
+  // harn.run_report.v2 tool_calls[] row
+  {"agent_id": "run:root", "tool_use_id": "call-1", "tool_name": "add", "status": "completed"}
+  ```
+
+  In Rust, `harn_vm::session_bundle::BundleToolCall` is removed (bundles hold
+  `ToolCallRecord`), and `RunReportToolCall` is `{ agent_id, call: ToolCallRecord }`.
+
+### Added
+
+- Prompt-template syntax, filter contracts, lint analysis, and outlines now
+  compile in a runtime-independent crate shared by the renderer and tooling.
+  Filter implementations must cover the complete typed vocabulary at compile time.
+- Smart Ship now provides immutable grouped verification, signed release checkpoints,
+  durable incident and mutation ownership, bounded forward repair, and standalone installation controls.
+  It refuses promotion when required evidence is missing, invalid, failed, or owned by a stale controller.
+- Read GitHub CLI credentials through `harness.secrets.read_cli("github", {hostname, user})` without storing command stdout
+  or exposing token values in diagnostics. Empty, failed, oversized, and timed-out reads refuse explicitly.
+- Smart Ship snapshots now retain signed, inspectable admission records instead
+  of receipt hashes. Qualification binds independent exact-head reviews, trusted
+  scope selection, repository identity, frozen policy, and complete original or
+  valid reused CI evidence. Admission and grouped verification share one proof
+  verifier; changed admission facts invalidate prior executed dispatch bindings.
+  The GitHub reader uses connector 0.11.0 source and submission facts, and archived
+  replay preserves the same contract. Live controller authority and fleet cutover
+  remain gated on their separate qualification.
+- Smart Ship's stock verification executor now has a public command for preparing
+  jobs and executing frozen admission or grouped dispatches with a host-held signer.
+- Smart Ship package candidates retain an immutable archive and complete verification
+  evidence for the shared tested-file publisher, independently of native runtime builds.
+  Promotion selects the exact successful build and derives a package tag from its
+  verified metadata, while the existing publisher owns release writes.
+- Smart Ship can qualify complete exact-head reviews against stable independent
+  reviewer identities. Missing facts, partial inventories, self-approval, stale
+  heads, unresolved threads, and ambiguous latest votes cannot qualify review.
+  The decision retains counts and named refusals for live reads and replay.
+  Scope, required CI evidence, and signed admission remain separate obligations.
+
+### Changed
+
+- Provider capability rules now compile in the shared provider catalog crate.
+  Runtime lookups and source generators use the same explicit rule resolver,
+  while credentials, runtime overrides, and live probes remain in the VM.
+- Module preparation and closed-program linking derive compilation contexts from
+  the graph's parsed sources, avoiding a second context parse. Preparation keeps
+  the exact source bytes used by the graph without retaining every syntax tree.
+  Prepared generations now also refresh edits that preserve file length and timestamp.
+- Long agent loops spend less time preparing each provider request. Message
+  fingerprints are reused for every message unchanged since the previous call
+  instead of being re-hashed by each per-call projection (redacted contents,
+  token estimates, cost admission, result transcripts). Requests whose tool
+  calls are all answered no longer convert the whole transcript to VM values,
+  and tool results without directive-shaped text are no longer rebuilt to
+  defang them. Persisted transcripts, event logs, and run records are
+  unchanged.
+- Long agent loops spend less time preparing each provider call. Each attempt
+  now estimates its context tokens once and shares the estimate with the rate
+  governor, the request receipt, the route rate limiter, and cost admission,
+  instead of each re-walking the transcript; calls without
+  `equivalent_failover` no longer estimate at all while building options.
+  Messages unchanged since the previous call keep their provider-visible
+  projection and their JSON conversion, so only new messages are converted.
+  Persisted transcripts, event logs, session stores, and run records are
+  unchanged.
+- Long agent loops spend less time persisting their own events. Each
+  transcript journal flush now writes all of its queued events in one
+  session-store transaction instead of one transaction per event, and a
+  failed flush leaves every queued event in place to retry rather than a
+  persisted prefix. The session store and the SQLite event log reuse their
+  prepared statements, the session search index computes its lexical
+  vectors without allocating per character, and record hashes are encoded
+  without copying the event payload. Stored events, hashes, search vectors,
+  and event-log rows are byte-identical to before.
+- `SqliteSessionStore::append_batch` appends several events to one session
+  atomically, and `SqliteSessionStore::append_transactions` reports how many
+  append transactions a store has committed.
+- **HTTPS and WSS connections now trust the operating system's certificate
+  store, and the CLI builds one TLS stack.** Every HTTP client moved to
+  reqwest 0.13 with rustls on the aws-lc-rs crypto provider, so the default
+  CLI no longer compiles the `ring` provider or a second copy of reqwest.
+  Server certificates are verified through the platform verifier (Keychain on
+  macOS, the Windows certificate store, the system CA bundle on Linux) instead
+  of a bundled Mozilla root list, so a corporate proxy or private CA that the
+  machine already trusts works for `http_*`, `sse_connect`,
+  `websocket_connect`, LLM providers, and package fetches without extra
+  configuration. On Linux the system bundle must exist: a minimal container
+  image needs the `ca-certificates` package, or `SSL_CERT_FILE` pointing at a
+  PEM bundle. Release archives are now built with a named `dist` Cargo
+  profile (`cargo build --profile dist`) that owns symbol stripping, so a
+  from-source `Dockerfile` build ships the same stripped binary as the
+  release archives.
+- Native execution now reuses the canonical compiler's constant, local-slot and
+  binding-type metadata directly, removing duplicate representations and conversion
+  loops without changing bytecode or runtime behavior.
+- Provider configuration parsing, overlay merging, audit contracts, and packaged defaults now compile in
+  `harn-provider-catalog`. The catalog crate parses its packaged defaults once and shares the immutable snapshot.
+  Generated provider and capability snapshots now live under `crates/harn-provider-catalog/src/`;
+  catalog generation and capability-promotion commands use those paths by default.
+- Owned Linux CI runners now share a pinned Kache compiler cache across their private target directories.
+  Cache summaries distinguish measured compiler activity from missing reports, including when targets live
+  outside the checkout.
+  The shared Rust cache action pins the manifest's dev debug profile before both cache restores and builds,
+  preventing inherited runner settings from changing the artifact or separating cache readers from writers.
+- Provider catalog projection, validation, schemas, bindings, decision contracts, and pure taxonomy
+  now compile in the catalog crate. Runtime adapters capture configuration and measured capability
+  receipts once before projection. Redundant validation tests were retired and owning tests moved
+  with their implementation so the native VM test unit carries less work.
+- `harn lint` and `harn check` type-check each file once. The linter now reads
+  the type facts of the check that already ran with the file's imports,
+  instead of type-checking the program a second time without them, so
+  type-aware lint rules see bindings typed by imported declarations (for
+  example, a redundant `== true` on an imported `bool` result is now
+  reported). The editor's lint diagnostics read the same facts.
+- `harn lint` runs files in parallel like `harn check` (`HARN_CHECK_JOBS`
+  sets the worker count) and replays output in file order. A file that fails
+  to lex or parse no longer stops the remaining files from being linted; the
+  run still exits non-zero.
+- `harn lint` parses each target once: the parse from building the module
+  graph seeds the analysis. Analysis results are shared, not copied, between
+  the cache and its readers, and the lint rules that read tokens share one
+  tokenization of the file instead of each lexing it again.
+- `HARN_CHECK_ANALYSIS_STATS=1` prints how many tokenizations, parses, and
+  type checks a `harn lint` or `harn check` run performed.
+- Credential paths now come from one registry, `known_paths.toml` in harn-vm,
+  and every guard reads it: the sandbox read denylist, the taint gate that
+  asks before reading a secret under untrusted context, the command risk scan's
+  `credential_file_read` label, and the default approval
+  `sensitive_path_patterns`. Before, they kept separate lists, so for example
+  reading `~/.docker/config.json`, `~/.config/gcloud`, or `~/.kube/config`
+  under untrusted context never tripped the secret-read gate, and the approval
+  rules missed `~/.ssh` and every cloud CLI store. The sandbox now also denies
+  `~/.pgpass` and `~/.git-credentials`. The path matchers now treat `.envrc`,
+  `id_ecdsa`, `id_dsa`, `*.key`, `secrets.*`, and `*.secrets.*` as credentials
+  everywhere. A substring match no longer fires on lookalike names such as
+  `.environment.ts`.
+- The PackageManagerConfig preset no longer lists `~/.npmrc`, `~/.netrc`,
+  `~/.pypirc`, or Cargo's credential files as grants. The denylist already
+  removed them, and the registry now refuses a grant that names a credential.
+- The language server analyzes a document without holding the lock every
+  request reads. Folding, completion, and navigation use the current syntax
+  while type analysis runs, and reuse the same parse when it finishes.
+- The language server keeps each document's module graph and reuses it while
+  the document's import declarations are unchanged, instead of re-reading
+  every imported module from disk on each edit, and reads project lint
+  settings once per directory until a watched file or the configuration
+  changes.
+- Imported modules resolve against the unsaved text of open documents, and
+  editing a module re-checks the open documents that import it. Namespace
+  signature changes invalidate cached type results.
+- A dependency edit during analysis causes another pass, and results from a
+  closed document cannot overwrite a reopened document at the same URI.
+- Native VM runtime failures keep their identity instead of turning into
+  prose. Division by zero stays `VmError::DivisionByZero` at the top level and
+  renders as `Division by zero`; the source location comes from the stack trace
+  that CLI diagnostics already print, not a `(line N)` suffix. An oversized
+  string repetition or pad is the new `VmError::ValueByteLimit` and renders as
+  `Value byte limit: repeat output would be N bytes (limit M)`. A
+  parameter that fails its declared primitive type is `VmError::TypeError`,
+  like a dict-shaped parameter already was, and renders as
+  `Type error: function 'f' parameter 'p' expected int, got string (...)`
+  instead of `Runtime error: TypeError: ...`.
+- The portable-kernel differential now runs every portable runtime failure case
+  through the native VM as well and compares the failure class.
+
+### Fixed
+
+- Swift structural parsing uses the corrected tree-sitter grammar, preserving optional chaining followed by
+  conditional casts and nil-coalescing defaults.
+  Source preflight now refuses stale grammar provenance receipts before integration.
+- Rust CI restores the cache writer's Cargo environment instead of requesting an incompatible cache key.
+  The cache policy now rejects compiler-environment drift between Linux writers and consumers.
+- Trigger event selectors now match connector-normalized kinds and actions, with
+  an optional provider prefix. Shipped personas, templates, and examples use
+  connector event names such as `github.pull_request.opened` instead of unserved
+  aliases.
+- Document how linked hosts discover outbound connector grants and hand them to
+  Harn child processes without exposing values in their launch environment or
+  falling back to ambient credentials.
+- Sandbox conformance releases every detached daemon helper through private FIFO
+  custody, including multiple readers on macOS, without a second process-table scan.
+- `harn fix` capability migrations now pass a narrowed capability bundle as
+  `pick(harness, ["fs", "runtime"])` instead of a field-by-field record literal,
+  so a runtime bump no longer writes code that `harn check --strict` rejects with
+  HARN-LNT-077. Files that define or import their own `pick` keep the literal.
+- A `sub_agent_run` inside a `parallel` branch now resolves provider credentials through the
+  same session view as the task that started it.
+  An optional path argument a model sends empty is now dropped at dispatch even when only the
+  session policy declares it a path, instead of failing path validation and costing a turn.
+- YAML parsing accepts large and heavily commented documents again: a block of more than 32
+  consecutive comment lines or a document with more than 250,000 nodes no longer fails, while
+  alias expansion beyond the document's own size is still rejected.
+- Harn's MCP client now reads a Streamable HTTP response whose event stream
+  opens with an `id:` field. It previously failed to parse such a stream, which
+  is how `harn serve mcp` answers `tools/call` over HTTP.
+- ACP prompts write their agent events to `event_log-<session>.jsonl` under
+  `HARN_EVENT_LOG_DIR` again. Since the native task authority change, the
+  durable sink was chosen after the prompt's VM was prepared, so the lazy
+  default event log that preparation stages moved the events to an
+  `observability.agent_events` topic and left the session file empty.
+- Recover valid JSON and typed subagent returns after non-JSON code examples in model explanations,
+  while preserving return-schema validation.
+- ACP embedded prompt resources retain their original structured content in canonical messages, so replay clients can
+  recover the authored URI, media type, and bytes without parsing the model-facing description.
+- Assistant text projection preserves the provider's response bytes across content blocks. Typed worker answers no longer
+  gain paragraph breaks inside JSON strings, while private reasoning remains excluded. Tool scanning also preserves inline
+  angle brackets in ordinary text, including generic types and workflow placeholders inside structured answers.
+- Per-command process scopes now narrow explicit parent roots, and native process execution and spawning honor the
+  shared scope. Agent loops stopped by policy report a policy-owned stop while preserving the reason, allowing
+  callers to distinguish authority revocation from an unknown terminal state.
+  Offline coding replay omits runtime-owned temporary and toolchain cache directories from application effects,
+  including when a command narrows its workspace root.
+  On macOS, confined process launches protect the host's launch environment from
+  numeric process-argument reads, while preserving the child's own environment.
+  Hosts that cannot enforce this protection refuse the confined launch.
+- Package checks, installation, dependency loading, and maturity checks enforce the full Harn runtime version,
+  including patch bounds, and reject malformed requirements. Development runtimes remain usable within the declared
+  bounds without satisfying a newer stable release minimum. Packages can now require the exact release that supplies
+  their runtime capabilities.
+- Embedded ACP servers install the standard library before pipeline discovery and execution, so hosts using Harn's lean
+  server dependency no longer panic on the first imported standard library module.
+- Language-server symbols and call hierarchy remain available when a dependency change causes background analysis to retry
+  without editing the open file.
+- Cargo cancellation qualification waits for the recorded workload ownership transfer before sending stop, avoiding an
+  early-start race while preserving process-reaping and lease-release checks.
+- Release recovery can rehearse an explicitly selected consumer repair through the existing
+  open-pull-request and repository checks, before publishing its certified candidate.
+  The release runtime uses Rustls 0.23.46, addressing the newly published TLS advisories.
+- The CI check reader refuses incompatible Harn runtimes before querying GitHub,
+  preventing a missing-check census from silently reading as green.
+- CI check reads refuse empty required-check inventories and incomplete, changing,
+  or duplicate API pages. Check runs and legacy commit statuses share complete
+  pagination, while partial observations remain visible in a refused result.
+- Intel macOS release builds use hosted compiler-cache persistence, and release runner policy rejects
+  unsupported storage backends.
+- Canonical session history and recaps retain dispatched tool results on native and text tool channels,
+  including their call identity and error outcome.
+- Hosted inference under a no-training ceiling now applies the route's declared
+  training restriction and admits it even when the provider's default training
+  policy is unspecified. Preview and transport use the same control plan; missing
+  or unapplied training controls still refuse the call.
+- Release size attribution now uses the same shared Cargo features as the compiled release binary.
+- Automatic review dispatch requires an explicit receiver workflow ref, so its
+  actions-only App token never needs to infer a private repository's default branch.
+  Missing configuration is refused before credentials or requests are created.
+- macOS confinement status now includes the host-environment protection prerequisite. Unsupported hosts
+  return a typed refusal before a child starts; release smoke verifies that refusal without weakening protection.
+- Cached archive dependencies now match the requested checksum and registry
+  provenance before reusing their lock. Changing either identity cannot silently
+  install the previously locked archive under a different declaration.
+- Run trusted macOS release smoke on the supported native host so confined process checks can protect the host environment.
+  Public pull-request code remains on disposable hosted runners.
+- Human questions and approvals stay pending across host transport deadlines.
+  Answers, Stop, and disconnect still settle them; ordinary host calls remain bounded.
+- Confined macOS commands now keep Foundation temporary files in the workspace's private temporary storage,
+  allowing Xcode 27's default SwiftPM backend to run tests without granting access to shared host temporary files.
+- Language tooling shares the parser's syntax traversal. Bundle manifests include prompt assets used in match guards,
+  call hierarchy finds functions declared inside bound closures, and optional-type linting checks pipeline parameters.
+- Post-publication development bumps use the current GitHub connector and correctly normalize disposable credential
+  handoff paths, so the release workflow can prepare and publish the next development version on runtime 166.
+- Development runtimes accept partial package compatibility ranges such as `>=0.10,<0.11`,
+  while preserving explicit stable and prerelease bounds.
+- Imported generic type aliases now materialize runtime schemas with their declaring module's private types
+  and the consumer's concrete arguments, including through public re-exports.
+  Nested schema contracts preserve the dictionary representation of `Schema<T>`.
+- Linux command guardians reap their kernel-adopted children under inherited filesystem confinement,
+  including when process-directory enumeration is unavailable.
+- Shared target cleanup accepts repeated `--protect-entry NAME` arguments to keep several lanes ahead of named removal
+  and age, rank, or byte limits. Protected or live entries still count toward the byte ceiling, and an oversized
+  protected root is reported as partial.
+  Named removals blocked by protection or a live process report a partial status, a pending count, and the affected names.
+- CI release checks retain their captured base commit when a stacked parent
+  branch is deleted. Native workspace checks use a downloadable Go setup action
+  pin while retaining Go 1.26.6.
+- Catalog exports now resolve wire-model capabilities and provider features from their explicit
+  provider overlay. Private routes no longer inherit capability facts from ambient configuration.
+- Incomplete JUnit reports can no longer look like a passing prefix. Scripting and host test inspection now share one
+  decoder; `parse_junit_xml_result` distinguishes invalid evidence from a valid empty suite and checks declared totals.
+- Grammar fitness receipts are now checked before pull requests and merge candidates land,
+  so combined grammar changes cannot silently invalidate the committed parser evidence.
+- **`harn doctor sandbox` reports a case whose probe tool is missing as not
+  measured, naming the tool.** A host without `perl` used to report the
+  network and Unix socket cases as over-refused, which blamed the sandbox for
+  a missing helper. Every probe program is now checked on `PATH` the way
+  `cargo` already was.
+- **The default `worktree` sandbox now confines and runs subprocesses on stock
+  Ubuntu 22.04 and 24.04 and Debian 12 kernels.** Linux selected
+  Landlock only at ABI 6 and otherwise required bubblewrap, so on these
+  systems every confined spawn was refused unless bubblewrap was installed and
+  user namespaces were allowed. Harn now negotiates the kernel's Landlock ABI
+  through the `landlock` crate and uses any ABI: the seccomp filter refuses
+  truncation by path below ABI 3, and only the serve-only Unix socket grant
+  still needs ABI 6. `harn doctor` and `harn doctor sandbox` list each
+  remaining difference as a mechanism limit. On a host without usable
+  Landlock, bubblewrap no longer refuses every launch over the default
+  files-only `/proc` grant: it mounts no procfs for that grant, and mounts the
+  sandbox's private procfs only for an explicit self-introspection grant.
+- Streamed Anthropic and OpenAI-compatible responses now decode exactly like the
+  same response returned without streaming. The stream is folded back into the
+  provider's own response body and read by the one response parser, so a feature
+  can no longer reach one path and miss the other. Fixes found by the new parity
+  check:
+
+  - Parallel tool calls from an OpenAI-compatible stream keep the provider's
+  order. They were returned in hash-map order.
+  - A streamed inline `<think>` span is recorded as a private reasoning block, and
+  streamed server tool-search no longer splits the answer text into two blocks.
+  - Unparseable tool arguments on a length-truncated turn become `{}` on both
+  paths, and empty arguments are a no-arguments call on both paths.
+  - An unstreamed Anthropic turn that bills output but commits neither text nor a
+  tool call is now rejected as a billed no-op, as the stream already did.
+  - An unsigned Anthropic `thinking` block is private reasoning on both paths
+  instead of an unreplayable signed block.
+  - A stream that delivers no content now fails as an empty generation even when
+  it reported no output tokens, matching the unstreamed path.
+  - A streamed Anthropic-wire result reports the configured provider name instead
+  of always `anthropic`.
+- The project scanner extracts files in parallel and skips the tree-sitter
+  pass for files over 1 MiB (generated sources take the line-oriented
+  fallback). Scanning this repository went from about 8.6 s back to about
+  1.1 s, level with the scanner before it switched to tree-sitter symbols.
+- C++ member function declarations such as `int x() const;`, including ones
+  returning pointers or references, are reported as methods instead of fields
+  named `int x`. Function-pointer members stay fields.
+- Every provider now receives the same repaired tool-call history. A tool result
+  whose call was compacted away is sent as an observation, and runtime feedback
+  injected between a call and its result moves after the result, on every route.
+  Previously OpenAI Chat Completions refused interleaved feedback, and OpenAI
+  Responses and Gemini refused an orphaned result, while Anthropic accepted both.
+  Calls left unanswered by a stopped turn keep their existing typed repair result.
+
+### Security
+
+- Update the optional WASI testbench runtime to Wasmtime 48.0.6, fixing the
+  newly reported Wasmtime sandbox vulnerabilities without changing its major
+  version or enabling the optional runtime by default.
+- On macOS, a `read_deny_roots` entry inside a writable process root now holds.
+  The read deny alone could be bypassed by renaming the denied file, or a
+  directory above it, and reading it under the new name. The sandbox profile now
+  also denies unlink, which covers rename, on the denied path and on each
+  directory above it, so those entries cannot be moved or deleted while every
+  other file in the root stays writable.
+- `harn serve mcp` now serves script-published tools, resources, and prompts
+  through the same MCP server as exported `pub fn`s. Script-registry tasks over
+  HTTP are owned by the authenticated caller that started them; previously any
+  caller holding a valid key could read or cancel another caller's task.
+  Exported-function servers also gain `harn.hitl.respond`, and both surfaces
+  require authorization for every method except `ping` and `server/discover`.
+- A script-published MCP tool that allows tasks now runs in the background and
+  returns its task id immediately, instead of finishing before `tools/call`
+  answered. Calls the registry would refuse are refused before a task exists.
+- `harn serve mcp` advertises the tasks extension only when some tool can run
+  as a task, and `completion/complete` only when resources or prompts exist,
+  for both script and export surfaces.
+- An MCP HTTP client whose `Accept` header omits `text/event-stream` receives
+  `tools/call` results as a JSON body. Export-surface list pages now follow
+  `HARN_MCP_LIST_PAGE_SIZE` (default 100) like every other MCP list.
+- Smart Ship now requires the full qualified signed admission record before an
+  external admission can be reserved or dispatched. Authority generations freeze
+  their policy digest, and release reservations bind the exact complete proven
+  checkpoint. Pending verification and unresolved effects block policy transfer.
+
 ## v0.10.166
 
 ### Breaking

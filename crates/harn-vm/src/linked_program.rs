@@ -42,9 +42,8 @@ pub fn link_program(
         ))
     })?;
     let entry_context = ModuleCompilationContext::from_graph(&build.graph, &entrypoint);
-    let entry_chunk = crate::Compiler::new()
-        .with_imported_enum_candidates(entry_context.enum_candidates().to_vec())
-        .with_imported_source_callable_names(entry_context.source_callable_names().to_vec())
+    let entry_chunk = entry_context
+        .configure_compiler(crate::Compiler::new())
         .compile(&entry_source.program)
         .map_err(|error| {
             LinkedProgramError::invalid(format!(
@@ -141,11 +140,12 @@ pub fn link_program(
         } else {
             requested
         };
-        let selected = crate::module_artifact::specialize_module_artifact(
+        let selected = crate::module_artifact::specialize_module_artifact_with_context(
             &parsed.program,
             Some(compile_path.display().to_string()),
             full,
             &effective,
+            &compilation_context,
         )
         .map_err(|error| {
             LinkedProgramError::invalid(format!(

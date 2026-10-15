@@ -281,12 +281,12 @@ mod tests {
     }
 
     #[test]
-    fn inaccessible_candidate_is_not_measured_absent() {
-        let root = tempfile::tempdir().unwrap();
-        let parent = root.path().join("ordinary-file");
-        std::fs::write(&parent, b"not a directory").unwrap();
+    fn metadata_error_is_not_measured_absent() {
+        let candidate = Path::new("verifier\0");
+        let error = candidate.metadata().unwrap_err();
+        assert_ne!(error.kind(), std::io::ErrorKind::NotFound);
         assert_eq!(
-            observe_candidates(&parent.join("verifier"), &[], "verifier"),
+            observe_candidates(candidate, &[], "verifier"),
             ProgramLookupObservation::Unmeasured(ProgramLookupUnmeasured::FilesystemUnavailable),
         );
     }

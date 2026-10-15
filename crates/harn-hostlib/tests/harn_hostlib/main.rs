@@ -38,6 +38,7 @@ mod host_conditions;
 mod operator_precedence_agreement;
 mod parser_agreement_corpus;
 mod prepared_source_verifier;
+mod process_adoption_e2e;
 mod process_artifact_retention;
 mod process_owner_death_e2e;
 mod process_sandbox_env_e2e;

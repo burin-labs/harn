@@ -2331,6 +2331,16 @@ schema-valued option. Reflection resolves nested imports and behaves the same
 for filesystem and embedded standard-library modules. A type alias without
 `pub` stays module-private; importing it is an error.
 
+Imported generic aliases also support reflection after applying concrete type
+arguments. For example, if a module exports `pub type Receipt<T> = {data: T}`,
+an importer can declare `type Stored = Receipt<Payload>` and decode JSON with
+`schema_of(Stored)`. Private helper types resolve in the exporting module;
+`Payload` resolves in the importing module. Public re-exports preserve that
+scope. Wildcard imports use the same resolved type names as selective imports.
+
+Nested `Schema<T>` fields check for a schema dictionary, rather than a value of
+`T`. The typechecker owns the relation between that dictionary and `T`.
+
 ### Public re-exports
 
 A facade module can re-publish symbols from other modules as part of its

@@ -280,10 +280,7 @@ fn compile_artifacts(
     imported: ModuleCompilationContext,
 ) -> Result<PrecompileArtifacts, String> {
     let entry_chunk = authority
-        .compiler_with_imported_symbols(
-            imported.enum_candidates().iter().cloned(),
-            imported.source_callable_names().iter().cloned(),
-        )
+        .compiler_with_imported_symbols(&imported)
         .compile(program)
         .map_err(|e| format!("compile error: {e}"))?;
     let module_artifact = authority
