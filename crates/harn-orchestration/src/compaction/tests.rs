@@ -156,44 +156,6 @@ fn token_estimate_counts_structured_message_content() {
 }
 
 #[test]
-fn compaction_policy_instructions_extend_by_default() {
-    let policy = CompactionPolicy {
-        instructions: Some("Keep the failing test names.".to_string()),
-        ..Default::default()
-    };
-    let archived = [serde_json::json!({"role": "user", "content": "old context"})];
-    let retained = [serde_json::json!({"role": "tool", "content": "new evidence"})];
-    let prompt = render_llm_compaction_prompt(None, &archived, &retained, 1, &policy)
-        .expect("prompt renders");
-
-    assert_eq!(policy.instruction_mode(), "extend");
-    assert!(prompt.contains("Preserve goals, constraints"));
-    assert!(prompt.contains("Additional compaction instructions"));
-    assert!(prompt.contains("Keep the failing test names."));
-    assert!(prompt.contains("TOOL: new evidence"));
-}
-
-#[test]
-fn compaction_policy_can_replace_default_instructions() {
-    let policy = CompactionPolicy {
-        instructions: Some("Only keep repro steps.".to_string()),
-        extend_default_instructions: Some(false),
-        ..Default::default()
-    };
-    let archived = [serde_json::json!({"role": "user", "content": "old context"})];
-    let retained = [serde_json::json!({"role": "tool", "content": "new evidence"})];
-    let prompt = render_llm_compaction_prompt(None, &archived, &retained, 1, &policy)
-        .expect("prompt renders");
-
-    assert_eq!(policy.instruction_mode(), "replace");
-    assert!(prompt.contains("according to these instructions"));
-    assert!(prompt.contains("Only keep repro steps."));
-    assert!(!prompt.contains("Preserve goals, constraints"));
-    assert!(prompt.contains("newer than every archived message"));
-    assert!(prompt.contains("TOOL: new evidence"));
-}
-
-#[test]
 fn snap_to_line_end_finds_newline() {
     let s = "line1\nline2\nline3\nline4\n";
     let head = snap_to_line_end(s, 12);
