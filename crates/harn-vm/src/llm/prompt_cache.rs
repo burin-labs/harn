@@ -201,11 +201,10 @@ mod tests {
     use super::*;
 
     fn caps(style: CacheBreakpointStyle) -> Capabilities {
-        Capabilities {
-            prompt_caching: true,
-            cache_breakpoint_style: style,
-            ..Capabilities::default()
-        }
+        let mut caps = Capabilities::default();
+        caps.prompt_caching = true;
+        caps.cache_breakpoint_style = style;
+        caps
     }
 
     fn request(messages: Vec<serde_json::Value>) -> LlmRequestPayload {
@@ -570,11 +569,9 @@ mod tests {
             CacheBreakpointStyle::LastBlock,
             CacheBreakpointStyle::None,
         ] {
-            let off = Capabilities {
-                prompt_caching: false,
-                cache_breakpoint_style: style,
-                ..Capabilities::default()
-            };
+            let mut off = Capabilities::default();
+            off.prompt_caching = false;
+            off.cache_breakpoint_style = style;
             let breakpoint = PromptCacheBreakpoint::resolve(&ordinary(), &off);
             assert_eq!(breakpoint, PromptCacheBreakpoint::Unsupported, "{style:?}");
             let mut value = body();

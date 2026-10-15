@@ -433,20 +433,18 @@ fn test_resolve_base_url_region_env() {
 
 #[test]
 fn capability_tags_include_structured_capability_flags() {
-    let caps = crate::llm::capabilities::Capabilities {
-        native_tools: true,
-        tool_search: vec!["web".to_string()],
-        vision_supported: true,
-        audio: true,
-        pdf: true,
-        video: true,
-        files_api_supported: true,
-        batch_api: true,
-        prompt_caching: true,
-        thinking_modes: vec!["enabled".to_string()],
-        structured_output: Some("native".to_string()),
-        ..Default::default()
-    };
+    let mut caps = crate::llm::capabilities::Capabilities::default();
+    caps.native_tools = true;
+    caps.tool_search = vec!["web".to_string()];
+    caps.vision_supported = true;
+    caps.audio = true;
+    caps.pdf = true;
+    caps.video = true;
+    caps.files_api_supported = true;
+    caps.batch_api = true;
+    caps.prompt_caching = true;
+    caps.thinking_modes = vec!["enabled".to_string()];
+    caps.structured_output = Some("native".to_string());
 
     assert_eq!(
         capability_tags_from_capabilities(&caps),

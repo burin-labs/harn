@@ -325,11 +325,9 @@ mod tests {
         )
         .await;
 
-        let mut caps = Capabilities {
-            native_tools: true,
-            preferred_tool_format: Some("native".to_string()),
-            ..Capabilities::default()
-        };
+        let mut caps = Capabilities::default();
+        caps.native_tools = true;
+        caps.preferred_tool_format = Some("native".to_string());
         apply_cached_measurement_with(&model, ProbeKind::LlamaProps, &base_url, &mut caps);
 
         assert_eq!(

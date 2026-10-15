@@ -118,10 +118,8 @@ fn option_probe_preserves_only_the_selected_interactions_sampling_field() {
 
 #[test]
 fn disabled_thinking_uses_the_models_lowest_supported_interactions_level() {
-    let caps = crate::llm::capabilities::Capabilities {
-        reasoning_effort_levels: vec!["low".into(), "medium".into(), "high".into()],
-        ..Default::default()
-    };
+    let mut caps = crate::llm::capabilities::Capabilities::default();
+    caps.reasoning_effort_levels = vec!["low".into(), "medium".into(), "high".into()];
 
     assert_eq!(
         thinking_level(&ThinkingConfig::Disabled, &caps).as_deref(),
