@@ -45,6 +45,9 @@ impl SchemaFragment {
         match self {
             SchemaFragment::Value(value) => vm_value_node_count(value),
             SchemaFragment::Ref(_) => 1,
+            SchemaFragment::Apply { args, .. } => {
+                2 + args.iter().map(SchemaFragment::node_count).sum::<usize>()
+            }
             SchemaFragment::Dict(entries) => {
                 1 + entries
                     .values()
@@ -63,6 +66,13 @@ impl SchemaFragment {
     fn schema_depth(&self) -> usize {
         match self {
             SchemaFragment::Value(_) | SchemaFragment::Ref(_) => 1,
+            SchemaFragment::Apply { args, .. } => {
+                1 + args
+                    .iter()
+                    .map(SchemaFragment::schema_depth)
+                    .max()
+                    .unwrap_or(0)
+            }
             SchemaFragment::Dict(entries) => {
                 1 + entries
                     .iter()
@@ -103,6 +113,13 @@ impl SchemaFragment {
         }
         match self {
             SchemaFragment::Value(_) | SchemaFragment::Ref(_) => self.clone(),
+            SchemaFragment::Apply { name, args } => SchemaFragment::Apply {
+                name: name.clone(),
+                args: args
+                    .iter()
+                    .map(|arg| arg.pruned_schema(depth_limit - 1))
+                    .collect(),
+            },
             SchemaFragment::Dict(entries) => SchemaFragment::Dict(
                 entries
                     .iter()
@@ -172,6 +189,12 @@ fn vm_value_node_count(value: &VmValue) -> usize {
 pub(super) enum SchemaFragment {
     Value(VmValue),
     Ref(String),
+    /// An imported generic exports a schema factory in its declaring lexical
+    /// environment. Arguments are schemas resolved in the consumer's scope.
+    Apply {
+        name: String,
+        args: Vec<SchemaFragment>,
+    },
     Dict(BTreeMap<String, SchemaFragment>),
     List(Vec<SchemaFragment>),
 }
@@ -338,7 +361,18 @@ impl Compiler {
             }
             TypeExpr::Applied { name, args } => {
                 let alias = self.type_aliases.get(name)?;
-                let body = alias.body.as_ref()?;
+                let Some(body) = alias.body.as_ref() else {
+                    if args.len() > u8::MAX as usize {
+                        return None;
+                    }
+                    return Some(SchemaFragment::Apply {
+                        name: name.clone(),
+                        args: args
+                            .iter()
+                            .map(|arg| self.schema_fragment_for_type(arg, visiting))
+                            .collect::<Option<Vec<_>>>()?,
+                    });
+                };
                 if alias.type_params.len() != args.len() {
                     return None;
                 }
@@ -411,6 +445,13 @@ impl Compiler {
         match fragment {
             SchemaFragment::Value(value) => self.emit_vm_value_literal(value),
             SchemaFragment::Ref(name) => self.emit_get_binding(name),
+            SchemaFragment::Apply { name, args } => {
+                self.emit_get_binding(name);
+                for arg in args {
+                    self.emit_schema_fragment(arg);
+                }
+                self.chunk.emit_u8(Op::Call, args.len() as u8, self.line);
+            }
             SchemaFragment::Dict(entries) => {
                 for (key, value) in entries {
                     let key_idx = self.string_constant(key);
@@ -436,5 +477,70 @@ impl Compiler {
         };
         self.emit_schema_fragment(&fragment);
         true
+    }
+
+    /// Export generic aliases as ordinary lexical closures, using the same
+    /// schema lowering as local concrete aliases. Private helper names stay
+    /// owned by this module; no AST or duplicate type table crosses the import.
+    pub(super) fn emit_generic_schema_factory(
+        &mut self,
+        name: &str,
+        source_file: Option<String>,
+    ) -> Result<bool, super::CompileError> {
+        let Some(alias) = self.type_aliases.get(name).cloned() else {
+            return Ok(false);
+        };
+        let Some(body) = alias.body else {
+            return Ok(false);
+        };
+        if alias.type_params.is_empty() || alias.type_params.len() > u8::MAX as usize {
+            return Ok(false);
+        }
+        let params = alias
+            .type_params
+            .iter()
+            .map(|param| harn_parser::TypedParam::untyped(&param.name))
+            .collect::<Vec<_>>();
+        let mut compiler = self.nested_body();
+        compiler.type_aliases = self.type_aliases.clone();
+        for param in &params {
+            compiler.type_aliases.insert(
+                param.name.clone(),
+                super::TypeAliasDefinition {
+                    type_params: Vec::new(),
+                    body: None,
+                },
+            );
+        }
+        compiler.declare_param_slots(&params);
+        let Some(fragment) =
+            compiler.schema_fragment_for_type(&body, &mut vec![TypeExpr::Named(name.to_string())])
+        else {
+            return Ok(false);
+        };
+        compiler.emit_schema_fragment(&fragment.bounded());
+        compiler.chunk.emit(Op::Return, self.line);
+        compiler.chunk.source_file = source_file;
+        super::ensure_chunk_addressable(
+            &compiler.chunk,
+            &format!("generic schema `{name}`"),
+            self.line,
+        )?;
+        let function = crate::CompiledFunction {
+            name: format!("<schema:{name}>"),
+            type_params: Vec::new(),
+            nominal_type_names: Vec::new(),
+            params: compiler.compile_param_slots(&params),
+            default_start: None,
+            chunk: std::sync::Arc::new(compiler.chunk),
+            is_generator: false,
+            is_stream: false,
+            has_rest_param: false,
+            has_runtime_type_checks: false,
+        };
+        let index = self.chunk.functions.len();
+        self.chunk.functions.push(std::sync::Arc::new(function));
+        self.chunk.emit_u16(Op::Closure, index as u16, self.line);
+        Ok(true)
     }
 }

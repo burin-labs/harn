@@ -436,7 +436,9 @@ impl Compiler {
             compiler.chunk = Chunk::new();
             compiler.string_constants.clear();
             compiler.chunk.source_file.clone_from(&source_file);
-            if compiler.emit_schema_for_alias(name) {
+            if compiler.emit_schema_for_alias(name)
+                || compiler.emit_generic_schema_factory(name, source_file.clone())?
+            {
                 compiler.emit_define_binding(name, false);
                 compiler.chunk.emit(Op::Nil, compiler.line);
                 compiler.chunk.emit(Op::Return, compiler.line);
