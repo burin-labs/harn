@@ -16,7 +16,7 @@ async fn module_export_call_commits_initialization_once_and_preserves_caller_sco
     let caller_dir = root.path().join("caller");
     vm.set_source_dir(&caller_dir);
     let caller_import = root.path().join("already-imported.harn");
-    vm.imported_paths.insert(caller_import.clone());
+    vm.imported_paths.push(caller_import.clone());
     vm.output.push_str("caller\n");
     let initializations = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let observed = initializations.clone();
