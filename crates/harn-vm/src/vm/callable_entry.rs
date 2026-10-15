@@ -6,7 +6,7 @@ use crate::value::{VmError, VmValue};
 
 use super::Vm;
 
-pub(super) enum TopLevelEntry {
+pub(crate) enum TopLevelEntry {
     Chunk(ChunkRef),
     Callable {
         bootstrap: ChunkRef,
@@ -111,7 +111,7 @@ impl Vm {
         .await
     }
 
-    pub(super) async fn execute_top_level(
+    pub(crate) async fn execute_top_level(
         &mut self,
         entry: TopLevelEntry,
     ) -> Result<VmValue, VmError> {

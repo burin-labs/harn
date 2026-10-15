@@ -55,6 +55,7 @@ mod tests_value_calls;
 pub(crate) use async_builtin::run_async_builtin_with;
 pub use async_builtin::{AsyncBuiltinCtx, VmCallSite};
 pub use builtin::{VmBuiltinArity, VmBuiltinKind, VmBuiltinMetadata};
+pub(crate) use callable_entry::TopLevelEntry;
 pub use debug::{DebugAction, DebugState};
 pub(crate) use harness_seam::{HarnessMethodFuture, HarnessMethods};
 pub use module_phase_timing::{ModulePhaseRecorder, ModulePhaseStats};

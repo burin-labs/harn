@@ -49,6 +49,21 @@ impl VmRuntime for RefusingRuntime {
     fn subtask_scope(&self) -> Box<dyn crate::vm::VmExecutionScope> {
         self.native.subtask_scope()
     }
+    fn poll_async_builtin(
+        &self,
+        cx: &mut std::task::Context<'_>,
+        continuation: &mut dyn FnMut(&mut std::task::Context<'_>) -> std::task::Poll<()>,
+    ) -> std::task::Poll<()> {
+        self.native.poll_async_builtin(cx, continuation)
+    }
+    fn execute_timed<'a>(
+        &'a self,
+        vm: &'a mut Vm,
+        entry: crate::vm::TopLevelEntry,
+        deadline: std::time::Instant,
+    ) -> Pin<Box<dyn Future<Output = Result<VmValue, VmError>> + Send + 'a>> {
+        self.native.execute_timed(vm, entry, deadline)
+    }
     fn start_span(&self, kind: crate::vm::VmSpanKind, name: String) -> crate::vm::ScopeSpan {
         self.native.start_span(kind, name)
     }
@@ -99,6 +114,16 @@ impl VmRuntime for RefusingRuntime {
     }
     fn suspend_active_context(&self) -> crate::vm::step_context::ActiveContextGuard {
         self.native.suspend_active_context()
+    }
+    fn step_error_boundary(
+        &self,
+        error: VmError,
+        frame_depth: usize,
+    ) -> crate::vm::step_context::StepBoundaryDecision {
+        self.native.step_error_boundary(error, frame_depth)
+    }
+    fn finish_skipped_step(&self, frame_depth: usize, message: String) {
+        self.native.finish_skipped_step(frame_depth, message);
     }
     fn denied_builtin_family(
         &self,

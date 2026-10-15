@@ -37,6 +37,17 @@ pub(crate) trait VmRuntime: Any + Send + Sync {
         execution_id: &crate::ExecutionId,
     ) -> Box<dyn super::VmExecutionScope>;
     fn subtask_scope(&self) -> Box<dyn super::VmExecutionScope>;
+    fn poll_async_builtin(
+        &self,
+        cx: &mut std::task::Context<'_>,
+        continuation: &mut dyn FnMut(&mut std::task::Context<'_>) -> std::task::Poll<()>,
+    ) -> std::task::Poll<()>;
+    fn execute_timed<'a>(
+        &'a self,
+        vm: &'a mut super::Vm,
+        entry: super::TopLevelEntry,
+        deadline: std::time::Instant,
+    ) -> Pin<Box<dyn Future<Output = Result<VmValue, VmError>> + Send + 'a>>;
     fn task_cleanup(&self, execution_id: &crate::ExecutionId) -> Arc<dyn VmTaskCleanup>;
     fn start_span(&self, kind: VmSpanKind, name: String) -> super::ScopeSpan;
     fn builtin_span(&self, name: &str) -> Option<super::ScopeSpan>;
@@ -54,6 +65,12 @@ pub(crate) trait VmRuntime: Any + Send + Sync {
     fn enter_function(&self, name: &str, frame_depth: usize, args: &[VmValue]);
     fn prune_frames(&self, frame_depth: usize);
     fn suspend_active_context(&self) -> super::step_context::ActiveContextGuard;
+    fn step_error_boundary(
+        &self,
+        error: VmError,
+        frame_depth: usize,
+    ) -> super::step_context::StepBoundaryDecision;
+    fn finish_skipped_step(&self, frame_depth: usize, message: String);
     fn denied_builtin_family(
         &self,
         denied: std::collections::HashSet<String>,

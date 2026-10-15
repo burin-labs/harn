@@ -6,9 +6,13 @@ use std::{any::Any, path::Path, sync::Arc};
 use std::{future::Future, pin::Pin};
 
 mod bridge;
+mod context;
+mod execution_evidence;
 mod lifecycle;
+mod step_lifecycle;
 pub(crate) mod subtask;
 mod task_cleanup;
+mod timed_execution;
 mod tracing;
 
 #[derive(Clone)]
@@ -105,6 +109,23 @@ impl VmRuntime for NativeExecutionState {
         subtask::capture_inline(Arc::clone(&self.pool_registry))
     }
 
+    fn poll_async_builtin(
+        &self,
+        cx: &mut std::task::Context<'_>,
+        continuation: &mut dyn FnMut(&mut std::task::Context<'_>) -> std::task::Poll<()>,
+    ) -> std::task::Poll<()> {
+        crate::stdlib::pool::with_pool_registry_poll(&self.pool_registry, || continuation(cx))
+    }
+
+    fn execute_timed<'a>(
+        &'a self,
+        vm: &'a mut Vm,
+        entry: crate::vm::TopLevelEntry,
+        deadline: std::time::Instant,
+    ) -> Pin<Box<dyn Future<Output = Result<VmValue, VmError>> + Send + 'a>> {
+        Box::pin(timed_execution::execute(vm, entry, deadline))
+    }
+
     fn start_span(&self, kind: crate::vm::VmSpanKind, name: String) -> crate::vm::ScopeSpan {
         tracing::start_span(kind, name)
     }
@@ -156,6 +177,18 @@ impl VmRuntime for NativeExecutionState {
 
     fn suspend_active_context(&self) -> crate::vm::step_context::ActiveContextGuard {
         crate::step_runtime::suspend_active_context()
+    }
+
+    fn step_error_boundary(
+        &self,
+        error: VmError,
+        frame_depth: usize,
+    ) -> crate::vm::step_context::StepBoundaryDecision {
+        step_lifecycle::error_boundary(error, frame_depth)
+    }
+
+    fn finish_skipped_step(&self, frame_depth: usize, message: String) {
+        crate::step_runtime::pop_and_record(frame_depth, "skipped", Some(message));
     }
 
     fn denied_builtin_family(
