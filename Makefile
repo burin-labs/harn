@@ -799,6 +799,7 @@ test-pr-gate-scripts:
 	./scripts/tests/harn_launcher_python_cutover_test.sh
 	./scripts/tests/lint_harn_gate_test.sh
 	./scripts/tests/build_revision_workflow_test.sh
+	bash ./scripts/tests/fetch_release_base_test.sh
 	./scripts/tests/dev_setup_profile_test.sh
 	./scripts/tests/sync_diagnostics_catalog_test.sh
 	./scripts/tests/sign_local_macos_test.sh
