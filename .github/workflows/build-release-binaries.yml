@@ -582,7 +582,7 @@ jobs:
 
       - name: Upload release license notices
         if: needs.setup.outputs.should_package_archives == 'true'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: harn-release-license-notices
           path: dist/release-notices/
@@ -591,7 +591,7 @@ jobs:
 
       - name: Upload CLI AOT payload for release and benchmark targets
         if: needs.setup.outputs.build_mode == 'benchmark' || needs.setup.outputs.build_mode == 'candidate'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: harn-cli-aot-payload
           path: |
@@ -836,7 +836,7 @@ jobs:
         # that outcome — install unconditionally on the measured target so a
         # budget failure can always produce its own attribution.
         if: matrix.target == 'x86_64-unknown-linux-gnu'
-        uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2.87.22
+        uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2.87.26
         with:
           tool: cargo-bloat
 
@@ -1402,7 +1402,7 @@ jobs:
 
       - name: Upload binary-size report
         if: always() && matrix.target == 'x86_64-unknown-linux-gnu'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         # The size report is diagnostic. The budget check above is the hard
         # gate; do not let transient Actions artifact-store failures block a
         # release artifact that otherwise built and packaged successfully.
@@ -1571,7 +1571,7 @@ jobs:
       # for the manifest's `file`; the receipt rides beside it.
       - name: Upload candidate archive (unix)
         if: needs.setup.outputs.build_mode == 'candidate' && runner.os != 'Windows'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: harn-${{ matrix.target }}
           path: |
@@ -1584,7 +1584,7 @@ jobs:
 
       - name: Upload candidate archive (windows)
         if: needs.setup.outputs.build_mode == 'candidate' && runner.os == 'Windows'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: harn-${{ matrix.target }}
           path: |
@@ -1754,7 +1754,7 @@ jobs:
           harn-version-file: .harn-bootstrap-version
 
       - name: Upload release files
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: harn-release-files
           path: |
@@ -1765,7 +1765,7 @@ jobs:
           retention-days: 30
 
       - name: Upload candidate manifest
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: candidate-manifest-${{ needs.setup.outputs.candidate_source_sha }}
           path: ${{ steps.manifest.outputs.manifest }}
