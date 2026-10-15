@@ -36,11 +36,23 @@ fn inherited_native_suffix_does_not_nest_the_next_workspace_alias() {
 fn workspace_temp_symlinks_cannot_select_host_storage() {
     let workspace = tempfile::tempdir().unwrap();
     let outside = tempfile::tempdir().unwrap();
-    std::os::unix::fs::symlink(outside.path(), workspace.path().join(".harn-tmp")).unwrap();
     let policy = CapabilityPolicy {
         sandbox_profile: crate::orchestration::SandboxProfile::Worktree,
         workspace_roots: vec![workspace.path().display().to_string()],
         ..Default::default()
     };
-    assert!(prepare(&policy).is_err());
+    let baseline = prepare(&policy)
+        .unwrap()
+        .expect("ordinary private storage is admitted");
+    assert_eq!(
+        baseline.directory,
+        workspace.path().canonicalize().unwrap().join(".harn-tmp")
+    );
+    std::fs::remove_dir_all(workspace.path().join(".harn-tmp")).unwrap();
+    std::os::unix::fs::symlink(outside.path(), workspace.path().join(".harn-tmp")).unwrap();
+    assert!(
+        prepare(&policy).unwrap().is_none(),
+        "a redirected scratch root must supply no binding"
+    );
+    assert_eq!(std::fs::read_dir(outside.path()).unwrap().count(), 0);
 }
