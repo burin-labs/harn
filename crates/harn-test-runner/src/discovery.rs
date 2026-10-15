@@ -24,7 +24,6 @@ pub fn extract_cases_from_program(
     source: &Arc<String>,
     program: &Arc<Vec<SNode>>,
     filter: Option<&str>,
-    workers: usize,
 ) -> Result<Vec<TestCase>, String> {
     let fixtures = fixtures::discover(program)?;
     let mut cases = Vec::new();
@@ -32,7 +31,9 @@ pub fn extract_cases_from_program(
         let Some(meta) = inspect_test_pipeline(snode, &fixtures)? else {
             continue;
         };
-        let weight = meta.weight.min(workers).max(1);
+        // Discovery is a source fact shared by every shard. Host capacity only
+        // limits permits when the scheduler claims a case.
+        let weight = meta.weight.max(1);
         if meta.rows.is_empty() {
             if filter.is_some_and(|pattern| !meta.name.contains(pattern)) {
                 continue;

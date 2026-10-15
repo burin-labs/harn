@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
 use harn_lexer::{Lexer, Span, TokenKind};
-use harn_parser::{MatchArm, Node, SNode};
+use harn_parser::{Node, SNode};
 use harn_prompt_syntax::outline::{OutlineBlock, OutlineBlockKind};
 use tower_lsp::lsp_types::{FoldingRange, FoldingRangeKind};
 
@@ -104,285 +104,61 @@ fn collect_token_ranges(
 }
 
 fn collect_ast_ranges(
-    node: &SNode,
+    root: &SNode,
     ranges: &mut Vec<FoldingRange>,
     seen: &mut HashSet<(u32, u32, u8)>,
 ) {
-    match &node.node {
-        Node::AttributedDecl { inner, .. } => collect_ast_ranges(inner, ranges, seen),
-        Node::Pipeline { body, .. }
-        | Node::OverrideDecl { body, .. }
-        | Node::FnDecl { body, .. }
-        | Node::ToolDecl { body, .. }
-        | Node::SpawnExpr { body }
-        | Node::ScopeBlock { body }
-        | Node::WhileLoop { body, .. }
-        | Node::Retry { body, .. }
-        | Node::TryExpr { body }
-        | Node::DeferStmt { body }
-        | Node::DeadlineBlock { body, .. }
-        | Node::MutexBlock { body, .. }
-        | Node::Closure { body, .. } => {
-            push_span_range(ranges, seen, &node.span, Some(FoldingRangeKind::Region));
-            collect_body_ranges(body, ranges, seen);
-        }
-        Node::ImplBlock { methods, .. } => {
-            push_span_range(ranges, seen, &node.span, Some(FoldingRangeKind::Region));
-            collect_body_ranges(methods, ranges, seen);
-        }
-        Node::SkillDecl { fields, .. } => {
-            push_span_range(ranges, seen, &node.span, Some(FoldingRangeKind::Region));
-            for (_, value) in fields {
-                collect_ast_ranges(value, ranges, seen);
-            }
-        }
-        Node::EvalPackDecl {
-            fields,
-            body,
-            summarize,
-            ..
-        } => {
-            push_span_range(ranges, seen, &node.span, Some(FoldingRangeKind::Region));
-            for (_, value) in fields {
-                collect_ast_ranges(value, ranges, seen);
-            }
-            collect_body_ranges(body, ranges, seen);
-            if let Some(summarize) = summarize {
-                collect_body_ranges(summarize, ranges, seen);
-            }
-        }
-        Node::CostRoute { options, body } => {
-            push_span_range(ranges, seen, &node.span, Some(FoldingRangeKind::Region));
-            for (_, value) in options {
-                collect_ast_ranges(value, ranges, seen);
-            }
-            collect_body_ranges(body, ranges, seen);
-        }
-        Node::EnumDecl { .. }
-        | Node::StructDecl { .. }
-        | Node::InterfaceDecl { .. }
-        | Node::TypeDecl { .. } => {
+    harn_parser::visit::walk_node(root, &mut |node| {
+        if matches!(
+            &node.node,
+            Node::Pipeline { .. }
+                | Node::OverrideDecl { .. }
+                | Node::FnDecl { .. }
+                | Node::ToolDecl { .. }
+                | Node::SpawnExpr { .. }
+                | Node::ScopeBlock { .. }
+                | Node::WhileLoop { .. }
+                | Node::Retry { .. }
+                | Node::TryExpr { .. }
+                | Node::DeferStmt { .. }
+                | Node::DeadlineBlock { .. }
+                | Node::MutexBlock { .. }
+                | Node::Closure { .. }
+                | Node::ImplBlock { .. }
+                | Node::SkillDecl { .. }
+                | Node::EvalPackDecl { .. }
+                | Node::CostRoute { .. }
+                | Node::EnumDecl { .. }
+                | Node::StructDecl { .. }
+                | Node::InterfaceDecl { .. }
+                | Node::TypeDecl { .. }
+                | Node::IfElse { .. }
+                | Node::ForIn { .. }
+                | Node::MatchExpr { .. }
+                | Node::TryCatch { .. }
+                | Node::Parallel { .. }
+                | Node::SelectExpr { .. }
+                | Node::GuardStmt { .. }
+                | Node::Block(_)
+        ) {
             push_span_range(ranges, seen, &node.span, Some(FoldingRangeKind::Region));
         }
-        Node::IfElse {
-            condition,
-            then_body,
-            else_body,
-            ..
-        } => {
-            push_span_range(ranges, seen, &node.span, Some(FoldingRangeKind::Region));
-            collect_ast_ranges(condition, ranges, seen);
-            collect_body_ranges(then_body, ranges, seen);
-            if let Some(else_body) = else_body {
-                collect_body_ranges(else_body, ranges, seen);
-            }
-        }
-        Node::ForIn { iterable, body, .. } => {
-            push_span_range(ranges, seen, &node.span, Some(FoldingRangeKind::Region));
-            collect_ast_ranges(iterable, ranges, seen);
-            collect_body_ranges(body, ranges, seen);
-        }
-        Node::MatchExpr { value, arms } => {
-            push_span_range(ranges, seen, &node.span, Some(FoldingRangeKind::Region));
-            collect_ast_ranges(value, ranges, seen);
+        if let Node::MatchExpr { arms, .. } = &node.node {
             for arm in arms {
-                collect_match_arm_ranges(arm, ranges, seen);
+                let Some(last) = arm.body.last() else {
+                    continue;
+                };
+                let span = Span {
+                    start: arm.pattern.span.start,
+                    end: last.span.end,
+                    line: arm.pattern.span.line,
+                    column: arm.pattern.span.column,
+                    end_line: last.span.end_line,
+                };
+                push_span_range(ranges, seen, &span, Some(FoldingRangeKind::Region));
             }
         }
-        Node::TryCatch {
-            has_catch: _,
-            body,
-            catch_body,
-            finally_body,
-            ..
-        } => {
-            push_span_range(ranges, seen, &node.span, Some(FoldingRangeKind::Region));
-            collect_body_ranges(body, ranges, seen);
-            collect_body_ranges(catch_body, ranges, seen);
-            if let Some(finally_body) = finally_body {
-                collect_body_ranges(finally_body, ranges, seen);
-            }
-        }
-        Node::Parallel {
-            expr,
-            body,
-            options,
-            ..
-        } => {
-            push_span_range(ranges, seen, &node.span, Some(FoldingRangeKind::Region));
-            collect_ast_ranges(expr, ranges, seen);
-            collect_body_ranges(body, ranges, seen);
-            for (_, value) in options {
-                collect_ast_ranges(value, ranges, seen);
-            }
-        }
-        Node::SelectExpr {
-            cases,
-            timeout,
-            default_body,
-        } => {
-            push_span_range(ranges, seen, &node.span, Some(FoldingRangeKind::Region));
-            for case in cases {
-                collect_ast_ranges(&case.channel, ranges, seen);
-                collect_body_ranges(&case.body, ranges, seen);
-            }
-            if let Some((duration, body)) = timeout {
-                collect_ast_ranges(duration, ranges, seen);
-                collect_body_ranges(body, ranges, seen);
-            }
-            if let Some(body) = default_body {
-                collect_body_ranges(body, ranges, seen);
-            }
-        }
-        Node::GuardStmt {
-            condition,
-            else_body,
-        } => {
-            push_span_range(ranges, seen, &node.span, Some(FoldingRangeKind::Region));
-            collect_ast_ranges(condition, ranges, seen);
-            collect_body_ranges(else_body, ranges, seen);
-        }
-        Node::RequireStmt { condition, message } => {
-            collect_ast_ranges(condition, ranges, seen);
-            if let Some(message) = message {
-                collect_ast_ranges(message, ranges, seen);
-            }
-        }
-        Node::FunctionCall { args, .. }
-        | Node::EnumConstruct { args, .. }
-        | Node::ListLiteral(args)
-        | Node::OrPattern(args) => {
-            for arg in args {
-                collect_ast_ranges(arg, ranges, seen);
-            }
-        }
-        Node::ValueCall { callee, args } => {
-            collect_ast_ranges(callee, ranges, seen);
-            for arg in args {
-                collect_ast_ranges(arg, ranges, seen);
-            }
-        }
-        Node::MethodCall { object, args, .. } | Node::OptionalMethodCall { object, args, .. } => {
-            collect_ast_ranges(object, ranges, seen);
-            for arg in args {
-                collect_ast_ranges(arg, ranges, seen);
-            }
-        }
-        Node::PropertyAccess { object, .. } | Node::OptionalPropertyAccess { object, .. } => {
-            collect_ast_ranges(object, ranges, seen);
-        }
-        Node::SubscriptAccess { object, index }
-        | Node::OptionalSubscriptAccess { object, index } => {
-            collect_ast_ranges(object, ranges, seen);
-            collect_ast_ranges(index, ranges, seen);
-        }
-        Node::SliceAccess { object, start, end } => {
-            collect_ast_ranges(object, ranges, seen);
-            if let Some(start) = start {
-                collect_ast_ranges(start, ranges, seen);
-            }
-            if let Some(end) = end {
-                collect_ast_ranges(end, ranges, seen);
-            }
-        }
-        Node::BinaryOp { left, right, .. }
-        | Node::RangeExpr {
-            start: left,
-            end: right,
-            ..
-        } => {
-            collect_ast_ranges(left, ranges, seen);
-            collect_ast_ranges(right, ranges, seen);
-        }
-        Node::UnaryOp { operand, .. }
-        | Node::TryOperator { operand }
-        | Node::NonNullAssert { operand }
-        | Node::TryStar { operand }
-        | Node::Spread(operand) => collect_ast_ranges(operand, ranges, seen),
-        Node::Ternary {
-            condition,
-            true_expr,
-            false_expr,
-        } => {
-            collect_ast_ranges(condition, ranges, seen);
-            collect_ast_ranges(true_expr, ranges, seen);
-            collect_ast_ranges(false_expr, ranges, seen);
-        }
-        Node::Assignment { target, value, .. } => {
-            collect_ast_ranges(target, ranges, seen);
-            collect_ast_ranges(value, ranges, seen);
-        }
-        Node::LetBinding { value, .. }
-        | Node::ConstBinding { value, .. }
-        | Node::ThrowStmt { value }
-        | Node::EmitExpr { value } => collect_ast_ranges(value, ranges, seen),
-        Node::ReturnStmt { value } | Node::YieldExpr { value } => {
-            if let Some(value) = value {
-                collect_ast_ranges(value, ranges, seen);
-            }
-        }
-        Node::DictLiteral(entries)
-        | Node::StructConstruct {
-            fields: entries, ..
-        } => {
-            for entry in entries {
-                collect_ast_ranges(&entry.key, ranges, seen);
-                collect_ast_ranges(&entry.value, ranges, seen);
-            }
-        }
-        Node::Block(stmts) => {
-            push_span_range(ranges, seen, &node.span, Some(FoldingRangeKind::Region));
-            collect_body_ranges(stmts, ranges, seen);
-        }
-        Node::ImportDecl { .. }
-        | Node::SelectiveImport { .. }
-        | Node::NamespaceImport { .. }
-        | Node::DurationLiteral(_)
-        | Node::StringLiteral(_)
-        | Node::RawStringLiteral(_)
-        | Node::InterpolatedString(_)
-        | Node::IntLiteral(_)
-        | Node::FloatLiteral(_)
-        | Node::BoolLiteral(_)
-        | Node::NilLiteral
-        | Node::Identifier(_)
-        | Node::BreakStmt
-        | Node::ContinueStmt => {}
-    }
-}
-
-fn collect_body_ranges(
-    body: &[SNode],
-    ranges: &mut Vec<FoldingRange>,
-    seen: &mut HashSet<(u32, u32, u8)>,
-) {
-    for stmt in body {
-        collect_ast_ranges(stmt, ranges, seen);
-    }
-}
-
-fn collect_match_arm_ranges(
-    arm: &MatchArm,
-    ranges: &mut Vec<FoldingRange>,
-    seen: &mut HashSet<(u32, u32, u8)>,
-) {
-    collect_ast_ranges(&arm.pattern, ranges, seen);
-    if let Some(guard) = &arm.guard {
-        collect_ast_ranges(guard, ranges, seen);
-    }
-    collect_body_ranges(&arm.body, ranges, seen);
-
-    let Some(last) = arm.body.last() else {
-        return;
-    };
-    let span = Span {
-        start: arm.pattern.span.start,
-        end: last.span.end,
-        line: arm.pattern.span.line,
-        column: arm.pattern.span.column,
-        end_line: last.span.end_line,
-    };
-    push_span_range(ranges, seen, &span, Some(FoldingRangeKind::Region));
+    });
 }
 
 fn push_span_range(
@@ -500,6 +276,26 @@ mod tests {
             &Url::from_file_path(&path).unwrap(),
             &RuleWorkspace::from_root(temp.path()),
         )
+    }
+
+    #[test]
+    fn folds_closures_in_parameter_defaults() {
+        let source = "fn helper(callback = { ->\n  if true {\n    1\n  }\n}) {\n  callback()\n}\n";
+        let program = harn_parser::parse_source(source).expect("default closure parses");
+        let ranges = build_folding_ranges(source, Some(&program));
+        assert!(
+            ranges
+                .iter()
+                .any(|range| range.start_line == 1 && range.end_line == 3),
+            "default closure body folds: {ranges:?}"
+        );
+        assert_eq!(
+            ranges
+                .iter()
+                .filter(|range| range.start_line == 1 && range.end_line == 3)
+                .count(),
+            1
+        );
     }
 
     #[test]

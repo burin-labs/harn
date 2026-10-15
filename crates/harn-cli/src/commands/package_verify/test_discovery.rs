@@ -93,7 +93,7 @@ fn discover_file(package_dir: &Path, path: &Path) -> PackageTestFileDiscovery {
                         let source = Arc::new(source);
                         let program = Arc::new(program);
                         match harn_test_runner::extract_cases_from_program(
-                            path, &source, &program, None, 1,
+                            path, &source, &program, None,
                         ) {
                             Ok(cases) => {
                                 let tests = cases

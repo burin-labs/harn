@@ -103,6 +103,12 @@ and measure performance in a host-isolated job.
 Conformance and other non-user targets continue to apply `--timeout` to their
 whole test case or subprocess.
 
+User tests use the configured secret provider, with the default chain restricted
+to environment variables. An explicit parent-secret handoff stays closed to the
+names the parent supplied, including in parallel workers and imported helpers.
+Each case retains a fresh harness; handed-off values are not added to subprocess
+environments.
+
 Per-case top-level phases are disjoint: `compile` is zero for suite-prepared
 test entries (and covers fallback compilation for direct embedders); `setup`
 constructs and configures its fresh VM; `execute` is the
@@ -147,6 +153,11 @@ environment produces another baseline. A single case heavier than the rest of
 the suite is assigned alone and named in the shard plan. The same baseline
 also enforces the absolute per-case regression threshold, so moving a slower
 case into a less-loaded shard cannot turn the regression green.
+
+Shard ownership depends on the selected source, shard count, and timing baseline,
+including declared heavy weights for unmeasured cases. Local worker capacity does
+not change that partition. Scheduling bounds each selected case's permits to the
+host's worker count, so the same matrix can use runners with different capacities.
 
 Aggregate phase totals are cumulative worker-time. They reconcile with serial
 case work, but parallel cases overlap, so aggregate setup/compile/execute/

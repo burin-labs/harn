@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
 
-use harn_parser::{BinaryOperator, DictEntry, Node, SNode, UnaryOperator};
+use harn_parser::{BinaryOperator, Node, SNode, UnaryOperator};
 
 const DEFAULT_AGENT_ITERATIONS: i64 = 50;
 
@@ -59,15 +59,8 @@ impl CostAnalyzer {
 
     fn walk_node(&mut self, node: &SNode) {
         match &node.node {
-            Node::FunctionCall { name, args, .. } => {
-                if name == "llm_call" || name == "agent_loop" {
-                    self.rows.push(self.analyze_call(node, name, args));
-                }
-                self.walk_nodes(args);
-            }
-            Node::ValueCall { callee, args } => {
-                self.walk_node(callee);
-                self.walk_nodes(args);
+            Node::FunctionCall { name, args, .. } if name == "llm_call" || name == "agent_loop" => {
+                self.rows.push(self.analyze_call(node, name, args));
             }
             Node::MethodCall {
                 object,
@@ -78,15 +71,10 @@ impl CostAnalyzer {
                 object,
                 method,
                 args,
-            } => {
-                if method == "call" && is_harness_llm_handle(object) {
-                    self.rows
-                        .push(self.analyze_call(node, "harness.llm.call", args));
-                }
-                self.walk_node(object);
-                self.walk_nodes(args);
+            } if method == "call" && is_harness_llm_handle(object) => {
+                self.rows
+                    .push(self.analyze_call(node, "harness.llm.call", args));
             }
-            Node::AttributedDecl { inner, .. } => self.walk_node(inner),
             Node::CostRoute { options, body } => {
                 let mut inherited = BTreeMap::new();
                 for frame in &self.inherited_options {
@@ -99,193 +87,11 @@ impl CostAnalyzer {
                 self.inherited_options.push(inherited);
                 self.walk_nodes(body);
                 self.inherited_options.pop();
+                return;
             }
-            Node::Pipeline { body, .. }
-            | Node::OverrideDecl { body, .. }
-            | Node::FnDecl { body, .. }
-            | Node::ToolDecl { body, .. }
-            | Node::SpawnExpr { body }
-            | Node::TryExpr { body }
-            | Node::Block(body)
-            | Node::Closure { body, .. }
-            | Node::DeferStmt { body }
-            | Node::MutexBlock { body, .. } => self.walk_nodes(body),
-            Node::SkillDecl { fields, .. } => {
-                for (_, value) in fields {
-                    self.walk_node(value);
-                }
-            }
-            Node::EvalPackDecl {
-                fields,
-                body,
-                summarize,
-                ..
-            } => {
-                for (_, value) in fields {
-                    self.walk_node(value);
-                }
-                self.walk_nodes(body);
-                if let Some(body) = summarize {
-                    self.walk_nodes(body);
-                }
-            }
-            Node::IfElse {
-                condition,
-                then_body,
-                else_body,
-                ..
-            } => {
-                self.walk_node(condition);
-                self.walk_nodes(then_body);
-                if let Some(body) = else_body {
-                    self.walk_nodes(body);
-                }
-            }
-            Node::ForIn { iterable, body, .. } => {
-                self.walk_node(iterable);
-                self.walk_nodes(body);
-            }
-            Node::WhileLoop { condition, body } => {
-                self.walk_node(condition);
-                self.walk_nodes(body);
-            }
-            Node::Retry { count, body } => {
-                self.walk_node(count);
-                self.walk_nodes(body);
-            }
-            Node::TryCatch {
-                has_catch: _,
-                body,
-                catch_body,
-                finally_body,
-                ..
-            } => {
-                self.walk_nodes(body);
-                self.walk_nodes(catch_body);
-                if let Some(body) = finally_body {
-                    self.walk_nodes(body);
-                }
-            }
-            Node::DeadlineBlock { duration, body } => {
-                self.walk_node(duration);
-                self.walk_nodes(body);
-            }
-            Node::MatchExpr { value, arms } => {
-                self.walk_node(value);
-                for arm in arms {
-                    if let Some(guard) = &arm.guard {
-                        self.walk_node(guard);
-                    }
-                    self.walk_nodes(&arm.body);
-                }
-            }
-            Node::LetBinding { value, .. } | Node::ConstBinding { value, .. } => {
-                self.walk_node(value);
-            }
-            Node::Assignment { target, value, .. } => {
-                self.walk_node(target);
-                self.walk_node(value);
-            }
-            Node::ReturnStmt { value: Some(value) } | Node::YieldExpr { value: Some(value) } => {
-                self.walk_node(value);
-            }
-            Node::EmitExpr { value } => self.walk_node(value),
-            Node::ThrowStmt { value }
-            | Node::TryOperator { operand: value }
-            | Node::TryStar { operand: value }
-            | Node::Spread(value) => self.walk_node(value),
-            Node::UnaryOp { operand, .. } => self.walk_node(operand),
-            Node::BinaryOp { left, right, .. } => {
-                self.walk_node(left);
-                self.walk_node(right);
-            }
-            Node::Ternary {
-                condition,
-                true_expr,
-                false_expr,
-            } => {
-                self.walk_node(condition);
-                self.walk_node(true_expr);
-                self.walk_node(false_expr);
-            }
-            Node::PropertyAccess { object, .. } | Node::OptionalPropertyAccess { object, .. } => {
-                self.walk_node(object);
-            }
-            Node::SubscriptAccess { object, index }
-            | Node::OptionalSubscriptAccess { object, index } => {
-                self.walk_node(object);
-                self.walk_node(index);
-            }
-            Node::SliceAccess { object, start, end } => {
-                self.walk_node(object);
-                if let Some(start) = start {
-                    self.walk_node(start);
-                }
-                if let Some(end) = end {
-                    self.walk_node(end);
-                }
-            }
-            Node::EnumConstruct { args, .. } | Node::ListLiteral(args) => self.walk_nodes(args),
-            Node::DictLiteral(entries)
-            | Node::StructConstruct {
-                fields: entries, ..
-            } => self.walk_entries(entries),
-            Node::GuardStmt {
-                condition,
-                else_body,
-            } => {
-                self.walk_node(condition);
-                self.walk_nodes(else_body);
-            }
-            Node::RequireStmt { condition, message } => {
-                self.walk_node(condition);
-                if let Some(message) = message {
-                    self.walk_node(message);
-                }
-            }
-            Node::RangeExpr { start, end, .. } => {
-                self.walk_node(start);
-                self.walk_node(end);
-            }
-            Node::SelectExpr {
-                cases,
-                timeout,
-                default_body,
-            } => {
-                for case in cases {
-                    self.walk_node(&case.channel);
-                    self.walk_nodes(&case.body);
-                }
-                if let Some((duration, body)) = timeout {
-                    self.walk_node(duration);
-                    self.walk_nodes(body);
-                }
-                if let Some(body) = default_body {
-                    self.walk_nodes(body);
-                }
-            }
-            Node::Parallel {
-                expr,
-                body,
-                options,
-                ..
-            } => {
-                self.walk_node(expr);
-                for (_, value) in options {
-                    self.walk_node(value);
-                }
-                self.walk_nodes(body);
-            }
-            Node::ImplBlock { methods, .. } => self.walk_nodes(methods),
             _ => {}
         }
-    }
-
-    fn walk_entries(&mut self, entries: &[DictEntry]) {
-        for entry in entries {
-            self.walk_node(&entry.key);
-            self.walk_node(&entry.value);
-        }
+        harn_parser::visit::for_each_immediate_child(node, &mut |child| self.walk_node(child));
     }
 
     fn analyze_call(&self, node: &SNode, name: &str, args: &[SNode]) -> CostRow {
@@ -879,6 +685,25 @@ pipeline main() {
                 .filter(|line| line.contains(" llm_call"))
                 .count(),
             4
+        );
+    }
+
+    #[test]
+    fn walks_defaults_and_scope_blocks_once() {
+        let out = render(
+            r#"
+fn helper(value = llm_call("default", nil, {model: "gpt-4o"})) {
+  scope {
+    llm_call("scoped", nil, {model: "gpt-4o"})
+  }
+}
+"#,
+        );
+        assert_eq!(
+            out.lines()
+                .filter(|line| line.contains(" llm_call"))
+                .count(),
+            2
         );
     }
 

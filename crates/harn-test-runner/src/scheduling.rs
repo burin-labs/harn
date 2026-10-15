@@ -256,14 +256,9 @@ mod tests {
                 .to_string(),
         );
         let program = Arc::new(parse_program(&source).unwrap());
-        let cases = extract_cases_from_program(
-            Path::new("test_scheduler.harn"),
-            &source,
-            &program,
-            None,
-            usize::MAX,
-        )
-        .unwrap();
+        let cases =
+            extract_cases_from_program(Path::new("test_scheduler.harn"), &source, &program, None)
+                .unwrap();
         let scheduler = Arc::new(CaseScheduler::new(cases, 3));
         let cancelled = AtomicBool::new(false);
 
@@ -293,14 +288,9 @@ mod tests {
                 .to_string(),
         );
         let program = Arc::new(parse_program(&source).unwrap());
-        let cases = extract_cases_from_program(
-            Path::new("test_scheduler.harn"),
-            &source,
-            &program,
-            None,
-            usize::MAX,
-        )
-        .unwrap();
+        let cases =
+            extract_cases_from_program(Path::new("test_scheduler.harn"), &source, &program, None)
+                .unwrap();
         let scheduler = Arc::new(CaseScheduler::new(cases, 2));
         let cancelled = AtomicBool::new(false);
 
@@ -323,14 +313,9 @@ mod tests {
                 .to_string(),
         );
         let program = Arc::new(parse_program(&source).unwrap());
-        let cases = extract_cases_from_program(
-            Path::new("test_scheduler.harn"),
-            &source,
-            &program,
-            None,
-            usize::MAX,
-        )
-        .unwrap();
+        let cases =
+            extract_cases_from_program(Path::new("test_scheduler.harn"), &source, &program, None)
+                .unwrap();
         let events = Arc::new(Mutex::new(Vec::new()));
         let captured = Arc::clone(&events);
         let finished = Arc::new(Mutex::new(Vec::<TestResult>::new()));
