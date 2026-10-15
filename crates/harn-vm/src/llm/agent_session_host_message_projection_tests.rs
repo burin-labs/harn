@@ -26,7 +26,7 @@ fn recording_assistant_text_emits_the_live_message_projection() {
     )));
     let captured = Arc::new(Mutex::new(Vec::new()));
     register_sink(&session_id, Arc::new(AssistantEventSink(captured.clone())));
-    let llm_result = crate::stdlib::json_to_vm_value(&json!({
+    let llm_result = crate::schema::json_to_vm_value(&json!({
         "provider": "fireworks",
         "model": "accounts/fireworks/models/gpt-oss-120b",
         "text": "ready",
@@ -71,7 +71,7 @@ fn recording_empty_assistant_text_emits_no_empty_message_chunk() {
     )));
     let captured = Arc::new(Mutex::new(Vec::new()));
     register_sink(&session_id, Arc::new(AssistantEventSink(captured.clone())));
-    let llm_result = crate::stdlib::json_to_vm_value(&json!({
+    let llm_result = crate::schema::json_to_vm_value(&json!({
         "provider": "fireworks",
         "model": "accounts/fireworks/models/gpt-oss-120b",
         "text": "",

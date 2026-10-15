@@ -3,6 +3,13 @@
   "baselineRevision": "7deefa6d8215dc5ce0bac2705624516d17c89392",
   "removedCases": [
     {
+      "path": "crates/harn-vm/src/llm/tool_delimiter.rs",
+      "name": "wire_form_is_invisible_until_canonicalized",
+      "reason": "SUBSUMED: the existing live-delta test uses the same captured response and now also checks its wire-only input and remap idempotence. It compares the complete canonicalized output across arbitrary streaming chunk boundaries instead of checking only delimiter substrings.",
+      "retainedPath": "crates/harn-vm/src/llm/providers/openai_compat/tests/streaming.rs",
+      "retainedName": "delta_canonicalizer_matches_whole_string_remap_on_real_response"
+    },
+    {
       "path": "crates/harn-vm/src/llm/usage_tests.rs",
       "name": "public_usage_projections_do_not_recompute_accounting",
       "reason": "REMOVED: scanning four Rust files for forbidden call spellings coupled the test to file layout and could miss recomputation behind an imported helper. The retained test compares actual VM, event, trace and tool-probe projections of a nonempty usage ledger; exhaustive caller architecture is not a runtime coverage claim.",

@@ -7,6 +7,7 @@ pub mod atomic_io;
 #[doc(hidden)]
 pub mod bench_internals;
 pub mod builtin_profile;
+pub mod builtin_support;
 pub mod bytecode_cache;
 pub mod cancellation;
 pub mod canonical_json;

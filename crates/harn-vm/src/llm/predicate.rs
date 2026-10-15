@@ -1,9 +1,10 @@
 //! Predicate runtime boundary. Frontend admission can ship independently, but
 //! a registered source method must never silently use unrestricted transport.
 
-use crate::stdlib::macros::{harn_builtin, register_builtin_defs, VmBuiltinDef};
 use crate::value::{VmError, VmValue};
 use crate::vm::{AsyncBuiltinCtx, Vm};
+use harn_builtin_macros::harn_builtin;
+use harn_vm_core::builtin_support::{register_builtin_defs, VmBuiltinDef};
 
 const PREDICATE_BUILTINS: &[&VmBuiltinDef] = &[
     &EVALUATE_PREDICATE_BUILTIN_DEF,

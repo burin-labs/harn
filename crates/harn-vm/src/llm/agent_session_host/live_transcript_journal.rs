@@ -1,8 +1,9 @@
 //! Canonical transcript lifecycle for a live Harn agent session.
 
-use crate::stdlib::macros::{harn_builtin, register_builtin_defs, VmBuiltinDef};
 use crate::value::{DictMap, VmError, VmValue};
 use crate::vm::Vm;
+use harn_builtin_macros::harn_builtin;
+use harn_vm_core::builtin_support::{register_builtin_defs, VmBuiltinDef};
 
 const HOST_SESSION_FLUSH: &str = "__host_agent_session_flush";
 const HOST_AGENT_EMIT_EVENT: &str = "__host_agent_emit_event";

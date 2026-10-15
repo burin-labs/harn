@@ -118,7 +118,7 @@ async fn abandoned_finalize_flushes_once_and_fires_native_cleanup_once() {
     crate::llm::agent_session_host::record_provider_dispatch(session_id);
     crate::agent_sessions::inject_message(
         session_id,
-        crate::stdlib::json_to_vm_value(&json!({
+        crate::schema::json_to_vm_value(&json!({
             "role": "user",
             "content": "persist before cancellation",
         })),
@@ -611,7 +611,7 @@ async fn persisted_terminal_seals_the_live_session_against_late_mutation() {
     crate::agent_sessions::install_journal(session_id, prepared.state).expect("install journal");
     crate::agent_sessions::append_event(
         session_id,
-        crate::stdlib::json_to_vm_value(&json!({
+        crate::schema::json_to_vm_value(&json!({
             "kind": crate::llm::helpers::SYSTEM_REMINDER_EVENT_KIND,
             "role": "system",
             "content": "",
@@ -662,7 +662,7 @@ async fn persisted_terminal_seals_the_live_session_against_late_mutation() {
 
     let error = crate::agent_sessions::append_event(
         session_id,
-        crate::stdlib::json_to_vm_value(&json!({
+        crate::schema::json_to_vm_value(&json!({
             "kind": "late_event",
             "role": "system",
         })),
@@ -921,7 +921,7 @@ async fn failed_terminal_flush_retains_completed_side_effect_stages_for_retry() 
     };
     assert_observer_live();
 
-    let status = crate::stdlib::json_to_vm_value(&json!({
+    let status = crate::schema::json_to_vm_value(&json!({
         "final_status": "failed",
         "stop_reason": "error",
         "iterations": 3,
@@ -1075,7 +1075,7 @@ async fn a_cancel_mid_tool_persists_an_answer_for_the_open_call() {
     ] {
         crate::agent_sessions::inject_message(
             session_id,
-            crate::stdlib::json_to_vm_value(&message),
+            crate::schema::json_to_vm_value(&message),
         )
         .expect("enqueue transcript mutation");
     }

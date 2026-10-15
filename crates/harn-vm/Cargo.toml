@@ -92,6 +92,7 @@ testbench-wasi = ["dep:wasmtime", "dep:wasmtime-wasi", "dep:wat", "dep:tempfile"
 
 [dependencies]
 harn-vm-core = { path = "../harn-vm-core", version = "=0.10.167" }
+harn-llm = { path = "../harn-llm", version = "=0.10.167" }
 harn-builtin-meta = { path = "../harn-builtin-meta", version = "=0.10.167" }
 harn-builtin-registry = { path = "../harn-builtin-registry", version = "=0.10.167" }
 harn-capability-contracts = { path = "../harn-capability-contracts", version = "=0.10.167" }
@@ -205,7 +206,6 @@ serde = { version = "1", features = ["derive"] }
 schemars = "=1.2.2"
 ts-rs = { version = "=12.0.1", features = ["serde-json-impl"] }
 serde_ignored = "0.1"
-tiktoken-rs = "0.12.0"
 subtle = "2.6"
 time = { version = "0.3", features = ["formatting", "parsing", "serde"] }
 uuid = { version = "1", features = ["serde", "v4", "v5", "v7"] }

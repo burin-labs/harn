@@ -4,9 +4,10 @@
 
 use std::collections::BTreeMap;
 
-use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
+use harn_builtin_macros::harn_builtin;
+use harn_vm_core::builtin_support::VmBuiltinDef;
 
 pub(crate) fn register_transcript_builtins(vm: &mut Vm) {
     for def in MODULE_BUILTINS {
@@ -174,7 +175,7 @@ fn stats_to_vm(stats: &TranscriptStats) -> VmValue {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::stdlib::json_to_vm_value;
+    use crate::schema::json_to_vm_value;
 
     fn transcript_from_json(value: serde_json::Value) -> VmValue {
         json_to_vm_value(&value)

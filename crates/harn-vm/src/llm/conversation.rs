@@ -1,9 +1,10 @@
 use crate::value::VmDictExt;
 
-use crate::stdlib::macros::{harn_builtin, register_builtin_defs, VmBuiltinDef};
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
+use harn_builtin_macros::harn_builtin;
 use harn_parser::diagnostic_codes::Code;
+use harn_vm_core::builtin_support::{register_builtin_defs, VmBuiltinDef};
 
 use super::helpers::{
     emit_reminder_lifecycle_event, is_transcript_value, new_transcript_with,
@@ -546,7 +547,7 @@ fn transcript_import_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue
     let text = args.first().map(VmValue::display).unwrap_or_default();
     let json = serde_json::from_str(&text)
         .map_err(|error| VmError::Runtime(format!("transcript_import: {error}")))?;
-    Ok(crate::stdlib::json_to_vm_value(&json))
+    Ok(crate::schema::json_to_vm_value(&json))
 }
 
 /// Register conversation management builtins.

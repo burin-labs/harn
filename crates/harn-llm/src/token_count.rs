@@ -3,21 +3,21 @@ use tiktoken_rs::tokenizer::{get_tokenizer, Tokenizer};
 const TIKTOKEN_IDENTITY_PREFIX: &str = "tiktoken:";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct ExactToken {
-    pub(crate) id: u32,
-    pub(crate) tokenizer: String,
-    pub(crate) bytes: Vec<u8>,
+pub struct ExactToken {
+    pub id: u32,
+    pub tokenizer: String,
+    pub bytes: Vec<u8>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum TokenCountSource {
+pub enum TokenCountSource {
     TiktokenExact,
     TiktokenApproximation,
     Heuristic,
 }
 
 impl TokenCountSource {
-    pub(crate) fn as_str(self) -> &'static str {
+    pub fn as_str(self) -> &'static str {
         match self {
             TokenCountSource::TiktokenExact => "tiktoken",
             TokenCountSource::TiktokenApproximation => "tiktoken_approximation",
@@ -27,22 +27,22 @@ impl TokenCountSource {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct TokenizerInfo {
-    pub(crate) encoder: Option<&'static str>,
-    pub(crate) tokenizer: Option<Tokenizer>,
-    pub(crate) model_family: &'static str,
-    pub(crate) source: TokenCountSource,
-    pub(crate) exact: bool,
-    pub(crate) known_model_family: bool,
+pub struct TokenizerInfo {
+    pub encoder: Option<&'static str>,
+    pub tokenizer: Option<Tokenizer>,
+    pub model_family: &'static str,
+    pub source: TokenCountSource,
+    pub exact: bool,
+    pub known_model_family: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct TokenCountEstimate {
-    pub(crate) tokens: i64,
-    pub(crate) info: TokenizerInfo,
+pub struct TokenCountEstimate {
+    pub tokens: i64,
+    pub info: TokenizerInfo,
 }
 
-pub(crate) fn tokenizer_info_for_model(model: &str) -> TokenizerInfo {
+pub fn tokenizer_info_for_model(model: &str) -> TokenizerInfo {
     if let Some(tokenizer) = openai_tokenizer(model) {
         return TokenizerInfo {
             encoder: Some(encoder_name(tokenizer)),
@@ -72,7 +72,7 @@ pub(crate) fn tokenizer_info_for_model(model: &str) -> TokenizerInfo {
     }
 }
 
-pub(crate) fn tiktoken_count_text(text: &str, model: &str) -> Result<TokenCountEstimate, String> {
+pub fn tiktoken_count_text(text: &str, model: &str) -> Result<TokenCountEstimate, String> {
     let info = tokenizer_info_for_model(model);
     let Some(tokenizer) = info.tokenizer else {
         return Err(format!("no tiktoken encoder for model `{model}`"));
@@ -85,7 +85,7 @@ pub(crate) fn tiktoken_count_text(text: &str, model: &str) -> Result<TokenCountE
     })
 }
 
-pub(crate) fn exact_tokenizer_identity_for_model(model: &str) -> Result<String, String> {
+pub fn exact_tokenizer_identity_for_model(model: &str) -> Result<String, String> {
     let info = tokenizer_info_for_model(model);
     if !info.exact {
         return Err(format!(
@@ -99,7 +99,7 @@ pub(crate) fn exact_tokenizer_identity_for_model(model: &str) -> Result<String, 
     Ok(format!("{TIKTOKEN_IDENTITY_PREFIX}{encoder}"))
 }
 
-pub(crate) fn tokenize_exact(text: &str, model: &str) -> Result<Vec<ExactToken>, String> {
+pub fn tokenize_exact(text: &str, model: &str) -> Result<Vec<ExactToken>, String> {
     let info = tokenizer_info_for_model(model);
     if !info.exact {
         return Err(format!(
@@ -127,7 +127,7 @@ pub(crate) fn tokenize_exact(text: &str, model: &str) -> Result<Vec<ExactToken>,
         .collect()
 }
 
-pub(crate) fn detokenize_exact(tokenizer: &str, ids: &[u32]) -> Result<String, String> {
+pub fn detokenize_exact(tokenizer: &str, ids: &[u32]) -> Result<String, String> {
     let tokenizer_kind = tokenizer_from_identity(tokenizer).ok_or_else(|| {
         format!(
             "unknown tokenizer identity `{tokenizer}`; expected `{TIKTOKEN_IDENTITY_PREFIX}<encoder>`"
@@ -139,7 +139,7 @@ pub(crate) fn detokenize_exact(tokenizer: &str, ids: &[u32]) -> Result<String, S
         .map_err(|error| format!("tokens are not valid UTF-8 text: {error}"))
 }
 
-pub(crate) fn estimate_text_tokens(text: &str, model: Option<&str>) -> TokenCountEstimate {
+pub fn estimate_text_tokens(text: &str, model: Option<&str>) -> TokenCountEstimate {
     if let Some(model) = model.filter(|model| !model.trim().is_empty()) {
         if let Ok(count) = tiktoken_count_text(text, model) {
             return count;

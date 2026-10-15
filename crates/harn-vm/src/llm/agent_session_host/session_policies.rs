@@ -240,7 +240,7 @@ pub(super) fn build_nested_budget_denial(
         "daemon_state": serde_json::Value::Null,
         "daemon_snapshot_path": serde_json::Value::Null,
     });
-    crate::stdlib::json_to_vm_value(&result)
+    crate::schema::json_to_vm_value(&result)
 }
 
 fn parse_approval_policy(value: Option<&VmValue>) -> Result<Option<ToolApprovalPolicy>, VmError> {

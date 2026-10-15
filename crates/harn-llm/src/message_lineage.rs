@@ -3,11 +3,11 @@
 //! Projection and visible-message assembly attach this private metadata while
 //! they still own source indices and directive placement. Option extraction
 //! removes it from provider-visible messages and carries the typed manifest to
-//! the request observer through [`crate::llm::api::LlmCallOptions`].
+//! the request observer through `LlmCallOptions`.
 
 use serde::{Deserialize, Serialize};
 
-pub(crate) const MESSAGE_LINEAGE_KEY: &str = "_harn_message_lineage";
+pub const MESSAGE_LINEAGE_KEY: &str = "_harn_message_lineage";
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 pub struct ProjectionLineage {
@@ -33,7 +33,7 @@ pub enum MessageSemanticKind {
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
-pub(crate) struct MessageLineageEntry {
+pub struct MessageLineageEntry {
     pub semantic_kind: MessageSemanticKind,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_message_index: Option<usize>,
@@ -42,21 +42,19 @@ pub(crate) struct MessageLineageEntry {
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
-pub(crate) struct MessageLineageManifest {
+pub struct MessageLineageManifest {
     pub projection: ProjectionLineage,
     pub messages: Vec<MessageLineageEntry>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
-pub(crate) struct AttachedMessageLineage {
+pub struct AttachedMessageLineage {
     pub projection: ProjectionLineage,
     #[serde(flatten)]
     pub message: MessageLineageEntry,
 }
 
-pub(crate) fn take_from_messages(
-    messages: &mut [serde_json::Value],
-) -> Option<MessageLineageManifest> {
+pub fn take_from_messages(messages: &mut [serde_json::Value]) -> Option<MessageLineageManifest> {
     let attached = messages
         .iter_mut()
         .map(|message| {
@@ -85,7 +83,7 @@ pub(crate) fn take_from_messages(
     })
 }
 
-pub(crate) fn raw_projection() -> ProjectionLineage {
+pub fn raw_projection() -> ProjectionLineage {
     ProjectionLineage {
         policy: "raw".to_string(),
         event_ref: None,
@@ -93,7 +91,7 @@ pub(crate) fn raw_projection() -> ProjectionLineage {
     }
 }
 
-pub(crate) fn unknown_projection() -> ProjectionLineage {
+pub fn unknown_projection() -> ProjectionLineage {
     ProjectionLineage {
         policy: "unknown".to_string(),
         event_ref: None,
@@ -101,7 +99,7 @@ pub(crate) fn unknown_projection() -> ProjectionLineage {
     }
 }
 
-pub(crate) fn attach_projection(
+pub fn attach_projection(
     messages: &mut [serde_json::Value],
     source_indices: &[Option<usize>],
     projection: &ProjectionLineage,

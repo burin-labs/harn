@@ -98,7 +98,7 @@ fn explicit_output_schema_owns_the_structured_request_contract() {
         "the provider request must use the same caller-selected schema"
     );
 
-    let data = crate::stdlib::json_to_vm_value(&serde_json::json!({"age": "twenty"}));
+    let data = crate::schema::json_to_vm_value(&serde_json::json!({"age": "twenty"}));
     assert!(
         !crate::llm::call::compute_validation_errors(&data, &opts).is_empty(),
         "post-stream validation must retain the explicit integer constraint"
@@ -179,7 +179,7 @@ fn post_stream_validation_restores_the_caller_schema() {
         schema,
         strict: true,
     };
-    let data = crate::stdlib::json_to_vm_value(&serde_json::json!({
+    let data = crate::schema::json_to_vm_value(&serde_json::json!({
         "detail": "x".repeat(242)
     }));
 

@@ -68,7 +68,7 @@ async fn resolved_dispatch_session_owns_host_execution_and_restores_the_caller()
     let observed = Arc::new(StdMutex::new(None));
     let _bridge = HostBridgeGuard::replace(session_observing_bridge(observed.clone()));
     let _ambient = crate::agent_sessions::enter_current_session("unrelated-ambient-session");
-    let tools = crate::stdlib::json_to_vm_value(&serde_json::json!({
+    let tools = crate::schema::json_to_vm_value(&serde_json::json!({
         "_type": "tool_registry",
         "tools": [{
             "name": "session_probe",
@@ -77,7 +77,7 @@ async fn resolved_dispatch_session_owns_host_execution_and_restores_the_caller()
             "parameters": {},
         }],
     }));
-    let call = crate::stdlib::json_to_vm_value(&serde_json::json!({
+    let call = crate::schema::json_to_vm_value(&serde_json::json!({
         "id": "session-scope-proof",
         "name": "session_probe",
         "arguments": {},
@@ -85,7 +85,7 @@ async fn resolved_dispatch_session_owns_host_execution_and_restores_the_caller()
     let mut options = crate::value::DictMap::new();
     options.insert(
         crate::value::intern_key("session_id"),
-        crate::stdlib::json_to_vm_value(&serde_json::json!("resolved-dispatch-session")),
+        crate::schema::json_to_vm_value(&serde_json::json!("resolved-dispatch-session")),
     );
 
     let result = host_agent_dispatch_tool_call(

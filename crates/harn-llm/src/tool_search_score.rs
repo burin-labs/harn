@@ -41,13 +41,13 @@ impl Candidate {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct RankedTool {
-    pub(crate) tool_name: String,
-    pub(crate) score: f64,
-    pub(crate) snippet: String,
+pub struct RankedTool {
+    pub tool_name: String,
+    pub score: f64,
+    pub snippet: String,
 }
 
-pub(crate) fn score_tools(
+pub fn score_tools(
     query: &str,
     registry: &serde_json::Value,
     opts: &serde_json::Value,

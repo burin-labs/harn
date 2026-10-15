@@ -51,7 +51,7 @@ fn prepare(
         ));
     }
     crate::schema::normalize_provider_json_schema(&mut schema);
-    let schema_value = crate::stdlib::json_to_vm_value(&schema);
+    let schema_value = crate::schema::json_to_vm_value(&schema);
     let prompt = if strategy == StructuredOutputStrategy::PromptValidation {
         super::prompt_with_schema_contract(&prompt, &schema_value)
     } else {

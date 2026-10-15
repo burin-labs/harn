@@ -7,10 +7,10 @@
 //! `{type: "audio", url?: string, base64?: string, file_id?: string, media_type: string}`.
 //! Provider serializers translate that one shape into their native wire format.
 
-use crate::value::{VmError, VmValue};
+use harn_vm_core::value::{VmError, VmValue};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct ImageContent {
+pub struct ImageContent {
     pub url: Option<String>,
     pub base64: Option<String>,
     pub media_type: String,
@@ -70,7 +70,7 @@ impl ImageContent {
         }))
     }
 
-    pub(crate) fn openai_url(&self) -> String {
+    pub fn openai_url(&self) -> String {
         self.url.clone().unwrap_or_else(|| {
             format!(
                 "data:{};base64,{}",
@@ -82,7 +82,7 @@ impl ImageContent {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct VideoContent {
+pub struct VideoContent {
     pub url: Option<String>,
     pub base64: Option<String>,
     pub media_type: String,
@@ -127,7 +127,7 @@ impl VideoContent {
         }))
     }
 
-    pub(crate) fn openai_url(&self) -> String {
+    pub fn openai_url(&self) -> String {
         self.url.clone().unwrap_or_else(|| {
             format!(
                 "data:{};base64,{}",
@@ -139,7 +139,7 @@ impl VideoContent {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum FileContentKind {
+pub enum FileContentKind {
     Pdf,
     Audio,
 }
@@ -176,7 +176,7 @@ impl FileContentKind {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct FileContent {
+pub struct FileContent {
     pub kind: FileContentKind,
     pub url: Option<String>,
     pub base64: Option<String>,
@@ -242,9 +242,7 @@ impl FileContent {
     }
 }
 
-pub(crate) fn parse_image_block(
-    block: &serde_json::Value,
-) -> Result<Option<ImageContent>, VmError> {
+pub fn parse_image_block(block: &serde_json::Value) -> Result<Option<ImageContent>, VmError> {
     ImageContent::from_block(block)
 }
 
@@ -269,7 +267,7 @@ pub(crate) fn parse_image_block(
 /// canonical "is this a screenshot dict" test and every projection derives from
 /// this single definition.
 #[derive(Debug, Clone)]
-pub(crate) struct ScreenImage {
+pub struct ScreenImage {
     pub base64: String,
     pub media_type: String,
 }
@@ -305,7 +303,7 @@ impl TryFrom<&serde_json::Value> for ScreenImage {
 impl ScreenImage {
     /// The neutral image content block (`{type:image, base64, media_type}`) the
     /// provider content mappers project into each vendor's native image shape.
-    pub(crate) fn to_neutral_image_block(&self) -> serde_json::Value {
+    pub fn to_neutral_image_block(&self) -> serde_json::Value {
         serde_json::json!({
             "type": "image",
             "base64": self.base64,
@@ -315,7 +313,7 @@ impl ScreenImage {
 
     /// A `data:` URL for providers that ingest images as URLs (OpenAI
     /// `image_url`, Responses `input_image`).
-    pub(crate) fn to_data_url(&self) -> String {
+    pub fn to_data_url(&self) -> String {
         format!("data:{};base64,{}", self.media_type, self.base64)
     }
 }
@@ -328,11 +326,11 @@ impl ScreenImage {
 /// converter accepts (e.g. Shape A `{image:{base64,media_type}}`) would be
 /// rendered on egress but never pulled into the content list by the searchers —
 /// the two ends must agree on one definition.
-pub(crate) fn is_screenshot_dict(value: &serde_json::Value) -> bool {
+pub fn is_screenshot_dict(value: &serde_json::Value) -> bool {
     screenshot_image_block(value).is_some()
 }
 
-pub(crate) fn screenshot_image_block(value: &serde_json::Value) -> Option<serde_json::Value> {
+pub fn screenshot_image_block(value: &serde_json::Value) -> Option<serde_json::Value> {
     let obj = value.as_object()?;
     // An explicitly-typed block is handled by the normal image/file/video
     // parsers — never reinterpret it here.
@@ -360,17 +358,15 @@ pub(crate) fn screenshot_image_block(value: &serde_json::Value) -> Option<serde_
     None
 }
 
-pub(crate) fn parse_file_block(block: &serde_json::Value) -> Result<Option<FileContent>, VmError> {
+pub fn parse_file_block(block: &serde_json::Value) -> Result<Option<FileContent>, VmError> {
     FileContent::from_block(block)
 }
 
-pub(crate) fn parse_video_block(
-    block: &serde_json::Value,
-) -> Result<Option<VideoContent>, VmError> {
+pub fn parse_video_block(block: &serde_json::Value) -> Result<Option<VideoContent>, VmError> {
     VideoContent::from_block(block)
 }
 
-pub(crate) fn messages_contain_images(messages: &[serde_json::Value]) -> Result<bool, VmError> {
+pub fn messages_contain_images(messages: &[serde_json::Value]) -> Result<bool, VmError> {
     for message in messages {
         if message
             .get("images")
@@ -399,7 +395,7 @@ pub(crate) fn messages_contain_images(messages: &[serde_json::Value]) -> Result<
     Ok(false)
 }
 
-pub(crate) fn messages_contain_videos(messages: &[serde_json::Value]) -> Result<bool, VmError> {
+pub fn messages_contain_videos(messages: &[serde_json::Value]) -> Result<bool, VmError> {
     for message in messages {
         if message
             .get("videos")
@@ -428,15 +424,15 @@ pub(crate) fn messages_contain_videos(messages: &[serde_json::Value]) -> Result<
     Ok(false)
 }
 
-pub(crate) fn messages_contain_audio(messages: &[serde_json::Value]) -> Result<bool, VmError> {
+pub fn messages_contain_audio(messages: &[serde_json::Value]) -> Result<bool, VmError> {
     messages_contain_file_kind(messages, FileContentKind::Audio)
 }
 
-pub(crate) fn messages_contain_pdf(messages: &[serde_json::Value]) -> Result<bool, VmError> {
+pub fn messages_contain_pdf(messages: &[serde_json::Value]) -> Result<bool, VmError> {
     messages_contain_file_kind(messages, FileContentKind::Pdf)
 }
 
-pub(crate) fn messages_contain_file_ids(messages: &[serde_json::Value]) -> Result<bool, VmError> {
+pub fn messages_contain_file_ids(messages: &[serde_json::Value]) -> Result<bool, VmError> {
     for message in messages {
         match message.get("content") {
             Some(serde_json::Value::Array(blocks)) => {
@@ -481,7 +477,7 @@ fn messages_contain_file_kind(
     Ok(false)
 }
 
-pub(crate) fn messages_contain_url_images(messages: &[serde_json::Value]) -> Result<bool, VmError> {
+pub fn messages_contain_url_images(messages: &[serde_json::Value]) -> Result<bool, VmError> {
     for message in messages {
         match message.get("content") {
             Some(serde_json::Value::Array(blocks)) => {
@@ -511,7 +507,7 @@ pub(crate) fn messages_contain_url_images(messages: &[serde_json::Value]) -> Res
 /// `redacted_thinking`, `reasoning_summary`, signatures). A denylist leaks
 /// every tag it has not been taught yet, which is how private reasoning
 /// reached `assistant_text` (#6254). An unrecognized block is not prose.
-pub(crate) fn is_user_facing_text_block_type(block_type: Option<&str>) -> bool {
+pub fn is_user_facing_text_block_type(block_type: Option<&str>) -> bool {
     matches!(block_type, Some("text" | "output_text"))
 }
 
@@ -555,7 +551,7 @@ fn provider_visible_block(block: &serde_json::Value) -> Option<serde_json::Value
     Some(normalized)
 }
 
-pub(crate) fn provider_visible_content(content: &serde_json::Value) -> serde_json::Value {
+pub fn provider_visible_content(content: &serde_json::Value) -> serde_json::Value {
     match content {
         serde_json::Value::Array(blocks) => {
             serde_json::Value::Array(blocks.iter().filter_map(provider_visible_block).collect())
@@ -571,16 +567,16 @@ pub(crate) fn provider_visible_content(content: &serde_json::Value) -> serde_jso
 }
 
 #[cfg(test)]
-pub(crate) fn anthropic_content(content: &serde_json::Value) -> serde_json::Value {
+pub fn anthropic_content(content: &serde_json::Value) -> serde_json::Value {
     anthropic_content_for_request(
         content,
-        crate::llm::capabilities::ReasoningRoundTripPolicy::EchoSigned,
+        harn_provider_catalog::capabilities::ReasoningRoundTripPolicy::EchoSigned,
     )
 }
 
-pub(crate) fn anthropic_content_for_request(
+pub fn anthropic_content_for_request(
     content: &serde_json::Value,
-    reasoning_policy: crate::llm::capabilities::ReasoningRoundTripPolicy,
+    reasoning_policy: harn_provider_catalog::capabilities::ReasoningRoundTripPolicy,
 ) -> serde_json::Value {
     let visible = anthropic_visible_content(content, reasoning_policy);
     let content = &visible;
@@ -654,7 +650,7 @@ pub(crate) fn anthropic_content_for_request(
 
 fn anthropic_visible_content(
     content: &serde_json::Value,
-    reasoning_policy: crate::llm::capabilities::ReasoningRoundTripPolicy,
+    reasoning_policy: harn_provider_catalog::capabilities::ReasoningRoundTripPolicy,
 ) -> serde_json::Value {
     match content {
         serde_json::Value::Array(blocks) => serde_json::Value::Array(
@@ -664,7 +660,7 @@ fn anthropic_visible_content(
                 .collect(),
         ),
         serde_json::Value::Object(_)
-            if crate::llm::reasoning_history::should_replay_anthropic_block(
+            if crate::reasoning_history::should_replay_anthropic_block(
                 content,
                 reasoning_policy,
             ) =>
@@ -682,9 +678,9 @@ fn anthropic_visible_content(
 
 fn anthropic_visible_block(
     block: &serde_json::Value,
-    reasoning_policy: crate::llm::capabilities::ReasoningRoundTripPolicy,
+    reasoning_policy: harn_provider_catalog::capabilities::ReasoningRoundTripPolicy,
 ) -> Option<serde_json::Value> {
-    if crate::llm::reasoning_history::should_replay_anthropic_block(block, reasoning_policy) {
+    if crate::reasoning_history::should_replay_anthropic_block(block, reasoning_policy) {
         return Some(block.clone());
     }
     if is_private_or_reasoning_block(block) {
@@ -697,7 +693,7 @@ fn anthropic_visible_block(
     Some(normalized)
 }
 
-pub(crate) fn openai_content(content: &serde_json::Value) -> serde_json::Value {
+pub fn openai_content(content: &serde_json::Value) -> serde_json::Value {
     let visible = provider_visible_content(content);
     let content = &visible;
     match content {
@@ -769,7 +765,7 @@ pub(crate) fn openai_content(content: &serde_json::Value) -> serde_json::Value {
     }
 }
 
-pub(crate) fn ollama_message(mut message: serde_json::Value) -> serde_json::Value {
+pub fn ollama_message(mut message: serde_json::Value) -> serde_json::Value {
     let Some(object) = message.as_object_mut() else {
         return message;
     };
@@ -867,7 +863,7 @@ pub(crate) fn ollama_message(mut message: serde_json::Value) -> serde_json::Valu
     message
 }
 
-pub(crate) fn gemini_parts(content: &serde_json::Value) -> Vec<serde_json::Value> {
+pub fn gemini_parts(content: &serde_json::Value) -> Vec<serde_json::Value> {
     let visible = provider_visible_content(content);
     let content = &visible;
     match content {
@@ -900,7 +896,7 @@ pub(crate) fn gemini_parts(content: &serde_json::Value) -> Vec<serde_json::Value
                     }
                     let mut part = serde_json::json!({ "functionCall": function_call });
                     if let Some(signature) =
-                        crate::llm::providers::gemini_tool_call_thought_signature(block)
+                        crate::reasoning_history::gemini_tool_call_thought_signature(block)
                     {
                         part["thoughtSignature"] = serde_json::json!(signature);
                     }
@@ -965,7 +961,7 @@ pub(crate) fn gemini_parts(content: &serde_json::Value) -> Vec<serde_json::Value
                         "text": text.get("text").and_then(|value| value.as_str()).unwrap_or_default(),
                     });
                     if let Some(signature) =
-                        crate::llm::providers::gemini_tool_call_thought_signature(block)
+                        crate::reasoning_history::gemini_tool_call_thought_signature(block)
                     {
                         part["thoughtSignature"] = serde_json::json!(signature);
                     }

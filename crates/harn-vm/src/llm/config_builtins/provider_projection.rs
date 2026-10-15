@@ -2,7 +2,7 @@
 //! its aliases, its credential status, and the whole provider catalog.
 
 use crate::llm_config;
-use crate::stdlib::json_to_vm_value;
+use crate::schema::json_to_vm_value;
 use crate::value::{VmDictExt, VmValue};
 
 use super::batch_projection::string_list_to_vm_value;

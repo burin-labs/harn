@@ -14,9 +14,10 @@
 //! dialect list would put policy back in Rust.
 
 use crate::llm::helpers::vm_value_to_json;
-use crate::stdlib::json_to_vm_value;
-use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
+use crate::schema::json_to_vm_value;
 use crate::value::{VmError, VmValue};
+use harn_builtin_macros::harn_builtin;
+use harn_vm_core::builtin_support::VmBuiltinDef;
 
 use super::bare::{bare_tool_names, parse_bare_calls_in_body, parse_bare_calls_scoped, ProseScope};
 use super::scan::{call_head, scan_units, ScanSpec};
@@ -656,7 +657,7 @@ mod tests {
     }
 
     fn entities() -> VmValue {
-        crate::stdlib::json_to_vm_value(&serde_json::json!({
+        crate::schema::json_to_vm_value(&serde_json::json!({
             "amp;": "&",
             "lt;": "<",
             "gt;": ">",
@@ -666,7 +667,7 @@ mod tests {
 
     #[test]
     fn scan_units_reads_its_vocabulary_from_the_spec() {
-        let spec = crate::stdlib::json_to_vm_value(&serde_json::json!({
+        let spec = crate::schema::json_to_vm_value(&serde_json::json!({
             "call_tags": ["action"],
             "block_tags": [],
             "wrapper_tags": [],
@@ -698,7 +699,7 @@ mod tests {
         let error = host_tool_scan_units_builtin(
             &[
                 text("hi"),
-                crate::stdlib::json_to_vm_value(&serde_json::json!({})),
+                crate::schema::json_to_vm_value(&serde_json::json!({})),
             ],
             &mut out,
         )
@@ -803,7 +804,7 @@ mod tests {
 
     #[test]
     fn decode_entities_resolves_each_reference_exactly_once() {
-        let value = crate::stdlib::json_to_vm_value(&serde_json::json!({
+        let value = crate::schema::json_to_vm_value(&serde_json::json!({
             "content": "if (a &lt;= b) { xs.map(x =&gt; x) }",
             "nested": ["a &amp;&amp; b"],
         }));
@@ -824,7 +825,7 @@ mod tests {
     #[test]
     fn decode_entities_matches_longest_key_first() {
         // Iteration order of the caller's dict must not change the result.
-        let table = crate::stdlib::json_to_vm_value(&serde_json::json!({
+        let table = crate::schema::json_to_vm_value(&serde_json::json!({
             "lt": "L",
             "lt;": "<",
         }));
@@ -834,7 +835,7 @@ mod tests {
 
     #[test]
     fn render_call_round_trips_through_the_call_parser() {
-        let arguments = crate::stdlib::json_to_vm_value(&serde_json::json!({"path": "a.rs"}));
+        let arguments = crate::schema::json_to_vm_value(&serde_json::json!({"path": "a.rs"}));
         let rendered = call(host_tool_render_call_builtin, &[text("look"), arguments]);
         let rendered = rendered.as_str().expect("rendered call");
         assert!(rendered.starts_with("look({"), "{rendered}");
@@ -847,7 +848,7 @@ mod tests {
 
     #[test]
     fn scan_bare_calls_recovers_a_call_and_leaves_the_prose() {
-        let registry = crate::stdlib::json_to_vm_value(&serde_json::json!({
+        let registry = crate::schema::json_to_vm_value(&serde_json::json!({
             "_type": "tool_registry",
             "tools": [{"name": "look", "description": "read a file", "params": []}],
         }));
@@ -870,7 +871,7 @@ mod tests {
 
     #[test]
     fn scan_bare_units_matches_the_trimmed_single_unit_boundary() {
-        let registry = crate::stdlib::json_to_vm_value(&serde_json::json!({
+        let registry = crate::schema::json_to_vm_value(&serde_json::json!({
             "_type": "tool_registry",
             "tools": [{"name": "edit", "description": "edit a file", "params": []}],
         }));
@@ -879,7 +880,7 @@ mod tests {
             host_tool_scan_bare_calls_builtin,
             &[text(source.trim()), registry.clone()],
         );
-        let units = crate::stdlib::json_to_vm_value(&serde_json::json!([
+        let units = crate::schema::json_to_vm_value(&serde_json::json!([
             {"kind": "text", "text": source}
         ]));
         let batched = call(host_tool_scan_bare_units_builtin, &[units, registry]);

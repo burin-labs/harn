@@ -340,7 +340,7 @@ pub(crate) async fn emit_agent_event_with_ctx(
             continue;
         }
         let payload = serde_json::to_value(event).unwrap_or(serde_json::Value::Null);
-        let arg = crate::stdlib::json_to_vm_value(&payload);
+        let arg = crate::schema::json_to_vm_value(&payload);
         for subscriber in &subscribers {
             let VmValue::Closure(closure) = &subscriber.callback else {
                 continue;

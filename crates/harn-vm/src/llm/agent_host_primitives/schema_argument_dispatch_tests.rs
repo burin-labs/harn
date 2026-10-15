@@ -6,7 +6,7 @@ async fn dispatch_flattens_schema_declared_discriminator_envelope() {
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("dispatch-proof.txt");
     std::fs::write(&path, "schema dispatch proof\n").expect("write fixture");
-    let tools = crate::stdlib::json_to_vm_value(&serde_json::json!({
+    let tools = crate::schema::json_to_vm_value(&serde_json::json!({
         "tools": [{
             "name": "read_file",
             "description": "Read a file through the local Harn executor.",
@@ -19,7 +19,7 @@ async fn dispatch_flattens_schema_declared_discriminator_envelope() {
             }
         }]
     }));
-    let call = crate::stdlib::json_to_vm_value(&serde_json::json!({
+    let call = crate::schema::json_to_vm_value(&serde_json::json!({
         "id": "schema-envelope-dispatch",
         "name": "read_file",
         "arguments": {

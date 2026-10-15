@@ -141,7 +141,7 @@ pub(super) async fn deny_tool_call_value(
         evidence,
     )
     .await;
-    crate::stdlib::json_to_vm_value(&denied)
+    crate::schema::json_to_vm_value(&denied)
 }
 
 pub(super) fn agent_primitive_denied_tool(

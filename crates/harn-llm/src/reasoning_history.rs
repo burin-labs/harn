@@ -4,7 +4,26 @@
 //! owns the narrower provider-visible continuation data: signed Anthropic
 //! blocks and typed same-field OpenAI-compatible replay.
 
-use crate::llm::capabilities::{ReasoningHistoryWireField, ReasoningRoundTripPolicy};
+use harn_provider_catalog::capabilities::{ReasoningHistoryWireField, ReasoningRoundTripPolicy};
+
+/// Gemini's opaque thought signature from a live response or retained metadata.
+pub fn gemini_tool_call_thought_signature(value: &serde_json::Value) -> Option<&str> {
+    value
+        .get("thoughtSignature")
+        .or_else(|| value.get("thought_signature"))
+        .or_else(|| {
+            value
+                .get("provider_metadata")
+                .and_then(|metadata| metadata.get("gemini"))
+                .and_then(|gemini| {
+                    gemini
+                        .get("thought_signature")
+                        .or_else(|| gemini.get("thoughtSignature"))
+                })
+        })
+        .and_then(serde_json::Value::as_str)
+        .filter(|signature| !signature.is_empty())
+}
 
 const PROVIDER_CONTINUATION_KEY: &str = "provider_continuation";
 
@@ -19,11 +38,11 @@ struct AnthropicContinuation {
     content_blocks: Vec<serde_json::Value>,
 }
 
-pub(crate) fn capture_anthropic_block(block: &serde_json::Value) -> Option<serde_json::Value> {
+pub fn capture_anthropic_block(block: &serde_json::Value) -> Option<serde_json::Value> {
     is_signed_anthropic_block(block).then(|| block.clone())
 }
 
-pub(crate) fn capture_anthropic_blocks(
+pub fn capture_anthropic_blocks(
     blocks: &[serde_json::Value],
     enabled: bool,
 ) -> Vec<serde_json::Value> {
@@ -33,7 +52,7 @@ pub(crate) fn capture_anthropic_blocks(
     blocks.iter().filter_map(capture_anthropic_block).collect()
 }
 
-pub(crate) fn is_signed_anthropic_block(block: &serde_json::Value) -> bool {
+pub fn is_signed_anthropic_block(block: &serde_json::Value) -> bool {
     match block.get("type").and_then(serde_json::Value::as_str) {
         Some("thinking") => {
             block
@@ -53,7 +72,7 @@ pub(crate) fn is_signed_anthropic_block(block: &serde_json::Value) -> bool {
     }
 }
 
-pub(crate) fn should_replay_anthropic_block(
+pub fn should_replay_anthropic_block(
     block: &serde_json::Value,
     policy: ReasoningRoundTripPolicy,
 ) -> bool {
@@ -63,7 +82,7 @@ pub(crate) fn should_replay_anthropic_block(
 /// Preserve exact signed blocks ahead of the visible/tool content in an
 /// Anthropic assistant history message. The provider requires the original
 /// order and bytes when the next turn continues that reasoning context.
-pub(crate) fn prepend_signed_anthropic_blocks(
+pub fn prepend_signed_anthropic_blocks(
     message: &mut serde_json::Value,
     blocks: &[serde_json::Value],
 ) {
@@ -95,7 +114,7 @@ pub(crate) fn prepend_signed_anthropic_blocks(
 
 /// Attach opaque provider-bound continuation state without mixing it into the
 /// provider-neutral conversation content.
-pub(crate) fn attach_anthropic_continuation(
+pub fn attach_anthropic_continuation(
     message: &mut serde_json::Value,
     blocks: &[serde_json::Value],
 ) {
@@ -116,7 +135,7 @@ pub(crate) fn attach_anthropic_continuation(
 
 /// Restore exact Anthropic continuation blocks only on Anthropic egress, then
 /// remove the storage envelope before the request is serialized.
-pub(crate) fn restore_anthropic_continuation(
+pub fn restore_anthropic_continuation(
     message: &mut serde_json::Value,
     policy: ReasoningRoundTripPolicy,
 ) {
@@ -137,7 +156,7 @@ pub(crate) fn restore_anthropic_continuation(
     }
 }
 
-pub(crate) fn openai_same_key_reasoning(
+pub fn openai_same_key_reasoning(
     message: &serde_json::Value,
     policy: ReasoningRoundTripPolicy,
     field: Option<ReasoningHistoryWireField>,
@@ -167,7 +186,7 @@ pub(crate) fn openai_same_key_reasoning(
 /// Harn's block for an Anthropic `thinking` content block. A block with a
 /// signature keeps it so the block can be replayed; an unsigned one cannot be
 /// replayed to Anthropic and becomes private reasoning text.
-pub(crate) fn anthropic_thinking_block(block: &serde_json::Value) -> serde_json::Value {
+pub fn anthropic_thinking_block(block: &serde_json::Value) -> serde_json::Value {
     let thinking = block
         .get("thinking")
         .and_then(serde_json::Value::as_str)

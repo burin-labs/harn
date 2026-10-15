@@ -191,7 +191,7 @@ mod tests {
 
     #[test]
     fn split_answer_preserves_json_bytes_and_excludes_private_blocks() {
-        let message = crate::stdlib::json_to_vm_value(&serde_json::json!({
+        let message = crate::schema::json_to_vm_value(&serde_json::json!({
             "role": "assistant",
             "content": [
                 {"type": "text", "text": "{\"verdict\":\"refuted\",\"reason\":\"jobs."},

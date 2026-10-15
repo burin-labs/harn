@@ -34,17 +34,17 @@
 //! self-healing; forcing a compaction at that boundary would be a pure latency
 //! optimization, not a correctness requirement.
 
-use crate::llm::tools::{TEXT_TOOL_CALL_CLOSE, TEXT_TOOL_CALL_OPEN};
+use crate::tool_protocol::{TEXT_TOOL_CALL_CLOSE, TEXT_TOOL_CALL_OPEN};
 
 /// Non-special wire delimiter substituted for `<tool_call>`.
-pub(crate) const WIRE_TOOL_CALL_OPEN: &str = "[[CALL]]";
+pub const WIRE_TOOL_CALL_OPEN: &str = "[[CALL]]";
 /// Non-special wire delimiter substituted for `</tool_call>`.
-pub(crate) const WIRE_TOOL_CALL_CLOSE: &str = "[[/CALL]]";
+pub const WIRE_TOOL_CALL_CLOSE: &str = "[[/CALL]]";
 
 /// Rewrite outgoing prompt text from canonical `<tool_call>` delimiters to the
 /// non-special wire form. Applied to every message (system + history) sent to a
 /// `reserved_tool_call_token` model.
-pub(crate) fn canonical_to_wire(text: &str) -> String {
+pub fn canonical_to_wire(text: &str) -> String {
     if !text.contains(TEXT_TOOL_CALL_OPEN) && !text.contains(TEXT_TOOL_CALL_CLOSE) {
         return text.to_string();
     }
@@ -54,7 +54,7 @@ pub(crate) fn canonical_to_wire(text: &str) -> String {
 
 /// Rewrite an incoming completion from the non-special wire form back to
 /// canonical `<tool_call>` delimiters before the parser/transcript see it.
-pub(crate) fn wire_to_canonical(text: &str) -> String {
+pub fn wire_to_canonical(text: &str) -> String {
     if !text.contains(WIRE_TOOL_CALL_OPEN) && !text.contains(WIRE_TOOL_CALL_CLOSE) {
         return text.to_string();
     }
@@ -90,23 +90,5 @@ mod tests {
         assert_eq!(wire.matches(WIRE_TOOL_CALL_OPEN).count(), 2);
         assert_eq!(wire.matches(WIRE_TOOL_CALL_CLOSE).count(), 2);
         assert_eq!(wire_to_canonical(&wire), canonical);
-    }
-
-    // Convergence regression: a reserved-token completion arriving in raw wire
-    // form is invisible to the tagged tool-call parser (which looks for
-    // `<tool_call>`). The remap MUST run before the parser, and a single remap
-    // pass is sufficient and idempotent. The end-to-end parser-coupled
-    // regression + streaming/non-streaming parity tests live in
-    // `llm::tools::tests::reserved_token` where the tool-registry helpers exist.
-    #[test]
-    fn wire_form_is_invisible_until_canonicalized() {
-        let wire = include_str!("testdata/qwen36_reserved_token_response.txt");
-        assert!(wire.contains(WIRE_TOOL_CALL_OPEN) && !wire.contains(TEXT_TOOL_CALL_OPEN));
-        let canonical = wire_to_canonical(wire);
-        assert!(
-            canonical.contains(TEXT_TOOL_CALL_OPEN) && !canonical.contains(WIRE_TOOL_CALL_OPEN)
-        );
-        // Idempotent: a second pass is a no-op (covers accidental double-remap).
-        assert_eq!(wire_to_canonical(&canonical), canonical);
     }
 }
