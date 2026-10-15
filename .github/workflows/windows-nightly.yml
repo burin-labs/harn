@@ -186,7 +186,7 @@ jobs:
         shell: bash
         run: ./scripts/ci/windows_storage_budget.sh report before_build --require-free-headroom
       - name: Install Go formatter
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        uses: actions/setup-go@44694675825211faa026b3c33043df3e48a5fa00 # v6.0.0
         with:
           go-version: "1.26.6"
           cache: false
