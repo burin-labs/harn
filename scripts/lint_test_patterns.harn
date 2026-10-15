@@ -209,6 +209,8 @@ const CONFORMANCE_REAL_TIME_ALLOWLIST: list<string> = [
 // are the intended surface. `crates/harn-cli/tests/harn_cli_fast/orchestrator_http/`
 // is a prefix match; other files require an explicit entry.
 const E2E_SUBPROCESS_PATHS: list<string> = [
+  // Release process smoke must cross the real CLI and its measured host confinement or typed refusal.
+  "crates/harn-cli/tests/harn_cli_e2e/process_smoke_cli.rs",
   // Shared checkpoint mutations must retain keys and one initial value across real CLI processes.
   "crates/harn-cli/tests/harn_cli_e2e/checkpoint_concurrency.rs",
   // Durable credential grants and revocation must cross fresh CLI processes.
