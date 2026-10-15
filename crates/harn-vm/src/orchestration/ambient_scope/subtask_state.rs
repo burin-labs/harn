@@ -9,6 +9,16 @@ use crate::redact::NamedPattern;
 use crate::security::SecurityPolicy;
 use crate::vm::subtask::{swap_subtask_placement_context, SubtaskPlacement};
 
+impl super::AmbientExecutionScope {
+    pub(crate) fn with_prepared_identity(
+        mut self,
+        context: crate::prepared_run::PreparedIdentityContext,
+    ) -> Self {
+        self.prepared_identity = Some(Arc::new(context));
+        self
+    }
+}
+
 /// Mechanically checked projection of `thread_local_audit.toml`'s
 /// `subtask_scope.captured` policy. Keep this beside the typed state that
 /// implements the policy; the whole-crate audit test rejects drift either way.

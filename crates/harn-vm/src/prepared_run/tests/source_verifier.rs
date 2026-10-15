@@ -273,7 +273,10 @@ async fn module_and_package_verifiers_execute_the_baseline_through_the_real_proc
             assert!(String::from_utf8_lossy(&control.stdout).contains("NEW_RUNNER"));
             let output = match run.execute(first).await {
                 ExecutionOutcome::Completed { output, .. } => output,
-                other => panic!("baseline execution failed: {other:?}"),
+                ExecutionOutcome::ExecutorFailed { error, .. } => {
+                    panic!("baseline execution failed: {error}")
+                }
+                _ => panic!("baseline execution did not complete"),
             };
             assert_eq!(
                 output["status"],
@@ -293,7 +296,10 @@ async fn module_and_package_verifiers_execute_the_baseline_through_the_real_proc
             std::fs::write(&fixture.request.args[0], "assert 2 + 2 == 4\n").unwrap();
             let second = match run.execute(prepare()).await {
                 ExecutionOutcome::Completed { output, .. } => output,
-                other => panic!("refreshed baseline execution failed: {other:?}"),
+                ExecutionOutcome::ExecutorFailed { error, .. } => {
+                    panic!("refreshed baseline execution failed: {error}")
+                }
+                _ => panic!("refreshed baseline execution did not complete"),
             };
             assert_eq!(second["exit_code"], 0);
             assert_eq!(second["verifier_receipt"]["baseline_sha256"], digest);
@@ -425,7 +431,7 @@ async fn canonical_exec_and_spawn_refuse_exit_zero_without_the_declared_entrypoi
                 ExecutionOutcome::ExecutorFailed { error, .. } => {
                     assert!(error.contains("execution is unmeasured"), "{error}")
                 }
-                other => panic!("exit zero without the entrypoint cannot qualify: {other:?}"),
+                _ => panic!("exit zero without the entrypoint cannot qualify"),
             }
         }
     }

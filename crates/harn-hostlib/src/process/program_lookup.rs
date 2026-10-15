@@ -9,17 +9,32 @@ use super::SpawnSpec;
 /// Filesystem presence is lookup evidence, never verifier identity or success.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProgramLookupObservation {
-    Absent { program: String },
-    Present { path: std::path::PathBuf },
+    /// Every candidate in the measured search path is absent.
+    Absent {
+        /// Statically named program whose lookup was measured.
+        program: String,
+    },
+    /// A candidate exists; this doesn't establish executability or identity.
+    Present {
+        /// Existing candidate in the prepared child's search path.
+        path: std::path::PathBuf,
+    },
+    /// Lookup couldn't establish either presence or absence.
     Unmeasured(ProgramLookupUnmeasured),
 }
 
+/// The fact missing from a prepared program lookup.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProgramLookupUnmeasured {
+    /// Expansion or command structure prevents static lookup.
     InvocationNotStatic,
+    /// The child's working directory couldn't be inspected.
     WorkingDirectoryUnavailable,
+    /// Shell startup code or imported functions can change lookup.
     ShellStartupUnbounded,
+    /// No effective search path was available.
     SearchPathUnavailable,
+    /// An I/O error prevented inspection of a candidate.
     FilesystemUnavailable,
 }
 

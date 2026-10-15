@@ -182,14 +182,6 @@ impl AmbientExecutionScope {
         self
     }
 
-    pub(crate) fn with_prepared_identity(
-        mut self,
-        context: crate::prepared_run::PreparedIdentityContext,
-    ) -> Self {
-        self.prepared_identity = Some(std::sync::Arc::new(context));
-        self
-    }
-
     /// Snapshot the ambient context a child inherits from its parent at spawn
     /// time: the command-policy stack, dynamic-permission stack, and the
     /// runtime-context overlay (so the child's events keep the parent's

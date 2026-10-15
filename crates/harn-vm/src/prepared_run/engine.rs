@@ -138,48 +138,13 @@ impl<E> PreparedRun<E> {
         }
 
         let mut diagnostics = validate_host_facts(&plan, &host_facts, now_ms);
-        let mut source_verifiers = BTreeMap::new();
-        for request in &plan.verifier_loaders {
-            let captured = if !host_facts.admitted_verifier_loaders.contains(request) {
-                Err(
-                    crate::verifier_provenance::VerifierLoaderObservation::Refused {
-                        reason: "verifier has no exact host admission".to_string(),
-                    },
-                )
-            } else {
-                self.verifier_baselines.capture(request.clone())
-            };
-            match captured {
-                Ok(verifier) if !source_verifiers.contains_key(request.id()) => {
-                    startup.verifier_baselines.insert(
-                        request.id().to_string(),
-                        verifier.baseline_sha256().to_string(),
-                    );
-                    startup.verifier_observations.insert(
-                        request.id().to_string(),
-                        crate::verifier_provenance::VerifierLoaderObservation::Unchanged,
-                    );
-                    source_verifiers.insert(request.id().to_string(), verifier);
-                }
-                Ok(_) => diagnostics.push(diagnostic(
-                    "verifier_duplicate_id",
-                    "verifier loader id is repeated",
-                    None,
-                    "Declare each host-admitted verifier exactly once.",
-                )),
-                Err(error) => {
-                    startup
-                        .verifier_observations
-                        .insert(request.id().to_string(), error.clone());
-                    diagnostics.push(diagnostic(
-                        "verifier_unmeasured",
-                        format!("{error:?}"),
-                        None,
-                        "Admit a supported verifier loader before executor mutation.",
-                    ));
-                }
-            }
-        }
+        let source_verifiers = super::verifiers::capture(
+            &self.verifier_baselines,
+            &plan.verifier_loaders,
+            &host_facts.admitted_verifier_loaders,
+            &mut startup,
+            &mut diagnostics,
+        );
         let mut policy_decisions = Vec::new();
         let mut approval_candidates = Vec::new();
         let mut deciders = BTreeMap::new();
@@ -306,15 +271,10 @@ impl<E> PreparedRun<E> {
             ),
         )
         .expect("authority lease inputs are serializable");
-        let lease_fingerprint = if startup.verifier_baselines.is_empty() {
-            lease_fingerprint
-        } else {
-            fingerprint(
-                "harn verifier authority lease v1",
-                &(&lease_fingerprint, &startup.verifier_baselines),
-            )
-            .expect("verifier baseline identities are serializable")
-        };
+        let lease_fingerprint = super::verifiers::bind_lease_fingerprint(
+            lease_fingerprint,
+            &startup.verifier_baselines,
+        );
         let lease = AuthorityLease {
             source_verifiers,
             lease_fingerprint: lease_fingerprint.clone(),
@@ -660,9 +620,6 @@ impl AuthorityUse {
         args: &[String],
         cwd: &Path,
     ) -> Result<Option<Arc<crate::verifier_provenance::PreparedVerifier>>, String> {
-        if self.lease.source_verifiers.is_empty() {
-            return Ok(None);
-        }
         if let Some(verifier) = self
             .lease
             .source_verifiers

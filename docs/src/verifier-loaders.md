@@ -70,7 +70,7 @@ original filesystem locations:
 | Disposition | Meaning |
 | --- | --- |
 | `unchanged` | Measured locations still match their baseline |
-| `changed` | Present material differs, including a new earlier search candidate |
+| `changed` | Material differs, including a new earlier search candidate |
 | `absent` | Material present in the baseline is now missing, or capture measured absence |
 | `unmeasured` | Filesystem access, platform support, or loader behavior prevented measurement |
 | `refused` | The declaration or host authority wasn't admitted |

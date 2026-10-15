@@ -144,6 +144,7 @@ impl IsolatedPythonSourceVerifier {
 #[derive(Debug)]
 pub struct PreparedVerifier {
     spec: VerifierLoaderSpec,
+    #[cfg(target_os = "linux")]
     request: IsolatedPythonSourceVerifier,
     #[cfg(target_os = "linux")]
     modules: Option<python_modules::CapturedModules>,
