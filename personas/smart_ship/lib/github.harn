@@ -14,6 +14,8 @@ pub import {
 pub import { github_reviewed_change, read_github_reviewed_change } from "./github_review"
 pub import {
   GithubCiArtifact,
+  GithubCiArtifactRead,
+  GithubCiArtifactUnavailable,
   GithubCiAssessment,
   GithubCiIdentity,
   GithubCiJob,

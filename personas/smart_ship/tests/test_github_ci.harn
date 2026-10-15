@@ -1,6 +1,8 @@
 import { digest, execution, fixture, reviewed_request } from "../fixtures/support"
 import {
   GithubCiArtifact,
+  GithubCiArtifactRead,
+  GithubCiAssessment,
   GithubCiJob,
   assess_github_ci,
   github_ci_identities,
@@ -146,31 +148,30 @@ fn ci_fixture(random: HarnessRandom) -> CiFixture {
     artifacts: [
       {
         requirement: "tests",
-        result: Ok(
-          {
-            repo: REPOSITORY,
-            run_id: 10,
-            run_name: "Verify",
-            run_head_sha: producer.head_sha,
-            workflow_id: 1,
-            run_attempt: 2,
-            run_event: producer.event,
-            run_status: "completed",
-            run_conclusion: "success",
-            artifact_id: 201,
-            artifact_name: "python-result",
-            artifact_total_count: 2,
-            artifact_pages_fetched: 1,
-            artifact_expires_at: "2099-01-01T00:00:00Z",
-            artifact_digest: digest("archive bytes"),
-            archive_size_bytes: 300,
-            archive_sha256: sha256_hex("archive bytes"),
-            member_name: "result.json",
-            member_size_bytes: len(json_stringify(run)),
-            member_sha256: sha256_hex(json_stringify(run)),
-            data: run,
-          },
-        ),
+        status: "read",
+        receipt: {
+          repo: REPOSITORY,
+          run_id: 10,
+          run_name: "Verify",
+          run_head_sha: producer.head_sha,
+          workflow_id: 1,
+          run_attempt: 2,
+          run_event: producer.event,
+          run_status: "completed",
+          run_conclusion: "success",
+          artifact_id: 201,
+          artifact_name: "python-result",
+          artifact_total_count: 2,
+          artifact_pages_fetched: 1,
+          artifact_expires_at: "2099-01-01T00:00:00Z",
+          artifact_digest: digest("archive bytes"),
+          archive_size_bytes: 300,
+          archive_sha256: sha256_hex("archive bytes"),
+          member_name: "result.json",
+          member_size_bytes: len(json_stringify(run)),
+          member_sha256: sha256_hex(json_stringify(run)),
+          data: run,
+        },
       },
     ],
   }
@@ -276,6 +277,11 @@ pipeline test_archive_replays_complete_measured_artifact_census_without_invented
     ["ci-job-inputs-10-2", "python-result"],
   )
   assert_eq(replay_github_ci(f.request.policy, actual, POLICY, JOBS), actual)
+  const stored: GithubCiAssessment = schema_expect(
+    json_parse(json_stringify(actual)),
+    schema_of(GithubCiAssessment),
+  )
+  assert_eq(replay_github_ci(f.request.policy, stored, POLICY, JOBS), actual)
   for reads in [[], actual.source_reads.slice(1), actual.source_reads + actual.source_reads] {
     assert(
       is_err(
@@ -504,7 +510,7 @@ pipeline test_every_matrix_leg_requires_its_own_original_execution(harness: Harn
   ]
   const ids = github_ci_identities(request, jobs)
   assert_eq(ids[0]!.names, ["Test Python", "Test TypeScript"])
-  const receipt = unwrap(f.artifacts[0]!.result)
+  const receipt = schema_expect(f.artifacts[0]!, schema_of(GithubCiArtifactRead)).receipt
   const original = receipt.data.proof.original
     + {requirement: prepare_admission(request).requirements[0]!}
   const rebound = receipt
@@ -524,7 +530,7 @@ pipeline test_every_matrix_leg_requires_its_own_original_execution(harness: Harn
       registration: f.registration + {jobs: ids.map({ identity -> identity + {provenance: nil} })},
       census: f.census + [f.census[1]! + {id: 102, name: "Test TypeScript"}],
     }
-  const artifacts = [{requirement: "tests", result: Ok(rebound)}]
+  const artifacts = [{requirement: "tests", status: "read", receipt: rebound}]
   const partial = assess_github_ci(
     f.request.policy,
     source(matrix, 3),
@@ -557,7 +563,7 @@ pipeline test_every_matrix_leg_requires_its_own_original_execution(harness: Harn
 
 pipeline test_actual_result_signature_and_exact_provider_attempt_are_required(harness: Harness) {
   const f = ci_fixture(harness.random)
-  const receipt = unwrap(f.artifacts[0]!.result)
+  const receipt = schema_expect(f.artifacts[0]!, schema_of(GithubCiArtifactRead)).receipt
   const forged = receipt + {data: receipt.data + {proof: receipt.data.proof + {signature: ""}}}
   const invalid = assess_github_ci(
     f.request.policy,
@@ -566,7 +572,7 @@ pipeline test_actual_result_signature_and_exact_provider_attempt_are_required(ha
     f.producer,
     f.request,
     JOBS,
-    [{requirement: "tests", result: Ok(forged)}],
+    [{requirement: "tests", status: "read", receipt: forged}],
     7000,
   )
   assert_eq(invalid.assessment.status, "invalid")
@@ -588,7 +594,7 @@ pipeline test_actual_result_signature_and_exact_provider_attempt_are_required(ha
             f.producer,
             f.request,
             JOBS,
-            [{requirement: "tests", result: Ok(altered)}],
+            [{requirement: "tests", status: "read", receipt: altered}],
             7000,
           )
         },
