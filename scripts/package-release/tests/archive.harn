@@ -1,5 +1,6 @@
 import { assert_error_contains } from "std/testing"
 import { PackageBuild, PackageCandidate, build_package_candidate } from "../build"
+import { qualify_package_report } from "../lib"
 import {
   CANDIDATE_MANIFEST_FILE,
   validate_candidate_manifest,
@@ -231,9 +232,13 @@ pipeline test_the_actual_archive_is_qualified_and_a_reached_test_failure_cannot_
     harness.fs.read_text(path_join(substituted_output, "portable-fixture-0.1.0.tar.gz")),
     "substituted archive",
   )
-  const observed = json_parse(
-    harness.fs.read_text(path_join(substituted_output, "verification.json")),
+  const observed = unwrap(
+    qualify_package_report(
+      json_parse(harness.fs.read_text(path_join(substituted_output, "verification.json"))),
+      0,
+    ),
   )
-  assert_eq(observed.data.status, "pass")
+  assert(observed.required > 0)
+  assert_eq(observed.passed, observed.required)
   assert(!harness.fs.exists(path_join(substituted_output, CANDIDATE_MANIFEST_FILE)))
 }
