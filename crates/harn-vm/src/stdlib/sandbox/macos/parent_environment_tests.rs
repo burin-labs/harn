@@ -7,7 +7,9 @@ const CANARY: &str = "public-nonsecret-controller-canary";
 // Only booleans and syscall status leave the reader. Never print the environment
 // buffer, which could contain unrelated host secrets in a regressed build.
 const READER: &str = r#"
-import ctypes, json, os, subprocess, time
+import ctypes, json, os, subprocess, sys, time
+with open(sys.argv[1], 'w') as marker:
+    marker.write('child reached')
 libc = ctypes.CDLL(None, use_errno=True)
 result = []
 for selector in [38, 49]:
@@ -44,11 +46,21 @@ fn confined_child_cannot_read_the_hosts_launch_environment() {
             String::from_utf8_lossy(&output.stdout),
             String::from_utf8_lossy(&output.stderr)
         );
-        assert!(String::from_utf8_lossy(&output.stdout)
-            .contains("parent environment protected; self and child commands reached"));
+        let expected = if Backend::filesystem_available() {
+            "parent environment protected; self and child commands reached"
+        } else {
+            "unsupported host refusal reached; child did not start"
+        };
+        assert!(String::from_utf8_lossy(&output.stdout).contains(expected));
         return;
     }
-    let args = vec!["-c".to_string(), READER.to_string()];
+    let workspace = tempfile::tempdir().expect("workspace");
+    let marker = workspace.path().join("child-reached");
+    let args = vec![
+        "-c".to_string(),
+        READER.to_string(),
+        marker.display().to_string(),
+    ];
     let direct = Command::new("/usr/bin/python3")
         .args(&args)
         .env_clear()
@@ -60,6 +72,8 @@ fn confined_child_cannot_read_the_hosts_launch_environment() {
         .output()
         .expect("positive control");
     assert!(direct.status.success());
+    assert!(marker.exists(), "positive control must start the reader");
+    std::fs::remove_file(&marker).expect("clear the measured control marker");
     let before: serde_json::Value = serde_json::from_slice(&direct.stdout).expect("control status");
     let controls = before.as_array().expect("control inventory");
     assert_eq!(controls.len(), 4);
@@ -73,9 +87,9 @@ fn confined_child_cannot_read_the_hosts_launch_environment() {
         }
     }
 
-    let workspace = tempfile::tempdir().expect("workspace");
     let mut policy = tests::macos_policy_with_workspace_ops(&[]);
     policy.workspace_roots = vec![workspace.path().display().to_string()];
+    policy.process_sandbox.allow_child_workspace_write = true;
     let config = ProcessCommandConfig {
         cwd: Some(workspace.path().to_path_buf()),
         closed_env: true,
@@ -94,8 +108,30 @@ fn confined_child_cannot_read_the_hosts_launch_environment() {
         &config,
         &policy,
         SandboxProfile::OsHardened,
-    )
-    .expect("confined reader reached");
+    );
+    if !Backend::filesystem_available() {
+        let error = output.expect_err("unsupported host must refuse the confined child");
+        let refusal = error
+            .sandbox_mechanism_unavailable()
+            .expect("typed mechanism refusal");
+        assert_eq!(
+            refusal.mechanism,
+            super::super::SandboxMechanism::MacosSandboxExec
+        );
+        assert_eq!(
+            refusal.availability,
+            super::super::SandboxMechanismAvailability::AbsentOnHost
+        );
+        assert_eq!(refusal.profile, SandboxProfile::OsHardened);
+        assert!(!marker.exists(), "refused child must never start");
+        println!("unsupported host refusal reached; child did not start");
+        return;
+    }
+    let output = output.expect("confined reader reached");
+    assert!(
+        marker.exists(),
+        "supported host must start the confined reader"
+    );
     assert!(
         output.status.success(),
         "{}",

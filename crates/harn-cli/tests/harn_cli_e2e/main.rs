@@ -106,6 +106,8 @@ mod persona_activation_cli_e2e;
 mod pg_codegen_cli;
 mod precompile_dispatch;
 mod predicate_contract;
+#[cfg(target_os = "macos")]
+mod process_smoke_cli;
 mod provider_catalog_sources;
 mod provider_dispatch_audit;
 mod provider_option_qualification;
