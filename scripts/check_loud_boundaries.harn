@@ -121,7 +121,7 @@ pub fn rust_sites(grep_output: string, wire_strings: dict<string, string>) -> li
         || body.contains("BoundaryId::" + variant + ";")
         || body.contains("BoundaryId::" + variant + " ")
         || body.ends_with("BoundaryId::" + variant) {
-        sites.push({path: path, id: to_string(wire_strings[variant] ?? "")})
+        sites = sites.push({path: path, id: to_string(wire_strings[variant] ?? "")})
       }
     }
   }
@@ -149,7 +149,7 @@ pub fn harn_sites(grep_output: string) -> list<BoundarySite> {
     if close <= 0 {
       continue
     }
-    sites.push({path: path, id: after[:close]})
+    sites = sites.push({path: path, id: after[:close]})
   }
   return sites.unique()
 }
@@ -158,7 +158,7 @@ fn sites_for(sites: list<BoundarySite>, id: string) -> list<string> {
   let paths: list<string> = []
   for site in sites {
     if site.id == id {
-      paths.push(site.path)
+      paths = paths.push(site.path)
     }
   }
   return paths.unique().sorted()
@@ -171,7 +171,7 @@ fn registered_ids(entries: list, findings_out: list) -> dict {
   for entry in entries {
     const id = to_string(entry?.id ?? "")
     if id == "" {
-      findings.push(
+      findings = findings.push(
         {
           kind: "invalid_entry",
           id: "",
@@ -180,7 +180,7 @@ fn registered_ids(entries: list, findings_out: list) -> dict {
         },
       )
     } else if registered[id] != nil {
-      findings.push(
+      findings = findings.push(
         {kind: "duplicate_entry", id: id, path: REGISTRY_PATH, message: "registered twice"},
       )
     } else {
@@ -206,7 +206,7 @@ fn enum_correspondence_findings(
     const id = to_string(wire_strings[variant] ?? "")
     enum_ids[id] = true
     if registered[id] == nil {
-      findings.push(
+      findings = findings.push(
         {
           kind: "unregistered_boundary",
           id: id,
@@ -218,7 +218,7 @@ fn enum_correspondence_findings(
   }
   for id in registered.keys() {
     if enum_ids[id] == nil {
-      findings.push(
+      findings = findings.push(
         {
           kind: "orphan_entry",
           id: id,
@@ -240,7 +240,7 @@ fn entry_anchor_findings(
 ) -> list<BoundaryFinding> {
   let findings: list<BoundaryFinding> = []
   if anchors.count == 0 {
-    findings.push(
+    findings = findings.push(
       {kind: "no_anchor", id: id, path: REGISTRY_PATH, message: "entry declares no `anchors`"},
     )
   }
@@ -249,14 +249,14 @@ fn entry_anchor_findings(
     const path = to_string(anchor)
     anchor_set[path] = true
     if existing_paths[path] == nil {
-      findings.push(
+      findings = findings.push(
         {kind: "missing_anchor", id: id, path: path, message: "anchor file does not exist"},
       )
     }
   }
   const live = sites_for(sites, id)
   if live.count == 0 {
-    findings.push(
+    findings = findings.push(
       {
         kind: "stale_entry",
         id: id,
@@ -267,7 +267,7 @@ fn entry_anchor_findings(
   }
   for path in live {
     if anchor_set[path] == nil {
-      findings.push(
+      findings = findings.push(
         {
           kind: "unregistered_site",
           id: id,
@@ -318,7 +318,7 @@ fn audited_findings(
     for anchor in entry?.anchors ?? [] {
       const path = to_string(anchor)
       if existing_paths[path] == nil {
-        findings.push(
+        findings = findings.push(
           {
             kind: "missing_audited_anchor",
             id: id,
@@ -327,7 +327,7 @@ fn audited_findings(
           },
         )
       } else if marker != "" && !to_string(contents[path] ?? "").contains(marker) {
-        findings.push(
+        findings = findings.push(
           {
             kind: "audited_event_gone",
             id: id,
@@ -371,7 +371,7 @@ pub fn evaluate(
   // payload, which would otherwise report into the void.
   for site in sites {
     if seen.registered[site.id] == nil {
-      findings.push(
+      findings = findings.push(
         {
           kind: "unknown_boundary",
           id: site.id,
@@ -422,11 +422,11 @@ fn referenced_paths(entries: list) -> list<string> {
   let paths: list<string> = []
   for entry in entries {
     for anchor in entry?.anchors ?? [] {
-      paths.push(to_string(anchor))
+      paths = paths.push(to_string(anchor))
     }
     const test_path = to_string(entry?.test ?? "")
     if test_path != "" {
-      paths.push(test_path)
+      paths = paths.push(test_path)
     }
   }
   return paths.unique()
@@ -470,17 +470,17 @@ pipeline main(harness: Harness, task: unknown) {
   let sites: list<BoundarySite> = []
   for site in rust_sites(rust_grep, wire_strings) {
     if !is_exempt_site(site.path) {
-      sites.push(site)
+      sites = sites.push(site)
     }
   }
   for site in harn_sites(harn_grep) {
-    sites.push(site)
+    sites = sites.push(site)
   }
   let existing: dict<string, bool> = {}
   let contents: dict<string, string> = {}
   let wanted = referenced_paths(registry?.boundary ?? [])
   for path in referenced_paths(registry?.audited ?? []) {
-    wanted.push(path)
+    wanted = wanted.push(path)
   }
   for path in wanted.unique() {
     if harness.fs.exists(path_join(root, path)) {
