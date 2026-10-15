@@ -39,9 +39,7 @@ use serde_json::json;
 
 mod scope;
 mod storage;
-pub(crate) use scope::{
-    current_pool_registry, new_pool_registry, with_pool_registry_poll, with_pool_registry_scope,
-};
+pub(crate) use scope::{current_pool_registry, new_pool_registry, with_pool_registry_poll};
 use storage::{PersistedPoolMeta, PersistedPoolState, PersistedTask, PoolDurableStore, PoolRecord};
 
 /// Default `max_concurrent` when a pool is created without one.

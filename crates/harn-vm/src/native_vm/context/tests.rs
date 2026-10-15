@@ -1,5 +1,5 @@
 use super::*;
-use crate::stdlib::pool::{current_pool_registry, new_pool_registry, with_pool_registry_scope};
+use crate::stdlib::pool::{current_pool_registry, new_pool_registry, with_pool_registry_poll};
 use crate::vm::run_async_builtin_with;
 use std::{
     future::{poll_fn, Future},
@@ -31,10 +31,10 @@ async fn child_context_has_independent_output_buffer() {
     assert_eq!(captured, "parent");
 }
 
-#[tokio::test]
-async fn pending_builtin_restores_the_callers_pool_before_cancellation() {
+#[test]
+fn pending_builtin_restores_the_callers_pool_before_cancellation() {
     let outer = new_pool_registry();
-    with_pool_registry_scope(Arc::clone(&outer), async {
+    with_pool_registry_poll(&outer, || {
         let vm = Vm::new();
         let expected = Arc::clone(&vm.native().pool_registry);
         assert!(!Arc::ptr_eq(&expected, &outer));
@@ -54,6 +54,5 @@ async fn pending_builtin_restores_the_callers_pool_before_cancellation() {
         assert!(Arc::ptr_eq(&current_pool_registry(), &outer));
         drop(future);
         assert!(Arc::ptr_eq(&current_pool_registry(), &outer));
-    })
-    .await;
+    });
 }
