@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::orchestration::{CapabilityPolicy, SandboxProfile};
-use crate::value::{ErrorCategory, VmDictExt, VmError, VmValue};
+use crate::value::{VmError, VmValue};
 
 use super::{
     effective_fallback, normalize_for_policy, path_is_within, sandbox_denial_error,
