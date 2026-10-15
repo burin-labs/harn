@@ -158,6 +158,23 @@ fn ready(
 
 struct MultipleSourceExecutor(Vec<IsolatedPythonSourceVerifier>);
 
+#[test]
+fn source_capture_refuses_a_fifo_without_waiting_for_a_writer() {
+    use crate::verifier_provenance::{PreparedVerifier, VerifierLoaderObservation};
+    use std::os::unix::ffi::OsStrExt;
+
+    let fixture = SourceFixture::new();
+    std::fs::remove_file(&fixture.request.source).unwrap();
+    let path = std::ffi::CString::new(fixture.request.source.as_os_str().as_bytes()).unwrap();
+    // SAFETY: path is a valid NUL-terminated path in this test's private directory.
+    assert_eq!(unsafe { libc::mkfifo(path.as_ptr(), 0o600) }, 0);
+    assert!(matches!(
+        PreparedVerifier::capture(fixture.request.into()),
+        Err(VerifierLoaderObservation::Unmeasured { reason })
+            if reason.contains("not a regular file")
+    ));
+}
+
 #[derive(Clone)]
 struct ModuleExecutor {
     request: crate::verifier_provenance::IsolatedPythonModuleVerifier,

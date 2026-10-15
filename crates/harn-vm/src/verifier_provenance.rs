@@ -542,8 +542,13 @@ pub fn validate_pinned_environment(
 #[cfg(target_os = "linux")]
 fn bounded_read(path: &Path, maximum: usize) -> Result<Vec<u8>, String> {
     use std::io::Read;
+    use std::os::unix::fs::OpenOptionsExt;
 
-    let file = std::fs::File::open(path).map_err(|error| error.to_string())?;
+    let file = std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NONBLOCK | libc::O_NOFOLLOW)
+        .open(path)
+        .map_err(|error| error.to_string())?;
     if !file
         .metadata()
         .map_err(|error| error.to_string())?
