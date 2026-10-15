@@ -121,11 +121,18 @@ runs:
         CACHE_BIN: ${{ inputs.cache-bin }}
         CACHE_WORKSPACE_CRATES: ${{ inputs.cache-workspace-crates }}
         CACHE_RUNNER_TEMP: ${{ runner.temp }}
+        # Checked against Cargo.toml by the cache identity regression. Pin
+        # both readers and writers before hashing keys or compiling so an
+        # owned runner's inherited profile cannot change Harn's artifact.
+        CACHE_DEV_DEBUG: line-tables-only
       run: |
         node <<'NODE'
         const fs = require('node:fs');
         const os = require('node:os');
         const path = require('node:path');
+        const devDebug = process.env.CACHE_DEV_DEBUG;
+        if (!devDebug) throw new Error('Rust cache has no declared dev debug profile');
+        fs.appendFileSync(process.env.GITHUB_ENV, `CARGO_PROFILE_DEV_DEBUG=${devDebug}\n`);
         const retained = process.env.CACHE_WORKSPACE_CRATES === 'true';
         const explicit = process.env.CACHE_EXPLICIT_SOURCE_KEY || '';
         const source = process.env.CACHE_SOURCE_KEY || '';
