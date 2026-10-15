@@ -32,6 +32,14 @@ use serde::{Deserialize, Serialize};
 #[cfg(unix)]
 use super::{ProcessError, SpawnSpec};
 
+#[cfg(target_os = "linux")]
+#[path = "owner_death/adopted_children.rs"]
+mod adopted_children;
+
+#[cfg(all(test, target_os = "linux"))]
+#[path = "owner_death/adopted_children_tests.rs"]
+mod adopted_children_tests;
+
 /// Private argv marker handled before the public CLI parser runs.
 pub const GUARDIAN_ARG: &str = "__harn-process-owner-guardian";
 
@@ -1165,16 +1173,31 @@ fn wait_for_payload_exit(
 
 #[cfg(target_os = "linux")]
 fn reap_adopted_children() -> io::Result<()> {
+    // The payload waiter has returned before either caller reaches this
+    // point. Only this thread now reaps children adopted by the subreaper.
+    let error =
+        match adopted_children::terminate_and_reap(harn_vm::op_interrupt::SUBPROCESS_TERM_GRACE) {
+            Ok(()) => return Ok(()),
+            Err(error) => error,
+        };
+    retain_adopted_children(error)
+}
+
+#[cfg(target_os = "linux")]
+fn retain_adopted_children(error: io::Error) -> io::Result<()> {
+    eprintln!("guardian cleanup incomplete; retaining child custody: {error}");
+    // An unproved cleanup must not release the guardian or its journal while
+    // children remain. Keep the original native reaper as an integrity hold;
+    // the operation failed, and its caller may still need external cleanup.
     loop {
         let result = unsafe { libc::waitpid(-1, std::ptr::null_mut(), 0) };
         if result > 0 {
             continue;
         }
-        let error = io::Error::last_os_error();
-        match error.raw_os_error() {
+        match io::Error::last_os_error().raw_os_error() {
             Some(libc::EINTR) => continue,
-            Some(libc::ECHILD) => return Ok(()),
-            _ => return Err(error),
+            Some(libc::ECHILD) => return Err(error),
+            _ => return Err(io::Error::last_os_error()),
         }
     }
 }
