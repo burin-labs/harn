@@ -351,7 +351,7 @@ fn collect_calls(node: &SNode, calls: &mut Vec<CallSite>) {
                 });
             }
             harn_parser::visit::for_each_immediate_child(node, &mut |child| {
-                collect_calls(child, calls)
+                collect_calls(child, calls);
             });
         }
     }
