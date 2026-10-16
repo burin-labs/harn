@@ -146,7 +146,7 @@ fn package_verification_pins_its_executable_for_nested_commands() {
         .args(["fmt", "tests/test_main.harn"]));
     assert!(formatted.status.success(), "{formatted:?}");
     for inherited in [None, Some(package.join("unrelated-harn"))] {
-        let mut command = Command::new(&binary);
+        let mut command = Command::new(binary);
         command
             .current_dir(&package)
             .args(["package", "verify", ".", "--json"])
