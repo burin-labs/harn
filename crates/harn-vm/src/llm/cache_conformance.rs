@@ -1,5 +1,6 @@
 //! Prompt-cache conformance using the active runtime capability snapshot.
 
+#[doc(inline)]
 pub use harn_llm::cache_conformance::*;
 
 /// Resolve support from the active provider configuration and measurements.

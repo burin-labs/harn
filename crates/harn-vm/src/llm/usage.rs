@@ -15,6 +15,7 @@ use super::api::{LlmResult, ProviderAttempts};
 mod billing;
 pub use billing::BillingUsage;
 mod receipt;
+#[doc(inline)]
 pub use harn_llm::usage::ReportedCacheUsage;
 pub(crate) use harn_llm::usage::{
     cache_field_roots, extract_cache_read_tokens, extract_cache_write_tokens,
