@@ -1071,6 +1071,9 @@ admission even when missing usage prevents complete settlement.
 Denials retain the terminal `budget_exceeded` contract and add a typed
 `admission_reason`, such as `unknown_pricing`, `unsupported_billing_shape`, or
 `insufficient_allowance`.
+`harness.llm.call_safe(...).error` declares both `admission_reason` and
+`provider_call_count` as optional fields, so scripts can read the reason and
+measured dispatch count directly.
 
 These are reservation facts, separate from the existing actual-usage totals
 and their unknown-usage indicators; `settled_upper_usd` is not billed spend.

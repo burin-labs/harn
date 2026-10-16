@@ -20,8 +20,6 @@ type Cost = {
 
 type Report = {role: string, ok: bool, text: string, cost: Cost, admission_reason: string?}
 
-type Denial = {admission_reason: string}
-
 type Allocation = {arm: string, role: string, microusd: int}
 
 fn call_once(harness: {llm: HarnessLlm, stdio: HarnessStdio}) {
@@ -39,12 +37,6 @@ fn call_once(harness: {llm: HarnessLlm, stdio: HarnessStdio}) {
   )
   const cost = schema_expect(harness.llm.session_cost(), schema_of(Cost))
   const response = result.response
-  let admission_reason: string? = nil
-  match schema_parse(result.error, schema_of(Denial)) {
-    Ok(denial) -> { admission_reason = denial.admission_reason }
-    Err(_) -> {
-    }
-  }
   const report: Report = {
     role: argv[1],
     ok: result.ok && response != nil,
@@ -54,7 +46,7 @@ fn call_once(harness: {llm: HarnessLlm, stdio: HarnessStdio}) {
       to_string(result.error)
     },
     cost: cost,
-    admission_reason: admission_reason,
+    admission_reason: result.error?.admission_reason,
   }
   harness.stdio.println(json_stringify(report))
 }
