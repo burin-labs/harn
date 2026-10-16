@@ -1313,8 +1313,10 @@ turn, including its inherited workers, without changing another session's cap.
 allowance shared with other hosts and CLI processes. Configuration also captures
 an active `MachineSpendQuota::scope` at construction, before moving to a worker
 thread. Client metadata can't replace this allowance. Daily and calendar-month
-limits reset in UTC; typed exhaustion facts include `period`,
-`remaining_microusd`, and `reset_at_unix_ms`. See the
+limits reset in UTC. A failed prompt's `error.data.machineSpend` retains the
+typed `period`, `remaining_microusd`, and `reset_at_unix_ms` facts; lifetime
+limits have a null reset time. Generated host bindings expose the same record.
+See the
 [durable provider allowance](./cli-reference.md#durable-provider-allowance) for
 reservation, recovery, and pricing rules.
 

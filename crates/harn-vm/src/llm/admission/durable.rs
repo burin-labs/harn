@@ -101,12 +101,32 @@ pub struct MachineSpendReceipt {
     pub monthly_reset_unix_ms: i64,
 }
 
-#[derive(Clone, Copy, serde::Serialize)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
-enum QuotaPeriod {
+pub enum MachineSpendPeriod {
     Day,
     Month,
     Lifetime,
+}
+
+/// Machine quota facts retained by native hosts and protocol adapters.
+#[derive(
+    Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
+pub struct MachineSpendExhaustion {
+    pub period: MachineSpendPeriod,
+    pub limit_microusd: i64,
+    pub reserved_microusd: i64,
+    pub remaining_microusd: i64,
+    pub reset_at_unix_ms: Option<i64>,
+}
+
+impl MachineSpendExhaustion {
+    pub fn json_schema() -> serde_json::Value {
+        serde_json::to_value(schemars::schema_for!(Self)).expect("quota schema encodes")
+    }
 }
 
 struct LifetimeSpend {
@@ -344,19 +364,19 @@ impl MachineSpendQuota {
         for (period, kind, limit, reset) in [
             (
                 day.as_str(),
-                QuotaPeriod::Day,
+                MachineSpendPeriod::Day,
                 policy.daily_limit_microusd,
                 Some(daily_reset),
             ),
             (
                 month.as_str(),
-                QuotaPeriod::Month,
+                MachineSpendPeriod::Month,
                 policy.monthly_limit_microusd,
                 Some(monthly_reset),
             ),
             (
                 LIFETIME_PERIOD,
-                QuotaPeriod::Lifetime,
+                MachineSpendPeriod::Lifetime,
                 policy.lifetime_limit_microusd,
                 None,
             ),
@@ -666,21 +686,36 @@ fn db_error(error_value: impl LedgerFailure) -> VmError {
     )
 }
 
-fn exhausted(period: QuotaPeriod, limit: i64, used: i64, reset_unix_ms: Option<i64>) -> VmError {
-    VmError::Thrown(crate::schema::json_to_vm_value(&serde_json::json!({
+fn exhausted(
+    period: MachineSpendPeriod,
+    limit: i64,
+    used: i64,
+    reset_unix_ms: Option<i64>,
+) -> VmError {
+    let facts = MachineSpendExhaustion {
+        period,
+        limit_microusd: limit,
+        reserved_microusd: used,
+        remaining_microusd: limit.saturating_sub(used).max(0),
+        reset_at_unix_ms: reset_unix_ms,
+    };
+    let mut payload = serde_json::json!({
         "category": "budget_exceeded",
         "origin": "local",
         "kind": "terminal",
         "reason": "budget_exceeded",
         "admission_reason": "insufficient_allowance",
         "quota_scope": "machine",
-        "period": period,
-        "limit_microusd": limit,
-        "reserved_microusd": used,
-        "remaining_microusd": limit.saturating_sub(used).max(0),
-        "reset_at_unix_ms": reset_unix_ms,
         "message": "machine spend quota exhausted before provider transport"
-    })))
+    });
+    payload.as_object_mut().expect("quota error object").extend(
+        serde_json::to_value(facts)
+            .expect("quota facts serialize")
+            .as_object()
+            .expect("quota facts object")
+            .clone(),
+    );
+    VmError::Thrown(crate::schema::json_to_vm_value(&payload))
 }
 
 #[cfg(test)]

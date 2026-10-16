@@ -49,9 +49,13 @@ async fn invoke_acp(project: &Path, authority: &Path) -> serde_json::Value {
             .filter(|message| message["params"]["update"]["sessionUpdate"] == "agent_message_chunk")
             .filter_map(|message| message["params"]["update"]["content"]["text"].as_str())
             .collect();
-        assert!(turn.response.get("error").is_none(), "{:?}", turn.response);
+        let failure = turn.response.get("error").map(|error| {
+            assert_eq!(error["data"]["schema"], "harn.acp.prompt_error.v1");
+            assert_eq!(error["data"]["category"], "budget_exceeded", "{error}");
+            error["data"]["machineSpend"].clone()
+        });
         client.shutdown_expect_success();
-        serde_json::from_str(output.trim()).expect("typed quota outcome")
+        failure.unwrap_or_else(|| serde_json::from_str(output.trim()).expect("typed quota outcome"))
     })
     .await
     .unwrap()
@@ -91,6 +95,7 @@ async fn invoke(project: &Path, authority: &Path, shorthand: bool) -> std::proce
 
 async fn local_provider(
     root: &Path,
+    metered: bool,
 ) -> (
     Arc<AtomicUsize>,
     Arc<AtomicBool>,
@@ -105,20 +110,39 @@ async fn local_provider(
     let released = release.clone();
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
+    let model = harn_vm::llm_config::model_catalog_entry("gpt-4o-mini").unwrap();
+    let input_tokens = model
+        .context_window
+        .max(model.runtime_context_window.unwrap_or(0));
     let handler = move |axum::Json(body): axum::Json<serde_json::Value>| {
-        counter.fetch_add(1, Ordering::SeqCst);
+        let call = counter.fetch_add(1, Ordering::SeqCst) + 1;
         let held = held.clone();
         let released = released.clone();
         async move {
+            // A broken allocator admits both contenders. Release the held
+            // request so that case fails its census instead of deadlocking.
+            if call > 2 && held.swap(false, Ordering::SeqCst) {
+                released.notify_one();
+            }
             if held.load(Ordering::SeqCst) {
                 released.notified().await;
             }
-            // Deliberately omit usage: a restart must keep the reservation.
-            axum::Json(serde_json::json!({
+            let mut response = serde_json::json!({
                 "model": body["model"],
                 "choices": [{"index": 0, "message": {"role": "assistant", "content": "ok"},
                              "finish_reason": "stop"}]
-            }))
+            });
+            if metered {
+                // Charge the catalog bound so the concurrent processes cannot
+                // pass merely because reported usage was cheaper than the hold.
+                let output_tokens = body["max_tokens"].as_u64().unwrap();
+                response["usage"] = serde_json::json!({
+                    "prompt_tokens": input_tokens,
+                    "completion_tokens": output_tokens,
+                    "total_tokens": input_tokens + output_tokens,
+                });
+            }
+            axum::Json(response)
         }
     };
     let app = axum::Router::new().route("/v1/chat/completions", axum::routing::post(handler));
@@ -143,7 +167,8 @@ async fn concurrent_projects_and_restarted_shorthand_share_the_host_allowance() 
     for project in [left.path(), right.path()] {
         std::fs::write(project.join("probe.harn"), source).unwrap();
     }
-    let (calls, hold_transport, release, server) = local_provider(authority.path()).await;
+    // Missing usage must retain the full reservation across restart.
+    let (calls, hold_transport, release, server) = local_provider(authority.path(), false).await;
     write_policy(authority.path(), 2_000_000);
     let first = invoke(left.path(), authority.path(), false).await;
     assert!(
@@ -246,7 +271,7 @@ async fn cli_and_acp_share_a_monthly_quota_across_processes_and_restart() {
         } catch (error) { error }
         harness.stdio.println(json_stringify(outcome))
     }"#).unwrap();
-    let (calls, hold, release, server) = local_provider(authority.path()).await;
+    let (calls, hold, release, server) = local_provider(authority.path(), true).await;
     let write_monthly = |limit| {
         std::fs::write(authority.path().join("policy.toml"), format!(
             "ledger_path = {}\nscope = \"person\"\n[limits]\nmonthly_limit_microusd = {limit}\n",
@@ -268,8 +293,13 @@ async fn cli_and_acp_share_a_monthly_quota_across_processes_and_restart() {
         policy.clone(),
     )
     .unwrap();
-    let one_call = quota.receipt().unwrap().reserved_microusd;
+    let one_call = quota.receipt().unwrap().lifetime_reserved_microusd;
     assert!(one_call > 0, "positive control must reserve real allowance");
+    assert_eq!(
+        quota.receipt().unwrap().lifetime_actual_known_microusd,
+        one_call
+    );
+    assert_eq!(quota.receipt().unwrap().lifetime_usage_unknown_attempts, 0);
     let limit = one_call * 2;
     policy.monthly_limit_microusd = Some(limit);
     quota
@@ -298,16 +328,26 @@ async fn cli_and_acp_share_a_monthly_quota_across_processes_and_restart() {
         "{acp} {cli:?}"
     );
     assert_eq!(calls.load(Ordering::SeqCst), 2);
-    assert_eq!(quota.receipt().unwrap().reserved_microusd, limit);
+    assert_eq!(quota.receipt().unwrap().lifetime_reserved_microusd, limit);
+    assert_eq!(
+        quota.receipt().unwrap().lifetime_actual_known_microusd,
+        limit
+    );
+    assert_eq!(quota.receipt().unwrap().lifetime_usage_unknown_attempts, 0);
     hold.store(false, Ordering::SeqCst);
+    std::fs::write(editor.path().join("probe.harn"), r#"pipeline main(harness: Harness) {
+        harness.llm.call("hello", nil, {provider: "openai", model: "gpt-4o-mini", max_tokens: 64, stream: false})
+    }"#).unwrap();
     let restarted = invoke_acp(editor.path(), authority.path()).await;
-    assert_eq!(restarted["quota_scope"], "machine", "{restarted}");
     assert_eq!(restarted["period"], "month", "{restarted}");
     assert_eq!(restarted["remaining_microusd"], 0);
     assert!(restarted["reset_at_unix_ms"].as_i64().unwrap() > 0);
     assert_eq!(calls.load(Ordering::SeqCst), 2, "restart bypassed quota");
     let reopened =
         MachineSpendQuota::open(authority.path().join("spend.sqlite"), "person", policy).unwrap();
-    assert_eq!(reopened.receipt().unwrap().reserved_microusd, limit);
+    assert_eq!(
+        reopened.receipt().unwrap().lifetime_reserved_microusd,
+        limit
+    );
     server.abort();
 }

@@ -472,6 +472,7 @@ type HarnACPPromptErrorData struct {
 	Code *string `json:"code,omitempty"`
 	Retryable *bool `json:"retryable,omitempty"`
 	RetryAfterMs *int64 `json:"retryAfterMs,omitempty"`
+	MachineSpend *HarnMachineSpendExhaustion `json:"machineSpend,omitempty"`
 	Provider *string `json:"provider,omitempty"`
 	Model *string `json:"model,omitempty"`
 }

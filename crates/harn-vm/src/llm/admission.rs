@@ -15,7 +15,8 @@ mod host;
 use bound::AttemptBound;
 use durable::DurableReservation;
 pub use durable::{
-    BudgetCeilingUpdate, MachineSpendPolicy, MachineSpendQuota, MachineSpendReceipt,
+    BudgetCeilingUpdate, MachineSpendExhaustion, MachineSpendPeriod, MachineSpendPolicy,
+    MachineSpendQuota, MachineSpendReceipt,
 };
 pub use host::ConservativeLlmBudget;
 
