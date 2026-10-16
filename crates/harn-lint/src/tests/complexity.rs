@@ -5,13 +5,13 @@ use super::*;
 
 #[test]
 fn callable_defaults_count_without_charging_nested_declarations_twice() {
-    let source = r#"
+    let source = r"
 fn outer(flag: bool) {
   const local = { value: bool = flag and true -> value }
   fn inner() { if true { return 1 } return 0 }
   return local()
 }
-"#;
+";
     let program = Parser::new(Lexer::new(source).tokenize().unwrap())
         .parse()
         .unwrap();
