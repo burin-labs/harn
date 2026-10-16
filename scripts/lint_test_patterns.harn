@@ -364,6 +364,9 @@ const E2E_SUBPROCESS_PATHS: list<string> = [
   "crates/harn-cli/tests/harn_cli_e2e/skills_cli.rs",
   "crates/harn-cli/tests/harn_cli_fast/trigger_replay_cli.rs",
   "crates/harn-cli/tests/harn_cli_e2e/user_test_reports_cli.rs",
+  // Shard coverage qualifies real CLI exit codes, emitted reports, and clean
+  // source before/after execution; in-process parser tests cannot reach it.
+  "crates/harn-cli/tests/harn_cli_e2e/shard_coverage_cli.rs",
   "crates/harn-cli/tests/harn_cli_fast/orchestrator_http.rs",
   "crates/harn-cli/tests/test_util/process.rs",
 ]

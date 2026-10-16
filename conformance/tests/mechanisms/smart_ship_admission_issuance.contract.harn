@@ -1,0 +1,28 @@
+import { fixture } from "../../../personas/smart_ship/fixtures/support"
+import { assess_admission, verify_admission } from "../../../personas/smart_ship/lib/main"
+import { contract_effect, contract_negative } from "./lib/mechanism_contract"
+
+pipeline default(harness: Harness) {
+  const f = fixture(harness.random)
+  const signed = f.snapshot.changes[0]!.admission
+  const missing = assess_admission(signed.record + {proofs: []}, f.policy)
+  contract_effect(
+    harness.stdio,
+    "missing_execution_withholds_admission",
+    missing.status == "pending" && missing.checks.required == 1
+      && missing.checks.executed == 0
+      && missing.checks.pending == ["tests"],
+  )
+  const unsigned = verify_admission(signed + {signature: ""}, f.policy)
+  contract_effect(
+    harness.stdio,
+    "unsigned_assessment_grants_no_authority",
+    unsigned.status == "invalid" && unsigned.invalid.contains("admission-signature"),
+  )
+  contract_negative(
+    harness.stdio,
+    "complete_signed_evidence_qualifies",
+    assess_admission(signed.record, f.policy) != verify_admission(signed, f.policy)
+      || verify_admission(signed, f.policy).status != "admitted",
+  )
+}

@@ -64,6 +64,10 @@ It is either `{kind: "snapshot", snapshot: <frozen Snapshot>}` or
 selection outside candidate code. The command verifies that the prepared job
 matches this dispatch; it does not establish the controller's authority or
 qualify reviews and policy on its behalf.
+For admission, the dispatch binds the signed scope and exact test inputs.
+Reviews may finish later without rerunning the same verified command. The
+admission issuer must qualify and sign the current reviews before admitting
+the change. A changed scope, source or policy cannot borrow that execution.
 
 Assemble `execute.json` with these fields:
 
@@ -104,3 +108,84 @@ required before widening that policy.
 This command does not merge a change, advance a checkpoint, publish a release,
 or prove that GitHub ran a job. A GitHub workflow must retain its provider run
 and job observations through the shared CI evidence adapter as well.
+
+## Inspect original GitHub CI and issue admission
+
+Use `admission-cli.harn` from a trusted workflow. Keep its request file,
+installation policy, scope signer and job selection outside the candidate
+checkout. The command reads GitHub and signs evidence; it does not change
+branches, rules or releases.
+
+Before running stock commands, call `github_ci_identities(request, jobs)` from
+the package's GitHub export. Pass that exact identity list to the shared CI
+registration action. Register the clean tested commit and tree before the
+job legs start. Each leg must use `job-cli.harn` with its actual numeric
+GitHub run ID as a string and its actual attempt number. Upload each complete
+`JobRun` as a single JSON member using the declared artifact name.
+
+Keep a trusted `issuer.json` configuration beside the installation's public
+`policy.json`. Pass this configuration separately from every submitted or
+downloaded admission file. Its fields are:
+
+| Field | Value |
+| --- | --- |
+| `policy_file` | Path to the canonical public policy, relative to `issuer.json` |
+| `producer_policy` | Trusted repository, workflow filename, allowed events, registrar job and step |
+| `run_name` | The trusted workflow's display name |
+| `jobs` | Logical job IDs and their complete list of exact leg bindings |
+| `token_secret` | A read-only GitHub credential reference |
+| `issuer` | The enrolled issuer's `{id, secret}` reference |
+
+The submitted `admission.json` contains only:
+
+| Field | Value |
+| --- | --- |
+| `action` | `"inspect"` or `"issue"` |
+| `request` | The complete `AdmissionRequest` with its signed scope |
+| `producer.run_id` | The original executing GitHub run ID |
+| `producer.attempt` | Its original attempt number |
+
+A job binding contains `id` and `legs`. Each leg names its `requirement`,
+exact GitHub job `name`, `artifact_name`, and JSON `member_name`. Bind every
+scope requirement once. A logical matrix job requires every declared leg;
+one successful leg cannot stand in for the rest.
+
+```sh
+harn run --allow-process-network vendor/smart-ship/admission-cli.harn -- issuer.json admission.json > admission-result.json
+```
+
+Grant the configuration, public policy and request files as read roots, and a scratch directory as a write
+root when they are outside the runner's workspace. Supply credentials through
+the host secret store or bounded parent-secret stdin channel. Candidate
+commands must never receive the GitHub token or admission issuer key.
+
+The result retains `observation` with the provider's complete job census,
+registration receipt, downloaded artifact receipts, signed stock results,
+and assessment. The API workflow head stays separate from the tested commit
+and tree. Original run, attempt, job IDs, source and input identities must
+agree. A submitted policy must match the independently loaded installation
+policy before any credential read. The command collects all CI observations,
+then reads current exact-head reviews as its final provider read. It
+requalifies the measured CI archive with those current reviews before signing,
+without another network read. A changed head or base refuses the old signed scope.
+
+`inspect` returns `admission: null`. `issue` reads the issuer key only after
+all checks pass, then returns the signed admission alongside its observation.
+Missing stock results stay pending even when GitHub reports success.
+Pending or failed assessment prints the evidence and exits nonzero; a
+structural or identity refusal produces no signed receipt. Keep the full
+result for audit and replay through `assess_github_ci`.
+
+The observation's `source_reads` retains the actual artifact-list and job-list
+responses, including unrelated artifacts and every measured page.
+`replay_github_ci(trusted_policy, observation, producer_policy, jobs)` requalifies those exact
+observations through the same shared reader. Missing, reordered or unused
+responses refuse. Replay checks the archived decision; it does not claim a
+fresh provider read or grant permission to issue a live admission.
+
+Decode a saved observation with `schema_of(GithubCiAssessment)` before replay.
+Each artifact has a `status`: `"read"` carries its complete `receipt`, and
+`"unavailable"` carries the connector's exact `error`. Preserve both outcomes
+when storing the JSON. An absent rate-limit field stays absent; an explicitly
+reported zero stays zero. An unavailable artifact cannot count as an executed
+stock requirement.

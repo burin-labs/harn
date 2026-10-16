@@ -23,9 +23,9 @@ pub use fixtures::{FixtureScope, TestFixture};
 #[doc(hidden)]
 pub use model::TestCase;
 pub use reporting::{
-    AggregateTimings, CostRegression, DominantCase, PhaseTimings, ShardPlan,
-    SuiteCallablePreparation, SuiteModulePreparation, TestPhase, TestResult, TestSummary,
-    TestTimeout, TestTimingSpan,
+    AggregateTimings, CostRegression, DominantCase, PhaseTimings, PlannedShardCase,
+    ShardMatrixPlan, ShardPlan, SuiteCallablePreparation, SuiteModulePreparation, TestPhase,
+    TestResult, TestSourceIdentity, TestSummary, TestTimeout, TestTimingSpan,
 };
 #[doc(hidden)]
 pub use scheduling::{execute_parallel_cases, ParallelCaseResults, ParallelRunOptions};

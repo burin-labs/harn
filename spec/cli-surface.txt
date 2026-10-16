@@ -1966,6 +1966,7 @@ harn test --timing-baseline
 harn test --timing-environment
 harn test --trusted-host-dispatch
 harn test --verbose
+harn test --verify-shards
 harn test --watch
 harn test --workspace-id
 harn test -j

@@ -137,4 +137,10 @@ pub import {
   VerificationPlan,
   VerifierKey,
 } from "./types"
-pub import { policy_errors, verify, verify_admission } from "./verification"
+pub import {
+  admission_policy_matches,
+  assess_admission,
+  policy_errors,
+  verify,
+  verify_admission,
+} from "./verification"

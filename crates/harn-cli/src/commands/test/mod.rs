@@ -41,6 +41,23 @@ use reporting::{
 };
 
 pub(crate) async fn run_command(mut args: TestArgs) {
+    if let Some(source) = args.verify_shards.as_deref() {
+        let verdict = crate::test_shard_coverage::verify(
+            source,
+            args.shard_total.expect("clap requires shard total"),
+            &args.paths,
+        );
+        let text = serde_json::to_string_pretty(&verdict).expect("serializable coverage verdict");
+        if let Some(path) = args.json_out.as_deref() {
+            fs::write(path, &text)
+                .unwrap_or_else(|error| command_error(&format!("{path}: {error}")));
+        }
+        println!("{text}");
+        if verdict.status != "complete" {
+            process::exit(1);
+        }
+        return;
+    }
     classify_test_paths(&mut args);
     // Record what the caller typed before the environment gets a vote. The
     // `--plan` refusal below is the only consumer that has to tell the two

@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::timing::DurationSummary;
 
@@ -89,6 +89,36 @@ pub struct ShardPlan {
     pub unknown_cases: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub dominant_case: Option<DominantCase>,
+    /// Complete pre-selection inventory. A matrix verifier must compare this
+    /// with observed cases; adding per-shard pass counts cannot prove coverage.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub matrix: Option<ShardMatrixPlan>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TestSourceIdentity {
+    pub commit: String,
+    pub tree: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PlannedShardCase {
+    pub file: String,
+    pub name: String,
+    pub shard: usize,
+    pub declared_weight: usize,
+    pub estimated_ms: u64,
+    pub known_timing: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ShardMatrixPlan {
+    pub schema_version: u32,
+    /// Absent for dirty, untracked, non-Git, or mixed-repository inputs.
+    pub source: Option<TestSourceIdentity>,
+    /// The same clean source was observed again after execution.
+    pub source_confirmed: bool,
+    pub cases: Vec<PlannedShardCase>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]

@@ -15,6 +15,7 @@ import {
 import { ReviewAdmission } from "./review"
 import {
   AdmissionRecord,
+  AdmissionRequest,
   AdmissionRule,
   AdmissionVerification,
   Execution,
@@ -348,16 +349,24 @@ fn admission_time_errors(record: AdmissionRecord) -> list<string> {
   return invalid
 }
 
+/** Compare submitted policy provenance with an independently selected installation policy. */
+pub fn admission_policy_matches(request: AdmissionRequest, policy: Policy) -> bool {
+  return request.installation == policy.installation
+    && request.policy_digest == policy_digest(policy)
+    && policy_digest(request.policy) == request.policy_digest
+}
+
 type AdmissionAuthentication = {rule: AdmissionRule?, invalid: list<string>}
 
-fn authenticate_admission(signed: SignedAdmission, policy: Policy) -> AdmissionAuthentication {
-  const record = signed.record
+fn authenticate_record(
+  record: AdmissionRecord,
+  policy: Policy,
+  initial_errors: list<string>,
+) -> AdmissionAuthentication {
   const scope = record.scope.scope
   const rule = policy.admission_rules.find({ candidate -> candidate.id == scope.rule })
-  let invalid = admission_time_errors(record)
-  if record.installation != policy.installation || record.policy_digest != policy_digest(policy)
-    || policy_digest(record.policy) != record.policy_digest
-    || scope.installation != record.installation
+  let invalid = initial_errors + admission_time_errors(record)
+  if !admission_policy_matches(record, policy) || scope.installation != record.installation
     || scope.policy_digest != record.policy_digest
     || scope.source.repository != record.source.repository
     || scope.reviewed_head != record.source.head
@@ -384,15 +393,15 @@ fn authenticate_admission(signed: SignedAdmission, policy: Policy) -> AdmissionA
       invalid = invalid + ["scope-signature"]
     }
   }
-  if !signature_valid(signed, admission_bytes(record), policy.admission_keys, policy.installation) {
-    invalid = invalid + ["admission-signature"]
-  }
   return {rule: rule, invalid: invalid}
 }
 
-fn qualify_admission(signed: SignedAdmission, policy: Policy) -> AdmissionVerification {
-  const record = signed.record
-  const authenticated = authenticate_admission(signed, policy)
+fn assess_record(
+  record: AdmissionRecord,
+  policy: Policy,
+  initial_errors: list<string>,
+) -> AdmissionVerification {
+  const authenticated = authenticate_record(record, policy, initial_errors)
   const rule = authenticated.rule
   const invalid = authenticated.invalid
   let review: ReviewAdmission? = nil
@@ -413,6 +422,27 @@ fn qualify_admission(signed: SignedAdmission, policy: Policy) -> AdmissionVerifi
     "admitted"
   }
   return {status: status, review: review, checks: checks, invalid: invalid}
+}
+
+/**
+ * Assess current review and original CI evidence before reading an issuer key. This grants no authority.
+ */
+pub fn assess_admission(record: AdmissionRecord, policy: Policy) -> AdmissionVerification {
+  return assess_record(record, policy, policy_errors(policy))
+}
+
+fn qualify_admission(signed: SignedAdmission, policy: Policy) -> AdmissionVerification {
+  const errors = if signature_valid(
+    signed,
+    admission_bytes(signed.record),
+    policy.admission_keys,
+    policy.installation,
+  ) {
+    []
+  } else {
+    ["admission-signature"]
+  }
+  return assess_record(signed.record, policy, errors)
 }
 
 /** Judge signed admission through the same original-execution verifier used for grouped work. */

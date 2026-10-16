@@ -1,0 +1,121 @@
+import {
+  assess_github_ci,
+  load_github_issuer,
+  read_github_ci_artifacts,
+  read_github_reviewed_change,
+  replay_github_ci,
+} from "./lib/github"
+import {
+  AdmissionRequest,
+  SignedAdmission,
+  admission_bytes,
+  admission_policy_matches,
+  verify_admission,
+} from "./lib/main"
+import { Run, live_source } from "burin-ci-checks/ci_job_proof"
+
+type Request = {
+  action: "inspect" | "issue",
+  request: AdmissionRequest,
+  producer: {run_id: int, attempt: int},
+}
+
+fn main(harness: Harness) {
+  require len(argv) == 2, "pass trusted issuer configuration and submitted admission files after --"
+  const config = load_github_issuer(harness.fs, argv[0])
+  const settings = config.settings
+  const text = harness.fs.read_text(argv[1])
+  require len(text) <= 16777216, "admission request exceeds its size limit"
+  const input: Request = schema_expect(json_parse(text), schema_of(Request))
+  require admission_policy_matches(input.request, config.policy),
+    "submitted admission differs from the trusted installation policy"
+  require input.producer.run_id > 0 && input.producer.attempt > 0,
+    "admission requires the original producer run and attempt"
+  const repository = settings.producer_policy.repository
+  const parts = repository.split("/")
+  require len(parts) == 2 && input.request.scope.scope.source.repository == repository,
+    "admission producer must match the trusted repository scope"
+  const token = harness.secrets.read(settings.token_secret)
+  const source = live_source(harness.net, harness.fs, token)
+  const producer = schema_expect(
+    source.json(
+      "/repos/" + repository + "/actions/runs/" + to_string(input.producer.run_id)
+        + "/attempts/"
+        + to_string(input.producer.attempt),
+    ),
+    schema_of(Run),
+  )
+  require producer.id == input.producer.run_id && producer.run_attempt == input.producer.attempt,
+    "GitHub returned a different producer run or attempt"
+  const options = {installation_token: token}
+  const artifacts = read_github_ci_artifacts(
+    harness,
+    input.request,
+    settings.jobs,
+    producer,
+    settings.run_name,
+    options,
+  )
+  // Complete all CI network reads before refreshing the independent review.
+  const original = assess_github_ci(
+    config.policy,
+    source,
+    settings.producer_policy,
+    producer,
+    input.request,
+    settings.jobs,
+    artifacts,
+    harness.clock.now_ms(),
+  )
+  const observed = read_github_reviewed_change(
+    harness,
+    {
+      owner: parts[0]!,
+      repo: parts[1]!,
+      pull_number: to_int(input.request.source.change),
+      expected_head_oid: input.request.scope.scope.reviewed_head,
+      per_page: 100,
+      max_pages: 100,
+      maximum_count: 10000,
+      options: options,
+    },
+  )
+  if is_err(observed) {
+    throw "admission review read refused: " + json_stringify(unwrap_err(observed))
+  }
+  const current = unwrap(observed)
+  // Requalify the measured CI archive with current review facts without another network read.
+  const assessment = replay_github_ci(
+    config.policy,
+    original
+      + {
+        record: original.record
+          + {
+            source: current.source,
+            reviews: current.reviews,
+            admitted_at_ms: harness.clock.now_ms(),
+          },
+      },
+    settings.producer_policy,
+    settings.jobs,
+  )
+  if input.action == "inspect" || assessment.assessment.status != "admitted" {
+    harness.stdio.println(json_stringify({observation: assessment, admission: nil}))
+    if assessment.assessment.status != "admitted" {
+      harness.runtime.exit(1)
+    }
+    return
+  }
+  const issuer = settings.issuer
+  const signed: SignedAdmission = {
+    record: assessment.record,
+    signer: issuer.id,
+    signature: ed25519_sign(
+      harness.secrets.read(issuer.secret),
+      admission_bytes(assessment.record),
+    ),
+  }
+  require verify_admission(signed, config.policy) == assessment.assessment,
+    "admission issuer did not authenticate the assessed record"
+  harness.stdio.println(json_stringify({observation: assessment, admission: signed}))
+}

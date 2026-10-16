@@ -5,6 +5,40 @@ generator_version = "0.10.167"
 protocol_artifact_version = "0.10.167"
 
 [[package]]
+name = "burin-ci-checks"
+source = "git+https://github.com/burin-labs/.github"
+rev_request = "a4da07f69b45a057dc46465bea10948f7bf3e0a3"
+commit = "a4da07f69b45a057dc46465bea10948f7bf3e0a3"
+content_hash = "sha256-v2:9ffccbca9c793323c312c44a8d1811afc2413d4a5a56171899ff6bac6588cbdc"
+package_version = "0.1.0"
+harn_compat = ">=0.10.132,<0.11"
+manifest_digest = "sha256:0746d5b3a163842a31557109ffd32e677cf58a30f80f0f1d2607e888f0f542a8"
+
+[[package.exports.modules]]
+name = "candidate_manifest"
+path = "scripts/release-promotion/manifest.harn"
+
+[[package.exports.modules]]
+name = "ci_job_proof"
+path = "scripts/ci-job-proof/lib.harn"
+
+[[package.exports.modules]]
+name = "ci_latency"
+path = "scripts/ci-latency/lib.harn"
+
+[[package.exports.modules]]
+name = "ci_runtime_evidence"
+path = "scripts/ci-runtime-evidence/collector.harn"
+
+[[package.exports.modules]]
+name = "local_checks"
+path = "scripts/local-checks/lib.harn"
+
+[[package.exports.modules]]
+name = "local_checks_cli"
+path = "scripts/local-checks/cli.harn"
+
+[[package]]
 name = "harn-github-connector"
 source = "git+https://github.com/burin-labs/harn-github-connector"
 tag = "v0.12.0"

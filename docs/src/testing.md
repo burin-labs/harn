@@ -175,6 +175,40 @@ to the final sample. Thus p50 selects the upper middle value for an even-sized
 population. An empty population serializes every statistic as `null` with
 `sample_count: 0`, distinguishing no measurement from a measured zero.
 
+### Verify a complete shard matrix
+
+Start from a clean Git checkout with tracked test files. Ignore the report
+directory in Git before committing the source. Run every shard with the same
+selection and timing baseline; worker counts may differ:
+
+```sh
+TEST_SOURCE=$(git rev-parse HEAD)
+mkdir -p reports
+harn test suite --parallel --jobs 1 --shard-index 1 --shard-total 3 --json-out reports/1.json
+harn test suite --parallel --jobs 2 --shard-index 2 --shard-total 3 --json-out reports/2.json
+harn test suite --parallel --jobs 3 --shard-index 3 --shard-total 3 --json-out reports/3.json
+harn test --verify-shards "$TEST_SOURCE" --shard-total 3 reports/1.json reports/2.json reports/3.json
+```
+
+The final command emits a structured coverage verdict and exits nonzero unless
+every planned case passed exactly once in its assigned shard. Its source and
+shard count come from the CI plan, independently of downloaded reports. Missing
+or truncated reports, duplicated or omitted cases, changed partition plans,
+skips, failures and unconfirmed source all refuse complete coverage. The verdict
+retains the measured inventory size, observed and unique counts, missing shards
+and cases, duplicates, failing names and plan identity. `--json-out` saves it.
+
+Each user-test shard report retains its complete pre-selection inventory and
+assignments. The runner records clean Git commit and tree identity before
+execution and confirms the source again afterward. Dirty, untracked, non-Git or
+mixed-repository test collections still run, but carry no qualified matrix source. A
+checkout left changed after execution cannot confirm its original source. Reports from
+older runtimes without this inventory cannot establish complete coverage.
+
+The verifier accepts at most 128 MiB of reports and 1,024 shards. Its verdict
+establishes coverage of the measured case inventory; CI must authenticate the
+producer, runtime artifact, required test selection and complete execution inputs separately.
+
 ### Writing a conformance test
 
 Create a `.harn` file with a `pipeline default(harness: Harness, task)` entry point and use

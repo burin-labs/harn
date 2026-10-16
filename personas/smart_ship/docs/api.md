@@ -115,12 +115,156 @@ pub type GithubAdmissionUnknown = {
 }
 ```
 
+### type `GithubCiArtifact`
+
+An unavailable execution remains distinct from a successfully read artifact.
+
+```harn
+pub type GithubCiArtifact = GithubCiArtifactRead | GithubCiArtifactUnavailable
+```
+
+### type `GithubCiArtifactRead`
+
+A decoded immutable artifact receipt is ordinary data that survives JSON archival.
+
+```harn
+pub type GithubCiArtifactRead = {
+  requirement: string,
+  status: "read",
+  receipt: GithubWorkflowJsonArtifactReceipt<JobRun>,
+}
+```
+
+### type `GithubCiArtifactUnavailable`
+
+Preserve the connector's exact refusal without persisting a runtime Result value.
+
+```harn
+pub type GithubCiArtifactUnavailable = {
+  requirement: string,
+  status: "unavailable",
+  error: GithubConnectorError,
+}
+```
+
+### type `GithubCiAssessment`
+
+The complete original provider census and downloaded-byte receipts accompany qualification.
+
+```harn
+pub type GithubCiAssessment = {
+  inspection: OriginalRunInspection,
+  source_reads: list<GithubCiRead>,
+  artifacts: list<GithubCiArtifact>,
+  record: AdmissionRecord,
+  assessment: AdmissionVerification,
+}
+```
+
+### type `GithubCiIdentity`
+
+This projection is used by registration before execution and observation afterward.
+
+```harn
+pub type GithubCiIdentity = {id: string, names: list<string>, digest: string}
+```
+
+### type `GithubCiJob`
+
+A shared logical CI job may contain several independently measured matrix legs.
+
+```harn
+pub type GithubCiJob = {id: string, legs: list<GithubCiLeg>}
+```
+
+### type `GithubCiLeg`
+
+One actual matrix leg executes one complete stock requirement.
+
+```harn
+pub type GithubCiLeg = {
+  requirement: string,
+  name: string,
+  artifact_name: string,
+  member_name: string,
+}
+```
+
+### type `GithubCiProducerPolicy`
+
+The original observer's policy remains owned by the shared CI contract.
+
+```harn
+pub type GithubCiProducerPolicy = ProducerPolicy
+```
+
+### type `GithubCiRead`
+
+Preserve actual bounded provider responses, including the complete artifact-list pages.
+
+```harn
+pub type GithubCiRead = {endpoint: string, response: unknown}
+```
+
+### type `GithubIssuerConfiguration`
+
+One canonical policy file supplies the scope preparer and admission issuer.
+
+```harn
+pub type GithubIssuerConfiguration = {policy: Policy, settings: GithubIssuerSettings}
+```
+
+### type `GithubIssuerSettings`
+
+Host-owned settings are separate from every submitted or downloaded admission request.
+
+```harn
+pub type GithubIssuerSettings = {
+  policy_file: string,
+  producer_policy: GithubCiProducerPolicy,
+  run_name: string,
+  jobs: list<GithubCiJob>,
+  token_secret: string,
+  issuer: {id: string, secret: string},
+}
+```
+
+### fn `assess_github_ci`
+
+Live reads and archived replay enter this same original-run and signed-execution boundary.
+
+```harn
+pub fn assess_github_ci(
+  trusted: Policy,
+  source: ProofSource,
+  policy: ProducerPolicy,
+  producer: Run,
+  request: AdmissionRequest,
+  jobs: list<GithubCiJob>,
+  artifacts: list<GithubCiArtifact>,
+  at_ms: int,
+) -> GithubCiAssessment {
+}
+```
+
 ### fn `github_admission_binding`
 
 Bind recovery to effective nonsecret provider settings; secret values never enter state.
 
 ```harn
 pub fn github_admission_binding(configuration: GithubAdmissionConfiguration) -> string {
+}
+```
+
+### fn `github_ci_identities`
+
+Derive shared CI identities from the full trusted stock inventory, including every matrix leg.
+
+```harn
+pub fn github_ci_identities(
+  request: AdmissionRequest,
+  jobs: list<GithubCiJob>,
+) -> list<GithubCiIdentity> {
 }
 ```
 
@@ -133,6 +277,31 @@ pub fn github_reviewed_change(census: GithubPullRequestReviewCensus) -> Reviewed
 }
 ```
 
+### fn `load_github_issuer`
+
+Load trusted issuer settings and public policy before reading any credential or submitted evidence.
+
+```harn
+pub fn load_github_issuer(fs: HarnessFs, path: string) -> GithubIssuerConfiguration {
+}
+```
+
+### fn `read_github_ci_artifacts`
+
+Download actual stock results through the connector's bounded, digest-checked archive reader.
+
+```harn
+pub fn read_github_ci_artifacts(
+  harness: Harness,
+  request: AdmissionRequest,
+  jobs: list<GithubCiJob>,
+  producer: Run,
+  run_name: string,
+  options: GithubClientOptions,
+) -> list<GithubCiArtifact> {
+}
+```
+
 ### fn `read_github_reviewed_change`
 
 Read-only initial forge adapter. Errors retain the connector's structured refusal.
@@ -142,6 +311,20 @@ pub fn read_github_reviewed_change(
   harness: Harness,
   request: GithubPullRequestReviewCensusRequest,
 ) -> GithubConnectorResult<ReviewedChangeObservation> {
+}
+```
+
+### fn `replay_github_ci`
+
+Requalify recorded observations without inventing provider pages or granting live authority.
+
+```harn
+pub fn replay_github_ci(
+  trusted: Policy,
+  archive: GithubCiAssessment,
+  policy: GithubCiProducerPolicy,
+  jobs: list<GithubCiJob>,
+) -> GithubCiAssessment {
 }
 ```
 
@@ -1039,6 +1222,24 @@ pub fn admission_effect(signed: SignedAdmission) -> AdmissionEffect {
 }
 ```
 
+### fn `admission_policy_matches`
+
+Compare submitted policy provenance with an independently selected installation policy.
+
+```harn
+pub fn admission_policy_matches(request: AdmissionRequest, policy: Policy) -> bool {
+}
+```
+
+### fn `assess_admission`
+
+Assess current review and original CI evidence before reading an issuer key. This grants no authority.
+
+```harn
+pub fn assess_admission(record: AdmissionRecord, policy: Policy) -> AdmissionVerification {
+}
+```
+
 ### fn `begin_effect`
 
 Commit this transition with CAS at the privileged owner before contacting the provider.
@@ -1364,7 +1565,7 @@ pub fn policy_errors(policy: Policy) -> list<string> {
 
 ### fn `prepare_admission`
 
-Derive every precheck request before dispatch; absent or incomplete scope remains visible.
+Bind prechecks to signed scope; current reviews are authenticated by the admission receipt.
 
 ```harn
 pub fn prepare_admission(request: AdmissionRequest) -> VerificationPlan {
