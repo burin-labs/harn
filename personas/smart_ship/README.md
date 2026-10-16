@@ -93,6 +93,19 @@ new integration confirmation, so
 they cannot silently lose the verification obligation. Preparing the state is
 not evidence that a forge transaction happened; that adapter remains in progress.
 
+The GitHub export adds `prepare_github_integration` and
+`github_integration_transaction`. They retain the complete fresh review censuses
+and build one transaction containing the destination update, the claimed
+controller update, and an unchanged-ref guard for each newly admitted source
+branch. The prepared controller object must contain the same witness and pending
+verification obligation. Replayed data cannot drop or substitute these guards.
+The claim retains the remote and ref measured by the Git owner. A known
+controller frontier also binds the destination's expected base. Fork branches
+cannot participate in this single-repository transaction, even when review
+policy permits them. These functions prepare data without contacting the forge;
+transport binding, source materialization, object upload and dispatch remain
+requirements of the privileged publisher.
+
 `checkpoint_valid` verifies both the original execution signatures and the
 checkpoint publisher's signature. Consumers use `release_identity` to obtain
 the exact proven manifest identity. A moving branch is a convenience projection.

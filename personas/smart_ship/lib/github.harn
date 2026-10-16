@@ -27,6 +27,13 @@ pub import {
   submit_github_admission,
 } from "./github_effect"
 pub import {
+  GithubIntegrationTransaction,
+  GithubIntegrationWitness,
+  github_integration_state,
+  github_integration_transaction,
+  prepare_github_integration,
+} from "./github_integration"
+pub import {
   GithubIssuerConfiguration,
   GithubIssuerSettings,
   load_github_issuer,

@@ -43,6 +43,8 @@ pipeline test_atomic_adapter_claim_is_unique_durable_and_invalidated_by_stop(har
   const winners = results.filter({ result -> is_ok(result) })
   assert_eq(len(winners), 1, "one actor must own the prepared atomic transaction")
   const claim = unwrap(winners[0]!)
+  assert_eq(claim.remote, s.store.remote)
+  assert_eq(claim.ref, s.store.ref)
   const current = read_state(harness.process, s.store)
   assert_eq(current.commit, claim.commit, "the claim must name the actual remote revision")
   assert_eq(current.state, claim.state)

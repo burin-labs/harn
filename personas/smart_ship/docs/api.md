@@ -206,6 +206,37 @@ Preserve actual bounded provider responses, including the complete artifact-list
 pub type GithubCiRead = {endpoint: string, response: unknown}
 ```
 
+### type `GithubIntegrationTransaction`
+
+The exact state object and source guards must travel in the same provider transaction.
+
+```harn
+pub type GithubIntegrationTransaction = {
+  repository: string,
+  witness: GithubIntegrationWitness,
+  state_commit: string,
+  updates: list<GithubRefUpdate>,
+}
+```
+
+### type `GithubIntegrationWitness`
+
+A source-bound transaction witness; preparing it performs no forge mutation.
+
+```harn
+pub type GithubIntegrationWitness = {
+  schema: "smart-ship.github-integration.v1",
+  request: IntegrationEffect,
+  repository_remote: string,
+  authority_ref: string,
+  authority_before: string,
+  destination: GithubRefUpdate,
+  head_guards: list<GithubRefUpdate>,
+  observations: list<GithubPullRequestReviewCensus>,
+  prepared_at_ms: int,
+}
+```
+
 ### type `GithubIssuerConfiguration`
 
 One canonical policy file supplies the scope preparer and admission issuer.
@@ -268,6 +299,33 @@ pub fn github_ci_identities(
 }
 ```
 
+### fn `github_integration_state`
+
+Prepare confirmation and pending verification as one state revision, without publishing it.
+
+```harn
+pub fn github_integration_state(
+  claim: EffectClaim,
+  witness: GithubIntegrationWitness,
+) -> Result<Controller, string> {
+}
+```
+
+### fn `github_integration_transaction`
+
+Couple the prepared state's exact payload to both moving refs and every source guard.
+Object upload, transport binding and provider dispatch belong to the privileged publisher.
+This pure plan alone grants no mutation authority and does not establish source materialization.
+
+```harn
+pub fn github_integration_transaction(
+  claim: EffectClaim,
+  witness: GithubIntegrationWitness,
+  prepared: StateWrite,
+) -> GithubIntegrationTransaction {
+}
+```
+
 ### fn `github_reviewed_change`
 
 Normalize the connector's complete exact-head census for live reads and deterministic replay.
@@ -283,6 +341,24 @@ Load trusted issuer settings and public policy before reading any credential or 
 
 ```harn
 pub fn load_github_issuer(fs: HarnessFs, path: string) -> GithubIssuerConfiguration {
+}
+```
+
+### fn `prepare_github_integration`
+
+Requalify each newly integrated change through the existing review owner.
+Same-repository source branches become no-op guards in the atomic transaction.
+Retained changes are already integrated and may no longer have live PR branches.
+
+```harn
+pub fn prepare_github_integration(
+  claim: EffectClaim,
+  request: IntegrationEffect,
+  authority_ref: string,
+  expected_base: string,
+  observations: list<GithubPullRequestReviewCensus>,
+  now_ms: int,
+) -> GithubIntegrationWitness {
 }
 ```
 
@@ -554,7 +630,7 @@ pub type Effect = {
 Only the actor whose distinct state commit reached the remote owns this dispatch.
 
 ```harn
-pub type EffectClaim = {commit: string, state: Controller}
+pub type EffectClaim = {remote: string, ref: string, commit: string, state: Controller}
 ```
 
 ### type `EffectClaimRefusal`

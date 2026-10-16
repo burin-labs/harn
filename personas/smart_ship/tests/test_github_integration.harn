@@ -1,0 +1,356 @@
+import { assert_error_contains } from "std/testing"
+import {
+  digest,
+  execution,
+  finish_reviewed_admission,
+  fixture,
+  reviewed_request,
+} from "../fixtures/support"
+import { StateWrite } from "../lib/git_store"
+import {
+  github_integration_state,
+  github_integration_transaction,
+  prepare_github_integration,
+} from "../lib/github_integration"
+import {
+  Change,
+  Controller,
+  EffectClaim,
+  Fence,
+  IntegrationEffect,
+  begin_effect,
+  control,
+  freeze_snapshot,
+  integration_effect,
+  offer,
+  policy_digest,
+  reserve_effect,
+  start,
+} from "../lib/main"
+import { GithubPullRequestReviewCensus } from "harn-github-connector/default"
+
+const BASE = "b".repeat(40)
+
+const RESULT = "e".repeat(40)
+
+const CLAIM = "d".repeat(40)
+
+type Setup = {
+  claim: EffectClaim,
+  request: IntegrationEffect,
+  observations: list<GithubPullRequestReviewCensus>,
+}
+
+fn fence(state: Controller) -> Fence {
+  return pick(state.authority, ["installation", "generation", "revision", "controller"])
+}
+
+fn setup(random: HarnessRandom, fork_source: bool = false, prior_base: string? = nil) -> Setup {
+  const f = fixture(random)
+  const repository = "example/project"
+  const policy = f.policy
+    + {
+      repositories: [repository],
+      admission_rules: f.policy.admission_rules.map(
+        { rule ->
+          rule
+            + {
+              repository: repository,
+              repository_id: "repo",
+              review: rule.review + {allow_forks: fork_source},
+            }
+        },
+      ),
+    }
+  let changes: list<Change> = []
+  let observations: list<GithubPullRequestReviewCensus> = []
+  for id in ["42", "43"] {
+    const head = sha256_hex(id)[0:40]
+    const original = execution(f)
+    const executed = original
+      + {
+        source: original.source + {repository: repository, commit: head},
+        requirement: original.requirement + {repository: repository},
+        started_at_ms: 100,
+        completed_at_ms: 900,
+      }
+    const request = reviewed_request(policy, f.private_key, {id: id, base: BASE}, executed)
+    const head_repository = if fork_source {
+      "fork/project"
+    } else {
+      repository
+    }
+    const head_repository_id = if fork_source {
+      "fork"
+    } else {
+      "repo"
+    }
+    const bound = request
+      + {
+        source: request.source
+          + {
+            head_repository: head_repository,
+            head_repository_id: head_repository_id,
+            base_repository_id: "repo",
+          },
+      }
+    const signed = finish_reviewed_admission(bound, f.private_key, executed)
+    changes = changes
+      + [{id: id, repository: repository, head: head, integrated_commit: RESULT, admission: signed}]
+    observations = observations
+      + [
+        {
+          repository: repository,
+          number: to_int(id),
+          head_oid: head,
+          head_branch: "feature/" + id,
+          base_oid: BASE,
+          base_branch: "main",
+          author: {id: "fixture-author", login: "Fixture author", type: "User"},
+          state: "OPEN",
+          is_draft: false,
+          head_repository: {id: head_repository_id, full_name: head_repository},
+          base_repository: {id: "repo", full_name: repository},
+          review_decision: nil,
+          total_reviews: 1,
+          total_threads: 0,
+          pages_fetched: 2,
+          reviews: [
+            {
+              id: "review-" + id,
+              state: "APPROVED",
+              commit_oid: head,
+              author: {id: "fixture-reviewer", login: "Fixture reviewer", type: "User"},
+              submitted_at: "1970-01-01T00:00:00Z",
+              updated_at: "1970-01-01T00:00:00Z",
+            },
+          ],
+          threads: [],
+        },
+      ]
+  }
+  const snapshot = freeze_snapshot(
+    f.snapshot
+      + {
+        policy_digest: policy_digest(policy),
+        sequence: if prior_base == nil {
+          1
+        } else {
+          2
+        },
+        sources: [{repository: repository, commit: RESULT, tree: "f".repeat(40)}],
+        changes: changes,
+        requirements: f.snapshot.requirements.map({ row -> row + {repository: repository} }),
+      },
+  )
+  let initial: Controller = {
+    schema: "smart-ship.controller.v1",
+    authority: f.authority + {policy: policy, policy_digest: policy_digest(policy)},
+    active: nil,
+    pending: nil,
+    checkpoint: nil,
+    incidents: [],
+    effects: [],
+    unverified_since_ms: nil,
+  }
+  if prior_base != nil {
+    const baseline = freeze_snapshot(
+      snapshot
+        + {
+          sequence: 1,
+          changes: [],
+          sources: [{repository: repository, commit: prior_base, tree: "f".repeat(40)}],
+        },
+    )
+    const offered = unwrap(offer(initial, fence(initial), baseline, policy, 1000))
+    initial = unwrap(start(offered, fence(offered)))
+  }
+  const request = integration_effect(snapshot)
+  const reserved = unwrap(reserve_effect(initial, fence(initial), request, policy, nil, 1000))
+  const claimed = unwrap(
+    begin_effect(reserved, fence(reserved), request, digest("unique publisher")),
+  )
+  return {
+    claim: {
+      remote: "https://github.com/" + repository + ".git",
+      ref: "refs/heads/authority",
+      commit: CLAIM,
+      state: claimed,
+    },
+    request: request,
+    observations: observations,
+  }
+}
+
+pipeline test_group_transaction_couples_both_moving_refs_and_every_reviewed_head(harness: Harness) {
+  const s = setup(harness.random)
+  const witness = prepare_github_integration(
+    s.claim,
+    s.request,
+    "refs/heads/authority",
+    BASE,
+    s.observations,
+    1000,
+  )
+  const next = unwrap(github_integration_state(s.claim, witness))
+  const prepared: StateWrite = {expected: CLAIM, commit: "9".repeat(40), state: next}
+  const plan = github_integration_transaction(s.claim, witness, prepared)
+  assert_eq(len(plan.updates), 4)
+  assert_eq(plan.updates[0]!.ref, "refs/heads/main")
+  assert_eq(plan.updates[0]!.before_oid, BASE)
+  assert_eq(plan.updates[0]!.after_oid, RESULT)
+  assert_eq(plan.updates[1]!.ref, "refs/heads/authority")
+  assert_eq(plan.updates[1]!.before_oid, CLAIM)
+  assert_eq(plan.updates[1]!.after_oid, prepared.commit)
+  assert_eq(plan.updates[2]!.ref, "refs/heads/feature/42")
+  assert_eq(plan.updates[3]!.ref, "refs/heads/feature/43")
+  for head in witness.head_guards {
+    assert_eq(head.before_oid, head.after_oid)
+    assert_eq(head.force, false)
+  }
+  assert_eq(next.pending, s.request.snapshot)
+  assert_eq(next.effects[0]!.status, "confirmed")
+  assert_eq(next.checkpoint, nil)
+  const reordered = prepare_github_integration(
+    s.claim,
+    s.request,
+    "refs/heads/authority",
+    BASE,
+    [s.observations[1]!, s.observations[0]!],
+    1000,
+  )
+  assert_eq(reordered, witness, "provider census order must not change the transaction identity")
+  const incomplete = prepared + {state: next + {pending: nil}}
+  assert_error_contains(
+    fn() { github_integration_transaction(s.claim, witness, incomplete) },
+    "prepared controller object differs",
+  )
+}
+
+pipeline test_group_transaction_refuses_missing_withdrawn_and_changed_sources(harness: Harness) {
+  const s = setup(harness.random)
+  const positive = prepare_github_integration(
+    s.claim,
+    s.request,
+    "refs/heads/authority",
+    BASE,
+    s.observations,
+    1000,
+  )
+  assert_eq(len(positive.head_guards), 2)
+  assert_error_contains(
+    fn() { prepare_github_integration(
+      s.claim,
+      s.request,
+      "refs/heads/authority",
+      BASE,
+      [s.observations[0]!],
+      1000,
+    ) },
+    "one complete observation per new change",
+  )
+  const first = s.observations[0]!
+  const withdrawn = first + {reviews: first.reviews.map({ row -> row + {state: "DISMISSED"} })}
+  assert_error_contains(
+    fn() { prepare_github_integration(
+      s.claim,
+      s.request,
+      "refs/heads/authority",
+      BASE,
+      [withdrawn, s.observations[1]!],
+      1000,
+    ) },
+    "current complete reviews",
+  )
+  assert_error_contains(
+    fn() { prepare_github_integration(
+      s.claim,
+      s.request,
+      "refs/heads/authority",
+      "a".repeat(40),
+      s.observations,
+      1000,
+    ) },
+    "fresh review source differs",
+  )
+  assert_error_contains(
+    fn() { prepare_github_integration(
+      s.claim + {ref: "refs/heads/main"},
+      s.request,
+      "refs/heads/main",
+      BASE,
+      s.observations,
+      1000,
+    ) },
+    "distinct branch refs",
+  )
+}
+
+pipeline test_replayed_transaction_cannot_remove_source_or_controller_guards(harness: Harness) {
+  const s = setup(harness.random)
+  const witness = prepare_github_integration(
+    s.claim,
+    s.request,
+    "refs/heads/authority",
+    BASE,
+    s.observations,
+    1000,
+  )
+  for changed in [
+    witness + {head_guards: []},
+    witness + {authority_before: "a".repeat(40)},
+    witness + {authority_ref: "refs/heads/another-controller"},
+    witness + {repository_remote: "https://github.com/other/project.git"},
+    witness + {destination: witness.destination + {force: true}},
+    witness + {destination: witness.destination + {after_oid: "0".repeat(40)}},
+  ] {
+    assert(is_err(github_integration_state(s.claim, changed)))
+  }
+  const stopped = unwrap(control(s.claim.state, fence(s.claim.state), "stopped"))
+  assert(is_err(github_integration_state(s.claim + {state: stopped}, witness)))
+}
+
+pipeline test_atomic_group_reports_unsupported_forks_even_when_review_policy_allows_them(
+  harness: Harness,
+) {
+  const s = setup(harness.random, true)
+  assert_eq(s.claim.state.effects[0]!.status, "dispatching")
+  assert_error_contains(
+    fn() { prepare_github_integration(
+      s.claim,
+      s.request,
+      "refs/heads/authority",
+      BASE,
+      s.observations,
+      1000,
+    ) },
+    "atomic source guards require an actual branch in the destination repository",
+  )
+}
+
+pipeline test_group_destination_must_match_the_existing_integrated_frontier(harness: Harness) {
+  const s = setup(harness.random, false, BASE)
+  const witness = prepare_github_integration(
+    s.claim,
+    s.request,
+    "refs/heads/authority",
+    BASE,
+    s.observations,
+    1000,
+  )
+  const next = unwrap(github_integration_state(s.claim, witness))
+  assert_eq(next.active, s.claim.state.active, "integration must not cancel running verification")
+  assert_eq(next.pending, s.request.snapshot)
+  const drift = setup(harness.random, false, "a".repeat(40))
+  assert_error_contains(
+    fn() { prepare_github_integration(
+      drift.claim,
+      drift.request,
+      "refs/heads/authority",
+      BASE,
+      drift.observations,
+      1000,
+    ) },
+    "destination drifted from the retained controller frontier",
+  )
+}
