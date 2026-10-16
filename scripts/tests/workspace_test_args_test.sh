@@ -84,10 +84,15 @@ fi
 if FAKE_VM_METADATA=1 bash "$root/scripts/ci/workspace_features.sh" missing > "$scratch/log" 2>&1; then
   echo 'A missing workspace member was accepted' >&2; exit 1
 fi
-FAKE_VM_METADATA=1 GITHUB_EVENT_NAME=push bash "$root/scripts/ci/run_workspace_tests.sh" vm:3/3 > "$scratch/log"
+FAKE_VM_METADATA=1 GITHUB_EVENT_NAME=push bash "$root/scripts/ci/run_workspace_tests.sh" vm-unit:3/3 > "$scratch/log"
 jq -e '.["rust-suites"].fixture.testcases.case["filter-match"].status == "matches"' "$RUNNER_TEMP/harn-nextest-inventory.json" > /dev/null
 grep -q 'eligible=1' "$scratch/log"
-grep -q -- '--locked -p harn-vm --features harn-vm/default,harn-vm/otel --partition count:3/3 --no-tests pass' "$scratch/ran"
+grep -Fq -- '--locked -p harn-vm --features harn-vm/default,harn-vm/otel --lib --partition count:3/3 --no-tests pass' "$scratch/ran"
+FAKE_VM_METADATA=1 GITHUB_EVENT_NAME=push bash "$root/scripts/ci/run_workspace_tests.sh" vm-integration > "$scratch/log"
+grep -Fq -- '--locked -p harn-vm --features harn-vm/default,harn-vm/otel --test * --bins --no-tests fail' "$scratch/ran"
+if grep -Eq -- '--lib|--partition|--tests' "$scratch/ran"; then
+  echo 'Native integration tests also selected or partitioned the unit harness' >&2; exit 1
+fi
 GITHUB_EVENT_NAME=push bash "$root/scripts/ci/run_workspace_tests.sh" rest:1/4 > "$scratch/log"
 grep -q -- '--locked --workspace --exclude harn-vm --exclude harn-fmt --exclude harn-lsp --exclude harn-package --partition count:1/4 --no-tests pass' "$scratch/ran"
 # The producer compiles only its three tooling packages, with workspace features.
@@ -99,8 +104,8 @@ fi
 # An affected selection without harn-vm leaves the vm group nothing to build.
 jq -n --arg base "$base" '{pull_request: {base: {sha: $base}}}' > "$scratch/event"
 rm "$scratch/ran"
-GITHUB_EVENT_NAME=pull_request POST_MERGE_TIER_ACTIVE=true bash "$root/scripts/ci/run_workspace_tests.sh" vm:1/3 > "$scratch/log"
-grep -q 'group=vm selects nothing' "$scratch/log"
+GITHUB_EVENT_NAME=pull_request POST_MERGE_TIER_ACTIVE=true bash "$root/scripts/ci/run_workspace_tests.sh" vm-unit:1/3 > "$scratch/log"
+grep -q 'group=vm-unit selects nothing' "$scratch/log"
 [[ ! -e "$scratch/ran" ]]
 rm -f "$scratch/ran"
 GITHUB_EVENT_NAME=pull_request POST_MERGE_TIER_ACTIVE=true bash "$root/scripts/ci/run_workspace_tests.sh" tooling > "$scratch/log"
@@ -112,7 +117,7 @@ if bash "$root/scripts/ci/run_workspace_tests.sh" count:1/3 > "$scratch/log" 2>&
   echo 'An ungrouped partition was accepted' >&2; exit 1
 fi
 rm "$scratch/ran"
-if FAKE_VM_METADATA=1 MATCH_STATUS=mismatch GITHUB_EVENT_NAME=push bash "$root/scripts/ci/run_workspace_tests.sh" vm:3/3 > "$scratch/log" 2>&1; then
+if FAKE_VM_METADATA=1 MATCH_STATUS=mismatch GITHUB_EVENT_NAME=push bash "$root/scripts/ci/run_workspace_tests.sh" vm-unit:3/3 > "$scratch/log" 2>&1; then
   echo 'An empty eligible suite was accepted' >&2; exit 1
 fi
 [[ ! -e "$scratch/ran" ]]
