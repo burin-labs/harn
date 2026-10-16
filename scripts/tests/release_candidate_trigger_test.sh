@@ -206,9 +206,29 @@ resolve release_pull_request EVENT_NAME=pull_request REF_NAME=8861/merge
 [[ "$(matrix_targets candidate)" == "aarch64-apple-darwin,aarch64-unknown-linux-gnu,x86_64-apple-darwin,x86_64-pc-windows-msvc,x86_64-unknown-linux-gnu" ]] \
   || fail "the candidate does not build all five targets: $(matrix_targets candidate)"
 
+# A feature branch proposes no version change even when main has advanced to
+# the next development version. Compare its fork point, not today's main.
+commit_version 0.10.143-dev "Start development"
+development_sha="$(git -C "$repo" rev-parse HEAD)"
+git -C "$repo" checkout --quiet -b stale-feature "$head_sha"
+printf 'ordinary feature change\n' > "$repo/feature.txt"
+git -C "$repo" add feature.txt
+git -C "$repo" commit --quiet -m "Change a feature without changing the version"
+feature_sha="$(git -C "$repo" rev-parse HEAD)"
+git -C "$repo" checkout --quiet main
+resolve stale_feature_pull_request EVENT_NAME=pull_request REF_NAME=8862/merge \
+  PR_BASE_SHA="$development_sha" PR_HEAD_SHA="$feature_sha"
+[[ -z "$(output stale_feature_pull_request rehearsal_source_sha)" &&
+   "$(output stale_feature_pull_request should_build_binaries)" == false ]] \
+  || fail "a stale feature branch requested a release rehearsal"
+
+if run_resolver unreadable_pull_request_history EVENT_NAME=pull_request REF_NAME=8863/merge \
+  PR_BASE_SHA=0000000000000000000000000000000000000001 PR_HEAD_SHA="$feature_sha"; then
+  fail "unreadable pull-request comparison history passed as no release"
+fi
+
 # An explicit main source build reuses the full candidate producer without
 # declaring a release. Dispatches cannot enter the promotion trigger.
-commit_version 0.10.143-dev "Start development"
 resolve source EVENT_NAME=workflow_dispatch INPUT_SOURCE_CANDIDATE=true
 [[ "$(output source build_mode)" == candidate &&
    "$(output source candidate_purpose)" == source &&

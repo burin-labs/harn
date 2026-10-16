@@ -71,6 +71,14 @@ Run records retain the first 1,024 receipts. Additional receipts produce a
 `reasoning_receipts` gap with code `receipt_limit_exceeded` and the discarded
 count. Consumers must treat that list as partial evidence.
 
+## Terminal errors
+
+Provider content-policy refusals carry `terminalClass: "provider_content_policy"`
+with provider ownership. Saved destination-policy denials carry
+`terminalClass: "tool_policy_rejected"` with local ownership and their governing
+rule. Authentication, transport, and application failures retain their own classes;
+an error message alone does not supply provider provenance.
+
 ## Durable agent-event correlation
 
 Agent events written inside a VM execution carry the same `execution_id`.
