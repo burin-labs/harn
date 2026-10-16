@@ -399,7 +399,7 @@ pub(crate) fn record_provider_dispatch(session_id: &str) {
     });
 }
 
-/// Bill an auxiliary call (a judge, classifier, or other Harn-assigned purpose
+/// Bill an auxiliary call (a judge, classifier, or other declared helper purpose
 /// that is not the agent turn) to its session's run record.
 ///
 /// The agent turn records its accepted result through
@@ -411,7 +411,7 @@ pub(crate) fn record_auxiliary_call_usage(
     result: &super::api::LlmResult,
 ) {
     let call_role = opts.context_manifest.call_role();
-    if !super::mock::is_auxiliary_call_role(call_role) {
+    if !super::prompt::is_auxiliary_call_role(call_role) {
         return;
     }
     let Some(session_id) = opts.session_id.as_deref() else {

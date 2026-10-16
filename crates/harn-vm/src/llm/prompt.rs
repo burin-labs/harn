@@ -179,6 +179,17 @@ pub(crate) struct ContextAssemblyManifest {
     egress_delta: Option<EgressDelta>,
 }
 
+/// A declared helper purpose acts on a session's behalf rather than
+/// continuing its conversation. Purpose names are open to applications;
+/// fixture vocabulary must not decide attribution or directive authority.
+/// The primary turn and undeclared fixture buckets retain conversation scope.
+pub(crate) fn is_auxiliary_call_role(role: &str) -> bool {
+    !matches!(
+        role,
+        "" | "unattributed" | "default" | "shared" | "agent.main"
+    )
+}
+
 impl Default for ContextAssemblyManifest {
     fn default() -> Self {
         Self::from_parts(PromptRoot::Composed, "unattributed", Vec::new(), None)

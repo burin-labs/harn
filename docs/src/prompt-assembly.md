@@ -209,6 +209,12 @@ inferred from `session_id`. Both the manifest and `provider_call_request`
 retain the resolved role and the current delegated-worker `actor_chain`, when
 one exists.
 
+A declared purpose other than `agent.main` acts as an auxiliary call for its
+session, including application-defined names such as `model.router`. Its usage
+is retained in the session's saved run record, but it does not receive or consume
+the primary conversation's directives. Undeclared calls and the `default` and
+`shared` fixture buckets keep their existing conversation scope.
+
 ## Relationship to other primitives
 
 - [System reminders](./system-reminders.md) are the dynamic subset of fragments:

@@ -547,6 +547,97 @@ fn plan_document_event_uses_the_canonical_plan_kind() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn application_auxiliary_calls_are_billed_without_consuming_agent_directives() {
+    crate::agent_sessions::reset_session_store();
+    crate::reset_thread_local_state();
+    let root = tempfile::tempdir().expect("temporary journal root");
+    let session = "application-auxiliary-usage";
+    let (_, mut journal) =
+        prepare_test_journal(session, &options(root.path()), "run-aux", "turn-aux").await;
+    install_test_journal(session, &mut journal);
+    let source = r#"
+import { agent_session_inject_reminder } from "std/agent/state"
+import { with_llm_script } from "std/testing"
+
+pipeline main(harness: Harness) {
+  const session = "application-auxiliary-usage"
+  agent_session_inject_reminder(
+    harness.agent, session,
+    {body: "Primary conversation contract", authority: "contract"},
+  )
+  with_llm_script(harness.llm, [
+    {text: "classified", input_tokens: 10, output_tokens: 2, simulated_cost_usd: 0.018376},
+    {text: "judged", input_tokens: 10, output_tokens: 2, simulated_cost_usd: 0.002},
+    {text: "ready", input_tokens: 10, output_tokens: 2, simulated_cost_usd: 0.003},
+  ], { ->
+    for role in ["application.classifier", "completion.judge", "agent.main"] {
+      harness.llm.call("Reply briefly.", nil, {provider: "mock", session_id: session, call_role: role})
+    }
+    const calls = harness.llm.mock_calls()
+    assert(len(calls) == 3)
+    for index in [0, 1, 2] {
+      const request = json_stringify(calls[index].messages) + to_string(calls[index]?.system ?? "")
+      harness.stdio.println("directed:" + to_string(contains(request, "Primary conversation contract")))
+    }
+  })
+}
+"#;
+    let chunk = crate::compile_source(source).expect("compile application auxiliary calls");
+    let output = tokio::task::LocalSet::new()
+        .run_until(async {
+            let mut vm = crate::new_vm();
+            crate::register_vm_stdlib(&mut vm);
+            vm.execute(&chunk)
+                .await
+                .expect("execute three declared call roles");
+            vm.output().to_string()
+        })
+        .await;
+    flush(session).await.expect("flush observed usage");
+    let store = session_store::open_canonical_agent_session(
+        &session_store::SessionStoreDir::under_root(root.path()),
+        session,
+        None,
+        SessionType::User,
+    )
+    .await
+    .expect("open durable usage");
+    let events = session_store::read_all_events(&store, session)
+        .await
+        .expect("read observed usage");
+    let roles = events
+        .iter()
+        .filter(|event| event.payload["transcript_event"]["kind"] == "llm_call")
+        .map(|event| event.payload["transcript_event"]["metadata"]["call_role"].clone())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        roles,
+        vec![
+            serde_json::json!("application.classifier"),
+            serde_json::json!("completion.judge")
+        ],
+        "both auxiliary purposes must be billed; the accepted primary turn has its own writer"
+    );
+    assert_eq!(
+        output
+            .lines()
+            .filter(|line| line.starts_with("directed:"))
+            .collect::<Vec<_>>(),
+        vec!["directed:false", "directed:false", "directed:true"],
+        "auxiliary calls must leave conversation directives for the primary turn"
+    );
+    let run = crate::orchestration::project_run_record_from_session(&store, session)
+        .await
+        .expect("project observed helper usage");
+    let usage = run.usage.expect("known nonzero usage must be present");
+    assert_eq!(usage.call_count, 2);
+    let cost = usage.cost_usd.expect("both helper prices must be known");
+    assert!((cost - 0.020376).abs() < 1e-12, "{usage:?}");
+    crate::agent_sessions::reset_session_store();
+    crate::reset_thread_local_state();
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn generic_agent_loop_projects_the_current_run_after_a_long_session_history() {
     generic_agent_loop_projects_the_current_run_for_format("native").await;
 }
@@ -593,7 +684,7 @@ async fn generic_agent_loop_projects_the_current_run_for_format(tool_format: &st
             .expect("append prior history");
     }
     let source = format!(
-        r###"
+        r#"
 import {{ agent_loop }} from "std/agent/loop"
 
 pipeline main(harness: Harness, task: unknown) {{
@@ -653,7 +744,7 @@ pipeline main(harness: Harness, task: unknown) {{
   harness.stdio.println("budget:" + json_stringify(result.adaptive_budget))
   harness.stdio.println("recap:" + json_stringify(result.recap.snapshot))
 }}
-"###,
+"#,
     );
     let chunk = crate::compile_source(&source).expect("compile agent loop");
     let local = tokio::task::LocalSet::new();
