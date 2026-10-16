@@ -160,14 +160,15 @@ pub fn completed_run_jobs(
     const path = terminal_check_path(identity, raw_job)
     let observed = raw_job
     if path != nil {
-      const evidence = verified_terminal_job(
-        identity,
-        raw_job,
-        github_api_json(process, clock, path),
-      )
-      if evidence != nil {
-        observed = raw_job + evidence
-        reconciled = reconciled + [to_string(raw_job.name)]
+      const lookup = try {
+        github_api_json(process, clock, path)
+      }
+      if is_ok(lookup) {
+        const evidence = verified_terminal_job(identity, raw_job, unwrap(lookup))
+        if evidence != nil {
+          observed = raw_job + evidence
+          reconciled = reconciled + [to_string(raw_job.name)]
+        }
       }
     }
     if observed.status != "completed" {
