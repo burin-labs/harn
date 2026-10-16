@@ -3259,6 +3259,15 @@ separators in relative dependency keys on every supported operating system.
 | `--keep-going` | Continue after a source fails to compile. The exit code still reports the failure. |
 | `-j`, `--jobs <N>` | Compile up to `N` sources at once when walking a directory. Defaults to the machine's available parallelism. Output, artifacts, and the summary are identical for every `N`. |
 | `--artifact-contract` | Print the machine-readable adjacent-artifact compatibility contract. |
+| `--warm-cache` | Prepare the runtime's shared entry, module, and interface caches for this installed tree, including reachable packages and stdlib. Conflicts with `--out`, `--relocatable`, and `--jobs`. |
+
+`harn precompile --warm-cache main.harn` prepares the machine where the source
+tree is installed. It uses the entrypoint's manifest authority for its imported
+modules, validates package declarations and the lock, and never executes source
+code or calls a model. Writes must succeed or the command fails. Set
+`HARN_CACHE_DIR` to choose the same cache used by the host. Repeat preparation
+after relocating the tree, changing its dependencies, or changing Harn; these
+machine-local cache keys include canonical paths.
 
 ### Regenerating artifacts, and what cannot go stale
 

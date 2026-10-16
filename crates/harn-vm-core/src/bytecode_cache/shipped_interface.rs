@@ -16,6 +16,7 @@ struct ShippedInterface {
     entry: ModuleCompilationContext,
     files: BTreeMap<String, ModuleCompilationContext>,
     package_import_aliases: Vec<String>,
+    package_lock_digest: Option<String>,
 }
 
 fn key(source: &str, context_hash: [u8; 32]) -> CacheKey {
@@ -36,21 +37,37 @@ fn label(entry: &Path, path: &Path) -> Option<String> {
 /// A compilation projection and its relocatable artifact, ready to publish
 /// once the caller's source validation has succeeded.
 pub struct PrecompiledInterface {
-    context: ModuleCompilationContext,
-    encoded: Option<Vec<u8>>,
+    payload: ShippedInterface,
+    key: CacheKey,
+    needs_write: bool,
     destination: PathBuf,
 }
 
 impl PrecompiledInterface {
     pub fn context(&self) -> &ModuleCompilationContext {
-        &self.context
+        &self.payload.entry
+    }
+
+    pub fn package_import_aliases(&self) -> &[String] {
+        &self.payload.package_import_aliases
+    }
+
+    /// Attach the package manager's validated root aliases and lock proof.
+    /// The runtime rechecks this authority before accepting an entry hit.
+    pub fn set_package_authority(&mut self, aliases: Vec<String>, digest: Option<String>) {
+        self.needs_write |= self.payload.package_import_aliases != aliases
+            || self.payload.package_lock_digest != digest;
+        self.payload.package_import_aliases = aliases;
+        self.payload.package_lock_digest = digest;
     }
 
     /// Persist new output, retaining a valid existing artifact byte for byte.
     pub fn store(&self) -> io::Result<()> {
-        if let Some(bytes) = &self.encoded {
+        if self.needs_write {
+            let payload = serialize_cache_payload(&self.payload)?;
+            let bytes = encode_artifact(&self.key, KIND_MODULE_INTERFACE, &payload);
             ensure_parent_dir(&self.destination)?;
-            crate::atomic_io::atomic_write_with_mode(&self.destination, bytes, ARTIFACT_MODE)?;
+            crate::atomic_io::atomic_write_with_mode(&self.destination, &bytes, ARTIFACT_MODE)?;
         }
         Ok(())
     }
@@ -63,21 +80,16 @@ pub fn prepare_precompiled_interface(
     source_path: &Path,
     source: &str,
 ) -> io::Result<PrecompiledInterface> {
-    if let Some(result) = recall_at(destination, source_path, source) {
-        return Ok(PrecompiledInterface {
-            context: result
-                .entry_compilation_context
-                .expect("validated interface"),
-            encoded: None,
-            destination: destination.to_path_buf(),
-        });
-    }
-    let result = walk_import_graph_fingerprinted(
-        source_path,
-        source,
-        CODEGEN_FINGERPRINT,
-        GraphOutputs::ManifestAndEntryContext,
-    );
+    let existing = recall_at(destination, source_path, source);
+    let needs_write = existing.is_none();
+    let result = existing.unwrap_or_else(|| {
+        walk_import_graph_fingerprinted(
+            source_path,
+            source,
+            CODEGEN_FINGERPRINT,
+            GraphOutputs::ManifestAndEntryContext,
+        )
+    });
     let context = result
         .entry_compilation_context
         .ok_or_else(|| io::Error::other("cannot derive a complete module interface"))?;
@@ -93,19 +105,16 @@ pub fn prepare_precompiled_interface(
         })
         .collect::<Option<BTreeMap<_, _>>>()
         .ok_or_else(|| io::Error::other("module interface dependencies span filesystem roots"))?;
-    let payload = serialize_cache_payload(&ShippedInterface {
-        entry: context.clone(),
+    let payload = ShippedInterface {
+        entry: context,
         files,
         package_import_aliases: manifest.package_import_aliases,
-    })?;
-    let bytes = encode_artifact(
-        &key(source, result.relocatable),
-        KIND_MODULE_INTERFACE,
-        &payload,
-    );
+        package_lock_digest: manifest.package_lock_digest,
+    };
     Ok(PrecompiledInterface {
-        context,
-        encoded: Some(bytes),
+        payload,
+        key: key(source, result.relocatable),
+        needs_write,
         destination: destination.to_path_buf(),
     })
 }
@@ -154,6 +163,7 @@ fn recall_at(destination: &Path, source_path: &Path, source: &str) -> Option<Gra
             .clone();
     }
     manifest.package_import_aliases = payload.package_import_aliases;
+    manifest.package_lock_digest = payload.package_lock_digest;
     result.entry_compilation_context = Some(payload.entry);
     Some(result)
 }

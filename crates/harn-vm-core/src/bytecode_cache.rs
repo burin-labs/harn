@@ -70,6 +70,7 @@ mod graph;
 mod header;
 mod interface;
 mod shipped_interface;
+mod warm;
 pub(crate) use embedded_stdlib::load_embedded_stdlib_module;
 pub use embedded_stdlib::{
     register_embedded_stdlib_artifacts, EmbeddedStdlibArtifact, EmbeddedStdlibRegistrationError,
@@ -82,6 +83,7 @@ use graph::{
 use header::{read_header_from, ParsedHeader};
 pub(crate) use interface::InterfaceSlot;
 pub use shipped_interface::{prepare_precompiled_interface, PrecompiledInterface};
+pub use warm::precompile_module_to_cache;
 
 /// Header magic for all bytecode-cache artifact families.
 pub const MAGIC: &[u8; 8] = b"HARNBC\0\0";
