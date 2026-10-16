@@ -29,7 +29,7 @@
     {"arm": "native1", "pass": "b", "compile_seconds": 113.42, "native_unit_seconds": 109.49, "package_seconds": 3.68, "tool_parse_seconds": 2.32, "workflow_seconds": 3.73, "prompt_scan_seconds": [1.11, 1.12, 1.11]},
     {"arm": "native0", "pass": "b", "compile_seconds": 91.44, "native_unit_seconds": 31.98, "package_seconds": 3.69, "tool_parse_seconds": 3.57, "workflow_seconds": 4.40, "prompt_scan_seconds": [1.56, 1.58, 1.56]}
   ],
-  "decision": "Do not change the CI profile on this evidence alone. Warm build improves by 21.98 seconds, while prompt scanning slows about 41 percent and both semantic suites slow. The active shared CLI producer runs on hosted four-core capacity without this incremental policy. A hosted-shaped build plus the full owning audit workload must establish total critical-path benefit before adoption. No ten-minute CI p90 improvement is established.",
+  "decision": "This initial owned-incremental experiment did not justify a profile change alone: the warm build improved by 21.98 seconds while prompt scanning slowed about 41 percent. The subsequent hosted-shaped, non-incremental experiment in bench/hosted-native-opt-level-9112.json measures the full owning audit consumers and records the adoption decision. No ten-minute CI p90 improvement is established here.",
   "evidence": {
     "remote_reports": "/home/ksinder/remote-builds/9112-cache-trial/native-opt-level-reports",
     "local_reports": "/private/tmp/harn-9112-native-opt-level-results",
