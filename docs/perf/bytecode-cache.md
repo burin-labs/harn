@@ -273,7 +273,8 @@ relocatability from a Harn version string.
 
 The adjacent `.harnifc` stores the entry's imported names and kinds and those
 of every dependency in its graph. Dependency labels are relative to the entry,
-with `/` separators. The payload contains no absolute paths or timestamps.
+with `/` separators; package dependencies use their place within the package,
+independent of install generation. The payload contains no absolute paths or timestamps.
 The header uses the same relocatable graph identity as an adjacent entry chunk,
 including source content, resolution, embedded stdlib, compiler build, and options.
 
