@@ -176,6 +176,10 @@ fn main(harness: Harness) -> int {{
     .await;
     drop(cwd_guard);
 
+    if crate::tests::common::sandbox_host::assert_unavailable_worktree_refusal(&outcome) {
+        harn_vm::reset_thread_local_state();
+        return;
+    }
     assert_eq!(
         outcome.exit_code, 0,
         "stderr:\n{}\nstdout:\n{}",

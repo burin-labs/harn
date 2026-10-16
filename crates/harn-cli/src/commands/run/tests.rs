@@ -694,6 +694,11 @@ pipeline main(harness: Harness) {{
     )
     .await;
 
+    #[cfg(target_os = "macos")]
+    if crate::tests::common::sandbox_host::assert_unavailable_worktree_refusal(&outcome) {
+        harn_vm::reset_thread_local_state();
+        return;
+    }
     assert_eq!(outcome.exit_code, 0, "stderr:\n{}", outcome.stderr);
     assert_eq!(outcome.stdout.trim(), "payload");
     assert!(
@@ -760,6 +765,11 @@ pipeline main(harness: Harness) {{
     )
     .await;
 
+    #[cfg(target_os = "macos")]
+    if crate::tests::common::sandbox_host::assert_unavailable_worktree_refusal(&outcome) {
+        harn_vm::reset_thread_local_state();
+        return;
+    }
     assert_eq!(outcome.exit_code, 0, "stderr:\n{}", outcome.stderr);
     harn_vm::reset_thread_local_state();
 }
@@ -839,6 +849,11 @@ pipeline main(harness: Harness) {
 
     std::env::remove_var(src);
 
+    #[cfg(target_os = "macos")]
+    if crate::tests::common::sandbox_host::assert_unavailable_worktree_refusal(&outcome) {
+        harn_vm::reset_thread_local_state();
+        return;
+    }
     assert_eq!(outcome.exit_code, 0, "stderr:\n{}", outcome.stderr);
     assert_eq!(
         outcome.stdout.lines().collect::<Vec<_>>(),
@@ -906,6 +921,11 @@ pipeline main(harness: Harness) {
 
     std::env::remove_var(secret);
 
+    #[cfg(target_os = "macos")]
+    if crate::tests::common::sandbox_host::assert_unavailable_worktree_refusal(&outcome) {
+        harn_vm::reset_thread_local_state();
+        return;
+    }
     assert_eq!(outcome.exit_code, 0, "stderr:\n{}", outcome.stderr);
     assert_eq!(outcome.stdout.trim(), "CLOSED");
     assert!(

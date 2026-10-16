@@ -153,9 +153,20 @@ fn assert_report_passes(report: &serde_json::Value, stdout: &str) {
     );
 }
 
+fn assert_host_verification(report: &serde_json::Value, stdout: &str, command: &str) {
+    #[cfg(target_os = "macos")]
+    if let Some(refusal) = crate::test_util::process::unavailable_worktree_sandbox() {
+        assert_verification_refused(report, &refusal.to_string(), command);
+        return;
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = command;
+    assert_report_passes(report, stdout);
+}
+
 /// A command refusal must remain failed verification in the real playground report.
 #[cfg(target_os = "macos")]
-fn assert_comment_verification_refused(report: &serde_json::Value, expected: &str) {
+fn assert_verification_refused(report: &serde_json::Value, expected: &str, command: &str) {
     assert_eq!(report["verdict"], "fail", "{report}");
     let stages = report["stages"].as_array().expect("executed stages");
     let failed: Vec<_> = stages
@@ -192,7 +203,7 @@ fn assert_comment_verification_refused(report: &serde_json::Value, expected: &st
     assert!(
         events.iter().any(|event| {
             event["metadata"]["tool_call_id"] == *call_id
-                && event["metadata"]["raw_input"]["command"] == "node scripts/verify-comment.js"
+                && event["metadata"]["raw_input"]["command"] == command
         }),
         "the default verifier command must have been reached: {report}"
     );
@@ -301,14 +312,7 @@ fn burin_mini_comment_file_fixture_run_updates_workspace_copy() {
     assert!(stdout.contains("task_id=comment_file"), "stdout={stdout}");
     let report = generated_report_path(&experiment_root, &stdout, "comment_file-latest.json");
     let report_json = read_json(&report);
-    #[cfg(target_os = "macos")]
-    if let Some(refusal) = crate::test_util::process::unavailable_worktree_sandbox() {
-        assert_comment_verification_refused(&report_json, &refusal.to_string());
-    } else {
-        assert_report_passes(&report_json, &stdout);
-    }
-    #[cfg(not(target_os = "macos"))]
-    assert_report_passes(&report_json, &stdout);
+    assert_host_verification(&report_json, &stdout, "node scripts/verify-comment.js");
     assert_eq!(report_json["workflow_status"], "completed");
     let action_ids: Vec<String> = report_json["action_graph"]["actions"]
         .as_array()
@@ -371,7 +375,7 @@ fn burin_mini_rate_limit_fixture_run_wires_middleware() {
     );
     let report = generated_report_path(&experiment_root, &stdout, "rate_limit_auth-latest.json");
     let report_json = read_json(&report);
-    assert_report_passes(&report_json, &stdout);
+    assert_host_verification(&report_json, &stdout, "node scripts/verify-rate-limit.js");
     assert_eq!(report_json["workflow_status"], "completed");
     assert_eq!(
         report_json["research"].as_array().map(Vec::len),
@@ -483,7 +487,7 @@ fn burin_mini_rate_limit_liveish_fixture_ignores_redundant_read_actions() {
     assert!(!stdout.contains("tool_rejected"), "stdout={stdout}");
     let report = generated_report_path(&experiment_root, &stdout, "rate_limit_auth-latest.json");
     let report_json = read_json(&report);
-    assert_report_passes(&report_json, &stdout);
+    assert_host_verification(&report_json, &stdout, "node scripts/verify-rate-limit.js");
     assert_eq!(report_json["workflow_status"], "completed");
     assert_eq!(
         report_json["research"].as_array().map(Vec::len),
@@ -524,7 +528,7 @@ fn burin_mini_rate_limit_weak_verify_plan_normalizes_to_single_verify_action() {
     assert!(!stdout.contains("tool_rejected"), "stdout={stdout}");
     let report = generated_report_path(&experiment_root, &stdout, "rate_limit_auth-latest.json");
     let report_json = read_json(&report);
-    assert_report_passes(&report_json, &stdout);
+    assert_host_verification(&report_json, &stdout, "node scripts/verify-rate-limit.js");
     assert_eq!(report_json["workflow_status"], "completed");
     let actions = report_json["action_graph"]["actions"]
         .as_array()
@@ -584,7 +588,7 @@ fn burin_mini_rate_limit_overresearch_planner_commits_final_action_graph() {
     );
     let report = generated_report_path(&experiment_root, &stdout, "rate_limit_auth-latest.json");
     let report_json = read_json(&report);
-    assert_report_passes(&report_json, &stdout);
+    assert_host_verification(&report_json, &stdout, "node scripts/verify-rate-limit.js");
     assert_eq!(report_json["workflow_status"], "completed");
     assert_eq!(
         report_json["research"].as_array().map(Vec::len),
@@ -661,6 +665,9 @@ mod stage_summary_tests {
     #[cfg(target_os = "macos")]
     #[test]
     fn native_qualification_cannot_accept_an_unavailable_host() {
+        use harn_cli::tests::common::sandbox_host::{
+            native_qualification_profile, worktree_sandbox_for_host,
+        };
         use harn_vm::process_sandbox::{
             SandboxMechanism, SandboxMechanismAvailability, SandboxMechanismUnavailable,
             SandboxRequirement,
@@ -677,25 +684,21 @@ mod stage_summary_tests {
             "confines_processes": false,
             "os_hardened_refusal": harn_vm::value::json::vm_value_to_json(&refusal.thrown_value()),
         });
-        let compatible =
-            crate::test_util::process::worktree_sandbox_for_host(unsupported.clone(), "ci");
+        let compatible = worktree_sandbox_for_host(unsupported.clone(), "ci");
         assert!(
             compatible.is_some(),
             "compatibility checks must retain a measured refusal"
         );
         let required = std::panic::catch_unwind(|| {
-            crate::test_util::process::worktree_sandbox_for_host(
-                unsupported,
-                crate::test_util::process::native_qualification_profile(),
-            )
+            worktree_sandbox_for_host(unsupported, native_qualification_profile())
         });
         assert!(
             required.is_err(),
             "a required qualification cannot pass by accepting a refusal"
         );
-        assert!(crate::test_util::process::worktree_sandbox_for_host(
+        assert!(worktree_sandbox_for_host(
             serde_json::json!({"confines_processes": true}),
-            crate::test_util::process::native_qualification_profile()
+            native_qualification_profile()
         )
         .is_none());
     }
