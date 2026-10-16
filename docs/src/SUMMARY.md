@@ -45,6 +45,7 @@
 - [LLM quick reference](./docs/llm/harn-quickref.md)
 - [Best practices](./best-practices.md)
 - [Run an A/B experiment](./cookbooks/ab-experiment.md)
+- [Run an experiment inside one allowance](./cookbooks/conservative-experiment.md)
 - [Coming from LangChain](./cookbooks/coming-from-langchain.md)
 - [Compile a bounded experiment](./cookbooks/compile-hypothesis.md)
 - [Pipeline lifecycle cookbook](./cookbooks/lifecycle.md)

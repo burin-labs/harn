@@ -1036,6 +1036,8 @@ unreserved attempt is refused. Independent top-level executions have separate
 ledgers. Allocate disjoint budgets to separate processes: for an experiment,
 actor and grader allocations across both arms must sum to the whole allowance.
 The runtime does not turn separate process budgets into a shared batch cap.
+For a runnable actor/grader sequence with disjoint process allocations, see
+[Run an experiment inside one allowance](../cookbooks/conservative-experiment.md).
 
 Full, streaming, offthread, retry, and fallback attempts use the same admission
 boundary. Complete, consistent provider token counters release only the unused
