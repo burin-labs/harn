@@ -116,6 +116,23 @@ struct Nested {
     outside_written: bool,
 }
 
+impl Nested {
+    fn refused_on_unsupported_host(&self) -> bool {
+        let Some(refusal) = crate::sandbox_host::unavailable_worktree_sandbox() else {
+            return false;
+        };
+        assert_eq!(self.report["spawned"], false, "{}", self.report);
+        assert_eq!(
+            self.report["error"],
+            refusal.into_error().to_string(),
+            "{}",
+            self.report
+        );
+        assert!(!self.inside_written && !self.outside_written);
+        true
+    }
+}
+
 /// Run `test` again under `outer_profile`, as the child side, with the
 /// child's policy shaped by `case`.
 fn run_nested(
@@ -215,6 +232,9 @@ fn a_child_inherits_an_outer_sandbox_as_strict_as_its_policy() {
         Case::Workspace,
         harn_profile,
     );
+    if nested.refused_on_unsupported_host() {
+        return;
+    }
     assert_eq!(nested.report["spawned"], true, "{}", nested.report);
     assert!(nested.inside_written, "{}", nested.report);
     assert!(!nested.outside_written, "{}", nested.report);
@@ -234,6 +254,9 @@ fn an_explicitly_granted_outside_directory_takes_the_nested_write() {
         Case::GrantOutside,
         harn_profile,
     );
+    if nested.refused_on_unsupported_host() {
+        return;
+    }
     assert_eq!(nested.report["spawned"], true, "{}", nested.report);
     assert!(nested.inside_written, "{}", nested.report);
     assert!(nested.outside_written, "{}", nested.report);
@@ -251,6 +274,9 @@ fn a_weaker_outer_sandbox_refuses_the_spawn_with_its_reason() {
         Case::Workspace,
         |_, _| "(version 1)(allow default)(deny network-outbound)".to_string(),
     );
+    if nested.refused_on_unsupported_host() {
+        return;
+    }
     assert_eq!(nested.report["spawned"], false, "{}", nested.report);
     let error = nested.report["error"].as_str().unwrap_or_default();
     assert!(
@@ -270,6 +296,9 @@ fn an_outer_sandbox_must_pin_a_denial_inside_a_writable_root() {
     }
     let test = "stdlib::sandbox::macos::nested::tests::an_outer_sandbox_must_pin_a_denial_inside_a_writable_root";
     let pinned = run_nested(test, Case::DenyInside, harn_profile);
+    if pinned.refused_on_unsupported_host() {
+        return;
+    }
     assert_eq!(pinned.report["spawned"], true, "{}", pinned.report);
 
     let unpinned = run_nested(test, Case::DenyInside, |policy, exe| {
@@ -301,6 +330,9 @@ fn an_absent_denial_inside_a_writable_root_is_not_inherited() {
         Case::DenyAbsent,
         harn_profile,
     );
+    if nested.refused_on_unsupported_host() {
+        return;
+    }
     assert_eq!(nested.report["spawned"], false, "{}", nested.report);
     let error = nested.report["error"].as_str().unwrap_or_default();
     assert!(

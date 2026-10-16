@@ -6,9 +6,6 @@ use super::*;
 
 #[test]
 fn sandbox_exec_missing_program_matches_direct_spawn_error() {
-    if !Path::new(SANDBOX_EXEC_PATH).exists() {
-        return;
-    }
     let cwd = std::env::current_dir().expect("current dir");
     let mut policy = macos_policy_with_workspace_ops(&[]);
     policy.workspace_roots = vec![cwd.display().to_string()];
@@ -21,18 +18,17 @@ fn sandbox_exec_missing_program_matches_direct_spawn_error() {
         .output()
         .map_err(spawn_error)
         .expect_err("direct missing program");
-    let sandboxed =
-        Backend::run_to_output(missing, &[], &config, &policy, SandboxProfile::Worktree)
-            .expect_err("sandboxed missing program");
+    let result = Backend::run_to_output(missing, &[], &config, &policy, SandboxProfile::Worktree);
+    if crate::sandbox_host::assert_unavailable_result(&result) {
+        return;
+    }
+    let sandboxed = result.expect_err("sandboxed missing program");
 
     assert_eq!(sandboxed.to_string(), direct.to_string());
 }
 
 #[test]
 fn sandbox_exec_keeps_genuine_nonzero_exit_as_output() {
-    if !Path::new(SANDBOX_EXEC_PATH).exists() {
-        return;
-    }
     let cwd = std::env::current_dir().expect("current dir");
     let mut policy = macos_policy_with_workspace_ops(&[]);
     policy.workspace_roots = vec![cwd.display().to_string()];
@@ -40,14 +36,17 @@ fn sandbox_exec_keeps_genuine_nonzero_exit_as_output() {
         cwd: Some(cwd),
         ..Default::default()
     };
-    let output = Backend::run_to_output(
+    let result = Backend::run_to_output(
         "/bin/sh",
         &strings(["-c", "exit 71"]),
         &config,
         &policy,
         SandboxProfile::Worktree,
-    )
-    .expect("sandboxed nonzero exit");
+    );
+    if crate::sandbox_host::assert_unavailable_result(&result) {
+        return;
+    }
+    let output = result.expect("sandboxed nonzero exit");
 
     assert_eq!(output.status.code(), Some(71));
 }
@@ -831,11 +830,14 @@ fn sandbox_exec_profile_allows_swiftpm_manifest_evaluation() {
     // Manifest evaluation exercises SwiftPM's own sandbox and toolchain
     // lookup without paying to compile and link an unrelated test bundle.
     let args = strings(["package", "dump-package"]);
+    let prepared = wrap_with_sandbox_exec("swift", &args, &policy, SandboxProfile::Worktree);
+    if crate::sandbox_host::assert_unavailable_result(&prepared) {
+        return;
+    }
     let PrepareOutcome::WrappedExec {
         wrapper,
         args: wrapped_args,
-    } = wrap_with_sandbox_exec("swift", &args, &policy, SandboxProfile::Worktree)
-        .expect("wrap SwiftPM manifest evaluation")
+    } = prepared.expect("wrap SwiftPM manifest evaluation")
     else {
         panic!("macOS backend should wrap with sandbox-exec");
     };
@@ -1283,7 +1285,9 @@ fn a_live_confined_child_is_refused_a_denied_file_and_allowed_its_sibling() {
 
 #[test]
 fn unix_socket_roots_admit_sockets_under_the_root_and_nothing_over_ip() {
+    let workspace = tempfile::tempdir().expect("real workspace for UserTemp projection");
     let mut policy = macos_policy_with_workspace_ops(&["read_text"]);
+    policy.workspace_roots = vec![workspace.path().display().to_string()];
     policy.process_sandbox.unix_socket_roots = vec!["/tmp/harn-workspace".to_string()];
 
     let profile = render_profile(&policy);

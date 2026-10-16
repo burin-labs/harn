@@ -466,8 +466,12 @@ fn real_run_command_reports_sandboxed_missing_program_as_typed_not_found() {
         vlist_str(&["harn-command-that-does-not-exist-5662"]),
     );
     req.insert("cwd".into(), vstr(&workspace.path().to_string_lossy()));
-    let error = call("hostlib_tools_run_command", req).expect_err("missing program must fail");
+    let result = call("hostlib_tools_run_command", req);
     pop_execution_policy();
+    if super::sandbox_host::assert_unavailable_tool(&result) {
+        return;
+    }
+    let error = result.expect_err("missing program must fail");
 
     assert_missing_process_error(
         error,

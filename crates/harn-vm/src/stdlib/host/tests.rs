@@ -181,10 +181,12 @@ fn sandboxed_process_exec_neutralizes_rustc_wrappers_after_caller_env_policy() {
         ])),
     );
 
-    let cmd = build_sandboxed_command(&params, "process.exec")
-        .expect("build command")
-        .command;
+    let result = build_sandboxed_command(&params, "process.exec");
     crate::orchestration::pop_execution_policy();
+    if crate::sandbox_host::assert_unavailable_result(&result) {
+        return;
+    }
+    let cmd = result.expect("build command").command;
     let env = command_env(&cmd);
 
     for key in [
@@ -1024,15 +1026,13 @@ fn process_exec_delivers_stdin_to_a_real_child() {
 
 // Drive the real `host_call("process","exec")` builder under a restricted
 // policy and read back the `$TMPDIR` the child actually saw. This is the
-// agent-facing path; the assertion is OS-independent (it observes the
-// injected env, not OS-sandbox enforcement), so it pins the mechanism on
-// every CI host while the live OS-level link proof runs on a Linux host
-// with Landlock available.
+// agent-facing path. Capable hosts observe the actual injected environment;
+// unsupported hosts must return their measured refusal through this path.
 #[cfg(unix)]
 async fn process_exec_tmpdir_probe(
     workspace: &std::path::Path,
     caller_env: Option<VmValue>,
-) -> String {
+) -> Option<String> {
     let mut env_pairs = vec![(
         crate::value::intern_key("mode"),
         VmValue::String(arcstr::ArcStr::from("argv")),
@@ -1053,23 +1053,21 @@ async fn process_exec_tmpdir_probe(
     crate::orchestration::push_execution_policy(crate::orchestration::CapabilityPolicy {
         sandbox_profile: crate::orchestration::SandboxProfile::Worktree,
         workspace_roots: vec![workspace.to_string_lossy().into_owned()],
-        // Keep OS confinement out of this unit assertion regardless of host
-        // Landlock/seatbelt availability; we are pinning the env injection,
-        // not OS enforcement (which the Linux Landlock run proves
-        // end-to-end).
         ..crate::orchestration::CapabilityPolicy::default()
     });
-    std::env::set_var("HARN_HANDLER_SANDBOX", "off");
-    let result = super::dispatch_process_exec(&params, serde_json::Value::Null)
-        .await
-        .expect("process.exec result");
-    std::env::remove_var("HARN_HANDLER_SANDBOX");
+    let result = super::dispatch_process_exec(&params, serde_json::Value::Null).await;
     crate::orchestration::pop_execution_policy();
-    result
-        .as_dict()
-        .and_then(|d| d.get("stdout"))
-        .map(VmValue::display)
-        .unwrap_or_default()
+    if crate::sandbox_host::assert_unavailable_result(&result) {
+        return None;
+    }
+    Some(
+        result
+            .expect("process.exec result")
+            .as_dict()
+            .and_then(|d| d.get("stdout"))
+            .map(VmValue::display)
+            .expect("successful process.exec must report stdout"),
+    )
 }
 
 #[cfg(unix)]
@@ -1077,7 +1075,9 @@ async fn process_exec_tmpdir_probe(
 fn process_exec_injects_workspace_local_tmpdir() {
     run_host_async_test(|| async {
         let workspace = tempfile::tempdir().expect("workspace");
-        let tmpdir = process_exec_tmpdir_probe(workspace.path(), None).await;
+        let Some(tmpdir) = process_exec_tmpdir_probe(workspace.path(), None).await else {
+            return;
+        };
 
         assert!(
             !tmpdir.is_empty(),
@@ -1118,7 +1118,10 @@ fn process_exec_respects_caller_pinned_tmpdir() {
             )),
         )]));
 
-        let tmpdir = process_exec_tmpdir_probe(workspace.path(), Some(caller_env)).await;
+        let Some(tmpdir) = process_exec_tmpdir_probe(workspace.path(), Some(caller_env)).await
+        else {
+            return;
+        };
 
         assert_eq!(
             std::path::PathBuf::from(&tmpdir),
