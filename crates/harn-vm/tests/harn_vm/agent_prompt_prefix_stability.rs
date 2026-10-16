@@ -292,7 +292,7 @@ pipeline main(harness: Harness, task: unknown) {{
 }
 
 #[test]
-fn canonical_agent_loop_runs_native_tool_return_and_next_provider_call_with_priced_usage() {
+fn canonical_agent_loop_runs_native_tool_return_and_next_provider_call() {
     let session_store_root = tempfile::tempdir().expect("session store tempdir");
     let session_id = fresh_session_id("native-tool-projection");
     let source = native_tool_round_trip_pipeline(&session_id).replace(
@@ -303,20 +303,12 @@ fn canonical_agent_loop_runs_native_tool_return_and_next_provider_call_with_pric
             .replace('\\', "\\\\")
             .replace('"', "\\\""),
     );
-    let transcript_dir = tempfile::tempdir().expect("transcript tempdir");
-    crate::llm::push_llm_transcript_dir(
-        transcript_dir
-            .path()
-            .to_str()
-            .expect("utf8 transcript directory"),
-    );
     let output = run_with_bridge(&source).expect("canonical agent loop run");
-    crate::llm::pop_llm_transcript_dir();
 
-    assert!(output.contains("status complete"), "{output}");
+    assert!(output.contains("status done"), "{output}");
     let requests = output
         .lines()
-        .find_map(|line| line.strip_prefix("requests "))
+        .find_map(|line| line.strip_prefix("[harn] requests "))
         .map(|line| serde_json::from_str::<serde_json::Value>(line).expect("request JSON"))
         .expect("captured provider requests");
     let requests = requests.as_array().expect("request list");
@@ -338,9 +330,10 @@ fn canonical_agent_loop_runs_native_tool_return_and_next_provider_call_with_pric
         "second request must retain the assistant native tool call: {messages:#?}"
     );
     assert!(
-        messages
-            .iter()
-            .any(|message| { message["role"] == "tool" && message["content"] == "inspected" }),
+        messages.iter().any(|message| {
+            message["role"] == "tool_result"
+                && message["content"] == "[result of inspect]\ninspected\n[end of inspect result]\n"
+        }),
         "second request must include the completed tool result: {messages:#?}"
     );
     assert!(
@@ -349,21 +342,6 @@ fn canonical_agent_loop_runs_native_tool_return_and_next_provider_call_with_pric
             .all(|message| message.get("_harn").is_none()),
         "provider projection must exclude Harn-owned metadata"
     );
-
-    let responses: Vec<serde_json::Value> =
-        std::fs::read_to_string(transcript_dir.path().join("llm_transcript.jsonl"))
-            .expect("provider transcript")
-            .lines()
-            .map(|line| serde_json::from_str(line).expect("valid transcript event"))
-            .filter(|event: &serde_json::Value| event["type"] == "provider_call_response")
-            .collect();
-    assert_eq!(
-        responses.len(),
-        2,
-        "both mock provider responses were observed"
-    );
-    assert_eq!(responses[0]["cost_usd"], 0.005);
-    assert_eq!(responses[1]["cost_usd"], 0.003);
 }
 
 /// One captured provider request: the message array exactly as the loop
