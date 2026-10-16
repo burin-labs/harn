@@ -3247,8 +3247,11 @@ harn precompile src/             # walk a tree for every .harn file
 harn precompile src/ --out build # write artifacts to a sibling tree instead
 ```
 
-Artifacts are written beside each source as `<name>.harnbc` for an entry chunk
-and `<name>.harnmod` for a module, unless `--out` redirects them.
+Artifacts are written beside each source as `<name>.harnbc` for an entry chunk,
+`<name>.harnmod` for module bytecode, and `<name>.harnifc` for imported interfaces,
+unless `--out` redirects them. Ship all three families with the complete source
+tree. Directory artifacts retain their cache hits after relocation, with `/`
+separators in relative dependency keys on every supported operating system.
 
 | Flag | Description |
 |---|---|
@@ -3260,22 +3263,18 @@ and `<name>.harnmod` for a module, unless `--out` redirects them.
 ### Regenerating artifacts, and what cannot go stale
 
 `harn precompile` is also the command that refreshes these artifacts for a
-source tree. Re-running it over the same tree rewrites every artifact from
-current source; deleting the `.harnbc` and `.harnmod` files and re-running is
-equivalent, because a missing artifact is compiled on demand.
+source tree. Re-running it reuses valid artifacts and replaces stale or missing
+ones. Deleting the `.harnbc`, `.harnmod`, and `.harnifc` files forces regeneration.
 
-An artifact that no longer matches its source is not used. Both families are
+An artifact that no longer matches its source is not used. All three families are
 found by a key derived from source content, not from a timestamp: an entry
 chunk by a hash of the entry source, a module artifact by a hash of the module
 source, each combined with the Harn release and a compiler fingerprint. A
 candidate whose header does not carry the key being looked up is rejected and
-the source is compiled instead. So editing a file cannot leave a run executing
-the previous version of it, and an artifact older than the source beside it is
-not evidence that the old code ran.
-
-That is worth stating because the opposite is a natural thing to suspect. If a
-run appears to ignore an edit, the artifacts are the wrong place to look
-first; check that the edited file is the one the run actually imports.
+the source is compiled instead. Shipped interfaces also check the complete
+dependency graph's content and resolution before supplying imported names and
+kinds. A missing, stale, or foreign interface falls back to derivation and the
+shared cache. Set `HARN_BYTECODE_CACHE_DEBUG=1` to diagnose cache write failures.
 
 ## harn portal
 

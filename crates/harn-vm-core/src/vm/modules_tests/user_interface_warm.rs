@@ -159,6 +159,70 @@ fn a_warm_import_of_an_unchanged_graph_parses_nothing() {
 }
 
 #[test]
+fn shipped_interfaces_survive_relocation_without_parsing() {
+    use crate::bytecode_cache::{
+        prepare_precompiled_interface, CacheKey, INTERFACE_CACHE_EXTENSION,
+    };
+    use crate::module_artifact::{
+        compile_module_artifact_from_source_with_context, ModuleProvenance,
+    };
+    use crate::module_source::ModuleSource;
+
+    let _guard = cache_test_guard();
+    let _cache = CacheDir::install();
+    let tree = Tree::new();
+    for path in [&tree.root, &tree.mid, &tree.leaf] {
+        let source = std::fs::read_to_string(path).unwrap();
+        let dest = path.with_extension(INTERFACE_CACHE_EXTENSION);
+        let interface = prepare_precompiled_interface(&dest, path, &source).unwrap();
+        interface.store_at(&dest).unwrap();
+        let artifact =
+            compile_module_artifact_from_source_with_context(path, &source, interface.context())
+                .unwrap();
+        let key = CacheKey::from_module_source(
+            &ModuleSource::from_text(source.as_str()),
+            interface.context(),
+            ModuleProvenance::User,
+        );
+        crate::bytecode_cache::store_module_at(&path.with_extension("harnmod"), &key, &artifact)
+            .unwrap();
+    }
+    let relocated = tempfile::tempdir().unwrap();
+    for entry in std::fs::read_dir(tree._dir.path()).unwrap() {
+        let entry = entry.unwrap();
+        std::fs::rename(entry.path(), relocated.path().join(entry.file_name())).unwrap();
+    }
+    let root = relocated.path().join("root.harn");
+    let (walks, parses) = parse_work_during(|| {
+        assert!(import_fresh(&runtime(), &root).contains(&"describe".to_string()));
+    });
+    assert!(
+        walks > 0,
+        "shipped graph identity must actually be validated"
+    );
+    assert_eq!(
+        parses, 0,
+        "a shipped interface must supply every module projection"
+    );
+
+    // A changed export changes the lowering interface even though root's bytes
+    // and all shipped artifacts remain untouched.
+    std::fs::write(
+        relocated.path().join("leaf.harn"),
+        "pub enum Shade { Ready(message: string) Empty }\n",
+    )
+    .unwrap();
+    let (_, parses) = parse_work_during(|| {
+        let context = derived_interface(&root);
+        assert!(!context.enum_candidates().contains(&"Color".to_string()));
+    });
+    assert!(
+        parses > 0,
+        "stale shipped interfaces must rederive, not suppress preparation"
+    );
+}
+
+#[test]
 fn editing_a_leaf_re_derives_its_importers_interface() {
     let _guard = cache_test_guard();
     let _cache = CacheDir::install();

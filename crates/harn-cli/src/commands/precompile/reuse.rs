@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 
 use harn_vm::module_artifact::ModuleCompilationContext;
 
-use crate::compiler_context::{imported_symbols_for_source, SourceCompilerAuthority};
+use crate::compiler_context::SourceCompilerAuthority;
 
 /// The keys the two artifacts for one source will be stored under.
 pub(super) struct ArtifactKeys {
@@ -37,27 +37,26 @@ impl ArtifactKeys {
     }
 }
 
-/// Derive both keys, and return the import graph projection they were derived
-/// from so the compile that may follow does not walk it a second time.
+/// Derive both bytecode keys from the prepared imported interface.
 pub(super) fn artifact_keys(
     source_path: &Path,
     source: &str,
     source_root: Option<&Path>,
     authority: &SourceCompilerAuthority,
-) -> (ArtifactKeys, ModuleCompilationContext) {
+    compilation_context: &ModuleCompilationContext,
+) -> ArtifactKeys {
     let entry = if source_root.is_some() {
         harn_vm::bytecode_cache::CacheKey::from_relocatable_source(source_path, source)
     } else {
         harn_vm::bytecode_cache::CacheKey::from_source(source_path, source)
     };
-    let compilation_context = imported_symbols_for_source(source_path, source);
     let module_source = harn_vm::module_source::ModuleSource::from_text(source);
     let module = harn_vm::bytecode_cache::CacheKey::from_module_source(
         &module_source,
-        &compilation_context,
+        compilation_context,
         authority.module_provenance(),
     );
-    (ArtifactKeys { entry, module }, compilation_context)
+    ArtifactKeys { entry, module }
 }
 
 /// What one source cost this invocation.
