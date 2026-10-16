@@ -6,6 +6,9 @@ The package runs on ordinary Git projects. Repository names, build commands,
 execution environments, verification keys, and budgets belong to installation
 policy.
 
+Policy identity treats an integral repair budget such as `5` and `5.0` as the same
+value across JSON transport. A changed budget still requires a new signed policy.
+
 [Install and control Smart Ship](docs/install.md).
 [Run stock verification in CI](docs/ci.md).
 
