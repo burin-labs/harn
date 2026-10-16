@@ -3259,7 +3259,7 @@ separators in relative dependency keys on every supported operating system.
 | `--keep-going` | Continue after a source fails to compile. The exit code still reports the failure. |
 | `-j`, `--jobs <N>` | Compile up to `N` sources at once when walking a directory. Defaults to the machine's available parallelism. Output, artifacts, and the summary are identical for every `N`. |
 | `--artifact-contract` | Print the machine-readable adjacent-artifact compatibility contract. |
-| `--warm-cache` | Prepare the runtime's shared entry, module, and interface caches for this installed tree, including reachable packages and stdlib. Conflicts with `--out`, `--relocatable`, and `--jobs`. |
+| `--warm-cache` | Prepare the runtime's shared entry, module, and interface caches for this installed tree, including reachable packages and the complete stdlib catalog. Conflicts with `--out`, `--relocatable`, and `--jobs`. |
 
 `harn precompile --warm-cache main.harn` prepares the machine where the source
 tree is installed. It uses the entrypoint's manifest authority for its imported
@@ -3271,7 +3271,11 @@ machine-local cache keys include canonical paths.
 
 Use the executing backend's builtin catalog. Embedded hosts whose catalog
 differs from the standalone CLI prepare through
-`harn_vm::bytecode_cache::CachePrecompiler` linked into that host.
+`harn_vm::bytecode_cache::CachePrecompiler` linked into that host. After
+registering the backend's builtins, call `prepare_stdlib_catalog` once, then
+`prepare` for each source root. This also prepares stdlib modules loaded
+dynamically by native capabilities. A host that invokes a standalone CLI
+helper must also prepare that helper's entrypoints with the CLI.
 
 ### Regenerating artifacts, and what cannot go stale
 

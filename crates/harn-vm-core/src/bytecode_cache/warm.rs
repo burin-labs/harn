@@ -15,6 +15,7 @@ use crate::VmError;
 #[derive(Default)]
 pub struct CachePrecompiler {
     modules: BTreeSet<String>,
+    stdlib_prepared: bool,
 }
 
 impl CachePrecompiler {
@@ -22,9 +23,23 @@ impl CachePrecompiler {
         self.modules.len()
     }
 
+    /// Prepare every module in the installed stdlib catalog, including modules
+    /// loaded dynamically by native capabilities rather than source imports.
+    pub fn prepare_stdlib_catalog(&mut self) -> Result<(), VmError> {
+        require_cache()?;
+        if !self.stdlib_prepared {
+            for entry in harn_modules::stdlib_catalog().sources {
+                self.prepare_stdlib(entry.module)?;
+            }
+            self.stdlib_prepared = true;
+        }
+        Ok(())
+    }
+
     /// Prepare modules and the root's imported interface without instantiating
     /// source. Return the same entry projection and store identity to the
     /// caller, which owns entry compilation and package-manager authority.
+    /// Call `prepare_stdlib_catalog` first when preparing an executing backend.
     /// Unlike execution's opportunistic writes, persistence failures are errors.
     pub fn prepare(
         &mut self,
@@ -32,19 +47,37 @@ impl CachePrecompiler {
         source: &str,
         provenance: ModuleProvenance,
     ) -> Result<(ModuleCompilationContext, LookupOutcome), VmError> {
-        if !cache_enabled() || cache_dir().is_none() {
-            return Err(VmError::Runtime(
-                "module cache is disabled or unavailable".into(),
-            ));
-        }
-        let result = shipped_interface::recall(path, source).unwrap_or_else(|| {
-            walk_import_graph_fingerprinted(
-                path,
-                source,
-                CODEGEN_FINGERPRINT,
-                GraphOutputs::ManifestAndEntryContext,
-            )
-        });
+        require_cache()?;
+        let slot = InterfaceSlot::open(path, source)
+            .ok_or_else(|| VmError::Runtime("module interface cache is unavailable".into()))?;
+        let result = shipped_interface::recall(path, source)
+            .or_else(|| {
+                let (context, manifest) = slot.recall()?;
+                let mut result = walk_import_graph_fingerprinted(
+                    path,
+                    source,
+                    CODEGEN_FINGERPRINT,
+                    GraphOutputs::Hashes,
+                );
+                // A concurrent edit between recall and hashing must not pair an
+                // old typed projection with a new graph identity.
+                let manifest = match manifest.check(&manifest.entry) {
+                    ManifestCheck::Valid => manifest,
+                    ManifestCheck::ValidAfterRecheck { refreshed } => refreshed,
+                    ManifestCheck::Stale => return None,
+                };
+                result.manifest = Some(manifest);
+                result.entry_compilation_context = Some(context);
+                Some(result)
+            })
+            .unwrap_or_else(|| {
+                walk_import_graph_fingerprinted(
+                    path,
+                    source,
+                    CODEGEN_FINGERPRINT,
+                    GraphOutputs::ManifestAndEntryContext,
+                )
+            });
         let context = result.entry_compilation_context.ok_or_else(|| {
             VmError::Runtime(format!(
                 "incomplete imported interface for {}",
@@ -54,8 +87,6 @@ impl CachePrecompiler {
         let manifest = result.manifest.ok_or_else(|| {
             VmError::Runtime(format!("incomplete interface graph for {}", path.display()))
         })?;
-        let slot = InterfaceSlot::open(path, source)
-            .ok_or_else(|| VmError::Runtime("module interface cache is unavailable".into()))?;
         slot.write(&context, &manifest).map_err(persist_error)?;
         self.prepare_module(path, &ModuleSource::from_text(source), &context, provenance)?;
         let mut projections = manifest
@@ -82,13 +113,6 @@ impl CachePrecompiler {
             }
             prepare_interface(&file.path, &source, &file.compilation_context, &projections)?;
             self.prepare_module(&file.path, &source, &file.compilation_context, provenance)?;
-        }
-        // Stdlib has its own runtime key domain and is not a filesystem input
-        // in the entry manifest. The module graph supplies its virtual paths.
-        for module in harn_modules::build_with_source(path, source).module_paths() {
-            if let Some(name) = module.to_str().and_then(|path| path.strip_prefix("<std>/")) {
-                self.prepare_stdlib(name)?;
-            }
         }
         Ok((
             context,
@@ -169,6 +193,15 @@ impl CachePrecompiler {
         self.modules.insert(identity);
         Ok(())
     }
+}
+
+fn require_cache() -> Result<(), VmError> {
+    if !cache_enabled() || cache_dir().is_none() {
+        return Err(VmError::Runtime(
+            "module cache is disabled or unavailable".into(),
+        ));
+    }
+    Ok(())
 }
 
 /// Each module keeps its own dependency proof. The hash-only walk collects

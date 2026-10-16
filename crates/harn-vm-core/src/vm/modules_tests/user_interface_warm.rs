@@ -162,6 +162,15 @@ fn cache_preparation_reuses_graph_projections_and_keeps_module_proofs_local() {
         parses <= 3 * MODULES as u64,
         "preparation re-derived every module's closure: {parses} parses"
     );
+    let (_, repeated_parses) = parse_work_during(|| {
+        compiler
+            .prepare(&root, &source, ModuleProvenance::User)
+            .unwrap();
+    });
+    assert_eq!(
+        repeated_parses, 0,
+        "overlapping entries must reuse their saved typed projection"
+    );
 
     // A module's proof must exclude unrelated importers. Copying the root's
     // whole manifest into every slot would pass a warm read but fail here.

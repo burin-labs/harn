@@ -21,6 +21,12 @@ pub(super) fn run(args: &PrecompileArgs) {
     }
     ensure_builtin_signatures_installed();
     let mut compiler = bytecode_cache::CachePrecompiler::default();
+    if !args.quiet {
+        eprintln!("precompile cache: preparing the runtime stdlib");
+    }
+    compiler
+        .prepare_stdlib_catalog()
+        .unwrap_or_else(|error| command_error(&error.to_string()));
     let mut prepared = 0;
     let mut failed = 0;
     for source in &sources {
