@@ -175,7 +175,7 @@ package_verify_check_resolutions() {
     return 1
   fi
   cp "$lockfile" "$latest_lock" || return $?
-  minimum_rows="$(package_verify_select_minimums "$@")" || return $?
+  minimum_rows="$(package_verify_select_minimums "$latest_metadata" "$filter" "$@")" || return $?
   while IFS=$'\t' read -r dependency minimum; do
     [[ -n "$dependency" ]] || continue
     cargo update --manifest-path "$manifest" -p "$dependency" --precise "$minimum" || return $?
@@ -199,8 +199,8 @@ package_verify_emit_resolution_receipts() {
   local row package package_version dependency requirement minimum resolution_name resolved
   for row in "$@"; do
     IFS=$'\t' read -r package package_version dependency requirement minimum resolution_name <<<"$row"
-    resolved="$(jq -er --arg package "$package" --arg package_version "$package_version" \
-      --arg resolution_name "$resolution_name" -f "$filter" "$metadata_path")" || return $?
+    resolved="$(package_verify_resolved_version "$metadata_path" "$filter" \
+      "$package" "$package_version" "$resolution_name")" || return $?
     # `none` describes a ceiling contract with no declared minimum to pin.
     if [[ "$require_minimum" == 1 && "$minimum" != none && "$resolved" != "$minimum" ]]; then
       echo "error: $phase resolved $package dependency $dependency to $resolved, expected minimum $minimum" >&2
@@ -211,7 +211,15 @@ package_verify_emit_resolution_receipts() {
   done
 }
 
+package_verify_resolved_version() {
+  local metadata_path=$1 filter=$2 package=$3 package_version=$4 resolution_name=$5
+  jq -er --arg package "$package" --arg package_version "$package_version" \
+    --arg resolution_name "$resolution_name" -f "$filter" "$metadata_path"
+}
+
 package_verify_select_minimums() {
+  local metadata_path=$1 filter=$2
+  shift 2
   local row _package _package_version dependency _requirement minimum _resolution_name
   local selected=()
   local entry selected_dependency selected_minimum found
@@ -236,7 +244,26 @@ package_verify_select_minimums() {
       selected+=("$dependency"$'\t'"$minimum")
     fi
   done
-  if [[ "${#selected[@]}" -gt 0 ]]; then
-    printf '%s\n' "${selected[@]}"
-  fi
+  [[ "${#selected[@]}" -gt 0 ]] || return 0
+  local package package_version resolution_name resolved measured needs_pin
+  for entry in "${selected[@]}"; do
+    IFS=$'\t' read -r selected_dependency selected_minimum <<<"$entry"
+    measured=0
+    needs_pin=0
+    for row in "$@"; do
+      IFS=$'\t' read -r package package_version dependency _requirement minimum resolution_name <<<"$row"
+      [[ "$dependency" == "$selected_dependency" && "$minimum" != none ]] || continue
+      resolved="$(package_verify_resolved_version "$metadata_path" "$filter" \
+        "$package" "$package_version" "$resolution_name")" || return $?
+      measured=$((measured + 1))
+      [[ "$resolved" == "$selected_minimum" ]] || needs_pin=1
+    done
+    if [[ "$measured" -eq 0 ]]; then
+      echo "error: no measured resolution for minimum dependency $selected_dependency" >&2
+      return 1
+    fi
+    if [[ "$needs_pin" -eq 1 ]]; then
+      printf '%s\n' "$entry"
+    fi
+  done
 }
