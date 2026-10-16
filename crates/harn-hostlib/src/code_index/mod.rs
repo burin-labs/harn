@@ -98,6 +98,7 @@ mod readonly;
 mod reconcile;
 mod refactor_core;
 mod rename;
+mod rename_binding;
 mod repo_map;
 mod signature_syntax;
 mod snapshot;
