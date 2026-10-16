@@ -20,7 +20,8 @@ const env = {...process.env,HARN_CARGO_LEASE_WORKSPACE:root,
   HARN_PACKAGE_VERIFY_TARGET_DIR:path.join(root,'target'),
   HARN_PACKAGE_VERIFY_BUILD_DIR:'',CARGO_TARGET_DIR:path.join(root,'target'),
   CARGO_BUILD_BUILD_DIR:path.join(root,'target'),
-  PACKAGE_TEST_REPOSITORY:repository,PACKAGE_TEST_ROOT:root,PACKAGE_TEST_RUNNER:runner};
+  PACKAGE_TEST_REPOSITORY:repository,PACKAGE_TEST_ROOT:root,PACKAGE_TEST_RUNNER:runner,
+  PACKAGE_TEST_CANDIDATE:path.join(root,'candidate')};
 function command(name, program, args, expected=0) {
   const run = spawnSync(program,args,{cwd:root,env,encoding:'utf8'});
   fs.writeFileSync(path.join(root,`${name}.stdout`),run.stdout || '');
@@ -70,7 +71,7 @@ try {
     '}',
     'package_verify_configure_target "$PACKAGE_TEST_ROOT/parent-target"',
     '[[ "$package_check_target_dir" == "$package_check_build_dir" ]]',
-    'package_verify_check_resolutions "$PACKAGE_TEST_ROOT/candidate/Cargo.toml" "$package_check_target_dir" "$package_check_build_dir" "$PACKAGE_TEST_ROOT" unused-filter',
+    'package_verify_check_resolutions "$PACKAGE_TEST_CANDIDATE/Cargo.toml" "$package_check_target_dir" "$package_check_build_dir" "$PACKAGE_TEST_ROOT" unused-filter',
   ].join('\n')+'\n');
   const first = verify('cold');
   const dependency = supportArtifact(first).filenames.find(file => file.endsWith('.rmeta'));
@@ -82,27 +83,29 @@ try {
   assert.ok(records(warm).some(r => r.reason === 'compiler-artifact' && r.target.name === 'candidate' && !r.fresh));
   assert.ok(fs.existsSync(path.join(root,'target/.rustc_info.json')),'the owning layout must expose the nested-target marker');
 
-  write('candidate/src/lib.rs','this deliberately does not compile\n');
+  fs.renameSync(path.join(root,'candidate'),path.join(root,'relocated'));
+  env.PACKAGE_TEST_CANDIDATE = path.join(root,'relocated');
+  write('relocated/src/lib.rs','this deliberately does not compile\n');
   const invalid = verify('invalid-source',101);
   assert.ok(records(invalid).some(r => r.reason === 'compiler-message' && r.message.level === 'error'
     && r.message.spans.some(span => span.file_name.endsWith('src/lib.rs'))),`${invalid.stdout}\n${invalid.stderr}`);
-  write('candidate/src/lib.rs',valid);
+  write('relocated/src/lib.rs',valid);
   assert.equal(supportArtifact(verify('source-recovery')).fresh,true);
 
-  write('candidate/build-input.txt','invalid\n');
+  write('relocated/build-input.txt','invalid\n');
   const badBuild = verify('invalid-build-input',101);
   assert.match(badBuild.stderr,/invalid build input/);
-  write('candidate/build-input.txt','41\n');
+  write('relocated/build-input.txt','41\n');
   assert.equal(supportArtifact(verify('build-recovery')).fresh,true);
   assert.equal(hash(),identity,'candidate invalidation must retain the dependency bytes');
-  const built = command('tests',runner,['test','--offline','--manifest-path',path.join(root,'candidate/Cargo.toml'),
+  const built = command('tests',runner,['test','--offline','--manifest-path',path.join(env.PACKAGE_TEST_CANDIDATE,'Cargo.toml'),
     '--no-run','--message-format=json-render-diagnostics']);
   const binary = records(built).find(r => r.reason === 'compiler-artifact' && r.target.name === 'candidate' && r.profile.test)?.executable;
   assert.ok(binary,'the recovered candidate test must actually be linked');
   assert.match(command('execute',binary,['--exact','compiled_candidate_value']).stdout,/1 passed; 0 failed/);
   console.log(JSON.stringify({schema:'harn.package_candidate_cache_test.v1',
     dependency_reused:true,dependency_hash_unchanged:true,normalized_source_refused:true,
-    normalized_build_input_refused:true,recovery_executed:true,nested_target_marker:true,pending:0,bad:0}));
+    normalized_build_input_refused:true,relocated_candidate:true,recovery_executed:true,nested_target_marker:true,pending:0,bad:0}));
 } finally {
   fs.rmSync(root,{recursive:true,force:true});
 }
