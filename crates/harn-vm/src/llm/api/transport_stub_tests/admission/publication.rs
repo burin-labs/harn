@@ -42,10 +42,15 @@ fn publication_stays_private_through_a_conservatively_budgeted_native_tool_turn(
     let _transport = allow_stubbed_llm_transport();
     let _cleanup = Cleanup;
     crate::llm::cost::reset_cost_state();
+    let budget = crate::llm::admission::ConservativeLlmBudget::new(7.0).unwrap();
+    let observed_budget = budget.clone();
     let wire = Arc::new(Mutex::new(Vec::new()));
     let captured = wire.clone();
     let server = spawn_llm_stub_many("assistant publication egress", 2, move |turn, stream| {
-        captured.lock().unwrap().push(request(stream));
+        captured.lock().unwrap().push((
+            request(stream),
+            observed_budget.receipt().unwrap().settled_upper_usd,
+        ));
         reply(
             stream,
             if turn == 0 {
@@ -75,7 +80,6 @@ fn publication_stays_private_through_a_conservatively_budgeted_native_tool_turn(
         .enable_all()
         .build()
         .unwrap();
-    let budget = crate::llm::admission::ConservativeLlmBudget::new(7.0).unwrap();
     let output = runtime
         .block_on(budget.scope(tokio::task::LocalSet::new().run_until(async {
             let mut vm = crate::new_vm();
@@ -110,7 +114,10 @@ fn publication_stays_private_through_a_conservatively_budgeted_native_tool_turn(
         2,
         "second request reached real HTTP after the tool executed"
     );
-    let messages = requests[1]["input"].as_array().unwrap();
+    assert_eq!(requests[0].1, rust_decimal::Decimal::ZERO);
+    let first_charge = requests[1].1;
+    assert!(first_charge > rust_decimal::Decimal::ZERO);
+    let messages = requests[1].0["input"].as_array().unwrap();
     assert!(messages
         .iter()
         .all(|message| message.get("harn_assistant_publication").is_none()));
@@ -135,7 +142,12 @@ fn publication_stays_private_through_a_conservatively_budgeted_native_tool_turn(
     );
     let receipt = budget.receipt().expect("read the VM's host allowance");
     assert_eq!(receipt.ceiling_usd, rust_decimal::Decimal::from(7));
-    assert!(receipt.settled_upper_usd > rust_decimal::Decimal::ZERO);
+    assert_eq!(
+        receipt.settled_upper_usd,
+        first_charge * rust_decimal::Decimal::from(2)
+    );
+    assert_eq!(receipt.in_flight_usd, rust_decimal::Decimal::ZERO);
+    assert_eq!(receipt.uncertain_usd, rust_decimal::Decimal::ZERO);
     assert_eq!(receipt.denied_attempts, 0);
     assert!(!receipt.contract_broken);
 }
@@ -157,6 +169,7 @@ fn publication_egress_preserves_strict_pre_dispatch_refusals() {
         for message in [
             json!({"role":"assistant","content":"draft","harn_assistant_publication":"invalid"}),
             json!({"role":"assistant","content":"draft","harn_assistant_publication":null}),
+            json!({"role":"assistant","content":"draft","harn_assistant_publication":{"withheld":null}}),
             json!({"role":"user","content":"draft","harn_assistant_publication":"published"}),
             json!({"role":"assistant","content":"draft","harn_assistant_publication":"withheld","unknown_metadata":true}),
         ] {
