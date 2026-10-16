@@ -1,5 +1,7 @@
 pub import {
   AdmissionEffect,
+  CandidateEffect,
+  CandidateQualification,
   EffectReceipt,
   EffectRefusal,
   EffectRequest,
@@ -8,10 +10,15 @@ pub import {
   ReleaseEffect,
   RerunEffect,
   admission_effect,
+  candidate_effect,
   effect_receipt,
   integration_effect,
 } from "./effect_contract"
-import { effect_receipt_valid, qualify_admission_effect } from "./effect_contract"
+import {
+  effect_receipt_valid,
+  qualify_admission_effect,
+  qualify_candidate_effect,
+} from "./effect_contract"
 import {
   checkpoint_id,
   is_digest,
@@ -199,13 +206,25 @@ fn effect_refusal(
   return {reason: reason, admission: admission, verification: verification}
 }
 
-fn qualify_integration(
+fn qualify_group_effect(
   state: Controller,
   fence: Fence,
-  request: IntegrationEffect,
+  effect: EffectRequest,
   policy: Policy,
   now_ms: int?,
 ) -> EffectRefusal? {
+  if effect.kind == "candidate" {
+    return qualify_candidate(
+      state,
+      schema_expect(effect, schema_of(CandidateEffect)),
+      policy,
+      now_ms,
+    )
+  }
+  if effect.kind != "integration" {
+    return nil
+  }
+  const request = schema_expect(effect, schema_of(IntegrationEffect))
   const derived = try {
     integration_effect(request.snapshot)
   }
@@ -226,6 +245,46 @@ fn qualify_integration(
   } else {
     nil
   }
+}
+
+fn qualify_candidate(
+  state: Controller,
+  request: CandidateEffect,
+  policy: Policy,
+  now_ms: int?,
+) -> EffectRefusal? {
+  const measured = qualify_candidate_effect(request, policy)
+  if len(measured.invalid) > 0
+    || measured.admissions.any({ item -> item.status != "admitted" }) {
+    return effect_refusal("candidate preparation inputs are not qualified")
+      + {preparation: measured}
+  }
+  const frontier = state.pending ?? state.active ?? state.checkpoint?.snapshot
+  const known = (frontier?.sources ?? []).find({ item -> item.repository == request.repository })
+  const retained = (frontier?.changes ?? []).filter(
+    { item -> item.repository == request.repository },
+  )
+    .to_list()
+  if now_ms == nil || now_ms < 0
+    || (known != nil && known.commit != request.source)
+    || len(frontier?.changes ?? []) + measured.required > policy.max_changes
+    || request.admissions.any(
+      { signed ->
+        retained.any(
+          { change ->
+            change.id == signed.record.source.change
+              || change.head == signed.record.source.head
+          },
+        )
+      },
+    )
+    || (state.unverified_since_ms != nil
+      && (now_ms < state.unverified_since_ms
+        || now_ms - state.unverified_since_ms >= policy.max_unverified_ms)) {
+    return effect_refusal("candidate base, cumulative change bound or verification debt is invalid")
+      + {preparation: measured}
+  }
+  return nil
 }
 
 /** Persist the qualified reservation with CAS; refusals retain any measured evidence. */
@@ -251,12 +310,9 @@ pub fn reserve_effect(
   if admission != nil && admission.status != "admitted" {
     return Err(effect_refusal("external admission is not qualified", admission))
   }
-  if request.kind == "integration" {
-    const integration = schema_expect(request, schema_of(IntegrationEffect))
-    const refusal = qualify_integration(state, fence, integration, policy, now_ms)
-    if refusal != nil {
-      return Err(refusal)
-    }
+  const group_refusal = qualify_group_effect(state, fence, request, policy, now_ms)
+  if group_refusal != nil {
+    return Err(group_refusal)
   }
   if request.kind == "release" {
     const checkpoint = state.checkpoint
@@ -360,6 +416,12 @@ pub fn settle_effect(
   status: "unknown" | "confirmed" | "refused",
   receipt: EffectReceipt?,
 ) -> Result<Controller, string> {
+  if request.kind == "candidate" && status == "confirmed" {
+    const effect = state.effects.find({ item -> item.request == request })
+    if effect == nil || effect.dispatch_id == nil || effect.status == "reserved" {
+      return Err("candidate confirmation requires its durable dispatch claim")
+    }
+  }
   if request.kind == "integration" && status == "confirmed" {
     return Err("integration confirmation must retain its pending verification frontier")
   }

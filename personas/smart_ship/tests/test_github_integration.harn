@@ -267,8 +267,8 @@ pipeline test_group_transaction_refuses_missing_withdrawn_and_changed_sources(ha
       s.claim,
       s.request,
       "refs/heads/authority",
-      "a".repeat(40),
-      s.observations,
+      BASE,
+      [first + {base_oid: "a".repeat(40)}, s.observations[1]!],
       1000,
     ) },
     "fresh review source differs",
@@ -353,4 +353,22 @@ pipeline test_group_destination_must_match_the_existing_integrated_frontier(harn
     ) },
     "destination drifted from the retained controller frontier",
   )
+}
+
+pipeline test_reviewed_base_can_precede_the_exact_destination_without_rewriting_admission(
+  harness: Harness,
+) {
+  const destination = "a".repeat(40)
+  const s = setup(harness.random, false, destination)
+  const witness = prepare_github_integration(
+    s.claim,
+    s.request,
+    "refs/heads/authority",
+    destination,
+    s.observations,
+    1000,
+  )
+  assert_eq(witness.destination.before_oid, destination)
+  assert_eq(witness.observations[0]!.base_oid, BASE)
+  assert_eq(witness.request.snapshot.changes, s.request.snapshot.changes)
 }
