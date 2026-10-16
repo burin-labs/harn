@@ -750,6 +750,14 @@ pub type GitStore = {
 }
 ```
 
+### type `GroupTree`
+
+Exact stock-Git composition, before any destination or authority ref moves.
+
+```harn
+pub type GroupTree = {base: string, heads: list<string>, tree: string}
+```
+
 ### type `Incident`
 
 One incident retains the failed immutable source, original evidence, and all repair attempts.
@@ -1241,6 +1249,14 @@ One immutable Git source identity. Repository names are installation data.
 pub type Source = {repository: string, commit: string, tree: string}
 ```
 
+### type `StateObjectStage`
+
+Upload evidence is separate from authority publication; retain uncertain uploads for recovery.
+
+```harn
+pub type StateObjectStage = {ref: string, result: CommitResult}
+```
+
 ### type `StateRead`
 
 The remote commit is the compare-and-swap revision, independent of local files or leases.
@@ -1715,6 +1731,23 @@ pub fn prepare_admission(request: AdmissionRequest) -> VerificationPlan {
 }
 ```
 
+### fn `prepare_group_tree`
+
+Merge each exact reviewed head onto the destination through Git's merge-tree.
+Only loose objects are written. The caller's worktree, index and refs stay unchanged.
+Temporary commits carry intermediate trees, never destination history or signed lineage.
+
+```harn
+pub fn prepare_group_tree(
+  process: HarnessProcess,
+  workspace: string,
+  base: string,
+  heads: list<string>,
+  timeout_ms: int = 10000,
+) -> GroupTree {
+}
+```
+
 ### fn `prepare_job`
 
 Measure one complete command plan and issue a fresh dispatch identity before execution.
@@ -1823,6 +1856,31 @@ Derive the budget projection from the one authoritative attempt ledger.
 
 ```harn
 pub fn repair_spend(incident: Incident) -> RepairSpend {
+}
+```
+
+### fn `require_git_transport`
+
+Refuse fetch or push aliases and URL rewrites before binding Git objects to a forge API.
+
+```harn
+pub fn require_git_transport(process: HarnessProcess, store: GitStore, expected_remote: string) {
+}
+```
+
+### fn `require_group_candidate`
+
+Bind the proposed linear candidate to the exact composition, refusing omitted or extra edits.
+
+```harn
+pub fn require_group_candidate(
+  process: HarnessProcess,
+  workspace: string,
+  group: GroupTree,
+  candidate: string,
+  expected_tree: string,
+  timeout_ms: int = 10000,
+) {
 }
 ```
 
@@ -1949,6 +2007,21 @@ pub fn source_identity(source: Source) -> string {
 }
 ```
 
+### fn `stage_state`
+
+Upload an exact state object to a write-once branch keyed by its expected authority revision.
+This never moves the authority ref. Delete the staging ref only after its transaction is
+reconciled, with a provider-side comparison against the measured staged object.
+
+```harn
+pub fn stage_state(
+  process: HarnessProcess,
+  store: GitStore,
+  write: StateWrite,
+) -> StateObjectStage {
+}
+```
+
 ### fn `start`
 
 Claim exactly one frozen snapshot; newer offers occupy only the pending slot.
@@ -1978,6 +2051,19 @@ Live adapters and replay readers enter through the same source and inventory con
 
 ```harn
 pub fn validate_review_observation(value: ReviewObservation) -> ReviewObservation {
+}
+```
+
+### fn `validate_state_write`
+
+Validate the actual immutable object, its exact parent and payload, and its transition.
+
+```harn
+pub fn validate_state_write(
+  process: HarnessProcess,
+  store: GitStore,
+  write: StateWrite,
+) -> Controller? {
 }
 ```
 

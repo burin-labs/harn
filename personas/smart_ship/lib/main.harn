@@ -42,14 +42,19 @@ pub import {
   claim_reserved_effect,
   dispatch_reserved_effect,
 } from "./effect_owner"
+pub import { GroupTree, prepare_group_tree, require_group_candidate } from "./git_group"
 pub import {
   CommitResult,
   GitStore,
+  StateObjectStage,
   StateRead,
   StateWrite,
   commit_state,
   prepare_state,
   read_state,
+  require_git_transport,
+  stage_state,
+  validate_state_write,
 } from "./git_store"
 pub import {
   admission_bytes,

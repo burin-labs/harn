@@ -102,9 +102,24 @@ verification obligation. Replayed data cannot drop or substitute these guards.
 The claim retains the remote and ref measured by the Git owner. A known
 controller frontier also binds the destination's expected base. Fork branches
 cannot participate in this single-repository transaction, even when review
-policy permits them. These functions prepare data without contacting the forge;
-transport binding, source materialization, object upload and dispatch remain
-requirements of the privileged publisher.
+policy permits them. These functions prepare data without contacting the forge.
+The Git store's `require_git_transport` checks fetch and push URL resolution
+against the publisher's repository, using a private probe remote in the bare
+object workspace. `stage_state` uploads the exact validated object to
+`refs/heads/smart-ship-objects/<expected-authority-commit>` without moving the
+authority ref. Competing states have the same parent and cannot replace one
+another through its non-force push. Unknown uploads retain their ref and object
+for reconciliation. The publisher must delete this ref with an exact-object
+comparison only after the final transaction is reconciled. Source materialization,
+provider qualification and crash recovery remain requirements of that publisher.
+
+`prepare_group_tree` composes exact reviewed heads with stock Git's
+`merge-tree --write-tree`, including branches that forked before the destination
+advanced. It writes only loose intermediate objects. `require_group_candidate`
+then compares the complete result with the proposed candidate's actual tree and
+requires exactly one parent at the expected destination. Missing or additional
+edits and a changed parent are refused. These checks do not create a signed
+candidate or prove that a provider accepted a ref update.
 
 `checkpoint_valid` verifies both the original execution signatures and the
 checkpoint publisher's signature. Consumers use `release_identity` to obtain

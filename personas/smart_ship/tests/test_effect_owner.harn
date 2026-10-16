@@ -1,6 +1,7 @@
 import { assert_error_contains } from "std/testing"
 import { git } from "../fixtures/neutral"
 import { Fixture, digest, fixture, reviewed_admission } from "../fixtures/support"
+import { require_git_transport, stage_state } from "../lib/git_store"
 import {
   AdmissionEffect,
   Controller,
@@ -28,6 +29,106 @@ type ProviderEvidence = {integrated_commit: string}
 
 fn fence(state: Controller) -> Fence {
   return pick(state.authority, ["installation", "generation", "revision", "controller"])
+}
+
+pipeline test_state_object_upload_is_write_once_and_never_publishes_authority(harness: Harness) {
+  const s = setup(harness)
+  defer {
+    harness.fs.delete(s.root)
+  }
+  const previous = read_state(harness.process, s.store)
+  const next = unwrap(control(s.state, fence(s.state), "draining"))
+  const first = prepare_state(harness.process, s.store, previous, next)
+  const second = prepare_state(
+    harness.process,
+    s.store,
+    previous,
+    unwrap(control(s.state, fence(s.state), "stopped")),
+  )
+  assert(first.commit != second.commit)
+  const raced = parallel settle [first, second] with { max_concurrent: 2 } { candidate ->
+    stage_state(harness.process, s.store, candidate)
+  }
+  assert_eq(raced.failed, 0)
+  const results = raced.results.map({ result -> unwrap(result) })
+  assert_eq(results.filter({ result -> result.result.status == "committed" }).len(), 1)
+  assert_eq(results.filter({ result -> result.result.status == "conflict" }).len(), 1)
+  const staged = results.find({ result -> result.result.status == "committed" })!
+  const write = if staged.result.commit == first.commit {
+    first
+  } else {
+    second
+  }
+  assert_eq(staged.ref, "refs/heads/smart-ship-objects/" + previous.commit!)
+  assert_eq(staged.result.status, "committed")
+  assert_eq(staged.result.observed, write.commit)
+  assert_eq(
+    read_state(harness.process, s.store),
+    previous,
+    "uploading objects must not publish the prepared authority transition",
+  )
+  assert_eq(stage_state(harness.process, s.store, write), staged)
+  const competing = if write == first {
+    second
+  } else {
+    first
+  }
+  assert(competing.commit != write.commit)
+  const refused = stage_state(harness.process, s.store, competing)
+  assert_eq(refused.result.status, "conflict")
+  assert_eq(refused.result.observed, write.commit)
+  assert_eq(
+    git(harness.process, s.root, ["--git-dir=" + s.store.remote, "rev-parse", staged.ref]),
+    write.commit,
+  )
+  assert_error_contains(
+    fn() { stage_state(
+      harness.process,
+      s.store,
+      write + {state: write.state + {pending: s.f.snapshot}},
+    ) },
+    "prepared state payload changed",
+  )
+  const unavailable = stage_state(
+    harness.process,
+    s.store + {remote: path_join(s.root, "unavailable.git")},
+    write,
+  )
+  assert_eq(unavailable.result.status, "unknown", "an unmeasured remote is never an empty success")
+  assert_eq(unavailable.result.observed, nil)
+}
+
+pipeline test_forge_transport_refuses_fetch_push_and_named_remote_redirection(harness: Harness) {
+  const s = setup(harness)
+  defer {
+    harness.fs.delete(s.root)
+  }
+  const expected = "https://github.com/example/project.git"
+  const bound = s.store + {remote: expected}
+  require_git_transport(harness.process, bound, expected)
+  assert_error_contains(
+    fn() { require_git_transport(harness.process, s.store, expected) },
+    "Git transport differs",
+  )
+  for kind in ["insteadOf", "pushInsteadOf"] {
+    const key = "url.file:///unrelated-fixture/." + kind
+    git(harness.process, s.store.workspace, ["config", key, "https://github.com/"])
+    assert_error_contains(
+      fn() { require_git_transport(harness.process, bound, expected) },
+      "transport was redirected",
+    )
+    git(harness.process, s.store.workspace, ["config", "--unset-all", key])
+    require_git_transport(harness.process, bound, expected)
+  }
+  git(
+    harness.process,
+    s.store.workspace,
+    ["config", "remote.smart-ship-transport.pushurl", "https://github.com/other/project.git"],
+  )
+  assert_error_contains(
+    fn() { require_git_transport(harness.process, bound, expected) },
+    "transport was redirected",
+  )
 }
 
 pipeline test_atomic_adapter_claim_is_unique_durable_and_invalidated_by_stop(harness: Harness) {
