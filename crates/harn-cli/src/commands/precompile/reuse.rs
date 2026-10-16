@@ -10,7 +10,7 @@
 
 use std::path::{Path, PathBuf};
 
-use harn_vm::module_artifact::ModuleCompilationContext;
+use harn_vm::bytecode_cache::PrecompiledInterface;
 
 use crate::compiler_context::SourceCompilerAuthority;
 
@@ -43,8 +43,11 @@ pub(super) fn artifact_keys(
     source: &str,
     source_root: Option<&Path>,
     authority: &SourceCompilerAuthority,
-    compilation_context: &ModuleCompilationContext,
-) -> ArtifactKeys {
+    interface_dest: &Path,
+) -> Result<(ArtifactKeys, PrecompiledInterface), String> {
+    let interface =
+        harn_vm::bytecode_cache::prepare_precompiled_interface(interface_dest, source_path, source)
+            .map_err(|e| format!("prepare {}: {e}", interface_dest.display()))?;
     let entry = if source_root.is_some() {
         harn_vm::bytecode_cache::CacheKey::from_relocatable_source(source_path, source)
     } else {
@@ -53,10 +56,10 @@ pub(super) fn artifact_keys(
     let module_source = harn_vm::module_source::ModuleSource::from_text(source);
     let module = harn_vm::bytecode_cache::CacheKey::from_module_source(
         &module_source,
-        compilation_context,
+        interface.context(),
         authority.module_provenance(),
     );
-    ArtifactKeys { entry, module }
+    Ok((ArtifactKeys { entry, module }, interface))
 }
 
 /// What one source cost this invocation.
