@@ -314,7 +314,6 @@ pub(crate) async fn consume_interaction_sse<R: tokio::io::AsyncBufRead + Unpin>(
     Ok(stream.finish())
 }
 
-/// Steps for `input`, plus the system text lifted out of the message list.
 /// Restate Harn's native tool definitions as flat Interactions function tools.
 ///
 /// The `generateContent` builder is the owner of Google schema sanitization;
