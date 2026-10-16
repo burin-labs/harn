@@ -2,6 +2,9 @@ use super::*;
 use crate::llm::mock::reset_llm_mock_state;
 use crate::NativeBuiltinCtxExt;
 
+#[path = "agents_sub_agent_physical_usage_tests.rs"]
+mod physical_usage_tests;
+
 struct ExecutionPolicyGuard;
 
 impl Drop for ExecutionPolicyGuard {

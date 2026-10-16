@@ -16,8 +16,7 @@
 
 use super::{
     append_parent_sub_agent_event, finish_sub_agent, stop_details_for_error, sub_agent_error_dict,
-    sub_agent_result_event, transcript_tokens_used, wrap_sub_agent_error, SubAgentExecutionResult,
-    SubAgentRunSpec,
+    sub_agent_result_event, wrap_sub_agent_error, SubAgentExecutionResult, SubAgentRunSpec,
 };
 use crate::value::{VmError, VmValue};
 #[cfg(test)]
@@ -76,8 +75,19 @@ pub(super) fn child_error_outcome(
     };
     let transcript = crate::agent_sessions::transcript(&spec.session_id)
         .unwrap_or_else(|| crate::stdlib::json_to_vm_value(&serde_json::json!({})));
-    let tokens_used = transcript_tokens_used(&transcript);
-    let envelope = wrap_sub_agent_error(
+    let physical_usage = super::physical_usage_for_session(&spec.session_id).unwrap_or_else(|| {
+        serde_json::json!({
+            "status": "unmeasured",
+            "token_scope": "every_provider_call",
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "total_tokens": 0,
+        })
+    });
+    let input_tokens = physical_usage["input_tokens"].as_i64().unwrap_or(0);
+    let output_tokens = physical_usage["output_tokens"].as_i64().unwrap_or(0);
+    let tokens_used = input_tokens.saturating_add(output_tokens);
+    let mut envelope = crate::llm::vm_value_to_json(&wrap_sub_agent_error(
         String::new(),
         VmValue::List(std::sync::Arc::new(Vec::new())),
         0,
@@ -86,7 +96,11 @@ pub(super) fn child_error_outcome(
         &spec.session_id,
         error_value.clone(),
         Some(transcript.clone()),
-    );
+    ));
+    let mut physical_usage = physical_usage;
+    physical_usage["total_tokens"] = serde_json::Value::from(tokens_used);
+    envelope["usage"] = physical_usage;
+    let envelope = crate::schema::json_to_vm_value(&envelope);
     append_parent_sub_agent_event(
         spec.parent_session_id.as_deref(),
         sub_agent_result_event(
