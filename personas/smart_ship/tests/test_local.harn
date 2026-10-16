@@ -21,6 +21,7 @@ fn fence(state: Controller) -> Fence {
   return pick(state.authority, ["installation", "generation", "revision", "controller"])
 }
 
+@heavy(threads: 2)
 pipeline test_python_combined_failure_holds_the_checkpoint_until_forward_repair(harness: Harness) {
   const stack = STACKS.find({ item -> item.name == "python" })
   if stack == nil {
@@ -29,6 +30,7 @@ pipeline test_python_combined_failure_holds_the_checkpoint_until_forward_repair(
   interaction(harness, stack)
 }
 
+@heavy(threads: 2)
 pipeline test_typescript_combined_failure_holds_the_checkpoint_until_forward_repair(
   harness: Harness,
 ) {

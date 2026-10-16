@@ -60,7 +60,9 @@ pub enum ConformanceCase {
     /// An atomic write into the workspace through the platform's replacement
     /// API lands. On macOS Foundation takes its staging directory from the OS
     /// rather than `TMPDIR`; the native lookup must resolve to private storage.
-    /// SwiftPM writes its build files this way.
+    /// SwiftPM writes its build files this way. Apple platform executables
+    /// ignore the startup suffix environment; this probe initializes the
+    /// injected binding through the native API before testing the write.
     AtomicReplaceAdmitted,
     /// A child re-created by the process-owner guardian is confined like a
     /// direct child. The guardian rebuilds the payload from serialized data,

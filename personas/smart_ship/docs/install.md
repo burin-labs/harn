@@ -86,6 +86,36 @@ times, platform approval, and thread resolution separately. Unknown facts stay
 unknown.
 The observation supplies review evidence; it does not admit or merge the change.
 
+## Integrate a qualified GitHub change
+
+Qualify the release guard and transfer exclusive landing ownership before
+activating this adapter. GitHub continues to enforce effective branch rules,
+including a required merge queue. The command does not change repository rules.
+
+Save a `GithubAdmissionConfiguration` in a trusted file outside submitted
+artifacts. Its `installation` field contains your qualified `Installation`
+document; `token_reference` names a host secret, and `method` selects `merge`,
+`squash`, or `rebase`. Keep Git authentication with the host's normal credential
+store. Save the signed witness and current authority fence as a
+`GithubAdmissionSubmission` in `submission.json`.
+
+```sh
+HARN_EGRESS_ALLOW=api.github.com,github.com harn run --allow-process-network .smart-ship-source/personas/smart_ship/github-effect-cli.harn -- github-effect.json submission.json
+```
+
+Inspect `dispatch` and the typed `admission_refusal`. A confirmed dispatch
+retains the provider's integrated commit in the durable receipt's JSON body.
+Use that actual commit and resolve its tree when forming the next verification
+snapshot. Keep the release checkpoint held until complete verification passes.
+An uncertain dispatch requires reconciliation; submitting the same admission
+again reads its recorded outcome without contacting GitHub. A stop or stale
+fence prevents a new dispatch, while an already committed dispatch can finish
+and retain its measured result.
+If a process stopped after reserving an admission but before claiming its
+dispatch, inspect the current authority fence and resubmit the same signed
+witness with that fence. The existing owner claims the reservation once.
+An operation already marked `dispatching` or `unknown` requires reconciliation.
+
 ## Uninstall
 
 Disable the installation's event triggers, drain admitted work, and reconcile
@@ -97,13 +127,15 @@ Retain remote state and signed checkpoint history for release consumers and reco
 
 Before integrating a change, obtain a `SignedScope` from the trusted owner of
 job selection. Match its rule to your frozen policy's `admission_rules`; each
-rule binds a repository, optional immutable repository ID, scope trust domain,
+rule binds a repository, optional immutable repository ID, destination
+`base_branch`, scope trust domain,
 and independent review policy. Configure GitHub rules with the observed base
 repository ID. Plain Git installations may explicitly use `repository_id: null`.
 Candidate code must not choose the scope inventory or receive scope/admission
 signing credentials.
-The scope owner binds `reviewed_head` and `reviewed_base` to the actual tested
-`source`. Keep GitHub's generated test merge commit there; it must not be
+The scope owner binds `reviewed_head`, `reviewed_base` and
+`reviewed_base_branch` to the actual tested `source` and destination branch.
+Keep GitHub's generated test merge commit there; it must not be
 relabelled as the reviewed PR head or the workflow run's API head field.
 
 Build an `AdmissionRequest` from that scope and the complete reviewed source

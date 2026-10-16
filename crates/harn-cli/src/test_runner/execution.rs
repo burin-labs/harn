@@ -59,6 +59,26 @@ struct InvocationExecution {
     value: Option<harn_vm::VmValue>,
 }
 
+/// Capture caller authority before scheduling cases on dedicated worker threads.
+#[derive(Clone)]
+pub(super) struct TestExecutionContext {
+    secret_provider: Result<std::sync::Arc<dyn harn_vm::secrets::SecretProvider>, String>,
+    operator_approval_grant: Option<harn_vm::orchestration::OperatorApprovalGrant>,
+}
+
+impl TestExecutionContext {
+    pub(super) fn capture(
+        operator_approval_grant: Option<&harn_vm::orchestration::OperatorApprovalGrant>,
+    ) -> Self {
+        Self {
+            secret_provider: harn_vm::secrets::configured_secret_chain()
+                .map(|provider| std::sync::Arc::new(provider) as _)
+                .map_err(|error| error.to_string()),
+            operator_approval_grant: operator_approval_grant.cloned(),
+        }
+    }
+}
+
 pub(super) async fn execute_case(
     case: &TestCase,
     execution_cwd: &Path,
@@ -66,7 +86,7 @@ pub(super) async fn execute_case(
     loaded_skills: &crate::skill_loader::LoadedSkills,
     prepared_module_cache: &harn_vm::PreparedModuleCache,
     stdio_available: bool,
-    operator_approval_grant: Option<&harn_vm::orchestration::OperatorApprovalGrant>,
+    execution_context: &TestExecutionContext,
 ) -> TestResult {
     let total_start = Instant::now();
     let compile_start = Instant::now();
@@ -111,7 +131,7 @@ pub(super) async fn execute_case(
         loaded_skills,
         prepared_module_cache,
         stdio_available,
-        operator_approval_grant,
+        execution_context,
         compile_ms,
         total_start,
     )
@@ -127,7 +147,7 @@ pub(super) async fn execute_file_fixture(
     loaded_skills: &crate::skill_loader::LoadedSkills,
     prepared_module_cache: &harn_vm::PreparedModuleCache,
     stdio_available: bool,
-    operator_approval_grant: Option<&harn_vm::orchestration::OperatorApprovalGrant>,
+    execution_context: &TestExecutionContext,
 ) -> Result<harn_vm::IsolateValue, TestResult> {
     let total_start = Instant::now();
     let compile_start = Instant::now();
@@ -181,7 +201,7 @@ pub(super) async fn execute_file_fixture(
         loaded_skills,
         prepared_module_cache,
         stdio_available,
-        operator_approval_grant,
+        execution_context,
         compile_ms,
         total_start,
     )
@@ -211,15 +231,16 @@ async fn execute_compiled(
     loaded_skills: &crate::skill_loader::LoadedSkills,
     prepared_module_cache: &harn_vm::PreparedModuleCache,
     stdio_available: bool,
-    operator_approval_grant: Option<&harn_vm::orchestration::OperatorApprovalGrant>,
+    execution_context: &TestExecutionContext,
     compile_ms: u64,
     total_start: Instant,
 ) -> InvocationExecution {
     let timeout_ms = options.timeout_ms;
     let _egress_scope = harn_vm::egress::scope_egress_policy_for_current_thread();
     harn_vm::reset_thread_local_state();
-    let _operator_approval_guard = operator_approval_grant
-        .cloned()
+    let _operator_approval_guard = execution_context
+        .operator_approval_grant
+        .clone()
         .map(harn_vm::orchestration::install_operator_approval_grant);
     let _stdio_guard = (!stdio_available).then(harn_vm::reserve_stdio_for_current_thread);
     reset_hostlib_state();
@@ -333,7 +354,9 @@ async fn execute_compiled(
             crate::package::install_manifest_hooks(&mut vm, &extensions)
                 .await
                 .map_err(|error| format!("failed to install manifest hooks: {error}"))?;
-            vm.set_harness(harn_vm::Harness::real());
+            vm.set_harness(crate::source_exec::default_harness_with_secret_provider(
+                execution_context.secret_provider.clone()?,
+            ));
             let setup_ms = setup_start.elapsed().as_millis() as u64;
             let exec_start = Instant::now();
             let outcome = match vm

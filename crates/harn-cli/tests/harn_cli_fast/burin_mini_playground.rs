@@ -153,6 +153,51 @@ fn assert_report_passes(report: &serde_json::Value, stdout: &str) {
     );
 }
 
+/// A command refusal must remain failed verification in the real playground report.
+#[cfg(target_os = "macos")]
+fn assert_comment_verification_refused(report: &serde_json::Value, expected: &str) {
+    assert_eq!(report["verdict"], "fail", "{report}");
+    let stages = report["stages"].as_array().expect("executed stages");
+    let failed: Vec<_> = stages
+        .iter()
+        .filter(|stage| stage["status"] == "failed")
+        .collect();
+    assert_eq!(failed.len(), 1, "one actual command must fail: {report}");
+    assert_eq!(failed[0]["outcome"], "completion_unverified");
+    let events = failed[0]["transcript"]["events"]
+        .as_array()
+        .expect("command transcript");
+    let refusals: Vec<_> = events
+        .iter()
+        .filter(|event| {
+            event["kind"] == "tool_call_update"
+                && event["metadata"]["status"] == "failed"
+                && event["metadata"]["tool_name"] == "run"
+        })
+        .collect();
+    assert_eq!(
+        refusals.len(),
+        1,
+        "a nonempty tool refusal is required: {report}"
+    );
+    let error = refusals[0]["metadata"]["error"]
+        .as_str()
+        .expect("named refusal");
+    assert!(error.contains(expected), "{error}");
+    let call_id = &refusals[0]["metadata"]["tool_call_id"];
+    assert!(
+        call_id.is_string(),
+        "the failure must name its actual command"
+    );
+    assert!(
+        events.iter().any(|event| {
+            event["metadata"]["tool_call_id"] == *call_id
+                && event["metadata"]["raw_input"]["command"] == "node scripts/verify-comment.js"
+        }),
+        "the default verifier command must have been reached: {report}"
+    );
+}
+
 /// Mirror `harn_cli::run`'s thread + multi-thread runtime setup so the
 /// `LocalSet` inside `execute_playground` binds to a thread we control,
 /// matching what `harn playground` does in production. The returned
@@ -256,6 +301,13 @@ fn burin_mini_comment_file_fixture_run_updates_workspace_copy() {
     assert!(stdout.contains("task_id=comment_file"), "stdout={stdout}");
     let report = generated_report_path(&experiment_root, &stdout, "comment_file-latest.json");
     let report_json = read_json(&report);
+    #[cfg(target_os = "macos")]
+    if let Some(refusal) = crate::test_util::process::unavailable_worktree_sandbox() {
+        assert_comment_verification_refused(&report_json, &refusal.to_string());
+    } else {
+        assert_report_passes(&report_json, &stdout);
+    }
+    #[cfg(not(target_os = "macos"))]
     assert_report_passes(&report_json, &stdout);
     assert_eq!(report_json["workflow_status"], "completed");
     let action_ids: Vec<String> = report_json["action_graph"]["actions"]
@@ -605,6 +657,48 @@ fn burin_mini_semantic_evaluator_heuristic_passes_for_rate_limit_fixture() {
 #[cfg(test)]
 mod stage_summary_tests {
     use super::summarize_stages;
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn native_qualification_cannot_accept_an_unavailable_host() {
+        use harn_vm::process_sandbox::{
+            SandboxMechanism, SandboxMechanismAvailability, SandboxMechanismUnavailable,
+            SandboxRequirement,
+        };
+        let refusal = SandboxMechanismUnavailable {
+            schema: SandboxMechanismUnavailable::SCHEMA.to_string(),
+            mechanism: SandboxMechanism::MacosSandboxExec,
+            availability: SandboxMechanismAvailability::AbsentOnHost,
+            profile: harn_vm::orchestration::SandboxProfile::OsHardened,
+            requirement: SandboxRequirement::Profile,
+            unconfined: vec![],
+        };
+        let unsupported = serde_json::json!({
+            "confines_processes": false,
+            "os_hardened_refusal": harn_vm::value::json::vm_value_to_json(&refusal.thrown_value()),
+        });
+        let compatible =
+            crate::test_util::process::worktree_sandbox_for_host(unsupported.clone(), "ci");
+        assert!(
+            compatible.is_some(),
+            "compatibility checks must retain a measured refusal"
+        );
+        let required = std::panic::catch_unwind(|| {
+            crate::test_util::process::worktree_sandbox_for_host(
+                unsupported,
+                crate::test_util::process::native_qualification_profile(),
+            )
+        });
+        assert!(
+            required.is_err(),
+            "a required qualification cannot pass by accepting a refusal"
+        );
+        assert!(crate::test_util::process::worktree_sandbox_for_host(
+            serde_json::json!({"confines_processes": true}),
+            crate::test_util::process::native_qualification_profile()
+        )
+        .is_none());
+    }
     use serde_json::json;
 
     /// Trimmed to the fields `summarize_stages` reads, from the actual

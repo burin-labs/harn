@@ -50,7 +50,10 @@ if [[ "$(grep -Fc 'run_rust_test_lane.sh cargo-nextest nextest run' "$workflow")
   echo "macOS workspace tests must have exactly one workspace nextest invocation" >&2
   exit 1
 fi
-for required in '--locked' '--workspace' '--profile ci'; do
+# The typed native-qualification policy owns profile selection, complete CI
+# inheritance and the exact command in check_rust_test_lane_policy.harn. This
+# pre-warm check needs no Harn binary and keeps only the transport/flag checks.
+for required in '--locked' '--workspace'; do
   if ! grep -Fq -- "$required" <<<"$nextest_command"; then
     echo "macOS workspace tests must use the canonical Rust test environment" >&2
     echo "  the workspace nextest step is missing ${required}" >&2

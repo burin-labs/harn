@@ -48,11 +48,6 @@ pub(crate) fn append_terminal_event_once(id: &str, event: VmValue) -> Result<VmV
                 });
         }
         append_event_to_state(state, event.clone(), "append_terminal_event")?;
-        state
-            .transcript_journal
-            .as_mut()
-            .expect("terminal append keeps the active journal installed")
-            .mark_terminal_queued();
         Ok(event)
     })
 }

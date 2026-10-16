@@ -5,8 +5,6 @@
 //! at existing async agent-loop boundaries. `AgentEvent` sinks stay strictly
 //! observability-only: a filtered or failed sink can never alter durability.
 
-use std::collections::VecDeque;
-
 use harn_session_store::{
     AppendEvent, EventIdentity, EventIdentityField, SessionEventKind, SessionType,
     SessionWriteLease,
@@ -18,6 +16,10 @@ use crate::agent_sessions::session_event::{
 };
 use crate::stdlib::session_store;
 use crate::value::{DictMap, VmError};
+
+mod queue;
+pub(crate) use queue::JournalAuditWriter;
+use queue::JournalQueue;
 
 const WORKFLOW_LEARNING_ELIGIBILITY_HEADER: &str = "harn.workflow_learning.eligibility";
 const WORKFLOW_LEARNING_ELIGIBLE: &str = "eligible";
@@ -40,9 +42,8 @@ struct JournalConfig {
 
 pub(crate) struct JournalState {
     config: JournalConfig,
-    pending: VecDeque<SessionEventPayload>,
+    pending: JournalQueue,
     first_event_id: Option<u64>,
-    terminal_queued: bool,
     execution_id: Option<String>,
     task_id: Option<String>,
     owns_session: bool,
@@ -72,11 +73,11 @@ impl JournalState {
     }
 
     pub(crate) fn terminal_queued(&self) -> bool {
-        self.terminal_queued
+        self.pending.is_sealed()
     }
 
-    pub(crate) fn mark_terminal_queued(&mut self) {
-        self.terminal_queued = true;
+    pub(crate) fn audit_writer(&self) -> JournalAuditWriter {
+        self.pending.audit_writer()
     }
 
     pub(crate) fn claim_task(
@@ -121,8 +122,9 @@ impl JournalState {
     ) -> Result<Option<(crate::stdlib::canonical_store::CanonicalStore, AppendEvent)>, VmError>
     {
         self.pending
-            .front()
-            .cloned()
+            .snapshot()
+            .into_iter()
+            .next()
             .map(|payload| {
                 append_event_for_payload(&self.config, payload)
                     .map(|event| (self.config.store.clone(), event))
@@ -134,8 +136,8 @@ impl JournalState {
     pub(crate) fn pending_events(&self) -> Result<PendingJournalBatch, VmError> {
         let events = self
             .pending
-            .iter()
-            .cloned()
+            .snapshot()
+            .into_iter()
             .map(|payload| append_event_for_payload(&self.config, payload))
             .collect::<Result<Vec<_>, _>>()?;
         Ok((self.config.store.clone(), events))
@@ -148,8 +150,13 @@ impl JournalState {
         if let Some(first) = event_ids.first() {
             self.first_event_id.get_or_insert(*first);
         }
-        let persisted = event_ids.len().min(self.pending.len());
-        self.pending.drain(..persisted);
+        self.pending.record_persisted(event_ids.len());
+    }
+}
+
+impl Drop for JournalState {
+    fn drop(&mut self) {
+        self.pending.seal();
     }
 }
 
@@ -229,9 +236,8 @@ pub(crate) async fn prepare(
                 turn_id,
                 workflow_learning_eligibility,
             },
-            pending: VecDeque::new(),
+            pending: JournalQueue::default(),
             first_event_id: None,
-            terminal_queued: false,
             execution_id: None,
             task_id: None,
             owns_session: false,
@@ -323,7 +329,7 @@ pub(crate) fn enqueue_message_removed(
 
 fn enqueue(journal: &mut Option<JournalState>, payload: SessionEventPayload) {
     if let Some(journal) = journal {
-        journal.pending.push_back(payload);
+        journal.pending.enqueue(payload);
     }
 }
 
@@ -580,3 +586,7 @@ mod public_timeline_tests;
 #[cfg(test)]
 #[path = "agent_session_journal_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "agent_session_journal/journal_handoff_tests.rs"]
+mod journal_handoff_tests;

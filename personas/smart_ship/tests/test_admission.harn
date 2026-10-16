@@ -9,6 +9,7 @@ const source: ReviewedSource = {
   change: "17",
   head: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
   base: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  base_branch: "main",
   author: author,
   state: "open",
   draft: false,
@@ -39,6 +40,7 @@ const observation: ReviewObservation = {
   change: source.change,
   head: source.head,
   base: source.base,
+  base_branch: source.base_branch,
   platform_decision: nil,
   declared_reviews: 1,
   declared_threads: 0,
@@ -87,6 +89,7 @@ pipeline test_admission_requires_independent_current_head_and_complete_facts() {
     observation + {declared_threads: 1},
     observation + {head: source.base},
     observation + {base: source.head},
+    observation + {base_branch: "release"},
     observation + {reviews: [approval + {submitted_at: "not-a-time"}]},
   ] {
     const decision = review_admission(source, policy, incomplete)

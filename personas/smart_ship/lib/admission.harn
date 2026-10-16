@@ -36,6 +36,9 @@ fn source_refusals(source: ReviewedSource, policy: ReviewPolicy) -> Refusals {
     || !is_git_id(source.base) {
     invalid = invalid + ["review-source"]
   }
+  if trim(source.base_branch) == "" {
+    invalid = invalid + ["review-target"]
+  }
   if source.author == nil {
     pending = pending + ["change-author"]
   } else if source.author.id == "" || source.author.name == "" || source.author.kind == "" {
@@ -88,7 +91,8 @@ fn census_refusals(source: ReviewedSource, reviews: ReviewObservation) -> Refusa
   let invalid: list<string> = []
   if reviews.repository != source.repository || reviews.change != source.change
     || reviews.head != source.head
-    || reviews.base != source.base {
+    || reviews.base != source.base
+    || reviews.base_branch != source.base_branch {
     invalid = invalid + ["review-source-binding"]
   }
   if reviews.platform_decision == "changes_requested" {

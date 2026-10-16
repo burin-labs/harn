@@ -103,6 +103,7 @@ pub type AdmissionRule = {
   id: string,
   repository: string,
   repository_id: string?,
+  base_branch: string,
   scope_trust_domain: string,
   review: ReviewPolicy,
 }
@@ -115,6 +116,7 @@ pub type AdmissionScope = {
   rule: string,
   reviewed_head: string,
   reviewed_base: string,
+  reviewed_base_branch: string,
   source: Source,
   requirements: list<JobInputs>,
   inventory_complete: bool,

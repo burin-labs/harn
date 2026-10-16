@@ -92,6 +92,29 @@ committed for dispatch may finish; stop preserves its uncertain outcome until
 an actual provider receipt is recorded. Unknown results block transfer and are
 never redispatched from the original reservation.
 
+The GitHub effect adapter reserves signed admissions through this same owner,
+reads the current complete review and thread census, and applies the installation's
+review policy before committing dispatch. A dismissed trusted approval, unresolved
+thread, or missing census refuses the admission. The dispatch commitment rechecks
+authority after those reads. The fresh source must match the signed source,
+including its destination branch. The signed scope and installation rule bind
+that destination independently. The published connector binds the merge to the
+verified head; GitHub enforces its effective branch rules. Review reads and the
+merge are separate API operations. GitHub does not provide an atomic review or
+destination-branch guard for this merge call; a retarget after the final read
+remains outside this adapter's guarantee.
+Durable effect receipts retain the fresh review decision, canonical provider JSON,
+and its checked hash, including the actual integrated commit. Duplicate
+submissions return that recorded outcome without another provider call;
+uncertain responses remain a transfer barrier. Configure and activate this
+adapter only after qualifying the installation's release guard and exclusive
+landing ownership.
+
+The reservation also binds the merge method, API endpoint and credential reference.
+Recovery checks that nonsecret identity before reading credentials or contacting a
+provider, and the generic dispatch claim enforces the same binding. Rotating a
+credential's value at its recorded reference does not put that value into state.
+
 The Python and TypeScript fixtures execute ordinary commands against clean Git
 sources. Each reviewed change passes independently; their combination fails one
 test. `fixtures/live_repair.harn` uses a real configured model, independently

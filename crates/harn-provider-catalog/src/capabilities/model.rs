@@ -134,9 +134,32 @@ pub struct GovernorBackoff {
     pub jitter: Option<bool>,
 }
 
-/// Provider-wide default fields merged into matching rules.
-#[derive(Debug, Clone, Deserialize, Default)]
-pub struct ProviderDefaults {
+/// Provider-wide optional facts. Derive the struct and all merge operations
+/// from one field list so a newly declared fact cannot be omitted by a merge.
+macro_rules! provider_defaults {
+    ($($(#[$attribute:meta])* pub $field:ident: $ty:ty,)*) => {
+        #[derive(Debug, Clone, Deserialize, Default)]
+        pub struct ProviderDefaults {
+            $($(#[$attribute])* pub $field: $ty,)*
+        }
+
+        impl ProviderDefaults {
+            pub(super) fn overlay(&mut self, other: &Self) {
+                $(overlay_opt(&mut self.$field, &other.$field);)*
+            }
+
+            pub(super) fn fill_missing_from(&mut self, other: &Self) {
+                $(fill_opt(&mut self.$field, &other.$field);)*
+            }
+
+            pub(super) fn has_any_field(&self) -> bool {
+                false $(|| self.$field.is_some())*
+            }
+        }
+    };
+}
+
+provider_defaults! {
     /// Message/request/response wire format used by shared helpers.
     /// Known values are `openai`, `anthropic`, `gemini`, and `ollama`.
     #[serde(default)]
@@ -245,139 +268,6 @@ pub(super) fn overlay_opt<T: Clone>(dst: &mut Option<T>, src: &Option<T>) {
 pub(super) fn fill_opt<T: Clone>(dst: &mut Option<T>, src: &Option<T>) {
     if dst.is_none() {
         dst.clone_from(src);
-    }
-}
-
-/// Visits every `ProviderDefaults` field once, applying `$op` (`overlay_opt`
-/// or `fill_opt`) to each `(dst, src)` pair. The field roster lives here only;
-/// `overlay`/`fill_missing_from` differ solely in the merge rule they pass.
-macro_rules! merge_provider_defaults {
-    ($dst:expr, $src:expr, $op:path) => {{
-        $op(&mut $dst.message_wire_format, &$src.message_wire_format);
-        $op(&mut $dst.live_endpoint_family, &$src.live_endpoint_family);
-        $op(
-            &mut $dst.native_tool_wire_format,
-            &$src.native_tool_wire_format,
-        );
-        $op(
-            &mut $dst.image_url_input_supported,
-            &$src.image_url_input_supported,
-        );
-        $op(
-            &mut $dst.file_upload_wire_format,
-            &$src.file_upload_wire_format,
-        );
-        $op(&mut $dst.reasoning_wire_format, &$src.reasoning_wire_format);
-        $op(&mut $dst.files_api_supported, &$src.files_api_supported);
-        $op(&mut $dst.batch_api, &$src.batch_api);
-        $op(&mut $dst.batch_wire_format, &$src.batch_wire_format);
-        $op(&mut $dst.batch_input_mode, &$src.batch_input_mode);
-        $op(
-            &mut $dst.batch_discount_percent,
-            &$src.batch_discount_percent,
-        );
-        $op(
-            &mut $dst.batch_turnaround_hours,
-            &$src.batch_turnaround_hours,
-        );
-        $op(&mut $dst.batch_max_requests, &$src.batch_max_requests);
-        $op(&mut $dst.batch_max_input_bytes, &$src.batch_max_input_bytes);
-        $op(
-            &mut $dst.batch_result_retention_days,
-            &$src.batch_result_retention_days,
-        );
-        $op(&mut $dst.batch_result_ordering, &$src.batch_result_ordering);
-        $op(&mut $dst.batch_partial_failure, &$src.batch_partial_failure);
-        $op(&mut $dst.batch_cancellation, &$src.batch_cancellation);
-        $op(&mut $dst.batch_security_notes, &$src.batch_security_notes);
-        $op(
-            &mut $dst.batch_operational_notes,
-            &$src.batch_operational_notes,
-        );
-        $op(&mut $dst.batch_regions, &$src.batch_regions);
-        $op(&mut $dst.prompt_cache_ttls, &$src.prompt_cache_ttls);
-        $op(
-            &mut $dst.prompt_cache_min_prefix_tokens,
-            &$src.prompt_cache_min_prefix_tokens,
-        );
-        $op(
-            &mut $dst.cache_breakpoint_style,
-            &$src.cache_breakpoint_style,
-        );
-        $op(&mut $dst.reasoning_round_trip, &$src.reasoning_round_trip);
-        $op(&mut $dst.seed_supported, &$src.seed_supported);
-        $op(&mut $dst.top_k_supported, &$src.top_k_supported);
-        $op(&mut $dst.temperature_supported, &$src.temperature_supported);
-        $op(&mut $dst.top_p_supported, &$src.top_p_supported);
-        $op(
-            &mut $dst.frequency_penalty_supported,
-            &$src.frequency_penalty_supported,
-        );
-        $op(
-            &mut $dst.presence_penalty_supported,
-            &$src.presence_penalty_supported,
-        );
-        $op(&mut $dst.stop_supported, &$src.stop_supported);
-        $op(
-            &mut $dst.advanced_generation_options,
-            &$src.advanced_generation_options,
-        );
-        $op(
-            &mut $dst.supports_parallel_tool_calls,
-            &$src.supports_parallel_tool_calls,
-        );
-        $op(
-            &mut $dst.requires_parallel_tool_calls_false,
-            &$src.requires_parallel_tool_calls_false,
-        );
-    }};
-}
-
-impl ProviderDefaults {
-    pub(super) fn overlay(&mut self, other: &ProviderDefaults) {
-        merge_provider_defaults!(self, other, overlay_opt);
-    }
-
-    pub(super) fn fill_missing_from(&mut self, other: &ProviderDefaults) {
-        merge_provider_defaults!(self, other, fill_opt);
-    }
-
-    pub(super) fn has_any_field(&self) -> bool {
-        self.message_wire_format.is_some()
-            || self.live_endpoint_family.is_some()
-            || self.native_tool_wire_format.is_some()
-            || self.image_url_input_supported.is_some()
-            || self.file_upload_wire_format.is_some()
-            || self.reasoning_wire_format.is_some()
-            || self.files_api_supported.is_some()
-            || self.batch_api.is_some()
-            || self.batch_wire_format.is_some()
-            || self.batch_input_mode.is_some()
-            || self.batch_discount_percent.is_some()
-            || self.batch_turnaround_hours.is_some()
-            || self.batch_max_requests.is_some()
-            || self.batch_max_input_bytes.is_some()
-            || self.batch_result_retention_days.is_some()
-            || self.batch_result_ordering.is_some()
-            || self.batch_partial_failure.is_some()
-            || self.batch_cancellation.is_some()
-            || self.batch_security_notes.is_some()
-            || self.batch_operational_notes.is_some()
-            || self.batch_regions.is_some()
-            || self.prompt_cache_ttls.is_some()
-            || self.prompt_cache_min_prefix_tokens.is_some()
-            || self.cache_breakpoint_style.is_some()
-            || self.reasoning_round_trip.is_some()
-            || self.seed_supported.is_some()
-            || self.top_k_supported.is_some()
-            || self.temperature_supported.is_some()
-            || self.top_p_supported.is_some()
-            || self.frequency_penalty_supported.is_some()
-            || self.presence_penalty_supported.is_some()
-            || self.stop_supported.is_some()
-            || self.advanced_generation_options.is_some()
-            || self.supports_parallel_tool_calls.is_some()
-            || self.requires_parallel_tool_calls_false.is_some()
     }
 }
 

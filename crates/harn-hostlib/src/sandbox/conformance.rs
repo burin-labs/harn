@@ -542,13 +542,27 @@ fn probe(case: ConformanceCase, layout: &Layout) -> (Vec<String>, String) {
             }
         }
         ConformanceCase::AtomicReplaceAdmitted => {
-            // JavaScript for Automation reaches Foundation on every Mac; the
-            // atomic option (1) is the call SwiftPM's build-file writes make.
+            // Apple platform executables ignore the startup directory-suffix
+            // environment, unlike ordinary native tools. Initialize that same
+            // injected binding explicitly in this platform-owned probe, then
+            // verify Foundation resolves it to the private workspace temp root.
             let target = layout.workspace.join("atomic.txt");
             let script = format!(
                 "ObjC.import('Foundation'); \
-                 $.NSString.alloc.initWithUTF8String('probe').dataUsingEncoding(4)\
-                 .writeToURLOptionsError($.NSURL.fileURLWithPath({:?}), 1, null)",
+                 ObjC.bindFunction('_set_user_dir_suffix', ['bool', ['char *']]); \
+                 var env = $.NSProcessInfo.processInfo.environment; \
+                 var suffix = ObjC.unwrap(env.objectForKey('DIRHELPER_USER_DIR_SUFFIX')); \
+                 if (!suffix || !$._set_user_dir_suffix(suffix)) throw Error('missing private temp binding'); \
+                 var actual = $.NSURL.fileURLWithPath($.NSTemporaryDirectory()).URLByResolvingSymlinksInPath.path; \
+                 var expected = $.NSURL.fileURLWithPath(env.objectForKey('TMPDIR')).URLByResolvingSymlinksInPath.path; \
+                 if (ObjC.unwrap(actual) !== ObjC.unwrap(expected)) throw Error('native temp escaped workspace'); \
+                 var error = $(); \
+                 var ok = $.NSString.alloc.initWithUTF8String('probe').dataUsingEncoding(4)\
+                 .writeToURLOptionsError($.NSURL.fileURLWithPath({:?}), 1, error); \
+                 if (!ok) throw Error(JSON.stringify({{ \
+                 message:ObjC.unwrap(error.localizedDescription), \
+                 code:Number(error.code), domain:ObjC.unwrap(error.domain), \
+                 temporary:ObjC.unwrap($.NSTemporaryDirectory()) }})); ok",
                 target.display().to_string()
             );
             (
