@@ -206,6 +206,70 @@ Preserve actual bounded provider responses, including the complete artifact-list
 pub type GithubCiRead = {endpoint: string, response: unknown}
 ```
 
+### type `GithubIntegrationCleanup`
+
+Unresolved integrations retain their objects. Cleanup never overwrites a competing ref.
+
+```harn
+pub type GithubIntegrationCleanup = {
+  status: "deleted" | "retained" | "unknown",
+  observed: string?,
+  provider: GithubRefUpdatesReceipt?,
+  error: GithubConnectorError?,
+  reason: string?,
+}
+```
+
+### type `GithubIntegrationConfiguration`
+
+Trusted public-GitHub installation; workers never receive its secret reference or handles.
+
+```harn
+pub type GithubIntegrationConfiguration = {installation: Installation, token_reference: string}
+```
+
+### type `GithubIntegrationDispatch`
+
+Keep prepared identities after an uncertain response. Repeated delivery never dispatches again.
+
+```harn
+pub type GithubIntegrationDispatch = {
+  status: "not_started" | "confirmed" | "refused" | "reconciliation_required",
+  dispatch_started: bool,
+  claim: EffectClaim?,
+  transaction: GithubIntegrationTransaction?,
+  stage: StateObjectStage?,
+  provider: GithubRefUpdatesReceipt?,
+  error: GithubConnectorError?,
+  reason: string?,
+}
+```
+
+### type `GithubIntegrationReconciliation`
+
+Read-back is conclusive only when the exact atomic confirmation survives in current authority.
+
+```harn
+pub type GithubIntegrationReconciliation = {
+  status: "confirmed" | "refused" | "unresolved",
+  observed: string?,
+  state_commit: string,
+  staging_ref: string,
+}
+```
+
+### type `GithubIntegrationRefusal`
+
+A conclusive provider refusal is retained independently of a successful transaction witness.
+
+```harn
+pub type GithubIntegrationRefusal = {
+  schema: "smart-ship.github-integration-refusal.v1",
+  transaction: GithubIntegrationTransaction,
+  provider: GithubConnectorError,
+}
+```
+
 ### type `GithubIntegrationTransaction`
 
 The exact state object and source guards must travel in the same provider transaction.
@@ -278,6 +342,36 @@ pub fn assess_github_ci(
 }
 ```
 
+### fn `cleanup_github_integration`
+
+Delete only a conclusively reconciled transaction's exact owned staging object.
+
+```harn
+pub fn cleanup_github_integration(
+  harness: Harness,
+  configuration: GithubIntegrationConfiguration,
+  transaction: GithubIntegrationTransaction,
+) -> GithubIntegrationCleanup {
+}
+```
+
+### fn `dispatch_github_integration`
+
+Dispatch an already reserved integration once. The candidate must already be an accessible
+signed GitHub object. Materialization is checked with stock Git before the provider call.
+Destination, authority and all current source heads participate in one SDK transaction.
+
+```harn
+pub fn dispatch_github_integration(
+  harness: Harness,
+  configuration: GithubIntegrationConfiguration,
+  fence: Fence,
+  request: IntegrationEffect,
+  expected_base: string,
+) -> GithubIntegrationDispatch {
+}
+```
+
 ### fn `github_admission_binding`
 
 Bind recovery to effective nonsecret provider settings; secret values never enter state.
@@ -296,6 +390,15 @@ pub fn github_ci_identities(
   request: AdmissionRequest,
   jobs: list<GithubCiJob>,
 ) -> list<GithubCiIdentity> {
+}
+```
+
+### fn `github_integration_binding`
+
+The reservation binds the configured provider identity before any claim can invoke it.
+
+```harn
+pub fn github_integration_binding(configuration: GithubIntegrationConfiguration) -> string {
 }
 ```
 
@@ -387,6 +490,33 @@ pub fn read_github_reviewed_change(
   harness: Harness,
   request: GithubPullRequestReviewCensusRequest,
 ) -> GithubConnectorResult<ReviewedChangeObservation> {
+}
+```
+
+### fn `reconcile_github_integration`
+
+Recover from persisted transaction data by reading actual Git objects and current authority.
+This performs no provider mutation and never turns an unresolved observation into a retry.
+
+```harn
+pub fn reconcile_github_integration(
+  process: HarnessProcess,
+  configuration: GithubIntegrationConfiguration,
+  transaction: GithubIntegrationTransaction,
+) -> GithubIntegrationReconciliation {
+}
+```
+
+### fn `recover_github_integration`
+
+Recover the prepared transaction from remote authority history and its owned staging branch.
+
+```harn
+pub fn recover_github_integration(
+  process: HarnessProcess,
+  configuration: GithubIntegrationConfiguration,
+  request: IntegrationEffect,
+) -> GithubIntegrationTransaction {
 }
 ```
 
@@ -621,6 +751,7 @@ pub type Effect = {
   status: "reserved" | "dispatching" | "unknown" | "confirmed" | "refused",
   dispatch_binding: string?,
   dispatch_id: string?,
+  dispatch_revision: int?,
   receipt: EffectReceipt?,
 }
 ```
@@ -1968,6 +2099,21 @@ pub fn settle_effect(
   status: "unknown" | "confirmed" | "refused",
   receipt: EffectReceipt?,
 ) -> Result<Controller, string> {
+}
+```
+
+### fn `settle_owned_effect`
+
+Record a measured outcome only for the exact dispatch this owner durably claimed.
+
+```harn
+pub fn settle_owned_effect(
+  process: HarnessProcess,
+  store: GitStore,
+  claim: EffectClaim,
+  request: EffectRequest,
+  outcome: EffectOutcome,
+) -> CommitResult {
 }
 ```
 

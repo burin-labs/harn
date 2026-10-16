@@ -107,6 +107,7 @@ pub type Effect = {
   status: "reserved" | "dispatching" | "unknown" | "confirmed" | "refused",
   dispatch_binding: string?,
   dispatch_id: string?,
+  dispatch_revision: int?,
   receipt: EffectReceipt?,
 }
 
@@ -299,6 +300,7 @@ pub fn reserve_effect(
         status: "reserved",
         dispatch_binding: dispatch_binding,
         dispatch_id: nil,
+        dispatch_revision: nil,
         receipt: nil,
       },
     ]
@@ -336,7 +338,12 @@ pub fn begin_effect(
   next.effects = state.effects.map(
     { item ->
       if item == effect {
-        item + {status: "dispatching", dispatch_id: dispatch_id}
+        item
+          + {
+            status: "dispatching",
+            dispatch_id: dispatch_id,
+            dispatch_revision: next.authority.revision,
+          }
       } else {
         item
       }

@@ -1,6 +1,6 @@
 import { IntegrationEffect } from "./controller"
 import { effect_receipt } from "./effect_contract"
-import { EffectClaim, claim_reserved_effect } from "./effect_owner"
+import { EffectClaim, claim_reserved_effect, settle_owned_effect } from "./effect_owner"
 import { prepare_group_tree, require_group_candidate } from "./git_group"
 import {
   StateObjectStage,
@@ -9,6 +9,7 @@ import {
   prepare_state,
   read_state,
   read_state_object,
+  read_state_revision,
   require_git_transport,
   stage_state,
   validate_state_write,
@@ -25,6 +26,7 @@ import { Installation } from "./installation"
 import { Fence } from "./types"
 import {
   GithubConnectorError,
+  GithubConnectorResult,
   GithubPullRequestReviewCensus,
   GithubRefUpdatesReceipt,
   github_pr_review_census,
@@ -38,7 +40,7 @@ pub type GithubIntegrationConfiguration = {installation: Installation, token_ref
  * Keep prepared identities after an uncertain response. Repeated delivery never dispatches again.
  */
 pub type GithubIntegrationDispatch = {
-  status: "not_started" | "confirmed" | "reconciliation_required",
+  status: "not_started" | "confirmed" | "refused" | "reconciliation_required",
   dispatch_started: bool,
   claim: EffectClaim?,
   transaction: GithubIntegrationTransaction?,
@@ -52,10 +54,26 @@ pub type GithubIntegrationDispatch = {
  * Read-back is conclusive only when the exact atomic confirmation survives in current authority.
  */
 pub type GithubIntegrationReconciliation = {
-  status: "confirmed" | "unresolved",
+  status: "confirmed" | "refused" | "unresolved",
   observed: string?,
   state_commit: string,
   staging_ref: string,
+}
+
+/** A conclusive provider refusal is retained independently of a successful transaction witness. */
+pub type GithubIntegrationRefusal = {
+  schema: "smart-ship.github-integration-refusal.v1",
+  transaction: GithubIntegrationTransaction,
+  provider: GithubConnectorError,
+}
+
+/** Unresolved integrations retain their objects. Cleanup never overwrites a competing ref. */
+pub type GithubIntegrationCleanup = {
+  status: "deleted" | "retained" | "unknown",
+  observed: string?,
+  provider: GithubRefUpdatesReceipt?,
+  error: GithubConnectorError?,
+  reason: string?,
 }
 
 type Prepared = {
@@ -64,6 +82,8 @@ type Prepared = {
   transaction: GithubIntegrationTransaction,
   stage: StateObjectStage,
 }
+
+type ProviderReply = {outcome: GithubConnectorResult<GithubRefUpdatesReceipt>}
 
 /** The reservation binds the configured provider identity before any claim can invoke it. */
 pub fn github_integration_binding(configuration: GithubIntegrationConfiguration) -> string {
@@ -155,6 +175,10 @@ fn prepare(
     unwrap(github_integration_state(claim, witness)),
   )
   const transaction = github_integration_transaction(claim, witness, write)
+  require !transaction.updates.any(
+    { update -> update.ref == "refs/heads/smart-ship-objects/" + claim.commit },
+  ),
+    "object staging cannot address a destination, authority or reviewed source branch"
   require_git_transport(harness.process, store, claim.remote)
   const stage = stage_state(harness.process, store, write)
   return {witness: witness, write: write, transaction: transaction, stage: stage}
@@ -225,7 +249,7 @@ pub fn dispatch_github_integration(
     prepare(harness, configuration, claim, request, expected_base)
   }
   if is_err(prepared) {
-    return result + {reason: "integration preparation refused; reconcile the durable claim"}
+    return result + {reason: "integration preparation refused: " + to_string(unwrap_err(prepared))}
   }
   const ready = unwrap(prepared)
   result = result + {transaction: ready.transaction, stage: ready.stage}
@@ -249,24 +273,27 @@ pub fn dispatch_github_integration(
   }
   const parts = request.repository.split("/")
   const attempted = try {
-    github_update_refs(
-      harness,
-      {
-        owner: parts[0]!,
-        repo: parts[1]!,
-        updates: ready.transaction.updates,
-        options: {
-          installation_token: harness.secrets.read(configuration.token_reference),
-          allow_gh_auth_fallback: false,
-          retry_unsafe: false,
-          retry: {max_attempts: 1},
+    const reply: ProviderReply = {
+      outcome: github_update_refs(
+        harness,
+        {
+          owner: parts[0]!,
+          repo: parts[1]!,
+          updates: ready.transaction.updates,
+          options: {
+            installation_token: harness.secrets.read(configuration.token_reference),
+            allow_gh_auth_fallback: false,
+            retry_unsafe: false,
+            retry: {max_attempts: 1},
+          },
         },
-      },
-    )
+      ),
+    }
+    reply
   }
   result = result + {dispatch_started: true}
   if is_ok(attempted) {
-    const provider = unwrap(attempted)
+    const provider = unwrap(attempted).outcome
     if is_ok(provider) {
       result = result + {provider: unwrap(provider)}
     } else {
@@ -291,7 +318,34 @@ pub fn dispatch_github_integration(
       return result + {status: "confirmed", reason: nil}
     }
   }
-  return result + {reason: "atomic integration is unconfirmed; observe without redispatch"}
+  if result.error?.mutation_outcome == "refused" {
+    const refusal: GithubIntegrationRefusal = {
+      schema: "smart-ship.github-integration-refusal.v1",
+      transaction: ready.transaction,
+      provider: result.error!,
+    }
+    const settled = try {
+      settle_owned_effect(
+        harness.process,
+        config.store,
+        claim,
+        request,
+        {status: "refused", receipt: effect_receipt(json_stringify(refusal))},
+      )
+    }
+    if is_ok(settled) && unwrap(settled).status == "committed" {
+      return result + {status: "refused", reason: "provider definitively refused this integration"}
+    }
+  }
+  return result
+    + {
+      reason: "atomic integration is unconfirmed; observe without redispatch"
+        + if is_err(readback) {
+          ": " + to_string(unwrap_err(readback))
+        } else {
+          ""
+        },
+    }
 }
 
 /**
@@ -306,6 +360,32 @@ pub fn reconcile_github_integration(
   const store = configuration.installation.store
   require_git_transport(process, store, "https://github.com/" + transaction.repository + ".git")
   const witness = transaction.witness
+  const current = read_state(process, store)
+  const observed = current.state
+  // A terminal refusal retains the exact transaction in current authority. Its
+  // temporary prepared object may already have been collected after safe cleanup.
+  if observed != nil {
+    const effect = observed.effects.find({ item -> item.request == witness.request })
+    if effect?.status == "refused" && effect.receipt != nil {
+      const parsed = json_parse(effect.receipt.body)
+      if schema_is(parsed, GithubIntegrationRefusal) {
+        const refusal: GithubIntegrationRefusal = schema_expect(
+          parsed,
+          schema_of(GithubIntegrationRefusal),
+        )
+        if refusal.transaction == transaction && refusal.provider.mutation_outcome == "refused"
+          && witness.repository_remote == store.remote
+          && witness.authority_ref == store.ref {
+          return {
+            status: "refused",
+            observed: current.commit,
+            state_commit: transaction.state_commit,
+            staging_ref: "refs/heads/smart-ship-objects/" + witness.authority_before,
+          }
+        }
+      }
+    }
+  }
   const claim: EffectClaim = {
     remote: store.remote,
     ref: store.ref,
@@ -320,8 +400,6 @@ pub fn reconcile_github_integration(
   validate_state_write(process, store, write)
   require github_integration_transaction(claim, witness, write) == transaction,
     "recovery transaction differs from its actual state object and complete guards"
-  const current = read_state(process, store)
-  const observed = current.state
   const confirmed = observed != nil
     && observed.authority.installation == claim.state.authority.installation
     && observed.effects.any(
@@ -341,4 +419,158 @@ pub fn reconcile_github_integration(
     state_commit: transaction.state_commit,
     staging_ref: "refs/heads/smart-ship-objects/" + claim.commit,
   }
+}
+
+/** Recover the prepared transaction from remote authority history and its owned staging branch. */
+pub fn recover_github_integration(
+  process: HarnessProcess,
+  configuration: GithubIntegrationConfiguration,
+  request: IntegrationEffect,
+) -> GithubIntegrationTransaction {
+  const store = configuration.installation.store
+  require_git_transport(process, store, "https://github.com/" + request.repository + ".git")
+  const current = read_state(process, store)
+  require current.state != nil, "integration recovery has no measured authority"
+  const effect = current.state.effects.find({ item -> item.request == request })
+  require effect != nil && effect.dispatch_id != nil && effect.dispatch_revision != nil,
+    "integration recovery has no recorded dispatch"
+  const original = read_state_revision(process, store, current, effect.dispatch_revision)
+  const claimed = original.state!.effects.find({ item -> item.request == request })
+  require claimed != nil && claimed.status == "dispatching"
+    && claimed.dispatch_id == effect.dispatch_id,
+    "recorded authority revision does not own this dispatch"
+  const claim: EffectClaim = {
+    remote: store.remote,
+    ref: store.ref,
+    commit: original.commit!,
+    state: original.state!,
+  }
+  if effect.status == "refused" && effect.receipt != nil {
+    const parsed = json_parse(effect.receipt.body)
+    if schema_is(parsed, GithubIntegrationRefusal) {
+      const refusal: GithubIntegrationRefusal = schema_expect(
+        parsed,
+        schema_of(GithubIntegrationRefusal),
+      )
+      const witness = refusal.transaction.witness
+      const expected: StateWrite = {
+        expected: claim.commit,
+        commit: refusal.transaction.state_commit,
+        state: unwrap(github_integration_state(claim, witness)),
+      }
+      require refusal.provider.mutation_outcome == "refused"
+        && github_integration_transaction(claim, witness, expected) == refusal.transaction,
+        "durable refusal differs from its exact dispatch and transaction"
+      return refusal.transaction
+    }
+  }
+  const staged = if effect.status == "confirmed" {
+    read_state_revision(process, store, current, effect.dispatch_revision + 1)
+  } else {
+    read_state(process, store + {ref: "refs/heads/smart-ship-objects/" + original.commit!})
+  }
+  require staged.commit != nil && staged.state != nil,
+    "integration has no measured prepared object; do not redispatch"
+  const prepared_effect = staged.state.effects.find({ item -> item.request == request })
+  require prepared_effect != nil && prepared_effect.status == "confirmed"
+    && prepared_effect.receipt != nil,
+    "staged state has no exact integration confirmation"
+  const witness: GithubIntegrationWitness = schema_expect(
+    json_parse(prepared_effect.receipt.body),
+    schema_of(GithubIntegrationWitness),
+  )
+  const write: StateWrite = {expected: original.commit, commit: staged.commit, state: staged.state}
+  validate_state_write(process, store, write)
+  return github_integration_transaction(claim, witness, write)
+}
+
+/** Delete only a conclusively reconciled transaction's exact owned staging object. */
+pub fn cleanup_github_integration(
+  harness: Harness,
+  configuration: GithubIntegrationConfiguration,
+  transaction: GithubIntegrationTransaction,
+) -> GithubIntegrationCleanup {
+  require configuration.token_reference.trim() != "", "cleanup requires a secret reference"
+  let result: GithubIntegrationCleanup = {
+    status: "retained",
+    observed: nil,
+    provider: nil,
+    error: nil,
+    reason: nil,
+  }
+  const qualified = try {
+    reconcile_github_integration(harness.process, configuration, transaction)
+  }
+  if is_err(qualified) || unwrap(qualified).status == "unresolved" {
+    return result + {reason: "unresolved integration objects must be retained"}
+  }
+  const store = configuration.installation.store + {ref: unwrap(qualified).staging_ref}
+  const before = try {
+    read_state(harness.process, store)
+  }
+  if is_err(before) {
+    return result + {status: "unknown", reason: "staging ref could not be measured"}
+  }
+  const observed = unwrap(before).commit
+  if observed == nil {
+    return result + {status: "deleted"}
+  }
+  result = result + {observed: observed}
+  if observed != transaction.state_commit {
+    return result + {reason: "staging ref names a competing object"}
+  }
+  const parts = transaction.repository.split("/")
+  const attempted = try {
+    const reply: ProviderReply = {
+      outcome: github_update_refs(
+        harness,
+        {
+          owner: parts[0]!,
+          repo: parts[1]!,
+          updates: [
+            {
+              ref: store.ref,
+              before_oid: transaction.state_commit,
+              after_oid: "0".repeat(40),
+              force: false,
+            },
+          ],
+          options: {
+            installation_token: harness.secrets.read(configuration.token_reference),
+            allow_gh_auth_fallback: false,
+            retry_unsafe: false,
+            retry: {max_attempts: 1},
+          },
+        },
+      ),
+    }
+    reply
+  }
+  if is_ok(attempted) {
+    const outcome = unwrap(attempted).outcome
+    if is_ok(outcome) {
+      result = result + {provider: unwrap(outcome)}
+    } else {
+      result = result + {error: unwrap_err(outcome)}
+    }
+  }
+  const after = try {
+    read_state(harness.process, store)
+  }
+  if is_err(after) {
+    return result + {status: "unknown", reason: "cleanup read-back is unavailable"}
+  }
+  const remaining = unwrap(after).commit
+  return result
+    + {
+      status: if remaining == nil {
+        "deleted"
+      } else if result.error?.mutation_outcome == "refused"
+        || remaining != transaction.state_commit {
+        "retained"
+      } else {
+        "unknown"
+      },
+      observed: remaining,
+    }
 }

@@ -114,10 +114,67 @@ pub fn read_state_object(process: HarnessProcess, store: GitStore, commit: strin
     { effect -> effect.receipt == nil || effect_receipt_valid(effect.receipt) },
   ),
     "durable effect receipt content does not match its identity"
+  check_dispatch_revisions(state)
   return state
 }
 
+fn check_dispatch_revisions(state: Controller) {
+  require state.effects.all(
+    { effect ->
+      effect.dispatch_id == nil == (effect.dispatch_revision == nil)
+        && (effect.dispatch_revision == nil
+          || (effect.dispatch_revision > 0
+            && effect.dispatch_revision <= state.authority.revision))
+    },
+  ),
+    "dispatch identity requires its valid durable authority revision"
+}
+
+/** Recover a recorded dispatch from single-parent authority history, including after a stop. */
+pub fn read_state_revision(
+  process: HarnessProcess,
+  store: GitStore,
+  current: StateRead,
+  revision: int,
+) -> StateRead {
+  require current.commit != nil && current.state != nil && revision > 0
+    && revision <= current.state.authority.revision,
+    "authority revision is outside recorded history"
+  const distance = current.state.authority.revision - revision
+  const commit = run(process, store, ["rev-parse", current.commit + "~" + to_string(distance)])
+  const state = read_state_object(process, store, commit)
+  require state.authority.revision == revision
+    && state.authority.installation == current.state.authority.installation,
+    "authority history does not contain the recorded dispatch revision"
+  return {commit: commit, state: state}
+}
+
 fn check_transition(previous: Controller?, next: Controller) {
+  check_dispatch_revisions(next)
+  for effect in next.effects {
+    if effect.dispatch_id == nil {
+      continue
+    }
+    const prior = (previous?.effects ?? []).find({ item -> item.request == effect.request })
+    require if prior?.dispatch_id == nil {
+      effect.dispatch_revision == next.authority.revision
+    } else {
+      effect.dispatch_id == prior.dispatch_id && effect.dispatch_revision == prior.dispatch_revision
+    },
+      "recorded dispatch identity and revision cannot change"
+  }
+  require (previous?.effects ?? []).all(
+    { old ->
+      old.dispatch_id == nil
+        || next.effects.any(
+          { effect ->
+            effect.request == old.request && effect.dispatch_id == old.dispatch_id
+              && effect.dispatch_revision == old.dispatch_revision
+          },
+        )
+    },
+  ),
+    "a recorded dispatch cannot disappear from authority history"
   require next.effects.all(
     { effect -> effect.receipt == nil || effect_receipt_valid(effect.receipt) },
   ),

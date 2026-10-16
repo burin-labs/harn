@@ -1,6 +1,6 @@
 import { Controller, EffectReceipt, EffectRequest, begin_effect, settle_effect } from "./controller"
 import { effect_receipt_valid } from "./effect_contract"
-import { GitStore, commit_state, prepare_state, read_state } from "./git_store"
+import { CommitResult, GitStore, commit_state, prepare_state, read_state } from "./git_store"
 import { Fence } from "./types"
 
 /** Only the effect owner receives these handles; dispatch identities come from its own entropy. */
@@ -61,6 +61,42 @@ pub fn claim_reserved_effect(
   return Ok({remote: store.remote, ref: store.ref, commit: prepared.commit, state: unwrap(started)})
 }
 
+/** Record a measured outcome only for the exact dispatch this owner durably claimed. */
+pub fn settle_owned_effect(
+  process: HarnessProcess,
+  store: GitStore,
+  claim: EffectClaim,
+  request: EffectRequest,
+  outcome: EffectOutcome,
+) -> CommitResult {
+  require claim.remote == store.remote && claim.ref == store.ref && outcome_valid(outcome),
+    "effect settlement differs from its claimed store or valid outcome"
+  const claimed = claim.state.effects.find({ effect -> effect.request == request })
+  require claimed != nil && claimed.status == "dispatching" && claimed.dispatch_id != nil,
+    "effect settlement requires its original durable dispatch claim"
+  const current = read_state(process, store)
+  const state = current.state
+  require state != nil
+    && state.authority.installation == claim.state.authority.installation
+    && state.authority.generation == claim.state.authority.generation
+    && state.authority.controller == claim.state.authority.controller,
+    "dispatch settlement authority changed"
+  const effect = state.effects.find({ item -> item.request == request })
+  require effect != nil && effect.dispatch_id == claimed.dispatch_id
+    && effect.dispatch_binding == claimed.dispatch_binding,
+    "effect settlement belongs to a different dispatch"
+  const next = unwrap(
+    settle_effect(
+      state,
+      pick(state.authority, ["installation", "generation", "revision", "controller"]),
+      request,
+      outcome.status,
+      outcome.receipt,
+    ),
+  )
+  return commit_state(process, store, prepare_state(process, store, current, next))
+}
+
 /** Claim once, call the provider once, and settle its measured result through the same owner. */
 pub fn dispatch_reserved_effect(
   host: EffectOwnerHost,
@@ -96,23 +132,7 @@ pub fn dispatch_reserved_effect(
     {status: "unknown", receipt: nil}
   }
   const settlement = try {
-    const current = read_state(process, store)
-    const current_state = current.state
-    require current_state != nil
-      && current_state.authority.installation == fence.installation
-      && current_state.authority.generation == fence.generation
-      && current_state.authority.controller == fence.controller,
-      "dispatch settlement authority changed"
-    const next = unwrap(
-      settle_effect(
-        current_state,
-        pick(current_state.authority, ["installation", "generation", "revision", "controller"]),
-        request,
-        outcome.status,
-        outcome.receipt,
-      ),
-    )
-    commit_state(process, store, prepare_state(process, store, current, next))
+    settle_owned_effect(process, store, claim, request, outcome)
   }
   if is_ok(settlement) && unwrap(settlement).status == "committed" {
     return {

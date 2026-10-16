@@ -151,6 +151,7 @@ pipeline test_atomic_adapter_claim_is_unique_durable_and_invalidated_by_stop(har
   assert_eq(current.state, claim.state)
   assert_eq(claim.state.effects[0]?.status, "dispatching")
   assert(claim.state.effects[0]?.dispatch_id != nil)
+  assert_eq(claim.state.effects[0]?.dispatch_revision, claim.state.authority.revision)
   assert(
     is_err(
       claim_reserved_effect(
@@ -163,6 +164,16 @@ pipeline test_atomic_adapter_claim_is_unique_durable_and_invalidated_by_stop(har
     "a repeated delivery must not obtain a second claim",
   )
   const stopped = unwrap(control(claim.state, fence(claim.state), "stopped"))
+  const rewritten = stopped
+    + {
+      effects: stopped.effects.map(
+        { effect -> effect + {dispatch_revision: claim.state.authority.revision - 1} },
+      ),
+    }
+  assert_error_contains(
+    fn() { prepare_state(harness.process, s.store, current, rewritten) },
+    "recorded dispatch identity and revision cannot change",
+  )
   const stop = prepare_state(harness.process, s.store, current, stopped)
   assert_eq(commit_state(harness.process, s.store, stop).status, "committed")
   const after = read_state(harness.process, s.store)
