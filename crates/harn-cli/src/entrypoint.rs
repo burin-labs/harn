@@ -1125,8 +1125,13 @@ pub(crate) fn run_dap_adapter() {
 }
 
 pub(crate) async fn run_version(args: cli::VersionArgs) -> i32 {
-    let runtime_content = serde_json::to_string(harn_vm::runtime_content_fingerprint())
-        .expect("runtime content fingerprint serializes");
+    let mut fingerprint = harn_vm::runtime_content_fingerprint().clone();
+    fingerprint.source_revision = match env!("HARN_BUILD_REVISION") {
+        "" => None,
+        revision => Some(revision.to_string()),
+    };
+    let runtime_content =
+        serde_json::to_string(&fingerprint).expect("runtime content fingerprint serializes");
     let _name = env_guard::ScopedEnvVar::set("HARN_BUILD_NAME", env!("CARGO_PKG_NAME"));
     let _version = env_guard::ScopedEnvVar::set("HARN_BUILD_VERSION", env!("CARGO_PKG_VERSION"));
     let _description =
