@@ -18,7 +18,7 @@ type Cost = {
   admission: Admission,
 }
 
-type Report = {ok: bool, text: string, cost: Cost, admission_reason: string?}
+type Report = {role: string, ok: bool, text: string, cost: Cost, admission_reason: string?}
 
 type Denial = {admission_reason: string}
 
@@ -40,12 +40,24 @@ fn call_once(harness: {llm: HarnessLlm, stdio: HarnessStdio}) {
     )
   }
   const cost = schema_expect(harness.llm.session_cost(), schema_of(Cost))
-  let report: Report = {ok: false, text: "", cost: cost, admission_reason: nil}
+  let report: Report = {role: argv[1], ok: false, text: "", cost: cost, admission_reason: nil}
   match result {
-    Ok(response) -> { report = {ok: true, text: response.text, cost: cost, admission_reason: nil} }
+    Ok(response) -> { report = {
+      role: argv[1],
+      ok: true,
+      text: response.text,
+      cost: cost,
+      admission_reason: nil,
+    } }
     Err(error) -> {
       const reason = schema_parse(error, schema_of(Denial))?.admission_reason
-      report = {ok: false, text: to_string(error), cost: cost, admission_reason: reason}
+      report = {
+        role: argv[1],
+        ok: false,
+        text: to_string(error),
+        cost: cost,
+        admission_reason: reason,
+      }
     }
   }
   harness.stdio.println(json_stringify(report))
@@ -94,6 +106,7 @@ fn main(harness: Harness) {
     )
     require child.success, child.stderr
     const report = json_decode(child.stdout, schema_of(Report))?
+    require report.role == allocation.role, "Child role differs from its allocation"
     require report.ok && trim(report.text) != "", report.text
     require report.cost.provider_call_count == 1, "Expected one observed provider attempt"
     require report.cost.cost_usd != nil && report.cost.unpriced_calls == 0
