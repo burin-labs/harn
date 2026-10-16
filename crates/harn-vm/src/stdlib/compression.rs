@@ -487,7 +487,10 @@ fn zip_extract_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
                 ),
             ));
         }
-        let path = file.name().to_string();
+        let path = file
+            .name()
+            .map_err(|error| builtin_error("zip_extract", error))?
+            .into_owned();
         let remaining = cap.saturating_sub(total_extracted);
         let content = read_with_cap(&mut file, remaining, "zip_extract")?;
         total_extracted = total_extracted.saturating_add(content.len() as u64);
