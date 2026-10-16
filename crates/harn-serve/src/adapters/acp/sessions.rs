@@ -337,7 +337,10 @@ impl ConcurrentSessionControls {
         let Some(control) = control else {
             return false;
         };
-        if !control.cancellation.has_admitted_prompt() {
+        if !control
+            .cancellation
+            .can_preempt_live_control(control.prompt_is_active())
+        {
             return false;
         }
         match apply_live_client_operation(method, &session_id, params) {

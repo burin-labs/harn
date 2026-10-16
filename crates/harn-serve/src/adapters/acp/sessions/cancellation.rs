@@ -16,15 +16,17 @@ pub(in super::super) struct SessionCancellation {
 }
 
 impl SessionCancellation {
-    /// Dropped or stopped requests cannot make idle controls preemptive.
-    pub(in super::super) fn has_admitted_prompt(&self) -> bool {
+    /// Running execution or live admission permits preemption until a close
+    /// has been admitted. Cancellation cleanup retains the running behavior.
+    pub(in super::super) fn can_preempt_live_control(&self, prompt_active: bool) -> bool {
         let state = self.state.lock().unwrap_or_else(|error| error.into_inner());
         state.closing.strong_count() == 0
-            && state.prompts.iter().any(|prompt| {
-                prompt
-                    .upgrade()
-                    .is_some_and(|prompt| !prompt.cancelled.load(Ordering::SeqCst))
-            })
+            && (prompt_active
+                || state.prompts.iter().any(|prompt| {
+                    prompt
+                        .upgrade()
+                        .is_some_and(|prompt| !prompt.cancelled.load(Ordering::SeqCst))
+                }))
     }
 
     pub(in super::super) fn cancel(&self) -> bool {
@@ -80,7 +82,7 @@ mod tests {
         let second_close = cancellation.prepare_close();
         cancellation.cancel();
         assert!(active.cancelled.load(Ordering::SeqCst));
-        assert!(!cancellation.has_admitted_prompt());
+        assert!(!cancellation.can_preempt_live_control(false));
         let blocked = cancellation.prepare_prompt();
         assert!(blocked.cancelled.load(Ordering::SeqCst));
         drop(first_close);
@@ -89,8 +91,19 @@ mod tests {
         drop(second_close);
         let resumed = cancellation.prepare_prompt();
         assert!(!resumed.cancelled.load(Ordering::SeqCst));
-        assert!(cancellation.has_admitted_prompt());
+        assert!(cancellation.can_preempt_live_control(false));
         drop(resumed);
-        assert!(!cancellation.has_admitted_prompt());
+        assert!(!cancellation.can_preempt_live_control(false));
+    }
+
+    #[test]
+    fn running_cancellation_cleanup_keeps_control_until_close_is_admitted() {
+        let cancellation = SessionCancellation::default();
+        let _prompt = cancellation.prepare_prompt();
+        cancellation.cancel();
+        assert!(!cancellation.can_preempt_live_control(false));
+        assert!(cancellation.can_preempt_live_control(true));
+        let _close = cancellation.prepare_close();
+        assert!(!cancellation.can_preempt_live_control(true));
     }
 }
