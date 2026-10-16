@@ -6,6 +6,56 @@ use std::sync::Arc;
 use harn_vm::llm::{MachineSpendPolicy, MachineSpendQuota};
 
 use crate::test_util::process::harn_e2e_command;
+use crate::test_util::stdio_jsonrpc::StdioJsonRpcClient;
+
+async fn invoke_acp(project: &Path, authority: &Path) -> serde_json::Value {
+    let project = project.to_path_buf();
+    let authority = authority.to_path_buf();
+    tokio::task::spawn_blocking(move || {
+        let mut command = harn_e2e_command();
+        command
+            .current_dir(&project)
+            .env("HARN_PROVIDERS_CONFIG", authority.join("providers.toml"))
+            .env("HARN_SECRET_PROVIDERS", "env")
+            .env("HARN_SPEND_POLICY", authority.join("policy.toml"))
+            .env("SPEND_FIXTURE_KEY", "local-fixture-only")
+            .env_remove("HARN_LLM_CALLS_DISABLED")
+            .args(["serve", "acp", "probe.harn"]);
+        let mut client = StdioJsonRpcClient::spawn("quota ACP", command);
+        let created = client.request(serde_json::json!({
+            "jsonrpc":"2.0", "id":1, "method":"session/new",
+            "params":{"cwd":project, "environmentPolicy":{"kind":"inherited"}}
+        }));
+        let session = created["result"]["sessionId"]
+            .as_str()
+            .expect("ACP session");
+        client.send(&serde_json::json!({
+            "jsonrpc":"2.0", "method":"session/set_budget",
+            "params":{"sessionId":session,"llm_cost_usd":5.0,"llm_tokens":null}
+        }));
+        let turn = client.exchange(
+            serde_json::json!({
+                "jsonrpc":"2.0", "id":2, "method":"session/prompt",
+                "params":{"sessionId":session,"prompt":[{"type":"text","text":"go"}]}
+            }),
+            |method| {
+                assert_eq!(method, "host/capabilities");
+                serde_json::json!({})
+            },
+        );
+        let output: String = turn
+            .notifications
+            .iter()
+            .filter(|message| message["params"]["update"]["sessionUpdate"] == "agent_message_chunk")
+            .filter_map(|message| message["params"]["update"]["content"]["text"].as_str())
+            .collect();
+        assert!(turn.response.get("error").is_none(), "{:?}", turn.response);
+        client.shutdown_expect_success();
+        serde_json::from_str(output.trim()).expect("typed quota outcome")
+    })
+    .await
+    .unwrap()
+}
 
 fn write_policy(root: &Path, limit: i64) {
     std::fs::write(
@@ -178,4 +228,86 @@ async fn concurrent_projects_and_restarted_shorthand_share_the_host_allowance() 
         "denied restart reached HTTP"
     );
     assert_eq!(quota.receipt().unwrap().lifetime_reserved_microusd, limit);
+}
+
+#[tokio::test]
+async fn cli_and_acp_share_a_monthly_quota_across_processes_and_restart() {
+    let authority = tempfile::tempdir().unwrap();
+    let terminal = tempfile::tempdir().unwrap();
+    let editor = tempfile::tempdir().unwrap();
+    std::fs::write(terminal.path().join("probe.harn"), r#"fn main(harness: Harness) {
+        harness.llm.call("hello", nil, {provider: "openai", model: "gpt-4o-mini", max_tokens: 64, stream: false})
+        harness.stdio.println("provider_call_completed")
+    }"#).unwrap();
+    std::fs::write(editor.path().join("probe.harn"), r#"pipeline main(harness: Harness) {
+        const outcome = try {
+            harness.llm.call("hello", nil, {provider: "openai", model: "gpt-4o-mini", max_tokens: 64, stream: false})
+            {admitted: true}
+        } catch (error) { error }
+        harness.stdio.println(json_stringify(outcome))
+    }"#).unwrap();
+    let (calls, hold, release, server) = local_provider(authority.path()).await;
+    let write_monthly = |limit| {
+        std::fs::write(authority.path().join("policy.toml"), format!(
+            "ledger_path = {}\nscope = \"person\"\n[limits]\nmonthly_limit_microusd = {limit}\n",
+            toml::Value::String(authority.path().join("spend.sqlite").to_string_lossy().into_owned())
+        )).unwrap();
+    };
+    write_monthly(2_000_000);
+    let positive = invoke_acp(editor.path(), authority.path()).await;
+    assert_eq!(positive["admitted"], true, "{positive}");
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    let mut policy = MachineSpendPolicy {
+        daily_limit_microusd: None,
+        monthly_limit_microusd: Some(2_000_000),
+        lifetime_limit_microusd: None,
+    };
+    let quota = MachineSpendQuota::open(
+        authority.path().join("spend.sqlite"),
+        "person",
+        policy.clone(),
+    )
+    .unwrap();
+    let one_call = quota.receipt().unwrap().reserved_microusd;
+    assert!(one_call > 0, "positive control must reserve real allowance");
+    let limit = one_call * 2;
+    policy.monthly_limit_microusd = Some(limit);
+    quota
+        .update_policy(policy.clone(), "fixture-host-approved")
+        .unwrap();
+    write_monthly(limit);
+    hold.store(true, Ordering::SeqCst);
+    let acp = async {
+        let outcome = invoke_acp(editor.path(), authority.path()).await;
+        if outcome["admitted"] != true {
+            release.notify_one();
+        }
+        outcome
+    };
+    let cli = async {
+        let outcome = invoke(terminal.path(), authority.path(), false).await;
+        if !outcome.status.success() {
+            release.notify_one();
+        }
+        outcome
+    };
+    let (acp, cli) = tokio::join!(acp, cli);
+    assert_ne!(
+        acp["admitted"] == true,
+        cli.status.success(),
+        "{acp} {cli:?}"
+    );
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
+    assert_eq!(quota.receipt().unwrap().reserved_microusd, limit);
+    hold.store(false, Ordering::SeqCst);
+    let restarted = invoke_acp(editor.path(), authority.path()).await;
+    assert_eq!(restarted["quota_scope"], "machine", "{restarted}");
+    assert_eq!(restarted["period"], "month", "{restarted}");
+    assert_eq!(restarted["remaining_microusd"], 0);
+    assert!(restarted["reset_at_unix_ms"].as_i64().unwrap() > 0);
+    assert_eq!(calls.load(Ordering::SeqCst), 2, "restart bypassed quota");
+    let reopened =
+        MachineSpendQuota::open(authority.path().join("spend.sqlite"), "person", policy).unwrap();
+    assert_eq!(reopened.receipt().unwrap().reserved_microusd, limit);
+    server.abort();
 }

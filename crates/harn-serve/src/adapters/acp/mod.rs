@@ -804,6 +804,8 @@ pub struct AcpServerConfig {
     pub launcher_environment: harn_vm::security::LauncherEnvironment,
     /// Trusted launch authority, independent of client environment grants.
     pub host_inference_boundary: Option<harn_vm::llm::api::InferenceBoundary>,
+    /// Trusted machine/user billing authority, retained across transport threads.
+    pub machine_spend_quota: Option<harn_vm::llm::MachineSpendQuota>,
     pub pipeline: Option<String>,
     pub auth_policy: AuthPolicy,
     pub authenticated_principal: Option<AuthenticatedPrincipal>,
@@ -842,6 +844,7 @@ impl AcpServerConfig {
         Self {
             launcher_environment: harn_vm::security::LauncherEnvironment::capture(),
             host_inference_boundary: None,
+            machine_spend_quota: harn_vm::llm::MachineSpendQuota::current(),
             pipeline,
             auth_policy: AuthPolicy::allow_all(),
             authenticated_principal: None,
@@ -932,6 +935,13 @@ impl AcpServerConfig {
 
     pub fn with_budget(mut self, budget: BudgetSpec) -> Self {
         self.budget = normalize_budget_spec(budget);
+        self
+    }
+
+    /// Share one durable allowance with CLI and other embedded sessions.
+    /// Client RPC metadata cannot replace this host-owned authority.
+    pub fn with_machine_spend_quota(mut self, quota: harn_vm::llm::MachineSpendQuota) -> Self {
+        self.machine_spend_quota = Some(quota);
         self
     }
 
@@ -1056,6 +1066,7 @@ struct VmBaselineCacheEntry {
 pub struct AcpServer {
     launcher_environment: harn_vm::security::LauncherEnvironment,
     host_inference_boundary: Option<harn_vm::llm::api::InferenceBoundary>,
+    machine_spend_quota: Option<harn_vm::llm::MachineSpendQuota>,
     descriptor: AdapterDescriptor,
     /// Optional pipeline file to execute on each `session/prompt`.
     pipeline: Option<String>,

@@ -37,6 +37,20 @@ and leave a durable audit receipt.
 Keep the policy and ledger outside an agent's writable roots. A host embedding
 Harn can install the same allowance through `MachineSpendQuota::scope`.
 
+ACP configuration captures the active quota when `AcpServerConfig::new` runs.
+Embedded hosts can pass it explicitly with `with_machine_spend_quota(quota)`.
+The configuration retains that authority across dedicated runtime threads and
+WebSocket connections. Every prompt uses the same ledger, including resumed
+sessions and sessions in different projects.
+
+With a machine quota configured, authenticated `session/set_budget` changes
+write a durable receipt before changing the named session's ceiling.
+`session/set_config_option` budget changes use the same audit ledger. A failed
+audit write refuses the change. Session changes never raise the machine limits;
+use `MachineSpendQuota::update_policy` for an approved machine-policy change.
+Ledger schema version 3 preserves existing reservations and policy history;
+older Harn versions refuse to open the upgraded ledger.
+
 ## harn self
 
 Use a released Harn binary for an exact before-and-after check without
