@@ -554,7 +554,7 @@ pub fn rust_cache_refresh_concurrency_errors(workflow: dict) -> list<string> {
   if trim(workflow?.concurrency?.group ?? "") != CI_CACHE_REFRESH_CONCURRENCY_GROUP {
     errors = errors
       + [
-        "${CACHE_REFRESH_WORKFLOW}:rust-cache-refresh must serialize cache mutation across main commits",
+        "${CACHE_REFRESH_WORKFLOW}:rust-cache-refresh must serialize main cache mutations separately from read-only branch qualification",
       ]
   }
   if lowercase(trim(to_string(workflow?.concurrency?.["cancel-in-progress"] ?? true))) != "false" {

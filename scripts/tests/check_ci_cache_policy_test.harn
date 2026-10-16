@@ -38,6 +38,7 @@ import {
   windows_shared_cache_errors,
 } from "../check_ci_cache_policy"
 import { RUST_LINT_LEGS } from "../ci_cache_policy/linux_checks.harn"
+import { CI_CACHE_REFRESH_CONCURRENCY_GROUP } from "../ci_cache_policy/policy_core.harn"
 import "./ci_cache_policy/fixtures.harn"
 import "./ci_cache_policy/policy_integration_test.harn"
 
@@ -530,11 +531,10 @@ pipeline test_minimal_pr_capacity_policy_and_negative_controls(harness: Harness,
 }
 
 @test
-pipeline test_cache_refresh_serializes_mutation_without_cancelling_active_save(
-  harness: Harness,
-  task: unknown,
-) {
-  const job = {concurrency: {group: "harn-ci-rust-cache-refresh", "cancel-in-progress": false}}
+pipeline test_cache_refresh_serializes_main_without_starving_branch_qualification() {
+  const job = {
+    concurrency: {group: CI_CACHE_REFRESH_CONCURRENCY_GROUP, "cancel-in-progress": false},
+  }
   assert_eq(rust_cache_refresh_concurrency_errors(job), [])
 }
 
@@ -819,7 +819,7 @@ pipeline test_cache_refresh_whole_workflow_prevents_interleaved_pending_job_repl
   assert_eq(
     len(
       rust_cache_refresh_concurrency_errors(
-        {...workflow, concurrency: {...workflow.concurrency, group: "per-source"}},
+        {...workflow, concurrency: {...workflow.concurrency, group: "harn-ci-rust-cache-refresh"}},
       ),
     ),
     1,

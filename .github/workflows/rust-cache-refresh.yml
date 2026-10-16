@@ -33,10 +33,10 @@ on:
 permissions:
   contents: read
 
-# Serialize the complete CLI prerequisite and dependent matrix together.
-# Job-level groups can replace a pending dependent job with another run's CLI.
+# Serialize each complete prerequisite and matrix. Read-only branch probes use
+# their own group so main pushes cannot replace a pending qualification run.
 concurrency:
-  group: harn-ci-rust-cache-refresh
+  group: ${{ github.ref == 'refs/heads/main' && 'harn-ci-rust-cache-refresh' || 'harn-ci-rust-cache-qualification' }}
   cancel-in-progress: false
 
 env:
