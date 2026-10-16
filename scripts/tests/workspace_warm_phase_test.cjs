@@ -16,6 +16,7 @@ function fixture() {
   fs.mkdirSync(deps, { recursive: true });
   fs.mkdirSync(path.join(root, 'scripts/ci'), { recursive: true });
   fs.writeFileSync(path.join(root, 'scripts/ci/host_bound_rust_test_filter.sh'), '#!/bin/sh\nprintf "test(host_bound)\\n"\n', { mode: 0o755 });
+  fs.copyFileSync(path.resolve(__dirname, '../ci/workspace_features.sh'), path.join(root, 'scripts/ci/workspace_features.sh'));
   const command = `#!${process.execPath}
 const fs=require('node:fs');
 const path=require('node:path');
@@ -23,7 +24,9 @@ const args=process.argv.slice(2);
 const name=path.basename(process.argv[1]);
 fs.appendFileSync(process.env.PROBE_CALLS,JSON.stringify({name,args})+'\\n');
 if(name==='cargo' && args[0]==='metadata') {
-  console.log(JSON.stringify({target_directory:process.env.PROBE_TARGET}));
+  console.log(JSON.stringify({target_directory:process.env.PROBE_TARGET,
+    workspace_members:['vm','hostlib'], packages:[{name:'harn-vm',source:null,id:'vm'},{name:'harn-hostlib',source:null,id:'hostlib'}],
+    resolve:{nodes:[{id:'vm',features:['default','otel']},{id:'hostlib',features:['full']}]}}));
 } else {
   let phase=name==='cargo'?'harn-build':args.at(-1).includes('not (')?'workspace-tests':'security-tests';
   if(process.env.PROBE_FAIL===phase) process.exit(23);
@@ -56,7 +59,8 @@ test('the real warm owner measures the two consumer compiler phases and retains 
     const calls = fs.readFileSync(f.env.PROBE_CALLS, 'utf8').trim().split('\n').map(JSON.parse);
     assert.deepEqual(calls, [
       {name:'cargo-nextest', args:['nextest','run','--locked','--workspace','--profile','ci','--no-run','-E','not (test(host_bound))']},
-      {name:'cargo-nextest', args:['nextest','run','--locked','--workspace','--profile','ci','--no-run','-E','(package(harn-vm) and binary(harn_vm)) or (package(harn-hostlib) and binary(harn_hostlib))']},
+      {name:'cargo', args:['metadata','--locked','--format-version','1']},
+      {name:'cargo-nextest', args:['nextest','run','--locked','-p','harn-vm','-p','harn-hostlib','--features','harn-hostlib/full,harn-vm/default,harn-vm/otel','--profile','ci','--no-run','-E','(package(harn-vm) and binary(harn_vm)) or (package(harn-hostlib) and binary(harn_hostlib))']},
       {name:'cargo', args:['metadata','--format-version','1','--no-deps']},
     ]);
     assert.equal(fs.existsSync(path.join(f.deps, 'test-binary')), false);

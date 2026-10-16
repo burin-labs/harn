@@ -1210,6 +1210,18 @@ pub fn cache_action_errors(policy: CiCachePolicy, action: dict) -> list<string> 
     return ["${ACTION_PATH} must contain exactly one pinned upstream Rust cache step"]
   }
   errors = errors + workspace_cache_generation_errors(action, steps)
+  for restore in steps.filter(
+    { step ->
+      return step_uses(step).starts_with(UPSTREAM_CACHE_PREFIX)
+        || step_uses(step).starts_with(UPSTREAM_CACHE_RESTORE_PREFIX)
+    },
+  )
+    .to_list() {
+    if trim(to_string(restore?.env?.SEGMENT_DOWNLOAD_TIMEOUT_MINS ?? "")) != "2" {
+      errors = errors
+        + ["${ACTION_PATH} Rust cache restores must bound each download segment to two minutes"]
+    }
+  }
   const step = upstream[0]
   const expected_shared_key = "$" + "{{ steps.cache-paths.outputs.shared-key }}"
   if trim(step?.with?.["shared-key"] ?? "") != expected_shared_key

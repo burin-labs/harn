@@ -480,10 +480,13 @@ build_security_bundle() {
   staging="$(mktemp -d "${output_dir}/rust-security-artifact.XXXXXX")"
   cleanup_dir="$staging"
 
-  # Match the following workspace test build's unified feature graph. The
-  # filter limits archived binaries, not compilation, so security consumers
-  # still receive only their selected tests without a second crate build.
-  cargo-nextest nextest archive --locked --workspace --profile ci \
+  # Compile the two owning packages with workspace-resolved features. Include
+  # integration harnesses too: they can share a unit target's binary name.
+  local features
+  features="$(bash "$SCRIPT_DIR/workspace_features.sh" harn-vm harn-hostlib)"
+  [[ -n "$features" ]] || { echo 'security archive has no measured workspace features' >&2; exit 1; }
+  cargo-nextest nextest archive --locked -p harn-vm -p harn-hostlib \
+    --features "$features" --profile ci \
     -E "$SECURITY_FILTER" \
     --archive-file "$staging/harn-security-tests.tar.zst"
   write_security_manifest "$staging" "$commit" "$(rustc_identity_sha256)"
