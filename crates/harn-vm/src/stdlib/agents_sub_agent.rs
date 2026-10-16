@@ -1028,7 +1028,7 @@ pub(super) async fn execute_sub_agent(
             || result
                 .get("status")
                 .and_then(serde_json::Value::as_str)
-                .is_some_and(|status| status != "" && status != "done")
+                .is_some_and(|status| !status.is_empty() && status != "done")
         {
             result
                 .get("status")
