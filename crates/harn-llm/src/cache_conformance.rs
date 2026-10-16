@@ -1,7 +1,7 @@
 //! Prompt-cache conformance probe + classifier for Harn providers.
 //!
-//! The classifier is the stable contract Burin dogfood (#3532) and Harn Cloud
-//! receipts (#1106) consume; a live repeat-run HTTP probe is a convenience
+//! The classifier is the stable contract downstream host probes and cloud
+//! receipts consume; a live repeat-run HTTP probe is a convenience
 //! around it. Given a provider/model and one-or-more repeat runs of a
 //! stable-prefix request, this module:
 //!
@@ -15,9 +15,8 @@
 //!   ([`CacheConformanceClassification`]); and
 //! - aggregates a report verdict a repeat run can act on.
 //!
-//! The taxonomy here is the Harn-owned home for what Burin's
-//! `lib/runtime/model-selection.harn` bootstrapped: support classification plus
-//! the observation buckets. Product/runtime layers read this one verdict rather
+//! The taxonomy owns support classification and observation buckets.
+//! Product/runtime layers read this one verdict rather
 //! than re-deriving provider behavior.
 //!
 //! A missing provider usage field is recorded as an OBSERVATION
@@ -31,7 +30,7 @@ use crate::usage::ReportedTokenUsage;
 use harn_provider_catalog::capabilities::{Capabilities, WireDialect};
 
 /// Wire-format version of [`CacheConformanceReport`]. Bump on a breaking shape
-/// change so Burin/Cloud consumers can gate on the contract they parse.
+/// change so downstream consumers can gate on the contract they parse.
 pub const CACHE_CONFORMANCE_SCHEMA_VERSION: u32 = 2;
 
 /// Cache-control requirements for a `(provider, model)` route, derived from the
@@ -485,8 +484,8 @@ pub struct CacheConformanceRun {
     pub raw_usage: Option<Value>,
 }
 
-/// Report-level cache verdict aggregated across repeat runs — the one signal
-/// Burin dogfood and Cloud receipts key on.
+/// Report-level cache verdict aggregated across repeat runs for host probes
+/// and cloud receipts.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CacheVerdict {
@@ -537,8 +536,7 @@ impl CacheVerdict {
     }
 }
 
-/// Per-bucket run counts for report rollups. Mirrors Burin's
-/// `prompt_cache_observation_bucket_counts`, now Harn-owned.
+/// Per-bucket run counts for report rollups.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CacheConformanceBucketCounts {
     pub usage_unreported: usize,
@@ -575,7 +573,7 @@ impl CacheConformanceBucketCounts {
 }
 
 /// The full conformance report: capability support + per-run observations + one
-/// aggregate verdict, consumable by Burin #3532 and Harn Cloud #1106 without
+/// aggregate verdict, consumable by downstream hosts and cloud receipts without
 /// reclassifying provider behavior.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CacheConformanceReport {
