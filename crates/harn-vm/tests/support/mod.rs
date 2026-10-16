@@ -1,5 +1,13 @@
 #![allow(dead_code)]
 
+pub mod sandbox_host {
+    use harn_vm as vm;
+    include!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/support/sandbox_host.rs"
+    ));
+}
+
 use std::ffi::OsString;
 use std::sync::{Mutex, MutexGuard, OnceLock};
 

@@ -62,8 +62,8 @@ fn real_run_command_neutralizes_rustc_wrappers_inside_sandbox() {
 
     let workspace = tempfile::tempdir().expect("workspace");
 
-    // `warn` keeps the Worktree process policy active while allowing hosts
-    // without an OS confinement backend to exercise the environment contract.
+    // Keep the Worktree process policy active. Unsupported compatibility
+    // hosts must return their typed refusal through the actual tool calls.
     // SAFETY: the shared lock serializes every environment-mutating test in
     // this binary, and all five variables are restored before the guard drops.
     let _env_guard = super::process_tools_e2e::lock_env();
@@ -93,6 +93,31 @@ fn real_run_command_neutralizes_rustc_wrappers_inside_sandbox() {
         workspace_roots: vec![workspace.path().to_string_lossy().into_owned()],
         ..CapabilityPolicy::default()
     });
+    let restore = move || {
+        pop_execution_policy();
+        unsafe {
+            match old_handler_sandbox {
+                Some(value) => std::env::set_var("HARN_HANDLER_SANDBOX", value),
+                None => std::env::remove_var("HARN_HANDLER_SANDBOX"),
+            }
+            match old_rustc_wrapper {
+                Some(value) => std::env::set_var("RUSTC_WRAPPER", value),
+                None => std::env::remove_var("RUSTC_WRAPPER"),
+            }
+            match old_cargo_wrapper {
+                Some(value) => std::env::set_var("CARGO_BUILD_RUSTC_WRAPPER", value),
+                None => std::env::remove_var("CARGO_BUILD_RUSTC_WRAPPER"),
+            }
+            match old_workspace_wrapper {
+                Some(value) => std::env::set_var("RUSTC_WORKSPACE_WRAPPER", value),
+                None => std::env::remove_var("RUSTC_WORKSPACE_WRAPPER"),
+            }
+            match old_cargo_workspace_wrapper {
+                Some(value) => std::env::set_var("CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER", value),
+                None => std::env::remove_var("CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER"),
+            }
+        }
+    };
 
     let cwd = workspace.path().to_string_lossy();
     let inherited_response = call(command_request(&cwd));
@@ -129,6 +154,20 @@ fn real_run_command_neutralizes_rustc_wrappers_inside_sandbox() {
     );
     caller_request.insert("env_mode".into(), value("patch"));
     let caller_response = call(caller_request);
+    if matches!(
+        &inherited_response,
+        Err(HostlibError::SandboxMechanismUnavailable { .. })
+    ) {
+        restore();
+        assert!(super::sandbox_host::assert_unavailable_tool(
+            &inherited_response
+        ));
+        assert!(super::sandbox_host::assert_unavailable_tool(
+            &caller_response
+        ));
+        assert!(!workspace.path().join("target").exists());
+        return;
+    }
 
     let canonical_workspace = workspace.path().canonicalize().unwrap();
     let workspace_decisions = || {
@@ -283,29 +322,7 @@ fn real_run_command_neutralizes_rustc_wrappers_inside_sandbox() {
     assert_eq!(std::fs::read_to_string(&count).unwrap(), "xx");
     assert_eq!(workspace_decisions().len(), decisions_before_shell);
 
-    pop_execution_policy();
-    unsafe {
-        match old_handler_sandbox {
-            Some(value) => std::env::set_var("HARN_HANDLER_SANDBOX", value),
-            None => std::env::remove_var("HARN_HANDLER_SANDBOX"),
-        }
-        match old_rustc_wrapper {
-            Some(value) => std::env::set_var("RUSTC_WRAPPER", value),
-            None => std::env::remove_var("RUSTC_WRAPPER"),
-        }
-        match old_cargo_wrapper {
-            Some(value) => std::env::set_var("CARGO_BUILD_RUSTC_WRAPPER", value),
-            None => std::env::remove_var("CARGO_BUILD_RUSTC_WRAPPER"),
-        }
-        match old_workspace_wrapper {
-            Some(value) => std::env::set_var("RUSTC_WORKSPACE_WRAPPER", value),
-            None => std::env::remove_var("RUSTC_WORKSPACE_WRAPPER"),
-        }
-        match old_cargo_workspace_wrapper {
-            Some(value) => std::env::set_var("CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER", value),
-            None => std::env::remove_var("CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER"),
-        }
-    }
+    restore();
 
     for (source, response) in [
         ("inherited", inherited_response),

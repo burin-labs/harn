@@ -1447,6 +1447,19 @@ fn main(harness: Harness) {
             exit_code: 0,
         };
 
+        // A compatibility host without process confinement records a failed
+        // verifier, not an invented successful command. The native release
+        // profile rejects that host before changing this fixture expectation.
+        #[cfg(target_os = "macos")]
+        if let Some(refusal) = crate::tests::common::sandbox_host::unavailable_worktree_sandbox() {
+            let verifier = &mut fixture.expected.tools[2];
+            verifier.status = harn_vm::agent_events::ToolCallStatus::Failed;
+            verifier.result_blake3 = super::canonical_blake3(&serde_json::Value::String(
+                refusal.into_error().to_string(),
+            ));
+            verifier.exit_code = None;
+        }
+
         let receipt = execute_once(&replay_path, &fixture, 1)
             .await
             .expect("re-execution setup");
@@ -1460,8 +1473,22 @@ fn main(harness: Harness) {
             "the first replay must not mutate the next run's seed: {clean_repeat:#?}",
         );
 
+        #[cfg(target_os = "macos")]
+        if fixture.expected.tools[2].status == harn_vm::agent_events::ToolCallStatus::Failed {
+            fixture.expected.tools[2].status = harn_vm::agent_events::ToolCallStatus::Completed;
+            let false_success = execute_once(&replay_path, &fixture, 3)
+                .await
+                .expect("false success control setup");
+            assert!(!false_success.pass && !false_success.tools.pass);
+            assert!(
+                false_success.effects.pass,
+                "only the false command claim must fail"
+            );
+            fixture.expected.tools[2].status = harn_vm::agent_events::ToolCallStatus::Failed;
+        }
+
         fixture.expected.effects[0].after_blake3 = Some("projected-only".to_string());
-        let negative = execute_once(&replay_path, &fixture, 3)
+        let negative = execute_once(&replay_path, &fixture, 4)
             .await
             .expect("negative control setup");
         assert!(

@@ -285,6 +285,14 @@ pub mod clock_mock {
 
 #[cfg(test)]
 pub(crate) mod test_panic_silence;
+#[cfg(test)]
+pub(crate) mod sandbox_host {
+    use crate as vm;
+    include!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/support/sandbox_host.rs"
+    ));
+}
 pub(crate) use harn_vm_core::text_index;
 pub use harn_vm_core::typecheck;
 pub use harn_vm_core::value;

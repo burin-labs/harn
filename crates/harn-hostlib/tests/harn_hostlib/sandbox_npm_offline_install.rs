@@ -80,9 +80,13 @@ async fn sandboxed_npm_install_resolves_file_tarball_dependency_offline() {
                 ..Default::default()
             },
         )
-        .await
-        .expect("run sandboxed npm install");
+        .await;
     let _ = backend.terminate(&session.id).await;
+    if super::sandbox_host::assert_unavailable_local(&result) {
+        assert!(!workspace.join("node_modules").exists());
+        return;
+    }
+    let result = result.expect("run sandboxed npm install");
 
     assert!(
         result.success(),

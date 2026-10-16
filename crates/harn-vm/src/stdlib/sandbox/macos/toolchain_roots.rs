@@ -117,13 +117,17 @@ mod tests {
             ..CapabilityPolicy::default()
         };
         let args = ["-o", "hello", "hello.swift"].map(str::to_string);
-        let PrepareOutcome::WrappedExec { wrapper, args } = super::super::wrap_with_sandbox_exec(
+        let prepared = super::super::wrap_with_sandbox_exec(
             "/usr/bin/swiftc",
             &args,
             &policy,
             crate::orchestration::SandboxProfile::Worktree,
-        )
-        .expect("wrap swiftc") else {
+        );
+        if crate::sandbox_host::assert_unavailable_result(&prepared) {
+            assert!(!root.join("hello").exists());
+            return;
+        }
+        let PrepareOutcome::WrappedExec { wrapper, args } = prepared.expect("wrap swiftc") else {
             panic!("macOS backend should wrap with sandbox-exec");
         };
         let mut env = Vec::new();
