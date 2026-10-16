@@ -137,42 +137,11 @@ pub const HARN_VERSION: &str = env!("CARGO_PKG_VERSION");
 /// other, since `module_filename` is derived from that hash.
 pub const CODEGEN_FINGERPRINT: &str = COMPILER_SOURCE_IDENTITY.fingerprint().as_str();
 
-/// One declaration shared by the linked compiler and stale-generator validation.
-pub const COMPILER_SOURCE_IDENTITY: harn_source_fingerprint::SourceIdentity<'static> = {
-    use harn_source_fingerprint::{SourceContribution, SourceIdentity};
-    SourceIdentity {
-        domain: "harn.compiler-source.v2",
-        components: &[
-            SourceContribution::crate_sources("harn-lexer", harn_lexer::SOURCE_FINGERPRINT),
-            SourceContribution::crate_sources("harn-parser", harn_parser::SOURCE_FINGERPRINT),
-            SourceContribution::crate_sources("harn-kernel", harn_kernel::SOURCE_FINGERPRINT),
-            SourceContribution::crate_sources("harn-modules", harn_modules::SOURCE_FINGERPRINT),
-            SourceContribution::crate_sources(
-                "harn-builtin-meta",
-                harn_builtin_meta::SOURCE_FINGERPRINT,
-            ),
-            SourceContribution::crate_sources(
-                "harn-builtin-registry",
-                harn_builtin_registry::SOURCE_FINGERPRINT,
-            ),
-            SourceContribution::crate_sources(
-                "harn-capability-contracts",
-                harn_capability_contracts::SOURCE_FINGERPRINT,
-            ),
-            SourceContribution {
-                name: "harn-vm-core",
-                fingerprint: env!("HARN_CORE_COMPILER_SOURCE_FINGERPRINT"),
-                roots: crate::compiler_sources::CORE_COMPILER_PATHS,
-            },
-        ],
-    }
-};
-
 mod compiler_contracts;
 #[cfg(test)]
 #[path = "bytecode_cache_contract_tests.rs"]
 mod contract_tests;
-pub use compiler_contracts::compiler_fingerprint;
+pub use compiler_contracts::{compiler_fingerprint, COMPILER_SOURCE_IDENTITY};
 
 /// Conventional extension for entry-chunk cache files.
 pub const CACHE_EXTENSION: &str = "harnbc";
