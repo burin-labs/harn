@@ -38,6 +38,11 @@ public verifier, scope, admission and publisher keys, budgets, credential-free G
 state branch, local bare workspace, and pinned controller artifact digest.
 Keep private signing keys in your credential store. Configure Git authentication
 and commit signing through Git's normal host configuration.
+The required `writer_enrollment` field declares the initial former-writer
+inventory. Use `null` only for a fresh installation with no existing writer;
+otherwise supply the complete `WriterEnrollment`. Initialization records that
+declaration in its first authority commit. A missing field is refused, and
+later configuration changes cannot erase the recorded inventory.
 The control and grouped GitHub entrypoints refuse a different executing package
 before authority writes or credential reads. `inspect` remains read-only and
 available with a mismatched pin. Embedded hosts must bind their own executing
@@ -64,6 +69,38 @@ incidents, external requests, and verification counts and failing names.
 
 ## Control
 
+If another shipping or recovery writer already operates the repository, enroll
+it before activating this controller. `enroll-writers` takes a
+`writer_enrollment` containing the complete `writers` inventory, the trusted
+scope observer's `scope_trust_domain`, and `max_drain_age_ms`. Each writer names
+its stable `id`, repository and exact control-source Git commit. Enrollment
+belongs to the current shadow generation and is stored in controller authority.
+An existing writer captures a `FormerWriterPermit` once with
+`capture_former_writer`; it checks `former_writer_authorized` against freshly
+read authority before every mutation. A delayed process must retain its original
+permit rather than capturing a replacement generation.
+
+Invoke `drain-writers` before collecting provider observations. This commits the
+old route's admission stop. Wait for already-started effects and queued work to
+settle; a missing runner or an observation timeout does not prove completion.
+For every enrolled writer, measure the complete unfinished workflow, queue,
+repair and uncertain-effect inventories. Each `WriterDrainCensus` retains the
+actual measured resource identity, completeness, declared count and unsettled
+item identities. A resource must be positively identified before its empty
+inventory is trusted. These are provider observations, not values inferred from
+the absence of local files.
+
+The installation's trusted scope observer signs `writer_drain_bytes` for a
+`WriterDrain` bound to that installation, controller, policy, generation and
+durable drain revision. Use `qualify_writer_drain` to inspect required and
+observed counts and named refusals. Pass the complete `SignedWriterDrain` as
+`writer_drain` to `retire-writers`. The CLI uses its own current clock for the
+validity check. Signing keys remain in the observer's secret store; the request
+contains only the public proof. Missing writers, partial inventories, unfinished
+work, expired observations and invalid signatures prevent retirement and
+activation. A signature authenticates the observer; it does not establish that
+the observer actually queried the provider correctly.
+
 After your effect adapter and release consumer are qualified, activate the owner:
 
 ```sh
@@ -82,6 +119,12 @@ external request. Invoke `action: transfer` with `target_controller` set to the
 new qualified artifact digest. The new generation starts in shadow mode. Update
 the installation's controller digest before activating it. A rollback follows
 the same transfer procedure with the prior qualified artifact and a new generation.
+Former-writer retirement survives stop, shadow mode and later transfers. To
+restore an old route, first drain the current owner and transfer to a fresh
+shadow generation, restore its protected repository policy, then explicitly
+enroll that route again. Old permits remain invalid; a fresh old-writer process
+must capture the new generation. This does not waive real provider-drain or
+release-guard qualification.
 For a policy change, include the complete replacement `next_policy` in the
 transfer request. The state owner validates and archives that policy alongside
 its mechanically checked digest before committing the new generation. Update

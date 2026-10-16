@@ -129,6 +129,7 @@ pub fn fixture(random: HarnessRandom) -> Fixture {
     previous_checkpoint: "",
     promoted_sequence: 0,
     held_repositories: [],
+    writer_handoff: nil,
   }
   return {
     policy: policy,

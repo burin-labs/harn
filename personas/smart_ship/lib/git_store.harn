@@ -3,6 +3,11 @@ import { Controller, transfer_ready } from "./controller"
 import { effect_receipt_valid } from "./effect_contract"
 import { is_git_id, policy_digest } from "./identity"
 import { policy_errors } from "./verification"
+import {
+  validate_writer_handoff_transition,
+  writer_handoff_errors,
+  writer_handoff_retired,
+} from "./writer_handoff_contract"
 
 /**
  * A private bare object workspace and a configured remote; credentials stay in Git's host store.
@@ -124,6 +129,10 @@ pub fn read_state_object(process: HarnessProcess, store: GitStore, commit: strin
   fetch_state_objects(process, store, [commit])
   const text = run(process, store, ["show", commit + ":state.json"])
   const state: Controller = schema_expect(json_parse(text), schema_of(Controller))
+  require len(writer_handoff_errors(state.authority)) == 0
+    && (state.authority.writer_handoff?.phase != "retired"
+      || writer_handoff_retired(state.authority)),
+    "durable writer handoff is invalid"
   require state.effects.all(
     { effect -> effect.receipt == nil || effect_receipt_valid(effect.receipt) },
   ),
@@ -164,6 +173,7 @@ pub fn read_state_revision(
 }
 
 fn check_transition(previous: Controller?, next: Controller) {
+  validate_writer_handoff_transition(previous?.authority, next.authority)
   check_dispatch_revisions(next)
   for effect in next.effects {
     if effect.dispatch_id == nil {

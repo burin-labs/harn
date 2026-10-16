@@ -34,6 +34,7 @@ pipeline test_installation_starts_in_shadow_and_inspects_archived_checkpoint_pol
   const f = fixture(harness.random)
   const config: Installation = {
     schema: "smart-ship.installation.v1",
+    writer_enrollment: nil,
     policy: f.policy,
     controller: controller_artifact(pick(harness, ["env", "fs", "process"])).digest,
     store: {
@@ -125,6 +126,7 @@ pipeline test_installed_replacement_fences_the_old_controller_and_resumes(harnes
   const f = fixture(harness.random)
   const config: Installation = {
     schema: "smart-ship.installation.v1",
+    writer_enrollment: nil,
     policy: f.policy,
     controller: controller_artifact(pick(harness, ["env", "fs", "process"])).digest,
     store: {

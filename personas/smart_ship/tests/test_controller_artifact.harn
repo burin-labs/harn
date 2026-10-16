@@ -31,6 +31,7 @@ pipeline test_grouped_cli_rejects_another_artifact_before_reading_submitted_work
       {
         installation: {
           schema: "smart-ship.installation.v1",
+          writer_enrollment: nil,
           policy: f.policy,
           controller: digest("a syntactically valid but different artifact"),
           store: {

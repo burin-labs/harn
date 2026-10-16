@@ -172,9 +172,29 @@ pub import {
   VerifierKey,
 } from "./types"
 pub import {
+  FormerWriter,
+  FormerWriterPermit,
+  SignedWriterDrain,
+  WriterDrain,
+  WriterDrainCensus,
+  WriterDrainObservation,
+  WriterDrainQualification,
+  WriterHandoff,
+  WriterRetirement,
+} from "./types"
+pub import {
   admission_policy_matches,
   assess_admission,
   policy_errors,
   verify,
   verify_admission,
 } from "./verification"
+pub import {
+  WriterEnrollment,
+  begin_writer_drain,
+  capture_former_writer,
+  enroll_former_writers,
+  former_writer_authorized,
+  retire_former_writers,
+} from "./writer_handoff"
+pub import { qualify_writer_drain, writer_drain_bytes } from "./writer_handoff_contract"

@@ -224,6 +224,7 @@ pub fn exercise_publisher(harness: Harness, mode: string) {
   const config: GithubIntegrationConfiguration = {
     installation: {
       schema: "smart-ship.installation.v1",
+      writer_enrollment: nil,
       policy: policy,
       controller: initial.authority.controller,
       store: {

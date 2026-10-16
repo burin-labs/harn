@@ -750,6 +750,7 @@ pub type Authority = {
   previous_checkpoint: string,
   promoted_sequence: int,
   held_repositories: list<string>,
+  writer_handoff: WriterHandoff?,
 }
 ```
 
@@ -1007,6 +1008,22 @@ A worker carries only an expected fence, never durable mutation credentials.
 pub type Fence = {installation: string, generation: int, revision: int, controller: string}
 ```
 
+### type `FormerWriter`
+
+One existing mutation writer, bound to its repository and exact control-source revision.
+
+```harn
+pub type FormerWriter = {id: string, repository: string, source: string}
+```
+
+### type `FormerWriterPermit`
+
+A running former writer captures this generation once instead of adopting a later one.
+
+```harn
+pub type FormerWriterPermit = {installation: string, generation: int, writer: FormerWriter}
+```
+
 ### type `GitStore`
 
 A private bare object workspace and a configured remote; credentials stay in Git's host store.
@@ -1072,6 +1089,7 @@ pub type Installation = {
   policy: Policy,
   store: GitStore,
   controller: string,
+  writer_enrollment: WriterEnrollment?,
 }
 ```
 
@@ -1501,6 +1519,14 @@ Scope signatures authenticate selection without giving candidate code that autho
 pub type SignedScope = {scope: AdmissionScope, signer: string, signature: string}
 ```
 
+### type `SignedWriterDrain`
+
+A signature authenticates the observer, not the correctness of its provider census.
+
+```harn
+pub type SignedWriterDrain = {drain: WriterDrain, signer: string, signature: string}
+```
+
 ### type `SigningIdentity`
 
 Signing authority stays inside the controller and never enters the child environment.
@@ -1629,6 +1655,107 @@ An executor key has one declared trust domain; another installation cannot borro
 pub type VerifierKey = {id: string, public_key: string, trust_domain: string}
 ```
 
+### type `WriterDrain`
+
+The installation's trusted scope observer binds a real drain to its durable start.
+
+```harn
+pub type WriterDrain = {
+  schema: "smart-ship.writer-drain.v1",
+  installation: string,
+  policy_digest: string,
+  controller: string,
+  generation: int,
+  drain_revision: int,
+  observed_at_ms: int,
+  expires_at_ms: int,
+  observations: list<WriterDrainObservation>,
+}
+```
+
+### type `WriterDrainCensus`
+
+A complete provider observation retains the measured resource even when its count is zero.
+
+```harn
+pub type WriterDrainCensus = {
+  resource: string,
+  complete: bool,
+  declared: int,
+  unsettled: list<string>,
+}
+```
+
+### type `WriterDrainObservation`
+
+Every registered writer must answer for all four kinds of unfinished work.
+
+```harn
+pub type WriterDrainObservation = {
+  writer: FormerWriter,
+  runs: WriterDrainCensus,
+  queue: WriterDrainCensus,
+  repairs: WriterDrainCensus,
+  effects: WriterDrainCensus,
+}
+```
+
+### type `WriterDrainQualification`
+
+Counts and named refusals distinguish a measured drain from missing observations.
+
+```harn
+pub type WriterDrainQualification = {
+  status: "ready" | "pending" | "invalid",
+  required: int,
+  observed: int,
+  pending: list<string>,
+  invalid: list<string>,
+}
+```
+
+### type `WriterEnrollment`
+
+Frozen former-writer enrollment is installation data, never inferred from a missing record.
+
+```harn
+pub type WriterEnrollment = {
+  writers: list<FormerWriter>,
+  scope_trust_domain: string,
+  max_drain_age_ms: int,
+}
+```
+
+### type `WriterHandoff`
+
+Former-writer retirement remains durable across pause, restart and controller transfer.
+
+```harn
+pub type WriterHandoff = {
+  schema: "smart-ship.writer-handoff.v1",
+  policy: Policy,
+  scope_trust_domain: string,
+  controller: string,
+  generation: int,
+  enrolled_revision: int,
+  enrolled_at_ms: int,
+  max_drain_age_ms: int,
+  writers: list<FormerWriter>,
+  phase: "observing" | "draining" | "retired",
+  drain_revision: int?,
+  drain_started_at_ms: int?,
+  retirement: WriterRetirement?,
+}
+```
+
+### type `WriterRetirement`
+
+The accepted observation remains verifiable after its dispatch window expires.
+
+```harn
+pub type WriterRetirement = {proof: SignedWriterDrain, accepted_at_ms: int}
+```
+
 ### fn `admission_bytes`
 
 The admission issuer signs inspectable review, scope, original execution, and timing facts.
@@ -1681,6 +1808,19 @@ pub fn begin_effect(
 }
 ```
 
+### fn `begin_writer_drain`
+
+Persist the admission stop before an adapter measures outstanding provider work.
+
+```harn
+pub fn begin_writer_drain(
+  state: Controller,
+  expected: Fence,
+  now_ms: int,
+) -> Result<Controller, string> {
+}
+```
+
 ### fn `bind_admission_job`
 
 Bind a stock precheck to the reviewed admission inputs before execution.
@@ -1710,6 +1850,18 @@ pub fn candidate_effect(
   tree: string,
   admissions: list<SignedAdmission>,
 ) -> CandidateEffect {
+}
+```
+
+### fn `capture_former_writer`
+
+Capture once at old-writer startup; rereading cannot upgrade a delayed writer's permit.
+
+```harn
+pub fn capture_former_writer(
+  authority: Authority,
+  writer: FormerWriter,
+) -> Result<FormerWriterPermit, string> {
 }
 ```
 
@@ -1893,6 +2045,20 @@ pub fn effect_receipt(body: string) -> EffectReceipt {
 }
 ```
 
+### fn `enroll_former_writers`
+
+Register existing writers only in an explicit shadow generation with no new-controller work.
+
+```harn
+pub fn enroll_former_writers(
+  state: Controller,
+  expected: Fence,
+  enrollment: WriterEnrollment,
+  now_ms: int,
+) -> Result<Controller, string> {
+}
+```
+
 ### fn `execute_job`
 
 Execute the frozen request; changed source or toolchain refuses before the verification command.
@@ -1933,6 +2099,15 @@ pub fn finish_repair(
   attempt: int,
   spent_usd: float?,
 ) -> Result<Controller, string> {
+}
+```
+
+### fn `former_writer_authorized`
+
+A running old writer may use only the installation generation and source it captured.
+
+```harn
+pub fn former_writer_authorized(authority: Authority, permit: FormerWriterPermit) -> bool {
 }
 ```
 
@@ -2147,6 +2322,19 @@ pub fn qualify_release_files(
 }
 ```
 
+### fn `qualify_writer_drain`
+
+Qualify complete signed observations; no missing page, resource or writer becomes a zero.
+
+```harn
+pub fn qualify_writer_drain(
+  authority: Authority,
+  signed: SignedWriterDrain?,
+  now_ms: int,
+) -> WriterDrainQualification {
+}
+```
+
 ### fn `read_state`
 
 Read the exact reported remote object, never whatever a local tracking branch happens to name.
@@ -2310,6 +2498,20 @@ not an assertion about the forge; adapters still measure and guard the actual de
 
 ```harn
 pub fn retained_repository_snapshot(state: Controller, repository: string) -> Snapshot? {
+}
+```
+
+### fn `retire_former_writers`
+
+Retire the old route only from complete authenticated observations of its recorded drain.
+
+```harn
+pub fn retire_former_writers(
+  state: Controller,
+  expected: Fence,
+  proof: SignedWriterDrain,
+  now_ms: int,
+) -> Result<Controller, string> {
 }
 ```
 
@@ -2510,5 +2712,14 @@ Judge signed admission through the same original-execution verifier used for gro
 
 ```harn
 pub fn verify_admission(signed: SignedAdmission, policy: Policy) -> AdmissionVerification {
+}
+```
+
+### fn `writer_drain_bytes`
+
+Canonical signed bytes preserve every resource identity, count and unfinished item.
+
+```harn
+pub fn writer_drain_bytes(drain: WriterDrain) -> string {
 }
 ```

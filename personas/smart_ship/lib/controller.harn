@@ -42,6 +42,7 @@ import {
 } from "./types"
 pub import { RepairPermit } from "./types"
 import { policy_errors, verify } from "./verification"
+import { writer_handoff_retired } from "./writer_handoff_contract"
 
 /** Independent verification retains repaired source, original proofs and the complete verdict. */
 pub type RepairVerification = {snapshot: Snapshot, proofs: list<Proof>, verification: Verification}
@@ -968,6 +969,9 @@ pub fn control(
   if !authorized(state, fence) {
     return Err("control authority changed")
   }
+  if mode == "active" && !writer_handoff_retired(state.authority) {
+    return Err("former mutation writers have not retired")
+  }
   let next = advance(state)
   next.authority.mode = mode
   if mode == "stopped" || mode == "shadow" {
@@ -1060,6 +1064,7 @@ pub fn finish_repair(
 /** The controller owns drain and policy-change barriers for every durable generation transfer. */
 pub fn transfer_ready(state: Controller, next_policy_digest: string) -> bool {
   return is_digest(next_policy_digest) && state.authority.mode == "draining"
+    && writer_handoff_retired(state.authority)
     && state.active == nil
     && state.pending == nil
     && !state.effects.any(unresolved_effect)
