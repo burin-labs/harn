@@ -15,6 +15,81 @@ use super::generated_rust_binding::{HarnLlmErrorCategory, HarnLlmErrorKind, Harn
 use super::*;
 
 #[test]
+fn machine_quota_facts_survive_native_and_generated_host_projections() {
+    use super::generated_rust_binding::HarnMachineSpendExhaustion;
+    let facts = AcpPromptFailureFacts::from_thrown(&json!({
+        "category":"budget_exceeded", "kind":"terminal", "reason":"budget_exceeded",
+        "origin":"local", "quota_scope":"machine", "period":"month",
+        "limit_microusd":100, "reserved_microusd":100, "remaining_microusd":0,
+        "reset_at_unix_ms":1793491200000i64
+    }));
+    let wire = serde_json::to_value(AcpPromptErrorData::with_facts(
+        AgentTerminalClass::GenericThrow,
+        facts,
+    ))
+    .unwrap();
+    let generated: HarnMachineSpendExhaustion =
+        serde_json::from_value(wire["machineSpend"].clone()).unwrap();
+    assert_eq!(
+        serde_json::to_value(generated).unwrap(),
+        wire["machineSpend"]
+    );
+    let source: serde_json::Value = serde_json::from_str(
+        &protocol_source()
+            .read_text("conformance/protocols/schemas/acp-session-update.schema.json")
+            .unwrap(),
+    )
+    .unwrap();
+    let shape = &source["$defs"]["MachineSpendExhaustion"];
+    let owner = harn_vm::llm::MachineSpendExhaustion::json_schema();
+    let properties = |value: &serde_json::Value| {
+        value["properties"]
+            .as_object()
+            .unwrap()
+            .keys()
+            .cloned()
+            .collect::<std::collections::BTreeSet<_>>()
+    };
+    assert_eq!(properties(shape), properties(&owner));
+    let required = |value: &serde_json::Value| {
+        value["required"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|key| key.as_str().unwrap().to_string())
+            .collect::<std::collections::BTreeSet<_>>()
+    };
+    assert_eq!(required(shape), required(&owner));
+    assert_eq!(
+        shape["properties"]["period"]["enum"],
+        owner["$defs"]["MachineSpendPeriod"]["enum"]
+    );
+    for field in [
+        "limit_microusd",
+        "reserved_microusd",
+        "remaining_microusd",
+        "reset_at_unix_ms",
+    ] {
+        assert_eq!(
+            shape["properties"][field]["type"],
+            owner["properties"][field]["type"]
+        );
+    }
+    let schema = json!({"$ref":"#/$defs/HarnPromptErrorData", "$defs":source["$defs"]});
+    let validator = jsonschema::draft202012::new(&schema).unwrap();
+    validator.validate(&wire).unwrap();
+    let mut invalid = wire;
+    invalid["machineSpend"]
+        .as_object_mut()
+        .unwrap()
+        .remove("period");
+    assert!(
+        !validator.is_valid(&invalid),
+        "missing quota period must not pass the wire schema"
+    );
+}
+
+#[test]
 fn admission_snapshot_round_trips_through_schema_generated_host_records() {
     use super::generated_rust_binding::{
         HarnInferenceAdmissionSnapshot, HarnInferenceAdmissionStatus,

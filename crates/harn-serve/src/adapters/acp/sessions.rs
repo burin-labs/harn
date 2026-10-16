@@ -1,6 +1,8 @@
 //! ACP session state and cancellation routing helpers.
 use super::*;
 
+mod budget_rearm;
+
 #[derive(Clone)]
 pub(super) struct ConcurrentSessionControl {
     pub(super) inject_state: harn_vm::bridge::HostBridgeInjectionState,
@@ -183,6 +185,7 @@ pub(super) struct ConcurrentSessionControls {
     authenticated: Arc<AtomicBool>,
     auth_required_data: Arc<serde_json::Value>,
     pub(super) task_admission: Option<Arc<dyn SessionTaskAdmission>>,
+    pub(super) machine_spend_quota: Option<harn_vm::llm::MachineSpendQuota>,
 }
 
 impl ConcurrentSessionControls {
@@ -193,6 +196,7 @@ impl ConcurrentSessionControls {
             authenticated: Arc::new(AtomicBool::new(authenticated)),
             auth_required_data: Arc::new(auth_required_data),
             task_admission: None,
+            machine_spend_quota: None,
         }
     }
 
@@ -262,43 +266,9 @@ impl ConcurrentSessionControls {
             .remove(session_id);
     }
 
-    /// Apply a `session/set_budget` frame: re-arm the live ceiling for a
-    /// running turn, and record it on the named session so later turns keep
-    /// it instead of reverting to the configured ceiling.
-    pub(super) fn apply_budget_rearm(&self, msg: &serde_json::Value) -> bool {
-        let Some(rearm) = BudgetRearm::parse(msg) else {
-            return false;
-        };
-        let session_field = msg.get("params").and_then(|params| params.get("sessionId"));
-        let session_id = session_field.and_then(serde_json::Value::as_str);
-        let control = session_id.and_then(|session_id| {
-            self.sessions
-                .lock()
-                .unwrap_or_else(|error| error.into_inner())
-                .get(session_id)
-                .cloned()
-        });
-        if let Some(control) = control {
-            let mut spend = control
-                .llm_spend
-                .lock()
-                .unwrap_or_else(|error| error.into_inner());
-            if rearm.llm_cost_usd.is_some() {
-                if let (Some(ceiling), Some(cost)) = (rearm.llm_cost_usd, &spend.active_cost) {
-                    cost.set_ceiling(ceiling.cap());
-                }
-                spend.llm_cost_usd = rearm.llm_cost_usd;
-            }
-            if rearm.llm_tokens.is_some() {
-                if let (Some(ceiling), Some(tokens)) = (rearm.llm_tokens, &spend.active_tokens) {
-                    tokens.set_ceiling(ceiling.token_cap());
-                }
-                spend.llm_tokens = rearm.llm_tokens;
-            }
-        } else if session_field.is_none() {
-            rearm.apply_live();
-        }
-        true
+    #[cfg(test)]
+    fn apply_budget_rearm(&self, msg: &serde_json::Value) -> bool {
+        self.try_apply_budget_rearm(msg).expect("budget rearm")
     }
 
     pub(super) fn inject_owner(
@@ -1041,7 +1011,7 @@ fn rearm_dimension(value: Option<&serde_json::Value>) -> Option<CeilingRearm> {
         Some(serde_json::Value::Null) => Some(CeilingRearm::Clear),
         Some(serde_json::Value::Number(number)) => number
             .as_f64()
-            .filter(|n| n.is_finite())
+            .filter(|n| n.is_finite() && *n >= 0.0)
             .map(CeilingRearm::Set),
         _ => None,
     }

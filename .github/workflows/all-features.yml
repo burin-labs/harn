@@ -19,6 +19,7 @@ on:
       - 'crates/**/Cargo.toml'
       - 'bench/**/Cargo.toml'
       - 'scripts/check_all_features.sh'
+      - 'scripts/check_all_features.harn'
       - 'scripts/check_optional_dep_feature_contracts.harn'
       - 'scripts/tests/check_all_features_test.sh'
       - 'scripts/tests/check_optional_dep_feature_contracts_test.harn'
@@ -52,7 +53,7 @@ jobs:
           BASE_SHA: ${{ github.event.merge_group.base_sha || '' }}
           HEAD_SHA: ${{ github.event.merge_group.head_sha || github.sha }}
           GATE_NAME: All features compile
-          PATH_PATTERN: '^(Cargo\.(toml|lock)$|crates/.+/Cargo\.toml$|bench/.+/Cargo\.toml$|scripts/check_all_features\.sh$|scripts/check_optional_dep_feature_contracts\.harn$|scripts/tests/check_all_features_test\.sh$|scripts/tests/check_optional_dep_feature_contracts_test\.harn$|\.github/workflows/all-features\.yml$|\.github/scripts/merge-group-path-gate\.sh$)'
+          PATH_PATTERN: '^(Cargo\.(toml|lock)$|crates/.+/Cargo\.toml$|bench/.+/Cargo\.toml$|scripts/check_all_features\.(sh|harn)$|scripts/check_optional_dep_feature_contracts\.harn$|scripts/tests/check_all_features_test\.sh$|scripts/tests/check_optional_dep_feature_contracts_test\.harn$|\.github/workflows/all-features\.yml$|\.github/scripts/merge-group-path-gate\.sh$)'
         run: .github/scripts/merge-group-path-gate.sh
       - uses: ./.github/actions/rust-toolchain
         if: steps.scope.outputs.run_gate == 'true'

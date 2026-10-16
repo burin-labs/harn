@@ -14,7 +14,10 @@ mod durable;
 mod host;
 use bound::AttemptBound;
 use durable::DurableReservation;
-pub use durable::{MachineSpendPolicy, MachineSpendQuota, MachineSpendReceipt};
+pub use durable::{
+    BudgetCeilingUpdate, MachineSpendExhaustion, MachineSpendPeriod, MachineSpendPolicy,
+    MachineSpendQuota, MachineSpendReceipt,
+};
 pub use host::ConservativeLlmBudget;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
