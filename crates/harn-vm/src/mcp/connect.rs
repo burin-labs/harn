@@ -21,9 +21,9 @@ pub(crate) async fn mcp_connect_stdio_impl(
     cmd.kill_on_drop(true);
 
     let mut child = cmd.spawn().map_err(|e| {
-        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
+        VmError::Thrown(VmValue::string(format!(
             "mcp_connect: failed to spawn '{command}': {e}"
-        ))))
+        )))
     })?;
     let stdout = child.stdout.take().ok_or_else(|| {
         VmError::Runtime(format!("mcp_connect: '{command}' stdout was not piped"))

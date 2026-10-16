@@ -1,8 +1,6 @@
 //! Response shaping for `move_symbol`: refactor_core's shared edit envelope
 //! plus the move's own fields.
 
-use std::sync::Arc;
-
 use harn_vm::VmValue;
 
 use crate::ast::TEXT_PATCH_FALLBACK;
@@ -113,7 +111,7 @@ pub(crate) fn respond(
     } else {
         Vec::new()
     };
-    let sites = |list: &[Site]| VmValue::List(Arc::new(list.iter().map(Site::to_value).collect()));
+    let sites = |list: &[Site]| VmValue::list(list.iter().map(Site::to_value).collect());
     let moved_lines = match response.moved_lines {
         Some((start, end)) if planned => build_dict([
             ("start", VmValue::Int(start as i64)),

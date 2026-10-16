@@ -3,7 +3,6 @@
 use crate::value::{DictMap, VmError, VmValue};
 use crate::vm::Vm;
 use harn_builtin_macros::harn_builtin;
-use harn_vm_core::builtin_support::{register_builtin_defs, VmBuiltinDef};
 
 const HOST_SESSION_FLUSH: &str = "__host_agent_session_flush";
 const HOST_AGENT_EMIT_EVENT: &str = "__host_agent_emit_event";
@@ -409,12 +408,6 @@ async fn host_agent_emit_tool_outcome(
     Ok(VmValue::Nil)
 }
 
-const LIVE_TRANSCRIPT_JOURNAL_BUILTINS: &[&VmBuiltinDef] = &[
-    &HOST_AGENT_SESSION_FLUSH_DEF,
-    &HOST_AGENT_EMIT_EVENT_DEF,
-    &HOST_AGENT_EMIT_TOOL_OUTCOME_DEF,
-];
-
 pub(super) fn register_live_transcript_journal_primitives(vm: &mut Vm) {
-    register_builtin_defs(vm, LIVE_TRANSCRIPT_JOURNAL_BUILTINS);
+    harn_vm_core::builtin_support::register_module_builtins(vm, module_path!());
 }

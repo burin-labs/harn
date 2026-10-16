@@ -145,7 +145,7 @@ fn prompt_injection_patterns() -> &'static [Regex] {
 }
 
 fn err(message: impl Into<String>) -> VmError {
-    VmError::Thrown(VmValue::String(arcstr::ArcStr::from(message.into())))
+    VmError::Thrown(VmValue::string(message.into()))
 }
 
 fn dict_string(dict: &crate::value::DictMap, key: &str) -> Option<String> {

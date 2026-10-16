@@ -216,23 +216,20 @@ pub(crate) fn trace_to_vm_attempts(trace: &RoutingTrace) -> VmValue {
         .iter()
         .map(|attempt| {
             let mut dict = BTreeMap::new();
-            dict.insert("index".to_string(), VmValue::Int(attempt.index as i64));
+            dict.put_int("index", attempt.index as i64);
             dict.put_str("provider", attempt.provider.clone());
             dict.put_str("model", attempt.model.clone());
             dict.put_str("label", attempt.label.clone());
             dict.put_str("status", attempt.status.as_str());
-            dict.insert(
-                "duration_ms".to_string(),
-                VmValue::Int(attempt.duration_ms as i64),
-            );
+            dict.put_int("duration_ms", attempt.duration_ms as i64);
             if let Some(cost) = attempt.cost_usd {
-                dict.insert("cost_usd".to_string(), VmValue::Float(cost));
+                dict.put("cost_usd", VmValue::Float(cost));
             }
             if let Some(tokens) = attempt.input_tokens {
-                dict.insert("input_tokens".to_string(), VmValue::Int(tokens));
+                dict.put_int("input_tokens", tokens);
             }
             if let Some(tokens) = attempt.output_tokens {
-                dict.insert("output_tokens".to_string(), VmValue::Int(tokens));
+                dict.put_int("output_tokens", tokens);
             }
             if let Some(error) = &attempt.error {
                 let mut err_dict = BTreeMap::new();
@@ -245,15 +242,12 @@ pub(crate) fn trace_to_vm_attempts(trace: &RoutingTrace) -> VmValue {
                     err_dict.put_str("reason", reason.clone());
                 }
                 if let Some(attempt_count) = error.attempt_count {
-                    err_dict.insert(
-                        "attempt_count".to_string(),
-                        VmValue::Int(attempt_count as i64),
-                    );
+                    err_dict.put_int("attempt_count", attempt_count as i64);
                 }
                 if let Some(status) = error.status {
-                    err_dict.insert("status".to_string(), VmValue::Int(status as i64));
+                    err_dict.put_int("status", status as i64);
                 }
-                dict.insert("error".to_string(), VmValue::dict(err_dict));
+                dict.put("error", VmValue::dict(err_dict));
             }
             if let Some(outcome) = attempt.verifier_outcome {
                 dict.put_str("verifier_outcome", outcome.as_str());
@@ -273,13 +267,10 @@ pub(crate) fn trace_to_vm_attempts(trace: &RoutingTrace) -> VmValue {
                         VmValue::dict(sig_dict)
                     })
                     .collect();
-                dict.insert(
-                    "verifier_signals".to_string(),
-                    VmValue::List(std::sync::Arc::new(signals)),
-                );
+                dict.put("verifier_signals", VmValue::list(signals));
             }
             VmValue::dict(dict)
         })
         .collect();
-    VmValue::List(std::sync::Arc::new(items))
+    VmValue::list(items)
 }

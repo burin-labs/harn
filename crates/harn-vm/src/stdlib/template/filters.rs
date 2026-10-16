@@ -56,7 +56,7 @@ pub(super) fn apply_filter(
 }
 
 fn str_value(s: String) -> VmValue {
-    VmValue::String(arcstr::ArcStr::from(s))
+    VmValue::string(s)
 }
 
 fn capitalize(s: &str) -> String {
@@ -132,7 +132,7 @@ fn reverse(v: &VmValue) -> VmValue {
         VmValue::List(items) => {
             let mut out: Vec<VmValue> = items.as_ref().clone();
             out.reverse();
-            VmValue::List(std::sync::Arc::new(out))
+            VmValue::list(out)
         }
         VmValue::String(s) => str_value(s.chars().rev().collect::<String>()),
         _ => v.clone(),
@@ -184,7 +184,7 @@ fn indent(v: &VmValue, width: &VmValue, indent_first: bool) -> Result<VmValue, S
 fn lines(v: &VmValue) -> VmValue {
     let s = display_value(v);
     let list: Vec<VmValue> = s.split('\n').map(|p| str_value(p.to_string())).collect();
-    VmValue::List(std::sync::Arc::new(list))
+    VmValue::list(list)
 }
 
 fn escape_md(s: &str) -> String {

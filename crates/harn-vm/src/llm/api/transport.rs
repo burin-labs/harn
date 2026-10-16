@@ -3,6 +3,7 @@
 //! request-body construction lives in `crate::llm::providers`; this file is
 //! the wire-format layer below that.
 
+use crate::value::VmDictExt;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -208,9 +209,7 @@ async fn vm_call_llm_api_inner(
     // anthropic dialect for Claude ids and so never trips the guard).
     if !crate::llm::fake::FakeLlmProvider::should_intercept(provider) {
         crate::llm::route::Route::resolve(&capability_provider, &capability_model, &opts.thinking)
-            .map_err(|err| {
-                VmError::Thrown(VmValue::String(arcstr::ArcStr::from(err.into_message())))
-            })?;
+            .map_err(|err| VmError::Thrown(VmValue::string(err.into_message())))?;
     }
 
     // Route explicit Responses requests through providers that advertise the
@@ -416,14 +415,14 @@ pub(crate) async fn vm_call_llm_api_with_body(
     if let Err(VmError::Thrown(VmValue::Dict(fields))) = &mut result {
         if let Some(VmValue::Dict(receipt)) = fields.get("provider_usage") {
             let mut receipt = (**receipt).clone();
-            receipt.insert("started_at_ms".into(), VmValue::Int(started_at_ms));
+            receipt.put_int("started_at_ms", started_at_ms);
             receipt.insert(
                 "prompt_cache_ttl".into(),
                 opts.prompt_cache_ttl
                     .map_or(VmValue::Nil, |ttl| VmValue::String(ttl.as_str().into())),
             );
             let mut updated = (**fields).clone();
-            updated.insert("provider_usage".into(), VmValue::dict(receipt));
+            updated.put("provider_usage", VmValue::dict(receipt));
             *fields = updated.into();
         }
     }
@@ -745,9 +744,9 @@ async fn vm_call_llm_api_with_body_inner(
         &response.body,
     );
     let json: serde_json::Value = serde_json::from_str(&response.body).map_err(|e| {
-        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
+        VmError::Thrown(VmValue::string(format!(
             "{provider} response parse error: {e}"
-        ))))
+        )))
     })?;
 
     // Reuse the complete contract resolved for this dispatch instead of

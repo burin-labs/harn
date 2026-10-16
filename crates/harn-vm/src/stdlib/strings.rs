@@ -1,4 +1,4 @@
-use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
+use crate::stdlib::macros::harn_builtin;
 use crate::text::case::{
     lowercase_first, split_camel, split_kebab, split_snake, uppercase_first, words_to_camel,
     words_to_kebab, words_to_pascal, words_to_snake,
@@ -20,7 +20,7 @@ fn render_template_string(args: &[VmValue]) -> Result<VmValue, VmError> {
     let bindings = args.get(1).and_then(|a| a.as_dict());
     let rendered =
         render_template_result(&template, bindings, None, None).map_err(VmError::from)?;
-    Ok(VmValue::String(arcstr::ArcStr::from(rendered)))
+    Ok(VmValue::string(rendered))
 }
 
 fn render_asset(args: &[VmValue]) -> Result<VmValue, VmError> {
@@ -28,15 +28,14 @@ fn render_asset(args: &[VmValue]) -> Result<VmValue, VmError> {
     let asset = resolve_render_target(&path)?;
     let bindings = args.get(1).and_then(|a| a.as_dict());
     let rendered = render_asset_result(&asset, bindings).map_err(VmError::from)?;
-    Ok(VmValue::String(arcstr::ArcStr::from(rendered)))
+    Ok(VmValue::string(rendered))
 }
 
 /// Resolve a `render(...)` / `render_prompt(...)` target, honoring the
 /// `@/` and `@<alias>/` package-root forms (issue #742) and falling back
 /// to the legacy source-relative path resolver for plain strings.
 fn resolve_render_target(path: &str) -> Result<TemplateAsset, VmError> {
-    TemplateAsset::render_target(path)
-        .map_err(|msg| VmError::Thrown(VmValue::String(arcstr::ArcStr::from(msg))))
+    TemplateAsset::render_target(path).map_err(|msg| VmError::Thrown(VmValue::string(msg)))
 }
 
 /// `render_with_provenance(path, bindings)` — the debugger's hook for
@@ -76,41 +75,20 @@ fn provenance_result_dict(
     out.put_str("text", rendered);
     out.put_str("template_uri", template_uri);
     out.put_str("prompt_id", prompt_id);
-    out.insert(
-        "spans".to_string(),
-        VmValue::List(std::sync::Arc::new(spans_list)),
-    );
+    out.put("spans", VmValue::list(spans_list));
     VmValue::dict(out)
 }
 
 fn span_to_vm_dict(span: &PromptSourceSpan) -> VmValue {
     let mut d: std::collections::BTreeMap<String, VmValue> = std::collections::BTreeMap::new();
-    d.insert(
-        "template_line".into(),
-        VmValue::Int(span.template_line as i64),
-    );
-    d.insert(
-        "template_col".into(),
-        VmValue::Int(span.template_col as i64),
-    );
-    d.insert(
-        "output_start".into(),
-        VmValue::Int(span.output_start as i64),
-    );
-    d.insert("output_end".into(), VmValue::Int(span.output_end as i64));
-    d.insert(
-        "kind".into(),
-        VmValue::String(arcstr::ArcStr::from(span_kind_label(span.kind))),
-    );
-    d.insert(
-        "template_uri".into(),
-        VmValue::String(arcstr::ArcStr::from(span.template_uri.as_str())),
-    );
+    d.put_int("template_line", span.template_line as i64);
+    d.put_int("template_col", span.template_col as i64);
+    d.put_int("output_start", span.output_start as i64);
+    d.put_int("output_end", span.output_end as i64);
+    d.put_str("kind", span_kind_label(span.kind));
+    d.put_str("template_uri", span.template_uri.as_str());
     if let Some(ref v) = span.bound_value {
-        d.insert(
-            "bound_value".into(),
-            VmValue::String(arcstr::ArcStr::from(v.as_str())),
-        );
+        d.put_str("bound_value", v.as_str());
     }
     if let Some(parent) = span.parent_span.as_deref() {
         d.insert("parent_span".into(), span_to_vm_dict(parent));
@@ -131,9 +109,7 @@ fn span_kind_label(kind: PromptSpanKind) -> &'static str {
 }
 
 pub(crate) fn register_string_builtins(vm: &mut Vm) {
-    for def in MODULE_BUILTINS {
-        vm.register_builtin_def(def);
-    }
+    crate::stdlib::macros::register_module_builtins(vm, module_path!());
 }
 
 #[harn_builtin(
@@ -170,7 +146,7 @@ fn format_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> 
             }
         }
         result.push_str(rest);
-        return Ok(VmValue::String(arcstr::ArcStr::from(result)));
+        return Ok(VmValue::string(result));
     }
 
     // Otherwise: positional `{}` placeholders.
@@ -187,7 +163,7 @@ fn format_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> 
         rest = &rest[pos + 2..];
     }
     result.push_str(rest);
-    Ok(VmValue::String(arcstr::ArcStr::from(result)))
+    Ok(VmValue::string(result))
 }
 
 #[harn_builtin(
@@ -198,9 +174,7 @@ fn format_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> 
 )]
 fn trim_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let s = args.first().map(|a| a.display()).unwrap_or_default();
-    Ok(VmValue::String(arcstr::ArcStr::from(
-        harn_kernel::pure::trim_text(&s),
-    )))
+    Ok(VmValue::string(harn_kernel::pure::trim_text(&s)))
 }
 
 #[harn_builtin(
@@ -210,7 +184,7 @@ fn trim_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
 )]
 fn lowercase_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let s = args.first().map(|a| a.display()).unwrap_or_default();
-    Ok(VmValue::String(arcstr::ArcStr::from(s.to_lowercase())))
+    Ok(VmValue::string(s.to_lowercase()))
 }
 
 #[harn_builtin(
@@ -220,7 +194,7 @@ fn lowercase_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
 )]
 fn uppercase_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let s = args.first().map(|a| a.display()).unwrap_or_default();
-    Ok(VmValue::String(arcstr::ArcStr::from(s.to_uppercase())))
+    Ok(VmValue::string(s.to_uppercase()))
 }
 
 use crate::value::{char_substring, split_separator_required};
@@ -236,11 +210,8 @@ fn split_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let Some(sep) = args.get(1).map(|a| a.display()) else {
         return Err(split_separator_required());
     };
-    let parts: Vec<VmValue> = s
-        .split(&sep)
-        .map(|p| VmValue::String(arcstr::ArcStr::from(p)))
-        .collect();
-    Ok(VmValue::List(std::sync::Arc::new(parts)))
+    let parts: Vec<VmValue> = s.split(&sep).map(VmValue::string).collect();
+    Ok(VmValue::list(parts))
 }
 
 #[harn_builtin(
@@ -266,7 +237,7 @@ fn unicode_normalize_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue
             ));
         }
     };
-    Ok(VmValue::String(arcstr::ArcStr::from(normalized)))
+    Ok(VmValue::string(normalized))
 }
 
 #[harn_builtin(
@@ -276,11 +247,11 @@ fn unicode_normalize_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue
 )]
 fn unicode_graphemes_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let s = args.first().map(|a| a.display()).unwrap_or_default();
-    Ok(VmValue::List(std::sync::Arc::new(
+    Ok(VmValue::list(
         UnicodeSegmentation::graphemes(s.as_str(), true)
-            .map(|grapheme| VmValue::String(arcstr::ArcStr::from(grapheme)))
+            .map(VmValue::string)
             .collect(),
-    )))
+    ))
 }
 
 #[harn_builtin(
@@ -306,7 +277,7 @@ fn str_pad_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError>
         .unwrap_or_else(|| "right".to_string());
     let grapheme_count = UnicodeSegmentation::graphemes(s.as_str(), true).count();
     if grapheme_count >= width {
-        return Ok(VmValue::String(arcstr::ArcStr::from(s)));
+        return Ok(VmValue::string(s));
     }
     let needed = width - grapheme_count;
     let (left, right) = match side.as_str() {
@@ -319,12 +290,12 @@ fn str_pad_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError>
             ));
         }
     };
-    Ok(VmValue::String(arcstr::ArcStr::from(format!(
+    Ok(VmValue::string(format!(
         "{}{}{}",
         crate::limits::checked_repeat(fill, left)?,
         s,
         crate::limits::checked_repeat(fill, right)?
-    ))))
+    )))
 }
 
 #[harn_builtin(
@@ -414,8 +385,8 @@ fn replace_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError>
     let s = args.first().map(|a| a.display()).unwrap_or_default();
     let old = args.get(1).map(|a| a.display()).unwrap_or_default();
     let new = args.get(2).map(|a| a.display()).unwrap_or_default();
-    Ok(VmValue::String(arcstr::ArcStr::from(
-        harn_kernel::pure::replace_text(&s, &old, &new),
+    Ok(VmValue::string(harn_kernel::pure::replace_text(
+        &s, &old, &new,
     )))
 }
 
@@ -430,9 +401,9 @@ fn join_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     match args.first() {
         Some(VmValue::List(items)) => {
             let parts: Vec<String> = items.iter().map(|v| v.display()).collect();
-            Ok(VmValue::String(arcstr::ArcStr::from(parts.join(&sep))))
+            Ok(VmValue::string(parts.join(&sep)))
         }
-        _ => Ok(VmValue::String(arcstr::ArcStr::from(""))),
+        _ => Ok(VmValue::string("")),
     }
 }
 
@@ -450,9 +421,7 @@ fn substring_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
     let s = args.first().map(|a| a.display()).unwrap_or_default();
     let start = args.get(1).and_then(|a| a.as_int()).unwrap_or(0);
     let end = args.get(2).and_then(|a| a.as_int());
-    Ok(VmValue::String(arcstr::ArcStr::from(char_substring(
-        &s, start, end,
-    ))))
+    Ok(VmValue::string(char_substring(&s, start, end)))
 }
 
 #[harn_builtin(
@@ -466,7 +435,7 @@ fn chars_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
         // a full-file scan does not copy the source before materializing it.
         Some(VmValue::String(text)) => Ok(VmValue::chars_list(text)),
         Some(other) => Ok(VmValue::chars_list(&other.display())),
-        None => Ok(VmValue::List(std::sync::Arc::new(Vec::new()))),
+        None => Ok(VmValue::list(Vec::new())),
     }
 }
 
@@ -477,9 +446,7 @@ fn chars_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
 )]
 fn snake_to_camel_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let s = args.first().map(|a| a.display()).unwrap_or_default();
-    Ok(VmValue::String(arcstr::ArcStr::from(words_to_camel(
-        &split_snake(&s),
-    ))))
+    Ok(VmValue::string(words_to_camel(&split_snake(&s))))
 }
 
 #[harn_builtin(
@@ -489,9 +456,7 @@ fn snake_to_camel_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
 )]
 fn snake_to_pascal_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let s = args.first().map(|a| a.display()).unwrap_or_default();
-    Ok(VmValue::String(arcstr::ArcStr::from(words_to_pascal(
-        &split_snake(&s),
-    ))))
+    Ok(VmValue::string(words_to_pascal(&split_snake(&s))))
 }
 
 #[harn_builtin(
@@ -501,9 +466,7 @@ fn snake_to_pascal_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
 )]
 fn camel_to_snake_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let s = args.first().map(|a| a.display()).unwrap_or_default();
-    Ok(VmValue::String(arcstr::ArcStr::from(words_to_snake(
-        &split_camel(&s),
-    ))))
+    Ok(VmValue::string(words_to_snake(&split_camel(&s))))
 }
 
 #[harn_builtin(
@@ -513,9 +476,7 @@ fn camel_to_snake_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
 )]
 fn pascal_to_snake_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let s = args.first().map(|a| a.display()).unwrap_or_default();
-    Ok(VmValue::String(arcstr::ArcStr::from(words_to_snake(
-        &split_camel(&s),
-    ))))
+    Ok(VmValue::string(words_to_snake(&split_camel(&s))))
 }
 
 #[harn_builtin(
@@ -525,9 +486,7 @@ fn pascal_to_snake_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
 )]
 fn kebab_to_camel_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let s = args.first().map(|a| a.display()).unwrap_or_default();
-    Ok(VmValue::String(arcstr::ArcStr::from(words_to_camel(
-        &split_kebab(&s),
-    ))))
+    Ok(VmValue::string(words_to_camel(&split_kebab(&s))))
 }
 
 #[harn_builtin(
@@ -537,9 +496,7 @@ fn kebab_to_camel_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
 )]
 fn camel_to_kebab_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let s = args.first().map(|a| a.display()).unwrap_or_default();
-    Ok(VmValue::String(arcstr::ArcStr::from(words_to_kebab(
-        &split_camel(&s),
-    ))))
+    Ok(VmValue::string(words_to_kebab(&split_camel(&s))))
 }
 
 #[harn_builtin(
@@ -549,9 +506,7 @@ fn camel_to_kebab_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
 )]
 fn snake_to_kebab_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let s = args.first().map(|a| a.display()).unwrap_or_default();
-    Ok(VmValue::String(arcstr::ArcStr::from(words_to_kebab(
-        &split_snake(&s),
-    ))))
+    Ok(VmValue::string(words_to_kebab(&split_snake(&s))))
 }
 
 #[harn_builtin(
@@ -561,9 +516,7 @@ fn snake_to_kebab_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
 )]
 fn kebab_to_snake_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let s = args.first().map(|a| a.display()).unwrap_or_default();
-    Ok(VmValue::String(arcstr::ArcStr::from(words_to_snake(
-        &split_kebab(&s),
-    ))))
+    Ok(VmValue::string(words_to_snake(&split_kebab(&s))))
 }
 
 #[harn_builtin(
@@ -573,7 +526,7 @@ fn kebab_to_snake_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
 )]
 fn pascal_to_camel_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let s = args.first().map(|a| a.display()).unwrap_or_default();
-    Ok(VmValue::String(arcstr::ArcStr::from(lowercase_first(&s))))
+    Ok(VmValue::string(lowercase_first(&s)))
 }
 
 #[harn_builtin(
@@ -583,7 +536,7 @@ fn pascal_to_camel_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
 )]
 fn camel_to_pascal_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let s = args.first().map(|a| a.display()).unwrap_or_default();
-    Ok(VmValue::String(arcstr::ArcStr::from(uppercase_first(&s))))
+    Ok(VmValue::string(uppercase_first(&s)))
 }
 
 #[harn_builtin(
@@ -606,7 +559,7 @@ fn title_case_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
             out.extend(c.to_lowercase());
         }
     }
-    Ok(VmValue::String(arcstr::ArcStr::from(out)))
+    Ok(VmValue::string(out))
 }
 
 #[harn_builtin(
@@ -616,7 +569,7 @@ fn title_case_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
 )]
 fn uppercase_first_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let s = args.first().map(|a| a.display()).unwrap_or_default();
-    Ok(VmValue::String(arcstr::ArcStr::from(uppercase_first(&s))))
+    Ok(VmValue::string(uppercase_first(&s)))
 }
 
 #[harn_builtin(
@@ -626,7 +579,7 @@ fn uppercase_first_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
 )]
 fn lowercase_first_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let s = args.first().map(|a| a.display()).unwrap_or_default();
-    Ok(VmValue::String(arcstr::ArcStr::from(lowercase_first(&s))))
+    Ok(VmValue::string(lowercase_first(&s)))
 }
 
 #[harn_builtin(
@@ -638,10 +591,8 @@ fn dirname_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError>
     let path = args.first().map(|a| a.display()).unwrap_or_default();
     let p = std::path::Path::new(&path);
     match p.parent() {
-        Some(parent) => Ok(VmValue::String(arcstr::ArcStr::from(
-            parent.to_string_lossy().as_ref(),
-        ))),
-        None => Ok(VmValue::String(arcstr::ArcStr::from(""))),
+        Some(parent) => Ok(VmValue::string(parent.to_string_lossy().as_ref())),
+        None => Ok(VmValue::string("")),
     }
 }
 
@@ -654,10 +605,8 @@ fn basename_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError
     let path = args.first().map(|a| a.display()).unwrap_or_default();
     let p = std::path::Path::new(&path);
     match p.file_name() {
-        Some(name) => Ok(VmValue::String(arcstr::ArcStr::from(
-            name.to_string_lossy().as_ref(),
-        ))),
-        None => Ok(VmValue::String(arcstr::ArcStr::from(""))),
+        Some(name) => Ok(VmValue::string(name.to_string_lossy().as_ref())),
+        None => Ok(VmValue::string("")),
     }
 }
 
@@ -670,11 +619,8 @@ fn extname_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError>
     let path = args.first().map(|a| a.display()).unwrap_or_default();
     let p = std::path::Path::new(&path);
     match p.extension() {
-        Some(ext) => Ok(VmValue::String(arcstr::ArcStr::from(format!(
-            ".{}",
-            ext.to_string_lossy()
-        )))),
-        None => Ok(VmValue::String(arcstr::ArcStr::from(""))),
+        Some(ext) => Ok(VmValue::string(format!(".{}", ext.to_string_lossy()))),
+        None => Ok(VmValue::string("")),
     }
 }
 
@@ -790,12 +736,12 @@ fn repeat_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> 
     let s = args.first().map(|a| a.display()).unwrap_or_default();
     let count = args.get(1).and_then(VmValue::as_int).unwrap_or(0);
     if count <= 0 {
-        return Ok(VmValue::String(arcstr::ArcStr::from("")));
+        return Ok(VmValue::string(""));
     }
     // Reject pathological sizes so a typo doesn't try to allocate
     // multi-gigabyte strings (or panic `capacity overflow`) inside a script.
     let repeated = crate::limits::checked_repeat(&s, count as usize)?;
-    Ok(VmValue::String(arcstr::ArcStr::from(repeated)))
+    Ok(VmValue::string(repeated))
 }
 
 #[harn_builtin(
@@ -811,7 +757,7 @@ fn indent_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> 
         .map(|a| a.display())
         .unwrap_or_else(|| "  ".to_string());
     if prefix.is_empty() || text.is_empty() {
-        return Ok(VmValue::String(arcstr::ArcStr::from(text)));
+        return Ok(VmValue::string(text));
     }
     let mut out = String::with_capacity(text.len() + prefix.len() * 4);
     for line in text.split_inclusive('\n') {
@@ -824,7 +770,7 @@ fn indent_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> 
         }
         out.push_str(line);
     }
-    Ok(VmValue::String(arcstr::ArcStr::from(out)))
+    Ok(VmValue::string(out))
 }
 
 #[harn_builtin(
@@ -834,7 +780,7 @@ fn indent_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> 
 )]
 fn dedent_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let text = args.first().map(|a| a.display()).unwrap_or_default();
-    Ok(VmValue::String(arcstr::ArcStr::from(dedent_str(&text))))
+    Ok(VmValue::string(dedent_str(&text)))
 }
 
 #[harn_builtin(
@@ -846,55 +792,8 @@ fn dedent_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> 
 fn word_wrap_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let text = args.first().map(|a| a.display()).unwrap_or_default();
     let width = args.get(1).and_then(VmValue::as_int).unwrap_or(80).max(1) as usize;
-    Ok(VmValue::String(arcstr::ArcStr::from(word_wrap_str(
-        &text, width,
-    ))))
+    Ok(VmValue::string(word_wrap_str(&text, width)))
 }
-
-pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
-    &FORMAT_IMPL_DEF,
-    &TRIM_IMPL_DEF,
-    &LOWERCASE_IMPL_DEF,
-    &UPPERCASE_IMPL_DEF,
-    &SPLIT_IMPL_DEF,
-    &UNICODE_NORMALIZE_IMPL_DEF,
-    &UNICODE_GRAPHEMES_IMPL_DEF,
-    &STR_PAD_IMPL_DEF,
-    &STARTS_WITH_IMPL_DEF,
-    &ENDS_WITH_IMPL_DEF,
-    &CONTAINS_IMPL_DEF,
-    &INDEX_OF_IMPL_DEF,
-    &REPLACE_IMPL_DEF,
-    &JOIN_IMPL_DEF,
-    &SUBSTRING_IMPL_DEF,
-    &CHARS_IMPL_DEF,
-    &SNAKE_TO_CAMEL_IMPL_DEF,
-    &SNAKE_TO_PASCAL_IMPL_DEF,
-    &CAMEL_TO_SNAKE_IMPL_DEF,
-    &PASCAL_TO_SNAKE_IMPL_DEF,
-    &KEBAB_TO_CAMEL_IMPL_DEF,
-    &CAMEL_TO_KEBAB_IMPL_DEF,
-    &SNAKE_TO_KEBAB_IMPL_DEF,
-    &KEBAB_TO_SNAKE_IMPL_DEF,
-    &PASCAL_TO_CAMEL_IMPL_DEF,
-    &CAMEL_TO_PASCAL_IMPL_DEF,
-    &TITLE_CASE_IMPL_DEF,
-    &UPPERCASE_FIRST_IMPL_DEF,
-    &LOWERCASE_FIRST_IMPL_DEF,
-    &DIRNAME_IMPL_DEF,
-    &BASENAME_IMPL_DEF,
-    &EXTNAME_IMPL_DEF,
-    &RENDER_IMPL_DEF,
-    &RENDER_STRING_IMPL_DEF,
-    &RENDER_WITH_PROVENANCE_IMPL_DEF,
-    &PROMPT_MARK_RENDERED_IMPL_DEF,
-    &PUSH_LLM_RENDER_CONTEXT_IMPL_DEF,
-    &POP_LLM_RENDER_CONTEXT_IMPL_DEF,
-    &REPEAT_IMPL_DEF,
-    &INDENT_IMPL_DEF,
-    &DEDENT_IMPL_DEF,
-    &WORD_WRAP_IMPL_DEF,
-];
 
 /// Strips the common leading whitespace from every non-blank line. The
 /// minimum prefix length wins (tabs and spaces are compared verbatim,

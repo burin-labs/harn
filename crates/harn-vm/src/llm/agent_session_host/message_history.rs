@@ -21,7 +21,7 @@ fn host_agent_session_messages_builtin(
         .as_ref()
         .and_then(|v| dict_get(v, "messages"))
         .cloned()
-        .unwrap_or_else(|| VmValue::List(std::sync::Arc::new(Vec::new())));
+        .unwrap_or_else(|| VmValue::list(Vec::new()));
     Ok(messages)
 }
 
@@ -351,13 +351,6 @@ fn host_agent_session_pair_orphaned_tool_use_builtin(
     Ok(VmValue::Int(repaired as i64))
 }
 
-const MESSAGE_HISTORY_BUILTINS: &[&VmBuiltinDef] = &[
-    &HOST_AGENT_SESSION_MESSAGES_BUILTIN_DEF,
-    &HOST_AGENT_SESSION_RECORD_ASSISTANT_BUILTIN_DEF,
-    &HOST_AGENT_SESSION_POP_LAST_ASSISTANT_BUILTIN_DEF,
-    &HOST_AGENT_SESSION_PAIR_ORPHANED_TOOL_USE_BUILTIN_DEF,
-];
-
 pub(super) fn register_message_history_primitives(vm: &mut Vm) {
-    register_builtin_defs(vm, MESSAGE_HISTORY_BUILTINS);
+    harn_vm_core::builtin_support::register_module_builtins(vm, module_path!());
 }

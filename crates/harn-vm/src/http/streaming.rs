@@ -232,7 +232,7 @@ fn closed_event() -> VmValue {
 fn sse_server_closed_event() -> VmValue {
     let mut dict = BTreeMap::new();
     dict.put_str("type", "close");
-    dict.insert("server_closed".to_string(), VmValue::Bool(true));
+    dict.put_bool("server_closed", true);
     VmValue::dict(dict)
 }
 
@@ -290,18 +290,8 @@ fn sse_event_value(event: &MockStreamEvent) -> VmValue {
     dict.put_str("type", "event");
     dict.put_str("event", event.event_type.as_str());
     dict.put_str("data", event.data.as_str());
-    dict.insert(
-        "id".to_string(),
-        event
-            .id
-            .as_deref()
-            .map(|id| VmValue::String(arcstr::ArcStr::from(id)))
-            .unwrap_or(VmValue::Nil),
-    );
-    dict.insert(
-        "retry_ms".to_string(),
-        event.retry_ms.map(VmValue::Int).unwrap_or(VmValue::Nil),
-    );
+    dict.put_nullable_str("id", event.id.as_deref());
+    dict.put_nullable("retry_ms", event.retry_ms.map(VmValue::Int));
     VmValue::dict(dict)
 }
 
@@ -309,18 +299,12 @@ fn sse_server_response_value(id: &str, handle: &SseServerHandle) -> VmValue {
     let mut dict = BTreeMap::new();
     dict.put_str("id", id);
     dict.put_str("type", "sse_response");
-    dict.insert("status".to_string(), VmValue::Int(handle.status));
-    dict.insert("headers".to_string(), VmValue::dict(handle.headers.clone()));
+    dict.put_int("status", handle.status);
+    dict.put("headers", VmValue::dict(handle.headers.clone()));
     dict.insert("body".to_string(), VmValue::Nil);
-    dict.insert("streaming".to_string(), VmValue::Bool(true));
-    dict.insert(
-        "max_event_bytes".to_string(),
-        VmValue::Int(handle.max_event_bytes as i64),
-    );
-    dict.insert(
-        "max_buffered_events".to_string(),
-        VmValue::Int(handle.max_buffered_events as i64),
-    );
+    dict.put_bool("streaming", true);
+    dict.put_int("max_event_bytes", handle.max_event_bytes as i64);
+    dict.put_int("max_buffered_events", handle.max_buffered_events as i64);
     VmValue::dict(dict)
 }
 
@@ -328,20 +312,11 @@ fn default_sse_response_headers() -> crate::value::DictMap {
     crate::value::DictMap::from_iter([
         (
             "content-type".to_string(),
-            VmValue::String(arcstr::ArcStr::from("text/event-stream; charset=utf-8")),
+            VmValue::string("text/event-stream; charset=utf-8"),
         ),
-        (
-            "cache-control".to_string(),
-            VmValue::String(arcstr::ArcStr::from("no-cache")),
-        ),
-        (
-            "connection".to_string(),
-            VmValue::String(arcstr::ArcStr::from("keep-alive")),
-        ),
-        (
-            "x-accel-buffering".to_string(),
-            VmValue::String(arcstr::ArcStr::from("no")),
-        ),
+        ("cache-control".to_string(), VmValue::string("no-cache")),
+        ("connection".to_string(), VmValue::string("keep-alive")),
+        ("x-accel-buffering".to_string(), VmValue::string("no")),
     ])
 }
 
@@ -350,10 +325,7 @@ fn sse_response_headers(options: &crate::value::DictMap) -> crate::value::DictMa
     if let Some(VmValue::Dict(custom)) = options.get("headers") {
         for (name, value) in custom.iter() {
             headers.retain(|existing, _| !existing.eq_ignore_ascii_case(name));
-            headers.insert(
-                name.clone(),
-                VmValue::String(arcstr::ArcStr::from(value.display())),
-            );
+            headers.insert(name.clone(), VmValue::string(value.display()));
         }
     }
     if !headers
@@ -550,42 +522,17 @@ pub(super) fn vm_sse_server_response(options: &crate::value::DictMap) -> Result<
 fn sse_server_status_value(id: &str, handle: &SseServerHandle) -> VmValue {
     let mut dict = BTreeMap::new();
     dict.put_str("id", id);
-    dict.insert("status".to_string(), VmValue::Int(handle.status));
-    dict.insert("headers".to_string(), VmValue::dict(handle.headers.clone()));
-    dict.insert(
-        "buffered_events".to_string(),
-        VmValue::Int(handle.frames.len() as i64),
-    );
-    dict.insert(
-        "sent_events".to_string(),
-        VmValue::Int(handle.sent_events as i64),
-    );
-    dict.insert(
-        "flushed_events".to_string(),
-        VmValue::Int(handle.flushed_events as i64),
-    );
-    dict.insert("closed".to_string(), VmValue::Bool(handle.closed));
-    dict.insert(
-        "disconnected".to_string(),
-        VmValue::Bool(handle.disconnected),
-    );
-    dict.insert("cancelled".to_string(), VmValue::Bool(handle.cancelled));
-    dict.insert(
-        "cancel_reason".to_string(),
-        handle
-            .cancel_reason
-            .as_deref()
-            .map(|reason| VmValue::String(arcstr::ArcStr::from(reason)))
-            .unwrap_or(VmValue::Nil),
-    );
-    dict.insert(
-        "max_event_bytes".to_string(),
-        VmValue::Int(handle.max_event_bytes as i64),
-    );
-    dict.insert(
-        "max_buffered_events".to_string(),
-        VmValue::Int(handle.max_buffered_events as i64),
-    );
+    dict.put_int("status", handle.status);
+    dict.put("headers", VmValue::dict(handle.headers.clone()));
+    dict.put_int("buffered_events", handle.frames.len() as i64);
+    dict.put_int("sent_events", handle.sent_events as i64);
+    dict.put_int("flushed_events", handle.flushed_events as i64);
+    dict.put_bool("closed", handle.closed);
+    dict.put_bool("disconnected", handle.disconnected);
+    dict.put_bool("cancelled", handle.cancelled);
+    dict.put_nullable_str("cancel_reason", handle.cancel_reason.as_deref());
+    dict.put_int("max_event_bytes", handle.max_event_bytes as i64);
+    dict.put_int("max_buffered_events", handle.max_buffered_events as i64);
     VmValue::dict(dict)
 }
 
@@ -856,27 +803,9 @@ fn transport_mock_call_value(call: &TransportMockCall) -> VmValue {
     let mut dict = BTreeMap::new();
     dict.put_str("kind", call.kind.as_str());
     dict.put_str("url", call.url.as_str());
-    dict.insert(
-        "handle".to_string(),
-        call.handle
-            .as_deref()
-            .map(|handle| VmValue::String(arcstr::ArcStr::from(handle)))
-            .unwrap_or(VmValue::Nil),
-    );
-    dict.insert(
-        "type".to_string(),
-        call.message_type
-            .as_deref()
-            .map(|message_type| VmValue::String(arcstr::ArcStr::from(message_type)))
-            .unwrap_or(VmValue::Nil),
-    );
-    dict.insert(
-        "data".to_string(),
-        call.data
-            .as_deref()
-            .map(|data| VmValue::String(arcstr::ArcStr::from(data)))
-            .unwrap_or(VmValue::Nil),
-    );
+    dict.put_nullable_str("handle", call.handle.as_deref());
+    dict.put_nullable_str("type", call.message_type.as_deref());
+    dict.put_nullable_str("data", call.data.as_deref());
     VmValue::dict(dict)
 }
 
@@ -920,7 +849,7 @@ pub(super) async fn vm_sse_connect(
             message_type: None,
             data: None,
         });
-        return Ok(VmValue::String(arcstr::ArcStr::from(id)));
+        return Ok(VmValue::string(id));
     }
 
     if !url.starts_with("http://") && !url.starts_with("https://") {
@@ -966,7 +895,7 @@ pub(super) async fn vm_sse_connect(
         handles.insert(id.clone(), handle);
         Ok(())
     })?;
-    Ok(VmValue::String(arcstr::ArcStr::from(id)))
+    Ok(VmValue::string(id))
 }
 
 pub(super) async fn vm_sse_receive(stream_id: &str, timeout_ms: u64) -> Result<VmValue, VmError> {
@@ -1304,7 +1233,7 @@ pub(super) fn register_http_streaming_builtins(vm: &mut Vm) {
             .iter()
             .map(transport_mock_call_value)
             .collect::<Vec<_>>();
-        Ok(VmValue::List(std::sync::Arc::new(values)))
+        Ok(VmValue::list(values))
     });
 }
 
@@ -1319,9 +1248,7 @@ fn sse_event_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
         return Err(vm_error("sse_event: requires event data or an event dict"));
     };
     let options = get_options_arg(args, 1);
-    Ok(VmValue::String(arcstr::ArcStr::from(vm_sse_event_frame(
-        event, &options,
-    )?)))
+    Ok(VmValue::string(vm_sse_event_frame(event, &options)?))
 }
 
 #[cfg(test)]

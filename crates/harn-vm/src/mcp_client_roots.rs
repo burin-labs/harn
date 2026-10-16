@@ -13,14 +13,14 @@ pub async fn request_client_roots() -> Result<VmValue, VmError> {
 
 fn roots_from_response(result: &JsonValue) -> Result<VmValue, VmError> {
     let roots = result.get("roots").ok_or_else(|| {
-        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+        VmError::Thrown(VmValue::string(
             "mcp_client_roots: client response missing 'roots'",
-        )))
+        ))
     })?;
     if !roots.is_array() {
-        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+        return Err(VmError::Thrown(VmValue::string(
             "mcp_client_roots: client response 'roots' must be a list",
-        ))));
+        )));
     }
     Ok(json_to_vm_value(roots))
 }

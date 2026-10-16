@@ -15,7 +15,7 @@ use crate::event_log::{
 use crate::llm::vm_value_to_json;
 use crate::runtime_limits::RuntimeLimits;
 use crate::stdlib::args::{Args, ErrorKind};
-use crate::stdlib::macros::{harn_builtin, BuiltinSignature, Param, VmBuiltinDef, TY_ANY};
+use crate::stdlib::macros::{harn_builtin, BuiltinSignature, Param, TY_ANY};
 use crate::triggers::dispatcher::{current_dispatch_context, current_dispatch_wait_lease};
 use crate::triggers::TRIGGER_INBOX_ENVELOPES_TOPIC;
 use crate::value::{VmClosure, VmError, VmValue};
@@ -104,12 +104,8 @@ struct MonitorWaitRecord {
 }
 
 pub(crate) fn register_monitor_builtins(vm: &mut Vm) {
-    for def in MODULE_BUILTINS {
-        vm.register_builtin_def(def);
-    }
+    crate::stdlib::macros::register_module_builtins(vm, module_path!());
 }
-
-pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[&MONITOR_WAIT_FOR_NATIVE_BUILTIN_DEF];
 
 #[harn_builtin(
     exposure = "harness.runtime.monitor_wait_for_native",

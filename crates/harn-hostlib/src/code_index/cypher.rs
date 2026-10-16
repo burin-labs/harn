@@ -113,7 +113,7 @@ impl CypherValue {
     pub fn to_vm(&self) -> VmValue {
         match self {
             CypherValue::Null => VmValue::Nil,
-            CypherValue::String(s) => VmValue::String(arcstr::ArcStr::from(s.as_str())),
+            CypherValue::String(s) => VmValue::string(s.as_str()),
             CypherValue::Int(n) => VmValue::Int(*n),
             CypherValue::Bool(b) => VmValue::Bool(*b),
         }

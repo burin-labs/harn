@@ -8,7 +8,7 @@ use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 
 use crate::event_log::{active_event_log, EventId, EventLog, LogEvent, Topic};
-use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
+use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
@@ -56,12 +56,8 @@ struct HitlRequestEnvelope {
 }
 
 pub(crate) fn register_hitl_read_builtins(vm: &mut Vm) {
-    for def in MODULE_BUILTINS {
-        vm.register_builtin_def(def);
-    }
+    crate::stdlib::macros::register_module_builtins(vm, module_path!());
 }
-
-pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[&HITL_PENDING_BUILTIN_DEF];
 
 #[harn_builtin(
     exposure = "harness.interaction.hitl_pending",
@@ -80,12 +76,12 @@ async fn hitl_pending_builtin(
 async fn hitl_pending_impl(args: &[VmValue]) -> Result<VmValue, VmError> {
     let filters = parse_filters(args.first())?;
     let Some(log) = active_event_log() else {
-        return Ok(VmValue::List(std::sync::Arc::new(Vec::new())));
+        return Ok(VmValue::list(Vec::new()));
     };
     let rows = read_pending_rows(&log, &filters).await?;
-    Ok(VmValue::List(std::sync::Arc::new(
+    Ok(VmValue::list(
         rows.into_iter().map(pending_row_to_value).collect(),
-    )))
+    ))
 }
 
 async fn read_pending_rows(
@@ -202,14 +198,14 @@ fn pending_row_to_value(row: PendingHitlRow) -> VmValue {
     dict.put_str("prompt", row.prompt);
     dict.put_str("trace_id", row.trace_id);
     dict.put_str("timestamp", row.timestamp);
-    dict.insert(
-        "approvers".to_string(),
-        VmValue::List(std::sync::Arc::new(
+    dict.put(
+        "approvers",
+        VmValue::list(
             row.approvers
                 .into_iter()
                 .map(|value| VmValue::String(arcstr::ArcStr::from(value)))
                 .collect(),
-        )),
+        ),
     );
     dict.insert(
         "metadata".to_string(),

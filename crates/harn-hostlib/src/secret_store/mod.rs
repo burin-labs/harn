@@ -21,7 +21,6 @@
 //! migration logic belong in the `.harn` orchestration layer.
 
 use std::io;
-use std::sync::Arc;
 
 use harn_vm::VmValue;
 
@@ -147,7 +146,7 @@ fn handle_list(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     let items: Vec<VmValue> = keys.into_iter().map(|k| str_value(&k)).collect();
     Ok(build_dict([
         ("account".to_string(), str_value(&account)),
-        ("keys".to_string(), VmValue::List(Arc::new(items))),
+        ("keys".to_string(), VmValue::list(items)),
         ("backend".to_string(), str_value(backend.name())),
     ]))
 }

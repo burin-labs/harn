@@ -1,3 +1,4 @@
+use crate::value::VmDictExt;
 use std::collections::BTreeMap;
 
 use crate::value::VmValue;
@@ -25,15 +26,12 @@ pub(crate) fn schema_partial_dict(schema: &crate::value::DictMap) -> crate::valu
                 next_props.insert(key.clone(), value.clone());
             }
         }
-        partial.insert(
-            crate::value::intern_key("properties"),
-            VmValue::dict(next_props),
-        );
+        partial.put("properties", VmValue::dict(next_props));
     }
     if let Some(VmValue::List(branches)) = schema.get("union") {
-        partial.insert(
-            crate::value::intern_key("union"),
-            VmValue::List(std::sync::Arc::new(
+        partial.put(
+            "union",
+            VmValue::list(
                 branches
                     .iter()
                     .map(|branch| {
@@ -43,13 +41,13 @@ pub(crate) fn schema_partial_dict(schema: &crate::value::DictMap) -> crate::valu
                             .unwrap_or_else(|| branch.clone())
                     })
                     .collect(),
-            )),
+            ),
         );
     }
     if let Some(VmValue::List(branches)) = schema.get("all_of") {
-        partial.insert(
-            crate::value::intern_key("all_of"),
-            VmValue::List(std::sync::Arc::new(
+        partial.put(
+            "all_of",
+            VmValue::list(
                 branches
                     .iter()
                     .map(|branch| {
@@ -59,18 +57,15 @@ pub(crate) fn schema_partial_dict(schema: &crate::value::DictMap) -> crate::valu
                             .unwrap_or_else(|| branch.clone())
                     })
                     .collect(),
-            )),
+            ),
         );
     }
     if let Some(VmValue::Dict(item_schema)) = schema.get("items") {
-        partial.insert(
-            crate::value::intern_key("items"),
-            VmValue::dict(schema_partial_dict(item_schema)),
-        );
+        partial.put("items", VmValue::dict(schema_partial_dict(item_schema)));
     }
     if let Some(VmValue::Dict(extra_schema)) = schema.get("additional_properties") {
-        partial.insert(
-            crate::value::intern_key("additional_properties"),
+        partial.put(
+            "additional_properties",
             VmValue::dict(schema_partial_dict(extra_schema)),
         );
     }
@@ -88,21 +83,18 @@ pub(crate) fn schema_pick_dict(
             .filter(|(key, _)| keys.iter().any(|k| k.as_str() == key.as_str()))
             .map(|(key, value)| (key.clone(), value.clone()))
             .collect();
-        picked.insert(
-            crate::value::intern_key("properties"),
-            VmValue::dict(filtered),
-        );
+        picked.put("properties", VmValue::dict(filtered));
     }
     if let Some(VmValue::List(required)) = schema.get("required") {
-        picked.insert(
-            crate::value::intern_key("required"),
-            VmValue::List(std::sync::Arc::new(
+        picked.put(
+            "required",
+            VmValue::list(
                 required
                     .iter()
                     .filter(|value| keys.contains(&value.display()))
                     .cloned()
                     .collect(),
-            )),
+            ),
         );
     }
     picked
@@ -119,21 +111,18 @@ pub(crate) fn schema_omit_dict(
             .filter(|(key, _)| !keys.iter().any(|k| k.as_str() == key.as_str()))
             .map(|(key, value)| (key.clone(), value.clone()))
             .collect();
-        kept.insert(
-            crate::value::intern_key("properties"),
-            VmValue::dict(filtered),
-        );
+        kept.put("properties", VmValue::dict(filtered));
     }
     if let Some(VmValue::List(required)) = schema.get("required") {
-        kept.insert(
-            crate::value::intern_key("required"),
-            VmValue::List(std::sync::Arc::new(
+        kept.put(
+            "required",
+            VmValue::list(
                 required
                     .iter()
                     .filter(|value| !keys.contains(&value.display()))
                     .cloned()
                     .collect(),
-            )),
+            ),
         );
     }
     kept

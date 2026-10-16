@@ -100,12 +100,12 @@ async fn trigger_inspect_dlq_impl(
     _args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
     let entries = inspect_dlq_entries().await?;
-    Ok(VmValue::List(std::sync::Arc::new(
+    Ok(VmValue::list(
         entries
             .into_iter()
             .map(|entry| value_from_serde(&entry))
             .collect(),
-    )))
+    ))
 }
 
 #[harn_builtin(
@@ -125,12 +125,12 @@ async fn trigger_inspect_lifecycle_impl(
         _ => None,
     });
     let entries = inspect_lifecycle_events(kind.as_deref()).await?;
-    Ok(VmValue::List(std::sync::Arc::new(
+    Ok(VmValue::list(
         entries
             .into_iter()
             .map(|entry| value_from_serde(&entry))
             .collect(),
-    )))
+    ))
 }
 
 #[harn_builtin(
@@ -150,12 +150,12 @@ async fn trigger_inspect_action_graph_impl(
         _ => None,
     });
     let entries = inspect_action_graph_events(trace_id.as_deref()).await?;
-    Ok(VmValue::List(std::sync::Arc::new(
+    Ok(VmValue::list(
         entries
             .into_iter()
             .map(|entry| value_from_serde(&entry))
             .collect(),
-    )))
+    ))
 }
 
 pub(super) async fn find_replayable_event(event_id: &str) -> Result<TriggerEventRecord, VmError> {

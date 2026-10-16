@@ -5,7 +5,7 @@ use cookie::time::{Duration, OffsetDateTime};
 use cookie::{Cookie, CookieJar, Key, SameSite};
 
 use crate::stdlib::args::{Args, ErrorKind, Options};
-use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
+use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
@@ -18,7 +18,7 @@ fn dict(fields: crate::value::DictMap) -> VmValue {
 }
 
 fn list(items: Vec<VmValue>) -> VmValue {
-    VmValue::List(std::sync::Arc::new(items))
+    VmValue::list(items)
 }
 
 fn string(value: impl Into<arcstr::ArcStr>) -> VmValue {
@@ -678,9 +678,7 @@ fn cookie_round_trip_builtin(args: &[VmValue]) -> Result<VmValue, VmError> {
 }
 
 pub(crate) fn register_cookie_builtins(vm: &mut Vm) {
-    for def in MODULE_BUILTINS {
-        vm.register_builtin_def(def);
-    }
+    crate::stdlib::macros::register_module_builtins(vm, module_path!());
 }
 
 #[harn_builtin(
@@ -782,19 +780,6 @@ fn session_from_cookies_impl(args: &[VmValue], _out: &mut String) -> Result<VmVa
 fn cookie_round_trip_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     cookie_round_trip_builtin(args)
 }
-
-pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
-    &COOKIE_PARSE_IMPL_DEF,
-    &COOKIE_SERIALIZE_IMPL_DEF,
-    &COOKIE_DELETE_IMPL_DEF,
-    &COOKIE_SIGN_IMPL_DEF,
-    &COOKIE_VERIFY_IMPL_DEF,
-    &SESSION_SIGN_IMPL_DEF,
-    &SESSION_VERIFY_IMPL_DEF,
-    &SESSION_COOKIE_IMPL_DEF,
-    &SESSION_FROM_COOKIES_IMPL_DEF,
-    &COOKIE_ROUND_TRIP_IMPL_DEF,
-];
 
 #[cfg(test)]
 mod tests {

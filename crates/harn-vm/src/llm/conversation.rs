@@ -42,8 +42,8 @@ fn require_transcript<'a>(
         {
             Ok(d)
         }
-        _ => Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-            format!("{context}: argument must be a transcript"),
+        _ => Err(VmError::Thrown(VmValue::string(format!(
+            "{context}: argument must be a transcript"
         )))),
     }
 }
@@ -100,9 +100,9 @@ fn transcript_from_messages_impl(args: &[VmValue], _out: &mut String) -> Result<
             transcript_message_list(dict)?
         }
         _ => {
-            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+            return Err(VmError::Thrown(VmValue::string(
                 "transcript_from_messages: argument must be a message list or transcript",
-            ))));
+            )));
         }
     };
     Ok(new_transcript_with(None, messages, None, None))
@@ -116,9 +116,7 @@ fn transcript_from_messages_impl(args: &[VmValue], _out: &mut String) -> Result<
 )]
 fn transcript_messages_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let transcript = require_transcript(args, "transcript_messages")?;
-    Ok(VmValue::List(std::sync::Arc::new(transcript_message_list(
-        transcript,
-    )?)))
+    Ok(VmValue::list(transcript_message_list(transcript)?))
 }
 
 #[harn_builtin(
@@ -129,9 +127,7 @@ fn transcript_messages_impl(args: &[VmValue], _out: &mut String) -> Result<VmVal
 )]
 fn transcript_assets_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let transcript = require_transcript(args, "transcript_assets")?;
-    Ok(VmValue::List(std::sync::Arc::new(transcript_asset_list(
-        transcript,
-    )?)))
+    Ok(VmValue::list(transcript_asset_list(transcript)?))
 }
 
 #[harn_builtin(
@@ -145,7 +141,7 @@ fn transcript_events_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue
     Ok(transcript
         .get("events")
         .cloned()
-        .unwrap_or_else(|| VmValue::List(std::sync::Arc::new(Vec::new()))))
+        .unwrap_or_else(|| VmValue::list(Vec::new())))
 }
 
 #[harn_builtin(
@@ -224,9 +220,9 @@ fn transcript_summary_impl(args: &[VmValue], _out: &mut String) -> Result<VmValu
 )]
 fn transcript_id_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let transcript = require_transcript(args, "transcript_id")?;
-    Ok(VmValue::String(arcstr::ArcStr::from(
+    Ok(VmValue::string(
         transcript_id(transcript).unwrap_or_default(),
-    )))
+    ))
 }
 
 #[harn_builtin(
@@ -242,20 +238,16 @@ fn add_message_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
             let mut new_messages = (**list).clone();
             new_messages.push(vm_message_value(
                 &role,
-                args.get(2)
-                    .cloned()
-                    .unwrap_or_else(|| VmValue::String(arcstr::ArcStr::from(""))),
+                args.get(2).cloned().unwrap_or_else(|| VmValue::string("")),
             ));
-            Ok(VmValue::List(std::sync::Arc::new(new_messages)))
+            Ok(VmValue::list(new_messages))
         }
         Some(VmValue::Dict(dict)) if is_transcript_value(&VmValue::Dict(dict.clone())) => {
             let role = args.get(1).map(VmValue::display).unwrap_or_default();
             let mut new_messages = transcript_message_list(dict)?;
             new_messages.push(vm_message_value(
                 &role,
-                args.get(2)
-                    .cloned()
-                    .unwrap_or_else(|| VmValue::String(arcstr::ArcStr::from(""))),
+                args.get(2).cloned().unwrap_or_else(|| VmValue::string("")),
             ));
             Ok(rebuild_transcript(
                 dict,
@@ -266,9 +258,9 @@ fn add_message_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
                 transcript_state(dict),
             ))
         }
-        _ => Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+        _ => Err(VmError::Thrown(VmValue::string(
             "add_message: first argument must be a message list or transcript",
-        )))),
+        ))),
     }
 }
 
@@ -311,7 +303,7 @@ fn add_tool_result_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
         Some(VmValue::List(list)) => {
             let mut messages = (**list).clone();
             messages.push(build_message());
-            Ok(VmValue::List(std::sync::Arc::new(messages)))
+            Ok(VmValue::list(messages))
         }
         Some(VmValue::Dict(dict)) if is_transcript_value(&VmValue::Dict(dict.clone())) => {
             let mut messages = transcript_message_list(dict)?;
@@ -325,9 +317,9 @@ fn add_tool_result_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
                 transcript_state(dict),
             ))
         }
-        _ => Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+        _ => Err(VmError::Thrown(VmValue::string(
             "add_tool_result: first argument must be a message list or transcript",
-        )))),
+        ))),
     }
 }
 
@@ -447,17 +439,16 @@ fn transcript_resume_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue
 
 #[harn_builtin(exposure = "pure", effects = [], sig = "conversation() -> list", category = "transcript")]
 fn conversation_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    Ok(VmValue::List(std::sync::Arc::new(Vec::new())))
+    Ok(VmValue::list(Vec::new()))
 }
 
 #[harn_builtin(exposure = "pure", effects = [], sig = "transcript_add_asset(transcript: list | dict | Transcript, asset: dict) -> Transcript", category = "transcript")]
 fn transcript_add_asset_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let transcript = require_transcript(args, "transcript_add_asset")?;
-    let asset_value = args.get(1).cloned().ok_or_else(|| {
-        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-            "transcript_add_asset: missing asset",
-        )))
-    })?;
+    let asset_value = args
+        .get(1)
+        .cloned()
+        .ok_or_else(|| VmError::Thrown(VmValue::string("transcript_add_asset: missing asset")))?;
     let normalized = normalize_transcript_asset(&asset_value);
     let asset_id = normalized
         .as_dict()
@@ -503,7 +494,7 @@ fn transcript_render_visible_impl(args: &[VmValue], _out: &mut String) -> Result
             .join("\n"),
         _ => String::new(),
     };
-    Ok(VmValue::String(arcstr::ArcStr::from(rendered)))
+    Ok(VmValue::string(rendered))
 }
 
 #[harn_builtin(exposure = "pure", effects = [], sig = "transcript_render_full(transcript: list | dict | Transcript) -> string", category = "transcript")]
@@ -526,20 +517,20 @@ fn transcript_render_full_impl(args: &[VmValue], _out: &mut String) -> Result<Vm
             .join("\n"),
         _ => String::new(),
     };
-    Ok(VmValue::String(arcstr::ArcStr::from(rendered)))
+    Ok(VmValue::string(rendered))
 }
 
 #[harn_builtin(exposure = "pure", effects = [], sig = "transcript_export(transcript: list | dict | Transcript) -> string", category = "transcript")]
 fn transcript_export_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let transcript = args.first().cloned().unwrap_or(VmValue::Nil);
     if !is_transcript_value(&transcript) {
-        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+        return Err(VmError::Thrown(VmValue::string(
             "transcript_export: argument must be a transcript",
-        ))));
+        )));
     }
     let json = serde_json::to_string_pretty(&vm_value_to_json(&transcript))
         .map_err(|error| VmError::Runtime(format!("transcript_export: {error}")))?;
-    Ok(VmValue::String(arcstr::ArcStr::from(json)))
+    Ok(VmValue::string(json))
 }
 
 #[harn_builtin(exposure = "pure", effects = [], sig = "transcript_import(text: string) -> Transcript", category = "transcript")]
@@ -704,7 +695,7 @@ fn transcript_inject_reminder_builtin(
         (crate::value::intern_key("transcript"), next),
         (
             crate::value::intern_key("reminder_id"),
-            VmValue::String(arcstr::ArcStr::from(reminder_id)),
+            VmValue::string(reminder_id),
         ),
         (
             crate::value::intern_key("deduped_count"),
@@ -1082,10 +1073,7 @@ fn reminder_string_field(reminder: &crate::value::DictMap, key: &str) -> Option<
 }
 
 fn reminder_error(context: &str, message: impl Into<String>) -> VmError {
-    VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
-        "{context}: {}",
-        message.into()
-    ))))
+    VmError::Thrown(VmValue::string(format!("{context}: {}", message.into())))
 }
 
 fn reminder_code_error(context: &str, code: Code, message: impl Into<String>) -> VmError {

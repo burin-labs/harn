@@ -1,6 +1,7 @@
 //! Session initialization, terminal projection, and autonomy admission.
 
 use super::*;
+use crate::value::VmDictExt;
 
 /// Holds the pushed transcript-directory frame until the session takes it.
 ///
@@ -61,8 +62,8 @@ async fn host_agent_session_init(
             .as_ref()
             .and_then(|bridge| bridge.caller_message_id_for_session(&session_id))
         {
-            opts_map.insert(
-                "initial_user_message_id".into(),
+            opts_map.put(
+                "initial_user_message_id",
                 VmValue::String(message_id.into()),
             );
         }
@@ -982,24 +983,18 @@ async fn host_autonomy_budget_check(
     match check_autonomy_budget(&opts, &session_id).await? {
         AutonomyCheck::Denied(result) => {
             let mut out = crate::value::DictMap::new();
-            out.insert(crate::value::intern_key("approved"), VmValue::Bool(false));
+            out.put_bool("approved", false);
             out.insert(crate::value::intern_key("denial_result"), result);
             Ok(VmValue::dict(out))
         }
         AutonomyCheck::Approved(_) | AutonomyCheck::NoBudget => {
             let mut out = crate::value::DictMap::new();
-            out.insert(crate::value::intern_key("approved"), VmValue::Bool(true));
+            out.put_bool("approved", true);
             Ok(VmValue::dict(out))
         }
     }
 }
 
-const LIFECYCLE_BUILTINS: &[&VmBuiltinDef] = &[
-    &HOST_AGENT_SESSION_INIT_DEF,
-    &HOST_AGENT_SESSION_FINALIZE_DEF,
-    &HOST_AUTONOMY_BUDGET_CHECK_DEF,
-];
-
 pub(super) fn register_lifecycle_primitives(vm: &mut Vm) {
-    register_builtin_defs(vm, LIFECYCLE_BUILTINS);
+    harn_vm_core::builtin_support::register_module_builtins(vm, module_path!());
 }

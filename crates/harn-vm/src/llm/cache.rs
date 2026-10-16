@@ -15,7 +15,6 @@ use crate::stdlib::clock::now_wall_ms;
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 use harn_builtin_macros::harn_builtin;
-use harn_vm_core::builtin_support::{register_builtin_defs, VmBuiltinDef};
 
 const DEFAULT_NAMESPACE: &str = "default";
 const DEFAULT_TTL_SECONDS: u64 = 600;
@@ -91,17 +90,8 @@ impl CacheRecord {
 }
 
 pub(crate) fn register_cache_builtins(vm: &mut Vm) {
-    register_builtin_defs(vm, CACHE_BUILTINS);
+    harn_vm_core::builtin_support::register_module_builtins(vm, module_path!());
 }
-
-const CACHE_BUILTINS: &[&VmBuiltinDef] = &[
-    &CACHE_GET_BUILTIN_DEF,
-    &CACHE_PUT_BUILTIN_DEF,
-    &CACHE_CLEAR_BUILTIN_DEF,
-    &CACHE_STATS_BUILTIN_DEF,
-    &CACHE_STATS_RESET_BUILTIN_DEF,
-    &LLM_CACHE_KEY_BUILTIN_DEF,
-];
 
 fn cache_envelope_base(options: &CacheOptions) -> crate::value::DictMap {
     let mut envelope = crate::value::DictMap::new();
@@ -124,10 +114,7 @@ fn cache_get_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
     record_lookup(&options, hit.is_some());
 
     let mut envelope = cache_envelope_base(&options);
-    envelope.insert(
-        crate::value::intern_key("hit"),
-        VmValue::Bool(hit.is_some()),
-    );
+    envelope.put_bool("hit", hit.is_some());
     if let Some(value) = hit {
         envelope.insert(
             crate::value::intern_key("value"),
@@ -158,7 +145,7 @@ fn cache_put_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
     )?;
 
     let mut envelope = cache_envelope_base(&options);
-    envelope.insert(crate::value::intern_key("stored"), VmValue::Bool(true));
+    envelope.put_bool("stored", true);
     envelope.put_str("key", key);
     Ok(VmValue::dict(envelope))
 }
@@ -191,27 +178,15 @@ fn cache_stats_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
     let snapshot = metrics_snapshot(&options);
     let total = snapshot.hits.saturating_add(snapshot.misses);
     let mut dict = cache_envelope_base(&options);
-    dict.insert(
-        crate::value::intern_key("hits"),
-        VmValue::Int(saturating_u64_to_i64(snapshot.hits)),
-    );
-    dict.insert(
-        crate::value::intern_key("misses"),
-        VmValue::Int(saturating_u64_to_i64(snapshot.misses)),
-    );
-    dict.insert(
-        crate::value::intern_key("lookups"),
-        VmValue::Int(saturating_u64_to_i64(total)),
-    );
+    dict.put_int("hits", saturating_u64_to_i64(snapshot.hits));
+    dict.put_int("misses", saturating_u64_to_i64(snapshot.misses));
+    dict.put_int("lookups", saturating_u64_to_i64(total));
     let hit_rate = if total == 0 {
         0.0
     } else {
         snapshot.hits as f64 / total as f64
     };
-    dict.insert(
-        crate::value::intern_key("hit_rate"),
-        VmValue::Float(hit_rate),
-    );
+    dict.put("hit_rate", VmValue::Float(hit_rate));
     Ok(VmValue::dict(dict))
 }
 
@@ -372,10 +347,10 @@ fn llm_cache_key_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue,
             "__llm_cache_key: failed to encode identity: {error}"
         ))
     })?;
-    Ok(VmValue::String(arcstr::ArcStr::from(format!(
+    Ok(VmValue::string(format!(
         "sha256:{}",
         sha256_hex(canonical.as_bytes())
-    ))))
+    )))
 }
 
 fn cache_get_at(

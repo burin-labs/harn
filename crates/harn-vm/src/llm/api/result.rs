@@ -443,16 +443,14 @@ fn build_outcome_dict(kind: LlmOutcomeKind, result: &LlmResult) -> crate::value:
     // `billed` is what turns an `empty` outcome into the S2
     // "billed-noncommittal" signal; carried on every outcome so callers
     // never re-derive it from usage.
-    outcome.insert(
-        crate::value::intern_key("billed"),
-        VmValue::Bool(
-            result.input_tokens > 0
-                || result.output_tokens > 0
-                || result
-                    .telemetry
-                    .server_total_tokens
-                    .is_some_and(|tokens| tokens > 0),
-        ),
+    outcome.put_bool(
+        "billed",
+        result.input_tokens > 0
+            || result.output_tokens > 0
+            || result
+                .telemetry
+                .server_total_tokens
+                .is_some_and(|tokens| tokens > 0),
     );
     outcome
 }

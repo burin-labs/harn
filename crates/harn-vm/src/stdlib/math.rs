@@ -1,15 +1,13 @@
 use std::sync::Arc;
 
 use crate::stdlib::args::Args;
-use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
+use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmError, VmRange, VmRngHandle, VmValue};
 use crate::vm::Vm;
 use parking_lot::Mutex;
 
 pub(crate) fn register_math_builtins(vm: &mut Vm) {
-    for def in MODULE_BUILTINS {
-        vm.register_builtin_def(def);
-    }
+    crate::stdlib::macros::register_module_builtins(vm, module_path!());
 
     vm.set_global("pi", VmValue::Float(std::f64::consts::PI));
     vm.set_global("e", VmValue::Float(std::f64::consts::E));
@@ -717,43 +715,6 @@ fn decimal_not_supported(name: &str) -> VmError {
         "{name} is not defined for decimal; convert with to_float(value) first"
     ))
 }
-
-pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
-    &ABS_IMPL_DEF,
-    &MIN_IMPL_DEF,
-    &MAX_IMPL_DEF,
-    &FLOOR_IMPL_DEF,
-    &CEIL_IMPL_DEF,
-    &ROUND_IMPL_DEF,
-    &SQRT_IMPL_DEF,
-    &POW_IMPL_DEF,
-    &RNG_SEED_IMPL_DEF,
-    &RANDOM_IMPL_DEF,
-    &RANDOM_INT_IMPL_DEF,
-    &RANDOM_CHOICE_IMPL_DEF,
-    &RANDOM_SHUFFLE_IMPL_DEF,
-    &MEAN_IMPL_DEF,
-    &MEDIAN_IMPL_DEF,
-    &PERCENTILE_IMPL_DEF,
-    &VARIANCE_IMPL_DEF,
-    &STDDEV_IMPL_DEF,
-    &SIN_IMPL_DEF,
-    &COS_IMPL_DEF,
-    &TAN_IMPL_DEF,
-    &ASIN_IMPL_DEF,
-    &ACOS_IMPL_DEF,
-    &ATAN_IMPL_DEF,
-    &LOG2_IMPL_DEF,
-    &LOG10_IMPL_DEF,
-    &LN_IMPL_DEF,
-    &EXP_IMPL_DEF,
-    &ATAN2_IMPL_DEF,
-    &SIGN_IMPL_DEF,
-    &IS_NAN_IMPL_DEF,
-    &IS_INFINITE_IMPL_DEF,
-    &RANGE_INTERNAL_IMPL_DEF,
-    &RANGE_IMPL_DEF,
-];
 
 #[cfg(test)]
 mod tests {

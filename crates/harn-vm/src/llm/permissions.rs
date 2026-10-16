@@ -1260,13 +1260,13 @@ fn permission_request_value(
             request.put_str("requested_tier", AutonomyTier::ActWithApproval.as_str());
         }
     }
-    request.insert(
-        "grant_options".to_string(),
-        VmValue::List(std::sync::Arc::new(vec![
+    request.put(
+        "grant_options",
+        VmValue::list(vec![
             VmValue::String(arcstr::ArcStr::from("once")),
             VmValue::String(arcstr::ArcStr::from("session")),
             VmValue::Bool(false),
-        ])),
+        ]),
     );
     VmValue::dict(request)
 }

@@ -119,14 +119,14 @@ pub mod transcript_projection {
     pub fn transcript_value_from_messages(messages: &[serde_json::Value]) -> VmValue {
         let mut dict = crate::value::DictMap::new();
         dict.put_str("_type", "transcript");
-        dict.insert(
-            crate::value::intern_key("messages"),
-            VmValue::List(std::sync::Arc::new(
+        dict.put(
+            "messages",
+            VmValue::list(
                 messages
                     .iter()
                     .map(crate::schema::json_to_vm_value)
                     .collect(),
-            )),
+            ),
         );
         VmValue::dict(dict)
     }

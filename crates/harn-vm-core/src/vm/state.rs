@@ -619,7 +619,7 @@ impl Vm {
             }
             if func.has_rest_param && i == param_count - 1 {
                 let rest_args = args.to_vec_from(i);
-                slots[i].value = VmValue::List(std::sync::Arc::new(rest_args));
+                slots[i].value = VmValue::list(rest_args);
                 slots[i].initialized = true;
                 slots[i].synced = synced;
             } else if let Some(arg) = args.get(i) {

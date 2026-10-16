@@ -391,13 +391,10 @@ static ASCII_CHAR_STRINGS: std::sync::LazyLock<[HarnStr; 128]> = std::sync::Lazy
 impl VmValue {
     /// Canonical `VmValue::String` constructor from anything string-like.
     ///
-    /// Collapses the ubiquitous `VmValue::String(arcstr::ArcStr::from(..))`
-    /// spelling to a single call and performs exactly one allocation via
-    /// `Arc::<str>::from(&str)` regardless of whether the input is a `&str`,
-    /// `String`, `&String`, or `Cow<str>`. Prefer this over hand-writing the
-    /// `Arc::from` at call sites.
-    pub fn string(value: impl AsRef<str>) -> Self {
-        VmValue::String(HarnStr::from(value.as_ref()))
+    /// Uses the runtime string's conversion contract, including retaining an
+    /// existing shared string without copying its contents.
+    pub fn string(value: impl Into<HarnStr>) -> Self {
+        VmValue::String(value.into())
     }
 
     /// Canonical `VmValue::Decimal` constructor.
@@ -424,7 +421,7 @@ impl VmValue {
     /// `.chars()` method, and is the cursor-scanner-friendly counterpart to the
     /// O(n)-per-call `substring` / slice / `s[i]` operations on a `string`.
     pub fn chars_list(text: &str) -> Self {
-        VmValue::List(Shared::new(text.chars().map(VmValue::char_value).collect()))
+        VmValue::list(text.chars().map(VmValue::char_value).collect())
     }
 
     pub fn enum_variant(
@@ -454,6 +451,11 @@ impl VmValue {
             id,
             name: name.into(),
         }))
+    }
+
+    /// Construct a list, retaining its existing element storage.
+    pub fn list(values: Vec<VmValue>) -> Self {
+        VmValue::List(Shared::new(values))
     }
 
     /// Construct a [`VmValue::Dict`] from any iterator of `(key, value)`

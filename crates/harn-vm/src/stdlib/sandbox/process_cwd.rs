@@ -74,8 +74,8 @@ pub(crate) fn policy_process_cwd(
     }
     let roots = normalized_workspace_roots(policy);
     let current = std::env::current_dir().map_err(|error| {
-        VmError::Thrown(crate::value::VmValue::String(arcstr::ArcStr::from(
-            format!("process cwd resolution failed: {error}"),
+        VmError::Thrown(crate::value::VmValue::string(format!(
+            "process cwd resolution failed: {error}"
         )))
     })?;
     let current = normalize_for_policy(&current);
@@ -83,8 +83,8 @@ pub(crate) fn policy_process_cwd(
         return Ok(current);
     }
     roots.first().cloned().ok_or_else(|| {
-        VmError::Thrown(crate::value::VmValue::String(arcstr::ArcStr::from(
+        VmError::Thrown(crate::value::VmValue::string(
             "process cwd resolution failed: no workspace root available",
-        )))
+        ))
     })
 }

@@ -43,7 +43,7 @@ pub fn io_error_value(
     let mut failure = DictMap::new();
     failure.put_str("error", "io_error");
     failure.put_str("kind", io_error_kind_str(error));
-    failure.put_str("message", message);
+    failure.put_str("message", message.as_ref());
     if let Some(category) = category {
         failure.put_str("category", category.as_str());
     }

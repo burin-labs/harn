@@ -13,7 +13,7 @@ use crate::bridge::HostBridge;
 use crate::llm::daemon::{load_snapshot, DaemonSnapshot};
 use crate::orchestration::DaemonEventKindRecord;
 use crate::stdlib::args::Args;
-use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
+use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
@@ -22,15 +22,6 @@ const META_FILE: &str = "daemon.meta.json";
 const DEFAULT_EVENT_QUEUE_CAPACITY: usize = 1024;
 const DAEMON_MONITOR_POLL_MS: u64 = 10;
 const DAEMON_STOP_WAIT_MS: u64 = 500;
-
-pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
-    &DAEMON_SNAPSHOT_BUILTIN_DEF,
-    &DAEMON_SPAWN_BUILTIN_DEF,
-    &DAEMON_TRIGGER_BUILTIN_DEF,
-    &MANAGED_DAEMON_WAIT_BUILTIN_DEF,
-    &DAEMON_STOP_BUILTIN_DEF,
-    &DAEMON_RESUME_BUILTIN_DEF,
-];
 
 fn default_event_queue_capacity() -> usize {
     DEFAULT_EVENT_QUEUE_CAPACITY
@@ -146,9 +137,7 @@ pub(crate) fn swap_active_daemon_registry(next: Arc<DaemonRegistry>) -> Arc<Daem
 }
 
 pub fn register_daemon_builtins(vm: &mut Vm) {
-    for def in MODULE_BUILTINS {
-        vm.register_builtin_def(def);
-    }
+    crate::stdlib::macros::register_module_builtins(vm, module_path!());
 }
 
 #[harn_builtin(

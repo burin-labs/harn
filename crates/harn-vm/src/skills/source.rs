@@ -440,41 +440,35 @@ pub fn skill_entry_to_vm(skill: &Skill) -> crate::value::VmValue {
     );
     entry.put_opt_str("when_to_use", skill.manifest.when_to_use.as_deref());
     if skill.manifest.disable_model_invocation {
-        entry.insert(
-            crate::value::intern_key("disable_model_invocation"),
-            VmValue::Bool(true),
-        );
+        entry.put_bool("disable_model_invocation", true);
     }
     if !skill.manifest.allowed_tools.is_empty() {
-        entry.insert(
-            crate::value::intern_key("allowed_tools"),
-            VmValue::List(std::sync::Arc::new(
+        entry.put(
+            "allowed_tools",
+            VmValue::list(
                 skill
                     .manifest
                     .allowed_tools
                     .iter()
                     .map(|t| VmValue::String(arcstr::ArcStr::from(t.as_str())))
                     .collect(),
-            )),
+            ),
         );
     }
     if skill.manifest.user_invocable {
-        entry.insert(
-            crate::value::intern_key("user_invocable"),
-            VmValue::Bool(true),
-        );
+        entry.put_bool("user_invocable", true);
     }
     if !skill.manifest.paths.is_empty() {
-        entry.insert(
-            crate::value::intern_key("paths"),
-            VmValue::List(std::sync::Arc::new(
+        entry.put(
+            "paths",
+            VmValue::list(
                 skill
                     .manifest
                     .paths
                     .iter()
                     .map(|p| VmValue::String(arcstr::ArcStr::from(p.as_str())))
                     .collect(),
-            )),
+            ),
         );
     }
     entry.put_opt_str("context", skill.manifest.context.as_deref());
@@ -482,48 +476,42 @@ pub fn skill_entry_to_vm(skill: &Skill) -> crate::value::VmValue {
     if !skill.manifest.hooks.is_empty() {
         let mut hooks: crate::value::DictMap = crate::value::DictMap::new();
         for (k, v) in &skill.manifest.hooks {
-            hooks.insert(
-                crate::value::intern_key(k),
-                VmValue::String(arcstr::ArcStr::from(v.as_str())),
-            );
+            hooks.insert(crate::value::intern_key(k), VmValue::string(v.as_str()));
         }
-        entry.insert(crate::value::intern_key("hooks"), VmValue::dict(hooks));
+        entry.put("hooks", VmValue::dict(hooks));
     }
     entry.put_opt_str("model", skill.manifest.model.as_deref());
     entry.put_opt_str("effort", skill.manifest.effort.as_deref());
     if skill.manifest.require_signature {
-        entry.insert(
-            crate::value::intern_key("require_signature"),
-            VmValue::Bool(true),
-        );
+        entry.put_bool("require_signature", true);
     }
     if !skill.manifest.trusted_signers.is_empty() {
-        entry.insert(
-            crate::value::intern_key("trusted_signers"),
-            VmValue::List(std::sync::Arc::new(
+        entry.put(
+            "trusted_signers",
+            VmValue::list(
                 skill
                     .manifest
                     .trusted_signers
                     .iter()
                     .map(|fingerprint| VmValue::String(arcstr::ArcStr::from(fingerprint.as_str())))
                     .collect(),
-            )),
+            ),
         );
     }
     entry.put_opt_str("shell", skill.manifest.shell.as_deref());
     entry.put_opt_str("argument_hint", skill.manifest.argument_hint.as_deref());
     entry.put_opt_str("targets", skill.manifest.targets.as_deref());
     if !skill.manifest.mcp.is_empty() {
-        entry.insert(
-            crate::value::intern_key("mcp"),
-            VmValue::List(std::sync::Arc::new(
+        entry.put(
+            "mcp",
+            VmValue::list(
                 skill
                     .manifest
                     .mcp
                     .iter()
                     .map(crate::json_to_vm_value)
                     .collect(),
-            )),
+            ),
         );
     }
     entry.put_str("body", skill.body.as_str());
@@ -551,41 +539,35 @@ pub fn skill_manifest_ref_to_vm(skill: &SkillManifestRef) -> crate::value::VmVal
     );
     entry.put_opt_str("when_to_use", skill.manifest.when_to_use.as_deref());
     if skill.manifest.disable_model_invocation {
-        entry.insert(
-            crate::value::intern_key("disable_model_invocation"),
-            VmValue::Bool(true),
-        );
+        entry.put_bool("disable_model_invocation", true);
     }
     if !skill.manifest.allowed_tools.is_empty() {
-        entry.insert(
-            crate::value::intern_key("allowed_tools"),
-            VmValue::List(std::sync::Arc::new(
+        entry.put(
+            "allowed_tools",
+            VmValue::list(
                 skill
                     .manifest
                     .allowed_tools
                     .iter()
                     .map(|tool| VmValue::String(arcstr::ArcStr::from(tool.as_str())))
                     .collect(),
-            )),
+            ),
         );
     }
     if skill.manifest.user_invocable {
-        entry.insert(
-            crate::value::intern_key("user_invocable"),
-            VmValue::Bool(true),
-        );
+        entry.put_bool("user_invocable", true);
     }
     if !skill.manifest.paths.is_empty() {
-        entry.insert(
-            crate::value::intern_key("paths"),
-            VmValue::List(std::sync::Arc::new(
+        entry.put(
+            "paths",
+            VmValue::list(
                 skill
                     .manifest
                     .paths
                     .iter()
                     .map(|path| VmValue::String(arcstr::ArcStr::from(path.as_str())))
                     .collect(),
-            )),
+            ),
         );
     }
     entry.put_opt_str("context", skill.manifest.context.as_deref());
@@ -595,10 +577,10 @@ pub fn skill_manifest_ref_to_vm(skill: &SkillManifestRef) -> crate::value::VmVal
         for (key, value) in &skill.manifest.hooks {
             hooks.insert(
                 crate::value::intern_key(key),
-                VmValue::String(arcstr::ArcStr::from(value.as_str())),
+                VmValue::string(value.as_str()),
             );
         }
-        entry.insert(crate::value::intern_key("hooks"), VmValue::dict(hooks));
+        entry.put("hooks", VmValue::dict(hooks));
     }
     entry.put_opt_str("model", skill.manifest.model.as_deref());
     entry.put_opt_str("effort", skill.manifest.effort.as_deref());
@@ -606,16 +588,16 @@ pub fn skill_manifest_ref_to_vm(skill: &SkillManifestRef) -> crate::value::VmVal
     entry.put_opt_str("argument_hint", skill.manifest.argument_hint.as_deref());
     entry.put_opt_str("targets", skill.manifest.targets.as_deref());
     if !skill.manifest.mcp.is_empty() {
-        entry.insert(
-            crate::value::intern_key("mcp"),
-            VmValue::List(std::sync::Arc::new(
+        entry.put(
+            "mcp",
+            VmValue::list(
                 skill
                     .manifest
                     .mcp
                     .iter()
                     .map(crate::json_to_vm_value)
                     .collect(),
-            )),
+            ),
         );
     }
     entry.put_str("source", skill.layer.label());

@@ -48,10 +48,7 @@ impl MetadataRequest {
     }
 
     fn bulk_params(&self) -> DictMap {
-        DictMap::from_iter([(
-            intern_key("dir"),
-            VmValue::String(arcstr::ArcStr::from(self.directory.as_str())),
-        )])
+        DictMap::from_iter([(intern_key("dir"), VmValue::string(self.directory.as_str()))])
     }
 }
 

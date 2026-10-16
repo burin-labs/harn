@@ -6,7 +6,7 @@ use std::sync::Arc;
 use parking_lot::Mutex;
 
 use crate::stdlib::args::{ArgError, Args, ErrorKind};
-use crate::stdlib::macros::{harn_builtin, BuiltinSignature, Param, VmBuiltinDef, TY_ANY, TY_LIST};
+use crate::stdlib::macros::{harn_builtin, BuiltinSignature, Param, TY_ANY, TY_LIST};
 use crate::value::{VmError, VmValue};
 use crate::vm::iter::{
     broadcast_branches, drain_capped, iter_from_value, iter_handle_from_value, next_handle, VmIter,
@@ -128,26 +128,21 @@ fn register_stream_namespace(vm: &mut Vm) {
     vm.set_global(
         "stream",
         VmValue::dict(
-            std::iter::once((
-                "_namespace".to_string(),
-                VmValue::String(arcstr::ArcStr::from("stream")),
-            ))
-            .chain(names.into_iter().map(|name| {
-                (
-                    name.to_string(),
-                    VmValue::BuiltinRef(arcstr::ArcStr::from(format!("stream.{name}"))),
-                )
-            }))
-            .collect::<BTreeMap<_, _>>(),
+            std::iter::once(("_namespace".to_string(), VmValue::string("stream")))
+                .chain(names.into_iter().map(|name| {
+                    (
+                        name.to_string(),
+                        VmValue::BuiltinRef(arcstr::ArcStr::from(format!("stream.{name}"))),
+                    )
+                }))
+                .collect::<BTreeMap<_, _>>(),
         ),
     );
 }
 
 pub(crate) fn register_iter_builtins(vm: &mut Vm) {
     register_stream_namespace(vm);
-    for def in MODULE_BUILTINS {
-        vm.register_builtin_def(def);
-    }
+    crate::stdlib::macros::register_module_builtins(vm, module_path!());
 }
 
 // `iter` parser signature: union of list/dict/string/set/range/iter/Generator/stream/channel.
@@ -367,9 +362,7 @@ fn stream_zip_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
 fn stream_broadcast_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let source = iter_handle_from_value(require_arg(args, 0, "stream.broadcast")?)?;
     let n = require_positive_usize(args, 1, "stream.broadcast", "count")?;
-    Ok(VmValue::List(std::sync::Arc::new(broadcast_branches(
-        source, n,
-    ))))
+    Ok(VmValue::list(broadcast_branches(source, n)))
 }
 
 #[harn_builtin(
@@ -446,9 +439,7 @@ async fn stream_collect_impl(
     let inner = iter_handle_from_value(require_arg(&args, 0, "stream.collect")?)?;
     let max = collect_max_arg(&args)?;
     let mut vm = ctx.child_vm();
-    Ok(VmValue::List(std::sync::Arc::new(
-        drain_capped(&inner, &mut vm, max).await?,
-    )))
+    Ok(VmValue::list(drain_capped(&inner, &mut vm, max).await?))
 }
 
 #[harn_builtin(
@@ -614,25 +605,3 @@ fn spawn_parallel_race_task(
         }
     });
 }
-
-pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
-    &ITER_IMPL_DEF,
-    &PAIR_IMPL_DEF,
-    &STREAM_MAP_IMPL_DEF,
-    &STREAM_FILTER_IMPL_DEF,
-    &STREAM_TAP_IMPL_DEF,
-    &STREAM_SCAN_IMPL_DEF,
-    &STREAM_TAKE_IMPL_DEF,
-    &STREAM_TAKE_UNTIL_IMPL_DEF,
-    &STREAM_MERGE_IMPL_DEF,
-    &STREAM_INTERLEAVE_IMPL_DEF,
-    &STREAM_ZIP_IMPL_DEF,
-    &STREAM_BROADCAST_IMPL_DEF,
-    &STREAM_RACE_IMPL_DEF,
-    &STREAM_THROTTLE_IMPL_DEF,
-    &STREAM_DEBOUNCE_IMPL_DEF,
-    &STREAM_COLLECT_IMPL_DEF,
-    &STREAM_FOLD_IMPL_DEF,
-    &STREAM_FIRST_IMPL_DEF,
-    &PARALLEL_RACE_IMPL_BUILTIN_DEF,
-];

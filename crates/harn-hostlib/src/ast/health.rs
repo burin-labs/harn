@@ -4,7 +4,7 @@
 //! exact versioned corpus bytes. Runtime callers add only the selected grammar
 //! ABI and the observation for their source; policy is derived here once.
 
-use std::sync::{Arc, OnceLock};
+use std::sync::OnceLock;
 
 use harn_vm::VmValue;
 use serde::Deserialize;
@@ -241,7 +241,7 @@ impl ParserHealth {
                         VmValue::string(&receipt.tree_sitter_runtime),
                     ),
                     ("abi_version", VmValue::Nil),
-                    ("enabled_features", VmValue::List(Arc::new(Vec::new()))),
+                    ("enabled_features", VmValue::list(Vec::new())),
                 ])
             },
             |language_receipt| {
@@ -275,9 +275,9 @@ impl ParserHealth {
                     ),
                     (
                         "enabled_features",
-                        VmValue::List(Arc::new(vec![VmValue::string(grammar_feature(
+                        VmValue::list(vec![VmValue::string(grammar_feature(
                             self.language.expect("receipt has language"),
-                        ))])),
+                        ))]),
                     ),
                 ])
             },

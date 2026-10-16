@@ -1,3 +1,4 @@
+use crate::value::VmDictExt;
 use std::collections::BTreeMap;
 
 use crate::value::{VmError, VmGenerator, VmStream, VmValue};
@@ -13,7 +14,7 @@ impl crate::vm::Vm {
                 if gen.is_done() {
                     let mut dict = BTreeMap::new();
                     dict.insert("value".to_string(), VmValue::Nil);
-                    dict.insert("done".to_string(), VmValue::Bool(true));
+                    dict.put_bool("done", true);
                     Ok(VmValue::dict(dict))
                 } else {
                     let rx = gen.receiver.clone();
@@ -21,7 +22,7 @@ impl crate::vm::Vm {
                     match guard.recv().await {
                         Some(Ok(val)) => {
                             let mut dict = BTreeMap::new();
-                            dict.insert("done".to_string(), VmValue::Bool(false));
+                            dict.put_bool("done", false);
                             dict.insert("value".to_string(), val);
                             Ok(VmValue::dict(dict))
                         }
@@ -33,7 +34,7 @@ impl crate::vm::Vm {
                             gen.mark_done();
                             let mut dict = BTreeMap::new();
                             dict.insert("value".to_string(), VmValue::Nil);
-                            dict.insert("done".to_string(), VmValue::Bool(true));
+                            dict.put_bool("done", true);
                             Ok(VmValue::dict(dict))
                         }
                     }
@@ -55,7 +56,7 @@ impl crate::vm::Vm {
                 if stream.is_done() {
                     let mut dict = BTreeMap::new();
                     dict.insert("value".to_string(), VmValue::Nil);
-                    dict.insert("done".to_string(), VmValue::Bool(true));
+                    dict.put_bool("done", true);
                     Ok(VmValue::dict(dict))
                 } else {
                     let rx = stream.receiver.clone();
@@ -63,7 +64,7 @@ impl crate::vm::Vm {
                     match guard.recv().await {
                         Some(Ok(val)) => {
                             let mut dict = BTreeMap::new();
-                            dict.insert("done".to_string(), VmValue::Bool(false));
+                            dict.put_bool("done", false);
                             dict.insert("value".to_string(), val);
                             Ok(VmValue::dict(dict))
                         }
@@ -75,7 +76,7 @@ impl crate::vm::Vm {
                             stream.mark_done();
                             let mut dict = BTreeMap::new();
                             dict.insert("value".to_string(), VmValue::Nil);
-                            dict.insert("done".to_string(), VmValue::Bool(true));
+                            dict.put_bool("done", true);
                             Ok(VmValue::dict(dict))
                         }
                     }

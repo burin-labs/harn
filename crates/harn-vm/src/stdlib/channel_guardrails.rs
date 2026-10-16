@@ -12,26 +12,17 @@
 //! doc-comment for the verdict semantics, built-in scanner kinds, and
 //! the security/privacy trust contract.
 
-use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
+use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
 fn err(message: impl Into<String>) -> VmError {
-    VmError::Thrown(VmValue::String(arcstr::ArcStr::from(message.into())))
+    VmError::Thrown(VmValue::string(message.into()))
 }
 
 pub(crate) fn register_channel_guardrail_builtins(vm: &mut Vm) {
-    for def in MODULE_BUILTINS {
-        vm.register_builtin_def(def);
-    }
+    crate::stdlib::macros::register_module_builtins(vm, module_path!());
 }
-
-pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
-    &CHANNEL_GUARDRAIL_REGISTER_IMPL_DEF,
-    &CHANNEL_GUARDRAIL_UNREGISTER_IMPL_DEF,
-    &CHANNEL_GUARDRAIL_LIST_IMPL_DEF,
-    &CHANNEL_GUARDRAIL_CLEAR_IMPL_DEF,
-];
 
 #[harn_builtin(
     exposure = "harness.channels.guardrail_register",
@@ -54,7 +45,7 @@ fn channel_guardrail_register_impl(
         None => return Err(err("channel_guardrail_register: requires a config dict")),
     };
     let id = crate::channel_guardrails::register(&config)?;
-    Ok(VmValue::String(arcstr::ArcStr::from(id)))
+    Ok(VmValue::string(id))
 }
 
 #[harn_builtin(
@@ -88,11 +79,8 @@ fn channel_guardrail_unregister_impl(
 )]
 fn channel_guardrail_list_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let ids = crate::channel_guardrails::list_ids();
-    let values: Vec<VmValue> = ids
-        .into_iter()
-        .map(|id| VmValue::String(arcstr::ArcStr::from(id)))
-        .collect();
-    Ok(VmValue::List(std::sync::Arc::new(values)))
+    let values: Vec<VmValue> = ids.into_iter().map(VmValue::string).collect();
+    Ok(VmValue::list(values))
 }
 
 #[harn_builtin(

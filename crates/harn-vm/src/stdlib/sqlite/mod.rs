@@ -13,8 +13,7 @@ use tokio::sync::Mutex;
 use crate::llm::vm_value_to_json;
 use crate::stdlib::args::Args;
 use crate::stdlib::macros::{
-    harn_builtin, BuiltinSignature, Param, VmBuiltinDef, TY_ANY, TY_BOOL, TY_DICT, TY_LIST,
-    TY_RESOURCE,
+    harn_builtin, BuiltinSignature, Param, TY_ANY, TY_BOOL, TY_DICT, TY_LIST, TY_RESOURCE,
 };
 use crate::stdlib::sandbox::{self, FsAccess};
 use crate::value::{VmError, VmResourceHandle, VmValue};
@@ -59,25 +58,8 @@ pub(crate) fn reset_sqlite_state() {
 }
 
 pub(crate) fn register_sqlite_builtins(vm: &mut Vm) {
-    for def in MODULE_BUILTINS {
-        vm.register_builtin_def(def);
-    }
+    crate::stdlib::macros::register_module_builtins(vm, module_path!());
 }
-
-pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
-    &SQLITE_OPEN_IMPL_DEF,
-    &SQLITE_CLOSE_IMPL_DEF,
-    &SQLITE_QUERY_IMPL_DEF,
-    &SQLITE_QUERY_ONE_IMPL_DEF,
-    &SQLITE_EXECUTE_IMPL_DEF,
-    &SQLITE_TRANSACTION_IMPL_DEF,
-    &SQLITE_SAVEPOINT_IMPL_DEF,
-    &SQLITE_RELEASE_SAVEPOINT_IMPL_DEF,
-    &SQLITE_ROLLBACK_TO_SAVEPOINT_IMPL_DEF,
-    &SQLITE_MIGRATE_IMPL_DEF,
-    &SQLITE_MOCK_DB_IMPL_DEF,
-    &SQLITE_MOCK_CALLS_IMPL_DEF,
-];
 
 #[harn_builtin(
     exposure = "runtime_internal",
@@ -142,7 +124,7 @@ async fn sqlite_query_impl(
     let sql = call.non_empty_string(1, "sql")?.to_string();
     let params = params_arg(&call, 2)?;
     let rows = query_rows(target, &sql, &params, "sqlite_query").await?;
-    Ok(VmValue::List(Arc::new(rows)))
+    Ok(VmValue::list(rows))
 }
 
 #[harn_builtin(
@@ -371,7 +353,7 @@ fn sqlite_mock_db_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
 fn sqlite_mock_calls_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let mock = mock_handle(args.first(), "sqlite_mock_calls")?;
     let calls = mock.lock().calls.clone();
-    Ok(VmValue::List(Arc::new(calls)))
+    Ok(VmValue::list(calls))
 }
 
 fn open_db(path: &str, options: Option<&crate::value::DictMap>) -> Result<VmValue, VmError> {
@@ -669,7 +651,7 @@ async fn migrate(args: Vec<VmValue>) -> Result<VmValue, VmError> {
         crate::value::intern_key("available"),
         string_list(entries.iter().map(|entry| entry.name.clone()).collect()),
     );
-    response.insert(crate::value::intern_key("dry_run"), VmValue::Bool(dry_run));
+    response.put_bool("dry_run", dry_run);
     response.put_str("table", table);
     Ok(VmValue::dict(response))
 }
@@ -819,7 +801,7 @@ fn row_to_value(
                 let text = std::str::from_utf8(bytes).map_err(|error| {
                     runtime_error(format!("{builtin}: text column is not UTF-8: {error}"))
                 })?;
-                VmValue::String(arcstr::ArcStr::from(text.to_string()))
+                VmValue::string(text.to_string())
             }
             ValueRef::Blob(bytes) => VmValue::Bytes(Arc::new(bytes.to_vec())),
         };
@@ -1084,12 +1066,7 @@ fn quote_identifier(name: &str) -> String {
 }
 
 fn string_list(values: Vec<String>) -> VmValue {
-    VmValue::List(Arc::new(
-        values
-            .into_iter()
-            .map(|value| VmValue::String(arcstr::ArcStr::from(value)))
-            .collect(),
-    ))
+    VmValue::list(values.into_iter().map(VmValue::string).collect())
 }
 
 fn runtime_error(message: impl Into<String>) -> VmError {

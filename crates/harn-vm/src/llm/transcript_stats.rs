@@ -2,17 +2,15 @@
 //! logs, enabling pipeline tests to assert transcript continuity invariants
 //! across stage transitions.
 
+use crate::value::VmDictExt;
 use std::collections::BTreeMap;
 
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 use harn_builtin_macros::harn_builtin;
-use harn_vm_core::builtin_support::VmBuiltinDef;
 
 pub(crate) fn register_transcript_builtins(vm: &mut Vm) {
-    for def in MODULE_BUILTINS {
-        vm.register_builtin_def(def);
-    }
+    harn_vm_core::builtin_support::register_module_builtins(vm, module_path!());
 }
 
 #[harn_builtin(
@@ -51,13 +49,8 @@ fn transcript_events_by_kind_builtin(
             _ => false,
         })
         .collect();
-    Ok(VmValue::List(std::sync::Arc::new(filtered)))
+    Ok(VmValue::list(filtered))
 }
-
-pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
-    &TRANSCRIPT_STATS_BUILTIN_DEF,
-    &TRANSCRIPT_EVENTS_BY_KIND_BUILTIN_DEF,
-];
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub(crate) struct TranscriptStats {
@@ -141,34 +134,13 @@ fn count_tool_calls(msg: &crate::value::DictMap) -> i64 {
 
 fn stats_to_vm(stats: &TranscriptStats) -> VmValue {
     let mut dict = BTreeMap::new();
-    dict.insert(
-        "message_count".to_string(),
-        VmValue::Int(stats.message_count),
-    );
-    dict.insert(
-        "user_facing_message_count".to_string(),
-        VmValue::Int(stats.user_facing_message_count),
-    );
-    dict.insert(
-        "tool_result_message_count".to_string(),
-        VmValue::Int(stats.tool_result_message_count),
-    );
-    dict.insert(
-        "tool_call_count".to_string(),
-        VmValue::Int(stats.tool_call_count),
-    );
-    dict.insert(
-        "assistant_message_count".to_string(),
-        VmValue::Int(stats.assistant_message_count),
-    );
-    dict.insert(
-        "user_message_count".to_string(),
-        VmValue::Int(stats.user_message_count),
-    );
-    dict.insert(
-        "visible_event_count".to_string(),
-        VmValue::Int(stats.visible_event_count),
-    );
+    dict.put_int("message_count", stats.message_count);
+    dict.put_int("user_facing_message_count", stats.user_facing_message_count);
+    dict.put_int("tool_result_message_count", stats.tool_result_message_count);
+    dict.put_int("tool_call_count", stats.tool_call_count);
+    dict.put_int("assistant_message_count", stats.assistant_message_count);
+    dict.put_int("user_message_count", stats.user_message_count);
+    dict.put_int("visible_event_count", stats.visible_event_count);
     VmValue::dict(dict)
 }
 

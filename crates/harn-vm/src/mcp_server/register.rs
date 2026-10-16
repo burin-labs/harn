@@ -348,21 +348,17 @@ pub fn register_mcp_server_builtins(vm: &mut Vm) {
             let dict = match args.first() {
                 Some(VmValue::Dict(d)) => d.clone(),
                 _ => {
-                    return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+                    return Err(VmError::Thrown(VmValue::string(
                         "mcp_elicit: argument must be a dict with {message, requestedSchema}",
-                    ))));
+                    )));
                 }
             };
             let message = dict.get("message").map(VmValue::display).ok_or_else(|| {
-                VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-                    "mcp_elicit: 'message' is required",
-                )))
+                VmError::Thrown(VmValue::string("mcp_elicit: 'message' is required"))
             })?;
             let requested_schema = dict.get("requestedSchema").or_else(|| dict.get("schema"));
             let requested_schema = requested_schema.ok_or_else(|| {
-                VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-                    "mcp_elicit: 'requestedSchema' is required",
-                )))
+                VmError::Thrown(VmValue::string("mcp_elicit: 'requestedSchema' is required"))
             })?;
             let requested_schema_json: JsonValue = crate::mcp::vm_value_to_serde(requested_schema);
 
@@ -376,9 +372,9 @@ pub fn register_mcp_server_builtins(vm: &mut Vm) {
         "mcp_client_roots",
         |_ctx, args| async move {
             if !args.is_empty() {
-                return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+                return Err(VmError::Thrown(VmValue::string(
                     "mcp_client_roots: takes no arguments",
-                ))));
+                )));
             }
             crate::mcp_client_roots::request_client_roots().await
         },

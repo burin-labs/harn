@@ -395,7 +395,7 @@ fn coerce_scalar(raw: &str, field_type: &str, field_schema: &VmValue) -> Option<
             if unescaped.eq_ignore_ascii_case("null") && !field_allows_null(field_schema) {
                 return None;
             }
-            Some(VmValue::String(arcstr::ArcStr::from(unescaped.as_str())))
+            Some(VmValue::string(unescaped.as_str()))
         }
         "integer" => {
             let n: i64 = cleaned.parse().ok()?;
@@ -606,7 +606,7 @@ fn merge_repair_options(
     // burning the caller's `schema_retries` budget here would amplify
     // cost and the outer recovery cascade has already done what it
     // can. Set explicitly rather than relying on defaults.
-    merged.insert(crate::value::intern_key("schema_retries"), VmValue::Int(0));
+    merged.put_int("schema_retries", 0);
     // Strip schema_recover controls before the repair request reaches the
     // canonical llm_call option gate.
     merged.remove("repair");
@@ -617,9 +617,9 @@ fn merge_repair_options(
     // The schema argument owns the repair call's output contract.
     let mut output = crate::value::DictMap::new();
     output.insert(crate::value::intern_key("schema"), schema.clone());
-    output.insert(crate::value::intern_key("strict"), VmValue::Bool(true));
+    output.put_bool("strict", true);
     output.put_str("validation", "error");
-    merged.insert(crate::value::intern_key("output"), VmValue::dict(output));
+    merged.put("output", VmValue::dict(output));
     merged
 }
 
@@ -631,20 +631,14 @@ fn envelope_success(
     repaired: bool,
 ) -> VmValue {
     let mut env = crate::value::DictMap::new();
-    env.insert(crate::value::intern_key("ok"), VmValue::Bool(true));
+    env.put_bool("ok", true);
     env.insert(crate::value::intern_key("data"), data);
     env.put_str("raw_text", raw_text);
     env.put_str("error", "");
     env.insert(crate::value::intern_key("error_category"), VmValue::Nil);
-    env.insert(
-        crate::value::intern_key("attempts"),
-        VmValue::Int(attempts as i64),
-    );
+    env.put_int("attempts", attempts as i64);
     env.put_str("stage", stage);
-    env.insert(
-        crate::value::intern_key("repaired"),
-        VmValue::Bool(repaired),
-    );
+    env.put_bool("repaired", repaired);
     VmValue::dict(env)
 }
 
@@ -656,17 +650,14 @@ fn envelope_failure(
     attempts: usize,
 ) -> VmValue {
     let mut env = crate::value::DictMap::new();
-    env.insert(crate::value::intern_key("ok"), VmValue::Bool(false));
+    env.put_bool("ok", false);
     env.insert(crate::value::intern_key("data"), VmValue::Nil);
     env.put_str("raw_text", raw_text);
     env.put_str("error", error_message);
     env.put_str("error_category", error_category);
-    env.insert(
-        crate::value::intern_key("attempts"),
-        VmValue::Int(attempts as i64),
-    );
+    env.put_int("attempts", attempts as i64);
     env.put_str("stage", stage);
-    env.insert(crate::value::intern_key("repaired"), VmValue::Bool(false));
+    env.put_bool("repaired", false);
     VmValue::dict(env)
 }
 

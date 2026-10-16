@@ -438,7 +438,7 @@ pub(crate) fn build_refine_nudge(reasons: &[String]) -> String {
 // ---------------------------------------------------------------------------
 
 fn runtime_error(message: String) -> VmError {
-    VmError::Thrown(VmValue::String(arcstr::ArcStr::from(message)))
+    VmError::Thrown(VmValue::string(message))
 }
 
 fn parse_string(dict: &crate::value::DictMap, key: &str) -> Result<Option<String>, VmError> {
@@ -724,7 +724,7 @@ pub(crate) fn verifiers_summary(verifiers: &[Verifier]) -> VmValue {
             VmValue::dict(dict)
         })
         .collect();
-    VmValue::List(std::sync::Arc::new(items))
+    VmValue::list(items)
 }
 
 #[cfg(test)]

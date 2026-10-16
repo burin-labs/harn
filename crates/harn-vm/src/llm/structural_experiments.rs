@@ -48,11 +48,9 @@ pub(crate) fn parse_structural_experiment_option(
             args: serde_json::json!({}),
             handler: StructuralExperimentHandler::Closure(VmValue::Closure(closure.clone())),
         })),
-        Some(other) => Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-            format!(
-                "structural_experiment: expected string, dict, closure, nil, or false; got {}",
-                other.type_name()
-            ),
+        Some(other) => Err(VmError::Thrown(VmValue::string(format!(
+            "structural_experiment: expected string, dict, closure, nil, or false; got {}",
+            other.type_name()
         )))),
         None => match crate::stdlib::process::session_env_var(STRUCTURAL_EXPERIMENT_ENV)
             .ok()
@@ -112,9 +110,9 @@ fn parse_structural_experiment_dict(
     }
 
     let Some(name) = name else {
-        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+        return Err(VmError::Thrown(VmValue::string(
             "structural_experiment: dict form requires `name` or `transform`",
-        ))));
+        )));
     };
     build_builtin_experiment(&name, label, args_value)
 }
@@ -132,14 +130,14 @@ fn parse_structural_experiment_spec(
     }
     let (name, args) = if let Some(open_idx) = spec.find('(') {
         let close_idx = spec.rfind(')').ok_or_else(|| {
-            VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+            VmError::Thrown(VmValue::string(
                 "structural_experiment: missing closing `)`",
-            )))
+            ))
         })?;
         if close_idx < open_idx {
-            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+            return Err(VmError::Thrown(VmValue::string(
                 "structural_experiment: invalid argument list",
-            ))));
+            )));
         }
         let name = spec[..open_idx].trim();
         let args = parse_named_args(&spec[open_idx + 1..close_idx])?;
@@ -179,8 +177,8 @@ fn build_builtin_experiment(
             StructuralExperimentHandler::BuiltIn(BuiltInStructuralExperiment::InvertedSystem)
         }
         other => {
-            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-                format!("unknown structural experiment `{other}`"),
+            return Err(VmError::Thrown(VmValue::string(format!(
+                "unknown structural experiment `{other}`"
             ))))
         }
     };
@@ -200,15 +198,15 @@ fn parse_named_args(input: &str) -> Result<serde_json::Map<String, serde_json::V
             continue;
         }
         let Some((key, value_text)) = item.split_once(':') else {
-            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-                format!("structural_experiment: expected `name: value`, got `{item}`"),
+            return Err(VmError::Thrown(VmValue::string(format!(
+                "structural_experiment: expected `name: value`, got `{item}`"
             ))));
         };
         let key = key.trim();
         if key.is_empty() {
-            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+            return Err(VmError::Thrown(VmValue::string(
                 "structural_experiment: empty argument name",
-            ))));
+            )));
         }
         let value = parse_scalar_value(value_text.trim())?;
         out.insert(key.to_string(), value);
@@ -265,13 +263,13 @@ fn parse_scalar_value(input: &str) -> Result<serde_json::Value, VmError> {
     }
     if input.starts_with('"') && input.ends_with('"') && input.len() >= 2 {
         return serde_json::from_str(input).map_err(|error| {
-            VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
+            VmError::Thrown(VmValue::string(format!(
                 "structural_experiment: invalid string literal `{input}`: {error}"
-            ))))
+            )))
         });
     }
-    Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-        format!("structural_experiment: unsupported argument value `{input}`"),
+    Err(VmError::Thrown(VmValue::string(format!(
+        "structural_experiment: unsupported argument value `{input}`"
     ))))
 }
 
@@ -306,24 +304,19 @@ pub(crate) async fn apply_structural_experiment(
                     )
                 })?;
             let mut ctx = crate::value::DictMap::new();
-            ctx.insert(
-                crate::value::intern_key("messages"),
-                VmValue::List(std::sync::Arc::new(
-                    crate::llm::helpers::json_messages_to_vm(&current_messages),
-                )),
+            ctx.put(
+                "messages",
+                VmValue::list(crate::llm::helpers::json_messages_to_vm(&current_messages)),
             );
-            ctx.insert(
-                crate::value::intern_key("system"),
+            ctx.put_nullable(
+                "system",
                 current_system
                     .as_ref()
-                    .map(|value| VmValue::String(arcstr::ArcStr::from(value.as_str())))
-                    .unwrap_or(VmValue::Nil),
+                    .map(|value| VmValue::string(value.as_str())),
             );
-            ctx.insert(
-                crate::value::intern_key("iteration"),
-                iteration
-                    .map(|value| VmValue::Int(value as i64))
-                    .unwrap_or(VmValue::Nil),
+            ctx.put_nullable(
+                "iteration",
+                iteration.map(|value| VmValue::Int(value as i64)),
             );
             ctx.put_str("label", config.label.as_str());
             ctx.put_str("name", config.name.as_str());
@@ -381,9 +374,9 @@ fn interpret_closure_result(
                 Some(VmValue::List(list)) => crate::llm::helpers::vm_messages_to_json(list)?,
                 Some(VmValue::Nil) | None => current_messages.to_vec(),
                 Some(_) => {
-                    return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+                    return Err(VmError::Thrown(VmValue::string(
                         "structural_experiment transform: `messages` must be a list",
-                    ))))
+                    )))
                 }
             };
             let system = match dict.get("system") {
@@ -412,9 +405,9 @@ fn interpret_closure_result(
             }
             Ok((messages, system, serde_json::Value::Object(metadata)))
         }
-        _ => Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+        _ => Err(VmError::Thrown(VmValue::string(
             "structural_experiment transform must return nil, a message list, or a dict",
-        )))),
+        ))),
     }
 }
 

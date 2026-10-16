@@ -27,10 +27,7 @@ fn payload(
     let mut step = std::collections::BTreeMap::new();
     step.put_str("name", &definition.name);
     step.put_str("function", &definition.function);
-    step.insert(
-        "args".to_string(),
-        VmValue::List(Arc::new(domain_args(args).to_vec())),
-    );
+    step.put("args", VmValue::list(domain_args(args).to_vec()));
     let mut result = std::collections::BTreeMap::new();
     result.put_str("event", event.as_str());
     result.put_str(
@@ -41,7 +38,7 @@ fn payload(
         },
     );
     result.put_str("persona", persona.unwrap_or(""));
-    result.insert("step".to_string(), VmValue::dict(step));
+    result.put("step", VmValue::dict(step));
     if let Some(output) = output {
         result.insert("output".to_string(), output);
     }

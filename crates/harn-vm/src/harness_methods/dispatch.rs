@@ -454,7 +454,7 @@ fn call_harness_clock_method_sync_fast(
             let timestamp = chrono::DateTime::<chrono::Utc>::from_timestamp_millis(millis)
                 .map(|value| value.to_rfc3339_opts(chrono::SecondsFormat::Millis, true))
                 .unwrap_or_default();
-            Some(Ok(VmValue::String(arcstr::ArcStr::from(timestamp))))
+            Some(Ok(VmValue::string(timestamp)))
         }
         "now" => {
             let millis = crate::stdlib::clock::now_wall_ms_from(clock.as_ref());
@@ -611,14 +611,10 @@ fn call_harness_random_method_sync_fast(
             };
             let mut shuffled = items.as_ref().clone();
             shuffled.shuffle(&mut rand::rng());
-            Some(Ok(VmValue::List(std::sync::Arc::new(shuffled))))
+            Some(Ok(VmValue::list(shuffled)))
         }
-        "uuid" => Some(Ok(VmValue::String(arcstr::ArcStr::from(
-            uuid::Uuid::new_v4().to_string(),
-        )))),
-        "uuid_v7" => Some(Ok(VmValue::String(arcstr::ArcStr::from(
-            uuid::Uuid::now_v7().to_string(),
-        )))),
+        "uuid" => Some(Ok(VmValue::string(uuid::Uuid::new_v4().to_string()))),
+        "uuid_v7" => Some(Ok(VmValue::string(uuid::Uuid::now_v7().to_string()))),
         "bytes" => {
             let length = match args.first().and_then(VmValue::as_int) {
                 Some(length) if (1..=1024).contains(&length) => length as usize,
@@ -743,7 +739,7 @@ fn call_mock_harness_method_sync_fast(
                     let timestamp = chrono::DateTime::<chrono::Utc>::from_timestamp_millis(millis)
                         .map(|value| value.to_rfc3339_opts(chrono::SecondsFormat::Millis, true))
                         .unwrap_or_default();
-                    Some(Ok(VmValue::String(arcstr::ArcStr::from(timestamp))))
+                    Some(Ok(VmValue::string(timestamp)))
                 }
                 "sleep_ms" => {
                     let ms = match sleep_ms_arg(args) {
@@ -795,9 +791,7 @@ fn call_mock_harness_method_sync_fast(
                     .next_random_u64()
                     .map(|value| {
                         let value = (u128::from(value) << 64) | u128::from(value);
-                        VmValue::String(arcstr::ArcStr::from(
-                            uuid::Uuid::from_u128(value).to_string(),
-                        ))
+                        VmValue::string(uuid::Uuid::from_u128(value).to_string())
                     })
                     .ok_or_else(|| VmError::CategorizedError {
                         message: format!("MockHarness has no {method} response"),

@@ -46,12 +46,12 @@ impl crate::vm::Vm {
                 }
                 let mut sorted: Vec<VmValue> = items.iter().cloned().collect();
                 sorted.sort_by(|a, b| compare_values(a, b).cmp(&0));
-                Ok(VmValue::List(std::sync::Arc::new(sorted)))
+                Ok(VmValue::list(sorted))
             }
             "reversed" => {
                 let mut rev: Vec<VmValue> = items.iter().cloned().collect();
                 rev.reverse();
-                Ok(VmValue::List(std::sync::Arc::new(rev)))
+                Ok(VmValue::list(rev))
             }
             "join" => {
                 let sep = if args.is_empty() {
@@ -64,7 +64,7 @@ impl crate::vm::Vm {
                     .map(|v| v.display())
                     .collect::<Vec<_>>()
                     .join(&sep);
-                Ok(VmValue::String(arcstr::ArcStr::from(joined)))
+                Ok(VmValue::string(joined))
             }
             "contains" => {
                 let needle = args.first().unwrap_or(&VmValue::Nil);
@@ -80,26 +80,21 @@ impl crate::vm::Vm {
                     .iter()
                     .enumerate()
                     .map(|(i, v)| {
-                        VmValue::dict(BTreeMap::from([
-                            ("index".to_string(), VmValue::Int(i as i64)),
-                            ("value".to_string(), v.clone()),
-                        ]))
+                        VmValue::dict([("index", VmValue::Int(i as i64)), ("value", v.clone())])
                     })
                     .collect();
-                Ok(VmValue::List(std::sync::Arc::new(result)))
+                Ok(VmValue::list(result))
             }
             "zip" => {
                 if let Some(VmValue::List(other)) = args.first() {
                     let result: Vec<VmValue> = items
                         .iter()
                         .zip(other.iter())
-                        .map(|(a, b)| {
-                            VmValue::List(std::sync::Arc::new(vec![a.clone(), b.clone()]))
-                        })
+                        .map(|(a, b)| VmValue::list(vec![a.clone(), b.clone()]))
                         .collect();
-                    Ok(VmValue::List(std::sync::Arc::new(result)))
+                    Ok(VmValue::list(result))
                 } else {
-                    Ok(VmValue::List(std::sync::Arc::new(Vec::new())))
+                    Ok(VmValue::list(Vec::new()))
                 }
             }
             "slice" => {
@@ -121,24 +116,16 @@ impl crate::vm::Vm {
                     len as usize
                 };
                 let end = end.max(start);
-                Ok(VmValue::List(std::sync::Arc::new(
-                    items[start..end].to_vec(),
-                )))
+                Ok(VmValue::list(items[start..end].to_vec()))
             }
-            "unique" => Ok(VmValue::List(std::sync::Arc::new(
-                crate::value::dedup_values(items.iter()),
-            ))),
+            "unique" => Ok(VmValue::list(crate::value::dedup_values(items.iter()))),
             "take" => {
                 let n = args.first().and_then(|a| a.as_int()).unwrap_or(0).max(0) as usize;
-                Ok(VmValue::List(std::sync::Arc::new(
-                    items.iter().take(n).cloned().collect(),
-                )))
+                Ok(VmValue::list(items.iter().take(n).cloned().collect()))
             }
             "skip" => {
                 let n = args.first().and_then(|a| a.as_int()).unwrap_or(0).max(0) as usize;
-                Ok(VmValue::List(std::sync::Arc::new(
-                    items.iter().skip(n).cloned().collect(),
-                )))
+                Ok(VmValue::list(items.iter().skip(n).cloned().collect()))
             }
             "sum" => {
                 let mut int_sum: i64 = 0;
@@ -236,7 +223,7 @@ impl crate::vm::Vm {
                         result.push(item.clone());
                     }
                 }
-                Ok(VmValue::List(std::sync::Arc::new(result)))
+                Ok(VmValue::list(result))
             }
             "none" => {
                 if args.first().is_some_and(Self::is_callable_value) {
@@ -264,9 +251,9 @@ impl crate::vm::Vm {
                 let size = args.first().and_then(|a| a.as_int()).unwrap_or(1).max(1) as usize;
                 let chunks: Vec<VmValue> = items
                     .chunks(size)
-                    .map(|c| VmValue::List(std::sync::Arc::new(c.to_vec())))
+                    .map(|c| VmValue::list(c.to_vec()))
                     .collect();
-                Ok(VmValue::List(std::sync::Arc::new(chunks)))
+                Ok(VmValue::list(chunks))
             }
             "min_by" | "max_by" => {
                 if items.is_empty() {
@@ -283,23 +270,21 @@ impl crate::vm::Vm {
                     .filter(|v| !matches!(v, VmValue::Nil))
                     .cloned()
                     .collect();
-                Ok(VmValue::List(std::sync::Arc::new(result)))
+                Ok(VmValue::list(result))
             }
             "windows" => {
                 let size = args.first().and_then(|a| a.as_int()).unwrap_or(2).max(1) as usize;
                 let step = args.get(1).and_then(|a| a.as_int()).unwrap_or(1).max(1) as usize;
                 if size > items.len() {
-                    return Some(Ok(VmValue::List(std::sync::Arc::new(Vec::new()))));
+                    return Some(Ok(VmValue::list(Vec::new())));
                 }
                 let mut windows = Vec::new();
                 let mut start = 0;
                 while start + size <= items.len() {
-                    windows.push(VmValue::List(std::sync::Arc::new(
-                        items[start..start + size].to_vec(),
-                    )));
+                    windows.push(VmValue::list(items[start..start + size].to_vec()));
                     start += step;
                 }
-                Ok(VmValue::List(std::sync::Arc::new(windows)))
+                Ok(VmValue::list(windows))
             }
             "tally" => {
                 // Strict-string discriminator: dict keys are intrinsically
@@ -367,7 +352,7 @@ impl crate::vm::Vm {
                 for item in items.iter() {
                     results.push(self.call_callable_one(callable, item).await?);
                 }
-                Ok(VmValue::List(std::sync::Arc::new(results)))
+                Ok(VmValue::list(results))
             }
             "filter" => {
                 let Some(callable) = args.first().filter(|v| Self::is_callable_value(v)) else {
@@ -380,7 +365,7 @@ impl crate::vm::Vm {
                         results.push(item.clone());
                     }
                 }
-                Ok(VmValue::List(std::sync::Arc::new(results)))
+                Ok(VmValue::list(results))
             }
             "reduce" => {
                 let Some(callable) = args.get(1).filter(|v| Self::is_callable_value(v)).cloned()
@@ -442,7 +427,7 @@ impl crate::vm::Vm {
                         results.push(result);
                     }
                 }
-                Ok(VmValue::List(std::sync::Arc::new(results)))
+                Ok(VmValue::list(results))
             }
             "sorted_by" => {
                 let Some(callable) = args.first().filter(|v| Self::is_callable_value(v)) else {
@@ -454,9 +439,7 @@ impl crate::vm::Vm {
                     keyed.push((item.clone(), key));
                 }
                 keyed.sort_by(|(_, ka), (_, kb)| compare_values(ka, kb).cmp(&0));
-                Ok(VmValue::List(std::sync::Arc::new(
-                    keyed.into_iter().map(|(v, _)| v).collect(),
-                )))
+                Ok(VmValue::list(keyed.into_iter().map(|(v, _)| v).collect()))
             }
             "none" => {
                 let Some(callable) = args.first().filter(|v| Self::is_callable_value(v)) else {
@@ -496,10 +479,10 @@ impl crate::vm::Vm {
                         falsy.push(item.clone());
                     }
                 }
-                Ok(VmValue::List(std::sync::Arc::new(vec![
+                Ok(VmValue::list(vec![
                     VmValue::List(std::sync::Arc::new(truthy)),
                     VmValue::List(std::sync::Arc::new(falsy)),
-                ])))
+                ]))
             }
             "group_by" => {
                 let Some(callable) = args.first().filter(|v| Self::is_callable_value(v)) else {
@@ -513,12 +496,7 @@ impl crate::vm::Vm {
                 }
                 let result: crate::value::DictMap = groups
                     .into_iter()
-                    .map(|(k, v)| {
-                        (
-                            crate::value::intern_key(&k),
-                            VmValue::List(std::sync::Arc::new(v)),
-                        )
-                    })
+                    .map(|(k, v)| (crate::value::intern_key(&k), VmValue::list(v)))
                     .collect();
                 Ok(VmValue::dict(result))
             }
@@ -560,9 +538,7 @@ impl crate::vm::Vm {
             }
             "take_while" => {
                 let Some(callable) = args.first().filter(|v| Self::is_callable_value(v)) else {
-                    return Ok(VmValue::List(std::sync::Arc::new(
-                        items.iter().cloned().collect(),
-                    )));
+                    return Ok(VmValue::list(items.iter().cloned().collect()));
                 };
                 let mut out = Vec::new();
                 for item in items.iter() {
@@ -572,13 +548,11 @@ impl crate::vm::Vm {
                     }
                     out.push(item.clone());
                 }
-                Ok(VmValue::List(std::sync::Arc::new(out)))
+                Ok(VmValue::list(out))
             }
             "drop_while" => {
                 let Some(callable) = args.first().filter(|v| Self::is_callable_value(v)) else {
-                    return Ok(VmValue::List(std::sync::Arc::new(
-                        items.iter().cloned().collect(),
-                    )));
+                    return Ok(VmValue::list(items.iter().cloned().collect()));
                 };
                 let mut out = Vec::new();
                 let mut dropping = true;
@@ -592,7 +566,7 @@ impl crate::vm::Vm {
                     }
                     out.push(item.clone());
                 }
-                Ok(VmValue::List(std::sync::Arc::new(out)))
+                Ok(VmValue::list(out))
             }
             "count_by" => {
                 let Some(callable) = args.first().filter(|v| Self::is_callable_value(v)) else {
