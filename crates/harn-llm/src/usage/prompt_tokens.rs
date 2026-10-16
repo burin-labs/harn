@@ -2,7 +2,7 @@
 
 /// The wire counter's meaning, selected by the adapter that owns its dialect.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(crate) enum InputTokenBasis {
+pub enum InputTokenBasis {
     #[default]
     Inclusive,
     Fresh,
@@ -11,19 +11,19 @@ pub(crate) enum InputTokenBasis {
 /// Reported counters in a saved usage object or one incremental usage frame.
 /// Missing counters remain absent until the provider supplies them.
 #[derive(Clone, Copy, Debug, Default)]
-pub(crate) struct ReportedTokenUsage {
-    pub(crate) input_tokens: Option<i64>,
-    pub(crate) output_tokens: Option<i64>,
-    pub(crate) cache_read_tokens: Option<i64>,
-    pub(crate) cache_write_tokens: Option<i64>,
-    pub(crate) cache_supported: Option<bool>,
-    pub(crate) cache_unreported: bool,
+pub struct ReportedTokenUsage {
+    pub input_tokens: Option<i64>,
+    pub output_tokens: Option<i64>,
+    pub cache_read_tokens: Option<i64>,
+    pub cache_write_tokens: Option<i64>,
+    pub cache_supported: Option<bool>,
+    pub cache_unreported: bool,
     parse_error: Option<&'static str>,
     input_basis: Option<InputTokenBasis>,
 }
 
 impl ReportedTokenUsage {
-    pub(crate) fn from_value(value: &serde_json::Value) -> Self {
+    pub fn from_value(value: &serde_json::Value) -> Self {
         let Some(object) = value.as_object() else {
             return Self::default();
         };
@@ -116,7 +116,7 @@ impl ReportedTokenUsage {
         }
     }
 
-    pub(crate) fn has_any(self) -> bool {
+    pub fn has_any(self) -> bool {
         self.parse_error.is_some()
             || self.input_tokens.is_some()
             || self.output_tokens.is_some()
@@ -126,7 +126,7 @@ impl ReportedTokenUsage {
 
     /// Stream counters are cumulative snapshots, but a frame can update only
     /// one component. Replace reported components without erasing siblings.
-    pub(crate) fn merge_reported(&mut self, newer: Self) {
+    pub fn merge_reported(&mut self, newer: Self) {
         self.input_tokens = newer.input_tokens.or(self.input_tokens);
         self.output_tokens = newer.output_tokens.or(self.output_tokens);
         self.cache_read_tokens = newer.cache_read_tokens.or(self.cache_read_tokens);
@@ -137,7 +137,7 @@ impl ReportedTokenUsage {
         self.cache_unreported |= newer.cache_unreported;
     }
 
-    pub(crate) fn prompt_counts(self) -> Result<Option<PromptTokenCounts>, &'static str> {
+    pub fn prompt_counts(self) -> Result<Option<PromptTokenCounts>, &'static str> {
         if let Some(error) = self.parse_error {
             return Err(error);
         }
@@ -178,13 +178,13 @@ fn first_counter(value: &serde_json::Value, keys: &[&str]) -> Result<Option<i64>
 
 /// A validated partition of one prompt. Counts never determine their own basis.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct PromptTokenCounts {
-    pub(crate) total: i64,
-    pub(crate) fresh: i64,
+pub struct PromptTokenCounts {
+    pub total: i64,
+    pub fresh: i64,
 }
 
 impl PromptTokenCounts {
-    pub(crate) fn from_reported(
+    pub fn from_reported(
         input: i64,
         read: i64,
         write: i64,

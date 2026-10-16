@@ -2,6 +2,7 @@
 
 pub mod agent_control;
 pub mod agent_terminal_class;
+pub mod cache_conformance;
 pub mod content;
 pub mod effective_effort;
 pub mod inference;
@@ -15,4 +16,5 @@ pub mod tool_delimiter;
 pub mod tool_protocol;
 pub mod tool_search_score;
 pub mod tool_syntax;
+pub mod usage;
 pub mod wire;
