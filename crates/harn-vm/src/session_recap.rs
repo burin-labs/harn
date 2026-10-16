@@ -623,6 +623,25 @@ impl<'a> RecapProjector<'a> {
         self.iteration_index(turn_index, iteration)
     }
 
+    fn publication_segment(&mut self, turn_index: usize, record: &TranscriptRecord) -> usize {
+        // Accepted final prose can arrive after iteration_end. Keep it with
+        // the turn's last durable iteration without inventing either boundary.
+        let turn = &self.turns[turn_index];
+        let iteration = integer(&record.metadata().iteration)
+            .or(turn.current_iteration)
+            .or_else(|| {
+                turn.recap
+                    .iterations
+                    .iter()
+                    .rev()
+                    .find_map(|item| item.iteration)
+            });
+        if iteration.is_none() {
+            self.unassigned += 1;
+        }
+        self.iteration_index(turn_index, iteration)
+    }
+
     fn mark_segment_event(&mut self, turn_index: usize, segment_index: usize, event_id: u64) {
         self.turns[turn_index].recap.iterations[segment_index]
             .source_event_ids
@@ -677,7 +696,12 @@ impl<'a> RecapProjector<'a> {
                 self.matched += 1;
             }
             Some("assistant") if visibility.as_deref() == Some("public") => {
-                let segment_index = self.current_segment(turn_index);
+                let segment_index = if record.kind() == Some(&TranscriptKind::AssistantPublication)
+                {
+                    self.publication_segment(turn_index, record)
+                } else {
+                    self.current_segment(turn_index)
+                };
                 self.turns[turn_index].recap.iterations[segment_index]
                     .assistant_text
                     .push(RecapTextFact {
@@ -972,6 +996,7 @@ fn is_recap_event(event: &StoredEvent, record: &TranscriptRecord) -> bool {
         Some(
             TranscriptKind::IterationStart
                 | TranscriptKind::IterationEnd
+                | TranscriptKind::AssistantPublication
                 | TranscriptKind::ProgressReported
                 | TranscriptKind::AgentRunTerminal
         )

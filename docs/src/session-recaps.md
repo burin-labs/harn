@@ -11,6 +11,9 @@ not iteration boundaries. A terminal result does not close an iteration whose
 end event is missing, and a missing tool result still leaves its exchange
 incomplete. Older journals without these lifecycle events retain their missing
 evidence; the projection does not infer completion from terminal prose.
+An accepted final answer is projected from `assistant_publication` into the
+turn's last durable iteration, including when publication follows its end.
+Publishing an answer does not create missing iteration boundaries.
 
 ## Query inputs
 

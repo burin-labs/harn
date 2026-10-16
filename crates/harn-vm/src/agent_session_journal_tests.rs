@@ -865,6 +865,15 @@ pipeline main(harness: Harness, task: unknown) {{
             .any(|source| source.event_id == publication.event_id),
         "the recap's source bound must include the published answer"
     );
+    assert!(
+        recap.turns.iter().flat_map(|turn| &turn.iterations).any(|iteration| {
+            iteration.assistant_text.iter().any(|fact| {
+                fact.source_event_id == publication.event_id
+                    && fact.text.trim() == "Completed the deterministic work."
+            })
+        }),
+        "the recap must project the final answer itself, not only cover its source event: {recap:?}"
+    );
 
     let run_started = events
         .iter()

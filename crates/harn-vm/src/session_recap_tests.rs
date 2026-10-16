@@ -67,6 +67,19 @@ fn iteration_boundary(iteration: i64, kind: &str) -> AppendEvent {
     )
 }
 
+fn publication(text: &str) -> AppendEvent {
+    identified(
+        custom("assistant_publication"),
+        transcript(
+            "assistant_publication",
+            "assistant",
+            "public",
+            text,
+            json!({}),
+        ),
+    )
+}
+
 fn tool_call(id: &str) -> AppendEvent {
     let mut event = identified(
         SessionEventKind::ToolCall,
@@ -421,6 +434,7 @@ async fn terminal_success_cannot_cover_a_missing_iteration_end_or_tool_result() 
         if has_end {
             events.push(iteration_boundary(0, "iteration_end"));
         }
+        events.push(publication("Finished the check."));
         events.push(terminal());
         for event in events {
             store
@@ -441,7 +455,36 @@ async fn terminal_success_cannot_cover_a_missing_iteration_end_or_tool_result() 
         );
         assert_eq!(turn.state, state, "{id}");
         assert_eq!(turn.iterations[0].tools[0].state, tool_state, "{id}");
+        assert_eq!(turn.iterations.len(), 1, "publication must not reopen {id}");
+        assert_eq!(
+            turn.iterations[0].assistant_text[0].text,
+            "Finished the check."
+        );
     }
+}
+
+#[tokio::test]
+async fn publication_without_iteration_boundaries_remains_unassigned() {
+    let store = MemorySessionStore::default();
+    let id = "publication-without-boundaries";
+    create_session(&store, id).await;
+    for event in [user("Run the check"), publication("Finished."), terminal()] {
+        store
+            .append(id, event)
+            .await
+            .expect("append publication fact");
+    }
+    let recap = query_session_recap(&store, SessionRecapQuery::for_session(id))
+        .await
+        .expect("query unassigned publication")
+        .expect("session exists");
+    assert_eq!(recap.coverage.unassigned, 1);
+    assert_eq!(recap.turns[0].state, RecapCompletionState::Incomplete);
+    assert_eq!(recap.turns[0].iterations[0].iteration, None);
+    assert_eq!(
+        recap.turns[0].iterations[0].assistant_text[0].text,
+        "Finished."
+    );
 }
 
 #[tokio::test]
