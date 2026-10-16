@@ -3272,9 +3272,10 @@ machine-local cache keys include canonical paths.
 Use the executing backend's builtin catalog. Embedded hosts whose catalog
 differs from the standalone CLI prepare through
 `harn_vm::bytecode_cache::CachePrecompiler` linked into that host. After
-registering the backend's builtins, call `prepare_stdlib_catalog` once, then
-`prepare` for each source root. This also prepares stdlib modules loaded
-dynamically by native capabilities. A host that invokes a standalone CLI
+registering the backend's builtins, call `prepare` for each source root and
+`prepare_stdlib` for stdlib roots loaded dynamically by native capabilities.
+Static stdlib imports are included automatically. `prepare_stdlib_catalog`
+requires a backend with every stdlib integration linked. A host invoking a standalone CLI
 helper must also prepare that helper's entrypoints with the CLI.
 
 ### Regenerating artifacts, and what cannot go stale

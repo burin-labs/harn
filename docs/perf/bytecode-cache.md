@@ -311,8 +311,10 @@ Artifacts also identify the linked builtin contracts. A host with a lean or
 extended builtin catalog is a different compiler backend from the standalone
 CLI. Such hosts prepare through `harn_vm::bytecode_cache::CachePrecompiler`
 linked into their executing backend. Register that backend's builtins, call
-`prepare_stdlib_catalog` once to include modules loaded dynamically by native
-capabilities, then call `prepare` for each source root. Hosts invoking standalone
+`prepare` for each source root, and call `prepare_stdlib` for roots loaded
+dynamically by native capabilities. Static stdlib imports are included
+automatically. `prepare_stdlib_catalog` requires all stdlib integrations to be
+linked. Hosts invoking standalone
 CLI helpers also prepare those entrypoints through the CLI's backend. The helper derives each graph's typed
 contexts once, prepares modules and their individual dependency proofs, and
 returns the entry context and store identity. The host owns entry compilation

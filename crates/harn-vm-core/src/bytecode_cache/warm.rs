@@ -29,9 +29,30 @@ impl CachePrecompiler {
         require_cache()?;
         if !self.stdlib_prepared {
             for entry in harn_modules::stdlib_catalog().sources {
-                self.prepare_stdlib(entry.module)?;
+                self.prepare_stdlib_module(entry.module)?;
             }
             self.stdlib_prepared = true;
+        }
+        Ok(())
+    }
+
+    /// Prepare a dynamically loaded stdlib root and its import closure. Lean
+    /// backends use this instead of preparing optional, unlinked integrations.
+    pub fn prepare_stdlib(&mut self, module: &str) -> Result<(), VmError> {
+        require_cache()?;
+        let source = crate::stdlib_modules::get_stdlib_source(module)
+            .ok_or_else(|| VmError::Runtime(format!("unknown stdlib module {module}")))?;
+        self.prepare_stdlib_module(module)?;
+        self.prepare_graph_stdlib(&PathBuf::from(format!("<stdlib>/{module}.harn")), source)
+    }
+
+    fn prepare_graph_stdlib(&mut self, path: &Path, source: &str) -> Result<(), VmError> {
+        if !self.stdlib_prepared {
+            for path in harn_modules::build_with_source(path, source).module_paths() {
+                if let Some(module) = harn_modules::stdlib_module_name(&path) {
+                    self.prepare_stdlib_module(module)?;
+                }
+            }
         }
         Ok(())
     }
@@ -39,7 +60,9 @@ impl CachePrecompiler {
     /// Prepare modules and the root's imported interface without instantiating
     /// source. Return the same entry projection and store identity to the
     /// caller, which owns entry compilation and package-manager authority.
-    /// Call `prepare_stdlib_catalog` first when preparing an executing backend.
+    /// Static stdlib imports are included. Call `prepare_stdlib` for additional
+    /// roots loaded dynamically by native capabilities, or prepare the whole
+    /// catalog when the backend links every stdlib integration.
     /// File roots support user or trusted host-dispatch provenance; embedded
     /// stdlib preparation belongs to `prepare_stdlib_catalog`.
     /// Unlike execution's opportunistic writes, persistence failures are errors.
@@ -124,6 +147,7 @@ impl CachePrecompiler {
             prepare_interface(&file.path, &source, &file.compilation_context, &projections)?;
             self.prepare_module(&file.path, &source, &file.compilation_context, provenance)?;
         }
+        self.prepare_graph_stdlib(path, source)?;
         Ok((
             context,
             graph::entry_store_from_graph(source, result.canonical, Some(manifest)),
@@ -170,7 +194,7 @@ impl CachePrecompiler {
         Ok(())
     }
 
-    fn prepare_stdlib(&mut self, module: &str) -> Result<(), VmError> {
+    fn prepare_stdlib_module(&mut self, module: &str) -> Result<(), VmError> {
         let source = crate::stdlib_modules::get_stdlib_source(module)
             .ok_or_else(|| VmError::Runtime(format!("unknown stdlib module {module}")))?;
         let synthetic = PathBuf::from(format!("<stdlib>/{module}.harn"));
