@@ -50,8 +50,11 @@ warm_phase() {
 host_bound_filter="$(scripts/ci/host_bound_rust_test_filter.sh)"
 warm_phase workspace-tests cargo-nextest nextest run --locked --workspace --profile ci --no-run \
   -E "not (${host_bound_filter})"
-# Match rust-check-inputs' exact GitHub-owned security archive compile shape.
-warm_phase security-tests cargo-nextest nextest run --locked --workspace --profile ci --no-run \
+# Match the security producer's two packages and workspace features.
+security_features="$(bash scripts/ci/workspace_features.sh harn-vm harn-hostlib)"
+[[ -n "$security_features" ]] || { echo 'security warm has no measured workspace features' >&2; exit 1; }
+warm_phase security-tests cargo-nextest nextest run --locked -p harn-vm -p harn-hostlib \
+  --features "$security_features" --profile ci --no-run \
   -E '(package(harn-vm) and binary(harn_vm)) or (package(harn-hostlib) and binary(harn_hostlib))'
 
 # Workspace-crate cache canary touch for #5003 hosted wall-time sampling.

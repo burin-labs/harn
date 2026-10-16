@@ -9,11 +9,8 @@
 # library build on every leg. harn-vm keeps all of its targets in one group so
 # its feature set is resolved once.
 #
-# `tooling` belongs to the producer, which has already compiled the whole
-# workspace for its security archive. It selects its crates by filter rather
-# than by package, because a narrower package selection resolves features
-# differently and would rebuild that graph; it is small because the archive
-# build already sets the producer's finish time.
+# `tooling` belongs to the security producer and compiles only its small share.
+# Every narrowed package selection explicitly preserves workspace features.
 set -euo pipefail
 tooling_packages=(harn-fmt harn-lsp harn-package)
 partition=${1:?partition or all required}
@@ -45,35 +42,24 @@ else
     if [[ "$selected" == --workspace ]]; then
       case "$group" in
         vm) grouped=(-p harn-vm) ;;
-        tooling) grouped=(--workspace) ;;
+        tooling)
+          for name in "${tooling_packages[@]}"; do grouped+=(-p "$name"); done
+          ;;
         rest)
           grouped=(--workspace --exclude harn-vm)
           for name in "${tooling_packages[@]}"; do grouped+=(--exclude "$name"); done
           ;;
       esac
     else
-      in_group=false
       for ((i = 0; i < ${#packages[@]}; i += 2)); do
         [[ "${packages[$i]}" == -p ]] || { echo "Unexpected package selection: $selected" >&2; exit 1; }
         name=${packages[$((i + 1))]}
         case "$group" in
           vm) [[ "$name" == harn-vm ]] && grouped+=(-p "$name") ;;
           rest) [[ "$name" != harn-vm ]] && ! is_tooling "$name" && grouped+=(-p "$name") ;;
-          tooling) is_tooling "$name" && in_group=true ;;
+          tooling) is_tooling "$name" && grouped+=(-p "$name") ;;
         esac
       done
-      # The producer keeps the unified selection; it only needs a member present.
-      if [[ "$group" == tooling && "$in_group" == true ]]; then grouped=("${packages[@]}"); fi
-    fi
-    # Alone, harn-vm resolves only its own default features, which would
-    # compile out code that other members enable (harn-cli's `otel`). Build it
-    # with the feature set the whole workspace resolves for it.
-    if [[ "$group" == vm && ${#grouped[@]} -gt 0 ]]; then
-      vm_features=$(cargo metadata --locked --format-version 1 | jq -er '
-        (.packages[] | select(.name == "harn-vm" and .source == null) | .id) as $id
-        | .resolve.nodes[] | select(.id == $id) | .features | join(",")')
-      [[ -n "$vm_features" ]] || { echo 'harn-vm has no resolved workspace features' >&2; exit 1; }
-      grouped+=(--features "harn-vm/${vm_features//,/,harn-vm/}")
     fi
     if ((${#grouped[@]} == 0)); then
       echo "Workspace tests: packages=$selected group=$group selects nothing; partition=$partition skipped"
@@ -83,6 +69,12 @@ else
           > "$RUNNER_TEMP/harn-nextest-inventory.json"
       fi
       exit 0
+    fi
+    if [[ "$group" == vm || "$group" == tooling ]]; then
+      feature_packages=()
+      for ((i = 1; i < ${#grouped[@]}; i += 2)); do feature_packages+=("${grouped[$i]}"); done
+      features=$(bash "$script_dir/workspace_features.sh" "${feature_packages[@]}")
+      [[ -z "$features" ]] || grouped+=(--features "$features")
     fi
     packages=("${grouped[@]}")
     selected="${packages[*]}"
