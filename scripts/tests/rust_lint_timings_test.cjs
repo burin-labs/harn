@@ -16,6 +16,7 @@ try {
 const fs=require('node:fs'); const path=require('node:path');
 const args=process.argv.slice(2);
 fs.appendFileSync(process.env.CALLS,JSON.stringify(args)+'\\n');
+if(process.env.CARGO_HTTP_MULTIPLEXING!=='false') process.exit(86);
 if(args[0]==='clean') process.exit(0);
 if(args[0]==='metadata') { console.log(JSON.stringify({target_directory:process.env.TARGET})); process.exit(0); }
 if(JSON.stringify(args)!==JSON.stringify(['clippy','--workspace','--all-targets','--timings','--','-D','warnings'])) process.exit(89);
@@ -71,6 +72,7 @@ process.exit(process.env.MODE==='failed'?7:0);
     const child = command('bash', [lane, '--leg', 'workspace'], cwd, {
       ...process.env, PATH:real?process.env.PATH:`${bin}${path.delimiter}${process.env.PATH}`, MODE:mode,
       CARGO_TARGET_DIR:target,
+      GITHUB_ACTIONS:'true', CARGO_HTTP_MULTIPLEXING:'true',
       TARGET:target, CALLS:calls, HARN_LINT_TIMINGS_DIR:output,
       HARN_LINT_SOURCE_SHA:mode==='wrong-source'?'0'.repeat(40):source,
     });
