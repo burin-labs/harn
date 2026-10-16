@@ -176,19 +176,21 @@ mod tests {
     fn machine_quota_rearm_requires_a_known_session() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("spend.sqlite");
-        let mut controls = ConcurrentSessionControls::default();
-        controls.machine_spend_quota = Some(
-            harn_vm::llm::MachineSpendQuota::open(
-                &path,
-                "person",
-                harn_vm::llm::MachineSpendPolicy {
-                    daily_limit_microusd: None,
-                    monthly_limit_microusd: Some(1_000_000),
-                    lifetime_limit_microusd: None,
-                },
-            )
-            .unwrap(),
-        );
+        let controls = ConcurrentSessionControls {
+            machine_spend_quota: Some(
+                harn_vm::llm::MachineSpendQuota::open(
+                    &path,
+                    "person",
+                    harn_vm::llm::MachineSpendPolicy {
+                        daily_limit_microusd: None,
+                        monthly_limit_microusd: Some(1_000_000),
+                        lifetime_limit_microusd: None,
+                    },
+                )
+                .unwrap(),
+            ),
+            ..Default::default()
+        };
         let control = ConcurrentSessionControl::new();
         controls.register("target", control.clone());
         let _ambient = harn_vm::install_llm_cost_budget_seeded(Some(5.0), 0.0);
