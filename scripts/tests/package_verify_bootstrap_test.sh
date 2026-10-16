@@ -169,6 +169,27 @@ fi
 mv "$fixture/target/debug/harn-cli-aot-gen.not-built" \
   "$fixture/target/debug/harn-cli-aot-gen"
 
+# A verified artifact supplies both tools without a second Cargo graph. The
+# generator must remain usable when no target-directory copy exists.
+artifact_generator="$tmp_root/bin/artifact-aot-generator"
+mv "$fixture/target/debug/harn-cli-aot-gen" "$artifact_generator"
+: > "$CALLS_FILE"
+HARN_BIN="$stable_harn" HARN_BIN_NO_BUILD=1 \
+  HARN_RELEASE_CLI_AOT_GEN_BIN="$artifact_generator" \
+  package_verify_prepare_tools "$fixture" "$tool_dir"
+expected="resolve cwd=$fixture no_build=1 explicit=$stable_harn args=--print
+aot --workspace-root $fixture --check"
+[[ "$(<"$CALLS_FILE")" == "$expected" ]]
+: > "$CALLS_FILE"
+if HARN_BIN="$stable_harn" HARN_BIN_NO_BUILD=1 \
+  HARN_RELEASE_CLI_AOT_GEN_BIN="$tmp_root/missing-generator" \
+  package_verify_prepare_tools "$fixture" "$tool_dir" 2>"$tmp_root/missing-artifact.err"; then
+  echo 'package bootstrap accepted an absent supplied generator' >&2
+  exit 1
+fi
+[[ ! -s "$CALLS_FILE" ]]
+mv "$artifact_generator" "$fixture/target/debug/harn-cli-aot-gen"
+
 # Platform suffix policy must select the artifact a cold Windows Cargo build
 # is about to produce, without probing for a not-yet-existing executable.
 : > "$CALLS_FILE"
