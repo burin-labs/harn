@@ -67,6 +67,33 @@ pub fn prepare_group_tree(
   return {base: base, heads: heads, tree: tree}
 }
 
+/** Bind archived review bases to the actual histories without rewriting signed admissions. */
+pub fn require_group_ancestry(
+  process: HarnessProcess,
+  workspace: string,
+  group: GroupTree,
+  reviewed_bases: list<string>,
+  timeout_ms: int = 10000,
+) {
+  require is_git_id(group.base) && len(group.heads) > 0 && len(group.heads) <= 30
+    && len(reviewed_bases) == len(group.heads)
+    && reviewed_bases.all({ base -> is_git_id(base) }),
+    "group ancestry requires one original reviewed base per ordered head"
+  for index in range(0, len(group.heads)) {
+    const reviewed = reviewed_bases[index]!
+    const head = group.heads[index]!
+    require is_git_id(head), "group ancestry requires exact original heads"
+    for descendant in [group.base, head] {
+      const measured = try {
+        git(process, workspace, timeout_ms, ["merge-base", "--is-ancestor", reviewed, descendant])
+      }
+      require is_ok(measured),
+        "reviewed base must be an ancestor of both destination and original head: "
+        + head
+    }
+  }
+}
+
 /** Bind the proposed linear candidate to the exact composition, refusing omitted or extra edits. */
 pub fn require_group_candidate(
   process: HarnessProcess,

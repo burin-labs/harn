@@ -109,7 +109,6 @@ fn build_witness(
     complete = complete + [census]
     const observed = github_reviewed_change(census)
     require observed.source == source && source.repository == request.repository
-      && source.base == expected_base
       && source.base_branch == branch,
       "fresh review source differs from the signed admission or destination"
     require census.head_repository != nil && census.base_repository != nil

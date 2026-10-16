@@ -8,6 +8,37 @@ import {
 import "./fixtures.harn"
 
 @test
+pub pipeline test_rust_cache_rejects_unbounded_primary_and_fallback_downloads() {
+  const valid = action()
+  assert_eq(ci_cache_policy_errors(policy(), valid, node_action(), workflows()), [])
+  for index in [2, 3] {
+    for timeout in ["", "10"] {
+      const invalid = {
+        ...valid,
+        runs: {
+          ...valid.runs,
+          steps: valid.runs.steps.enumerate().map(
+            { item ->
+              return if item.index == index {
+                {...item.value, env: {SEGMENT_DOWNLOAD_TIMEOUT_MINS: timeout}}
+              } else {
+                item.value
+              }
+            },
+          )
+            .to_list(),
+        },
+      }
+      assert(
+        ci_cache_policy_errors(policy(), invalid, node_action(), workflows()).contains(
+          ".github/actions/rust-cache/action.yml Rust cache restores must bound each download segment to two minutes",
+        ),
+      )
+    }
+  }
+}
+
+@test
 pub pipeline test_setup_harn_cache_accepts_default_branch_writer_and_ephemeral_restore(
   harness: Harness,
   task: unknown,

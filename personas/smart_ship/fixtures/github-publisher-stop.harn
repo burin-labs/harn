@@ -1,4 +1,5 @@
-import { Controller, GitStore, commit_state, control, prepare_state, read_state } from "../lib/main"
+import { Controller, control } from "../lib/controller"
+import { GitStore, commit_state, prepare_state, read_state } from "../lib/git_store"
 
 fn main(harness: Harness) {
   require len(argv) == 1, "pass the fixture's private local store"

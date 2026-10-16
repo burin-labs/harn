@@ -161,6 +161,25 @@ refusals through `EffectRefusal.verification`. These retain required counts,
 pending and failing job names, and invalid evidence. A nil field means that
 qualification was not measured for that stage.
 
+Before signing a cumulative candidate, measure its tree with `prepare_group_tree`
+using the exact destination base and ordered reviewed heads. Call
+`require_group_ancestry` with each original reviewed base in the same head order:
+an older reviewed base must remain an ancestor of both the current destination
+and its original head. Main advancing does not rewrite an admission signature.
+Build
+`candidate_effect(repository, base, tree, admissions)` with those complete signed
+admissions, then reserve it through `reserve_effect` with the current time and
+commit that state before dispatch. The digest preserves admission order. Read
+`EffectRefusal.preparation` for the required count, every admission decision and
+invalid input names. Empty or duplicated input is refused.
+
+Candidate preparation uses the same durable dispatch owner as other effects.
+An unknown signing result forbids redispatch and blocks authority transfer until
+read-back reconciliation. Confirmation records the preparation receipt only;
+it does not offer a verification snapshot, move the destination, or promote a
+release checkpoint. The GitHub candidate-signing adapter and its recovery remain
+required before this reservation can become the default integration route.
+
 Each authority generation freezes `policy_digest`. To change policy, drain
 pending and active verification, reconcile external effects, and resolve work
 that still needs the old policy. Call `transfer` with the next policy, commit

@@ -3261,8 +3261,11 @@ harn precompile src/             # walk a tree for every .harn file
 harn precompile src/ --out build # write artifacts to a sibling tree instead
 ```
 
-Artifacts are written beside each source as `<name>.harnbc` for an entry chunk
-and `<name>.harnmod` for a module, unless `--out` redirects them.
+Artifacts are written beside each source as `<name>.harnbc` for an entry chunk,
+`<name>.harnmod` for module bytecode, and `<name>.harnifc` for imported interfaces,
+unless `--out` redirects them. Ship all three families with the complete source
+tree. Directory artifacts retain their cache hits after relocation, with `/`
+separators in relative dependency keys on every supported operating system.
 
 | Flag | Description |
 |---|---|
@@ -3270,26 +3273,40 @@ and `<name>.harnmod` for a module, unless `--out` redirects them.
 | `--keep-going` | Continue after a source fails to compile. The exit code still reports the failure. |
 | `-j`, `--jobs <N>` | Compile up to `N` sources at once when walking a directory. Defaults to the machine's available parallelism. Output, artifacts, and the summary are identical for every `N`. |
 | `--artifact-contract` | Print the machine-readable adjacent-artifact compatibility contract. |
+| `--warm-cache` | Prepare the runtime's shared entry, module, and interface caches for this installed tree, including reachable packages and the complete stdlib catalog. Conflicts with `--out`, `--relocatable`, and `--jobs`. |
+
+`harn precompile --warm-cache main.harn` prepares the machine where the source
+tree is installed. It uses the entrypoint's manifest authority for its imported
+modules, validates package declarations and the lock, and never executes source
+code or calls a model. Writes must succeed or the command fails. Set
+`HARN_CACHE_DIR` to choose the same cache used by the host. Repeat preparation
+after relocating the tree, changing its dependencies, or changing Harn; these
+machine-local cache keys include canonical paths.
+
+Use the executing backend's builtin catalog. Embedded hosts whose catalog
+differs from the standalone CLI prepare through
+`harn_vm::bytecode_cache::CachePrecompiler` linked into that host. After
+registering the backend's builtins, call `prepare` for each source root and
+`prepare_stdlib` for stdlib roots loaded dynamically by native capabilities.
+Static stdlib imports are included automatically. `prepare_stdlib_catalog`
+requires a backend with every stdlib integration linked. A host invoking a standalone CLI
+helper must also prepare that helper's entrypoints with the CLI.
 
 ### Regenerating artifacts, and what cannot go stale
 
 `harn precompile` is also the command that refreshes these artifacts for a
-source tree. Re-running it over the same tree rewrites every artifact from
-current source; deleting the `.harnbc` and `.harnmod` files and re-running is
-equivalent, because a missing artifact is compiled on demand.
+source tree. Re-running it reuses valid artifacts and replaces stale or missing
+ones. Deleting the `.harnbc`, `.harnmod`, and `.harnifc` files forces regeneration.
 
-An artifact that no longer matches its source is not used. Both families are
+An artifact that no longer matches its source is not used. All three families are
 found by a key derived from source content, not from a timestamp: an entry
 chunk by a hash of the entry source, a module artifact by a hash of the module
 source, each combined with the Harn release and a compiler fingerprint. A
 candidate whose header does not carry the key being looked up is rejected and
-the source is compiled instead. So editing a file cannot leave a run executing
-the previous version of it, and an artifact older than the source beside it is
-not evidence that the old code ran.
-
-That is worth stating because the opposite is a natural thing to suspect. If a
-run appears to ignore an edit, the artifacts are the wrong place to look
-first; check that the edited file is the one the run actually imports.
+the source is compiled instead. Shipped interfaces also check the complete
+dependency graph's content and resolution before supplying imported names and
+kinds. A missing, stale, or foreign interface falls back to derivation and the
+shared cache. Set `HARN_BYTECODE_CACHE_DEBUG=1` to diagnose cache write failures.
 
 ## harn portal
 

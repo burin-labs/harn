@@ -256,6 +256,9 @@ runs:
       if: inputs.persistent-target != 'true'
       uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
       continue-on-error: true
+      env:
+        # Abort a stalled 128 MiB segment and continue with a cold build.
+        SEGMENT_DOWNLOAD_TIMEOUT_MINS: "2"
       with:
         shared-key: ${{ steps.cache-paths.outputs.shared-key }}
         cache-on-failure: ${{ inputs.cache-on-failure }}
@@ -275,6 +278,8 @@ runs:
       if: steps.cache-paths.outputs.restore-prefix != '' && steps.cache.outputs.cache-hit != 'true'
       uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
       continue-on-error: true
+      env:
+        SEGMENT_DOWNLOAD_TIMEOUT_MINS: "2"
       with:
         path: ${{ steps.cache-paths.outputs.paths }}
         key: ${{ steps.cache-paths.outputs.restore-prefix }}${{ github.sha }}

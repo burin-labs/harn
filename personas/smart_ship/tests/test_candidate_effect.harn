@@ -1,0 +1,224 @@
+import { git } from "../fixtures/neutral"
+import {
+  execution,
+  finish_reviewed_admission,
+  fixture,
+  reviewed_request,
+} from "../fixtures/support"
+import { transfer_ready } from "../lib/controller"
+import {
+  CandidateEffect,
+  Controller,
+  Fence,
+  GitStore,
+  Policy,
+  SignedAdmission,
+  begin_effect,
+  candidate_effect,
+  commit_state,
+  control,
+  dispatch_reserved_effect,
+  effect_receipt,
+  freeze_snapshot,
+  prepare_state,
+  read_state,
+  reserve_effect,
+  settle_effect,
+} from "../lib/main"
+
+type Setup = {state: Controller, policy: Policy, request: CandidateEffect}
+
+fn fence(state: Controller) -> Fence {
+  return pick(state.authority, ["installation", "generation", "revision", "controller"])
+}
+
+fn setup(random: HarnessRandom) -> Setup {
+  const f = fixture(random)
+  const first = f.snapshot.changes[0]!.admission
+  const original = execution(f)
+  const second_run = original + {source: original.source + {commit: sha256_hex("second head")}}
+  const second = finish_reviewed_admission(
+    reviewed_request(
+      f.policy,
+      f.private_key,
+      {id: "change-2", base: first.record.source.base},
+      second_run,
+    ),
+    f.private_key,
+    second_run,
+  )
+  return {
+    state: {
+      schema: "smart-ship.controller.v1",
+      authority: f.authority,
+      active: nil,
+      pending: nil,
+      checkpoint: nil,
+      incidents: [],
+      effects: [],
+      unverified_since_ms: nil,
+    },
+    policy: f.policy,
+    request: candidate_effect("project", first.record.source.base, "e".repeat(40), [first, second]),
+  }
+}
+
+pipeline test_candidate_reservation_binds_order_and_complete_admission_witnesses(harness: Harness) {
+  const s = setup(harness.random)
+  const reserved = unwrap(reserve_effect(s.state, fence(s.state), s.request, s.policy, nil, 1000))
+  assert_eq(reserved.effects[0]!.request, s.request)
+  const reversed = candidate_effect(
+    "project",
+    s.request.source,
+    s.request.tree,
+    s.request.admissions.reversed(),
+  )
+  assert(reversed.input_digest != s.request.input_digest)
+  assert(is_ok(reserve_effect(s.state, fence(s.state), reversed, s.policy, nil, 1000)))
+  const advanced = candidate_effect("project", "a".repeat(40), s.request.tree, s.request.admissions)
+  assert(is_ok(reserve_effect(s.state, fence(s.state), advanced, s.policy, nil, 1000)))
+  const first = s.request.admissions[0]!
+  const bad: SignedAdmission = first + {signature: "0".repeat(128)}
+  const refusal = unwrap_err(
+    reserve_effect(
+      s.state,
+      fence(s.state),
+      candidate_effect(
+        "project",
+        s.request.source,
+        s.request.tree,
+        [bad, s.request.admissions[1]!],
+      ),
+      s.policy,
+      nil,
+      1000,
+    ),
+  )
+  assert_eq(refusal.preparation!.required, 2)
+  assert_eq(len(refusal.preparation!.admissions), 2)
+  assert_eq(refusal.preparation!.admissions[0]!.status, "invalid")
+  assert_eq(refusal.preparation!.admissions[1]!.status, "admitted")
+  for rejected in [
+    candidate_effect("project", s.request.source, s.request.tree, []),
+    candidate_effect("project", s.request.source, s.request.tree, [first, first]),
+    candidate_effect("project", s.request.source, "0".repeat(40), s.request.admissions),
+    candidate_effect("project", "0".repeat(40), s.request.tree, s.request.admissions),
+    s.request + {input_digest: "sha256:" + "f".repeat(64)},
+  ] {
+    const invalid = unwrap_err(
+      reserve_effect(s.state, fence(s.state), rejected, s.policy, nil, 1000),
+    )
+    assert(len(invalid.preparation!.invalid) > 0)
+  }
+}
+
+pipeline test_candidate_confirmation_never_advances_verification_or_checkpoint(harness: Harness) {
+  const s = setup(harness.random)
+  const reserved = unwrap(reserve_effect(s.state, fence(s.state), s.request, s.policy, nil, 1000))
+  const receipt = effect_receipt(json_stringify({commit: "a".repeat(40), tree: "b".repeat(40)}))
+  assert(is_err(settle_effect(reserved, fence(reserved), s.request, "confirmed", receipt)))
+  const claimed = unwrap(
+    begin_effect(reserved, fence(reserved), s.request, "sha256:" + "c".repeat(64)),
+  )
+  const confirmed = unwrap(settle_effect(claimed, fence(claimed), s.request, "confirmed", receipt))
+  assert_eq(confirmed.effects[0]!.status, "confirmed")
+  assert_eq(confirmed.active, nil)
+  assert_eq(confirmed.pending, nil)
+  assert_eq(confirmed.checkpoint, nil)
+  assert_eq(confirmed.authority.promoted_sequence, 0)
+  assert_eq(confirmed.unverified_since_ms, nil)
+  assert(is_err(reserve_effect(confirmed, fence(confirmed), s.request, s.policy, nil, 1000)))
+}
+
+pipeline test_candidate_refuses_stop_stale_generation_base_drift_and_cumulative_debt(
+  harness: Harness,
+) {
+  const s = setup(harness.random)
+  assert(
+    is_err(
+      reserve_effect(s.state, fence(s.state) + {generation: 2}, s.request, s.policy, nil, 1000),
+    ),
+  )
+  const held = s.state + {authority: s.state.authority + {held_repositories: ["project"]}}
+  assert(is_err(reserve_effect(held, fence(held), s.request, s.policy, nil, 1000)))
+  const stopped = unwrap(control(s.state, fence(s.state), "stopped"))
+  assert(is_err(reserve_effect(stopped, fence(stopped), s.request, s.policy, nil, 1000)))
+  const reserved = unwrap(reserve_effect(s.state, fence(s.state), s.request, s.policy, nil, 1000))
+  const revoked = unwrap(control(reserved, fence(reserved), "stopped"))
+  assert(is_err(begin_effect(revoked, fence(revoked), s.request, "sha256:" + "d".repeat(64))))
+  const f = fixture(harness.random)
+  const prior = freeze_snapshot(
+    f.snapshot + {sources: [{repository: "project", commit: "a".repeat(40), tree: "b".repeat(40)}]},
+  )
+  const drift = s.state + {pending: prior}
+  assert(is_err(reserve_effect(drift, fence(drift), s.request, s.policy, nil, 1000)))
+  const debt = s.state + {unverified_since_ms: 1000}
+  assert(is_err(reserve_effect(debt, fence(debt), s.request, s.policy, nil, 601000)))
+  assert(is_err(reserve_effect(debt, fence(debt), s.request, s.policy, nil, 999)))
+  assert(is_err(reserve_effect(s.state, fence(s.state), s.request, s.policy)))
+}
+
+pipeline test_candidate_lost_response_restart_never_redispatches_and_blocks_transfer(
+  harness: Harness,
+) {
+  const s = setup(harness.random)
+  const root = harness.fs.mkdtemp_in_workspace("candidate-owner-")
+  defer {
+    harness.fs.delete(root)
+  }
+  const remote = path_join(root, "remote.git")
+  const workspace = path_join(root, "owner.git")
+  git(harness.process, root, ["init", "--bare", "--quiet", remote])
+  git(harness.process, root, ["init", "--bare", "--quiet", workspace])
+  git(harness.process, workspace, ["config", "user.name", "Smart Ship Fixture"])
+  git(harness.process, workspace, ["config", "user.email", "fixture@example.invalid"])
+  const store: GitStore = {
+    workspace: workspace,
+    remote: remote,
+    ref: "refs/heads/authority",
+    timeout_ms: 10000,
+    signed_commits: false,
+  }
+  const reserved = unwrap(reserve_effect(s.state, fence(s.state), s.request, s.policy, nil, 1000))
+  const written = prepare_state(
+    harness.process,
+    store,
+    read_state(harness.process, store),
+    reserved,
+  )
+  assert_eq(commit_state(harness.process, store, written).status, "committed")
+  let calls = 0
+  const uncertain = dispatch_reserved_effect(
+    pick(harness, ["process", "random"]),
+    store,
+    fence(reserved),
+    s.request,
+    { _request ->
+      calls += 1
+      {status: "unknown", receipt: nil}
+    },
+  )
+  assert_eq(uncertain.status, "reconciliation_required")
+  assert_eq(calls, 1, "the provider path must actually be reached")
+  const restarted = path_join(root, "restart.git")
+  git(harness.process, root, ["init", "--bare", "--quiet", restarted])
+  const observed = read_state(harness.process, store + {workspace: restarted})
+  assert_eq(observed.state!.effects[0]!.status, "unknown")
+  const repeated = dispatch_reserved_effect(
+    pick(harness, ["process", "random"]),
+    store + {workspace: restarted},
+    fence(observed.state!),
+    s.request,
+    { _request ->
+      calls += 1
+      {status: "unknown", receipt: nil}
+    },
+  )
+  assert_eq(repeated.dispatch_started, false)
+  assert_eq(calls, 1)
+  const draining = unwrap(control(observed.state!, fence(observed.state!), "draining"))
+  assert(!transfer_ready(draining, draining.authority.policy_digest))
+  assert(
+    is_err(reserve_effect(observed.state!, fence(observed.state!), s.request, s.policy, nil, 1000)),
+  )
+}

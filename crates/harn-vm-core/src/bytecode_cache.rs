@@ -69,6 +69,8 @@ mod embedded_stdlib;
 mod graph;
 mod header;
 mod interface;
+mod shipped_interface;
+mod warm;
 pub(crate) use embedded_stdlib::load_embedded_stdlib_module;
 pub use embedded_stdlib::{
     register_embedded_stdlib_artifacts, EmbeddedStdlibArtifact, EmbeddedStdlibRegistrationError,
@@ -80,6 +82,8 @@ use graph::{
 };
 use header::{read_header_from, ParsedHeader};
 pub(crate) use interface::InterfaceSlot;
+pub use shipped_interface::{prepare_precompiled_interface, PrecompiledInterface};
+pub use warm::CachePrecompiler;
 
 /// Header magic for all bytecode-cache artifact families.
 pub const MAGIC: &[u8; 8] = b"HARNBC\0\0";
@@ -160,9 +164,8 @@ const KIND_MODULE_ARTIFACT: u8 = 2;
 /// manifest that keeps it reusable. See [`InterfaceSlot`].
 const KIND_MODULE_INTERFACE: u8 = 3;
 
-/// Extension for persisted module interfaces. They are a function of a
-/// module's place in a host tree, not of its bytes alone, so they live only in
-/// the shared cache and are never shipped adjacent to source.
+/// Extension for imported interfaces. Shared records bind a host manifest;
+/// adjacent records carry relocatable graph identities and typed projections.
 pub const INTERFACE_CACHE_EXTENSION: &str = "harnifc";
 
 /// Environment override for the cache directory. When set, takes
@@ -662,7 +665,7 @@ pub fn load(source_path: &Path, source: &str) -> LookupOutcome {
                 key,
                 chunk: Some(candidate.chunk),
                 manifest: walk.manifest().cloned(),
-                link_table: None,
+                link_table: walk.shipped_link_table(),
             };
         }
         // The graph moved in a way that does not change the key — a touched
@@ -715,12 +718,14 @@ impl<'a> GraphWalk<'a> {
 
     fn run(&mut self) -> &GraphHashes {
         self.result.get_or_insert_with(|| {
-            walk_import_graph_fingerprinted(
-                self.source_path,
-                self.source,
-                CODEGEN_FINGERPRINT,
-                GraphOutputs::Manifest,
-            )
+            shipped_interface::recall(self.source_path, self.source).unwrap_or_else(|| {
+                walk_import_graph_fingerprinted(
+                    self.source_path,
+                    self.source,
+                    CODEGEN_FINGERPRINT,
+                    GraphOutputs::Manifest,
+                )
+            })
         })
     }
 
@@ -734,6 +739,14 @@ impl<'a> GraphWalk<'a> {
 
     fn manifest(&mut self) -> Option<&ContextManifest> {
         self.run().manifest.as_ref()
+    }
+
+    fn shipped_link_table(&mut self) -> Option<Arc<GraphLinkTable>> {
+        let result = self.run();
+        // The ordinary manifest walk requests no entry projection. Only a
+        // validated shipped payload supplies one on this path.
+        result.entry_compilation_context.as_ref()?;
+        result.manifest.as_ref().map(link_table_for)
     }
 
     fn finish(mut self) -> ([u8; 32], Option<ContextManifest>) {
@@ -1249,6 +1262,9 @@ enum GraphOutputs {
     /// every module in the closure to derive its compilation context, so a
     /// caller that only needs a key must not pay for it.
     Hashes,
+    /// Content and resolver observations only. A shipped interface supplies
+    /// the typed projections after its graph hash has been checked.
+    InterfaceProof,
     /// The hashes plus a manifest a later process can re-check with stats.
     Manifest,
     /// As [`Self::Manifest`], plus the entry module's compilation context.
@@ -1386,7 +1402,7 @@ fn walk_import_graph_fingerprinted(
     // it beside each source digest; content alone has not been a complete
     // module compilation identity since imported callable lowering shipped.
     let mut entry_compilation_context = None;
-    if manifest.is_some() {
+    if manifest.is_some() && outputs != GraphOutputs::InterfaceProof {
         let graph = harn_modules::build_with_source(source_path, source);
         manifest
             .as_mut()

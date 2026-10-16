@@ -44,7 +44,9 @@ warm_phase() {
   return "$compiler_status"
 }
 
-warm_phase harn-build cargo build --locked --bin harn
+# Warm only the test graph consumed by rust-check-inputs. The shared CLI has
+# its own ci-cli producer and cache; a dev-profile CLI build here adds another
+# dependency graph that neither consumer restores for execution.
 host_bound_filter="$(scripts/ci/host_bound_rust_test_filter.sh)"
 warm_phase workspace-tests cargo-nextest nextest run --locked --workspace --profile ci --no-run \
   -E "not (${host_bound_filter})"
