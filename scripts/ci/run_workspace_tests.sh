@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
 # Census the eligible suite before allowing an empty individual partition.
 #
-# Native unit shards build only the library test harness. A separate share
-# builds all integration and binary test targets, which need the ordinary
-# library. This avoids compiling that library beside the unit harness in each
-# shard. All narrowed groups retain the workspace-resolved feature set.
+# Native and CLI unit shares build only the library test harness. Separate
+# shares build integration and binary targets, which need the ordinary library.
+# The remaining packages do not compile either large package's test harnesses.
+# All narrowed groups retain the workspace-resolved feature set.
 #
 # `tooling` runs independently of the security producer and compiles its share.
 # Every narrowed package selection explicitly preserves workspace features.
 set -euo pipefail
 tooling_packages=(harn-fmt harn-lsp harn-package)
 partition=${1:?partition or all required}
-[[ "$partition" =~ ^(all|tooling|vm-unit:[1-3]/3|vm-integration|rest:[1-4]/4)$ ]] || { echo 'Invalid workspace test partition' >&2; exit 1; }
+[[ "$partition" =~ ^(all|tooling|vm-unit:[1-3]/3|vm-integration|cli-unit|cli-integration|rest:[1-4]/4)$ ]] || { echo 'Invalid workspace test partition' >&2; exit 1; }
 group=${partition%%:*}
 script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 host_bound_filter=$(bash "$script_dir/host_bound_rust_test_filter.sh")
@@ -39,11 +39,12 @@ else
     if [[ "$selected" == --workspace ]]; then
       case "$group" in
         vm-unit|vm-integration) grouped=(-p harn-vm) ;;
+        cli-unit|cli-integration) grouped=(-p harn-cli) ;;
         tooling)
           for name in "${tooling_packages[@]}"; do grouped+=(-p "$name"); done
           ;;
         rest)
-          grouped=(--workspace --exclude harn-vm)
+          grouped=(--workspace --exclude harn-vm --exclude harn-cli)
           for name in "${tooling_packages[@]}"; do grouped+=(--exclude "$name"); done
           ;;
       esac
@@ -53,7 +54,8 @@ else
         name=${packages[$((i + 1))]}
         case "$group" in
           vm-unit|vm-integration) [[ "$name" == harn-vm ]] && grouped+=(-p "$name") ;;
-          rest) [[ "$name" != harn-vm ]] && ! is_tooling "$name" && grouped+=(-p "$name") ;;
+          cli-unit|cli-integration) [[ "$name" == harn-cli ]] && grouped+=(-p "$name") ;;
+          rest) [[ "$name" != harn-vm && "$name" != harn-cli ]] && ! is_tooling "$name" && grouped+=(-p "$name") ;;
           tooling) is_tooling "$name" && grouped+=(-p "$name") ;;
         esac
       done
@@ -67,21 +69,26 @@ else
       fi
       exit 0
     fi
-    if [[ "$group" == vm-unit || "$group" == vm-integration || "$group" == tooling ]]; then
+    if [[ "$group" == rest && "$selected" == --workspace ]]; then
+      feature_packages=(--workspace-except harn-vm harn-cli "${tooling_packages[@]}")
+    else
       feature_packages=()
       for ((i = 1; i < ${#grouped[@]}; i += 2)); do feature_packages+=("${grouped[$i]}"); done
-      features=$(bash "$script_dir/workspace_features.sh" "${feature_packages[@]}")
-      [[ -z "$features" ]] || grouped+=(--features "$features")
+      # The CLI directly depends on Native; preserve Native's workspace feature
+      # selection as well as the CLI's own features.
+      [[ "$group" != cli-* ]] || feature_packages+=(harn-vm)
     fi
+    features=$(bash "$script_dir/workspace_features.sh" "${feature_packages[@]}")
+    [[ -z "$features" ]] || grouped+=(--features "$features")
     case "$group" in
-      vm-unit) grouped+=(--lib) ;;
+      vm-unit|cli-unit) grouped+=(--lib) ;;
       # Cargo expands the quoted pattern, including future integration targets.
       # --tests would also select the library unit harness and duplicate it.
-      vm-integration) grouped+=(--test '*' --bins) ;;
+      vm-integration|cli-integration) grouped+=(--test '*' --bins) ;;
     esac
     packages=("${grouped[@]}")
     selected="${packages[*]}"
-    if [[ "$group" == tooling || "$group" == vm-integration ]]; then partition=all; else partition="count:${partition#*:}"; fi
+    if [[ "$group" == tooling || "$group" == vm-integration || "$group" == cli-* ]]; then partition=all; else partition="count:${partition#*:}"; fi
   fi
   args+=(--locked "${packages[@]}")
 fi

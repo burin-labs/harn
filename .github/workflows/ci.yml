@@ -1076,7 +1076,7 @@ jobs:
         uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2.87.22
         with:
           tool: nextest@0.9.132
-      # Compile only the security packages. All nine ordinary test shares
+      # Compile only the security packages. All eleven ordinary test shares
       # compile and execute independently in rust-test-partitions.
       - name: Build security test archive
         if: needs.changes.outputs.post_merge_tier != 'true'
@@ -1206,6 +1206,12 @@ jobs:
           - kind: partition-9
             name: Rust workspace tests (vm integration)
             partition: vm-integration
+          - kind: partition-10
+            name: Rust workspace tests (cli unit)
+            partition: cli-unit
+          - kind: partition-11
+            name: Rust workspace tests (cli integration)
+            partition: cli-integration
     env:
       # Match rust-check-inputs, so the workspace-tests cache key restores.
       RUSTFLAGS: "-D warnings -Clink-arg=-fuse-ld=mold"

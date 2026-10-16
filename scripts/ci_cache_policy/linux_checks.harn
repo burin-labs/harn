@@ -1103,6 +1103,8 @@ fn parallel_rust_proof_errors(workflow: dict) -> list<string> {
   const shares = rows.map({ row -> to_string(row?.partition ?? "") }).to_list().sorted()
   if shares
     != [
+      "cli-integration",
+      "cli-unit",
       "rest:1/4",
       "rest:2/4",
       "rest:3/4",
@@ -1126,7 +1128,7 @@ fn parallel_rust_proof_errors(workflow: dict) -> list<string> {
       != "scripts/ci/run_rust_test_lane.sh bash scripts/ci/run_workspace_tests.sh \"$HARN_EXT_TEST_PARTITION\"" {
     errors = errors
       + [
-        "ci.yml:rust-test-partitions must execute all nine exact workspace test shares independently",
+        "ci.yml:rust-test-partitions must execute every exact workspace test share independently",
       ]
   }
   const security_job = workflow?.jobs?.["rust-security"]

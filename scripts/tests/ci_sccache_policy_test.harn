@@ -592,6 +592,8 @@ fn workflow() {
               {partition: "vm-unit:2/3"},
               {partition: "vm-unit:3/3"},
               {partition: "vm-integration"},
+              {partition: "cli-unit"},
+              {partition: "cli-integration"},
             ],
           },
         },
@@ -1077,7 +1079,7 @@ pipeline test_rejects_parallel_tests_without_fail_closed_fallback() {
   )
   assert(
     errors.contains(
-      "ci.yml:rust-test-partitions must execute all nine exact workspace test shares independently",
+      "ci.yml:rust-test-partitions must execute every exact workspace test share independently",
     ),
   )
   assert(errors.contains("ci.yml:rust-test must run only as the co-location kill-switch fallback"))
@@ -1925,7 +1927,7 @@ pipeline test_rejects_masked_workspace_test_failure() {
   }
   assert(
     ci_linux_lane_policy_errors(unsafe).contains(
-      "ci.yml:rust-test-partitions must execute all nine exact workspace test shares independently",
+      "ci.yml:rust-test-partitions must execute every exact workspace test share independently",
     ),
   )
 }
@@ -1964,7 +1966,7 @@ pipeline test_rejects_host_bound_sandbox_coverage_drift() {
   const errors = ci_linux_lane_policy_errors(invalid)
   assert(
     errors.contains(
-      "ci.yml:rust-test-partitions must execute all nine exact workspace test shares independently",
+      "ci.yml:rust-test-partitions must execute every exact workspace test share independently",
     ),
   )
   assert(
@@ -2208,7 +2210,7 @@ pipeline test_parallel_workspace_suite_refuses_missing_or_duplicated_shares() {
   const partitions = valid.jobs["rust-test-partitions"]
   const rows = partitions.strategy.matrix.include
   const message =
-    "ci.yml:rust-test-partitions must execute all nine exact workspace test shares independently"
+    "ci.yml:rust-test-partitions must execute every exact workspace test share independently"
   for removed in rows {
     const missing = rows.filter({ row -> row.partition != removed.partition }).to_list()
     for invalid_rows in [missing, missing + [missing[0]]] {
