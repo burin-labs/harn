@@ -258,4 +258,33 @@ if grep -Fq 'Generate release/package CLI AOT payload' "$workflow"; then
   echo 'package audit must not restore a separate pre-verifier AOT build' >&2
   exit 1
 fi
+# Artifact-only jobs have not built the tools into this Cargo home. Frozen
+# packaging still needs the locked host dependencies, without fetching every
+# cross-compilation target or accepting a missing compiler identity.
+cat > "$tmp_root/bin/rustc" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "${FETCH_RUSTC_IDENTITY-host: x86_64-unknown-linux-gnu}"
+SH
+cat > "$tmp_root/bin/cargo" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$CALLS_FILE"
+exit "${FETCH_STATUS:-0}"
+SH
+chmod +x "$tmp_root/bin/rustc" "$tmp_root/bin/cargo"
+: > "$CALLS_FILE"
+package_verify_fetch_dependencies
+[[ "$(<"$CALLS_FILE")" == 'fetch --locked --target x86_64-unknown-linux-gnu' ]]
+: > "$CALLS_FILE"
+if FETCH_RUSTC_IDENTITY='rustc without a measured host' package_verify_fetch_dependencies; then
+  echo 'package dependency fetch accepted an unmeasured host' >&2
+  exit 1
+fi
+[[ ! -s "$CALLS_FILE" ]]
+if FETCH_STATUS=42 package_verify_fetch_dependencies; then
+  echo 'package dependency fetch hid a failed Cargo request' >&2
+  exit 1
+else
+  [[ "$?" == 42 ]]
+fi
+
 echo "package_verify_bootstrap_test: ok"
