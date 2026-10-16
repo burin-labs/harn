@@ -113,25 +113,33 @@ fn conservative_admission_streaming_and_offthread_use_the_same_allowance() {
         .enable_all()
         .build()
         .unwrap();
-    runtime.block_on(async {
-        let count = Arc::new(AtomicUsize::new(0));
-        let server = stub(count.clone(), true, false);
-        install(server.addr());
-        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
-        let first = vm_call_llm_full_streaming(&options(0.6, true), tx.clone())
-            .await
-            .unwrap();
-        assert_eq!(first.text, "hello");
-        let second = vm_call_llm_full_streaming_offthread(&options(0.6, true), tx.clone())
-            .await
-            .unwrap();
-        assert_eq!(second.text, "hello");
-        let error = vm_call_llm_full_streaming_offthread(&options(0.01, true), tx)
-            .await
-            .unwrap_err();
-        assert!(error.to_string().contains("conservative"), "{error}");
-        assert_eq!(count.load(Ordering::SeqCst), 2);
-    });
+    let dispatches = crate::llm::provider_dispatch::ProviderDispatchLedger::default();
+    runtime.block_on(
+        crate::llm::provider_dispatch::with_provider_dispatch_ledger(dispatches.clone(), async {
+            let count = Arc::new(AtomicUsize::new(0));
+            let server = stub(count.clone(), true, false);
+            install(server.addr());
+            let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+            let first = vm_call_llm_full_streaming(&options(0.6, true), tx.clone())
+                .await
+                .unwrap();
+            assert_eq!(first.text, "hello");
+            let second = vm_call_llm_full_streaming_offthread(&options(0.6, true), tx.clone())
+                .await
+                .unwrap();
+            assert_eq!(second.text, "hello");
+            let error = vm_call_llm_full_streaming_offthread(&options(0.01, true), tx)
+                .await
+                .unwrap_err();
+            assert!(error.to_string().contains("conservative"), "{error}");
+            assert_eq!(count.load(Ordering::SeqCst), 2);
+        }),
+    );
+    assert_eq!(
+        dispatches.observed(),
+        2,
+        "inline and spawned transport share the measurement"
+    );
 }
 
 #[test]
@@ -140,6 +148,7 @@ fn conservative_admission_does_not_recycle_an_empty_attempt_for_retry() {
     let _transport = allow_stubbed_llm_transport();
     let _cleanup = Cleanup;
     crate::llm::cost::reset_cost_state();
+    crate::llm::trace::reset_trace_state();
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -154,6 +163,13 @@ fn conservative_admission_does_not_recycle_an_empty_attempt_for_retry() {
             count.load(Ordering::SeqCst),
             1,
             "retry was denied before transport"
+        );
+        assert_eq!(
+            crate::llm::trace::peek_trace_usage_summary()
+                .cost
+                .provider_call_count,
+            1,
+            "the refused retry must not become an unknown provider attempt"
         );
     });
 }
