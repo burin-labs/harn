@@ -157,7 +157,11 @@ test('a foreign output path and a missing current artifact refuse before pruning
   try {
     const foreign = structuredClone(f.first);
     foreign[0].filenames[0] = path.join(f.workspace,'source.rs');
-    assert.throws(() => f.plan(foreign), /escapes target/);
+    foreign[3].filenames[0] = path.join(f.workspace,'second.rs');
+    assert.throws(() => f.plan(foreign), error => error.failures?.length === 2
+      && error.failures.every(message => message.includes('escapes target'))
+      && error.failures.some(message => message.includes('source.rs'))
+      && error.failures.some(message => message.includes('second.rs')));
     fs.rmSync(f.first[0].filenames[0]);
     assert.throws(() => f.plan(), /ENOENT/);
     for (const file of f.stale) assert.equal(fs.existsSync(file),true);

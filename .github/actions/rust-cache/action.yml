@@ -153,7 +153,7 @@ runs:
           fs.mkdirSync(path.join(keyRoot, 'src'), { recursive: true });
           // Advance the generation for the new retention policy while keeping
           // the existing OS/toolchain restore prefix available to consumers.
-          const retention = shared === 'workspace-tests' ? 'artifact_retention = "harn.workspace_artifact_retention.v1"\n' : '';
+          const retention = ['workspace-tests', 'harn-ci-cli'].includes(shared) ? 'artifact_retention = "harn.workspace_artifact_retention.v1"\n' : '';
           fs.writeFileSync(path.join(keyRoot, 'Cargo.toml'), `[package]\nname = "harn-cache-source-key"\nversion = "0.0.0"\nedition = "2021"\npublish = false\n\n[package.metadata.harn]\nsource = "${source}"\n${retention}\n[workspace]\n`);
           fs.writeFileSync(path.join(keyRoot, 'src/lib.rs'), '');
           workspaces.push(`${keyRoot} -> target`);

@@ -28,17 +28,21 @@ function artifacts(name) { return records(name).filter(r => r.reason === 'compil
 function digest(file) { return crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex'); }
 
 try {
-  write('Cargo.toml','[workspace]\nmembers=["lower","native"]\nresolver="2"\n');
+  write('Cargo.toml','[workspace]\nmembers=["lower","native","client"]\nresolver="2"\n');
   write('rust-toolchain.toml',fs.readFileSync(path.join(repository,'rust-toolchain.toml'),'utf8'));
   write('lower/Cargo.toml','[package]\nname="retention-lower"\nversion="0.1.0"\nedition="2021"\n[lib]\ncrate-type=["cdylib","rlib"]\n');
   write('lower/build.rs','fn main() { let out=std::path::PathBuf::from(std::env::var_os("OUT_DIR").unwrap()); std::fs::write(out.join("value.rs"),"pub const VALUE: u32 = 42;").unwrap(); }\n');
   write('lower/src/lib.rs','include!(concat!(env!("OUT_DIR"),"/value.rs"));\n');
   write('native/Cargo.toml','[package]\nname="harn-vm"\nversion="0.1.0"\nedition="2021"\n[dependencies]\nretention-lower={path="../lower"}\n[features]\ncurrent=[]\nsecond=[]\nretired=[]\n');
   write('native/src/lib.rs','pub fn value()->u32 { retention_lower::VALUE }\n#[test]\nfn actual_value_is_reached() { assert_eq!(value(),42); }\n');
+  write('native/examples/portable_conformance_json.rs','fn main() { println!("{}",harn_vm::value()); }\n');
+  write('client/Cargo.toml','[package]\nname="retention-client"\nversion="0.1.0"\nedition="2021"\n[dependencies]\nharn-vm={path="../native"}\n');
+  write('client/src/main.rs','fn main() { println!("{}",harn_vm::value()); }\n');
+  write('client/tests/launch.rs','#[test]\nfn compiled_binary_exists() { assert!(std::path::Path::new(env!("CARGO_BIN_EXE_retention-client")).is_file()); }\n');
   write('Makefile',[
     '.PHONY: lock retired current second metadata',
     'lock:\n\t"$(CACHE_ARTIFACT_CARGO_RUNNER)" generate-lockfile',
-    ...['retired','current','second'].map(name => `${name}:\n\t"$(CACHE_ARTIFACT_CARGO_RUNNER)" test --locked --workspace --no-run --features harn-vm/${name === 'second' ? 'current,harn-vm/second' : name} --message-format json-render-diagnostics > ${name}.jsonl`),
+    ...['retired','current','second'].map(name => `${name}:\n\t"$(CACHE_ARTIFACT_CARGO_RUNNER)" test --locked ${name === 'second' ? '-p harn-vm --lib' : '--workspace'} --no-run --features harn-vm/${name === 'second' ? 'current,harn-vm/second' : name} --message-format json-render-diagnostics > ${name}.jsonl`),
     'metadata:\n\t"$(CACHE_ARTIFACT_CARGO_RUNNER)" metadata --locked --format-version 1 > metadata.json',
   ].join('\n')+'\n');
   command('make',['lock','retired','current','second','metadata']);
@@ -48,6 +52,8 @@ try {
   const current = new Set([...artifacts('current'),...artifacts('second')].flatMap(a => a.filenames));
   assert.ok([...current].some(file => /(?:libretention_lower\.(?:so|dylib)|retention_lower\.dll)$/.test(file)),
     'a real unhashed shared library must reach retention qualification');
+  assert.ok([...current].some(file => file.includes(`${path.sep}examples${path.sep}`)),
+    'a real example target must reach retention qualification');
   const stale = artifacts('retired').flatMap(a => a.filenames).filter(file => !current.has(file));
   assert.ok(stale.some(file => /harn_vm-[a-f0-9]{16}$/.test(file)), 'a real obsolete Native executable must exist');
   assert.ok(stale.some(file => file.endsWith('.rlib')), 'a real obsolete library must exist');
