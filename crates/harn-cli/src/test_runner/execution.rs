@@ -264,7 +264,7 @@ async fn execute_compiled(
     // the task to another worker thread, which would leave the install on a
     // thread the spawn never runs on. An install that silently misses is
     // worse than none: the refusal is the only thing that would report it.
-    let mut vm = harn_vm::Vm::new();
+    let mut vm = harn_vm::new_vm();
     if case.trusted_host_dispatch {
         vm.enable_trusted_host_dispatch()
             .expect("fresh test VM accepts explicit trusted host-dispatch authority");

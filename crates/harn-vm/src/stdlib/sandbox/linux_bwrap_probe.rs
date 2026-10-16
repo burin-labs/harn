@@ -195,10 +195,10 @@ mod tests {
         )
         .err()
         .expect("expired preparation must not launch the payload");
-        assert!(matches!(error, crate::VmError::Thrown(_)), "{error}");
-        assert_eq!(
-            error.to_string(),
-            crate::Vm::deadline_exceeded_error().to_string()
+        assert!(
+            matches!(&error, crate::VmError::Thrown(crate::VmValue::String(message))
+                if message.as_str() == "Deadline exceeded"),
+            "{error}"
         );
         assert!(error.sandbox_mechanism_unavailable().is_none());
     }

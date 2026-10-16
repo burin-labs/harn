@@ -229,7 +229,7 @@ async fn eval_pack_handler_runs_from_cron_tick_and_sheds_after_budget() {
             let manifest = crate::triggers::test_util::scheduled_eval_manifest(dir.path())
                 .expect("scheduled eval manifest normalizes");
 
-            let mut vm = Vm::new();
+            let mut vm = crate::new_vm();
             register_vm_stdlib(&mut vm);
             vm.set_source_dir(dir.path());
             install_manifest_triggers(vec![TriggerBindingSpec {

@@ -9,15 +9,31 @@ use std::sync::Arc;
 #[cfg(test)]
 mod tests;
 
-impl AsyncBuiltinCtx {
-    pub(crate) fn record_evaluation_receipt(
+pub(crate) trait NativeBuiltinCtxExt: Sized {
+    fn record_evaluation_receipt(&self, receipt: crate::llm::decision::receipt::EvaluationReceipt);
+    fn evaluation_invocation_id(&self) -> String;
+    fn evaluation_replay(&self) -> Option<crate::llm::decision::replay::EvaluationReplayScope>;
+    fn pool_registry(&self) -> Arc<crate::stdlib::pool::PoolRegistry>;
+    fn package_snapshot_registry(&self) -> Arc<crate::stdlib::PackageSnapshotRegistry>;
+    fn connector_client(
         &self,
-        receipt: crate::llm::decision::receipt::EvaluationReceipt,
-    ) {
+        provider: &str,
+    ) -> impl std::future::Future<
+        Output = Result<
+            Option<Arc<dyn crate::connectors::ConnectorClient>>,
+            crate::connectors::ClientError,
+        >,
+    > + Send;
+    #[cfg(test)]
+    fn for_test(vm: Vm) -> Self;
+}
+
+impl NativeBuiltinCtxExt for AsyncBuiltinCtx {
+    fn record_evaluation_receipt(&self, receipt: crate::llm::decision::receipt::EvaluationReceipt) {
         self.with_child_vm(|vm| vm.native().evaluation.journal.lock().record(receipt));
     }
 
-    pub(crate) fn evaluation_invocation_id(&self) -> String {
+    fn evaluation_invocation_id(&self) -> String {
         self.with_child_vm(|vm| {
             vm.native()
                 .evaluation
@@ -27,16 +43,14 @@ impl AsyncBuiltinCtx {
         })
     }
 
-    pub(crate) fn evaluation_replay(
-        &self,
-    ) -> Option<crate::llm::decision::replay::EvaluationReplayScope> {
+    fn evaluation_replay(&self) -> Option<crate::llm::decision::replay::EvaluationReplayScope> {
         self.with_child_vm(|vm| vm.native().evaluation.replay.clone())
     }
 
     /// Construct a context with the fixture's active registries, as the
     /// production dispatch scope does for native host work.
     #[cfg(test)]
-    pub fn for_test(mut vm: Vm) -> Self {
+    fn for_test(mut vm: Vm) -> Self {
         let native = vm.native_mut();
         native.worker_registry = crate::stdlib::agents::agents_workers::active_worker_registry();
         native.daemon_registry = crate::stdlib::agents_daemon::active_daemon_registry();
@@ -49,16 +63,16 @@ impl AsyncBuiltinCtx {
     }
 
     /// Pool lookup follows the execution tree across Tokio worker threads.
-    pub(crate) fn pool_registry(&self) -> Arc<crate::stdlib::pool::PoolRegistry> {
+    fn pool_registry(&self) -> Arc<crate::stdlib::pool::PoolRegistry> {
         self.with_child_vm(|vm| vm.native().pool_registry.clone())
     }
 
-    pub(crate) fn package_snapshot_registry(&self) -> Arc<crate::stdlib::PackageSnapshotRegistry> {
+    fn package_snapshot_registry(&self) -> Arc<crate::stdlib::PackageSnapshotRegistry> {
         self.with_child_vm(|vm| vm.native().package_snapshot_registry.clone())
     }
 
     /// Resolve outside the interpreter lock so initialization can await freely.
-    pub(crate) async fn connector_client(
+    async fn connector_client(
         &self,
         provider: &str,
     ) -> Result<Option<Arc<dyn crate::connectors::ConnectorClient>>, crate::connectors::ClientError>

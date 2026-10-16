@@ -487,7 +487,10 @@ fn zip_extract_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
                 ),
             ));
         }
-        let path = file.name().to_string();
+        let path = file
+            .name()
+            .map_err(|error| builtin_error("zip_extract", error))?
+            .into_owned();
         let remaining = cap.saturating_sub(total_extracted);
         let content = read_with_cap(&mut file, remaining, "zip_extract")?;
         total_extracted = total_extracted.saturating_add(content.len() as u64);
@@ -562,13 +565,13 @@ mod tests {
     use super::*;
 
     fn vm() -> Vm {
-        let mut vm = Vm::new();
+        let mut vm = crate::new_vm();
         register_compression_builtins(&mut vm);
         vm
     }
 
     fn call(vm: &mut Vm, name: &str, args: Vec<VmValue>) -> Result<VmValue, VmError> {
-        let f = vm.builtins.get(name).unwrap().clone();
+        let f = vm.builtin_handler_for_test(name).unwrap().clone();
         let mut out = String::new();
         f(&args, &mut out)
     }

@@ -802,7 +802,7 @@ pipeline main(harness: Harness) {
         let local = tokio::task::LocalSet::new();
         let schema = local
             .run_until(async {
-                let mut vm = crate::Vm::new();
+                let mut vm = crate::new_vm();
                 crate::register_vm_stdlib(&mut vm);
                 vm.execute(&chunk)
                     .await

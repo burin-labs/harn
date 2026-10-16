@@ -1,3 +1,4 @@
+use crate::NativeBuiltinCtxExt;
 use std::collections::HashMap;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex as StdMutex};
@@ -14,7 +15,7 @@ use crate::orchestration::{
     clear_all_approval_policy_repeat_counts, clear_execution_policy_stacks, pop_approval_policy,
     push_approval_policy, DecisionReview, SideEffectCeilingViolation, ToolApprovalPolicy,
 };
-use crate::stdlib::json_to_vm_value;
+use crate::schema::json_to_vm_value;
 use crate::tool_annotations::SideEffectLevel;
 
 mod malformed_paths;
@@ -94,7 +95,7 @@ async fn dispatch_read_file_with_catalog(
         "arguments": {"path": path},
     }));
     let result = host_agent_dispatch_tool_call(
-        crate::vm::AsyncBuiltinCtx::for_test(crate::vm::Vm::new()),
+        crate::vm::AsyncBuiltinCtx::for_test(crate::new_vm()),
         call,
         catalog,
         options,

@@ -359,15 +359,15 @@ fn current_async_vm(ctx: &crate::vm::AsyncBuiltinCtx, _builtin: &str) -> Vm {
 }
 
 fn channel_send_wait(vm: &Vm, target: ChannelTarget) -> Result<Option<WaitGuard>, VmError> {
-    if !vm.deadlines.is_empty() {
+    if vm.has_scope_deadline() {
         return Ok(None);
     }
-    vm.wait_for_graph
-        .wait_for_channel_send(&vm.runtime_context.task_id, target)
+    vm.wait_for_graph()
+        .wait_for_channel_send(&vm.runtime_context().task_id, target)
 }
 
 fn channel_receive_wait(vm: &Vm, channels: &[VmValue]) -> Result<Option<WaitGuard>, VmError> {
-    if !vm.deadlines.is_empty() {
+    if vm.has_scope_deadline() {
         return Ok(None);
     }
     let targets = channels
@@ -380,8 +380,8 @@ fn channel_receive_wait(vm: &Vm, channels: &[VmValue]) -> Result<Option<WaitGuar
     if targets.is_empty() {
         return Ok(None);
     }
-    vm.wait_for_graph
-        .wait_for_channel_receive(&vm.runtime_context.task_id, targets)
+    vm.wait_for_graph()
+        .wait_for_channel_receive(&vm.runtime_context().task_id, targets)
 }
 
 pub(crate) fn register_concurrency_builtins(vm: &mut Vm) {
@@ -410,8 +410,8 @@ async fn sync_mutex_acquire_builtin(
     let timeout_ms = optional_timeout_ms(args.get(1));
     guard_sync_self_deadlock(&vm, "mutex", &key, 1, 1, timeout_ms)?;
     Ok(vm
-        .sync_runtime
-        .acquire("mutex", &key, 1, 1, timeout_ms, vm.cancel_token.clone())
+        .synchronization()
+        .acquire("mutex", &key, 1, 1, timeout_ms, vm.cancellation_token())
         .await?
         .map(VmValue::sync_permit)
         .unwrap_or(VmValue::Nil))
@@ -439,14 +439,14 @@ async fn sync_semaphore_acquire_builtin(
     let timeout_ms = optional_timeout_ms(args.get(3));
     guard_sync_self_deadlock(&vm, "semaphore", &key, capacity, permits, timeout_ms)?;
     Ok(vm
-        .sync_runtime
+        .synchronization()
         .acquire(
             "semaphore",
             &key,
             capacity,
             permits,
             timeout_ms,
-            vm.cancel_token.clone(),
+            vm.cancellation_token(),
         )
         .await?
         .map(VmValue::sync_permit)
@@ -474,8 +474,8 @@ async fn sync_gate_acquire_builtin(
     let timeout_ms = optional_timeout_ms(args.get(2));
     guard_sync_self_deadlock(&vm, "gate", &key, limit, 1, timeout_ms)?;
     Ok(vm
-        .sync_runtime
-        .acquire("gate", &key, limit, 1, timeout_ms, vm.cancel_token.clone())
+        .synchronization()
+        .acquire("gate", &key, limit, 1, timeout_ms, vm.cancellation_token())
         .await?
         .map(VmValue::sync_permit)
         .unwrap_or(VmValue::Nil))
@@ -515,14 +515,14 @@ async fn sync_rwlock_acquire_builtin(
     let timeout_ms = optional_timeout_ms(args.get(2));
     guard_sync_self_deadlock(&vm, "rwlock", &key, RWLOCK_CAPACITY, permits, timeout_ms)?;
     Ok(vm
-        .sync_runtime
+        .synchronization()
         .acquire(
             "rwlock",
             &key,
             RWLOCK_CAPACITY,
             permits,
             timeout_ms,
-            vm.cancel_token.clone(),
+            vm.cancellation_token(),
         )
         .await?
         .map(VmValue::sync_permit)
@@ -560,7 +560,9 @@ async fn sync_metrics_builtin(
     let vm = current_async_vm(&ctx, "sync_metrics");
     let kind = args.first().map(|v| v.display());
     let key = args.get(1).map(|v| v.display());
-    Ok(vm.sync_runtime.metrics(kind.as_deref(), key.as_deref()))
+    Ok(vm
+        .synchronization()
+        .metrics(kind.as_deref(), key.as_deref()))
 }
 
 #[harn_builtin(
@@ -599,7 +601,7 @@ async fn shared_cell_builtin(
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
     let vm = current_async_vm(&ctx, "shared_cell");
-    let shared_runtime = vm.shared_state_runtime.clone();
+    let shared_runtime = vm.shared_state().clone();
     let (scoped, options) = scoped_from_open_args(&vm, &args, "shared_cell", "key")?;
     let initial = options
         .as_ref()
@@ -622,7 +624,7 @@ async fn shared_get_builtin(
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
     let vm = current_async_vm(&ctx, "shared_get");
-    let shared_runtime = vm.shared_state_runtime.clone();
+    let shared_runtime = vm.shared_state().clone();
     let handle = args
         .first()
         .ok_or_else(|| VmError::Runtime("shared_get: handle is required".to_string()))?;
@@ -643,7 +645,7 @@ async fn shared_snapshot_builtin(
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
     let vm = current_async_vm(&ctx, "shared_snapshot");
-    let shared_runtime = vm.shared_state_runtime.clone();
+    let shared_runtime = vm.shared_state().clone();
     let handle = args
         .first()
         .ok_or_else(|| VmError::Runtime("shared_snapshot: handle is required".to_string()))?;
@@ -664,7 +666,7 @@ async fn shared_set_builtin(
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
     let vm = current_async_vm(&ctx, "shared_set");
-    let shared_runtime = vm.shared_state_runtime.clone();
+    let shared_runtime = vm.shared_state().clone();
     let handle = args
         .first()
         .ok_or_else(|| VmError::Runtime("shared_set: handle is required".to_string()))?;
@@ -691,7 +693,7 @@ async fn shared_cas_builtin(
         ));
     }
     let vm = current_async_vm(&ctx, "shared_cas");
-    let shared_runtime = vm.shared_state_runtime.clone();
+    let shared_runtime = vm.shared_state().clone();
     let scoped = scoped_from_handle_or_name(&vm, &args[0], "shared_cell", "shared_cas")?;
     Ok(VmValue::Bool(shared_runtime.cell_cas(
         &scoped,
@@ -713,7 +715,7 @@ async fn shared_map_builtin(
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
     let vm = current_async_vm(&ctx, "shared_map");
-    let shared_runtime = vm.shared_state_runtime.clone();
+    let shared_runtime = vm.shared_state().clone();
     let (scoped, options) = scoped_from_open_args(&vm, &args, "shared_map", "key")?;
     let initial = options
         .as_ref()
@@ -742,7 +744,7 @@ async fn shared_map_get_builtin(
         ));
     }
     let vm = current_async_vm(&ctx, "shared_map_get");
-    let shared_runtime = vm.shared_state_runtime.clone();
+    let shared_runtime = vm.shared_state().clone();
     let scoped = scoped_from_handle_or_name(&vm, &args[0], "shared_map", "shared_map_get")?;
     let default = args.get(2).cloned().unwrap_or(VmValue::Nil);
     Ok(shared_runtime.map_get(&scoped, &args[1].display(), default))
@@ -766,7 +768,7 @@ async fn shared_map_snapshot_builtin(
         ));
     }
     let vm = current_async_vm(&ctx, "shared_map_snapshot");
-    let shared_runtime = vm.shared_state_runtime.clone();
+    let shared_runtime = vm.shared_state().clone();
     let scoped = scoped_from_handle_or_name(&vm, &args[0], "shared_map", "shared_map_snapshot")?;
     Ok(shared_runtime.map_snapshot(&scoped, &args[1].display()))
 }
@@ -784,7 +786,7 @@ async fn shared_map_entries_builtin(
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
     let vm = current_async_vm(&ctx, "shared_map_entries");
-    let shared_runtime = vm.shared_state_runtime.clone();
+    let shared_runtime = vm.shared_state().clone();
     let handle = args
         .first()
         .ok_or_else(|| VmError::Runtime("shared_map_entries: handle is required".to_string()))?;
@@ -810,7 +812,7 @@ async fn shared_map_set_builtin(
         ));
     }
     let vm = current_async_vm(&ctx, "shared_map_set");
-    let shared_runtime = vm.shared_state_runtime.clone();
+    let shared_runtime = vm.shared_state().clone();
     let scoped = scoped_from_handle_or_name(&vm, &args[0], "shared_map", "shared_map_set")?;
     Ok(shared_runtime.map_set(&scoped, args[1].display(), args[2].clone()))
 }
@@ -833,7 +835,7 @@ async fn shared_map_delete_builtin(
         ));
     }
     let vm = current_async_vm(&ctx, "shared_map_delete");
-    let shared_runtime = vm.shared_state_runtime.clone();
+    let shared_runtime = vm.shared_state().clone();
     let scoped = scoped_from_handle_or_name(&vm, &args[0], "shared_map", "shared_map_delete")?;
     Ok(shared_runtime.map_delete(&scoped, &args[1].display()))
 }
@@ -856,7 +858,7 @@ async fn shared_map_cas_builtin(
         ));
     }
     let vm = current_async_vm(&ctx, "shared_map_cas");
-    let shared_runtime = vm.shared_state_runtime.clone();
+    let shared_runtime = vm.shared_state().clone();
     let scoped = scoped_from_handle_or_name(&vm, &args[0], "shared_map", "shared_map_cas")?;
     Ok(VmValue::Bool(shared_runtime.map_cas(
         &scoped,
@@ -879,7 +881,7 @@ async fn shared_metrics_builtin(
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
     let vm = current_async_vm(&ctx, "shared_metrics");
-    let shared_runtime = vm.shared_state_runtime.clone();
+    let shared_runtime = vm.shared_state().clone();
     let Some(handle) = args.first() else {
         return Ok(shared_runtime.metrics(None, None));
     };
@@ -905,7 +907,7 @@ async fn mailbox_open_builtin(
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
     let vm = current_async_vm(&ctx, "mailbox_open");
-    let shared_runtime = vm.shared_state_runtime.clone();
+    let shared_runtime = vm.shared_state().clone();
     let (scoped, options) = scoped_from_open_args(&vm, &args, "mailbox_open", "name")?;
     let capacity_arg = options
         .as_ref()
@@ -928,7 +930,7 @@ async fn mailbox_lookup_builtin(
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
     let vm = current_async_vm(&ctx, "mailbox_lookup");
-    let shared_runtime = vm.shared_state_runtime.clone();
+    let shared_runtime = vm.shared_state().clone();
     let target = args.first().ok_or_else(|| {
         VmError::Runtime("mailbox_lookup: name or handle is required".to_string())
     })?;
@@ -954,7 +956,7 @@ async fn mailbox_send_builtin(
         ));
     }
     let vm = current_async_vm(&ctx, "mailbox_send");
-    let shared_runtime = vm.shared_state_runtime.clone();
+    let shared_runtime = vm.shared_state().clone();
     let scoped = scoped_from_handle_or_name(&vm, &args[0], "mailbox", "mailbox_send")?;
     let Some(channel) = shared_runtime.mailbox_channel(&scoped) else {
         return Ok(VmValue::Bool(false));
@@ -981,7 +983,7 @@ async fn mailbox_try_receive_builtin(
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
     let vm = current_async_vm(&ctx, "mailbox_try_receive");
-    let shared_runtime = vm.shared_state_runtime.clone();
+    let shared_runtime = vm.shared_state().clone();
     let target = args
         .first()
         .ok_or_else(|| VmError::Runtime("mailbox_try_receive: target is required".to_string()))?;
@@ -1014,8 +1016,8 @@ async fn mailbox_receive_builtin(
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
     let vm = current_async_vm(&ctx, "mailbox_receive");
-    let shared_runtime = vm.shared_state_runtime.clone();
-    let cancel_token = vm.cancel_token.clone();
+    let shared_runtime = vm.shared_state().clone();
+    let cancel_token = vm.cancellation_token();
     let target = args
         .first()
         .ok_or_else(|| VmError::Runtime("mailbox_receive: target is required".to_string()))?;
@@ -1071,7 +1073,7 @@ async fn mailbox_close_builtin(
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
     let vm = current_async_vm(&ctx, "mailbox_close");
-    let shared_runtime = vm.shared_state_runtime.clone();
+    let shared_runtime = vm.shared_state().clone();
     let target = args
         .first()
         .ok_or_else(|| VmError::Runtime("mailbox_close: target is required".to_string()))?;
@@ -1092,7 +1094,7 @@ async fn mailbox_metrics_builtin(
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
     let vm = current_async_vm(&ctx, "mailbox_metrics");
-    let shared_runtime = vm.shared_state_runtime.clone();
+    let shared_runtime = vm.shared_state().clone();
     let target = args
         .first()
         .ok_or_else(|| VmError::Runtime("mailbox_metrics: target is required".to_string()))?;
@@ -1380,7 +1382,7 @@ async fn receive_builtin(
             let mut rx = ch.receiver.lock().await;
             return match rx.try_recv() {
                 Ok(val) => {
-                    vm.wait_for_graph.notify_channel_receive(&target);
+                    vm.wait_for_graph().notify_channel_receive(&target);
                     Ok(val)
                 }
                 Err(_) => Err(channel_closed_error("receive", ch.name.as_ref())),
@@ -1396,7 +1398,7 @@ async fn receive_builtin(
         };
         match rx.try_recv() {
             Ok(val) => {
-                vm.wait_for_graph.notify_channel_receive(&target);
+                vm.wait_for_graph().notify_channel_receive(&target);
                 return Ok(val);
             }
             Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => {
@@ -1417,7 +1419,7 @@ async fn receive_builtin(
                 value = rx.recv() => {
                     return match value {
                         Some(val) => {
-                            vm.wait_for_graph.notify_channel_receive(&target);
+                            vm.wait_for_graph().notify_channel_receive(&target);
                             Ok(val)
                         }
                         None => Err(channel_closed_error("receive", ch.name.as_ref())),
@@ -1426,7 +1428,7 @@ async fn receive_builtin(
                 _ = closed_rx.changed() => {
                     return match rx.try_recv() {
                         Ok(val) => {
-                            vm.wait_for_graph.notify_channel_receive(&target);
+                            vm.wait_for_graph().notify_channel_receive(&target);
                             Ok(val)
                         }
                         Err(_) => Err(channel_closed_error("receive", ch.name.as_ref())),
@@ -1675,7 +1677,7 @@ async fn circuit_breaker_builtin(
     let threshold = optional_positive_usize_arg(args.get(1), 5, "circuit_breaker", "threshold")?;
     let reset_ms =
         optional_non_negative_u64_arg(args.get(2), 30000, "circuit_breaker", "reset_ms")?;
-    ctx.child_vm().shared_state_runtime.configure_circuit(
+    ctx.child_vm().shared_state().configure_circuit(
         name.clone(),
         threshold,
         Duration::from_millis(reset_ms),
@@ -1732,7 +1734,7 @@ async fn circuit_check_builtin(
     let name = circuit_name(&args, "circuit_check")?;
     let state = ctx
         .child_vm()
-        .shared_state_runtime
+        .shared_state()
         .circuit_status(&name, std::time::Instant::now());
     Ok(VmValue::String(arcstr::ArcStr::from(state.as_str())))
 }
@@ -1750,9 +1752,7 @@ async fn circuit_record_success_builtin(
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
     let name = circuit_name(&args, "circuit_record_success")?;
-    ctx.child_vm()
-        .shared_state_runtime
-        .record_circuit_success(&name);
+    ctx.child_vm().shared_state().record_circuit_success(&name);
     Ok(VmValue::Nil)
 }
 
@@ -1771,7 +1771,7 @@ async fn circuit_record_failure_builtin(
     let name = circuit_name(&args, "circuit_record_failure")?;
     let is_open = ctx
         .child_vm()
-        .shared_state_runtime
+        .shared_state()
         .record_circuit_failure(&name, std::time::Instant::now());
     Ok(VmValue::Bool(is_open))
 }
@@ -1789,7 +1789,7 @@ async fn circuit_reset_builtin(
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
     let name = circuit_name(&args, "circuit_reset")?;
-    ctx.child_vm().shared_state_runtime.reset_circuit(&name);
+    ctx.child_vm().shared_state().reset_circuit(&name);
     Ok(VmValue::Nil)
 }
 
@@ -1829,13 +1829,13 @@ mod tests {
     use crate::vm::Vm;
 
     fn vm() -> Vm {
-        let mut vm = Vm::new();
+        let mut vm = crate::new_vm();
         register_concurrency_builtins(&mut vm);
         vm
     }
 
     fn call(vm: &mut Vm, name: &str, args: Vec<VmValue>) -> Result<VmValue, VmError> {
-        let f = vm.builtins.get(name).unwrap().clone();
+        let f = vm.builtin_handler_for_test(name).unwrap().clone();
         let mut out = String::new();
         f(&args, &mut out)
     }

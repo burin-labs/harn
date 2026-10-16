@@ -26,7 +26,7 @@ fn resolve<'a>(
 ) -> std::pin::Pin<Box<impl std::future::Future<Output = Result<Value, VmError>> + 'a>> {
     Box::pin(async move {
         let mut vm = Box::new(ctx.child_vm());
-        let args = crate::stdlib::json_to_vm_value(arguments);
+        let args = crate::schema::json_to_vm_value(arguments);
         let value = preparation(crate::orchestration::scope_read_only_invocation(
             session_id,
             vm.call_closure_pub(prepare, &[args]),

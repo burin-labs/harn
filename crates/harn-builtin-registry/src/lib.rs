@@ -17,7 +17,7 @@ use harn_builtin_meta::{BuiltinContract, BuiltinExposure, BuiltinSignature, Capa
 
 /// One name-keyed projection of a macro-emitted builtin definition. Aliases
 /// receive their own entry so signature and contract can never drift.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct BuiltinManifestEntry {
     pub name: &'static str,
     /// The builtin's primary name. Equal to [`Self::name`] except on an alias

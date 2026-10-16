@@ -1729,7 +1729,7 @@ mod tests {
     use crate::event_log::{
         install_active_event_log, install_memory_for_current_thread, EventLog, Topic,
     };
-    use crate::{register_vm_stdlib, reset_thread_local_state, Vm, VmError};
+    use crate::{register_vm_stdlib, reset_thread_local_state, VmError};
 
     fn hitl_lock() -> &'static Mutex<()> {
         static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
@@ -1751,7 +1751,7 @@ mod tests {
         reset_thread_local_state();
         let log = install_memory_for_current_thread(super::HITL_EVENT_LOG_QUEUE_DEPTH);
         let chunk = compile_hitl_fixture(source);
-        let mut vm = Vm::new();
+        let mut vm = crate::new_vm();
         register_vm_stdlib(&mut vm);
         vm.set_source_dir(base_dir);
         vm.execute(&chunk).await?;
@@ -1890,7 +1890,7 @@ pipeline test(harness: Harness, task: unknown) {
 }
 "#;
                 let chunk = compile_hitl_fixture(source);
-                let mut vm = Vm::new();
+                let mut vm = crate::new_vm();
                 register_vm_stdlib(&mut vm);
                 vm.set_source_dir(dir.path());
                 vm.execute(&chunk).await.expect("script succeeds");
@@ -2064,7 +2064,7 @@ pipeline test(harness: Harness, task: unknown) {
 }
 "#;
                 let chunk = compile_hitl_fixture(source);
-                let mut vm = Vm::new();
+                let mut vm = crate::new_vm();
                 register_vm_stdlib(&mut vm);
                 vm.set_source_dir(dir.path());
                 vm.execute(&chunk).await.expect("script runs");

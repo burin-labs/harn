@@ -33,8 +33,13 @@ impl NativeExecutionState {
 }
 
 #[cfg(test)]
-impl Vm {
-    pub(crate) fn agent_cleanup_runtimes(&self) -> CleanupRuntimes {
+pub(crate) trait NativeCleanupTestExt {
+    fn agent_cleanup_runtimes(&self) -> CleanupRuntimes;
+}
+
+#[cfg(test)]
+impl NativeCleanupTestExt for Vm {
+    fn agent_cleanup_runtimes(&self) -> CleanupRuntimes {
         self.native()
             .retained_cleanup_runtimes(self.execution_id())
             .as_ref()

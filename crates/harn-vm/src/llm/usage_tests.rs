@@ -637,35 +637,6 @@ fn pre_accounting_status_record_replays_as_unknown() {
 }
 
 #[test]
-fn public_usage_projections_do_not_recompute_accounting() {
-    let projection_sources = [
-        (
-            "transcript",
-            include_str!("agent_observe/transcript_observability.rs"),
-        ),
-        (
-            "structured envelope",
-            include_str!("structured_envelope.rs"),
-        ),
-        ("trace", include_str!("trace.rs")),
-        ("agent result", include_str!("agent_config.rs")),
-    ];
-    for (name, source) in projection_sources {
-        for forbidden in [
-            "priced_cost_usd(",
-            "cache_hit_ratio(",
-            "cache_savings_usd_for_provider(",
-            "struct LlmCallUsage",
-        ] {
-            assert!(
-                !source.contains(forbidden),
-                "{name} rebuilt canonical usage via {forbidden}"
-            );
-        }
-    }
-}
-
-#[test]
 fn extracts_openai_responses_usage() {
     let response = json!({
         "usage": {

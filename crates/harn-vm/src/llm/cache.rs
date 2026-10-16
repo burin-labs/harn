@@ -12,9 +12,10 @@ use serde::{Deserialize, Serialize};
 use crate::runtime_limits::RuntimeLimits;
 use crate::runtime_sqlite::{initialize_runtime_sqlite, RuntimeSqliteSchema, DEFAULT_BUSY_TIMEOUT};
 use crate::stdlib::clock::now_wall_ms;
-use crate::stdlib::macros::{harn_builtin, register_builtin_defs, VmBuiltinDef};
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
+use harn_builtin_macros::harn_builtin;
+use harn_vm_core::builtin_support::{register_builtin_defs, VmBuiltinDef};
 
 const DEFAULT_NAMESPACE: &str = "default";
 const DEFAULT_TTL_SECONDS: u64 = 600;
@@ -130,7 +131,7 @@ fn cache_get_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
     if let Some(value) = hit {
         envelope.insert(
             crate::value::intern_key("value"),
-            crate::stdlib::json_to_vm_value(&value),
+            crate::schema::json_to_vm_value(&value),
         );
     }
     Ok(VmValue::dict(envelope))

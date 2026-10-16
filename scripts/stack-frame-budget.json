@@ -245,11 +245,11 @@
     },
     {
       "max_bytes": 134251,
-      "path": "crates/harn-vm/src/vm/iter.rs"
+      "path": "crates/harn-vm-core/src/vm/iter.rs"
     },
     {
       "max_bytes": 229985,
-      "path": "crates/harn-vm/src/vm/methods/list.rs"
+      "path": "crates/harn-vm-core/src/vm/methods/list.rs"
     }
   ],
   "near_ceiling_fraction": 0.05,

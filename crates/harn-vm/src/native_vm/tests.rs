@@ -7,7 +7,7 @@ async fn native_harness_dispatch_rejects_another_backend_before_output() {
         "fn main(harness: Harness) { harness.stdio.print(\"native reached\") }",
     )
     .unwrap();
-    let mut vm = Vm::new();
+    let mut vm = crate::new_vm();
     vm.set_harness(crate::value::VmHarness::from_host(Arc::new(())));
     let error = vm.execute(&chunk).await.unwrap_err();
     assert!(
@@ -16,7 +16,7 @@ async fn native_harness_dispatch_rejects_another_backend_before_output() {
     );
     assert!(vm.output().is_empty());
 
-    let mut vm = Vm::new();
+    let mut vm = crate::new_vm();
     vm.set_harness(crate::harness::Harness::real());
     vm.execute(&chunk).await.unwrap();
     assert_eq!(vm.output(), "native reached");
@@ -24,7 +24,7 @@ async fn native_harness_dispatch_rejects_another_backend_before_output() {
 
 #[tokio::test]
 async fn native_mcp_builtins_reject_another_backend_before_transport() {
-    let mut vm = Vm::new();
+    let mut vm = crate::new_vm();
     crate::mcp::register_mcp_builtins(&mut vm);
     let VmValue::Harness(root) = crate::harness::Harness::real().into_vm_value() else {
         unreachable!()
@@ -74,6 +74,15 @@ impl RefusingRuntime {
 }
 
 impl VmRuntime for RefusingRuntime {
+    fn poll_source_dir(
+        &self,
+        source_dir: &mut Option<std::path::PathBuf>,
+        cx: &mut std::task::Context<'_>,
+        continuation: &mut dyn FnMut(&mut std::task::Context<'_>) -> std::task::Poll<()>,
+    ) -> std::task::Poll<()> {
+        self.native.poll_source_dir(source_dir, cx, continuation)
+    }
+
     fn as_any(&self) -> &dyn Any {
         &self.native
     }
@@ -155,6 +164,18 @@ impl VmRuntime for RefusingRuntime {
     fn enter_source_dir(&self, dir: Option<&Path>) -> Option<std::path::PathBuf> {
         self.native.enter_source_dir(dir)
     }
+    fn runtime_context_value(&self, vm: &Vm) -> VmValue {
+        self.native.runtime_context_value(vm)
+    }
+
+    fn is_replay(&self) -> bool {
+        self.native.is_replay()
+    }
+
+    fn warn(&self, category: &str, message: &str) {
+        self.native.warn(category, message);
+    }
+
     fn is_step_function(&self, name: &str) -> bool {
         self.native.is_step_function(name)
     }
@@ -284,37 +305,28 @@ async fn required_runtime_denial_reaches_every_builtin_dispatch_and_survives_for
     };
     refused(vm.call_named_builtin("probe_denied", vec![]).await, 1);
     refused(
-        vm.call_builtin_id_or_name(id, "probe_denied", vec![]).await,
+        vm.call_builtin_id_for_test(id, "probe_denied", vec![])
+            .await,
         2,
     );
     refused(
-        vm.try_call_sync_builtin_id_or_name_args(
-            Some(id),
-            "probe_denied",
-            &crate::vm::CallArgs::Slice(&[]),
-        )
-        .unwrap(),
+        vm.try_call_sync_builtin_for_test(Some(id), "probe_denied", &[])
+            .unwrap(),
         3,
     );
     refused(
-        vm.try_call_sync_builtin_id_or_name_from_stack_args(Some(id), "probe_denied", 0)
+        vm.try_call_stack_builtin_for_test(Some(id), "probe_denied", 0)
             .unwrap(),
         4,
     );
     refused(
-        vm.call_callable_args(
-            &VmValue::BuiltinRef("probe_denied".into()),
-            crate::vm::CallArgs::Slice(&[]),
-        )
-        .await,
+        vm.call_callable_value(&VmValue::BuiltinRef("probe_denied".into()), &[])
+            .await,
         5,
     );
     refused(
-        vm.call_callable_args(
-            &VmValue::builtin_ref_id(id, "probe_denied"),
-            crate::vm::CallArgs::Slice(&[]),
-        )
-        .await,
+        vm.call_callable_value(&VmValue::builtin_ref_id(id, "probe_denied"), &[])
+            .await,
         6,
     );
     refused(vm.call_named_builtin("probe_denied_async", vec![]).await, 7);

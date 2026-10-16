@@ -8,6 +8,8 @@
 #[path = "replay_tests.rs"]
 mod replay_tests;
 
+use crate::NativeBuiltinCtxExt;
+use crate::NativeVmExt;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -652,7 +654,7 @@ fn run_on(
         .build()
         .expect("runtime");
     let outcome = runtime.block_on(async {
-        let mut vm = crate::Vm::new();
+        let mut vm = crate::new_vm();
         crate::register_vm_stdlib(&mut vm);
         let ctx = crate::vm::AsyncBuiltinCtx::for_test(vm.child_vm());
         let result = super::evaluate(
@@ -1094,7 +1096,7 @@ fn the_dispatched_request_carries_the_admitted_profile_unchanged() {
         .build()
         .expect("runtime");
     runtime.block_on(async {
-        let mut vm = crate::Vm::new();
+        let mut vm = crate::new_vm();
         crate::register_vm_stdlib(&mut vm);
         let ctx = crate::vm::AsyncBuiltinCtx::for_test(vm);
         super::evaluate(

@@ -4,6 +4,8 @@
 //! verification. This module maps Harn values to that typed contract, projects
 //! retired per-session JSONL data on reads, and imports it on the first write.
 
+#[cfg(test)]
+use crate::NativeBuiltinCtxExt;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -1212,7 +1214,7 @@ mod tests {
     #[tokio::test(flavor = "current_thread")]
     async fn retired_timestamp_override_is_rejected_loudly() {
         let error = session_store_append_impl(
-            crate::vm::AsyncBuiltinCtx::for_test(crate::vm::Vm::new()),
+            crate::vm::AsyncBuiltinCtx::for_test(crate::new_vm()),
             vec![
                 VmValue::String(arcstr::ArcStr::from("session")),
                 VmValue::Nil,
@@ -1453,7 +1455,7 @@ mod tests {
         };
 
         let events_error = session_store_events_impl(
-            crate::vm::AsyncBuiltinCtx::for_test(crate::vm::Vm::new()),
+            crate::vm::AsyncBuiltinCtx::for_test(crate::new_vm()),
             args(),
         )
         .await
@@ -1461,7 +1463,7 @@ mod tests {
         assert!(events_error.to_string().contains("does not match"));
 
         let verify_error = session_store_verify_impl(
-            crate::vm::AsyncBuiltinCtx::for_test(crate::vm::Vm::new()),
+            crate::vm::AsyncBuiltinCtx::for_test(crate::new_vm()),
             args(),
         )
         .await

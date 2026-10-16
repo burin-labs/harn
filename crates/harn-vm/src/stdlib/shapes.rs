@@ -275,15 +275,3 @@ fn field_names_from_value(value: &VmValue) -> Option<Vec<String>> {
             .collect(),
     )
 }
-
-/// Render the "available fields: …" tail used in missing-field errors.
-/// Matches the wording the typechecker emits at `harn check` time so
-/// authors see the same phrasing whether the failure surfaces at static
-/// analysis or runtime shape validation.
-pub(crate) fn format_available_fields(keys: &[&str]) -> String {
-    if keys.is_empty() {
-        "no fields present".to_string()
-    } else {
-        format!("available fields: {}", keys.join(", "))
-    }
-}

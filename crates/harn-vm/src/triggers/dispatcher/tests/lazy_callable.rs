@@ -51,7 +51,7 @@ async fn lazy_dispatcher(
     .await
     .expect("install lazy trigger");
 
-    let mut vm = Vm::new();
+    let mut vm = crate::new_vm();
     register_vm_stdlib(&mut vm);
     vm.register_builtin("__test_current_policy", |_args, _out| {
         let level = crate::orchestration::current_execution_policy()

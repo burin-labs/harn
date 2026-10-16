@@ -17,6 +17,7 @@
 //!   diagnostic until an embedding host wires a tenant/org pool backend.
 
 use crate::value::VmDictExt;
+use crate::NativeBuiltinCtxExt;
 use std::any::Any;
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::path::PathBuf;
@@ -2310,14 +2311,10 @@ fn spawn_task(pool: Arc<parking_lot::Mutex<PoolEntry>>, pending: PendingTask) {
         tokio::task::yield_now().await;
         let outcome = std::panic::AssertUnwindSafe(async {
             let mut runner = ctx.child_vm();
-            runner.runtime_context = runner.runtime_context.child_task(
-                task_runtime_id,
-                "pool task",
-                Some(task_group_id),
-            );
+            runner.set_child_task_context(task_runtime_id, "pool task", Some(task_group_id));
             let outcome = crate::orchestration::scope_ambient(
                 ambient,
-                runner.call_closure_args(&closure, crate::vm::CallArgs::Empty),
+                runner.call_closure_pub(&closure, &[]),
             )
             .await
             .map_err(|error| error.to_string());
@@ -2424,8 +2421,8 @@ async fn wait_single_task(
         rx
     };
     let _wait = waiter
-        .wait_for_graph
-        .wait_for_tasks(&waiter.runtime_context.task_id, [task_id])?;
+        .wait_for_graph()
+        .wait_for_tasks(&waiter.runtime_context().task_id, [task_id])?;
     // The sender is dropped on completion; both send() and drop wake the
     // receiver. Either is fine: we only care that the task reached a
     // terminal state, which `finalize_task` guarantees before signaling.

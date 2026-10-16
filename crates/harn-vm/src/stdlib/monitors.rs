@@ -643,7 +643,7 @@ fn dispatch_error(error: impl std::fmt::Display) -> VmError {
 mod tests {
     use super::*;
     use crate::event_log::{install_active_event_log, install_memory_for_current_thread, EventLog};
-    use crate::{compile_source, register_vm_stdlib, reset_thread_local_state, Vm};
+    use crate::{compile_source, register_vm_stdlib, reset_thread_local_state};
 
     async fn execute_monitor_script(
         base_dir: &std::path::Path,
@@ -663,7 +663,7 @@ mod tests {
             None => install_memory_for_current_thread(MONITOR_EVENT_LOG_QUEUE_DEPTH),
         };
         let chunk = compile_source(source).expect("compile source");
-        let mut vm = Vm::new();
+        let mut vm = crate::new_vm();
         register_vm_stdlib(&mut vm);
         vm.set_source_dir(base_dir);
         vm.execute(&chunk).await?;
@@ -795,7 +795,7 @@ pipeline test(harness: Harness, task: unknown) {
 }
 "#;
                 let chunk = compile_source(source).expect("compile source");
-                let mut vm = Vm::new();
+                let mut vm = crate::new_vm();
                 register_vm_stdlib(&mut vm);
                 vm.set_source_dir(dir.path());
                 let task = async move {

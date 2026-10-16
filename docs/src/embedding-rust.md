@@ -114,6 +114,42 @@ depends on `harn-cli` (which enables the full set) gets the full surface
 regardless of what it requests from `harn-serve`. The lean configurations only
 take effect in builds that do **not** pull in the full CLI.
 
+## Construct a VM directly
+
+Add `harn-vm` and `harn-stdlib` at the same repository tag. Install the embedded
+standard library once during host startup, then construct the native interpreter
+and register its builtins:
+
+```rust
+harn_stdlib::install().expect("install embedded standard library");
+let mut vm = harn_vm::new_vm();
+harn_vm::register_vm_stdlib(&mut vm);
+```
+
+Replace `Vm::new()` and `Vm::default()` with this factory. Import
+`harn_vm::NativeVmExt` when using `set_bridge`, `set_connector_clients`,
+`evaluate_decision`, `set_evaluation_replay`, or `execution_evidence`.
+
+The interpreter, values, compiler, and module artifacts belong to
+`harn-vm-core`; `harn-vm` re-exports their public paths. A custom execution
+backend constructs `harn_vm_core::Vm::with_runtime` with its required
+`Arc<dyn VmRuntime>`. That contract supplies capability dispatch, policy gates,
+execution scopes, deadlines, tracing, and task cleanup. Native embeddings
+should use `harn_vm::new_vm()` to install those services together.
+
+File replacement and cross-process locking also belong to `harn-vm-core`.
+Native adapters select the execution's persistent state directory and record
+tool mutations. Standalone core callers default to `.harn/fs-cas-locks` under
+their working directory; install `scope_conditional_replace_lock_root` when
+the host owns a different state directory. Install that thread-local scope on
+each worker that writes files. Windows atomic writes and conditional
+replacements share the same lock namespace.
+
+Use `harn_vm::bytecode_cache::compiler_fingerprint()` for artifact compatibility.
+It covers compiler inputs and builtin authority contracts. Construct cache keys
+with `CacheKey::from_source` or `CacheKey::from_module_source` so those contracts
+enter the key and artifact header.
+
 ## Resolve connector credentials
 
 Use `harn_serve::try_load_provider_connectors` with the project directory or

@@ -10,7 +10,7 @@ use super::super::{assistant_message_from_llm_result, vm_to_json};
 
 #[test]
 fn native_tool_calls_replay_with_canonical_durable_shape() {
-    let result = crate::stdlib::json_to_vm_value(&json!({
+    let result = crate::schema::json_to_vm_value(&json!({
         "provider": "local",
         "text": "",
         "_effective_tool_format": "native",

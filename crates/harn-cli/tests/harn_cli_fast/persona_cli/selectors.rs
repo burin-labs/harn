@@ -25,7 +25,7 @@ async fn scaffolded_connector_personas_select_opened_events_only() {
                 fs::write(&entry, "pub pipeline run(_harness: Harness, event) { return {executed: true, kind: event.kind} }\n").unwrap();
                 let extensions = harn_cli::package::try_load_runtime_extensions(&entry).unwrap();
                 let log = harn_vm::event_log::install_memory_for_current_thread(128);
-                let mut vm = harn_vm::Vm::new();
+                let mut vm = harn_vm::new_vm();
                 harn_vm::register_vm_stdlib(&mut vm);
                 harn_cli::package::install_manifest_triggers(&mut vm, &extensions).await.unwrap();
                 assert_eq!(harn_vm::snapshot_trigger_bindings().len(), 1);

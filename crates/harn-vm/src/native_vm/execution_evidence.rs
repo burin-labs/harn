@@ -1,61 +1,9 @@
-use crate::native_vm::NativeVmState;
-use crate::vm::Vm;
-
-impl Vm {
-    /// Install an explicit decision recording/replay scope. Child VMs inherit
-    /// it, including work scheduled on other threads; misses cannot go live.
-    pub fn set_evaluation_replay(
-        &mut self,
-        scope: crate::llm::decision::replay::EvaluationReplayScope,
-    ) {
-        self.native_mut().evaluation.replay = Some(scope);
-    }
-
-    /// Snapshot the canonical evidence envelope for this execution tree.
-    /// Hosts provide persistence outcomes; Harn owns identity, schema, spans,
-    /// and the relationship between those facts.
-    pub fn execution_evidence(
-        &self,
-        flight_recording: Option<crate::flight_recorder::FlightRecordingArtifact>,
-        gaps: Vec<crate::orchestration::RunEvidenceGapRecord>,
-    ) -> crate::orchestration::ExecutionEvidenceRecord {
-        let mut gaps = gaps;
-        let (evaluation_receipts, evaluation_dropped) =
-            self.native().evaluation.journal.lock().snapshot();
-        if evaluation_dropped > 0 {
-            gaps.push(crate::orchestration::RunEvidenceGapRecord {
-                component: "evaluation_receipts".into(),
-                code: "receipt_limit_exceeded".into(),
-                message: format!("{evaluation_dropped} evaluation receipts beyond the first 1024 were not retained"),
-            });
-        }
-        let dropped = crate::llm::dropped_reasoning_receipts();
-        if let Some(gap) = crate::llm::reasoning_receipt::overflow_gap(dropped) {
-            // A truncated list must not read as the whole run. The overflow is
-            // named as a gap rather than left to look like a short run.
-            gaps.push(gap);
-        }
-        crate::orchestration::ExecutionEvidenceRecord {
-            evaluation_receipts: Some(evaluation_receipts),
-            reasoning_receipts: Some(crate::llm::peek_reasoning_receipts()),
-            schema_version: crate::orchestration::EXECUTION_EVIDENCE_SCHEMA_VERSION,
-            execution_id: Some(self.execution_id.to_string()),
-            trace_spans: self
-                .native()
-                .tracing_runtime
-                .completed_spans_for_execution(&self.execution_id)
-                .iter()
-                .map(crate::orchestration::RunTraceSpanRecord::from)
-                .collect(),
-            flight_recording,
-            gaps,
-        }
-    }
-}
-
+#[cfg(test)]
+#[cfg(test)]
 #[cfg(test)]
 mod tests {
     use crate::native_vm::NativeVmState;
+    use crate::NativeVmExt;
     struct TracingRuntimeGuard(std::sync::Arc<crate::tracing::TracingRuntime>);
 
     impl Drop for TracingRuntimeGuard {
@@ -72,7 +20,7 @@ mod tests {
 
     #[test]
     fn vm_owns_the_execution_evidence_envelope() {
-        let vm = super::Vm::new();
+        let vm = crate::new_vm();
         let gap = crate::orchestration::RunEvidenceGapRecord {
             component: "test".to_string(),
             code: "named_gap".to_string(),
@@ -94,7 +42,7 @@ mod tests {
 
     #[test]
     fn vm_evidence_cannot_capture_the_callers_tracing_runtime() {
-        let mut vm = super::Vm::new();
+        let mut vm = crate::new_vm();
         vm.native_mut().tracing_runtime = crate::tracing::fresh_tracing_runtime();
         {
             let _execution = crate::enter_execution_scope(vm.execution_id().clone());
@@ -127,7 +75,7 @@ mod tests {
 
     #[test]
     fn vm_evidence_selects_its_execution_from_a_reused_tracing_runtime() {
-        let mut vm = super::Vm::new();
+        let mut vm = crate::new_vm();
         vm.native_mut().tracing_runtime = crate::tracing::fresh_tracing_runtime();
         let _runtime = enter_tracing_runtime(vm.native().tracing_runtime.clone());
         crate::tracing::set_tracing_enabled(true);

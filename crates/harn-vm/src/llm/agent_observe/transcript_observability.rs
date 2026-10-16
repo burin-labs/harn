@@ -583,7 +583,7 @@ pub(super) fn dump_llm_request_with_context(
         "native_tool_count": payload.native_tools.as_ref().map(|tools| tools.len()).unwrap_or(0),
         "message_count": payload.messages.len(),
         "structured_output": served_context_receipts::structured_output_receipt(opts, &payload),
-        "prompt_cache_breakpoint": crate::llm::prompt_cache::PromptCacheBreakpoint::for_request(&payload),
+        "prompt_cache_breakpoint": crate::llm::prompt_cache::for_request(&payload),
         "served_context": served_context,
         "context_token_breakdown": context_token_breakdown,
         "structural_experiment": structural_experiment,

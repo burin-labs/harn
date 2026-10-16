@@ -775,9 +775,9 @@ mod tests {
     }
 
     fn call(name: &str, args: Vec<VmValue>) -> Result<VmValue, VmError> {
-        let mut vm = Vm::new();
+        let mut vm = crate::new_vm();
         register_multipart_builtins(&mut vm);
-        let func = vm.builtins.get(name).unwrap().clone();
+        let func = vm.builtin_handler_for_test(name).unwrap().clone();
         let mut out = String::new();
         func(&args, &mut out)
     }

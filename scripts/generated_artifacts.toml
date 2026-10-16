@@ -184,12 +184,11 @@ sources = [
   "crates/harn-parser/src/",
   "crates/harn-ir/src/",
   "crates/harn-kernel/src/",
-  "crates/harn-vm/build_support/codegen_fingerprint.rs",
-  "crates/harn-vm/src/compiler.rs",
-  "crates/harn-vm/src/bytecode_cache.rs",
-  "crates/harn-vm/src/chunk.rs",
-  "crates/harn-vm/src/chunk/",
-  "crates/harn-vm/src/module_artifact.rs",
+  "crates/harn-modules/src/",
+  "crates/harn-builtin-meta/src/",
+  "crates/harn-builtin-registry/src/",
+  "crates/harn-capability-contracts/src/",
+  "crates/harn-vm-core/",
 ]
 ci = true
 make_all = false
@@ -774,6 +773,7 @@ make_all = false  # excluded from `make all` for the same reason (no sibling che
 "lint-diagnostic-codes" = "source"
 "lint-no-xfail-regression" = "source"
 "lint-no-rust-prompt-prose" = "source"
+"lint-cancellation-owner" = "source"
 "lint-agent-path-normalization" = "source"
 "check-stdlib-host-neutral" = "source"
 "check-public-product-names" = "source"

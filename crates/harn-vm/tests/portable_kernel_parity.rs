@@ -132,7 +132,7 @@ fn run_native(
         let local = tokio::task::LocalSet::new();
         local
             .run_until(async move {
-                let mut vm = harn_vm::Vm::new();
+                let mut vm = harn_vm::new_vm();
                 harn_vm::register_vm_stdlib(&mut vm);
                 let callee = vm.execute(&chunk).await.expect("module executes");
                 let harn_vm::VmValue::Closure(closure) = callee else {

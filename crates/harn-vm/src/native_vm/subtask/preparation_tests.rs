@@ -1,5 +1,6 @@
 //! Reach the canonical consent dispatcher and actual prepared process effect.
 
+use crate::NativeBuiltinCtxExt;
 use std::collections::HashMap;
 use std::sync::{atomic::AtomicBool, Arc, Mutex as StdMutex};
 
@@ -117,7 +118,7 @@ impl Fixture {
         let source = include_str!("../../llm/fixtures/prepared_verify.harn.template")
             .replace("{{preparation}}", preparation);
         let chunk = crate::compile_source(&source).expect("compile preparation fixture");
-        let mut vm = crate::Vm::new();
+        let mut vm = crate::new_vm();
         crate::register_vm_stdlib(&mut vm);
         vm.set_harness(crate::Harness::real());
         let registry = vm.execute(&chunk).await.expect("register prepared tool");

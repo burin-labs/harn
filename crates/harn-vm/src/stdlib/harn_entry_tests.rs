@@ -1,13 +1,14 @@
 //! Rust-to-Harn crossings reuse immutable stdlib module instances from the
 //! execution tree's shared store (`vm/modules/shared_instances.rs`).
 
+use crate::NativeBuiltinCtxExt;
 use std::path::PathBuf;
 
 use crate::value::VmValue;
 use crate::vm::{AsyncBuiltinCtx, Vm};
 
 fn stdlib_root() -> Vm {
-    let mut vm = Vm::new();
+    let mut vm = crate::new_vm();
     crate::stdlib::register_vm_stdlib(&mut vm);
     vm
 }
@@ -58,11 +59,11 @@ fn harn_entry_crossings_instantiate_an_immutable_stdlib_closure_once() {
     for module in ["llm/tool_parse", "llm/dialects", "semver"] {
         let path = stdlib_path(module);
         assert!(
-            !probe.module_cache.contains_key(&path),
+            !probe.module_cached_for_test(&path),
             "the parent must stay cold for {module}, or this measures the warm path"
         );
         assert_eq!(
-            probe.shared_module_instances.instantiation_count(&path),
+            probe.module_instantiation_count_for_test(&path),
             1,
             "{module} must instantiate once across {CROSSINGS} crossings"
         );
@@ -93,15 +94,11 @@ fn a_module_with_mutable_top_level_state_stays_fresh_per_cold_crossing() {
 
     let probe = ctx.child_vm();
     assert_eq!(
-        probe
-            .shared_module_instances
-            .instantiation_count(&stdlib_path("llm/handlers")),
+        probe.module_instantiation_count_for_test(&stdlib_path("llm/handlers")),
         CROSSINGS
     );
     assert_eq!(
-        probe
-            .shared_module_instances
-            .instantiation_count(&stdlib_path("math")),
+        probe.module_instantiation_count_for_test(&stdlib_path("math")),
         1,
         "an immutable import of a mutable module is still shared"
     );
@@ -117,9 +114,7 @@ fn a_module_with_mutable_top_level_state_stays_fresh_per_cold_crossing() {
         }
     });
     assert_eq!(
-        probe
-            .shared_module_instances
-            .instantiation_count(&stdlib_path("agent/loop")),
+        probe.module_instantiation_count_for_test(&stdlib_path("agent/loop")),
         2
     );
 }

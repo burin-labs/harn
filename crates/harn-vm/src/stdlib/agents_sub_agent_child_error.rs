@@ -20,6 +20,8 @@ use super::{
     SubAgentRunSpec,
 };
 use crate::value::{VmError, VmValue};
+#[cfg(test)]
+use crate::NativeBuiltinCtxExt;
 
 fn is_agent_loop_initialization_failure(error: &VmError) -> bool {
     matches!(
@@ -244,7 +246,7 @@ mod tests {
     }
 
     async fn run_child(spec: SubAgentRunSpec) -> Result<SubAgentExecutionResult, VmError> {
-        let mut vm = crate::Vm::new();
+        let mut vm = crate::new_vm();
         crate::register_vm_stdlib(&mut vm);
         let ctx = crate::vm::AsyncBuiltinCtx::for_test(vm);
         super::super::execute_sub_agent(&ctx, spec).await

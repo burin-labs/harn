@@ -7,12 +7,18 @@ use std::{future::Future, pin::Pin};
 
 mod bridge;
 mod context;
+pub(crate) use context::NativeBuiltinCtxExt;
 mod execution_evidence;
 mod lifecycle;
+use lifecycle::NativeVmLifecycle;
+mod stdlib_registration;
 mod step_hooks;
 mod step_lifecycle;
+pub(crate) use stdlib_registration::install_shared_stdlib_registration;
 pub(crate) mod subtask;
 mod task_cleanup;
+#[cfg(test)]
+pub(crate) use task_cleanup::NativeCleanupTestExt;
 mod timed_execution;
 mod tracing;
 
@@ -127,6 +133,15 @@ impl VmRuntime for NativeExecutionState {
         Box::pin(timed_execution::execute(vm, entry, deadline))
     }
 
+    fn poll_source_dir(
+        &self,
+        source_dir: &mut Option<std::path::PathBuf>,
+        cx: &mut std::task::Context<'_>,
+        continuation: &mut dyn FnMut(&mut std::task::Context<'_>) -> std::task::Poll<()>,
+    ) -> std::task::Poll<()> {
+        crate::orchestration::poll_source_dir(source_dir, || continuation(cx))
+    }
+
     fn start_span(&self, kind: crate::vm::VmSpanKind, name: String) -> crate::vm::ScopeSpan {
         tracing::start_span(kind, name)
     }
@@ -157,6 +172,18 @@ impl VmRuntime for NativeExecutionState {
 
     fn enter_source_dir(&self, dir: Option<&Path>) -> Option<std::path::PathBuf> {
         crate::stdlib::process::enter_frame_source_dir(dir)
+    }
+
+    fn runtime_context_value(&self, vm: &Vm) -> VmValue {
+        crate::runtime_context::runtime_context_value(vm)
+    }
+
+    fn is_replay(&self) -> bool {
+        crate::triggers::dispatcher::is_replay()
+    }
+
+    fn warn(&self, category: &str, message: &str) {
+        crate::events::log_warn(category, message);
     }
 
     fn is_step_function(&self, name: &str) -> bool {
@@ -307,6 +334,8 @@ impl crate::vm::VmExecutionScope for NativeExecutionScope {
         continuation: &mut dyn FnMut(&mut std::task::Context<'_>) -> std::task::Poll<()>,
     ) -> std::task::Poll<()> {
         self.ambient.poll_scoped(false, || {
+            #[cfg(windows)]
+            let _locks = crate::conditional_replace::scope_native_lock_root();
             crate::stdlib::pool::with_pool_registry_poll(&self.pools, || continuation(cx))
         })
     }
@@ -330,23 +359,105 @@ impl NativeExecutionState {
     }
 }
 
-impl Vm {
+/// Native execution services for the backend-independent interpreter.
+pub trait NativeVmExt: Sized {
+    fn set_bridge(&mut self, bridge: Arc<crate::bridge::HostBridge>);
+    fn set_connector_clients(&mut self, clients: crate::connectors::VmConnectorClients);
+    fn evaluate_decision(
+        &mut self,
+        site_id: &str,
+        state: serde_json::Value,
+        questions: serde_json::Value,
+        policy: serde_json::Value,
+    ) -> impl Future<Output = Result<crate::llm::decision::EvaluationResult, VmError>> + Send;
+    fn set_evaluation_replay(&mut self, scope: crate::llm::decision::replay::EvaluationReplayScope);
+    fn execution_evidence(
+        &self,
+        flight_recording: Option<crate::flight_recorder::FlightRecordingArtifact>,
+        gaps: Vec<crate::orchestration::RunEvidenceGapRecord>,
+    ) -> crate::orchestration::ExecutionEvidenceRecord;
+}
+
+/// Construct an interpreter with Harn's native execution services.
+pub fn new_vm() -> Vm {
+    crate::initialize_runtime_assets();
+    Vm::with_runtime(Arc::new(NativeExecutionState::fresh()))
+}
+
+impl NativeVmExt for Vm {
+    /// Set the bridge for delegating unknown builtins in bridge mode.
+    fn set_bridge(&mut self, bridge: Arc<crate::bridge::HostBridge>) {
+        self.native_mut().bridge = Some(bridge);
+    }
+
+    /// Install the connector projection owned by this VM execution tree.
+    fn set_connector_clients(&mut self, clients: crate::connectors::VmConnectorClients) {
+        self.native_mut().connector_clients = Arc::new(clients);
+    }
+
     /// Evaluate a decision under this interpreter's execution and receipt owner.
-    pub async fn evaluate_decision(
+    async fn evaluate_decision(
         &mut self,
         site_id: &str,
         state: serde_json::Value,
         questions: serde_json::Value,
         policy: serde_json::Value,
     ) -> Result<crate::llm::decision::EvaluationResult, VmError> {
-        self.ensure_execution_available()?;
-        self.prepare_execution_for_top_level();
+        let ctx = self.prepare_host_call()?;
         let ambient = self.native().capture_top_level_ambient(self.execution_id());
-        let ctx = crate::vm::AsyncBuiltinCtx::from_inline_parent(self);
         crate::orchestration::scope_ambient(ambient, async {
             crate::llm::decision::evaluate_json(&ctx, site_id, state, questions, policy).await
         })
         .await
+    }
+    /// Install an explicit decision recording/replay scope. Child VMs inherit
+    /// it, including work scheduled on other threads; misses cannot go live.
+    fn set_evaluation_replay(
+        &mut self,
+        scope: crate::llm::decision::replay::EvaluationReplayScope,
+    ) {
+        self.native_mut().evaluation.replay = Some(scope);
+    }
+
+    /// Snapshot the canonical evidence envelope for this execution tree.
+    /// Hosts provide persistence outcomes; Harn owns identity, schema, spans,
+    /// and the relationship between those facts.
+    fn execution_evidence(
+        &self,
+        flight_recording: Option<crate::flight_recorder::FlightRecordingArtifact>,
+        gaps: Vec<crate::orchestration::RunEvidenceGapRecord>,
+    ) -> crate::orchestration::ExecutionEvidenceRecord {
+        let mut gaps = gaps;
+        let (evaluation_receipts, evaluation_dropped) =
+            self.native().evaluation.journal.lock().snapshot();
+        if evaluation_dropped > 0 {
+            gaps.push(crate::orchestration::RunEvidenceGapRecord {
+                component: "evaluation_receipts".into(),
+                code: "receipt_limit_exceeded".into(),
+                message: format!("{evaluation_dropped} evaluation receipts beyond the first 1024 were not retained"),
+            });
+        }
+        let dropped = crate::llm::dropped_reasoning_receipts();
+        if let Some(gap) = crate::llm::reasoning_receipt::overflow_gap(dropped) {
+            // A truncated list must not read as the whole run. The overflow is
+            // named as a gap rather than left to look like a short run.
+            gaps.push(gap);
+        }
+        crate::orchestration::ExecutionEvidenceRecord {
+            evaluation_receipts: Some(evaluation_receipts),
+            reasoning_receipts: Some(crate::llm::peek_reasoning_receipts()),
+            schema_version: crate::orchestration::EXECUTION_EVIDENCE_SCHEMA_VERSION,
+            execution_id: Some(self.execution_id().to_string()),
+            trace_spans: self
+                .native()
+                .tracing_runtime
+                .completed_spans_for_execution(self.execution_id())
+                .iter()
+                .map(crate::orchestration::RunTraceSpanRecord::from)
+                .collect(),
+            flight_recording,
+            gaps,
+        }
     }
 }
 

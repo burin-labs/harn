@@ -1,8 +1,8 @@
 //! The durable, secret-free projection of an effective model route.
 
 use crate::llm_config;
-use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmDictExt, VmError, VmValue};
+use harn_builtin_macros::harn_builtin;
 
 /// Return the Harn-resolved model-route facts that are safe to persist in
 /// replay, eval, and audit receipts.

@@ -583,7 +583,7 @@ pub fn on_tick(_event) -> nil {
             panic!("expected serve api");
         };
         let config = api_server_config(&args, AuthPolicy::allow_all())?;
-        let mut vm = harn_vm::Vm::new();
+        let mut vm = harn_vm::new_vm();
         harn_vm::register_vm_stdlib(&mut vm);
         let result = async {
             config

@@ -74,7 +74,7 @@ pub(super) fn register_builtins(vm: &mut Vm) {
 mod tests {
     #[test]
     fn stdlib_internal_requires_embedded_stdlib_authority() {
-        let mut vm = crate::Vm::new();
+        let mut vm = crate::new_vm();
         crate::register_vm_stdlib(&mut vm);
         let contract = harn_builtin_registry::builtin_entry("__schema_any_witness")
             .expect("schema witness must be projected into the compiler manifest");

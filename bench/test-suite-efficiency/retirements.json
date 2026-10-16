@@ -2,6 +2,34 @@
   "issue": 9649,
   "baselineRevision": "7deefa6d8215dc5ce0bac2705624516d17c89392",
   "removedCases": [
+    {
+      "path": "crates/harn-cli/src/commands/run/tests.rs",
+      "name": "execute_run_command_bound_grant_skips_non_matching_exec",
+      "reason": "SUBSUMED: the retained real entrypoint run now exercises both a matching shell and a neighboring env executable under the same command-bound grant, asserting the injected value and the absence of that name. These permission checks use the owning test runner's deadline rather than an incidental five-second child-startup budget.",
+      "retainedPath": "crates/harn-cli/src/commands/run/tests.rs",
+      "retainedName": "execute_run_granted_policy_injects_into_subprocess_env"
+    },
+    {
+      "path": "crates/harn-vm/src/orchestration/agent_inbox.rs",
+      "name": "wait_async_returns_when_push_happens",
+      "reason": "SUBSUMED: the retained wait-state check now polls the actual future to Pending, advances logical time below its deadline, and asserts that an inbox push wakes its registered waker before returning and leaving the entry drainable. It no longer assumes one scheduler yield means the waiter was installed.",
+      "retainedPath": "crates/harn-orchestration/src/agent_inbox.rs",
+      "retainedName": "wait_async_holds_through_partial_advance_then_wakes_on_entry"
+    },
+    {
+      "path": "crates/harn-vm/src/llm/tool_delimiter.rs",
+      "name": "wire_form_is_invisible_until_canonicalized",
+      "reason": "SUBSUMED: the existing live-delta test uses the same captured response and now also checks its wire-only input and remap idempotence. It compares the complete canonicalized output across arbitrary streaming chunk boundaries instead of checking only delimiter substrings.",
+      "retainedPath": "crates/harn-vm/src/llm/providers/openai_compat/tests/streaming.rs",
+      "retainedName": "delta_canonicalizer_matches_whole_string_remap_on_real_response"
+    },
+    {
+      "path": "crates/harn-vm/src/llm/usage_tests.rs",
+      "name": "public_usage_projections_do_not_recompute_accounting",
+      "reason": "REMOVED: scanning four Rust files for forbidden call spellings coupled the test to file layout and could miss recomputation behind an imported helper. The retained test compares actual VM, event, trace and tool-probe projections of a nonempty usage ledger; exhaustive caller architecture is not a runtime coverage claim.",
+      "retainedPath": "crates/harn-vm/src/llm/usage_tests.rs",
+      "retainedName": "one_ledger_projects_matching_vm_event_and_trace_accounting"
+    },
   {
     "path": "crates/harn-vm/tests/acp_host_call_parity.rs",
     "name": "every_call_in_the_canonical_dispatch_is_classified",
@@ -26,7 +54,7 @@
   {
     "path": "crates/harn-vm/tests/acp_host_call_parity.rs",
     "name": "the_per_turn_memo_is_observed_over_acp",
-    "reason": "SUBSUMED: asserting a handwritten acp_observes boolean cannot prove cache admission. The retained ACP test counts actual host bridge calls across repeated reads, and its non-turn-stable sibling is the bypass control.",
+    "reason": "SUBSUMED: asserting a handwritten acp_observes boolean cannot prove cache admission. The retained ACP test dispatches a prewarmed read without an HTTP wire event; sibling tests exercise mutation invalidation and non-turn-stable bypass.",
     "retainedPath": "crates/harn-serve/src/adapters/acp/tests/host_call_turn_cache.rs",
     "retainedName": "turn_stable_read_is_served_without_an_acp_round_trip"
   },
@@ -44,6 +72,27 @@
     "retainedPath": "crates/harn-serve/src/adapters/acp/tests/host_call_turn_cache.rs",
     "retainedName": "non_turn_stable_read_still_reaches_the_editor"
   },
+    {
+      "path": "crates/harn-vm/src/stdlib/args/drift_tests.rs",
+      "name": "stdlib_diagnostics_name_types_the_runtime_has",
+      "reason": "REMOVED: scanning Rust source prose with a regex coupled argument validation to the native source tree and required exemptions for legitimate JSON terminology. Typed Args/Options errors and their canonical runtime vocabulary retain executable checks; arbitrary handwritten diagnostic prose is no longer linted by this unit test.",
+      "retainedPath": "crates/harn-vm-core/src/value/args/tests.rs",
+      "retainedName": "missing_and_wrong_type_read_differently"
+    },
+    {
+      "path": "crates/harn-vm/src/stdlib/args/drift_tests.rs",
+      "name": "recommended_spellings_are_canonical",
+      "reason": "SUBSUMED: the recommendation table existed only for the retired source-prose regex. The retained test checks the type tags actually emitted by the typed argument validator against the canonical runtime vocabulary.",
+      "retainedPath": "crates/harn-vm-core/src/value/args/tag.rs",
+      "retainedName": "every_variant_names_a_tag_type_of_returns"
+    },
+    {
+      "path": "crates/harn-vm/src/stdlib/args/drift_tests.rs",
+      "name": "the_pattern_matches_claims_and_not_identifiers",
+      "reason": "REMOVED: this tested the retired source-prose regex rather than a Harn argument boundary. Typed argument failure checks remain at the owning validator.",
+      "retainedPath": "crates/harn-vm-core/src/value/args/tests.rs",
+      "retainedName": "a_dict_is_not_a_string"
+    },
     {
       "path": "crates/harn-vm/tests/harn_vm/thread_local_audit.rs",
       "name": "pool_worker_boundary_uses_task_local_registry_not_thread_local_registry",
@@ -935,7 +984,7 @@
       "path": "crates/harn-vm/src/vm/tests_runtime/optimizer.rs",
       "name": "monomorphic_counter_loop_result_is_correct",
       "reason": "Identical program and output; retained owner also compares optimized and unoptimized execution.",
-      "retainedPath": "crates/harn-vm/src/vm/tests_typed_op_fallback.rs",
+      "retainedPath": "crates/harn-vm/src/vm_tests/tests_typed_op_fallback.rs",
       "retainedName": "monomorphic_fast_path_still_correct"
     },
     {
@@ -1786,7 +1835,7 @@
       "path": "crates/harn-vm/src/chunk_tests.rs",
       "name": "get_var_flags_outer_name_reference",
       "reason": "The retained case emits the same GetVar into a fresh chunk and asserts the same references_outer_names flag before checking stickiness.",
-      "retainedPath": "crates/harn-vm/src/chunk_tests.rs",
+      "retainedPath": "crates/harn-vm-core/src/chunk_tests.rs",
       "retainedName": "references_outer_names_is_monotonic"
     },
     {
@@ -2015,7 +2064,7 @@
       "path": "crates/harn-vm/src/vm/harness_seam.rs",
       "name": "an_uninstalled_seam_is_an_error",
       "reason": "STRUCTURAL: the process-global optional slot was deleted. Vm construction requires VmRuntime, whose harness_methods method must provide a dispatcher and has no default implementation or absent state.",
-      "retainedPath": "crates/harn-vm/src/vm/runtime.rs"
+      "retainedPath": "crates/harn-vm-core/src/vm/runtime.rs"
     },
     {
       "path": "crates/harn-vm/src/vm/harness_seam.rs",
@@ -2051,7 +2100,7 @@
       "path": "crates/harn-vm/src/vm/tests_runtime/smoke.rs",
       "name": "test_function_call_new",
       "reason": "SUBSUMED: the retained native test makes the same untyped add-function call; functions/fn_decl.harn also proves the public typed CLI path.",
-      "retainedPath": "crates/harn-vm/src/vm/tests_runtime/language.rs",
+      "retainedPath": "crates/harn-vm/src/vm_tests/tests_runtime/language.rs",
       "retainedName": "test_fn_decl_and_call"
     },
     {

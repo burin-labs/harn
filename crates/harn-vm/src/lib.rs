@@ -21,7 +21,7 @@
 /// trait without each adding `harn-clock` as a direct dependency.
 pub use harn_clock as clock;
 
-pub mod runtime_stack;
+pub use harn_vm_core::runtime_stack;
 pub use runtime_stack::{on_vm_stack, RUNTIME_STACK_SIZE};
 
 pub mod a2a;
@@ -50,23 +50,23 @@ pub use bridge::{
     inject_leading_authorities, inject_leading_authority, leading_authority_param_count,
 };
 mod bounded_files;
-pub mod builtin_profile;
-pub mod bytecode_cache;
+pub use harn_vm_core::builtin_profile;
+pub use harn_vm_core::bytecode_cache;
 pub mod call_budget;
-pub(crate) mod cancellation;
-pub mod canonical_json;
+pub(crate) use harn_vm_core::cancellation;
+pub use harn_vm_core::canonical_json;
 pub mod channel_guardrails;
 pub mod channels;
 pub mod checkpoint;
-mod chunk;
-mod compiler;
+use harn_vm_core::chunk;
+use harn_vm_core::compiler;
 pub mod composition;
 pub mod conditional_replace;
 pub mod config;
 pub mod connectors;
-pub mod context_manifest;
+pub use harn_vm_core::context_manifest;
 pub mod corrections;
-pub mod coverage;
+pub use harn_vm_core::coverage;
 pub(crate) mod durable_rate_limit;
 pub mod duration_parse;
 pub mod egress;
@@ -86,8 +86,14 @@ pub mod harness_tenant;
 pub mod host_attachments;
 pub mod host_stdio;
 mod native_vm;
-pub(crate) mod runtime_effects;
-mod source_compile;
+#[cfg(test)]
+mod vm_tests;
+pub(crate) use harn_vm_core::runtime_effects;
+use harn_vm_core::source_compile;
+pub(crate) use native_vm::NativeBuiltinCtxExt;
+#[cfg(test)]
+pub(crate) use native_vm::NativeCleanupTestExt;
+pub use native_vm::{new_vm, NativeVmExt};
 pub mod task_retry;
 pub(crate) mod tool_call_mutations;
 
@@ -104,8 +110,8 @@ pub mod subtask {
 }
 mod http;
 pub mod jsonrpc;
-pub(crate) mod limits;
-pub mod linked_program;
+pub(crate) use harn_vm_core::limits;
+pub use harn_vm_core::linked_program;
 pub mod llm;
 pub mod llm_config;
 pub mod local_selection;
@@ -129,8 +135,8 @@ pub mod mcp_sampling;
 pub mod mcp_server;
 pub mod mcp_tasks;
 pub mod metadata;
-pub mod module_artifact;
-pub mod module_source;
+pub use harn_vm_core::module_artifact;
+pub use harn_vm_core::module_source;
 pub mod observability;
 pub mod op_interrupt;
 pub mod orchestration;
@@ -144,7 +150,7 @@ pub mod package_scripts;
 mod persistent_state;
 pub mod personas;
 pub mod portable;
-mod prepared_module;
+use harn_vm_core::prepared_module;
 pub mod prepared_run;
 pub mod process_sandbox;
 pub mod profile;
@@ -155,11 +161,10 @@ pub mod record_filter;
 pub mod redact;
 pub mod run_events;
 pub mod runtime_context;
-pub(crate) mod runtime_guards;
-pub mod runtime_limits;
+pub use harn_vm_core::runtime_limits;
 pub mod runtime_paths;
 pub(crate) mod runtime_sqlite;
-pub mod schema;
+pub use harn_vm_core::schema;
 pub(crate) mod secret_patterns;
 pub mod secrets;
 pub mod security;
@@ -168,11 +173,12 @@ pub mod session_publication;
 pub mod session_recap;
 pub mod session_timeline;
 pub mod sessions;
-pub(crate) mod shared_state;
+pub(crate) use harn_vm_core::shared_state;
 pub mod shells;
 pub mod skills;
 pub mod stdlib;
 pub mod verifier_provenance;
+pub use harn_vm_core::stdlib_modules;
 /// What the active backend does with a Unix-socket grant, so a launcher can
 /// disclose the shape it actually applied rather than the shape the field
 /// name suggests.
@@ -182,15 +188,13 @@ pub use stdlib::session_change::{
     subscribe as subscribe_session_changes, SessionChangeSubscription,
 };
 pub use stdlib::session_store::{open_canonical_store, open_canonical_store_for_maintenance};
-pub mod stdlib_modules;
 pub mod step_runtime;
 pub mod store;
-pub(crate) mod synchronization;
 pub mod tenant;
 pub(crate) mod term;
 pub(crate) mod test_env;
 pub mod testbench;
-pub mod text;
+pub use harn_vm_core::text;
 pub mod text_diff;
 pub mod tool_annotations;
 pub mod tool_call_cancellations;
@@ -201,7 +205,7 @@ pub mod tracing;
 pub mod triggers;
 pub mod trust_graph;
 pub(crate) mod url_encoding;
-pub mod user_dirs;
+pub use harn_vm_core::user_dirs;
 
 /// Initialize process-wide assets whose construction should happen before an
 /// embedding host enters an async request or VM execution stack.
@@ -281,17 +285,17 @@ pub mod clock_mock {
 
 #[cfg(test)]
 pub(crate) mod test_panic_silence;
-pub(crate) mod text_index;
-pub mod typecheck;
-pub mod value;
+pub(crate) use harn_vm_core::text_index;
+pub use harn_vm_core::typecheck;
+pub use harn_vm_core::value;
 pub mod verification;
 pub mod visible_text;
-mod vm;
-pub(crate) mod wait_for_graph;
+use harn_vm_core::vm;
+pub(crate) use harn_vm_core::wait_for_graph;
 pub mod waitpoints;
-pub mod windows_path;
+pub use harn_vm_core::windows_path;
 pub mod workspace_anchor;
-pub mod workspace_path;
+pub use harn_vm_core::workspace_path;
 pub mod yaml;
 
 pub use persistent_state::{

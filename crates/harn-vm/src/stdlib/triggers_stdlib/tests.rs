@@ -16,7 +16,7 @@ use crate::triggers::{
     TriggerRegistryError, TriggerRetryConfig,
 };
 use crate::value::VmValue;
-use crate::vm::Vm;
+
 use crate::{install_manifest_triggers, register_vm_stdlib, ProviderId, ProviderPayload};
 
 use super::journal::{DispatchHandleRecord, TriggerEventRecord};
@@ -126,7 +126,7 @@ pub fn on_tick_v4(harness: Harness, event: TriggerEvent) -> dict {
     )
     .expect("write lib");
 
-    let mut vm = Vm::new();
+    let mut vm = crate::new_vm();
     register_vm_stdlib(&mut vm);
     vm.set_project_root(tempdir.path());
     vm.set_source_dir(tempdir.path());

@@ -1,5 +1,6 @@
 //! One CLI projection of the VM-owned evaluation scope.
 use harn_vm::llm::decision::replay::EvaluationReplayScope;
+use harn_vm::NativeVmExt;
 use std::path::PathBuf;
 
 #[derive(Clone, Debug, Default)]

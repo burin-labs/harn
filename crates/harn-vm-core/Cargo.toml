@@ -1,0 +1,75 @@
+[package]
+name = "harn-vm-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Bytecode interpreter and compiler contracts for Harn execution backends"
+
+[features]
+vm-test-support = []
+vm-bench-internals = []
+
+[dependencies]
+harn-builtin-meta = { path = "../harn-builtin-meta", version = "=0.10.167" }
+harn-builtin-registry = { path = "../harn-builtin-registry", version = "=0.10.167" }
+harn-capability-contracts = { path = "../harn-capability-contracts", version = "=0.10.167" }
+harn-clock = { path = "../harn-clock", version = "=0.10.167" }
+harn-execution-policy = { path = "../harn-execution-policy", version = "=0.10.167" }
+harn-flock = { path = "../harn-flock", version = "=0.10.167" }
+harn-kernel = { path = "../harn-kernel", version = "=0.10.167" }
+harn-lexer = { path = "../harn-lexer", version = "=0.10.167" }
+harn-modules = { path = "../harn-modules", version = "=0.10.167" }
+harn-opcode-macros = { path = "../harn-opcode-macros", version = "=0.10.167" }
+harn-parser = { path = "../harn-parser", version = "=0.10.167" }
+harn-prompt-syntax = { path = "../harn-prompt-syntax", version = "=0.10.167" }
+harn-session-store = { path = "../harn-session-store", version = "=0.10.167" }
+harn-stdlib-catalog = { path = "../harn-stdlib-catalog", version = "=0.10.167" }
+arcstr = { version = "1", features = ["serde", "std"] }
+base64 = "0.23"
+blake3 = "1.8.7"
+hex = "0.4"
+imbl = { version = "7", features = ["serde"] }
+jsonschema.workspace = true
+linkme = "0.3"
+parking_lot = "0.12"
+pin-project-lite = "0.2"
+postcard = { version = "1.1", default-features = false, features = ["alloc"] }
+quick_cache = "0.7"
+rand = "0.10"
+rust_decimal = "1"
+regex = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["unbounded_depth"] }
+sha2 = "0.11"
+stacker = "0.1"
+strsim = "0.11"
+strip-ansi-escapes = "0.2"
+thiserror = "2"
+tracing = "0.1"
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync", "time", "macros"] }
+uuid = { version = "1", features = ["serde", "v4", "v5", "v7"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61.2", features = [
+    "Win32_Foundation",
+    "Win32_Storage_FileSystem",
+] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["test-util"] }
+walkdir = "2"
+harn-modules = { path = "../harn-modules", version = "=0.10.167", features = ["bundled-stdlib"] }
+proptest = "1"
+static_assertions = "1.1"
+tempfile = "3"
+toml = "1.1"
+harn-stdlib = { path = "../harn-stdlib", version = "=0.10.167" }
+
+[build-dependencies]
+sha2 = "0.11"
+
+[lints]
+workspace = true

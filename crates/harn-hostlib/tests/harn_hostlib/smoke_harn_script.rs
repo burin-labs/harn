@@ -10,7 +10,7 @@ use std::fs;
 
 use harn_lexer::Lexer;
 use harn_parser::Parser;
-use harn_vm::{register_vm_stdlib, Compiler, Harness, Vm, VmValue};
+use harn_vm::{register_vm_stdlib, Compiler, Harness, VmValue};
 use tempfile::TempDir;
 
 fn run_harn(source: &str) -> (VmValue, String) {
@@ -43,7 +43,7 @@ fn run_harn_with_policy_result(
                 let program = parser.parse().expect("parse");
                 let chunk = Compiler::new().compile(&program).expect("compile");
 
-                let mut vm = Vm::new();
+                let mut vm = harn_vm::new_vm();
                 register_vm_stdlib(&mut vm);
                 let _ = harn_hostlib::install_default(&mut vm);
                 vm.set_harness(Harness::real());

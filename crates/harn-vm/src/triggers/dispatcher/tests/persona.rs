@@ -57,7 +57,7 @@ async fn persona_dispatcher(
     .await
     .expect("install persona trigger");
 
-    let mut vm = Vm::new();
+    let mut vm = crate::new_vm();
     register_vm_stdlib(&mut vm);
     vm.set_source_dir(module_path.parent().expect("module parent"));
     let log = install_test_event_log();

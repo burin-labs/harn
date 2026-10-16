@@ -1,6 +1,7 @@
 use super::*;
 use crate::stdlib::pool::{current_pool_registry, new_pool_registry, with_pool_registry_poll};
 use crate::vm::run_async_builtin_with;
+use crate::NativeBuiltinCtxExt;
 use std::{
     future::{poll_fn, Future},
     sync::atomic::{AtomicUsize, Ordering},
@@ -9,7 +10,7 @@ use std::{
 
 #[tokio::test]
 async fn explicit_ctx_mints_child_and_captures_forwarded_output() {
-    let (present, captured) = run_async_builtin_with(Vm::new(), |ctx| async move {
+    let (present, captured) = run_async_builtin_with(crate::new_vm(), |ctx| async move {
         let _child = ctx.child_vm();
         ctx.forward_output("hello ");
         ctx.forward_output("world");
@@ -22,7 +23,7 @@ async fn explicit_ctx_mints_child_and_captures_forwarded_output() {
 
 #[tokio::test]
 async fn child_context_has_independent_output_buffer() {
-    let (_result, captured) = run_async_builtin_with(Vm::new(), |ctx| async move {
+    let (_result, captured) = run_async_builtin_with(crate::new_vm(), |ctx| async move {
         let child = ctx.child_ctx();
         child.forward_output("child");
         ctx.forward_output("parent");
@@ -35,7 +36,7 @@ async fn child_context_has_independent_output_buffer() {
 fn pending_builtin_restores_the_callers_pool_before_cancellation() {
     let outer = new_pool_registry();
     with_pool_registry_poll(&outer, || {
-        let vm = Vm::new();
+        let vm = crate::new_vm();
         let expected = Arc::clone(&vm.native().pool_registry);
         assert!(!Arc::ptr_eq(&expected, &outer));
         let polls = Arc::new(AtomicUsize::new(0));

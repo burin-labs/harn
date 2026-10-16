@@ -156,7 +156,7 @@ fn canonical_init_result(session_id: &str, run_id: &str, task: &str, result: VmV
     insert_missing(tools, "rejected", serde_json::json!([]));
     insert_missing(tools, "mode", serde_json::json!(""));
 
-    crate::stdlib::json_to_vm_value(&json)
+    crate::schema::json_to_vm_value(&json)
 }
 
 /// Exact run identity owned by the active Harn-driven agent-loop invocation.
@@ -222,7 +222,7 @@ mod tests {
 
     #[test]
     fn admission_terminal_projects_the_complete_agent_result_contract() {
-        let partial = crate::stdlib::json_to_vm_value(&serde_json::json!({
+        let partial = crate::schema::json_to_vm_value(&serde_json::json!({
             "status": "approval_required",
             "approval_required": true,
             "reviewers": ["oncall"],
@@ -258,7 +258,7 @@ mod tests {
 
     #[test]
     fn admission_terminal_preserves_explicit_policy_reason() {
-        let partial = crate::stdlib::json_to_vm_value(&serde_json::json!({
+        let partial = crate::schema::json_to_vm_value(&serde_json::json!({
             "status": "blocked",
             "final_status": "blocked",
             "stop_reason": "user_prompt_submit_blocked",
@@ -276,7 +276,7 @@ mod tests {
 
     #[test]
     fn admission_terminal_attributes_nested_budget_denials_to_policy() {
-        let partial = crate::stdlib::json_to_vm_value(&serde_json::json!({
+        let partial = crate::schema::json_to_vm_value(&serde_json::json!({
             "status": "blocked",
             "final_status": "budget_exhausted",
             "stop_reason": "nested_execution_budget_exhausted",

@@ -2,6 +2,7 @@
 //! building the harness it executes against, and the staged error type that
 //! reports where execution stopped.
 
+use harn_vm::NativeVmExt;
 use std::collections::{BTreeMap, BTreeSet};
 use std::future::Future;
 
@@ -236,7 +237,7 @@ pub(crate) async fn execute_with_skill_dirs_and_options(
     let local = tokio::task::LocalSet::new();
     local
         .run_until(scope_source_execution(execution_policy, async {
-            let mut vm = harn_vm::Vm::new();
+            let mut vm = harn_vm::new_vm();
             harn_vm::register_vm_stdlib(&mut vm);
             install_default_hostlib(&mut vm);
             // Compiling for trusted host dispatch only lowers the call; the VM

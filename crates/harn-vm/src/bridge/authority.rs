@@ -147,7 +147,7 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn injects_every_leading_authority_and_calls_the_export() {
-        let mut vm = Vm::new();
+        let mut vm = crate::new_vm();
         crate::stdlib::register_vm_stdlib(&mut vm);
         vm.set_harness(crate::Harness::real());
         let exports = vm

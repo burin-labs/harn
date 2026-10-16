@@ -16,7 +16,7 @@ The function returns `&'static RuntimeContentFingerprint` with these fields:
 | `content_sha256` | Composite identity of the linked runtime content |
 | `harn_version` | Version of the linked `harn-vm` crate |
 | `embedded_stdlib_sha256` | Stable digest over every embedded module name and source byte |
-| `compatibility.codegen_fingerprint` | Build-time digest of compiler and code-generation inputs |
+| `compatibility.codegen_fingerprint` | Digest of compiler inputs and typed builtin signature and authority contracts |
 | `compatibility.bytecode_schema_version` | Bytecode cache format identity |
 | `compatibility.linked_program_schema_version` | Linked-program envelope identity |
 | `compatibility.linker_algorithm_version` | Linker behavior identity |

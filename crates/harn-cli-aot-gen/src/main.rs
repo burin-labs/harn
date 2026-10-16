@@ -10,7 +10,7 @@ use harn_vm::Compiler;
 #[path = "../../harn-cli/build_support/cli_aot_manifest.rs"]
 #[allow(dead_code)]
 mod cli_aot_manifest;
-#[path = "../../harn-vm/build_support/codegen_fingerprint.rs"]
+#[path = "../../harn-vm-core/build_support/codegen_fingerprint.rs"]
 #[allow(dead_code)]
 mod codegen_fingerprint;
 
@@ -169,7 +169,7 @@ fn checkout_contract(workspace_root: &Path) -> Result<CheckoutContract, String> 
         .map_err(|error| format!("parse {}: {error}", workspace_manifest_path.display()))?;
     let harn_version = workspace_manifest.workspace.package.version;
 
-    let vm_manifest_dir = workspace_root.join("crates/harn-vm");
+    let vm_manifest_dir = workspace_root.join("crates/harn-vm-core");
     let compiler_inputs = codegen_fingerprint::compiler_inputs(&vm_manifest_dir);
     let compiler_fingerprint = codegen_fingerprint::fingerprint_inputs(&compiler_inputs);
     Ok(CheckoutContract {
@@ -278,7 +278,7 @@ fn build_expected(
     let manifest = CliAotManifest {
         schema_version: CLI_AOT_MANIFEST_SCHEMA_VERSION,
         harn_version: contract.harn_version.clone(),
-        compiler_fingerprint: contract.compiler_fingerprint.clone(),
+        compiler_fingerprint: harn_vm::bytecode_cache::compiler_fingerprint().to_string(),
         scripts,
     };
     Ok(ExpectedArtifacts {
@@ -520,7 +520,8 @@ mod tests {
     fn test_workspace(version: &str, compiler_source: &str) -> tempfile::TempDir {
         let workspace = tempfile::tempdir().expect("temp workspace");
         fs::create_dir_all(workspace.path().join("crates/harn-cli")).expect("create harn-cli");
-        fs::create_dir_all(workspace.path().join("crates/harn-vm/src")).expect("create harn-vm");
+        fs::create_dir_all(workspace.path().join("crates/harn-vm-core/src"))
+            .expect("create harn-vm-core");
         fs::create_dir_all(workspace.path().join("crates/harn-kernel/src"))
             .expect("create harn-kernel");
         let mut manifest = fs::File::create(workspace.path().join("Cargo.toml"))

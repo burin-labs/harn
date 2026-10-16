@@ -1064,7 +1064,7 @@ impl TriggerTestHarness {
         let log = install_default_for_base_dir(guard.path()).map_err(|error| error.to_string())?;
         let manifest = scheduled_eval_manifest(guard.path())?;
 
-        let mut vm = crate::Vm::new();
+        let mut vm = crate::new_vm();
         crate::register_vm_stdlib(&mut vm);
         vm.set_source_dir(guard.path());
 

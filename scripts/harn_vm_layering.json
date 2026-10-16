@@ -8,7 +8,7 @@
     "llm->agent_sessions": 420,
     "llm->native_vm": 1,
     "llm->orchestration": 276,
-    "llm->stdlib": 343,
+    "llm->stdlib": 153,
     "llm->triggers": 6,
     "llm_config->llm": 55,
     "llm_config->orchestration": 1,
@@ -17,16 +17,7 @@
     "provider_catalog->llm": 8,
     "provider_catalog->stdlib": 1,
     "triggers->native_vm": 2,
-    "triggers->stdlib": 34,
-    "value->stdlib": 1,
-    "value->vm": 6,
-    "vm->agent_sessions": 11,
-    "vm->connectors": 1,
-    "vm->llm": 4,
-    "vm->native_vm": 4,
-    "vm->orchestration": 39,
-    "vm->stdlib": 44,
-    "vm->triggers": 4
+    "triggers->stdlib": 34
   },
   "layers": [
     [

@@ -33,6 +33,14 @@ cat > "$fixture/scripts/harn_bin.sh" <<'SH'
 set -euo pipefail
 printf 'resolve cwd=%s no_build=%s explicit=%s args=%s\n' \
   "$PWD" "${HARN_BIN_NO_BUILD:-}" "${HARN_BIN:-}" "$*" >> "$CALLS_FILE"
+if [[ " $* " == *" --package-tools "* ]]; then
+  [[ -f "$FIXTURE_ROOT/crates/harn-cli/generated/cli-bytecode-manifest.json" ]]
+  [[ -d "$FIXTURE_ROOT/crates/harn-cli/generated/cli-bytecode" ]]
+  if [[ "${FAKE_CARGO_WINDOWS:-0}" == "1" ]]; then
+    cp "$AOT_GENERATOR_TEMPLATE" "$FIXTURE_ROOT/target/debug/harn-cli-aot-gen.exe"
+    chmod +x "$FIXTURE_ROOT/target/debug/harn-cli-aot-gen.exe"
+  fi
+fi
 printf '%s\n' "${HARN_BIN:-$FAKE_HARN}"
 SH
 chmod +x "$fixture/scripts/harn_bin.sh"
@@ -88,9 +96,9 @@ unset HARN_BIN HARN_BIN_NO_BUILD
 package_verify_prepare_tools "$fixture" "$tool_dir"
 [[ "$HARN_BIN" == "$fake_harn" ]]
 
-expected="cargo cwd=$fixture args=build -p harn-cli --bin harn -p harn-cli-aot-gen --bin harn-cli-aot-gen
-resolve cwd=$fixture no_build=0 explicit= args=--print
+expected="cargo cwd=$fixture args=build -p harn-cli -p harn-cli-aot-gen --bin harn-cli-aot-gen
 aot --workspace-root $fixture
+resolve cwd=$fixture no_build=0 explicit= args=--print --package-tools
 aot --workspace-root $fixture --check"
 actual="$(<"$CALLS_FILE")"
 if [[ "$actual" != "$expected" ]]; then
@@ -130,6 +138,18 @@ if [[ "$actual" != "$expected" ]]; then
   exit 1
 fi
 
+# Automatic no-build resolution must not silently become a build-mode probe.
+: > "$CALLS_FILE"
+HARN_BIN='' HARN_BIN_NO_BUILD=1 \
+  package_verify_prepare_tools "$fixture" "$tool_dir"
+expected="resolve cwd=$fixture no_build=1 explicit= args=--print
+aot --workspace-root $fixture --check"
+actual="$(<"$CALLS_FILE")"
+if [[ "$actual" != "$expected" ]]; then
+  printf 'automatic no-build package preparation attempted a build:\n%s\n' "$actual" >&2
+  exit 1
+fi
+
 mv "$fixture/target/debug/harn-cli-aot-gen" \
   "$fixture/target/debug/harn-cli-aot-gen.not-built"
 : > "$CALLS_FILE"
@@ -157,8 +177,7 @@ mv "$fixture/target/debug/harn-cli-aot-gen" "$AOT_GENERATOR_TEMPLATE.template"
 export AOT_GENERATOR_TEMPLATE="$AOT_GENERATOR_TEMPLATE.template"
 unset HARN_BIN HARN_BIN_NO_BUILD
 OS=Windows_NT FAKE_CARGO_WINDOWS=1 package_verify_prepare_tools "$fixture" "$tool_dir"
-expected="cargo cwd=$fixture args=build -p harn-cli --bin harn -p harn-cli-aot-gen --bin harn-cli-aot-gen
-resolve cwd=$fixture no_build=0 explicit= args=--print
+expected="resolve cwd=$fixture no_build=0 explicit= args=--print --package-tools
 aot --workspace-root $fixture --check"
 actual="$(<"$CALLS_FILE")"
 if [[ "$actual" != "$expected" ]]; then

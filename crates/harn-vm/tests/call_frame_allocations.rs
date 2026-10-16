@@ -91,7 +91,7 @@ fn allocs_during_execute_after(source: &str, after_opening_count: impl FnOnce())
         let local = tokio::task::LocalSet::new();
         local
             .run_until(async {
-                let mut vm = harn_vm::Vm::new();
+                let mut vm = harn_vm::new_vm();
                 harn_vm::register_vm_stdlib(&mut vm);
                 let before = allocs_on_this_thread();
                 after_opening_count();

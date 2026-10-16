@@ -1231,9 +1231,9 @@ mod tests {
     }
 
     fn call_result(name: &str, args: Vec<VmValue>) -> Result<VmValue, VmError> {
-        let mut vm = Vm::new();
+        let mut vm = crate::new_vm();
         register_json_stream_builtins(&mut vm);
-        let builtin = vm.builtins.get(name).unwrap().clone();
+        let builtin = vm.builtin_handler_for_test(name).unwrap().clone();
         builtin(&args, &mut String::new())
     }
 

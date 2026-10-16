@@ -67,29 +67,7 @@ fn positive_usize_arg(
     Ok(usize::try_from(value.max(1)).unwrap_or(usize::MAX))
 }
 
-/// Coerce a discriminator value (returned by a `group_by` / `count_by`
-/// callback) into the canonical dict-key string. Strict-string only:
-/// dict keys are intrinsically `String`, and coercing other types via
-/// `display()` silently merged collidable buckets (`Int(1)` and
-/// `String("1")` both rendered `"1"`). Callers explicitly project to
-/// string via `to_string(...)` so the discriminator is unambiguous at
-/// the call site.
-///
-/// Exposed at crate scope so the method-call path in
-/// `vm/methods/list.rs` enforces the same contract as the free
-/// builtin path here.
-pub(crate) fn string_discriminator(value: &VmValue, builtin: &str) -> Result<String, VmError> {
-    match value {
-        VmValue::String(s) => Ok((**s).to_string()),
-        VmValue::Nil => Err(VmError::TypeError(format!(
-            "{builtin}: callback returned nil; expected a string discriminator (wrap with to_string(...) if you intended a scalar)"
-        ))),
-        other => Err(VmError::TypeError(format!(
-            "{builtin}: callback must return a string discriminator, got {}; wrap with to_string(...) so the bucket key is unambiguous",
-            other.type_name()
-        ))),
-    }
-}
+use crate::value::string_discriminator;
 
 pub(crate) fn register_collection_builtins(vm: &mut Vm) {
     for def in COLLECTION_ASYNC_BUILTINS {

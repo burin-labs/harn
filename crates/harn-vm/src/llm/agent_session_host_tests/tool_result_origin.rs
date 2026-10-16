@@ -9,7 +9,7 @@ use super::*;
 /// side is `tests/agent/judge_self_citation_test.harn`.
 #[test]
 fn orphan_repair_result_is_tagged_as_harness_authored() {
-    let llm_result = crate::stdlib::json_to_vm_value(&json!({
+    let llm_result = crate::schema::json_to_vm_value(&json!({
         "provider": "local",
         "model": "Qwen/Qwen3.6-35B-A3B",
         "text": "",

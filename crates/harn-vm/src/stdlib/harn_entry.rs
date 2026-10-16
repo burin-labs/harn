@@ -17,7 +17,8 @@ pub(crate) async fn call_harn_export_by_name(
     label: &str,
     args: &[VmValue],
 ) -> Result<VmValue, VmError> {
-    let mut vm = ctx.child_vm();
+    // Keep the child interpreter out of every composing export-call future.
+    let mut vm = Box::new(ctx.child_vm());
     let result = call_harn_export_on_vm(&mut vm, import_path, export_name, label, args).await;
     let output = vm.take_output();
     ctx.forward_output(&output);
@@ -31,20 +32,8 @@ pub(crate) async fn call_harn_export_on_vm(
     label: &str,
     args: &[VmValue],
 ) -> Result<VmValue, VmError> {
-    let saved_env = std::mem::take(&mut vm.env);
-    let saved_imported_paths = std::mem::take(&mut vm.imported_paths);
-    let saved_source_dir = vm.source_dir.clone();
-    let exports = vm.load_module_exports_from_import(import_path).await;
-    vm.env = saved_env;
-    vm.imported_paths = saved_imported_paths;
-    vm.source_dir = saved_source_dir;
-    let exports = exports?;
-    let closure = exports.get(export_name).cloned().ok_or_else(|| {
-        VmError::Runtime(format!(
-            "{label}: stdlib module {import_path} did not export `{export_name}`"
-        ))
-    })?;
-    vm.call_closure_pub(&closure, args).await
+    vm.call_module_export(import_path, export_name, label, args)
+        .await
 }
 
 pub(crate) async fn call_agent_loop(

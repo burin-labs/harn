@@ -127,7 +127,7 @@ fn json_message_to_vm(msg: &serde_json::Value) -> Option<VmValue> {
             object.remove("tool_use_id");
             object.remove("call_id");
         }
-        return Some(crate::stdlib::json_to_vm_value(&message));
+        return Some(crate::schema::json_to_vm_value(&message));
     }
 
     if let Some(content) = msg.get("content").and_then(|v| v.as_str()) {
@@ -156,12 +156,12 @@ fn json_message_to_vm(msg: &serde_json::Value) -> Option<VmValue> {
         }
         return Some(vm_message_value(
             role,
-            crate::stdlib::json_to_vm_value(&serde_json::Value::Array(blocks.clone())),
+            crate::schema::json_to_vm_value(&serde_json::Value::Array(blocks.clone())),
         ));
     }
 
     msg.get("content")
-        .map(|content| vm_message_value(role, crate::stdlib::json_to_vm_value(content)))
+        .map(|content| vm_message_value(role, crate::schema::json_to_vm_value(content)))
 }
 
 pub(crate) fn vm_add_role_message(args: &[VmValue], role: &str) -> Result<VmValue, VmError> {

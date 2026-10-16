@@ -39,12 +39,12 @@ fn end(id: u64) {
 
 #[cfg(test)]
 mod tests {
-    use crate::{value::VmValue, vm::Vm};
+    use crate::value::VmValue;
 
     #[tokio::test(flavor = "current_thread")]
     async fn builtin_observation_is_inert_when_disabled_and_classifies_both_public_paths() {
         crate::orchestration::scope_fresh_tracing_runtime(async {
-            let mut vm = Vm::new();
+            let mut vm = crate::new_vm();
             vm.register_builtin("llm_call", |_, _| Ok(VmValue::Int(7)));
             assert!(vm.runtime().builtin_span("llm_call").is_none());
             assert_eq!(

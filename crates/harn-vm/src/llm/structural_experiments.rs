@@ -329,7 +329,7 @@ pub(crate) async fn apply_structural_experiment(
             ctx.put_str("name", config.name.as_str());
             ctx.insert(
                 crate::value::intern_key("args"),
-                crate::stdlib::json_to_vm_value(&config.args),
+                crate::schema::json_to_vm_value(&config.args),
             );
             interpret_closure_result(
                 &current_messages,

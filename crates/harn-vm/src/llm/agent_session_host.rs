@@ -11,9 +11,10 @@ use crate::value::VmDictExt;
 use std::{cell::RefCell, collections::BTreeMap, sync::Arc};
 
 use crate::agent_events::AgentEvent;
-use crate::stdlib::macros::{harn_builtin, register_builtin_defs, VmBuiltinDef};
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
+use harn_builtin_macros::harn_builtin;
+use harn_vm_core::builtin_support::{register_builtin_defs, VmBuiltinDef};
 
 use super::agent_terminal_class::{
     agent_loop_made_no_llm_call, agent_terminal_class, session_status_indicates_error,
@@ -487,7 +488,7 @@ fn opts_dict(value: Option<&VmValue>) -> crate::value::DictMap {
 }
 
 fn json_to_vm(value: &serde_json::Value) -> VmValue {
-    crate::stdlib::json_to_vm_value(value)
+    crate::schema::json_to_vm_value(value)
 }
 
 pub(crate) fn vm_to_json(value: &VmValue) -> serde_json::Value {

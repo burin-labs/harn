@@ -728,7 +728,7 @@ mod tests {
                     let program = parser.parse().unwrap();
                     let chunk = Compiler::new().compile(&program).unwrap();
 
-                    let mut vm = Vm::new();
+                    let mut vm = crate::new_vm();
                     register_vm_stdlib(&mut vm);
                     let _ = vm.execute(&chunk).await.unwrap();
                     vm.output().trim_end().to_string()

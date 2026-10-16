@@ -4,7 +4,7 @@ use crate::text::case::{
     words_to_kebab, words_to_pascal, words_to_snake,
 };
 use crate::value::VmDictExt;
-use crate::value::{string_char_count, values_equal, VmError, VmValue};
+use crate::value::{values_equal, VmError, VmValue};
 use crate::vm::Vm;
 use unicode_normalization::UnicodeNormalization;
 use unicode_segmentation::UnicodeSegmentation;
@@ -223,13 +223,7 @@ fn uppercase_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
     Ok(VmValue::String(arcstr::ArcStr::from(s.to_uppercase())))
 }
 
-/// `split(text, sep)` and `text.split(sep)` share this error so neither form
-/// silently picks a default separator.
-pub(crate) fn split_separator_required() -> VmError {
-    VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-        "split: separator is required (use split(text, sep) or text.split(sep))",
-    )))
-}
+use crate::value::{char_substring, split_separator_required};
 
 #[harn_builtin(
     exposure = "pure",
@@ -445,24 +439,6 @@ fn join_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
 /// Extract a character range `[start, end)` from `s`, the single source of
 /// truth shared by the `substring(...)` builtin and the `.substring(...)`
 /// method so both forms agree (issue: free/method semantics drift).
-///
-/// `start`/`end` are character offsets, not byte offsets. Both are clamped
-/// to `[0, len]`; a negative offset clamps to `0`; an `end` below `start`
-/// (after clamping) yields the empty string. Omitting `end` runs to the end
-/// of the string. This is the documented `substring(start, end?)` contract;
-/// unlike `s[a:b]` and `.slice`, a negative offset does not count from the end.
-#[expect(
-    clippy::string_slice,
-    reason = "char_range_to_byte_range returns clamped char-boundary offsets"
-)]
-pub(crate) fn char_substring(s: &str, start: i64, end: Option<i64>) -> String {
-    let len = string_char_count(s) as i64;
-    let start = start.clamp(0, len);
-    let end = end.unwrap_or(len).clamp(0, len).max(start);
-    let (start_byte, end_byte) =
-        crate::value::char_range_to_byte_range(s, start as usize, end as usize);
-    s[start_byte..end_byte].to_string()
-}
 
 #[harn_builtin(
     exposure = "pure",

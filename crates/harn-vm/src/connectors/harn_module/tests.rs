@@ -864,7 +864,7 @@ async fn poll_tick_emits_inbox_events_and_persists_cursor_state() {
     ])
     .await
     .unwrap();
-    let dispatcher = crate::Dispatcher::with_event_log(crate::Vm::new(), log.clone());
+    let dispatcher = crate::Dispatcher::with_event_log(crate::new_vm(), log.clone());
     let source_claims = read_topic(&log, crate::triggers::TRIGGER_INBOX_CLAIMS_TOPIC).await;
     assert_eq!(source_claims.len(), 2);
     assert!(source_claims
@@ -888,7 +888,7 @@ async fn poll_tick_emits_inbox_events_and_persists_cursor_state() {
     }
     // Rehydration uses the same durable inbox claims, even when another
     // polling binding delivers the same normalized event after restart.
-    let restarted = crate::Dispatcher::with_event_log(crate::Vm::new(), log.clone());
+    let restarted = crate::Dispatcher::with_event_log(crate::new_vm(), log.clone());
     let mut duplicate = envelopes[0].clone();
     duplicate.trigger_id = Some("other-poll-source".to_string());
     let outcomes = restarted

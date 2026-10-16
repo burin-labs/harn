@@ -536,10 +536,10 @@ const NON_TEST_WALL_CLOCK_ALLOWLIST: list<string> = [
   // time IS the observation, and an injected clock would report logical time
   // instead of the ten seconds the operator is trying to find. Same shape as
   // the `module_phase_timing.rs` entry below.
-  "crates/harn-vm/src/builtin_profile.rs",
+  "crates/harn-vm-core/src/builtin_profile.rs",
   // Module phase attribution measures real compile/load work for CLI timing
   // reports; host monotonic time is the observation being recorded.
-  "crates/harn-vm/src/vm/module_phase_timing.rs",
+  "crates/harn-vm-core/src/vm/module_phase_timing.rs",
   // Durable rate limiting retries real SQLite writer-lock contention and bounds
   // wall-clock backoff with host monotonic time; VM clock injection would not
   // model the blocking rusqlite calls it is defending.
@@ -714,12 +714,12 @@ const NON_TEST_WALL_CLOCK_ALLOWLIST: list<string> = [
   "crates/harn-vm/src/triggers/webhook_intake.rs",
   "crates/harn-vm/src/triggers/worker_queue.rs",
   "crates/harn-vm/src/trust_graph.rs",
-  "crates/harn-vm/src/vm/execution.rs",
+  "crates/harn-vm-core/src/vm/execution.rs",
   // std/signal interrupt handler deadlines share the VM's existing monotonic
   // deadline mechanism until the broader Clock-injection cleanup reaches vm/.
-  "crates/harn-vm/src/vm/interrupts.rs",
-  "crates/harn-vm/src/vm/iter.rs",
-  "crates/harn-vm/src/vm/ops/parallel.rs",
+  "crates/harn-vm-core/src/vm/interrupts.rs",
+  "crates/harn-vm-core/src/vm/iter.rs",
+  "crates/harn-vm-core/src/vm/ops/parallel.rs",
   "crates/harn-vm/src/waitpoints.rs",
 ]
 

@@ -1,5 +1,7 @@
 use crate::native_vm::NativeVmState;
 use crate::value::VmDictExt;
+use crate::NativeBuiltinCtxExt;
+use crate::NativeVmExt;
 use std::cell::RefCell;
 use std::collections::{BTreeMap, VecDeque};
 use std::future::Future;
@@ -1210,7 +1212,6 @@ mod tests {
     use super::*;
     use crate::compiler::Compiler;
     use crate::stdlib::register_vm_stdlib;
-    use crate::vm::Vm;
     use harn_lexer::Lexer;
     use harn_parser::Parser;
 
@@ -1229,7 +1230,7 @@ mod tests {
                     let program = parser.parse().unwrap();
                     let chunk = Compiler::new().compile(&program).unwrap();
 
-                    let mut vm = Vm::new();
+                    let mut vm = crate::new_vm();
                     register_vm_stdlib(&mut vm);
                     let result = vm.execute(&chunk).await?;
                     Ok((vm.output().to_string(), result))

@@ -159,7 +159,7 @@ mod tests {
             "missing",
         ];
         for json in samples {
-            let vm = crate::stdlib::json_to_vm_value(&json);
+            let vm = crate::schema::json_to_vm_value(&json);
             assert_eq!(json.content_text(), vm.content_text(), "{json}");
             for key in keys {
                 assert_eq!(json.has_field(key), vm.has_field(key), "{json} {key}");

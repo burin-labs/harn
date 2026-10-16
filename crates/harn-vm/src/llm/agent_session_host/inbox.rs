@@ -1,6 +1,8 @@
 //! Inbox delivery, command updates, feedback, and reminder mutation.
 
 use super::*;
+#[cfg(test)]
+use crate::NativeBuiltinCtxExt;
 
 /// Deterministic "should the loop auto-continue this truncated turn?" gate.
 ///
@@ -427,7 +429,7 @@ fn host_agent_session_apply_reminder_post_turn_builtin(
     let turn = args.get(1).and_then(VmValue::as_int).unwrap_or(0);
     let report = crate::agent_sessions::apply_reminder_post_turn(&session_id, turn)
         .map_err(VmError::Runtime)?;
-    Ok(crate::stdlib::json_to_vm_value(&report))
+    Ok(crate::schema::json_to_vm_value(&report))
 }
 
 const INBOX_BUILTINS: &[&VmBuiltinDef] = &[
@@ -453,7 +455,7 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn command_wait_without_a_vm_harness_fails_closed() {
-        let ctx = crate::vm::AsyncBuiltinCtx::for_test(crate::Vm::new());
+        let ctx = crate::vm::AsyncBuiltinCtx::for_test(crate::new_vm());
         let error = host_agent_session_await_inbox(
             ctx,
             vec![

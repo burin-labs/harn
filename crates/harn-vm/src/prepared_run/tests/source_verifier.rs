@@ -52,7 +52,7 @@ struct SourceExecutor {
 
 impl SourceExecutor {
     fn invoke(&self, environment: serde_json::Value) -> Result<serde_json::Value, String> {
-        let mut vm = crate::vm::Vm::new();
+        let mut vm = crate::new_vm();
         crate::stdlib::process::register_process_builtins(&mut vm);
         let mut command = vec![self.request.interpreter.display().to_string()];
         command.extend(self.request.invocation_args());
@@ -63,8 +63,7 @@ impl SourceExecutor {
             ),
         ];
         let builtin = vm
-            .builtins
-            .get("exec_opts")
+            .builtin_handler_for_test("exec_opts")
             .expect("canonical process builtin registered");
         builtin(&values, &mut String::new())
             .map(|value| vm_value_to_json(&value))

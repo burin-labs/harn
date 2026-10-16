@@ -11,7 +11,7 @@ fn run_with_worker_placement(source: &str) -> Result<Vec<String>, String> {
     let output = rt.block_on(harn_vm::subtask::scope_placement(
         harn_vm::subtask::SubtaskPlacement::Worker,
         async {
-            let mut vm = harn_vm::Vm::new();
+            let mut vm = harn_vm::new_vm();
             harn_vm::register_vm_stdlib(&mut vm);
             vm.execute(&chunk)
                 .await

@@ -1,3 +1,4 @@
+use crate::NativeBuiltinCtxExt;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -231,7 +232,7 @@ mod tests {
             return;
         };
         let root = PathBuf::from(std::env::var_os(HELPER_ROOT_ENV).unwrap());
-        let mut owner = Vm::new();
+        let mut owner = crate::new_vm();
         crate::register_vm_stdlib(&mut owner);
 
         match mode.as_str() {

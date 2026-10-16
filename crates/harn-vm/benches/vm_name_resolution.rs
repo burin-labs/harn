@@ -13,14 +13,14 @@
 use std::hint::black_box;
 
 use criterion::{criterion_group, criterion_main, Criterion};
-use harn_vm::{compile_source, register_vm_stdlib, Chunk, Vm};
+use harn_vm::{compile_source, register_vm_stdlib, Chunk};
 
 fn run_chunk(rt: &tokio::runtime::Runtime, chunk: &Chunk) -> String {
     rt.block_on(async {
         let local = tokio::task::LocalSet::new();
         local
             .run_until(async {
-                let mut vm = Vm::new();
+                let mut vm = harn_vm::new_vm();
                 register_vm_stdlib(&mut vm);
                 let result = vm.execute(chunk).await.expect("bench script runs");
                 black_box(result);

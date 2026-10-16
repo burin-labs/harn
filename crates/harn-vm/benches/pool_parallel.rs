@@ -1,7 +1,7 @@
 use std::hint::black_box;
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
-use harn_vm::{compile_source, register_vm_stdlib, Chunk, Vm, VmValue};
+use harn_vm::{compile_source, register_vm_stdlib, Chunk, VmValue};
 use tokio::runtime::{Builder, Runtime};
 
 const TASKS: usize = 16;
@@ -85,7 +85,7 @@ fn runtime() -> Runtime {
 fn execute(rt: &Runtime, chunk: &Chunk) -> VmValue {
     harn_vm::reset_thread_local_state();
     rt.block_on(async {
-        let mut vm = Vm::new();
+        let mut vm = harn_vm::new_vm();
         register_vm_stdlib(&mut vm);
         vm.execute(chunk).await.expect("pool fixture executes")
     })

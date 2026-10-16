@@ -1176,7 +1176,7 @@ fn main(harness: Harness) {
             let source = r#"fn main(harness: Harness) { harness.stdio.println("record me") }"#;
             harn_builtin_registry::install_builtin_manifest(crate::stdlib::all_builtin_manifest());
             let chunk = crate::compile_source(source).expect("compile");
-            let mut vm = crate::Vm::new();
+            let mut vm = crate::new_vm();
             crate::stdlib::register_vm_stdlib(&mut vm);
             vm.set_harness(Harness::mock().build());
             vm.execute(&chunk).await.expect("execute");
@@ -1203,7 +1203,7 @@ fn main(harness: Harness) {
             local
                 .run_until(async move {
                     let chunk = crate::compile_source(source)?;
-                    let mut vm = crate::Vm::new();
+                    let mut vm = crate::new_vm();
                     crate::stdlib::register_vm_stdlib(&mut vm);
                     vm.set_harness(harness);
                     vm.execute(&chunk)

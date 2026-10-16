@@ -1,3 +1,4 @@
+use harn_vm::NativeVmExt;
 use std::collections::HashSet;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
@@ -273,7 +274,7 @@ async fn configured_vm(
     project_root: Option<&Path>,
     store_base: &Path,
 ) -> Result<harn_vm::Vm, String> {
-    let mut vm = harn_vm::Vm::new();
+    let mut vm = harn_vm::new_vm();
     harn_vm::register_vm_stdlib(&mut vm);
     crate::install_default_hostlib(&mut vm);
     harn_vm::register_store_builtins(&mut vm, store_base);

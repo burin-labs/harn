@@ -93,7 +93,7 @@ fn insert_preserves_a_retained_null_value() {
 }
 
 fn vm(root: &Path) -> Vm {
-    let mut vm = Vm::new();
+    let mut vm = crate::new_vm();
     register_checkpoint_builtins_at_state_root(&mut vm, root, "recovery");
     vm
 }

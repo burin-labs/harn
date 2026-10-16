@@ -2,9 +2,9 @@
 //! against that route inherits.
 
 use crate::llm_config;
-use crate::stdlib::json_to_vm_value;
-use crate::stdlib::macros::harn_builtin;
+use crate::schema::json_to_vm_value;
 use crate::value::{VmDictExt, VmError, VmValue};
+use harn_builtin_macros::harn_builtin;
 
 use super::batch_projection::string_list_to_vm_value;
 use super::catalog_projection::toml_value_to_vm_value;
@@ -121,7 +121,7 @@ pub(super) fn llm_model_ladder_builtin(
             "llm_model_ladder: failed to project catalog row: {error}"
         ))
     })?;
-    Ok(crate::stdlib::json_to_vm_value(&value))
+    Ok(crate::schema::json_to_vm_value(&value))
 }
 
 /// Return logical- and route-merged model defaults for `model_id`.

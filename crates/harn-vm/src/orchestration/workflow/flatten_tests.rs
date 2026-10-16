@@ -1,5 +1,6 @@
 use super::*;
 use crate::orchestration::{CapabilityPolicy, WorkflowNode};
+use crate::NativeBuiltinCtxExt;
 use std::collections::BTreeMap;
 
 fn ceiling_with_tools(tools: &[&str]) -> CapabilityPolicy {
@@ -552,7 +553,7 @@ async fn flatten_matches_expected_stage_contract() {
             .collect(),
     };
 
-    let mut vm = crate::Vm::new();
+    let mut vm = crate::new_vm();
     crate::register_vm_stdlib(&mut vm);
     let ctx = crate::vm::AsyncBuiltinCtx::for_test(vm);
 

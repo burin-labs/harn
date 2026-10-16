@@ -2,7 +2,7 @@ use super::*;
 use crate::vm::Vm;
 
 fn vm_with_flow_builtins() -> Vm {
-    let mut vm = Vm::new();
+    let mut vm = crate::new_vm();
     register_flow_builtins(&mut vm);
     // The VM crate cannot depend on harn-hostlib (hostlib already depends on
     // the VM), so model the one read-only AST method this executor test needs.
@@ -24,8 +24,7 @@ fn vm_with_flow_builtins() -> Vm {
 fn call(vm: &Vm, name: &str, args: &[VmValue]) -> VmValue {
     let mut out = String::new();
     let builtin = vm
-        .builtins
-        .get(name)
+        .builtin_handler_for_test(name)
         .unwrap_or_else(|| panic!("builtin {name} not registered"))
         .clone();
     builtin(args, &mut out).expect("builtin call failed")
@@ -44,8 +43,7 @@ fn flow_invariant_require_approval_rejects_unknown_kind() {
     let vm = vm_with_flow_builtins();
     let mut out = String::new();
     let builtin = vm
-        .builtins
-        .get("flow_invariant_require_approval")
+        .builtin_handler_for_test("flow_invariant_require_approval")
         .unwrap()
         .clone();
     let error = builtin(
@@ -281,7 +279,10 @@ fn flow_invariant_feedback_summarizes_discovery_errors() {
 fn flow_evidence_atom_rejects_invalid_span() {
     let vm = vm_with_flow_builtins();
     let mut out = String::new();
-    let builtin = vm.builtins.get("flow_evidence_atom").unwrap().clone();
+    let builtin = vm
+        .builtin_handler_for_test("flow_evidence_atom")
+        .unwrap()
+        .clone();
     let atom_hex = "ab".repeat(32);
     let error = builtin(
         &[
@@ -299,7 +300,10 @@ fn flow_evidence_atom_rejects_invalid_span() {
 fn flow_evidence_atom_rejects_bad_hex() {
     let vm = vm_with_flow_builtins();
     let mut out = String::new();
-    let builtin = vm.builtins.get("flow_evidence_atom").unwrap().clone();
+    let builtin = vm
+        .builtin_handler_for_test("flow_evidence_atom")
+        .unwrap()
+        .clone();
     let error = builtin(
         &[
             VmValue::String(arcstr::ArcStr::from("not-hex")),

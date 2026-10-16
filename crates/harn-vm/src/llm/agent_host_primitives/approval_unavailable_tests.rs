@@ -1,4 +1,5 @@
 use super::{agent_primitive_denied_tool, host_agent_dispatch_tool_call};
+use crate::NativeBuiltinCtxExt;
 
 #[test]
 fn approval_unavailable_names_terminal_risk_class() {
@@ -70,7 +71,7 @@ async fn approval_unavailable_denials_share_terminal_risk_class_across_arg_varia
     let mut options = crate::value::DictMap::new();
     options.insert(
         crate::value::intern_key("session_id"),
-        crate::stdlib::json_to_vm_value(&serde_json::json!(
+        crate::schema::json_to_vm_value(&serde_json::json!(
             "approval-unavailable-terminal-class-test"
         )),
     );
@@ -111,13 +112,13 @@ async fn approval_unavailable_denials_share_terminal_risk_class_across_arg_varia
 }
 
 async fn dispatch_exec(command: &str, options: &crate::value::DictMap) -> serde_json::Value {
-    let call = crate::stdlib::json_to_vm_value(&serde_json::json!({
+    let call = crate::schema::json_to_vm_value(&serde_json::json!({
         "id": format!("exec-{command}"),
         "name": "exec",
         "arguments": {"command": command},
     }));
     let result = host_agent_dispatch_tool_call(
-        crate::vm::AsyncBuiltinCtx::for_test(crate::vm::Vm::new()),
+        crate::vm::AsyncBuiltinCtx::for_test(crate::new_vm()),
         call,
         None,
         options,

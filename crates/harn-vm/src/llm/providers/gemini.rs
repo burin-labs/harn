@@ -17,8 +17,8 @@ mod interactions_tests;
 mod test_support;
 
 use crate::llm::api::{
-    DeltaSender, LlmRequestPayload, LlmResult, OutputFormat, ProviderTelemetry,
-    RawProviderToolCall, ReasoningEffort, ThinkingConfig,
+    DeltaSender, LlmRequestPayload, LlmRequestPayloadExt, LlmResult, OutputFormat,
+    ProviderTelemetry, RawProviderToolCall, ReasoningEffort, ThinkingConfig,
 };
 use crate::llm::provider::{LlmProvider, LlmProviderChat};
 use crate::llm::providers::common::{
@@ -383,25 +383,7 @@ fn gemini_message_parts(message: &serde_json::Value) -> Vec<serde_json::Value> {
     parts
 }
 
-/// Return Gemini's opaque thought signature from either a live provider
-/// response or Harn's portable provider-metadata fixture representation.
-pub(crate) fn gemini_tool_call_thought_signature(value: &serde_json::Value) -> Option<&str> {
-    value
-        .get("thoughtSignature")
-        .or_else(|| value.get("thought_signature"))
-        .or_else(|| {
-            value
-                .get("provider_metadata")
-                .and_then(|metadata| metadata.get("gemini"))
-                .and_then(|gemini| {
-                    gemini
-                        .get("thought_signature")
-                        .or_else(|| gemini.get("thoughtSignature"))
-                })
-        })
-        .and_then(serde_json::Value::as_str)
-        .filter(|signature| !signature.is_empty())
-}
+pub(crate) use harn_llm::reasoning_history::gemini_tool_call_thought_signature;
 
 fn gemini_function_call_part(call: &serde_json::Value) -> Option<serde_json::Value> {
     let function = call.get("function").unwrap_or(call);
