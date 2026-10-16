@@ -17,13 +17,102 @@ pub import {
   ExternalActionPolicyLayer,
   ExternalActionReconciliationStatus,
 } from "std/external_action/vocabulary"
+import { EvaluationAnswer, EvaluationOutcome } from "std/predicate"
 
 /** Portable, value-free lifecycle vocabulary for one governed external action. */
+pub type ExternalActionReviewProbability = {label: string, probability: float}
+
+pub type ExternalActionReviewAnswer = {
+  question_id: string,
+  kind: string,
+  confidence: float,
+  confidence_kind: string,
+  verdict?: bool,
+  probability?: float,
+  label?: string,
+  score?: float,
+  probabilities: list<ExternalActionReviewProbability>,
+}
+
+pub type ExternalActionDecisionReview = {
+  receipt: string,
+  outcome: string,
+  rule: string,
+  applied: bool,
+  minimum_confidence?: float,
+  answers: list<ExternalActionReviewAnswer>,
+}
+
 pub type ExternalActionPolicyEvaluation = {
   layer: ExternalActionPolicyLayer,
   outcome: ExternalActionPolicyEvaluationOutcome,
   reason_code: string,
   policy_id?: string,
+  review?: ExternalActionDecisionReview,
+}
+
+/**
+ * Project evaluator evidence without model text, prompts, or action payloads.
+ * `applied` is set by the deterministic authorization owner, never by the model.
+ * @effects: []
+ * @errors: [invalid_argument]
+ */
+pub fn external_action_decision_review(
+  outcome: EvaluationOutcome,
+  rule: string,
+  applied: bool = false,
+  minimum_confidence: float? = nil,
+) -> ExternalActionDecisionReview {
+  require !applied || outcome.kind == "answered",
+    "external_action_decision_review: a non-answer cannot authorize an action"
+  let candidates: dict<string, EvaluationAnswer> = {}
+  if outcome.kind == "answered" {
+    candidates = outcome.value
+  } else if outcome.kind == "low_confidence" {
+    candidates = outcome.candidates
+  }
+  let answers: list<ExternalActionReviewAnswer> = []
+  for question_id in candidates.keys() {
+    const answer = candidates[question_id]
+    require answer != nil, "external_action_decision_review: missing candidate"
+    let projected: ExternalActionReviewAnswer = {
+      question_id: question_id,
+      kind: answer.kind,
+      confidence: answer.confidence,
+      confidence_kind: answer.confidence_kind,
+      probabilities: [],
+    }
+    if answer.kind == "boolean" {
+      projected.verdict = answer.verdict
+      projected.probability = answer.probability
+    } else {
+      let probabilities: list<ExternalActionReviewProbability> = []
+      for label in answer.probabilities.keys() {
+        const probability = answer.probabilities[label]
+        require probability != nil, "external_action_decision_review: missing probability"
+        probabilities = probabilities + [{label: label, probability: probability}]
+      }
+      projected.probabilities = probabilities
+      if answer.kind == "choice" {
+        projected.label = answer.choice
+      } else {
+        projected.label = answer.level
+        projected.score = answer.score
+      }
+    }
+    answers = answers + [projected]
+  }
+  let review: ExternalActionDecisionReview = {
+    receipt: outcome.receipt,
+    outcome: outcome.kind,
+    rule: rule,
+    applied: applied,
+    answers: answers,
+  }
+  if minimum_confidence != nil {
+    review.minimum_confidence = minimum_confidence
+  }
+  return review
 }
 
 pub type ExternalActionDecision = {

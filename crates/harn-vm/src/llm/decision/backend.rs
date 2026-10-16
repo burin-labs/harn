@@ -26,8 +26,12 @@ pub struct DecisionRequest<'a> {
     pub contract: &'a DecisionContract,
     /// Explicit, and exactly what the policy admitted. A backend that cannot
     /// honor both returns `UnsupportedOptions` rather than dropping one.
-    pub effort: &'a str,
-    pub temperature: f64,
+    pub effort: Option<&'a str>,
+    pub temperature: Option<f64>,
+    pub max_tokens: Option<i64>,
+    pub top_p: Option<f64>,
+    pub seed: Option<i64>,
+    pub timeout_ms: Option<i64>,
     pub evaluation_cost_limit: Option<f64>,
     pub run_cost_limit: Option<f64>,
 }
@@ -114,6 +118,7 @@ pub struct RawDecisionResponse {
 /// Why a dispatch produced no response. Each maps onto exactly one outcome
 /// arm, so a transport can never collapse a rate limit into a generic failure.
 #[derive(Clone, Debug, PartialEq)]
+#[non_exhaustive]
 pub enum DecisionTransportError {
     /// A paid response can fail validation while retaining its settlement.
     Accounted {

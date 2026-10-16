@@ -2,7 +2,7 @@ use std::path::{Component, Path, PathBuf};
 
 use super::FsAccess;
 
-pub(super) fn normalize_for_policy(path: &Path) -> PathBuf {
+pub(crate) fn normalize_for_policy(path: &Path) -> PathBuf {
     let absolute = if path.is_absolute() {
         path.to_path_buf()
     } else {
@@ -131,18 +131,8 @@ pub(super) fn normalize_io_device_path(path: &Path) -> PathBuf {
 /// sandbox treats as a stream rather than a workspace mutation for this access.
 pub(super) fn is_standard_io_device_for_access(path: &Path, access: FsAccess) -> bool {
     match access {
-        FsAccess::Read => {
-            matches!(
-                path.to_str(),
-                Some("/dev/stdin" | "/dev/stdout" | "/dev/stderr" | "/dev/null")
-            ) || is_dev_fd_descriptor(path)
-        }
-        FsAccess::Write => {
-            matches!(
-                path.to_str(),
-                Some("/dev/stdout" | "/dev/stderr" | "/dev/null")
-            ) || is_dev_fd_descriptor(path)
-        }
+        FsAccess::Read => crate::workspace_path::is_standard_io_device(path, false),
+        FsAccess::Write => crate::workspace_path::is_standard_io_device(path, true),
         FsAccess::Delete => false,
     }
 }
@@ -189,16 +179,6 @@ fn overlay_absorbs_access(path: &Path, access: FsAccess) -> bool {
         FsAccess::Read => overlay.absorbs_read(path),
         FsAccess::Write | FsAccess::Delete => overlay.absorbs_mutation(path),
     }
-}
-
-fn is_dev_fd_descriptor(path: &Path) -> bool {
-    let Some(text) = path.to_str() else {
-        return false;
-    };
-    let Some(fd) = text.strip_prefix("/dev/fd/") else {
-        return false;
-    };
-    !fd.is_empty() && fd.bytes().all(|byte| byte.is_ascii_digit())
 }
 
 #[cfg(target_os = "macos")]

@@ -64,9 +64,87 @@ pub(super) fn bare_tool_names(tools_val: Option<&VmValue>) -> BTreeSet<String> {
     known
 }
 
+/// Whether the object literal opening at `open_brace` starts with a quoted key.
+///
+/// This is what separates a JSON payload written against a name from code. A
+/// struct literal (`Point{ x: 1 }`) or a call taking an options object
+/// (`useState({ a: 1 })`) uses bare keys, and an answer that shows code is full
+/// of both. A payload the model meant as a call is JSON, and its first key is
+/// quoted.
+fn opens_quoted_key_object(bytes: &[u8], open_brace: usize) -> bool {
+    if bytes.get(open_brace) != Some(&b'{') {
+        return false;
+    }
+    let mut idx = open_brace + 1;
+    while idx < bytes.len() && bytes[idx].is_ascii_whitespace() {
+        idx += 1;
+    }
+    bytes.get(idx) == Some(&b'"')
+}
+
+/// A JSON payload abutting a name inside a line of prose, reported and not
+/// dispatched.
+///
+/// The recovery ladder reads a call only at the start of a line, so a name
+/// abutting the previous sentence was never examined: the turn produced no
+/// call, no diagnostic, and a payload the person read as chatter. Position is
+/// what the ladder uses to tell a call from narration, so lifting it for
+/// dispatch would make every mention of a tool a call. It can be lifted for
+/// the statement that nothing ran, which is the fact the turn was losing.
+///
+/// Only `name{"key": ...}` counts. The paren shape and bare-key objects are
+/// ordinary code (`useState({ a: 1 })`, `Point{ x: 1 }`) far more often than
+/// they are a dropped call, and a false report costs the answer its prose.
+///
+/// Returns the message and the byte just past the literal, so the walk does
+/// not descend into the arguments it has already accounted for.
+fn mid_line_call_shape(
+    text: &str,
+    start: usize,
+    known: &BTreeSet<String>,
+) -> Option<(String, usize)> {
+    let bytes = text.as_bytes();
+    let name_len = ident_length(&bytes[start..])?;
+    let name = &text[start..start + name_len];
+    let after = start + name_len;
+    if !opens_quoted_key_object(bytes, after) {
+        return None;
+    }
+    let end = after + parse_object_literal_from(&text[after..], name).ok()?.1;
+    let message = if known.contains(name) {
+        format!(
+            "Saw a call to `{name}` inside a line of prose. A tool call is read only at \
+             the start of a line, so nothing ran; re-emit it on its own line."
+        )
+    } else {
+        unknown_tool_feedback(name, known)
+    };
+    Some((message, end))
+}
+
 pub(super) fn parse_bare_calls_in_body_with_known(
     text: &str,
     known: &BTreeSet<String>,
+) -> TextToolParseResult {
+    parse_bare_calls_scoped(text, known, ProseScope::Prose)
+}
+
+/// Whether the text being scanned is the model's own prose.
+///
+/// The mid-line payload report is only sound on prose. Text that arrives
+/// already inside code (the body of an exact fence or backtick wrapper, or a
+/// line the unit scanner cut out of a fence) has lost the fence markers the
+/// scan uses to stay silent on code, so it gets the line-start ladder only.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum ProseScope {
+    Prose,
+    Code,
+}
+
+pub(super) fn parse_bare_calls_scoped(
+    text: &str,
+    known: &BTreeSet<String>,
+    scope: ProseScope,
 ) -> TextToolParseResult {
     let cleaned = strip_thinking_tags(text);
     let unwrapped = strip_tool_call_wrappers(cleaned.as_ref());
@@ -75,7 +153,7 @@ pub(super) fn parse_bare_calls_in_body_with_known(
     let text = harmony_normalized.as_ref();
 
     if let Some(unwrapped) = unwrap_exact_code_wrapper(text) {
-        let result = parse_bare_calls_in_body_with_known(unwrapped, known);
+        let result = parse_bare_calls_scoped(unwrapped, known, ProseScope::Code);
         if !result.calls.is_empty() || !result.errors.is_empty() {
             return result;
         }
@@ -344,8 +422,47 @@ pub(super) fn parse_bare_calls_in_body_with_known(
                                 }
                             }
                         }
+                        // An unregistered name abutting an object literal is
+                        // the same mistake the `name({ ... })` branch above
+                        // reports, written in the other shape. Without this
+                        // arm it fell through to prose in silence, so the
+                        // turn carried a dropped call nobody could see. A
+                        // bare-key literal is a struct or options object in
+                        // code, so only a quoted first key counts.
+                        let payload = opens_quoted_key_object(bytes, k + name_len)
+                            .then(|| parse_object_literal_from(&text[k + name_len..], name_str))
+                            .and_then(Result::ok);
+                        if let Some((_, consumed)) = payload {
+                            errors.push(unknown_tool_feedback(name_str, known));
+                            i = k + name_len + consumed;
+                            at_line_start = bytes.get(i.saturating_sub(1)) == Some(&b'\n');
+                            continue;
+                        }
                     }
                 }
+            }
+        }
+
+        // A call shape where the line-start ladder does not look. Nothing is
+        // dispatched from here; the model is told the call did not run, and
+        // the unit is handled like any other malformed call. Inside a fence a
+        // mid-line `name{"key": ...}` is a map or composite literal in code
+        // (`map[string]int{"a": 1}`), so fenced text stays silent. Only an
+        // identifier that starts here counts, so the byte-by-byte walk through
+        // a name cannot report each of its suffixes.
+        let in_fence = fence_lines.len() % 2 == 1;
+        if scope == ProseScope::Prose
+            && !at_line_start
+            && !in_inline_code
+            && !in_fence
+            && !bytes[i.saturating_sub(1)].is_ascii_alphanumeric()
+            && bytes[i.saturating_sub(1)] != b'_'
+        {
+            if let Some((message, end)) = mid_line_call_shape(text, i, known) {
+                errors.push(message);
+                i = end;
+                at_line_start = bytes.get(i.saturating_sub(1)) == Some(&b'\n');
+                continue;
             }
         }
 

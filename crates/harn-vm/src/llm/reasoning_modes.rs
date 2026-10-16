@@ -27,7 +27,7 @@ use crate::llm_config::{model_catalog_entry, ReasoningModeDef};
 
 /// The catalog id of the default mode. It is never declared in the catalog;
 /// requesting it is the same as requesting nothing.
-pub(crate) const STANDARD_MODE_ID: &str = "standard";
+pub(crate) use harn_provider_catalog::config::STANDARD_MODE_ID;
 
 /// Catalog lifecycle status that disqualifies a reasoning mode from use.
 const DEPRECATED_STATUS: &str = "deprecated";
@@ -85,9 +85,8 @@ pub(crate) fn resolve_requested(
         None | Some(STANDARD_MODE_ID) => return Ok(None),
         Some(other) => other,
     };
-    let thrown = |message: String| {
-        crate::value::VmError::Thrown(crate::value::VmValue::String(arcstr::ArcStr::from(message)))
-    };
+    let thrown =
+        |message: String| crate::value::VmError::Thrown(crate::value::VmValue::string(message));
     match gate(model, mode_id) {
         ReasoningModeGate::Usable => {}
         ReasoningModeGate::Unsupported => {

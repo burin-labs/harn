@@ -191,6 +191,7 @@
       "harn.session_recap.query",
       "harn.session_timeline.query",
       "harn.session_view.query",
+      "harn.session_history.boundaries",
       "harn.session_timeline.subscribe",
       "harn.session_timeline.unsubscribe",
       "session/new",
@@ -263,6 +264,7 @@
       "harn.session_recap.query",
       "harn.session_timeline.query",
       "harn.session_view.query",
+      "harn.session_history.boundaries",
       "harn.session_timeline.subscribe",
       "harn.session_timeline.unsubscribe",
       "session/new",
@@ -346,6 +348,7 @@
       "host_tool_result",
       "input_guardrail_verdict",
       "iteration_end",
+      "session_health",
       "iteration_start",
       "judge_decision",
       "judge_started",
@@ -372,6 +375,7 @@
       "tool_batch_disposition",
       "tool_call_audit",
       "tool_format_override",
+      "turn_phase_changed",
       "typed_checkpoint"
     ],
     "harnAgentEventMethod": "_harn/agentEvent",
@@ -451,12 +455,16 @@
       "empty_generation",
       "billing_limit",
       "output_budget_exhausted",
-      "unknown"
+      "unknown",
+      "policy_denied",
+      "managed_spend_paused"
     ],
     "promptErrorTerminalClasses": [
       "context_overflow",
       "provider_misconfigured",
       "provider_unavailable",
+      "provider_content_policy",
+      "provider_billing",
       "rate_limited",
       "timeout",
       "resource_busy",
@@ -464,7 +472,8 @@
       "host_bridge_unimplemented",
       "agent_loop_protocol_failure",
       "parse_dropped",
-      "generic_throw"
+      "generic_throw",
+      "managed_spend_paused"
     ],
     "promptResultExtensionFields": [
       "terminal"
@@ -552,6 +561,8 @@
       "errorCategory",
       "executionDurationMs",
       "executor",
+      "health",
+      "intent",
       "mutationStatus",
       "parsing",
       "rawInputPartial"
@@ -968,6 +979,51 @@
         "upstream_version": "2026-07-28"
       },
       "source": "conformance/protocols/schemas/mcp-2026-07-28.schema.json"
+    },
+    {
+      "artifact": "schemas/canonical-history-boundaries.schema.json",
+      "protocol": "harn",
+      "provenance": {
+        "owner": "harn-vm::agent_sessions::canonical_boundary",
+        "schema_version": 1
+      },
+      "source": "crates/harn-vm/src/agent_sessions/canonical_boundary.rs"
+    },
+    {
+      "artifact": "schemas/inference-admission-request.schema.json",
+      "protocol": "harn",
+      "provenance": {
+        "owner": "harn-vm::llm::api::inference_boundary",
+        "schema_version": 1
+      },
+      "source": "crates/harn-vm/src/llm/api/inference_boundary/admission.rs"
+    },
+    {
+      "artifact": "schemas/inference-admission-snapshot.schema.json",
+      "protocol": "harn",
+      "provenance": {
+        "owner": "harn-vm::llm::api::inference_boundary",
+        "schema_version": 1
+      },
+      "source": "crates/harn-vm/src/llm/api/inference_boundary/admission.rs"
+    },
+    {
+      "artifact": "schemas/machine-spend-exhaustion.schema.json",
+      "protocol": "harn",
+      "provenance": {
+        "owner": "harn-vm::llm::admission",
+        "schema_version": 1
+      },
+      "source": "crates/harn-vm/src/llm/admission/durable.rs"
+    },
+    {
+      "artifact": "schemas/session-health.schema.json",
+      "protocol": "harn",
+      "provenance": {
+        "owner": "harn-vm::agent_events::session_health",
+        "schema_version": 1
+      },
+      "source": "crates/harn-vm/src/agent_events/session_health.rs"
     },
     {
       "artifact": "schemas/tool-call-receipt.schema.json",

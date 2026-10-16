@@ -30,6 +30,13 @@ only `AuthorityUse`; it calls `authorize` with the exact typed requirement
 immediately before each material operation. Dispatch repeats the canonical
 evaluation and rejects any requirement not fingerprinted into the lease.
 
+Requested filesystem and process roots are authority to acquire, not concrete
+file effects in an existing workspace. Their policy evaluation retains authored
+path constraints and sensitive-path refusals, without treating the requested
+root as an existing workspace grant. Host ceilings, the exact approval batch,
+and the approved lease still control admission. Concrete tool dispatch uses its
+explicit workspace boundary and cannot use this internal acquisition interface.
+
 `PreparedRunExecutor` has separate `Output` and `Error` associated types.
 `ExecutionOutcome::ExecutorFailed` returns the concrete executor error beside
 the terminal authority receipt, so hosts can retain structured partial-run
@@ -38,11 +45,42 @@ evidence without parsing a rendered string or rereading a shared event store.
 or receipt persistence failures owned by Harn. Existing string-only executors
 use `type Error = String`; no adapter or side channel is required.
 
+Agent executors call `AuthorityUse::record_agent_terminal` with the actual
+producer's `AgentTerminalOutcome` before returning. Attached sessions expose
+the same operation as `ActivePreparedSession::record_agent_terminal`. The
+authority owner retains the decision in the optional receipt `agent_terminal`
+field and projects its shared lifecycle before the terminal receipt is
+persisted. Hosts do not rewrite authority receipts after execution.
+Provider diagnostic `message` and `detail` are omitted from authority evidence.
+Custom reasons use the producer's current journal redaction policy when recorded;
+ordinary stop reasons and typed owner identity are retained.
+
+| Producer lifecycle | Authority stage / status |
+| --- | --- |
+| Completed, executor succeeded | terminal / completed |
+| Cancelled or stopped | stopped / stopped |
+| Failed | terminal / failed |
+| Suspended or otherwise unfinished | terminal / failed |
+| Completed, executor failed | terminal / failed |
+
+Suspension retains its producer identity but cannot claim completed work in a
+finished generic invocation. An executor error outranks an earlier natural
+terminal. With no recorded agent terminal, ordinary generic executor result
+semantics remain in effect; absence does not imply a stop.
+`ExecutionOutcome::Completed` means the executor delivered its output. Read
+the authority receipt to determine whether that agent work completed, stopped,
+or remained unfinished.
+
 The normative JSON Schema for the normalized plan is
 [`run-authority-plan.v1.json`](../schemas/run-authority-plan.v1.json). The
 serialized contract contains secret references and exact consumer bindings,
 never secret values. `AuthorityLease` is deliberately not serializable;
 receipts are evidence, not reusable authority.
+
+Hosts can also declare [prepared verifier loaders](./verifier-loaders.md).
+Their native baselines are captured before task mutation and retained across
+goal refresh. A verifier completion receipt binds the actual child to that
+material; ordinary command success supplies no loader qualification.
 
 Non-interactive hosts must advertise only secret brokers that both support
 non-interactive access and cannot invoke GUI-capable keyring APIs. Environment
@@ -51,12 +89,25 @@ and scrubbed from the process environment before workload execution. Durable
 secrets remain behind a host broker outside the workload sandbox.
 
 When a run is both non-interactive and unable to obtain approval,
-`RunApprovalPolicy::construct` resolves every rule, legacy pattern, and repeat
-guard whose disposition is `ask` to a deterministic denial. The resulting
-policy can therefore never defer to a human who does not exist. The host's
+`RunApprovalPolicy` resolves a winning `ask` from any rule, legacy pattern, or
+repeat guard to a deterministic denial, unless an installed resolver can
+answer it. Rule selection happens first, preserving explicit grants and
+denials. The host's
 construction callback receives the same posture and selects its workspace
 policy layers from `workspace_trust`; it must not infer this fact from a path
 layout.
+
+Prepared execution installs this evaluator for live tool dispatch and inherited
+worker scopes. Nested approval declarations intersect with the prepared
+policy. Outside prepared execution, Harn constructs the same evaluator from
+the active host bridge and approval reviewer. An unavailable approval is
+reported with the `approval_unavailable` denial gate and its original rule in
+the decision receipt.
+
+Rust callers use `current_run_approval_policy` for decisions. The compatibility
+reader `current_approval_policy` projects declarations for nested scopes and
+worker transport. `RunApprovalPolicy::effective` retains the typed evaluator;
+use `declared` when a `ToolApprovalPolicy` configuration value is needed.
 
 `discover_toolchain` is the only command-derived root path. Preparation reviews
 the exact command and a read-root ceiling, then persists readiness. Only after
@@ -80,15 +131,44 @@ lease. `attach` binds that lease to the exact session, workspace, runtime
 provenance, and consumer before engine startup. A durable
 `PreparedSessionLeaseStore` atomically rejects replay across server processes.
 Routine turns reuse the attached authority envelope without prompting again,
-and `stop`, `pivot`, and `terminal` all persist terminal accounting. The JSON
-Schema is `schemas/prepared-session-v1.schema.json`; generated Rust,
+and `stop`, `pivot`, and `terminal` all persist terminal accounting. Accepted
+Stop and pivot controls persist `stage: stopped` and `status: stopped`, retaining
+the used and unused authority without classifying the control as executor failure.
+The JSON Schema is `schemas/prepared-session-v1.schema.json`; generated Rust,
 TypeScript, Swift, Python, and Go protocol artifacts expose the same states and
 commands.
+
+Embedded runtimes whose turn futures are not `Send` use
+`PreparedSession::run_turn_with(&active, turn)`. The future runs in the same
+attached authority and identity scope as `run_turn`; the embedder calls
+`active.authorize` before each material operation. Returning from a turn keeps
+the session attached. Its accepted lifecycle event calls `finish` or `stop` to
+persist terminal accounting and retire the lease.
+
+ACP embedders implement `AcpRuntimeConfigurator::run_prompt` to scope that
+future on the server's engine executor. The context identifies the session and
+workspace, exposes Harn's resolved capability policy and the existing host
+bridge, and reports accepted cancellation. Refusing before polling the future
+prevents VM, host-capability, and provider execution. Provider endpoint overrides
+preserve this configurator. The adapter still owns prompt responses, event
+flushing, and cancellation classification.
+
+`request_session_approval(&bridge, session_id, &batch)` projects a grouped batch
+through the attached ACP permission bridge. It uses Harn's canonical permission
+options and response parser; missing, malformed, and rejected answers cannot
+grant authority. Pass its decision to `PreparedSession::decide`, which verifies
+both the request ID and semantic batch fingerprint, then persists the decision
+before attachment or execution. Each batch has a fresh request ID even when its
+semantic content is identical. Preserve that ID in the decision; an older Allow
+or Deny cannot consume a replacement request.
+The helper rejects a bridge attached to another session before requesting any
+host decision.
 
 `PreparedRun::request_delta` remains the typed attenuation interface for a
 single prepared run. `PreparedSession::request_delta` adds the interactive
 session behavior: an identical requirement is already covered, attenuation is
 immediate, and widening produces one fingerprinted semantic approval batch.
+Delta decisions likewise require the exact request ID and active parent lease.
 Only the exact approved widening joins the active envelope; a denial leaves
 the existing session usable.
 

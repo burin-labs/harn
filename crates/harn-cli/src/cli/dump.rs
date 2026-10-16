@@ -19,6 +19,37 @@ pub(crate) struct DumpHighlightKeywordsArgs {
 }
 
 #[derive(Debug, Args)]
+pub(crate) struct DumpBuiltinMethodsArgs {
+    /// Markdown file whose generated builtin-method region is rewritten.
+    #[arg(long, default_value = "docs/src/builtins.md")]
+    pub output: String,
+    /// Verify the generated region matches the method registry; exit
+    /// non-zero if stale.
+    #[arg(long)]
+    pub check: bool,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct DumpOperatorPrecedenceArgs {
+    /// Markdown files holding a generated precedence table region.
+    #[arg(
+        long = "markdown",
+        default_values = [
+            "spec/chapters/03-operator-precedence-table.md",
+            "docs/src/language-basics.md",
+        ]
+    )]
+    pub markdown: Vec<String>,
+    /// Generated `PREC` constants the tree-sitter grammar reads.
+    #[arg(long, default_value = "tree-sitter-harn/grammar/precedence.js")]
+    pub tree_sitter: String,
+    /// Verify both outputs match the parser's precedence table; exit non-zero
+    /// if either is stale.
+    #[arg(long)]
+    pub check: bool,
+}
+
+#[derive(Debug, Args)]
 pub(crate) struct DumpPromptGrammarArgs {
     /// Path to the generated TextMate grammar (relative to the repo root).
     #[arg(
@@ -54,6 +85,18 @@ pub(crate) struct DumpTriggerQuickrefArgs {
     /// Verify the on-disk file matches what would be generated; exit non-zero
     /// if stale. Used by CI to prevent drift between the quickref and the
     /// runtime trigger provider catalog.
+    #[arg(long)]
+    pub check: bool,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct DumpCliSurfaceArgs {
+    /// Path to the generated CLI surface listing (relative to the repo root).
+    #[arg(long, default_value = "spec/cli-surface.txt")]
+    pub output: String,
+    /// Verify the on-disk listing matches the live parser; exit non-zero if
+    /// stale. Used by CI so a removed or renamed command, flag, or alias is
+    /// visible in the diff that removes it.
     #[arg(long)]
     pub check: bool,
 }

@@ -18,6 +18,7 @@ use harn_parser::{BindingPattern, DiagnosticCode as Code, DictEntry, Node, SNode
 use harn_vm::llm::AGENT_TOOL_HANDLER_RESULT_SCHEMA;
 use std::collections::BTreeSet;
 
+use super::dict_keys::entry_for_key;
 use crate::diagnostic::{LintDiagnostic, LintSeverity};
 
 const RULE_NAME: &str = "untyped-tool-handler-result";
@@ -139,28 +140,16 @@ fn returned_dict_literals(body: &[SNode]) -> Vec<Span> {
 /// treating an unreadable value as an envelope would silence the warning on
 /// every dict that merely mentions the key.
 fn is_handler_result_envelope(entries: &[DictEntry]) -> bool {
-    entry_for_key(entries, "schema").is_some_and(|entry| {
-        matches!(
-            &entry.value.node,
-            Node::StringLiteral(value) | Node::RawStringLiteral(value)
-                if value == AGENT_TOOL_HANDLER_RESULT_SCHEMA
-        )
-    })
-}
-
-fn entry_for_key<'a>(entries: &'a [DictEntry], key: &str) -> Option<&'a DictEntry> {
-    entries
-        .iter()
-        .find(|entry| key_name(&entry.key).as_deref() == Some(key))
-}
-
-fn key_name(node: &SNode) -> Option<String> {
-    match &node.node {
-        Node::StringLiteral(value) | Node::RawStringLiteral(value) | Node::Identifier(value) => {
-            Some(value.clone())
-        }
-        _ => None,
-    }
+    entry_for_key(entries, "outcome").is_some()
+        && entry_for_key(entries, "text").is_some()
+        && entry_for_key(entries, "data").is_some()
+        && entry_for_key(entries, "schema").is_some_and(|entry| {
+            matches!(
+                &entry.value.node,
+                Node::StringLiteral(value) | Node::RawStringLiteral(value)
+                    if value == AGENT_TOOL_HANDLER_RESULT_SCHEMA
+            )
+        })
 }
 
 fn make_diagnostic(span: Span) -> LintDiagnostic {
@@ -176,7 +165,7 @@ fn make_diagnostic(span: Span) -> LintDiagnostic {
         severity: LintSeverity::Error,
         suggestion: Some(
             "return a typed struct whose type declares the outcome, or the \
-             `harn.agent_tool_handler_result.v1` envelope for a text result."
+             `harn.agent_tool_handler_result.v2` envelope with an explicit outcome for a text result."
                 .to_string(),
         ),
         fix: None,

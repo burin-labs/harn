@@ -92,8 +92,8 @@ versions.
 | Command                        | Notes                                                    |
 | ------------------------------ | -------------------------------------------------------- |
 | `harn check --json`            | Per-file static check diagnostics + summary              |
-| `harn check provider-matrix --json` | Provider/model capability matrix                    |
-| `harn check connector-matrix --json` | Connector package capability matrix                |
+| `harn check --provider-matrix --json` | Provider/model capability matrix                  |
+| `harn check --connector-matrix --json` | Connector package capability matrix              |
 | `harn fmt --json`              | Per-file formatting result for write and check modes     |
 | `harn lint --json`             | Per-file lint diagnostics + autofix availability         |
 | `harn parse --json`            | Tagged Harn AST with byte spans                          |
@@ -108,7 +108,7 @@ versions.
 | `harn routes --json`           | Trigger route + budget + capability inventory            |
 | `harn dev --watch --json`      | Streaming NDJSON incremental rebuild events              |
 | `harn time run --json`         | Per-phase wall-clock + per-LLM/tool-call latency         |
-| `harn fix plan --json` / `apply --json` | Repair plan or applied edits, plus skipped invalid files |
+| `harn fix --plan --json` / `--apply --json` | Repair plan or applied edits, plus skipped invalid files |
 | `harn pack --json`             | `.harnpack` bundle build summary (inline schema)         |
 | `harn doctor --json`           | Capability matrix: host, targets, providers, effects     |
 | `harn doctor sandbox --json`   | Process-sandbox conformance: every contract case run live, with its verdict |
@@ -304,7 +304,7 @@ ranges are inclusive, one-based physical line numbers.
   not set).
 - `--json` is intentionally orthogonal to `--fix`: agents plan
   repairs from the report and apply them in a follow-up `harn lint
-  --fix` or `harn fix apply`.
+  --fix` or `harn fix --apply`.
 - `--changed-from <REV>` adds `data.changed` without changing the ordinary lint
   payload. It records the requested and resolved `from`/`to` commits plus every
   evaluated source path, change status, previous rename/copy path when present,
@@ -400,12 +400,12 @@ a plain replay. A plan that fails to load or evaluate exits non-zero with
 ### `harn test --json-out`
 
 User-test reports are standalone JSON documents rather than envelopes. Schema
-v3 includes typed timeout and phase records, suite-level timing and aggregate
-work attribution, and optional captured output:
+v5 includes per-case counted VM work, typed timeout and phase records,
+suite-level timing and aggregate work attribution, and optional captured output:
 
 ```json
 {
-  "schemaVersion": 3,
+  "schemaVersion": 5,
   "suite": "user",
   "root": "/workspace/tests",
   "duration_ms": 31,
@@ -444,6 +444,7 @@ work attribution, and optional captured output:
     "outcome": "timed_out",
     "duration_ms": 30,
     "timeout": { "phase": "execute", "limit_ms": 30 },
+    "work": { "vm_steps": 120 },
     "phases": {
       "setup_ms": 0,
       "compile_ms": 0,
@@ -471,6 +472,14 @@ distribution has `sample_count: 0` and `null` for every duration statistic.
 Discovery and worker-start error rows are not duration samples. Aggregate
 phases are cumulative worker-time and can exceed suite wall time under parallel
 execution. Nested module values overlap setup/execute and are never additive.
+
+`work` is always present. It is `null` when no case VM was constructed;
+`{"vm_steps": 0}` means recording was enabled and no instructions ran.
+`vm_steps` counts decoded bytecode dispatches from VM construction through
+teardown, including child VMs and failing instructions. It excludes native
+builtin internals, shared suite compilation, and successful file-scoped fixtures.
+Counts are stable for identical instruction sequences on the same Harn build.
+Timeouts and nondeterministic control flow can change the executed sequence.
 
 ### `harn test conformance --json`
 
@@ -520,12 +529,13 @@ parallel paths, unless `--allow-empty` is passed.
 ### `harn serve test`
 
 The JSON-RPC `initialize` result advertises
-`capabilities.test_run.schema_version: 4`. Each `test/run` result uses
-snake-case `schema_version: 4` and contains worker identity, run/cache counters,
+`capabilities.test_run.schema_version: 5`. Each `test/run` result uses
+snake-case `schema_version: 5` and contains worker identity, run/cache counters,
 and `summary`. The summary is the user-runner shape above: `results`, verdict
 counts including `skipped`, wall duration, `timing`, and cumulative `aggregate`. Each executed result
 carries optional typed `timeout` and measured `phases` with nested module
-attribution; discovery and worker-start errors omit unavailable phases.
+attribution and `work.vm_steps`; discovery and worker-start errors report
+`work: null` and omit unavailable phases.
 
 ### `harn run --emit-summary-json`
 

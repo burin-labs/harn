@@ -435,6 +435,7 @@ impl DrainDecisionReceipt {
 
 /// Errors surfaced when minting / verifying / replaying receipts.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum LifecycleReceiptError {
     SignatureAlgorithmMismatch {
         expected: String,

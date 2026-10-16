@@ -151,6 +151,7 @@ pub struct ReplayDivergence {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum ReplayOracleError {
     InvalidTrace(String),
     InvalidAllowlistPath(String),

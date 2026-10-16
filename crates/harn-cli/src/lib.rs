@@ -1,5 +1,15 @@
 #![recursion_limit = "256"]
 
+// The CLI requires hostlib. Without it the build fails with over a hundred
+// resolution errors, so this one comes first and names the cause (harn#7665).
+// Lean embedding is supported on `harn-serve` and `harn-vm` instead.
+#[cfg(not(feature = "hostlib"))]
+compile_error!(
+    "harn-cli requires the `hostlib` feature. Build with default features, or with \
+     `--no-default-features --features hostlib` to drop only mimalloc. For a build \
+     without hostlib, embed `harn-serve` or `harn-vm` instead."
+);
+
 pub mod acp;
 mod bootstrap;
 pub mod cli;
@@ -30,8 +40,10 @@ mod runtime;
 pub mod skill_loader;
 pub mod skill_provenance;
 mod source_exec;
+mod spend_policy;
 pub mod test_report;
 pub mod test_runner;
+mod test_shard_coverage;
 pub mod test_timing {
     pub use harn_test_runner::DurationSummary;
 }
@@ -41,8 +53,7 @@ mod typecheck_imports;
 mod worker_tenant;
 pub use commands::dispatch_explain::DISPATCH_AUDIT_SCHEMA_VERSION;
 pub(crate) use compiler_context::{
-    compiler_for_source, compiler_for_standalone_source, compiler_with_imported_enum_candidates,
-    ensure_builtin_signatures_installed,
+    compiler_for_source, compiler_for_standalone_source, ensure_builtin_signatures_installed,
 };
 pub use harn_skills::{get_embedded_skill, list_embedded_skills, EmbeddedSkill, SkillFrontmatter};
 // Items that used to live directly in this file. A bare item at the crate
@@ -58,7 +69,7 @@ pub(crate) use self::source_exec::*;
 use clap::{error::ErrorKind, CommandFactory, Parser as ClapParser};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Once};
-use std::{env, fs, panic, process, thread};
+use std::{env, fs, panic, process};
 
 use cli::{
     Cli, Command, CompletionShell, EvalCommand, GuardCommand, MergeCaptainCommand,
@@ -97,23 +108,31 @@ pub(crate) fn install_default_hostlib(_vm: &mut harn_vm::Vm) {}
 pub fn run() {
     install_broken_pipe_panic_hook();
     harn_vm::initialize_runtime_assets();
-    let raw_args = normalize_serve_args(bootstrap::args_after_pre_runtime_command());
+    // Pre-runtime commands stay on the main thread: the namespace helper must
+    // run while the process still has exactly one thread.
+    let raw_args = bootstrap::args_after_pre_runtime_command();
     // Defeat rlib dead-code stripping of `#[harn_builtin]`-emitted statics
     // (linkme issue #36). Without this touch the linker can drop every
     // builtin's distributed-slice entry, leaving `ALL_BUILTIN_DEFS` empty
     // and surfacing as a swarm of `HARN-NAM-002` errors at first call.
     harn_vm::stdlib::force_link();
 
-    ensure_builtin_signatures_installed();
+    #[cfg(target_os = "linux")]
+    if let Err(error) = commands::serve::confine_before_runtime(&raw_args) {
+        eprintln!("error: {error}");
+        process::exit(1);
+    }
 
-    let handle = thread::Builder::new()
+    let handle = harn_parser::runtime_stack::builder()
         .name("harn-cli".to_string())
-        .stack_size(CLI_RUNTIME_STACK_SIZE)
         .spawn(move || {
-            // Parsing `Cli` materializes the largest command variant on the
-            // current stack. Keep both bootstrap parsing passes on the CLI's
-            // explicitly sized thread; the default Windows process stack is
-            // smaller and can overflow as the command surface grows.
+            // Building or parsing `Cli` materializes the whole command tree
+            // on the current stack, and `harn serve` builds it to recognize
+            // its transport names. Keep every pass over the command surface
+            // on the CLI's explicitly sized thread; the 1 MiB Windows main
+            // thread overflowed on `harn serve mcp`.
+            ensure_builtin_signatures_installed();
+            let raw_args = normalize_serve_args(raw_args);
             let runtime_mode = cli_runtime_mode(&raw_args);
             let runtime = build_cli_runtime(runtime_mode);
             runtime.block_on(async_main(raw_args, runtime_mode));

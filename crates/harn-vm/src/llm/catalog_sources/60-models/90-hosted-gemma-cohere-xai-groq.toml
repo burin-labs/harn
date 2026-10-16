@@ -9,7 +9,8 @@ name = "Gemma 4 31B (OpenRouter)"
 provider = "openrouter"
 context_window = 262144
 capabilities = ["tools", "vision", "streaming", "thinking"]
-pricing = { input_per_mtok = 0.09, output_per_mtok = 0.34, cache_read_per_mtok = 0.05 }
+# OpenRouter route card, 2026-10-15; other Gemma hosts have separate cards.
+pricing = { input_per_mtok = 0.20, output_per_mtok = 0.40, cache_read_per_mtok = 0.05 }
 tier = "frontier"
 open_weight = true
 strengths = ["vision", "reasoning", "coding", "cheap"]
@@ -18,7 +19,7 @@ name = "Gemma 4 26B MoE (OpenRouter)"
 provider = "openrouter"
 context_window = 262144
 capabilities = ["tools", "vision", "streaming", "thinking"]
-pricing = { input_per_mtok = 0.09, output_per_mtok = 0.30, cache_read_per_mtok = 0.05 }
+pricing = { input_per_mtok = 0.0765, output_per_mtok = 0.255, cache_read_per_mtok = 0.0425 }
 tier = "mid"
 open_weight = true
 strengths = ["vision", "cheap", "speed"]
@@ -38,9 +39,12 @@ capabilities = ["tools", "vision", "streaming", "thinking"]
 tier = "mid"
 open_weight = true
 strengths = ["vision", "cheap", "speed"]
+# Together lists this model but a 2026-09-29 chat call returned "Unable to
+# access non-serverless model"; it needs a dedicated endpoint.
 [models."google/gemma-4-31B-it"]
 name = "Gemma 4 31B (Together)"
 provider = "together"
+availability = "dedicated"
 context_window = 262144
 capabilities = ["tools", "vision", "streaming", "thinking"]
 pricing = { input_per_mtok = 0.39, output_per_mtok = 0.97 }
@@ -82,6 +86,27 @@ tier = "mid"
 open_weight = true
 strengths = ["speed", "cheap", "tool_use", "reasoning"]
 
+# Fireworks publishes contextLength=0 for this serverless route. Direct probe
+# 2026-10-11 accepted 262132 prompt tokens plus 2 output tokens and rejected
+# 262142 prompt tokens with "model maximum context length: 262141". Use the
+# measured ceiling rather than the training window or another host's limit.
+# Native tool call/result round trip and a red-image check both returned 200.
+[models."accounts/fireworks/models/qwen3p8-max"]
+name = "Qwen3.8 Max (Fireworks)"
+provider = "fireworks"
+context_window = 262141
+logical_model = "qwen3.8-max"
+equivalence_group = "qwen3.8-max"
+served_variant = "fireworks"
+wire_model = "accounts/fireworks/models/qwen3p8-max"
+api_dialect = "openai_chat"
+capabilities = ["tools", "vision", "streaming", "thinking", "prompt_caching"]
+# https://fireworks.ai/models/fireworks/qwen3p8-max, read 2026-10-11.
+pricing = { input_per_mtok = 2.00, output_per_mtok = 6.00, cache_read_per_mtok = 0.25 }
+tier = "frontier"
+open_weight = false
+strengths = ["coding", "agentic", "tool_use", "reasoning", "vision"]
+
 # Fireworks-hosted gpt-oss routes. Without a catalog row the wire id
 # `accounts/fireworks/models/gpt-oss-*` has NO context window, so the
 # agent's auto-compaction budget falls back to a placeholder and the prompt
@@ -108,9 +133,17 @@ tier = "mid"
 open_weight = true
 strengths = ["speed", "cheap", "tool_use", "reasoning"]
 
+# Unlike the other Fireworks rows marked dedicated here, this model's metadata
+# reports `supportsServerless: true`. Its only deployment is a public but
+# non-default one, so this plain id returns HTTP 404 "Model not found,
+# inaccessible, and/or not deployed" (2026-10-01 and 2026-10-02), while the
+# deployment-qualified id
+# `accounts/fireworks/models/glm-5p2#accounts/fireworks/deployments/jpmnep80`
+# answers 200. The plain id is therefore not routable on the API-key path.
 [models."accounts/fireworks/models/glm-5p2"]
 name = "GLM 5.2 (Fireworks)"
 provider = "fireworks"
+availability = "dedicated"
 context_window = 1048576
 logical_model = "glm-5.2"
 equivalence_group = "glm-5.2"
@@ -176,9 +209,13 @@ tier = "mid"
 open_weight = true
 strengths = ["speed", "cheap", "tool_use", "reasoning", "long_context", "vision"]
 
+# Fireworks lists this model but a 2026-10-01 chat call returned HTTP 404
+# "Model not found, inaccessible, and/or not deployed"; it needs a dedicated
+# deployment.
 [models."accounts/fireworks/models/deepseek-v4-flash-0731"]
 name = "DeepSeek V4 Flash 0731 (Fireworks)"
 provider = "fireworks"
+availability = "dedicated"
 context_window = 1048576
 logical_model = "deepseek-v4-flash-0731"
 equivalence_group = "deepseek-v4-flash"
@@ -191,9 +228,13 @@ tier = "mid"
 open_weight = true
 strengths = ["speed", "cheap", "tool_use", "reasoning", "long_context"]
 
+# Fireworks lists this model but a 2026-10-01 chat call returned HTTP 404
+# "Model not found, inaccessible, and/or not deployed"; it needs a dedicated
+# deployment.
 [models."accounts/fireworks/models/deepseek-v4-pro-0813"]
 name = "DeepSeek V4 Pro 0813 (Fireworks)"
 provider = "fireworks"
+availability = "dedicated"
 context_window = 1048576
 logical_model = "deepseek-v4-pro-0813"
 equivalence_group = "deepseek-v4-pro-0813"
@@ -221,9 +262,16 @@ tier = "frontier"
 open_weight = true
 strengths = ["coding", "agentic", "long_context", "tool_use", "reasoning", "vision"]
 
+# Fireworks lists this model READY with `supportsServerless: true`, but its
+# serverless chat endpoint does not answer. On 2026-10-02 two non-streaming
+# requests and one streaming request each returned 0 bytes in 150 s, while
+# `deepseek-v4p1-flash` on the same key answered in 1.4 s; the hosted provider
+# contract probe timed out on every request to it on 2026-09-28 and 2026-10-02.
+# Until a serverless request answers again it needs a dedicated deployment.
 [models."accounts/fireworks/models/nemotron-lightning-3p5-30b-a3b"]
 name = "Nemotron 3.5 Lightning 30B A3B (Fireworks)"
 provider = "fireworks"
+availability = "dedicated"
 context_window = 262144
 logical_model = "nemotron-3.5-lightning-30b-a3b"
 equivalence_group = "nemotron-3.5-lightning-30b-a3b"
@@ -236,9 +284,13 @@ tier = "mid"
 open_weight = true
 strengths = ["speed", "coding", "agentic", "reasoning", "tool_use", "long_context"]
 
+# Fireworks lists this model but a 2026-10-01 chat call returned HTTP 404
+# "Model not found, inaccessible, and/or not deployed"; it needs a dedicated
+# deployment.
 [models."accounts/fireworks/models/deepseek-v4-pro"]
 name = "DeepSeek V4 Pro (Fireworks)"
 provider = "fireworks"
+availability = "dedicated"
 context_window = 1048576
 logical_model = "deepseek-v4-pro"
 equivalence_group = "deepseek-v4-pro"
@@ -253,9 +305,13 @@ tier = "frontier"
 open_weight = true
 strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context"]
 
+# Fireworks lists this model but a 2026-10-01 chat call returned HTTP 404
+# "Model not found, inaccessible, and/or not deployed"; it needs a dedicated
+# deployment.
 [models."accounts/fireworks/models/kimi-k2p6"]
 name = "Kimi K2.6 (Fireworks)"
 provider = "fireworks"
+availability = "dedicated"
 context_window = 262144
 logical_model = "moonshot-kimi-k2.6"
 equivalence_group = "moonshot-kimi-k2.6"
@@ -270,9 +326,13 @@ tier = "frontier"
 open_weight = true
 strengths = ["coding", "agentic", "long_context", "tool_use", "reasoning", "vision"]
 
+# Fireworks lists this model but a 2026-10-01 chat call returned HTTP 404
+# "Model not found, inaccessible, and/or not deployed"; it needs a dedicated
+# deployment.
 [models."accounts/fireworks/models/kimi-k2p7-code"]
 name = "Kimi K2.7 Code (Fireworks)"
 provider = "fireworks"
+availability = "dedicated"
 context_window = 262144
 logical_model = "moonshot-kimi-k2.7-code"
 equivalence_group = "moonshot-kimi-k2.7-code"
@@ -308,7 +368,7 @@ strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context", "visi
 [models."qwen/qwen3.8-27b"]
 name = "Qwen3.8 27B (Groq)"
 provider = "groq"
-context_window = 131042
+context_window = 131072
 logical_model = "qwen3.8-27b"
 equivalence_group = "qwen3.8-27b"
 served_variant = "groq-lpu-preview"
@@ -324,6 +384,29 @@ pricing = { input_per_mtok = 0.80, output_per_mtok = 4.00, cache_read_per_mtok =
 tier = "mid"
 open_weight = true
 strengths = ["speed", "coding", "tool_use", "reasoning", "vision"]
+
+# Command A+ through OpenRouter's single Cohere endpoint (listed 2026-09-22 as
+# `cohere/command-a-plus`, canonical `command-a-plus-05-2026`; 192,000
+# context, 64,000 max output, text and image input, $0.30 / $0.15 cached /
+# $1.50). Cohere's own docs give 128K context and publish no per-token price.
+# Probed 2026-10-09 pinned to that endpoint: a native tool call, the
+# tool-result round trip and effort `high` returned 200. With reasoning off the
+# model wrote its deliberation into the visible answer ("The user asks: ..."),
+# so prefer leaving reasoning on. OpenRouter lists no `tool_choice` for it.
+[models."cohere/command-a-plus"]
+name = "Command A+ (via OpenRouter)"
+provider = "openrouter"
+context_window = 192000
+released = "2026-09-22"
+logical_model = "command-a-plus-05-2026"
+equivalence_group = "command-a-plus-05-2026"
+served_variant = "openrouter"
+api_dialect = "openai_chat"
+capabilities = ["tools", "streaming", "thinking", "vision", "prompt_caching"]
+pricing = { input_per_mtok = 0.30, output_per_mtok = 1.50, cache_read_per_mtok = 0.15 }
+tier = "frontier"
+open_weight = true
+strengths = ["agentic", "tool_use", "reasoning", "multilingual", "vision"]
 
 # Cohere and xAI first-party routes. Both are OpenAI-compatible enough for
 # Harn's chat-completions adapter, but their economics are unusual: Command A+
@@ -352,12 +435,15 @@ logical_model = "grok-4.3"
 equivalence_group = "grok-4.3"
 api_dialect = "openai_chat_compat"
 capabilities = ["tools", "streaming", "thinking", "vision", "prompt_caching"]
-pricing = { input_per_mtok = 1.25, output_per_mtok = 2.50, cache_read_per_mtok = 0.20 }
+pricing = { input_per_mtok = 1.25, output_per_mtok = 2.50, cache_read_per_mtok = 0.20, input_token_bands = [{ minimum_input_tokens = 200001, input_multiplier = 2.0, output_multiplier = 2.0 }] }
 rate_limits = { source_url = "https://docs.x.ai/developers/models", last_verified = "2026-06-20" }
 tier = "frontier"
 open_weight = false
 strengths = ["agentic", "tool_use", "reasoning", "vision", "long_context"]
 
+# Grok 4.3 and Grok Build 0.1 bill every token at 2x once a request reaches
+# 200K input tokens, cache reads included (docs.x.ai model pages, read
+# 2026-10-09), like Grok 4.5-4.7; the band was missing from both rows.
 [models."grok-build-0.1"]
 name = "Grok Build 0.1"
 provider = "xai"
@@ -366,7 +452,7 @@ logical_model = "grok-code-fast-1"
 equivalence_group = "grok-code-fast-1"
 api_dialect = "openai_chat_compat"
 capabilities = ["tools", "streaming", "thinking", "vision", "prompt_caching"]
-pricing = { input_per_mtok = 1.00, output_per_mtok = 2.00, cache_read_per_mtok = 0.20 }
+pricing = { input_per_mtok = 1.00, output_per_mtok = 2.00, cache_read_per_mtok = 0.20, input_token_bands = [{ minimum_input_tokens = 200001, input_multiplier = 2.0, output_multiplier = 2.0 }] }
 rate_limits = { rpm = 1800, tpm = 10000000, tier = "us-east-1", source_url = "https://docs.x.ai/developers/models/grok-code-fast-1", last_verified = "2026-06-05" }
 tier = "frontier"
 open_weight = false

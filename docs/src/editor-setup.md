@@ -90,7 +90,7 @@ The extension gives them:
 The keyword, filter, and section vocabulary in that grammar is generated from
 the runtime's template engine, so the editor accepts exactly what
 `harness.fs.render_prompt(...)` does. Contributors changing the template language should edit
-`crates/harn-vm/src/stdlib/template/vocabulary.rs` and run
+`crates/harn-prompt-syntax/src/vocabulary.rs` and run
 `make gen-prompt-grammar` rather than hand-editing the grammar; CI fails on
 drift.
 

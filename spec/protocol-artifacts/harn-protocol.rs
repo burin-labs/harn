@@ -680,6 +680,42 @@ pub struct HarnExternalActionPolicyEvaluation {
     pub reason_code: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub policy_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub review: Option<HarnExternalActionDecisionReview>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnExternalActionReviewProbability {
+    pub label: String,
+    pub probability: serde_json::Number,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnExternalActionReviewAnswer {
+    pub question_id: String,
+    pub kind: String,
+    pub confidence: serde_json::Number,
+    pub confidence_kind: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verdict: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub probability: Option<serde_json::Number>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub score: Option<serde_json::Number>,
+    pub probabilities: Vec<HarnExternalActionReviewProbability>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnExternalActionDecisionReview {
+    pub receipt: String,
+    pub outcome: String,
+    pub rule: String,
+    pub applied: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub minimum_confidence: Option<serde_json::Number>,
+    pub answers: Vec<HarnExternalActionReviewAnswer>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -1486,6 +1522,7 @@ pub enum HarnAgentEventKind {
     HostToolResult,
     InputGuardrailVerdict,
     IterationEnd,
+    SessionHealth,
     IterationStart,
     JudgeDecision,
     JudgeStarted,
@@ -1512,6 +1549,7 @@ pub enum HarnAgentEventKind {
     ToolBatchDisposition,
     ToolCallAudit,
     ToolFormatOverride,
+    TurnPhaseChanged,
     TypedCheckpoint,
     Other(String),
 }
@@ -1537,6 +1575,7 @@ impl HarnAgentEventKind {
             Self::HostToolResult => "host_tool_result",
             Self::InputGuardrailVerdict => "input_guardrail_verdict",
             Self::IterationEnd => "iteration_end",
+            Self::SessionHealth => "session_health",
             Self::IterationStart => "iteration_start",
             Self::JudgeDecision => "judge_decision",
             Self::JudgeStarted => "judge_started",
@@ -1563,6 +1602,7 @@ impl HarnAgentEventKind {
             Self::ToolBatchDisposition => "tool_batch_disposition",
             Self::ToolCallAudit => "tool_call_audit",
             Self::ToolFormatOverride => "tool_format_override",
+            Self::TurnPhaseChanged => "turn_phase_changed",
             Self::TypedCheckpoint => "typed_checkpoint",
             Self::Other(value) => value,
         }
@@ -1603,6 +1643,7 @@ impl<'de> Deserialize<'de> for HarnAgentEventKind {
             "host_tool_result" => Self::HostToolResult,
             "input_guardrail_verdict" => Self::InputGuardrailVerdict,
             "iteration_end" => Self::IterationEnd,
+            "session_health" => Self::SessionHealth,
             "iteration_start" => Self::IterationStart,
             "judge_decision" => Self::JudgeDecision,
             "judge_started" => Self::JudgeStarted,
@@ -1629,6 +1670,7 @@ impl<'de> Deserialize<'de> for HarnAgentEventKind {
             "tool_batch_disposition" => Self::ToolBatchDisposition,
             "tool_call_audit" => Self::ToolCallAudit,
             "tool_format_override" => Self::ToolFormatOverride,
+            "turn_phase_changed" => Self::TurnPhaseChanged,
             "typed_checkpoint" => Self::TypedCheckpoint,
             _ => Self::Other(value),
         })
@@ -1814,6 +1856,8 @@ pub const ACP_DISPATCHED_METHOD_HARN_PROVIDERCATALOG: &str = "_harn/providerCata
 pub const ACP_DISPATCHED_METHOD_HARN_SESSION_RECAP_QUERY: &str = "harn.session_recap.query";
 pub const ACP_DISPATCHED_METHOD_HARN_SESSION_TIMELINE_QUERY: &str = "harn.session_timeline.query";
 pub const ACP_DISPATCHED_METHOD_HARN_SESSION_VIEW_QUERY: &str = "harn.session_view.query";
+pub const ACP_DISPATCHED_METHOD_HARN_SESSION_HISTORY_BOUNDARIES: &str =
+    "harn.session_history.boundaries";
 pub const ACP_DISPATCHED_METHOD_HARN_SESSION_TIMELINE_SUBSCRIBE: &str =
     "harn.session_timeline.subscribe";
 pub const ACP_DISPATCHED_METHOD_HARN_SESSION_TIMELINE_UNSUBSCRIBE: &str =
@@ -1888,6 +1932,7 @@ pub const ACP_DISPATCHED_METHODS: &[&str] = &[
     "harn.session_recap.query",
     "harn.session_timeline.query",
     "harn.session_view.query",
+    "harn.session_history.boundaries",
     "harn.session_timeline.subscribe",
     "harn.session_timeline.unsubscribe",
     "session/new",
@@ -1965,6 +2010,8 @@ pub const ACP_HANDLED_METHOD_HARN_PROVIDERCATALOG: &str = "_harn/providerCatalog
 pub const ACP_HANDLED_METHOD_HARN_SESSION_RECAP_QUERY: &str = "harn.session_recap.query";
 pub const ACP_HANDLED_METHOD_HARN_SESSION_TIMELINE_QUERY: &str = "harn.session_timeline.query";
 pub const ACP_HANDLED_METHOD_HARN_SESSION_VIEW_QUERY: &str = "harn.session_view.query";
+pub const ACP_HANDLED_METHOD_HARN_SESSION_HISTORY_BOUNDARIES: &str =
+    "harn.session_history.boundaries";
 pub const ACP_HANDLED_METHOD_HARN_SESSION_TIMELINE_SUBSCRIBE: &str =
     "harn.session_timeline.subscribe";
 pub const ACP_HANDLED_METHOD_HARN_SESSION_TIMELINE_UNSUBSCRIBE: &str =
@@ -2040,6 +2087,7 @@ pub const ACP_HANDLED_METHODS: &[&str] = &[
     "harn.session_recap.query",
     "harn.session_timeline.query",
     "harn.session_view.query",
+    "harn.session_history.boundaries",
     "harn.session_timeline.subscribe",
     "harn.session_timeline.unsubscribe",
     "session/new",
@@ -2281,6 +2329,7 @@ pub const HARN_AGENT_EVENT_KIND_HOST_ATTACHMENT: &str = "host_attachment";
 pub const HARN_AGENT_EVENT_KIND_HOST_TOOL_RESULT: &str = "host_tool_result";
 pub const HARN_AGENT_EVENT_KIND_INPUT_GUARDRAIL_VERDICT: &str = "input_guardrail_verdict";
 pub const HARN_AGENT_EVENT_KIND_ITERATION_END: &str = "iteration_end";
+pub const HARN_AGENT_EVENT_KIND_SESSION_HEALTH: &str = "session_health";
 pub const HARN_AGENT_EVENT_KIND_ITERATION_START: &str = "iteration_start";
 pub const HARN_AGENT_EVENT_KIND_JUDGE_DECISION: &str = "judge_decision";
 pub const HARN_AGENT_EVENT_KIND_JUDGE_STARTED: &str = "judge_started";
@@ -2310,6 +2359,7 @@ pub const HARN_AGENT_EVENT_KIND_STEP_JUDGE_DECISION: &str = "step_judge_decision
 pub const HARN_AGENT_EVENT_KIND_TOOL_BATCH_DISPOSITION: &str = "tool_batch_disposition";
 pub const HARN_AGENT_EVENT_KIND_TOOL_CALL_AUDIT: &str = "tool_call_audit";
 pub const HARN_AGENT_EVENT_KIND_TOOL_FORMAT_OVERRIDE: &str = "tool_format_override";
+pub const HARN_AGENT_EVENT_KIND_TURN_PHASE_CHANGED: &str = "turn_phase_changed";
 pub const HARN_AGENT_EVENT_KIND_TYPED_CHECKPOINT: &str = "typed_checkpoint";
 
 /// Pipeline-loop milestone kinds emitted via `_harn/agentEvent`.
@@ -2332,6 +2382,7 @@ pub const HARN_AGENT_EVENT_KINDS: &[&str] = &[
     "host_tool_result",
     "input_guardrail_verdict",
     "iteration_end",
+    "session_health",
     "iteration_start",
     "judge_decision",
     "judge_started",
@@ -2358,12 +2409,15 @@ pub const HARN_AGENT_EVENT_KINDS: &[&str] = &[
     "tool_batch_disposition",
     "tool_call_audit",
     "tool_format_override",
+    "turn_phase_changed",
     "typed_checkpoint",
 ];
 
 pub const AGENT_TERMINAL_CLASS_CONTEXT_OVERFLOW: &str = "context_overflow";
 pub const AGENT_TERMINAL_CLASS_PROVIDER_MISCONFIGURED: &str = "provider_misconfigured";
 pub const AGENT_TERMINAL_CLASS_PROVIDER_UNAVAILABLE: &str = "provider_unavailable";
+pub const AGENT_TERMINAL_CLASS_PROVIDER_CONTENT_POLICY: &str = "provider_content_policy";
+pub const AGENT_TERMINAL_CLASS_PROVIDER_BILLING: &str = "provider_billing";
 pub const AGENT_TERMINAL_CLASS_RATE_LIMITED: &str = "rate_limited";
 pub const AGENT_TERMINAL_CLASS_TIMEOUT: &str = "timeout";
 pub const AGENT_TERMINAL_CLASS_RESOURCE_BUSY: &str = "resource_busy";
@@ -2372,12 +2426,15 @@ pub const AGENT_TERMINAL_CLASS_HOST_BRIDGE_UNIMPLEMENTED: &str = "host_bridge_un
 pub const AGENT_TERMINAL_CLASS_AGENT_LOOP_PROTOCOL_FAILURE: &str = "agent_loop_protocol_failure";
 pub const AGENT_TERMINAL_CLASS_PARSE_DROPPED: &str = "parse_dropped";
 pub const AGENT_TERMINAL_CLASS_GENERIC_THROW: &str = "generic_throw";
+pub const AGENT_TERMINAL_CLASS_MANAGED_SPEND_PAUSED: &str = "managed_spend_paused";
 
 /// Stable terminal classes carried by typed ACP prompt-error data. Superseded by `HarnAgentTerminalClass`; retained for one release so existing consumers keep compiling.
 pub const AGENT_TERMINAL_CLASSES: &[&str] = &[
     "context_overflow",
     "provider_misconfigured",
     "provider_unavailable",
+    "provider_content_policy",
+    "provider_billing",
     "rate_limited",
     "timeout",
     "resource_busy",
@@ -2386,6 +2443,7 @@ pub const AGENT_TERMINAL_CLASSES: &[&str] = &[
     "agent_loop_protocol_failure",
     "parse_dropped",
     "generic_throw",
+    "managed_spend_paused",
 ];
 
 pub const AGENT_TERMINAL_KIND_NATURAL: &str = "natural";
@@ -2436,6 +2494,8 @@ pub enum HarnAgentTerminalClass {
     ContextOverflow,
     ProviderMisconfigured,
     ProviderUnavailable,
+    ProviderContentPolicy,
+    ProviderBilling,
     RateLimited,
     Timeout,
     ResourceBusy,
@@ -2444,6 +2504,7 @@ pub enum HarnAgentTerminalClass {
     AgentLoopProtocolFailure,
     ParseDropped,
     GenericThrow,
+    ManagedSpendPaused,
     /// A wire value outside the vocabulary this binding was generated from. Preserved verbatim.
     Unrecognized(String),
 }
@@ -2455,6 +2516,8 @@ impl HarnAgentTerminalClass {
         Self::ContextOverflow,
         Self::ProviderMisconfigured,
         Self::ProviderUnavailable,
+        Self::ProviderContentPolicy,
+        Self::ProviderBilling,
         Self::RateLimited,
         Self::Timeout,
         Self::ResourceBusy,
@@ -2463,6 +2526,7 @@ impl HarnAgentTerminalClass {
         Self::AgentLoopProtocolFailure,
         Self::ParseDropped,
         Self::GenericThrow,
+        Self::ManagedSpendPaused,
     ];
 
     /// The JSON wire string for this value.
@@ -2471,6 +2535,8 @@ impl HarnAgentTerminalClass {
             Self::ContextOverflow => "context_overflow",
             Self::ProviderMisconfigured => "provider_misconfigured",
             Self::ProviderUnavailable => "provider_unavailable",
+            Self::ProviderContentPolicy => "provider_content_policy",
+            Self::ProviderBilling => "provider_billing",
             Self::RateLimited => "rate_limited",
             Self::Timeout => "timeout",
             Self::ResourceBusy => "resource_busy",
@@ -2479,6 +2545,7 @@ impl HarnAgentTerminalClass {
             Self::AgentLoopProtocolFailure => "agent_loop_protocol_failure",
             Self::ParseDropped => "parse_dropped",
             Self::GenericThrow => "generic_throw",
+            Self::ManagedSpendPaused => "managed_spend_paused",
             Self::Unrecognized(value) => value.as_str(),
         }
     }
@@ -2489,6 +2556,8 @@ impl HarnAgentTerminalClass {
             "context_overflow" => Self::ContextOverflow,
             "provider_misconfigured" => Self::ProviderMisconfigured,
             "provider_unavailable" => Self::ProviderUnavailable,
+            "provider_content_policy" => Self::ProviderContentPolicy,
+            "provider_billing" => Self::ProviderBilling,
             "rate_limited" => Self::RateLimited,
             "timeout" => Self::Timeout,
             "resource_busy" => Self::ResourceBusy,
@@ -2497,6 +2566,7 @@ impl HarnAgentTerminalClass {
             "agent_loop_protocol_failure" => Self::AgentLoopProtocolFailure,
             "parse_dropped" => Self::ParseDropped,
             "generic_throw" => Self::GenericThrow,
+            "managed_spend_paused" => Self::ManagedSpendPaused,
             other => Self::Unrecognized(other.to_string()),
         }
     }
@@ -2902,7 +2972,7 @@ impl std::fmt::Display for HarnLlmErrorKind {
     }
 }
 
-/// Canonical provider-failure reason carried in `reason` on the `harn.acp.prompt_error.v1` envelope. Owned by `harn_vm`'s `LlmErrorReason`. The sibling `code` field is a PROVIDER PASSTHROUGH with no closed set: it is opaque diagnostic text, and a host must never branch on it. Branch on `reason` instead.
+/// Canonical LLM failure reason carried in `reason` on the `harn.acp.prompt_error.v1` envelope. Owned by `harn_vm`'s `LlmErrorReason`. Includes local policy refusals before provider I/O. The sibling `code` field is opaque diagnostic text with no closed set; branch on `reason` instead.
 /// Open vocabulary: unit variants are the values this binding was generated from, and `Unrecognized` carries any other string verbatim so a newer Harn never breaks an older consumer.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(from = "String", into = "String")]
@@ -2921,6 +2991,8 @@ pub enum HarnLlmErrorReason {
     BillingLimit,
     OutputBudgetExhausted,
     Unknown,
+    PolicyDenied,
+    ManagedSpendPaused,
     /// A wire value outside the vocabulary this binding was generated from. Preserved verbatim.
     Unrecognized(String),
 }
@@ -2943,6 +3015,8 @@ impl HarnLlmErrorReason {
         Self::BillingLimit,
         Self::OutputBudgetExhausted,
         Self::Unknown,
+        Self::PolicyDenied,
+        Self::ManagedSpendPaused,
     ];
 
     /// The JSON wire string for this value.
@@ -2962,6 +3036,8 @@ impl HarnLlmErrorReason {
             Self::BillingLimit => "billing_limit",
             Self::OutputBudgetExhausted => "output_budget_exhausted",
             Self::Unknown => "unknown",
+            Self::PolicyDenied => "policy_denied",
+            Self::ManagedSpendPaused => "managed_spend_paused",
             Self::Unrecognized(value) => value.as_str(),
         }
     }
@@ -2983,6 +3059,8 @@ impl HarnLlmErrorReason {
             "billing_limit" => Self::BillingLimit,
             "output_budget_exhausted" => Self::OutputBudgetExhausted,
             "unknown" => Self::Unknown,
+            "policy_denied" => Self::PolicyDenied,
+            "managed_spend_paused" => Self::ManagedSpendPaused,
             other => Self::Unrecognized(other.to_string()),
         }
     }
@@ -3032,6 +3110,8 @@ pub const HARN_TOOL_LIFECYCLE_EXTENSION_FIELD_ERROR: &str = "error";
 pub const HARN_TOOL_LIFECYCLE_EXTENSION_FIELD_ERRORCATEGORY: &str = "errorCategory";
 pub const HARN_TOOL_LIFECYCLE_EXTENSION_FIELD_EXECUTIONDURATIONMS: &str = "executionDurationMs";
 pub const HARN_TOOL_LIFECYCLE_EXTENSION_FIELD_EXECUTOR: &str = "executor";
+pub const HARN_TOOL_LIFECYCLE_EXTENSION_FIELD_HEALTH: &str = "health";
+pub const HARN_TOOL_LIFECYCLE_EXTENSION_FIELD_INTENT: &str = "intent";
 pub const HARN_TOOL_LIFECYCLE_EXTENSION_FIELD_MUTATIONSTATUS: &str = "mutationStatus";
 pub const HARN_TOOL_LIFECYCLE_EXTENSION_FIELD_PARSING: &str = "parsing";
 pub const HARN_TOOL_LIFECYCLE_EXTENSION_FIELD_RAWINPUTPARTIAL: &str = "rawInputPartial";
@@ -3046,6 +3126,8 @@ pub const HARN_TOOL_LIFECYCLE_EXTENSION_FIELDS: &[&str] = &[
     "errorCategory",
     "executionDurationMs",
     "executor",
+    "health",
+    "intent",
     "mutationStatus",
     "parsing",
     "rawInputPartial",
@@ -3549,6 +3631,7 @@ pub struct ACPTranscriptCompactedUpdateMetaHarn {
     pub recap: Value,
     #[serde(rename = "sourceMeasurement")]
     pub source_measurement: Value,
+    pub classification: Value,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub replayed: Option<bool>,
 }
@@ -3648,6 +3731,86 @@ pub struct ACPWorkerUpdate {
     pub meta: ACPWorkerUpdateMeta,
 }
 
+#[derive(Clone, Copy)]
+enum SessionUpdateRule {
+    Required,
+    MinLen(u64),
+    Minimum(i64),
+    NonBlank,
+    Choices(&'static [&'static str]),
+    Present(&'static [(&'static str, SessionUpdateRule)]),
+    When(
+        &'static [&'static str],
+        &'static [(&'static str, SessionUpdateRule)],
+    ),
+    RequiredForPhase,
+}
+
+fn validate_session_update(
+    value: &Value,
+    rules: &[(&str, SessionUpdateRule)],
+) -> Result<(), String> {
+    for (path, rule) in rules {
+        let field = value.pointer(path);
+        let reason = match rule {
+            SessionUpdateRule::Required if field.is_none() => Some("is required"),
+            SessionUpdateRule::MinLen(minimum)
+                if field
+                    .and_then(Value::as_str)
+                    .is_some_and(|text| (text.chars().count() as u64) < *minimum) =>
+            {
+                Some("is too short")
+            }
+            SessionUpdateRule::Minimum(minimum)
+                if field
+                    .and_then(Value::as_i64)
+                    .is_some_and(|number| number < *minimum) =>
+            {
+                Some("is below its minimum")
+            }
+            SessionUpdateRule::NonBlank
+                if field
+                    .and_then(Value::as_str)
+                    .is_some_and(|text| text.trim().is_empty()) =>
+            {
+                Some("must not be blank")
+            }
+            SessionUpdateRule::Choices(choices)
+                if field
+                    .and_then(Value::as_str)
+                    .is_some_and(|text| !choices.contains(&text)) =>
+            {
+                Some("has an unknown value")
+            }
+            SessionUpdateRule::Present(children) if field.is_some() => {
+                validate_session_update(value, children)?;
+                None
+            }
+            SessionUpdateRule::When(choices, children)
+                if field
+                    .and_then(Value::as_str)
+                    .is_some_and(|text| choices.contains(&text)) =>
+            {
+                validate_session_update(value, children)?;
+                None
+            }
+            SessionUpdateRule::RequiredForPhase if field.is_none() => {
+                Some("is required for this phase")
+            }
+            _ => None,
+        };
+        if let Some(reason) = reason {
+            let path = path
+                .trim_start_matches('/')
+                .replace('/', ".")
+                .replace("~1", "/")
+                .replace("~0", "~");
+            return Err(format!("session update {path} {reason}"));
+        }
+    }
+    Ok(())
+}
+
 fn deserialize_present_session_update_value<'de, D: serde::Deserializer<'de>>(
     deserializer: D,
 ) -> Result<Option<Value>, D::Error> {
@@ -3679,1227 +3842,413 @@ pub enum ACPTypedSessionUpdate {
     Worker(ACPWorkerUpdate),
 }
 
+type SessionUpdateDecoder = fn(Value) -> Result<ACPTypedSessionUpdate, serde_json::Error>;
+
+#[rustfmt::skip]
+const ARTIFACT_RULES: &[(&str, SessionUpdateRule)] = &[
+    ("/_meta", SessionUpdateRule::Required),
+    ("/_meta", SessionUpdateRule::Present(&[
+        ("/_meta/harn", SessionUpdateRule::Required),
+        ("/_meta/harn", SessionUpdateRule::Present(&[
+            ("/_meta/harn/artifactId", SessionUpdateRule::Required),
+            ("/_meta/harn/artifactId", SessionUpdateRule::MinLen(1)),
+            ("/_meta/harn/metadata", SessionUpdateRule::Required),
+            ("/_meta/harn/provenance", SessionUpdateRule::Required),
+            ("/_meta/harn/sizeBytes", SessionUpdateRule::Minimum(0)),
+            ("/_meta/harn/spec", SessionUpdateRule::Required),
+            ("/_meta/harn/title", SessionUpdateRule::Required),
+        ])),
+    ])),
+    ("/sessionUpdate", SessionUpdateRule::Required),
+];
+
+#[rustfmt::skip]
+const AVAILABLE_COMMANDS_UPDATE_RULES: &[(&str, SessionUpdateRule)] = &[
+    ("/availableCommands", SessionUpdateRule::Required),
+    ("/sessionUpdate", SessionUpdateRule::Required),
+];
+
+#[rustfmt::skip]
+const FS_WATCH_RULES: &[(&str, SessionUpdateRule)] = &[
+    ("/_meta", SessionUpdateRule::Required),
+    ("/_meta", SessionUpdateRule::Present(&[
+        ("/_meta/harn", SessionUpdateRule::Required),
+        ("/_meta/harn", SessionUpdateRule::Present(&[
+            ("/_meta/harn/events", SessionUpdateRule::Required),
+            ("/_meta/harn/subscriptionId", SessionUpdateRule::Required),
+            ("/_meta/harn/subscriptionId", SessionUpdateRule::MinLen(1)),
+        ])),
+    ])),
+    ("/sessionUpdate", SessionUpdateRule::Required),
+];
+
+#[rustfmt::skip]
+const HANDOFF_RULES: &[(&str, SessionUpdateRule)] = &[
+    ("/_meta", SessionUpdateRule::Required),
+    ("/_meta", SessionUpdateRule::Present(&[
+        ("/_meta/harn", SessionUpdateRule::Required),
+        ("/_meta/harn", SessionUpdateRule::Present(&[
+            ("/_meta/harn/artifactId", SessionUpdateRule::Required),
+            ("/_meta/harn/artifactId", SessionUpdateRule::MinLen(1)),
+            ("/_meta/harn/handoff", SessionUpdateRule::Required),
+            ("/_meta/harn/handoffId", SessionUpdateRule::Required),
+            ("/_meta/harn/handoffId", SessionUpdateRule::MinLen(1)),
+        ])),
+    ])),
+    ("/sessionUpdate", SessionUpdateRule::Required),
+];
+
+#[rustfmt::skip]
+const HITL_REQUEST_RULES: &[(&str, SessionUpdateRule)] = &[
+    ("/_meta", SessionUpdateRule::Required),
+    ("/_meta", SessionUpdateRule::Present(&[
+        ("/_meta/harn", SessionUpdateRule::Required),
+        ("/_meta/harn", SessionUpdateRule::Present(&[
+            ("/_meta/harn/kind", SessionUpdateRule::Required),
+            ("/_meta/harn/payload", SessionUpdateRule::Required),
+            ("/_meta/harn/requestId", SessionUpdateRule::Required),
+            ("/_meta/harn/requestId", SessionUpdateRule::MinLen(1)),
+        ])),
+    ])),
+    ("/sessionUpdate", SessionUpdateRule::Required),
+];
+
+#[rustfmt::skip]
+const HITL_RESOLVED_RULES: &[(&str, SessionUpdateRule)] = &[
+    ("/_meta", SessionUpdateRule::Required),
+    ("/_meta", SessionUpdateRule::Present(&[
+        ("/_meta/harn", SessionUpdateRule::Required),
+        ("/_meta/harn", SessionUpdateRule::Present(&[
+            ("/_meta/harn/kind", SessionUpdateRule::Required),
+            ("/_meta/harn/outcome", SessionUpdateRule::Required),
+            ("/_meta/harn/requestId", SessionUpdateRule::Required),
+            ("/_meta/harn/requestId", SessionUpdateRule::MinLen(1)),
+        ])),
+    ])),
+    ("/sessionUpdate", SessionUpdateRule::Required),
+];
+
+#[rustfmt::skip]
+const LIVE_SESSION_CLIENT_RULES: &[(&str, SessionUpdateRule)] = &[
+    ("/_meta", SessionUpdateRule::Required),
+    ("/_meta", SessionUpdateRule::Present(&[
+        ("/_meta/harn", SessionUpdateRule::Required),
+        ("/_meta/harn", SessionUpdateRule::Present(&[
+            ("/_meta/harn/action", SessionUpdateRule::Required),
+            ("/_meta/harn/action", SessionUpdateRule::MinLen(1)),
+            ("/_meta/harn/state", SessionUpdateRule::Required),
+        ])),
+    ])),
+    ("/sessionUpdate", SessionUpdateRule::Required),
+];
+
+#[rustfmt::skip]
+const LOG_RULES: &[(&str, SessionUpdateRule)] = &[
+    ("/_meta", SessionUpdateRule::Required),
+    ("/_meta", SessionUpdateRule::Present(&[
+        ("/_meta/harn", SessionUpdateRule::Required),
+        ("/_meta/harn", SessionUpdateRule::Present(&[
+            ("/_meta/harn/level", SessionUpdateRule::Required),
+            ("/_meta/harn/message", SessionUpdateRule::Required),
+        ])),
+    ])),
+    ("/sessionUpdate", SessionUpdateRule::Required),
+];
+
+#[rustfmt::skip]
+const PROGRESS_RULES: &[(&str, SessionUpdateRule)] = &[
+    ("/_meta", SessionUpdateRule::Required),
+    ("/_meta", SessionUpdateRule::Present(&[
+        ("/_meta/harn", SessionUpdateRule::Required),
+        ("/_meta/harn", SessionUpdateRule::Present(&[
+            ("/_meta/harn/message", SessionUpdateRule::Required),
+            ("/_meta/harn/pendingCount", SessionUpdateRule::Minimum(0)),
+            ("/_meta/harn/phase", SessionUpdateRule::Required),
+            ("/_meta/harn/totalBytes", SessionUpdateRule::Minimum(0)),
+        ])),
+    ])),
+    ("/sessionUpdate", SessionUpdateRule::Required),
+];
+
+#[rustfmt::skip]
+const REMINDER_EMITTED_RULES: &[(&str, SessionUpdateRule)] = &[
+    ("/_meta", SessionUpdateRule::Required),
+    ("/_meta", SessionUpdateRule::Present(&[
+        ("/_meta/harn", SessionUpdateRule::Required),
+        ("/_meta/harn", SessionUpdateRule::Present(&[
+            ("/_meta/harn/reminder", SessionUpdateRule::Required),
+            ("/_meta/harn/reminder", SessionUpdateRule::Present(&[
+                ("/_meta/harn/reminder/body", SessionUpdateRule::Required),
+                ("/_meta/harn/reminder/reminderId", SessionUpdateRule::Required),
+                ("/_meta/harn/reminder/reminderId", SessionUpdateRule::MinLen(1)),
+                ("/_meta/harn/reminder/renderedRole", SessionUpdateRule::Required),
+                ("/_meta/harn/reminder/renderedRole", SessionUpdateRule::Choices(&["system", "developer", "user"])),
+                ("/_meta/harn/reminder/roleHint", SessionUpdateRule::Required),
+                ("/_meta/harn/reminder/roleHint", SessionUpdateRule::Choices(&["system", "developer", "user_block", "ephemeral_cache"])),
+                ("/_meta/harn/reminder/source", SessionUpdateRule::Required),
+                ("/_meta/harn/reminder/source", SessionUpdateRule::Choices(&["stdlib_provider", "hook", "bridge", "in_pipeline", "inherited"])),
+                ("/_meta/harn/reminder/tags", SessionUpdateRule::Required),
+                ("/_meta/harn/reminder/ttlTurns", SessionUpdateRule::Required),
+            ])),
+        ])),
+    ])),
+    ("/sessionUpdate", SessionUpdateRule::Required),
+];
+
+#[rustfmt::skip]
+const SKILL_ACTIVATED_RULES: &[(&str, SessionUpdateRule)] = &[
+    ("/_meta", SessionUpdateRule::Required),
+    ("/_meta", SessionUpdateRule::Present(&[
+        ("/_meta/harn", SessionUpdateRule::Required),
+        ("/_meta/harn", SessionUpdateRule::Present(&[
+            ("/_meta/harn/iteration", SessionUpdateRule::Required),
+            ("/_meta/harn/iteration", SessionUpdateRule::Minimum(0)),
+            ("/_meta/harn/skillName", SessionUpdateRule::Required),
+            ("/_meta/harn/skillName", SessionUpdateRule::MinLen(1)),
+            ("/_meta/harn/skillName", SessionUpdateRule::NonBlank),
+        ])),
+    ])),
+    ("/sessionUpdate", SessionUpdateRule::Required),
+];
+
+#[rustfmt::skip]
+const SKILL_DEACTIVATED_RULES: &[(&str, SessionUpdateRule)] = &[
+    ("/_meta", SessionUpdateRule::Required),
+    ("/_meta", SessionUpdateRule::Present(&[
+        ("/_meta/harn", SessionUpdateRule::Required),
+        ("/_meta/harn", SessionUpdateRule::Present(&[
+            ("/_meta/harn/iteration", SessionUpdateRule::Minimum(0)),
+            ("/_meta/harn/skillName", SessionUpdateRule::Required),
+            ("/_meta/harn/skillName", SessionUpdateRule::MinLen(1)),
+            ("/_meta/harn/skillName", SessionUpdateRule::NonBlank),
+        ])),
+    ])),
+    ("/sessionUpdate", SessionUpdateRule::Required),
+];
+
+#[rustfmt::skip]
+const SKILL_NARROW_RULES: &[(&str, SessionUpdateRule)] = &[
+    ("/_meta", SessionUpdateRule::Required),
+    ("/_meta", SessionUpdateRule::Present(&[
+        ("/_meta/harn", SessionUpdateRule::Required),
+        ("/_meta/harn", SessionUpdateRule::Present(&[
+            ("/_meta/harn/remainingTools", SessionUpdateRule::Required),
+            ("/_meta/harn/removedTools", SessionUpdateRule::Required),
+        ])),
+    ])),
+    ("/sessionUpdate", SessionUpdateRule::Required),
+];
+
+#[rustfmt::skip]
+const SKILL_SCOPE_TOOLS_RULES: &[(&str, SessionUpdateRule)] = &[
+    ("/_meta", SessionUpdateRule::Required),
+    ("/_meta", SessionUpdateRule::Present(&[
+        ("/_meta/harn", SessionUpdateRule::Required),
+        ("/_meta/harn", SessionUpdateRule::Present(&[
+            ("/_meta/harn/allowedTools", SessionUpdateRule::Required),
+            ("/_meta/harn/skillName", SessionUpdateRule::Required),
+            ("/_meta/harn/skillName", SessionUpdateRule::MinLen(1)),
+            ("/_meta/harn/skillName", SessionUpdateRule::NonBlank),
+        ])),
+    ])),
+    ("/sessionUpdate", SessionUpdateRule::Required),
+];
+
+#[rustfmt::skip]
+const STANCE_TRANSITION_RULES: &[(&str, SessionUpdateRule)] = &[
+    ("/_meta", SessionUpdateRule::Required),
+    ("/_meta", SessionUpdateRule::Present(&[
+        ("/_meta/harn", SessionUpdateRule::Required),
+        ("/_meta/harn", SessionUpdateRule::Present(&[
+            ("/_meta/harn/phase", SessionUpdateRule::Required),
+            ("/_meta/harn/phase", SessionUpdateRule::MinLen(1)),
+            ("/_meta/harn/phase", SessionUpdateRule::NonBlank),
+            ("/_meta/harn/phase", SessionUpdateRule::When(&["write_access_granted", "write_access_denied"], &[
+                ("/_meta/harn/escapeTool", SessionUpdateRule::RequiredForPhase),
+                ("/_meta/harn/escapeTool", SessionUpdateRule::Required),
+                ("/_meta/harn/escapeTool", SessionUpdateRule::MinLen(1)),
+                ("/_meta/harn/escapeTool", SessionUpdateRule::NonBlank),
+            ])),
+        ])),
+    ])),
+    ("/sessionUpdate", SessionUpdateRule::Required),
+];
+
+#[rustfmt::skip]
+const TOOL_SEARCH_QUERY_RULES: &[(&str, SessionUpdateRule)] = &[
+    ("/_meta", SessionUpdateRule::Required),
+    ("/_meta", SessionUpdateRule::Present(&[
+        ("/_meta/harn", SessionUpdateRule::Required),
+        ("/_meta/harn", SessionUpdateRule::Present(&[
+            ("/_meta/harn/name", SessionUpdateRule::Required),
+            ("/_meta/harn/name", SessionUpdateRule::MinLen(1)),
+            ("/_meta/harn/query", SessionUpdateRule::Required),
+            ("/_meta/harn/toolUseId", SessionUpdateRule::Required),
+            ("/_meta/harn/toolUseId", SessionUpdateRule::MinLen(1)),
+        ])),
+    ])),
+    ("/sessionUpdate", SessionUpdateRule::Required),
+];
+
+#[rustfmt::skip]
+const TOOL_SEARCH_RESULT_RULES: &[(&str, SessionUpdateRule)] = &[
+    ("/_meta", SessionUpdateRule::Required),
+    ("/_meta", SessionUpdateRule::Present(&[
+        ("/_meta/harn", SessionUpdateRule::Required),
+        ("/_meta/harn", SessionUpdateRule::Present(&[
+            ("/_meta/harn/promoted", SessionUpdateRule::Required),
+            ("/_meta/harn/toolUseId", SessionUpdateRule::Required),
+            ("/_meta/harn/toolUseId", SessionUpdateRule::MinLen(1)),
+        ])),
+    ])),
+    ("/sessionUpdate", SessionUpdateRule::Required),
+];
+
+#[rustfmt::skip]
+const TRANSCRIPT_COMPACTED_RULES: &[(&str, SessionUpdateRule)] = &[
+    ("/_meta", SessionUpdateRule::Required),
+    ("/_meta", SessionUpdateRule::Present(&[
+        ("/_meta/harn", SessionUpdateRule::Required),
+        ("/_meta/harn", SessionUpdateRule::Present(&[
+            ("/_meta/harn/archivedMessages", SessionUpdateRule::Required),
+            ("/_meta/harn/archivedMessages", SessionUpdateRule::Minimum(0)),
+            ("/_meta/harn/classification", SessionUpdateRule::Required),
+            ("/_meta/harn/compactionPolicy", SessionUpdateRule::Required),
+            ("/_meta/harn/engineStrategy", SessionUpdateRule::Required),
+            ("/_meta/harn/estimatedTokensAfter", SessionUpdateRule::Required),
+            ("/_meta/harn/estimatedTokensAfter", SessionUpdateRule::Minimum(0)),
+            ("/_meta/harn/estimatedTokensBefore", SessionUpdateRule::Required),
+            ("/_meta/harn/estimatedTokensBefore", SessionUpdateRule::Minimum(0)),
+            ("/_meta/harn/hardLimitTokens", SessionUpdateRule::Required),
+            ("/_meta/harn/hardLimitTokens", SessionUpdateRule::Minimum(0)),
+            ("/_meta/harn/instructionMode", SessionUpdateRule::Required),
+            ("/_meta/harn/instructionSource", SessionUpdateRule::Required),
+            ("/_meta/harn/mode", SessionUpdateRule::Required),
+            ("/_meta/harn/reason", SessionUpdateRule::Required),
+            ("/_meta/harn/recap", SessionUpdateRule::Required),
+            ("/_meta/harn/receiptId", SessionUpdateRule::Required),
+            ("/_meta/harn/requestedStrategy", SessionUpdateRule::Required),
+            ("/_meta/harn/resolvedThresholdTokens", SessionUpdateRule::Required),
+            ("/_meta/harn/resolvedThresholdTokens", SessionUpdateRule::Minimum(0)),
+            ("/_meta/harn/schemaVersion", SessionUpdateRule::Required),
+            ("/_meta/harn/schemaVersion", SessionUpdateRule::Minimum(0)),
+            ("/_meta/harn/snapshotAssetId", SessionUpdateRule::Required),
+            ("/_meta/harn/sourceMeasurement", SessionUpdateRule::Required),
+            ("/_meta/harn/strategy", SessionUpdateRule::Required),
+            ("/_meta/harn/thresholdSource", SessionUpdateRule::Required),
+        ])),
+    ])),
+    ("/sessionUpdate", SessionUpdateRule::Required),
+];
+
+#[rustfmt::skip]
+const TRANSCRIPT_PROJECTED_RULES: &[(&str, SessionUpdateRule)] = &[
+    ("/_meta", SessionUpdateRule::Required),
+    ("/_meta", SessionUpdateRule::Present(&[
+        ("/_meta/harn", SessionUpdateRule::Required),
+        ("/_meta/harn", SessionUpdateRule::Present(&[
+            ("/_meta/harn/droppedCount", SessionUpdateRule::Minimum(0)),
+            ("/_meta/harn/keptCount", SessionUpdateRule::Minimum(0)),
+            ("/_meta/harn/policy", SessionUpdateRule::Required),
+            ("/_meta/harn/reason", SessionUpdateRule::Required),
+            ("/_meta/harn/reclaimedTokens", SessionUpdateRule::Minimum(0)),
+            ("/_meta/harn/redactedCount", SessionUpdateRule::Minimum(0)),
+        ])),
+    ])),
+    ("/sessionUpdate", SessionUpdateRule::Required),
+];
+
+#[rustfmt::skip]
+const WORKER_UPDATE_RULES: &[(&str, SessionUpdateRule)] = &[
+    ("/_meta", SessionUpdateRule::Required),
+    ("/_meta", SessionUpdateRule::Present(&[
+        ("/_meta/harn", SessionUpdateRule::Required),
+        ("/_meta/harn", SessionUpdateRule::Present(&[
+            ("/_meta/harn/event", SessionUpdateRule::Required),
+            ("/_meta/harn/event", SessionUpdateRule::MinLen(1)),
+            ("/_meta/harn/event", SessionUpdateRule::NonBlank),
+            ("/_meta/harn/metadata", SessionUpdateRule::Required),
+            ("/_meta/harn/status", SessionUpdateRule::Required),
+            ("/_meta/harn/status", SessionUpdateRule::MinLen(1)),
+            ("/_meta/harn/status", SessionUpdateRule::NonBlank),
+            ("/_meta/harn/terminal", SessionUpdateRule::Required),
+            ("/_meta/harn/workerId", SessionUpdateRule::Required),
+            ("/_meta/harn/workerId", SessionUpdateRule::MinLen(1)),
+            ("/_meta/harn/workerId", SessionUpdateRule::NonBlank),
+        ])),
+    ])),
+    ("/sessionUpdate", SessionUpdateRule::Required),
+];
+
 impl<'de> Deserialize<'de> for ACPTypedSessionUpdate {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let value = Value::deserialize(deserializer)?;
-        match value.get("sessionUpdate").and_then(Value::as_str) {
-            Some("artifact") => {
-                if value.pointer("/_meta").is_none() {
-                    return Err(serde::de::Error::custom("session update _meta is required"));
-                }
-                if value.pointer("/_meta").is_some() {
-                    if value.pointer("/_meta/harn").is_none() {
-                        return Err(serde::de::Error::custom(
-                            "session update _meta.harn is required",
-                        ));
-                    }
-                    if value.pointer("/_meta/harn").is_some() {
-                        if value.pointer("/_meta/harn/artifactId").is_none() {
-                            return Err(serde::de::Error::custom(
-                                "session update _meta.harn.artifactId is required",
-                            ));
-                        }
-                        if value
-                            .pointer("/_meta/harn/artifactId")
-                            .and_then(Value::as_str)
-                            .is_some_and(|text| text.chars().count() < 1)
-                        {
-                            return Err(serde::de::Error::custom(
-                                "session update _meta.harn.artifactId is too short",
-                            ));
-                        }
-                        if value.pointer("/_meta/harn/metadata").is_none() {
-                            return Err(serde::de::Error::custom(
-                                "session update _meta.harn.metadata is required",
-                            ));
-                        }
-                        if value.pointer("/_meta/harn/provenance").is_none() {
-                            return Err(serde::de::Error::custom(
-                                "session update _meta.harn.provenance is required",
-                            ));
-                        }
-                        if value
-                            .pointer("/_meta/harn/sizeBytes")
-                            .and_then(Value::as_i64)
-                            .is_some_and(|number| number < 0)
-                        {
-                            return Err(serde::de::Error::custom(
-                                "session update _meta.harn.sizeBytes is below its minimum",
-                            ));
-                        }
-                        if value.pointer("/_meta/harn/spec").is_none() {
-                            return Err(serde::de::Error::custom(
-                                "session update _meta.harn.spec is required",
-                            ));
-                        }
-                        if value.pointer("/_meta/harn/title").is_none() {
-                            return Err(serde::de::Error::custom(
-                                "session update _meta.harn.title is required",
-                            ));
-                        }
-                    }
-                }
-                if value.pointer("/sessionUpdate").is_none() {
-                    return Err(serde::de::Error::custom(
-                        "session update sessionUpdate is required",
-                    ));
-                }
-                serde_json::from_value(value)
-                    .map(Self::Artifact)
-                    .map_err(serde::de::Error::custom)
-            }
-            Some("available_commands_update") => {
-                if value.pointer("/availableCommands").is_none() {
-                    return Err(serde::de::Error::custom(
-                        "session update availableCommands is required",
-                    ));
-                }
-                if value.pointer("/sessionUpdate").is_none() {
-                    return Err(serde::de::Error::custom(
-                        "session update sessionUpdate is required",
-                    ));
-                }
-                serde_json::from_value(value)
-                    .map(Self::AvailableCommands)
-                    .map_err(serde::de::Error::custom)
-            }
-            Some("fs_watch") => {
-                if value.pointer("/_meta").is_none() {
-                    return Err(serde::de::Error::custom("session update _meta is required"));
-                }
-                if value.pointer("/_meta").is_some() {
-                    if value.pointer("/_meta/harn").is_none() {
-                        return Err(serde::de::Error::custom(
-                            "session update _meta.harn is required",
-                        ));
-                    }
-                    if value.pointer("/_meta/harn").is_some() {
-                        if value.pointer("/_meta/harn/events").is_none() {
-                            return Err(serde::de::Error::custom(
-                                "session update _meta.harn.events is required",
-                            ));
-                        }
-                        if value.pointer("/_meta/harn/subscriptionId").is_none() {
-                            return Err(serde::de::Error::custom(
-                                "session update _meta.harn.subscriptionId is required",
-                            ));
-                        }
-                        if value
-                            .pointer("/_meta/harn/subscriptionId")
-                            .and_then(Value::as_str)
-                            .is_some_and(|text| text.chars().count() < 1)
-                        {
-                            return Err(serde::de::Error::custom(
-                                "session update _meta.harn.subscriptionId is too short",
-                            ));
-                        }
-                    }
-                }
-                if value.pointer("/sessionUpdate").is_none() {
-                    return Err(serde::de::Error::custom(
-                        "session update sessionUpdate is required",
-                    ));
-                }
-                serde_json::from_value(value)
-                    .map(Self::FsWatch)
-                    .map_err(serde::de::Error::custom)
-            }
-            Some("handoff") => {
-                if value.pointer("/_meta").is_none() {
-                    return Err(serde::de::Error::custom("session update _meta is required"));
-                }
-                if value.pointer("/_meta").is_some() {
-                    if value.pointer("/_meta/harn").is_none() {
-                        return Err(serde::de::Error::custom(
-                            "session update _meta.harn is required",
-                        ));
-                    }
-                    if value.pointer("/_meta/harn").is_some() {
-                        if value.pointer("/_meta/harn/artifactId").is_none() {
-                            return Err(serde::de::Error::custom(
-                                "session update _meta.harn.artifactId is required",
-                            ));
-                        }
-                        if value
-                            .pointer("/_meta/harn/artifactId")
-                            .and_then(Value::as_str)
-                            .is_some_and(|text| text.chars().count() < 1)
-                        {
-                            return Err(serde::de::Error::custom(
-                                "session update _meta.harn.artifactId is too short",
-                            ));
-                        }
-                        if value.pointer("/_meta/harn/handoff").is_none() {
-                            return Err(serde::de::Error::custom(
-                                "session update _meta.harn.handoff is required",
-                            ));
-                        }
-                        if value.pointer("/_meta/harn/handoffId").is_none() {
-                            return Err(serde::de::Error::custom(
-                                "session update _meta.harn.handoffId is required",
-                            ));
-                        }
-                        if value
-                            .pointer("/_meta/harn/handoffId")
-                            .and_then(Value::as_str)
-                            .is_some_and(|text| text.chars().count() < 1)
-                        {
-                            return Err(serde::de::Error::custom(
-                                "session update _meta.harn.handoffId is too short",
-                            ));
-                        }
-                    }
-                }
-                if value.pointer("/sessionUpdate").is_none() {
-                    return Err(serde::de::Error::custom(
-                        "session update sessionUpdate is required",
-                    ));
-                }
-                serde_json::from_value(value)
-                    .map(Self::Handoff)
-                    .map_err(serde::de::Error::custom)
-            }
-            Some("hitl_request") => {
-                if value.pointer("/_meta").is_none() {
-                    return Err(serde::de::Error::custom("session update _meta is required"));
-                }
-                if value.pointer("/_meta").is_some() {
-                    if value.pointer("/_meta/harn").is_none() {
-                        return Err(serde::de::Error::custom(
-                            "session update _meta.harn is required",
-                        ));
-                    }
-                    if value.pointer("/_meta/harn").is_some() {
-                        if value.pointer("/_meta/harn/kind").is_none() {
-                            return Err(serde::de::Error::custom(
-                                "session update _meta.harn.kind is required",
-                            ));
-                        }
-                        if value.pointer("/_meta/harn/payload").is_none() {
-                            return Err(serde::de::Error::custom(
-                                "session update _meta.harn.payload is required",
-                            ));
-                        }
-                        if value.pointer("/_meta/harn/requestId").is_none() {
-                            return Err(serde::de::Error::custom(
-                                "session update _meta.harn.requestId is required",
-                            ));
-                        }
-                        if value
-                            .pointer("/_meta/harn/requestId")
-                            .and_then(Value::as_str)
-                            .is_some_and(|text| text.chars().count() < 1)
-                        {
-                            return Err(serde::de::Error::custom(
-                                "session update _meta.harn.requestId is too short",
-                            ));
-                        }
-                    }
-                }
-                if value.pointer("/sessionUpdate").is_none() {
-                    return Err(serde::de::Error::custom(
-                        "session update sessionUpdate is required",
-                    ));
-                }
-                serde_json::from_value(value)
-                    .map(Self::HitlRequest)
-                    .map_err(serde::de::Error::custom)
-            }
-            Some("hitl_resolved") => {
-                if value.pointer("/_meta").is_none() {
-                    return Err(serde::de::Error::custom("session update _meta is required"));
-                }
-                if value.pointer("/_meta").is_some() {
-                    if value.pointer("/_meta/harn").is_none() {
-                        return Err(serde::de::Error::custom(
-                            "session update _meta.harn is required",
-                        ));
-                    }
-                    if value.pointer("/_meta/harn").is_some() {
-                        if value.pointer("/_meta/harn/kind").is_none() {
-                            return Err(serde::de::Error::custom(
-                                "session update _meta.harn.kind is required",
-                            ));
-                        }
-                        if value.pointer("/_meta/harn/outcome").is_none() {
-                            return Err(serde::de::Error::custom(
-                                "session update _meta.harn.outcome is required",
-                            ));
-                        }
-                        if value.pointer("/_meta/harn/requestId").is_none() {
-                            return Err(serde::de::Error::custom(
-                                "session update _meta.harn.requestId is required",
-                            ));
-                        }
-                        if value
-                            .pointer("/_meta/harn/requestId")
-                            .and_then(Value::as_str)
-                            .is_some_and(|text| text.chars().count() < 1)
-                        {
-                            return Err(serde::de::Error::custom(
-                                "session update _meta.harn.requestId is too short",
-                            ));
-                        }
-                    }
-                }
-                if value.pointer("/sessionUpdate").is_none() {
-                    return Err(serde::de::Error::custom(
-                        "session update sessionUpdate is required",
-                    ));
-                }
-                serde_json::from_value(value)
-                    .map(Self::HitlResolved)
-                    .map_err(serde::de::Error::custom)
-            }
-            Some("live_session_client") => {
-                if value.pointer("/_meta").is_none() {
-                    return Err(serde::de::Error::custom("session update _meta is required"));
-                }
-                if value.pointer("/_meta").is_some() {
-                    if value.pointer("/_meta/harn").is_none() {
-                        return Err(serde::de::Error::custom(
-                            "session update _meta.harn is required",
-                        ));
-                    }
-                    if value.pointer("/_meta/harn").is_some() {
-                        if value.pointer("/_meta/harn/action").is_none() {
-                            return Err(serde::de::Error::custom(
-                                "session update _meta.harn.action is required",
-                            ));
-                        }
-                        if value
-                            .pointer("/_meta/harn/action")
-                            .and_then(Value::as_str)
-                            .is_some_and(|text| text.chars().count() < 1)
-                        {
-                            return Err(serde::de::Error::custom(
-                                "session update _meta.harn.action is too short",
-                            ));
-                        }
-                        if value.pointer("/_meta/harn/state").is_none() {
-                            return Err(serde::de::Error::custom(
-                                "session update _meta.harn.state is required",
-                            ));
-                        }
-                    }
-                }
-                if value.pointer("/sessionUpdate").is_none() {
-                    return Err(serde::de::Error::custom(
-                        "session update sessionUpdate is required",
-                    ));
-                }
-                serde_json::from_value(value)
-                    .map(Self::LiveSessionClient)
-                    .map_err(serde::de::Error::custom)
-            }
-            Some("log") => {
-                if value.pointer("/_meta").is_none() {
-                    return Err(serde::de::Error::custom("session update _meta is required"));
-                }
-                if value.pointer("/_meta").is_some() {
-                    if value.pointer("/_meta/harn").is_none() {
-                        return Err(serde::de::Error::custom(
-                            "session update _meta.harn is required",
-                        ));
-                    }
-                    if value.pointer("/_meta/harn").is_some() {
-                        if value.pointer("/_meta/harn/level").is_none() {
-                            return Err(serde::de::Error::custom(
-                                "session update _meta.harn.level is required",
-                            ));
-                        }
-                        if value.pointer("/_meta/harn/message").is_none() {
-                            return Err(serde::de::Error::custom(
-                                "session update _meta.harn.message is required",
-                            ));
-                        }
-                    }
-                }
-                if value.pointer("/sessionUpdate").is_none() {
-                    return Err(serde::de::Error::custom(
-                        "session update sessionUpdate is required",
-                    ));
-                }
-                serde_json::from_value(value)
-                    .map(Self::Log)
-                    .map_err(serde::de::Error::custom)
-            }
-            Some("progress") => {
-                if value.pointer("/_meta").is_none() {
-                    return Err(serde::de::Error::custom("session update _meta is required"));
-                }
-                if value.pointer("/_meta").is_some() {
-                    if value.pointer("/_meta/harn").is_none() {
-                        return Err(serde::de::Error::custom(
-                            "session update _meta.harn is required",
-                        ));
-                    }
-                    if value.pointer("/_meta/harn").is_some() {
-                        if value.pointer("/_meta/harn/message").is_none() {
-                            return Err(serde::de::Error::custom(
-                                "session update _meta.harn.message is required",
-                            ));
-                        }
-                        if value
-                            .pointer("/_meta/harn/pendingCount")
-                            .and_then(Value::as_i64)
-                            .is_some_and(|number| number < 0)
-                        {
-                            return Err(serde::de::Error::custom(
-                                "session update _meta.harn.pendingCount is below its minimum",
-                            ));
-                        }
-                        if value.pointer("/_meta/harn/phase").is_none() {
-                            return Err(serde::de::Error::custom(
-                                "session update _meta.harn.phase is required",
-                            ));
-                        }
-                        if value
-                            .pointer("/_meta/harn/totalBytes")
-                            .and_then(Value::as_i64)
-                            .is_some_and(|number| number < 0)
-                        {
-                            return Err(serde::de::Error::custom(
-                                "session update _meta.harn.totalBytes is below its minimum",
-                            ));
-                        }
-                    }
-                }
-                if value.pointer("/sessionUpdate").is_none() {
-                    return Err(serde::de::Error::custom(
-                        "session update sessionUpdate is required",
-                    ));
-                }
-                serde_json::from_value(value)
-                    .map(Self::Progress)
-                    .map_err(serde::de::Error::custom)
-            }
-            Some("reminder_emitted") => {
-                if value.pointer("/_meta").is_none() {
-                    return Err(serde::de::Error::custom("session update _meta is required"));
-                }
-                if value.pointer("/_meta").is_some() {
-                    if value.pointer("/_meta/harn").is_none() {
-                        return Err(serde::de::Error::custom(
-                            "session update _meta.harn is required",
-                        ));
-                    }
-                    if value.pointer("/_meta/harn").is_some() {
-                        if value.pointer("/_meta/harn/reminder").is_none() {
-                            return Err(serde::de::Error::custom(
-                                "session update _meta.harn.reminder is required",
-                            ));
-                        }
-                        if value.pointer("/_meta/harn/reminder").is_some() {
-                            if value.pointer("/_meta/harn/reminder/body").is_none() {
-                                return Err(serde::de::Error::custom(
-                                    "session update _meta.harn.reminder.body is required",
-                                ));
-                            }
-                            if value.pointer("/_meta/harn/reminder/reminderId").is_none() {
-                                return Err(serde::de::Error::custom(
-                                    "session update _meta.harn.reminder.reminderId is required",
-                                ));
-                            }
-                            if value
-                                .pointer("/_meta/harn/reminder/reminderId")
-                                .and_then(Value::as_str)
-                                .is_some_and(|text| text.chars().count() < 1)
-                            {
-                                return Err(serde::de::Error::custom(
-                                    "session update _meta.harn.reminder.reminderId is too short",
-                                ));
-                            }
-                            if value.pointer("/_meta/harn/reminder/renderedRole").is_none() {
-                                return Err(serde::de::Error::custom(
-                                    "session update _meta.harn.reminder.renderedRole is required",
-                                ));
-                            }
-                            if value
-                                .pointer("/_meta/harn/reminder/renderedRole")
-                                .and_then(Value::as_str)
-                                .is_some_and(|text| {
-                                    !["system", "developer", "user"].contains(&text)
-                                })
-                            {
-                                return Err(serde::de::Error::custom("session update _meta.harn.reminder.renderedRole has an unknown value"));
-                            }
-                            if value.pointer("/_meta/harn/reminder/roleHint").is_none() {
-                                return Err(serde::de::Error::custom(
-                                    "session update _meta.harn.reminder.roleHint is required",
-                                ));
-                            }
-                            if value
-                                .pointer("/_meta/harn/reminder/roleHint")
-                                .and_then(Value::as_str)
-                                .is_some_and(|text| {
-                                    !["system", "developer", "user_block", "ephemeral_cache"]
-                                        .contains(&text)
-                                })
-                            {
-                                return Err(serde::de::Error::custom("session update _meta.harn.reminder.roleHint has an unknown value"));
-                            }
-                            if value.pointer("/_meta/harn/reminder/source").is_none() {
-                                return Err(serde::de::Error::custom(
-                                    "session update _meta.harn.reminder.source is required",
-                                ));
-                            }
-                            if value
-                                .pointer("/_meta/harn/reminder/source")
-                                .and_then(Value::as_str)
-                                .is_some_and(|text| {
-                                    ![
-                                        "stdlib_provider",
-                                        "hook",
-                                        "bridge",
-                                        "in_pipeline",
-                                        "inherited",
-                                    ]
-                                    .contains(&text)
-                                })
-                            {
-                                return Err(serde::de::Error::custom("session update _meta.harn.reminder.source has an unknown value"));
-                            }
-                            if value.pointer("/_meta/harn/reminder/tags").is_none() {
-                                return Err(serde::de::Error::custom(
-                                    "session update _meta.harn.reminder.tags is required",
-                                ));
-                            }
-                            if value.pointer("/_meta/harn/reminder/ttlTurns").is_none() {
-                                return Err(serde::de::Error::custom(
-                                    "session update _meta.harn.reminder.ttlTurns is required",
-                                ));
-                            }
-                        }
-                    }
-                }
-                if value.pointer("/sessionUpdate").is_none() {
-                    return Err(serde::de::Error::custom(
-                        "session update sessionUpdate is required",
-                    ));
-                }
-                serde_json::from_value(value)
-                    .map(Self::ReminderEmitted)
-                    .map_err(serde::de::Error::custom)
-            }
-            Some("skill_activated") => {
-                if value.pointer("/_meta").is_none() {
-                    return Err(serde::de::Error::custom("session update _meta is required"));
-                }
-                if value.pointer("/_meta").is_some() {
-                    if value.pointer("/_meta/harn").is_none() {
-                        return Err(serde::de::Error::custom(
-                            "session update _meta.harn is required",
-                        ));
-                    }
-                    if value.pointer("/_meta/harn").is_some() {
-                        if value.pointer("/_meta/harn/iteration").is_none() {
-                            return Err(serde::de::Error::custom(
-                                "session update _meta.harn.iteration is required",
-                            ));
-                        }
-                        if value
-                            .pointer("/_meta/harn/iteration")
-                            .and_then(Value::as_i64)
-                            .is_some_and(|number| number < 0)
-                        {
-                            return Err(serde::de::Error::custom(
-                                "session update _meta.harn.iteration is below its minimum",
-                            ));
-                        }
-                        if value.pointer("/_meta/harn/skillName").is_none() {
-                            return Err(serde::de::Error::custom(
-                                "session update _meta.harn.skillName is required",
-                            ));
-                        }
-                        if value
-                            .pointer("/_meta/harn/skillName")
-                            .and_then(Value::as_str)
-                            .is_some_and(|text| text.chars().count() < 1)
-                        {
-                            return Err(serde::de::Error::custom(
-                                "session update _meta.harn.skillName is too short",
-                            ));
-                        }
-                        if value
-                            .pointer("/_meta/harn/skillName")
-                            .and_then(Value::as_str)
-                            .is_some_and(|text| text.trim().is_empty())
-                        {
-                            return Err(serde::de::Error::custom(
-                                "session update _meta.harn.skillName must not be blank",
-                            ));
-                        }
-                    }
-                }
-                if value.pointer("/sessionUpdate").is_none() {
-                    return Err(serde::de::Error::custom(
-                        "session update sessionUpdate is required",
-                    ));
-                }
-                serde_json::from_value(value)
-                    .map(Self::SkillActivated)
-                    .map_err(serde::de::Error::custom)
-            }
-            Some("skill_deactivated") => {
-                if value.pointer("/_meta").is_none() {
-                    return Err(serde::de::Error::custom("session update _meta is required"));
-                }
-                if value.pointer("/_meta").is_some() {
-                    if value.pointer("/_meta/harn").is_none() {
-                        return Err(serde::de::Error::custom(
-                            "session update _meta.harn is required",
-                        ));
-                    }
-                    if value.pointer("/_meta/harn").is_some() {
-                        if value
-                            .pointer("/_meta/harn/iteration")
-                            .and_then(Value::as_i64)
-                            .is_some_and(|number| number < 0)
-                        {
-                            return Err(serde::de::Error::custom(
-                                "session update _meta.harn.iteration is below its minimum",
-                            ));
-                        }
-                        if value.pointer("/_meta/harn/skillName").is_none() {
-                            return Err(serde::de::Error::custom(
-                                "session update _meta.harn.skillName is required",
-                            ));
-                        }
-                        if value
-                            .pointer("/_meta/harn/skillName")
-                            .and_then(Value::as_str)
-                            .is_some_and(|text| text.chars().count() < 1)
-                        {
-                            return Err(serde::de::Error::custom(
-                                "session update _meta.harn.skillName is too short",
-                            ));
-                        }
-                        if value
-                            .pointer("/_meta/harn/skillName")
-                            .and_then(Value::as_str)
-                            .is_some_and(|text| text.trim().is_empty())
-                        {
-                            return Err(serde::de::Error::custom(
-                                "session update _meta.harn.skillName must not be blank",
-                            ));
-                        }
-                    }
-                }
-                if value.pointer("/sessionUpdate").is_none() {
-                    return Err(serde::de::Error::custom(
-                        "session update sessionUpdate is required",
-                    ));
-                }
-                serde_json::from_value(value)
-                    .map(Self::SkillDeactivated)
-                    .map_err(serde::de::Error::custom)
-            }
-            Some("skill_narrow") => {
-                if value.pointer("/_meta").is_none() {
-                    return Err(serde::de::Error::custom("session update _meta is required"));
-                }
-                if value.pointer("/_meta").is_some() {
-                    if value.pointer("/_meta/harn").is_none() {
-                        return Err(serde::de::Error::custom(
-                            "session update _meta.harn is required",
-                        ));
-                    }
-                    if value.pointer("/_meta/harn").is_some() {
-                        if value.pointer("/_meta/harn/remainingTools").is_none() {
-                            return Err(serde::de::Error::custom(
-                                "session update _meta.harn.remainingTools is required",
-                            ));
-                        }
-                        if value.pointer("/_meta/harn/removedTools").is_none() {
-                            return Err(serde::de::Error::custom(
-                                "session update _meta.harn.removedTools is required",
-                            ));
-                        }
-                    }
-                }
-                if value.pointer("/sessionUpdate").is_none() {
-                    return Err(serde::de::Error::custom(
-                        "session update sessionUpdate is required",
-                    ));
-                }
-                serde_json::from_value(value)
-                    .map(Self::SkillNarrow)
-                    .map_err(serde::de::Error::custom)
-            }
-            Some("skill_scope_tools") => {
-                if value.pointer("/_meta").is_none() {
-                    return Err(serde::de::Error::custom("session update _meta is required"));
-                }
-                if value.pointer("/_meta").is_some() {
-                    if value.pointer("/_meta/harn").is_none() {
-                        return Err(serde::de::Error::custom(
-                            "session update _meta.harn is required",
-                        ));
-                    }
-                    if value.pointer("/_meta/harn").is_some() {
-                        if value.pointer("/_meta/harn/allowedTools").is_none() {
-                            return Err(serde::de::Error::custom(
-                                "session update _meta.harn.allowedTools is required",
-                            ));
-                        }
-                        if value.pointer("/_meta/harn/skillName").is_none() {
-                            return Err(serde::de::Error::custom(
-                                "session update _meta.harn.skillName is required",
-                            ));
-                        }
-                        if value
-                            .pointer("/_meta/harn/skillName")
-                            .and_then(Value::as_str)
-                            .is_some_and(|text| text.chars().count() < 1)
-                        {
-                            return Err(serde::de::Error::custom(
-                                "session update _meta.harn.skillName is too short",
-                            ));
-                        }
-                        if value
-                            .pointer("/_meta/harn/skillName")
-                            .and_then(Value::as_str)
-                            .is_some_and(|text| text.trim().is_empty())
-                        {
-                            return Err(serde::de::Error::custom(
-                                "session update _meta.harn.skillName must not be blank",
-                            ));
-                        }
-                    }
-                }
-                if value.pointer("/sessionUpdate").is_none() {
-                    return Err(serde::de::Error::custom(
-                        "session update sessionUpdate is required",
-                    ));
-                }
-                serde_json::from_value(value)
-                    .map(Self::SkillScopeTools)
-                    .map_err(serde::de::Error::custom)
-            }
-            Some("stance_transition") => {
-                if value.pointer("/_meta").is_none() {
-                    return Err(serde::de::Error::custom("session update _meta is required"));
-                }
-                if value.pointer("/_meta").is_some() {
-                    if value.pointer("/_meta/harn").is_none() {
-                        return Err(serde::de::Error::custom(
-                            "session update _meta.harn is required",
-                        ));
-                    }
-                    if value.pointer("/_meta/harn").is_some() {
-                        if value.pointer("/_meta/harn/phase").is_none() {
-                            return Err(serde::de::Error::custom(
-                                "session update _meta.harn.phase is required",
-                            ));
-                        }
-                        if value
-                            .pointer("/_meta/harn/phase")
-                            .and_then(Value::as_str)
-                            .is_some_and(|text| text.chars().count() < 1)
-                        {
-                            return Err(serde::de::Error::custom(
-                                "session update _meta.harn.phase is too short",
-                            ));
-                        }
-                        if value
-                            .pointer("/_meta/harn/phase")
-                            .and_then(Value::as_str)
-                            .is_some_and(|text| text.trim().is_empty())
-                        {
-                            return Err(serde::de::Error::custom(
-                                "session update _meta.harn.phase must not be blank",
-                            ));
-                        }
-                        if value
-                            .pointer("/_meta/harn/phase")
-                            .and_then(Value::as_str)
-                            .is_some_and(|text| {
-                                ["write_access_granted", "write_access_denied"].contains(&text)
-                            })
-                            && value.pointer("/_meta/harn/escapeTool").is_none()
-                        {
-                            return Err(serde::de::Error::custom(
-                                "session update _meta.harn.escapeTool is required for this phase",
-                            ));
-                        }
-                        if value
-                            .pointer("/_meta/harn/phase")
-                            .and_then(Value::as_str)
-                            .is_some_and(|text| {
-                                ["write_access_granted", "write_access_denied"].contains(&text)
-                            })
-                        {
-                            if value.pointer("/_meta/harn/escapeTool").is_none() {
-                                return Err(serde::de::Error::custom(
-                                    "session update _meta.harn.escapeTool is required",
-                                ));
-                            }
-                            if value
-                                .pointer("/_meta/harn/escapeTool")
-                                .and_then(Value::as_str)
-                                .is_some_and(|text| text.chars().count() < 1)
-                            {
-                                return Err(serde::de::Error::custom(
-                                    "session update _meta.harn.escapeTool is too short",
-                                ));
-                            }
-                            if value
-                                .pointer("/_meta/harn/escapeTool")
-                                .and_then(Value::as_str)
-                                .is_some_and(|text| text.trim().is_empty())
-                            {
-                                return Err(serde::de::Error::custom(
-                                    "session update _meta.harn.escapeTool must not be blank",
-                                ));
-                            }
-                        }
-                    }
-                }
-                if value.pointer("/sessionUpdate").is_none() {
-                    return Err(serde::de::Error::custom(
-                        "session update sessionUpdate is required",
-                    ));
-                }
-                serde_json::from_value(value)
-                    .map(Self::StanceTransition)
-                    .map_err(serde::de::Error::custom)
-            }
-            Some("tool_search_query") => {
-                if value.pointer("/_meta").is_none() {
-                    return Err(serde::de::Error::custom("session update _meta is required"));
-                }
-                if value.pointer("/_meta").is_some() {
-                    if value.pointer("/_meta/harn").is_none() {
-                        return Err(serde::de::Error::custom(
-                            "session update _meta.harn is required",
-                        ));
-                    }
-                    if value.pointer("/_meta/harn").is_some() {
-                        if value.pointer("/_meta/harn/name").is_none() {
-                            return Err(serde::de::Error::custom(
-                                "session update _meta.harn.name is required",
-                            ));
-                        }
-                        if value
-                            .pointer("/_meta/harn/name")
-                            .and_then(Value::as_str)
-                            .is_some_and(|text| text.chars().count() < 1)
-                        {
-                            return Err(serde::de::Error::custom(
-                                "session update _meta.harn.name is too short",
-                            ));
-                        }
-                        if value.pointer("/_meta/harn/query").is_none() {
-                            return Err(serde::de::Error::custom(
-                                "session update _meta.harn.query is required",
-                            ));
-                        }
-                        if value.pointer("/_meta/harn/toolUseId").is_none() {
-                            return Err(serde::de::Error::custom(
-                                "session update _meta.harn.toolUseId is required",
-                            ));
-                        }
-                        if value
-                            .pointer("/_meta/harn/toolUseId")
-                            .and_then(Value::as_str)
-                            .is_some_and(|text| text.chars().count() < 1)
-                        {
-                            return Err(serde::de::Error::custom(
-                                "session update _meta.harn.toolUseId is too short",
-                            ));
-                        }
-                    }
-                }
-                if value.pointer("/sessionUpdate").is_none() {
-                    return Err(serde::de::Error::custom(
-                        "session update sessionUpdate is required",
-                    ));
-                }
-                serde_json::from_value(value)
-                    .map(Self::ToolSearchQuery)
-                    .map_err(serde::de::Error::custom)
-            }
-            Some("tool_search_result") => {
-                if value.pointer("/_meta").is_none() {
-                    return Err(serde::de::Error::custom("session update _meta is required"));
-                }
-                if value.pointer("/_meta").is_some() {
-                    if value.pointer("/_meta/harn").is_none() {
-                        return Err(serde::de::Error::custom(
-                            "session update _meta.harn is required",
-                        ));
-                    }
-                    if value.pointer("/_meta/harn").is_some() {
-                        if value.pointer("/_meta/harn/promoted").is_none() {
-                            return Err(serde::de::Error::custom(
-                                "session update _meta.harn.promoted is required",
-                            ));
-                        }
-                        if value.pointer("/_meta/harn/toolUseId").is_none() {
-                            return Err(serde::de::Error::custom(
-                                "session update _meta.harn.toolUseId is required",
-                            ));
-                        }
-                        if value
-                            .pointer("/_meta/harn/toolUseId")
-                            .and_then(Value::as_str)
-                            .is_some_and(|text| text.chars().count() < 1)
-                        {
-                            return Err(serde::de::Error::custom(
-                                "session update _meta.harn.toolUseId is too short",
-                            ));
-                        }
-                    }
-                }
-                if value.pointer("/sessionUpdate").is_none() {
-                    return Err(serde::de::Error::custom(
-                        "session update sessionUpdate is required",
-                    ));
-                }
-                serde_json::from_value(value)
-                    .map(Self::ToolSearchResult)
-                    .map_err(serde::de::Error::custom)
-            }
-            Some("transcript_compacted") => {
-                if value.pointer("/_meta").is_none() {
-                    return Err(serde::de::Error::custom("session update _meta is required"));
-                }
-                if value.pointer("/_meta").is_some() {
-                    if value.pointer("/_meta/harn").is_none() {
-                        return Err(serde::de::Error::custom(
-                            "session update _meta.harn is required",
-                        ));
-                    }
-                    if value.pointer("/_meta/harn").is_some() {
-                        if value.pointer("/_meta/harn/archivedMessages").is_none() {
-                            return Err(serde::de::Error::custom(
-                                "session update _meta.harn.archivedMessages is required",
-                            ));
-                        }
-                        if value
-                            .pointer("/_meta/harn/archivedMessages")
-                            .and_then(Value::as_i64)
-                            .is_some_and(|number| number < 0)
-                        {
-                            return Err(serde::de::Error::custom(
-                                "session update _meta.harn.archivedMessages is below its minimum",
-                            ));
-                        }
-                        if value.pointer("/_meta/harn/compactionPolicy").is_none() {
-                            return Err(serde::de::Error::custom(
-                                "session update _meta.harn.compactionPolicy is required",
-                            ));
-                        }
-                        if value.pointer("/_meta/harn/engineStrategy").is_none() {
-                            return Err(serde::de::Error::custom(
-                                "session update _meta.harn.engineStrategy is required",
-                            ));
-                        }
-                        if value.pointer("/_meta/harn/estimatedTokensAfter").is_none() {
-                            return Err(serde::de::Error::custom(
-                                "session update _meta.harn.estimatedTokensAfter is required",
-                            ));
-                        }
-                        if value
-                            .pointer("/_meta/harn/estimatedTokensAfter")
-                            .and_then(Value::as_i64)
-                            .is_some_and(|number| number < 0)
-                        {
-                            return Err(serde::de::Error::custom("session update _meta.harn.estimatedTokensAfter is below its minimum"));
-                        }
-                        if value.pointer("/_meta/harn/estimatedTokensBefore").is_none() {
-                            return Err(serde::de::Error::custom(
-                                "session update _meta.harn.estimatedTokensBefore is required",
-                            ));
-                        }
-                        if value
-                            .pointer("/_meta/harn/estimatedTokensBefore")
-                            .and_then(Value::as_i64)
-                            .is_some_and(|number| number < 0)
-                        {
-                            return Err(serde::de::Error::custom("session update _meta.harn.estimatedTokensBefore is below its minimum"));
-                        }
-                        if value.pointer("/_meta/harn/hardLimitTokens").is_none() {
-                            return Err(serde::de::Error::custom(
-                                "session update _meta.harn.hardLimitTokens is required",
-                            ));
-                        }
-                        if value
-                            .pointer("/_meta/harn/hardLimitTokens")
-                            .and_then(Value::as_i64)
-                            .is_some_and(|number| number < 0)
-                        {
-                            return Err(serde::de::Error::custom(
-                                "session update _meta.harn.hardLimitTokens is below its minimum",
-                            ));
-                        }
-                        if value.pointer("/_meta/harn/instructionMode").is_none() {
-                            return Err(serde::de::Error::custom(
-                                "session update _meta.harn.instructionMode is required",
-                            ));
-                        }
-                        if value.pointer("/_meta/harn/instructionSource").is_none() {
-                            return Err(serde::de::Error::custom(
-                                "session update _meta.harn.instructionSource is required",
-                            ));
-                        }
-                        if value.pointer("/_meta/harn/mode").is_none() {
-                            return Err(serde::de::Error::custom(
-                                "session update _meta.harn.mode is required",
-                            ));
-                        }
-                        if value.pointer("/_meta/harn/reason").is_none() {
-                            return Err(serde::de::Error::custom(
-                                "session update _meta.harn.reason is required",
-                            ));
-                        }
-                        if value.pointer("/_meta/harn/recap").is_none() {
-                            return Err(serde::de::Error::custom(
-                                "session update _meta.harn.recap is required",
-                            ));
-                        }
-                        if value.pointer("/_meta/harn/receiptId").is_none() {
-                            return Err(serde::de::Error::custom(
-                                "session update _meta.harn.receiptId is required",
-                            ));
-                        }
-                        if value.pointer("/_meta/harn/requestedStrategy").is_none() {
-                            return Err(serde::de::Error::custom(
-                                "session update _meta.harn.requestedStrategy is required",
-                            ));
-                        }
-                        if value
-                            .pointer("/_meta/harn/resolvedThresholdTokens")
-                            .is_none()
-                        {
-                            return Err(serde::de::Error::custom(
-                                "session update _meta.harn.resolvedThresholdTokens is required",
-                            ));
-                        }
-                        if value
-                            .pointer("/_meta/harn/resolvedThresholdTokens")
-                            .and_then(Value::as_i64)
-                            .is_some_and(|number| number < 0)
-                        {
-                            return Err(serde::de::Error::custom("session update _meta.harn.resolvedThresholdTokens is below its minimum"));
-                        }
-                        if value.pointer("/_meta/harn/schemaVersion").is_none() {
-                            return Err(serde::de::Error::custom(
-                                "session update _meta.harn.schemaVersion is required",
-                            ));
-                        }
-                        if value
-                            .pointer("/_meta/harn/schemaVersion")
-                            .and_then(Value::as_i64)
-                            .is_some_and(|number| number < 0)
-                        {
-                            return Err(serde::de::Error::custom(
-                                "session update _meta.harn.schemaVersion is below its minimum",
-                            ));
-                        }
-                        if value.pointer("/_meta/harn/snapshotAssetId").is_none() {
-                            return Err(serde::de::Error::custom(
-                                "session update _meta.harn.snapshotAssetId is required",
-                            ));
-                        }
-                        if value.pointer("/_meta/harn/sourceMeasurement").is_none() {
-                            return Err(serde::de::Error::custom(
-                                "session update _meta.harn.sourceMeasurement is required",
-                            ));
-                        }
-                        if value.pointer("/_meta/harn/strategy").is_none() {
-                            return Err(serde::de::Error::custom(
-                                "session update _meta.harn.strategy is required",
-                            ));
-                        }
-                        if value.pointer("/_meta/harn/thresholdSource").is_none() {
-                            return Err(serde::de::Error::custom(
-                                "session update _meta.harn.thresholdSource is required",
-                            ));
-                        }
-                    }
-                }
-                if value.pointer("/sessionUpdate").is_none() {
-                    return Err(serde::de::Error::custom(
-                        "session update sessionUpdate is required",
-                    ));
-                }
-                serde_json::from_value(value)
-                    .map(Self::TranscriptCompacted)
-                    .map_err(serde::de::Error::custom)
-            }
-            Some("transcript_projected") => {
-                if value.pointer("/_meta").is_none() {
-                    return Err(serde::de::Error::custom("session update _meta is required"));
-                }
-                if value.pointer("/_meta").is_some() {
-                    if value.pointer("/_meta/harn").is_none() {
-                        return Err(serde::de::Error::custom(
-                            "session update _meta.harn is required",
-                        ));
-                    }
-                    if value.pointer("/_meta/harn").is_some() {
-                        if value
-                            .pointer("/_meta/harn/droppedCount")
-                            .and_then(Value::as_i64)
-                            .is_some_and(|number| number < 0)
-                        {
-                            return Err(serde::de::Error::custom(
-                                "session update _meta.harn.droppedCount is below its minimum",
-                            ));
-                        }
-                        if value
-                            .pointer("/_meta/harn/keptCount")
-                            .and_then(Value::as_i64)
-                            .is_some_and(|number| number < 0)
-                        {
-                            return Err(serde::de::Error::custom(
-                                "session update _meta.harn.keptCount is below its minimum",
-                            ));
-                        }
-                        if value.pointer("/_meta/harn/policy").is_none() {
-                            return Err(serde::de::Error::custom(
-                                "session update _meta.harn.policy is required",
-                            ));
-                        }
-                        if value.pointer("/_meta/harn/reason").is_none() {
-                            return Err(serde::de::Error::custom(
-                                "session update _meta.harn.reason is required",
-                            ));
-                        }
-                        if value
-                            .pointer("/_meta/harn/reclaimedTokens")
-                            .and_then(Value::as_i64)
-                            .is_some_and(|number| number < 0)
-                        {
-                            return Err(serde::de::Error::custom(
-                                "session update _meta.harn.reclaimedTokens is below its minimum",
-                            ));
-                        }
-                        if value
-                            .pointer("/_meta/harn/redactedCount")
-                            .and_then(Value::as_i64)
-                            .is_some_and(|number| number < 0)
-                        {
-                            return Err(serde::de::Error::custom(
-                                "session update _meta.harn.redactedCount is below its minimum",
-                            ));
-                        }
-                    }
-                }
-                if value.pointer("/sessionUpdate").is_none() {
-                    return Err(serde::de::Error::custom(
-                        "session update sessionUpdate is required",
-                    ));
-                }
-                serde_json::from_value(value)
-                    .map(Self::TranscriptProjected)
-                    .map_err(serde::de::Error::custom)
-            }
-            Some("worker_update") => {
-                if value.pointer("/_meta").is_none() {
-                    return Err(serde::de::Error::custom("session update _meta is required"));
-                }
-                if value.pointer("/_meta").is_some() {
-                    if value.pointer("/_meta/harn").is_none() {
-                        return Err(serde::de::Error::custom(
-                            "session update _meta.harn is required",
-                        ));
-                    }
-                    if value.pointer("/_meta/harn").is_some() {
-                        if value.pointer("/_meta/harn/event").is_none() {
-                            return Err(serde::de::Error::custom(
-                                "session update _meta.harn.event is required",
-                            ));
-                        }
-                        if value
-                            .pointer("/_meta/harn/event")
-                            .and_then(Value::as_str)
-                            .is_some_and(|text| text.chars().count() < 1)
-                        {
-                            return Err(serde::de::Error::custom(
-                                "session update _meta.harn.event is too short",
-                            ));
-                        }
-                        if value
-                            .pointer("/_meta/harn/event")
-                            .and_then(Value::as_str)
-                            .is_some_and(|text| text.trim().is_empty())
-                        {
-                            return Err(serde::de::Error::custom(
-                                "session update _meta.harn.event must not be blank",
-                            ));
-                        }
-                        if value.pointer("/_meta/harn/metadata").is_none() {
-                            return Err(serde::de::Error::custom(
-                                "session update _meta.harn.metadata is required",
-                            ));
-                        }
-                        if value.pointer("/_meta/harn/status").is_none() {
-                            return Err(serde::de::Error::custom(
-                                "session update _meta.harn.status is required",
-                            ));
-                        }
-                        if value
-                            .pointer("/_meta/harn/status")
-                            .and_then(Value::as_str)
-                            .is_some_and(|text| text.chars().count() < 1)
-                        {
-                            return Err(serde::de::Error::custom(
-                                "session update _meta.harn.status is too short",
-                            ));
-                        }
-                        if value
-                            .pointer("/_meta/harn/status")
-                            .and_then(Value::as_str)
-                            .is_some_and(|text| text.trim().is_empty())
-                        {
-                            return Err(serde::de::Error::custom(
-                                "session update _meta.harn.status must not be blank",
-                            ));
-                        }
-                        if value.pointer("/_meta/harn/terminal").is_none() {
-                            return Err(serde::de::Error::custom(
-                                "session update _meta.harn.terminal is required",
-                            ));
-                        }
-                        if value.pointer("/_meta/harn/workerId").is_none() {
-                            return Err(serde::de::Error::custom(
-                                "session update _meta.harn.workerId is required",
-                            ));
-                        }
-                        if value
-                            .pointer("/_meta/harn/workerId")
-                            .and_then(Value::as_str)
-                            .is_some_and(|text| text.chars().count() < 1)
-                        {
-                            return Err(serde::de::Error::custom(
-                                "session update _meta.harn.workerId is too short",
-                            ));
-                        }
-                        if value
-                            .pointer("/_meta/harn/workerId")
-                            .and_then(Value::as_str)
-                            .is_some_and(|text| text.trim().is_empty())
-                        {
-                            return Err(serde::de::Error::custom(
-                                "session update _meta.harn.workerId must not be blank",
-                            ));
-                        }
-                    }
-                }
-                if value.pointer("/sessionUpdate").is_none() {
-                    return Err(serde::de::Error::custom(
-                        "session update sessionUpdate is required",
-                    ));
-                }
-                serde_json::from_value(value)
-                    .map(Self::Worker)
-                    .map_err(serde::de::Error::custom)
-            }
-            _ => Err(serde::de::Error::custom("unknown typed session update")),
-        }
+        let (rules, decode): (&[(&str, SessionUpdateRule)], SessionUpdateDecoder) =
+            match value.get("sessionUpdate").and_then(Value::as_str) {
+                Some("artifact") => (ARTIFACT_RULES, |value| {
+                    serde_json::from_value(value).map(Self::Artifact)
+                }),
+                Some("available_commands_update") => (AVAILABLE_COMMANDS_UPDATE_RULES, |value| {
+                    serde_json::from_value(value).map(Self::AvailableCommands)
+                }),
+                Some("fs_watch") => (FS_WATCH_RULES, |value| {
+                    serde_json::from_value(value).map(Self::FsWatch)
+                }),
+                Some("handoff") => (HANDOFF_RULES, |value| {
+                    serde_json::from_value(value).map(Self::Handoff)
+                }),
+                Some("hitl_request") => (HITL_REQUEST_RULES, |value| {
+                    serde_json::from_value(value).map(Self::HitlRequest)
+                }),
+                Some("hitl_resolved") => (HITL_RESOLVED_RULES, |value| {
+                    serde_json::from_value(value).map(Self::HitlResolved)
+                }),
+                Some("live_session_client") => (LIVE_SESSION_CLIENT_RULES, |value| {
+                    serde_json::from_value(value).map(Self::LiveSessionClient)
+                }),
+                Some("log") => (LOG_RULES, |value| {
+                    serde_json::from_value(value).map(Self::Log)
+                }),
+                Some("progress") => (PROGRESS_RULES, |value| {
+                    serde_json::from_value(value).map(Self::Progress)
+                }),
+                Some("reminder_emitted") => (REMINDER_EMITTED_RULES, |value| {
+                    serde_json::from_value(value).map(Self::ReminderEmitted)
+                }),
+                Some("skill_activated") => (SKILL_ACTIVATED_RULES, |value| {
+                    serde_json::from_value(value).map(Self::SkillActivated)
+                }),
+                Some("skill_deactivated") => (SKILL_DEACTIVATED_RULES, |value| {
+                    serde_json::from_value(value).map(Self::SkillDeactivated)
+                }),
+                Some("skill_narrow") => (SKILL_NARROW_RULES, |value| {
+                    serde_json::from_value(value).map(Self::SkillNarrow)
+                }),
+                Some("skill_scope_tools") => (SKILL_SCOPE_TOOLS_RULES, |value| {
+                    serde_json::from_value(value).map(Self::SkillScopeTools)
+                }),
+                Some("stance_transition") => (STANCE_TRANSITION_RULES, |value| {
+                    serde_json::from_value(value).map(Self::StanceTransition)
+                }),
+                Some("tool_search_query") => (TOOL_SEARCH_QUERY_RULES, |value| {
+                    serde_json::from_value(value).map(Self::ToolSearchQuery)
+                }),
+                Some("tool_search_result") => (TOOL_SEARCH_RESULT_RULES, |value| {
+                    serde_json::from_value(value).map(Self::ToolSearchResult)
+                }),
+                Some("transcript_compacted") => (TRANSCRIPT_COMPACTED_RULES, |value| {
+                    serde_json::from_value(value).map(Self::TranscriptCompacted)
+                }),
+                Some("transcript_projected") => (TRANSCRIPT_PROJECTED_RULES, |value| {
+                    serde_json::from_value(value).map(Self::TranscriptProjected)
+                }),
+                Some("worker_update") => (WORKER_UPDATE_RULES, |value| {
+                    serde_json::from_value(value).map(Self::Worker)
+                }),
+                _ => return Err(serde::de::Error::custom("unknown typed session update")),
+            };
+        validate_session_update(&value, rules).map_err(serde::de::Error::custom)?;
+        decode(value).map_err(serde::de::Error::custom)
     }
 }
 
@@ -4925,6 +4274,7 @@ pub const HARN_PREPARED_SESSION_COMMANDS: &[&str] = &[
 ];
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HarnPreparedSessionApprovalDecision {
+    pub request_id: String,
     pub batch_fingerprint: String,
     pub approved: bool,
     pub decider: String,
@@ -5329,4 +4679,450 @@ pub struct HarnPlanDocument {
     pub resolution_receipts: Vec<HarnPlanCommentResolutionReceipt>,
     pub created_at: String,
     pub updated_at: String,
+}
+/// Value-free inference admission vocabulary owned by harn_vm.
+/// Open vocabulary: unit variants are the values this binding was generated from, and `Unrecognized` carries any other string verbatim so a newer Harn never breaks an older consumer.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub enum HarnMachineSpendPeriod {
+    Day,
+    Month,
+    Lifetime,
+    /// A wire value outside the vocabulary this binding was generated from. Preserved verbatim.
+    Unrecognized(String),
+}
+
+impl HarnMachineSpendPeriod {
+    /// Every value this binding was generated from, in wire order.
+    /// Excludes the `Unrecognized` escape.
+    pub const KNOWN: &'static [Self] = &[Self::Day, Self::Month, Self::Lifetime];
+
+    /// The JSON wire string for this value.
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Day => "day",
+            Self::Month => "month",
+            Self::Lifetime => "lifetime",
+            Self::Unrecognized(value) => value.as_str(),
+        }
+    }
+
+    /// Parse a wire string. An unrecognized value is preserved rather than rejected.
+    pub fn from_wire(value: &str) -> Self {
+        match value {
+            "day" => Self::Day,
+            "month" => Self::Month,
+            "lifetime" => Self::Lifetime,
+            other => Self::Unrecognized(other.to_string()),
+        }
+    }
+
+    /// Whether this value is part of the vocabulary this binding was generated from.
+    pub fn is_known(&self) -> bool {
+        !matches!(self, Self::Unrecognized(_))
+    }
+}
+
+impl From<String> for HarnMachineSpendPeriod {
+    fn from(value: String) -> Self {
+        Self::from_wire(&value)
+    }
+}
+
+impl From<HarnMachineSpendPeriod> for String {
+    fn from(value: HarnMachineSpendPeriod) -> Self {
+        value.as_str().to_string()
+    }
+}
+
+impl std::fmt::Display for HarnMachineSpendPeriod {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// Value-free inference admission vocabulary owned by harn_vm.
+/// Open vocabulary: unit variants are the values this binding was generated from, and `Unrecognized` carries any other string verbatim so a newer Harn never breaks an older consumer.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub enum HarnInferenceAdmissionStatus {
+    Admitted,
+    Denied,
+    Unknown,
+    /// A wire value outside the vocabulary this binding was generated from. Preserved verbatim.
+    Unrecognized(String),
+}
+
+impl HarnInferenceAdmissionStatus {
+    /// Every value this binding was generated from, in wire order.
+    /// Excludes the `Unrecognized` escape.
+    pub const KNOWN: &'static [Self] = &[Self::Admitted, Self::Denied, Self::Unknown];
+
+    /// The JSON wire string for this value.
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Admitted => "admitted",
+            Self::Denied => "denied",
+            Self::Unknown => "unknown",
+            Self::Unrecognized(value) => value.as_str(),
+        }
+    }
+
+    /// Parse a wire string. An unrecognized value is preserved rather than rejected.
+    pub fn from_wire(value: &str) -> Self {
+        match value {
+            "admitted" => Self::Admitted,
+            "denied" => Self::Denied,
+            "unknown" => Self::Unknown,
+            other => Self::Unrecognized(other.to_string()),
+        }
+    }
+
+    /// Whether this value is part of the vocabulary this binding was generated from.
+    pub fn is_known(&self) -> bool {
+        !matches!(self, Self::Unrecognized(_))
+    }
+}
+
+impl From<String> for HarnInferenceAdmissionStatus {
+    fn from(value: String) -> Self {
+        Self::from_wire(&value)
+    }
+}
+
+impl From<HarnInferenceAdmissionStatus> for String {
+    fn from(value: HarnInferenceAdmissionStatus) -> Self {
+        value.as_str().to_string()
+    }
+}
+
+impl std::fmt::Display for HarnInferenceAdmissionStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// Value-free inference admission vocabulary owned by harn_vm.
+/// Open vocabulary: unit variants are the values this binding was generated from, and `Unrecognized` carries any other string verbatim so a newer Harn never breaks an older consumer.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub enum HarnInferenceAdmissionReach {
+    LocalOnly,
+    HostedOpenWeight,
+    AnyHosted,
+    /// A wire value outside the vocabulary this binding was generated from. Preserved verbatim.
+    Unrecognized(String),
+}
+
+impl HarnInferenceAdmissionReach {
+    /// Every value this binding was generated from, in wire order.
+    /// Excludes the `Unrecognized` escape.
+    pub const KNOWN: &'static [Self] = &[Self::LocalOnly, Self::HostedOpenWeight, Self::AnyHosted];
+
+    /// The JSON wire string for this value.
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::LocalOnly => "local_only",
+            Self::HostedOpenWeight => "hosted_open_weight",
+            Self::AnyHosted => "any_hosted",
+            Self::Unrecognized(value) => value.as_str(),
+        }
+    }
+
+    /// Parse a wire string. An unrecognized value is preserved rather than rejected.
+    pub fn from_wire(value: &str) -> Self {
+        match value {
+            "local_only" => Self::LocalOnly,
+            "hosted_open_weight" => Self::HostedOpenWeight,
+            "any_hosted" => Self::AnyHosted,
+            other => Self::Unrecognized(other.to_string()),
+        }
+    }
+
+    /// Whether this value is part of the vocabulary this binding was generated from.
+    pub fn is_known(&self) -> bool {
+        !matches!(self, Self::Unrecognized(_))
+    }
+}
+
+impl From<String> for HarnInferenceAdmissionReach {
+    fn from(value: String) -> Self {
+        Self::from_wire(&value)
+    }
+}
+
+impl From<HarnInferenceAdmissionReach> for String {
+    fn from(value: HarnInferenceAdmissionReach) -> Self {
+        value.as_str().to_string()
+    }
+}
+
+impl std::fmt::Display for HarnInferenceAdmissionReach {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// Value-free inference admission vocabulary owned by harn_vm.
+/// Open vocabulary: unit variants are the values this binding was generated from, and `Unrecognized` carries any other string verbatim so a newer Harn never breaks an older consumer.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub enum HarnInferenceAdmissionDataPosture {
+    Default,
+    StrictestAvailable,
+    /// A wire value outside the vocabulary this binding was generated from. Preserved verbatim.
+    Unrecognized(String),
+}
+
+impl HarnInferenceAdmissionDataPosture {
+    /// Every value this binding was generated from, in wire order.
+    /// Excludes the `Unrecognized` escape.
+    pub const KNOWN: &'static [Self] = &[Self::Default, Self::StrictestAvailable];
+
+    /// The JSON wire string for this value.
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Default => "default",
+            Self::StrictestAvailable => "strictest_available",
+            Self::Unrecognized(value) => value.as_str(),
+        }
+    }
+
+    /// Parse a wire string. An unrecognized value is preserved rather than rejected.
+    pub fn from_wire(value: &str) -> Self {
+        match value {
+            "default" => Self::Default,
+            "strictest_available" => Self::StrictestAvailable,
+            other => Self::Unrecognized(other.to_string()),
+        }
+    }
+
+    /// Whether this value is part of the vocabulary this binding was generated from.
+    pub fn is_known(&self) -> bool {
+        !matches!(self, Self::Unrecognized(_))
+    }
+}
+
+impl From<String> for HarnInferenceAdmissionDataPosture {
+    fn from(value: String) -> Self {
+        Self::from_wire(&value)
+    }
+}
+
+impl From<HarnInferenceAdmissionDataPosture> for String {
+    fn from(value: HarnInferenceAdmissionDataPosture) -> Self {
+        value.as_str().to_string()
+    }
+}
+
+impl std::fmt::Display for HarnInferenceAdmissionDataPosture {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// Value-free inference admission vocabulary owned by harn_vm.
+/// Open vocabulary: unit variants are the values this binding was generated from, and `Unrecognized` carries any other string verbatim so a newer Harn never breaks an older consumer.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub enum HarnInferenceAdmissionDataControlsOutcome {
+    NotRequested,
+    Applied,
+    NoControlAvailable,
+    ProviderUnresearched,
+    /// A wire value outside the vocabulary this binding was generated from. Preserved verbatim.
+    Unrecognized(String),
+}
+
+impl HarnInferenceAdmissionDataControlsOutcome {
+    /// Every value this binding was generated from, in wire order.
+    /// Excludes the `Unrecognized` escape.
+    pub const KNOWN: &'static [Self] = &[
+        Self::NotRequested,
+        Self::Applied,
+        Self::NoControlAvailable,
+        Self::ProviderUnresearched,
+    ];
+
+    /// The JSON wire string for this value.
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::NotRequested => "not_requested",
+            Self::Applied => "applied",
+            Self::NoControlAvailable => "no_control_available",
+            Self::ProviderUnresearched => "provider_unresearched",
+            Self::Unrecognized(value) => value.as_str(),
+        }
+    }
+
+    /// Parse a wire string. An unrecognized value is preserved rather than rejected.
+    pub fn from_wire(value: &str) -> Self {
+        match value {
+            "not_requested" => Self::NotRequested,
+            "applied" => Self::Applied,
+            "no_control_available" => Self::NoControlAvailable,
+            "provider_unresearched" => Self::ProviderUnresearched,
+            other => Self::Unrecognized(other.to_string()),
+        }
+    }
+
+    /// Whether this value is part of the vocabulary this binding was generated from.
+    pub fn is_known(&self) -> bool {
+        !matches!(self, Self::Unrecognized(_))
+    }
+}
+
+impl From<String> for HarnInferenceAdmissionDataControlsOutcome {
+    fn from(value: String) -> Self {
+        Self::from_wire(&value)
+    }
+}
+
+impl From<HarnInferenceAdmissionDataControlsOutcome> for String {
+    fn from(value: HarnInferenceAdmissionDataControlsOutcome) -> Self {
+        value.as_str().to_string()
+    }
+}
+
+impl std::fmt::Display for HarnInferenceAdmissionDataControlsOutcome {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// Value-free inference admission vocabulary owned by harn_vm.
+/// Open vocabulary: unit variants are the values this binding was generated from, and `Unrecognized` carries any other string verbatim so a newer Harn never breaks an older consumer.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub enum HarnInferenceAdmissionDataControlsRefusal {
+    TrainingWithoutControl,
+    /// A wire value outside the vocabulary this binding was generated from. Preserved verbatim.
+    Unrecognized(String),
+}
+
+impl HarnInferenceAdmissionDataControlsRefusal {
+    /// Every value this binding was generated from, in wire order.
+    /// Excludes the `Unrecognized` escape.
+    pub const KNOWN: &'static [Self] = &[Self::TrainingWithoutControl];
+
+    /// The JSON wire string for this value.
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::TrainingWithoutControl => "training_without_control",
+            Self::Unrecognized(value) => value.as_str(),
+        }
+    }
+
+    /// Parse a wire string. An unrecognized value is preserved rather than rejected.
+    pub fn from_wire(value: &str) -> Self {
+        match value {
+            "training_without_control" => Self::TrainingWithoutControl,
+            other => Self::Unrecognized(other.to_string()),
+        }
+    }
+
+    /// Whether this value is part of the vocabulary this binding was generated from.
+    pub fn is_known(&self) -> bool {
+        !matches!(self, Self::Unrecognized(_))
+    }
+}
+
+impl From<String> for HarnInferenceAdmissionDataControlsRefusal {
+    fn from(value: String) -> Self {
+        Self::from_wire(&value)
+    }
+}
+
+impl From<HarnInferenceAdmissionDataControlsRefusal> for String {
+    fn from(value: HarnInferenceAdmissionDataControlsRefusal) -> Self {
+        value.as_str().to_string()
+    }
+}
+
+impl std::fmt::Display for HarnInferenceAdmissionDataControlsRefusal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnMachineSpendExhaustion {
+    pub period: HarnMachineSpendPeriod,
+    pub limit_microusd: i64,
+    pub reserved_microusd: i64,
+    pub remaining_microusd: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reset_at_unix_ms: Option<i64>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnInferenceAdmissionBoundary {
+    pub reach: HarnInferenceAdmissionReach,
+    pub allow_training_discounts: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnInferenceAdmissionRequest {
+    pub provider: String,
+    pub model: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub boundary: Option<HarnInferenceAdmissionBoundary>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub data_controls: Option<HarnInferenceAdmissionDataPosture>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnInferenceAdmissionSnapshot {
+    pub schema: String,
+    pub provider: String,
+    pub model: String,
+    pub status: HarnInferenceAdmissionStatus,
+    pub training_control_planned: bool,
+    pub data_posture: HarnInferenceAdmissionDataPosture,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub data_controls_note: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub data_controls_outcome: Option<HarnInferenceAdmissionDataControlsOutcome>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub data_controls_refusal: Option<HarnInferenceAdmissionDataControlsRefusal>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effective_boundary: Option<HarnInferenceAdmissionBoundary>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub governing_rule: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub local_runtime: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub open_weight: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub training_default: Option<String>,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnCanonicalSessionBoundary {
+    pub schema: String,
+    pub session_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub event_id: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub record_hash: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnCanonicalHistoryPosition {
+    pub source_event_id: String,
+    pub origin_session_id: String,
+    pub before_boundary: HarnCanonicalSessionBoundary,
+    pub boundary: HarnCanonicalSessionBoundary,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnCanonicalHistoryBoundaries {
+    pub tip: HarnCanonicalSessionBoundary,
+    pub positions: Vec<HarnCanonicalHistoryPosition>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnACPPromptCorrelation {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "messageId")]
+    pub message_id: Option<String>,
 }

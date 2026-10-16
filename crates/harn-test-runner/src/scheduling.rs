@@ -1,7 +1,6 @@
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
-use std::thread;
 
 use crate::{TestCase, TestResult};
 
@@ -38,7 +37,6 @@ pub struct ParallelCaseResults {
 pub struct ParallelRunOptions {
     pub workers: usize,
     pub total_tests: usize,
-    pub stack_size: usize,
     pub fail_fast: bool,
     pub progress: Option<TestRunProgress>,
 }
@@ -64,7 +62,6 @@ where
     let ParallelRunOptions {
         workers,
         total_tests,
-        stack_size,
         fail_fast,
         progress,
     } = options;
@@ -86,24 +83,15 @@ where
         let progress = progress.clone();
         let init_worker = Arc::clone(&init_worker);
         let execute = Arc::clone(&execute);
-        let handle = thread::Builder::new()
+        let handle = harn_parser::runtime_stack::builder()
             .name(format!("harn-test-worker-{worker_idx}"))
-            .stack_size(stack_size)
             .spawn(move || {
                 let mut worker = match init_worker(worker_idx) {
                     Ok(worker) => worker,
                     Err(error) => {
                         infrastructure_errors.lock().unwrap().push(TestResult {
-                            name: "<worker error>".to_string(),
-                            file: String::new(),
-                            passed: false,
-                            skip_reason: None,
                             error: Some(error),
-                            captured_output: None,
-                            timeout: None,
-                            duration_ms: 0,
-                            phases: None,
-                            timing_spans: Vec::new(),
+                            ..TestResult::unmeasured("<worker error>", "", false, 0)
                         });
                         return;
                     }
@@ -268,14 +256,9 @@ mod tests {
                 .to_string(),
         );
         let program = Arc::new(parse_program(&source).unwrap());
-        let cases = extract_cases_from_program(
-            Path::new("test_scheduler.harn"),
-            &source,
-            &program,
-            None,
-            usize::MAX,
-        )
-        .unwrap();
+        let cases =
+            extract_cases_from_program(Path::new("test_scheduler.harn"), &source, &program, None)
+                .unwrap();
         let scheduler = Arc::new(CaseScheduler::new(cases, 3));
         let cancelled = AtomicBool::new(false);
 
@@ -305,14 +288,9 @@ mod tests {
                 .to_string(),
         );
         let program = Arc::new(parse_program(&source).unwrap());
-        let cases = extract_cases_from_program(
-            Path::new("test_scheduler.harn"),
-            &source,
-            &program,
-            None,
-            usize::MAX,
-        )
-        .unwrap();
+        let cases =
+            extract_cases_from_program(Path::new("test_scheduler.harn"), &source, &program, None)
+                .unwrap();
         let scheduler = Arc::new(CaseScheduler::new(cases, 2));
         let cancelled = AtomicBool::new(false);
 
@@ -335,20 +313,20 @@ mod tests {
                 .to_string(),
         );
         let program = Arc::new(parse_program(&source).unwrap());
-        let cases = extract_cases_from_program(
-            Path::new("test_scheduler.harn"),
-            &source,
-            &program,
-            None,
-            usize::MAX,
-        )
-        .unwrap();
+        let cases =
+            extract_cases_from_program(Path::new("test_scheduler.harn"), &source, &program, None)
+                .unwrap();
         let events = Arc::new(Mutex::new(Vec::new()));
         let captured = Arc::clone(&events);
+        let finished = Arc::new(Mutex::new(Vec::<TestResult>::new()));
+        let captured_results = Arc::clone(&finished);
         let progress = Arc::new(move |event| {
             captured.lock().unwrap().push(match event {
                 TestRunEvent::TestStarted { .. } => "started",
-                TestRunEvent::TestFinished(_) => "finished",
+                TestRunEvent::TestFinished(result) => {
+                    captured_results.lock().unwrap().push(result);
+                    "finished"
+                }
                 _ => "suite",
             });
         });
@@ -358,27 +336,22 @@ mod tests {
             ParallelRunOptions {
                 workers: 1,
                 total_tests: 2,
-                stack_size: 2 * 1024 * 1024,
                 fail_fast: true,
                 progress: Some(progress),
             },
             |_| Ok(()),
             |_, case| TestResult {
-                name: case.name.clone(),
-                file: case.file.display().to_string(),
-                passed: false,
-                skip_reason: None,
                 error: Some("deterministic failure".to_string()),
-                captured_output: None,
-                timeout: None,
-                duration_ms: 0,
-                phases: None,
-                timing_spans: Vec::new(),
+                ..TestResult::unmeasured(&case.name, case.file.display().to_string(), false, 0)
             },
         );
 
         assert_eq!(run.cases.len(), 1);
         assert!(run.infrastructure_errors.is_empty());
         assert_eq!(*events.lock().unwrap(), ["started", "finished"]);
+        let finished = finished.lock().unwrap();
+        assert_eq!(finished.len(), 1);
+        assert_eq!(finished[0].name, run.cases[0].name);
+        assert_eq!(finished[0].error, run.cases[0].error);
     }
 }

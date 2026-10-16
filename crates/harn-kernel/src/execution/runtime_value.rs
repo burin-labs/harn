@@ -27,6 +27,12 @@ impl EnumValue {
 }
 
 #[derive(Clone)]
+pub(super) struct RuntimeException {
+    pub(super) value: RuntimeValue,
+    pub(super) declared: bool,
+}
+
+#[derive(Clone)]
 pub(super) enum RuntimeValue {
     Nil,
     Bool(bool),
@@ -40,19 +46,24 @@ pub(super) enum RuntimeValue {
     Closure(Closure),
     Builtin(String),
     Harness(String),
+    Exception(Rc<RuntimeException>),
 }
 
 impl RuntimeValue {
     pub(super) fn truthy(&self) -> bool {
+        use crate::value::Truthiness as T;
         match self {
-            Self::Nil | Self::Bool(false) => false,
-            Self::Int(0) => false,
-            Self::Float(value) if *value == 0.0 || value.is_nan() => false,
-            Self::String(value) => !value.is_empty(),
-            Self::List(value) => !value.is_empty(),
-            Self::Record(value) => !value.is_empty(),
-            _ => true,
+            Self::Nil => T::Nil,
+            Self::Bool(value) => T::Bool(*value),
+            Self::Int(value) => T::Int(*value),
+            Self::Float(value) => T::Float(*value),
+            Self::String(value) => T::Length(value.len()),
+            Self::Bytes(value) => T::Length(value.len()),
+            Self::List(value) => T::Length(value.len()),
+            Self::Record(value) => T::Length(value.len()),
+            _ => T::Opaque,
         }
+        .is_truthy()
     }
 
     pub(super) fn display(&self) -> String {
@@ -96,6 +107,7 @@ impl RuntimeValue {
             Self::Closure(_) => "<closure>".into(),
             Self::Builtin(name) => format!("<builtin {name}>"),
             Self::Harness(name) => format!("<harness {name}>"),
+            Self::Exception(_) => "<caught exception>".into(),
         }
     }
 }
@@ -116,7 +128,9 @@ impl SemanticValue for RuntimeValue {
                 variant: &value.variant,
                 fields: &value.fields,
             },
-            Self::Closure(_) | Self::Builtin(_) | Self::Harness(_) => ValueView::Opaque,
+            Self::Closure(_) | Self::Builtin(_) | Self::Harness(_) | Self::Exception(_) => {
+                ValueView::Opaque
+            }
         }
     }
 }
@@ -192,7 +206,10 @@ impl DataValue {
                     "execution returned an enum outside the portable data contract",
                 ));
             }
-            RuntimeValue::Closure(_) | RuntimeValue::Builtin(_) | RuntimeValue::Harness(_) => {
+            RuntimeValue::Closure(_)
+            | RuntimeValue::Builtin(_)
+            | RuntimeValue::Harness(_)
+            | RuntimeValue::Exception(_) => {
                 return Err(diagnostic(
                     "non_data_result",
                     "execution returned a host or callable value",

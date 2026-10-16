@@ -7,7 +7,8 @@
 //!
 //! Sources of truth:
 //!
-//! - `harn_lexer::KEYWORDS` — language keywords.
+//! - `harn_lexer::KEYWORDS` and `harn_lexer::CONTEXTUAL_STATEMENT_KEYWORDS` —
+//!   reserved words and the contextual words that begin statements.
 //! - `harn_vm::stdlib::stdlib_builtin_names()` — globally-available stdlib
 //!   builtins (all three tiers are registered unconditionally on a Harn VM,
 //!   so everything this function returns is reachable without an `import`).
@@ -22,7 +23,7 @@ use std::fs;
 use std::path::Path;
 use std::process;
 
-use harn_lexer::{KEYWORDS, LITERAL_KEYWORDS};
+use harn_lexer::{CONTEXTUAL_STATEMENT_KEYWORDS, KEYWORDS, LITERAL_KEYWORDS};
 use harn_vm::stdlib::stdlib_builtin_names;
 use serde::Serialize;
 
@@ -111,6 +112,7 @@ fn language_vocabulary() -> LanguageVocabulary {
 
     let keywords: Vec<String> = KEYWORDS
         .iter()
+        .chain(CONTEXTUAL_STATEMENT_KEYWORDS)
         .copied()
         .filter(|k| !literals.contains(k))
         .map(str::to_string)
@@ -119,7 +121,11 @@ fn language_vocabulary() -> LanguageVocabulary {
     // Builtins: names registered on a fully-initialized VM, minus anything
     // that's already a keyword (highlight.js treats those as keywords) and
     // compiler-internal `__*` names users never call directly.
-    let keyword_set: BTreeSet<&str> = KEYWORDS.iter().copied().collect();
+    let keyword_set: BTreeSet<&str> = KEYWORDS
+        .iter()
+        .chain(CONTEXTUAL_STATEMENT_KEYWORDS)
+        .copied()
+        .collect();
     let builtin_owned: Vec<String> = stdlib_builtin_names()
         .into_iter()
         .filter(|name| !name.starts_with("__"))

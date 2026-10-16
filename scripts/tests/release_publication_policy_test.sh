@@ -84,11 +84,11 @@ grep -Fq 'import { github_bump_remote } from "./github_remote"' "$branch_publish
 grep -Fq 'remote.publish_commit(' "$branch_publisher" \
   || fail "branch publication does not publish through the signed commit operation"
 # One arming path for both automated release-lane pull requests.
-grep -Fq 'gh pr merge "$pr_url" --auto --squash' "$root/scripts/lib/release_auto_merge.sh" \
-  || fail "the shared release auto-merge helper does not arm a squash merge"
+grep -Fq 'gh pr edit "$pr_url" --add-label ship' "$root/scripts/lib/release_ship_enrollment.sh" \
+  || fail "the shared release helper does not enroll Smart Ship"
 for armer in "$root/scripts/validate_development_bump.sh" "$release_opener"; do
-  grep -Fq 'release_arm_auto_merge "$pr_url"' "$armer" \
-    || fail "$(basename "$armer") does not arm through the shared release auto-merge helper"
+  grep -Fq 'release_enroll_ship "$pr_url"' "$armer" \
+    || fail "$(basename "$armer") does not enroll through the shared release helper"
   if grep -Fq 'gh pr merge' "$armer"; then
     fail "$(basename "$armer") arms auto-merge outside the shared helper"
   fi
@@ -97,6 +97,15 @@ done
 ci_workflow="$root/.github/workflows/ci.yml"
 grep -Fq 'release_published_version_for_workspace "$workspace_version"' "$ci_workflow" \
   || fail "source-only documentation checks try to install an unpublished -dev build"
+canary_workflow="$root/.github/workflows/consumer-canary.yml"
+canary_script="$root/scripts/ci/consumer_canary.sh"
+grep -Fq 'WORKSPACE_VERSION=' "$canary_workflow" \
+  || fail "consumer canary no longer passes the source workspace version"
+if grep -Fq 'TARGET_VERSION=' "$canary_workflow"; then
+  fail "consumer canary sends an unpublished workspace version as a consumer tag"
+fi
+grep -Fq 'release_published_version_for_workspace "$workspace_version"' "$canary_script" \
+  || fail "consumer canary no longer projects workspace state to a published tag"
 grep -Fq 'scripts/verify_release_tag_main_ancestry.sh --tag "$REF_NAME"' "$publish_workflow" \
   || fail "crate publication does not prove the tag selects merged main"
 

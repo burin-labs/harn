@@ -7,6 +7,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::value::{DictMap, VmValue};
 
+/// Origin of a chain no principal authenticated, the same subject
+/// `harn-serve` gives an unauthenticated client.
+pub const ANONYMOUS_SUBJECT: &str = "anonymous";
 const SUB: &str = "sub";
 const ACT: &str = "act";
 const MAY_ACT: &str = "may_act";
@@ -273,6 +276,22 @@ impl ActorChain {
     pub fn pushed(mut self, actor: impl Into<String>) -> Self {
         self.push(actor);
         self
+    }
+
+    /// The chain a delegated child runs under: `parent` with `actor` pushed
+    /// on. A named child is delegated even under a parent no principal
+    /// authenticated, so a missing chain starts at [`ANONYMOUS_SUBJECT`]
+    /// instead of dropping the hop and stamping the child like its parent
+    /// (harn#8927). Without an actor the parent's chain passes through.
+    pub fn delegated(parent: Option<Self>, actor: Option<&str>) -> Option<Self> {
+        match actor.map(str::trim).filter(|actor| !actor.is_empty()) {
+            Some(actor) => Some(
+                parent
+                    .unwrap_or_else(|| Self::new(ANONYMOUS_SUBJECT))
+                    .pushed(actor),
+            ),
+            None => parent,
+        }
     }
 
     pub fn pushed_with_scopes<I, S>(mut self, actor: impl Into<String>, scopes: I) -> Self

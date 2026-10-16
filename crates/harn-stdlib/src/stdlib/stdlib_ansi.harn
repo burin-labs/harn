@@ -108,32 +108,32 @@ fn __ansi_codes(style: any) {
   const s = style ?? {}
   let codes = []
   if s?.bold ?? false {
-    codes = codes.appending("1")
+    codes.push("1")
   }
   if s?.dim ?? false {
-    codes = codes.appending("2")
+    codes.push("2")
   }
   if s?.italic ?? false {
-    codes = codes.appending("3")
+    codes.push("3")
   }
   if s?.underline ?? false {
-    codes = codes.appending("4")
+    codes.push("4")
   }
   if s?.inverse ?? false {
-    codes = codes.appending("7")
+    codes.push("7")
   }
   if s?.strikethrough ?? false {
-    codes = codes.appending("9")
+    codes.push("9")
   }
   const fg = s?.fg ?? s?.color
   const fg_code = __ansi_color_code(fg, false)
   if fg_code != nil {
-    codes = codes.appending(fg_code)
+    codes.push(fg_code)
   }
   const bg = s?.bg ?? s?.background
   const bg_code = __ansi_color_code(bg, true)
   if bg_code != nil {
-    codes = codes.appending(bg_code)
+    codes.push(bg_code)
   }
   return codes
 }

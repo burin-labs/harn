@@ -300,7 +300,14 @@ pipeline test_unavailable_tool_keeps_the_actual_judge_prompt_byte_identical(
       )
         .to_list()
       assert_eq(len(judges), 2)
-      assert_eq(judges[0].system, judges[1].system)
+      const normalize_nonce = { system ->
+        regex_replace(
+          "Harn directive authority nonce for this session: [^.]+\\.",
+          "Harn directive authority nonce for this session: <nonce>.",
+          system,
+        )
+      }
+      assert_eq(normalize_nonce(judges[0].system), normalize_nonce(judges[1].system))
       assert_eq(judges[0].prompt, judges[1].prompt)
     },
   )

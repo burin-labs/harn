@@ -111,8 +111,23 @@ handler = "handlers::on_echo"
 The optional `oauth` table is package-owned setup metadata consumed by
 `harn connect <provider>`. It supports `resource`,
 `authorization_endpoint`, `token_endpoint`, `registration_endpoint`, `scopes`,
-`client_id`, `client_secret`, and `token_endpoint_auth_method`; operator CLI
-flags override those values for a single run.
+`client_id`, `client_secret`, `token_endpoint_auth_method`, and
+`authorization_params`. Operator CLI flags override those values for a single
+run.
+
+`authorization_params` adds query parameters to the authorization request. It
+cannot replace a parameter the flow owns, such as `client_id`, `state`, or
+`scope`. For an authorization endpoint on `accounts.google.com`,
+`harn connect` sends `access_type=offline` and `prompt=consent` by default.
+Google issues a refresh token only with those parameters, and
+`harn connect --refresh` and std/oauth need that token after the access token
+expires. A declared value overrides a default with the same key:
+
+```toml
+[providers.oauth]
+authorization_endpoint = "https://accounts.google.com/o/oauth2/v2/auth"
+authorization_params = { prompt = "select_account consent" }
+```
 
 The optional `capabilities` declaration feeds `harn check --connector-matrix`
 and the generated connector parity docs. Declare any of `webhook`, `oauth`,

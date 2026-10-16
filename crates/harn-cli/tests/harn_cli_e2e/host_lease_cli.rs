@@ -431,6 +431,7 @@ fn supervised_cargo_run_rejects_a_conflicting_artifact_environment() {
 #[cfg(unix)]
 #[test]
 fn cancelling_the_supervisor_reaps_cargo_before_releasing_its_lease() {
+    use notify::Watcher;
     use std::io::{BufRead, Read};
     use std::os::unix::fs::PermissionsExt;
     use std::process::Stdio;
@@ -444,6 +445,14 @@ fn cancelling_the_supervisor_reaps_cargo_before_releasing_its_lease() {
     let fake_bin = temp.path().join("bin");
     fs::create_dir_all(&workspace).expect("create workspace");
     fs::create_dir_all(&fake_bin).expect("create fake executable directory");
+    let (receipt_tx, receipt_rx) = mpsc::channel();
+    let mut receipt_watcher = notify::recommended_watcher(move |event| {
+        let _ = receipt_tx.send(event);
+    })
+    .expect("watch cancellation receipts");
+    receipt_watcher
+        .watch(temp.path(), notify::RecursiveMode::Recursive)
+        .expect("subscribe before the supervisor starts");
     let fake_cargo = fake_bin.join("cargo");
     fs::write(
         &fake_cargo,
@@ -530,6 +539,49 @@ fn cancelling_the_supervisor_reaps_cargo_before_releasing_its_lease() {
         }
     };
 
+    // Cargo can emit its marker before its parent records the ownership
+    // transfer. Cancel only after the durable receipt acknowledges that PID;
+    // the child marker alone does not prove the running contract was reached.
+    let receipt_path = loop {
+        let observed = fs::read_dir(lease_root.join("receipts"))
+            .ok()
+            .into_iter()
+            .flatten()
+            .filter_map(Result::ok)
+            .map(|entry| entry.path())
+            .filter(|path| {
+                path.extension()
+                    .is_some_and(|extension| extension == "json")
+            })
+            .find(|path| {
+                fs::read(path)
+                    .ok()
+                    .and_then(|bytes| {
+                        serde_json::from_slice::<harn_hostlib::HostLeaseRunReceipt>(&bytes).ok()
+                    })
+                    .is_some_and(|receipt| {
+                        matches!(receipt.status,
+                            harn_hostlib::HostLeaseRunState::Running { worker_pid, .. }
+                            if worker_pid == cargo_pid)
+                    })
+            });
+        if let Some(path) = observed {
+            break path;
+        }
+        let event = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            harn_clock::test_support::recv_within("Cargo ownership receipt update", &receipt_rx)
+        }))
+        .unwrap_or_else(|panic| {
+            unsafe { libc::kill(supervisor.id() as i32, libc::SIGTERM) };
+            let _ = supervisor.wait();
+            std::panic::resume_unwind(panic)
+        });
+        if let Err(error) = event {
+            unsafe { libc::kill(supervisor.id() as i32, libc::SIGTERM) };
+            let _ = supervisor.wait();
+            panic!("Cargo ownership transfer was not observed: {error}");
+        }
+    };
     let signal_result = unsafe { libc::kill(supervisor.id() as i32, libc::SIGTERM) };
     assert_eq!(signal_result, 0, "signal the exact supervisor process");
     let status = supervisor.wait().expect("wait for cancelled supervisor");
@@ -553,23 +605,21 @@ fn cancelling_the_supervisor_reaps_cargo_before_releasing_its_lease() {
         Some(libc::ESRCH)
     );
 
-    let receipt_path = fs::read_dir(lease_root.join("receipts"))
-        .expect("read cancellation receipt directory")
-        .next()
-        .expect("one cancellation receipt")
-        .expect("read cancellation receipt entry")
-        .path();
     let receipt: harn_hostlib::HostLeaseRunReceipt =
         serde_json::from_slice(&fs::read(receipt_path).expect("read cancellation receipt"))
             .expect("parse cancellation receipt");
-    assert!(matches!(
-        receipt.status,
-        harn_hostlib::HostLeaseRunState::Cancelled {
-            release: harn_hostlib::HostLeaseRunReleaseOutcome::Released,
-            worker_pid,
-            ..
-        } if worker_pid == cargo_pid
-    ));
+    assert!(
+        matches!(
+            receipt.status,
+            harn_hostlib::HostLeaseRunState::Cancelled {
+                release: harn_hostlib::HostLeaseRunReleaseOutcome::Released,
+                worker_pid,
+                ..
+            } if worker_pid == cargo_pid
+        ),
+        "unexpected cancellation receipt: {:?}",
+        receipt.status
+    );
 
     let state = harn_hostlib::HostLeaseStore::for_root(&lease_root)
         .expect("open lease store")

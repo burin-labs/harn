@@ -19,7 +19,7 @@ area:
   - {name: area/modules, color: "1d76db", description: "Module system, imports, package management"}
   - {name: area/orchestrator, color: "1d76db", description: "harn orchestrator serve runtime"}
   - {name: area/triggers, color: "1d76db", description: "Event-driven triggers subsystem"}
-  - {name: area/connectors, color: "1d76db", description: "External event-source connectors (GitHub/Slack/Linear/Notion/webhook/cron)"}
+  - {name: area/connectors, color: "1d76db", description: "External event-source connectors (GitHub/Slack/Linear/webhook/cron)"}
   - {name: area/flow-control, color: "1d76db", description: "Concurrency / throttle / rate-limit / waitpoints"}
   - {name: area/flow, color: "8957e5", description: "Agent-native shipping substrate (atoms, slices, shipping roles)"}
   - {name: area/personas, color: "8957e5", description: "Durable agent persona manifests, typed handoffs, and continuous role runtime"}

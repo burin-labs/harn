@@ -64,11 +64,11 @@ fn run_current_invocation_blocking() -> Result<i32, String> {
     let stderr = child
         .take_stderr()
         .ok_or_else(|| "supervised conformance stderr pipe is missing".to_string())?;
-    let stdout_task = std::thread::spawn(move || {
+    let stdout_task = harn_parser::runtime_stack::spawn(move || {
         let mut stdout = stdout;
         io::copy(&mut stdout, &mut io::stdout())
     });
-    let stderr_task = std::thread::spawn(move || {
+    let stderr_task = harn_parser::runtime_stack::spawn(move || {
         let mut stderr = stderr;
         io::copy(&mut stderr, &mut io::stderr())
     });

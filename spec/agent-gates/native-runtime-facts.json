@@ -58,6 +58,13 @@
   {
     "scope": "native-runner-option-helpers",
     "file": "crates/harn-vm/src/llm/agent_session_host/lifecycle.rs",
+    "expression": "\"initial_user_message_id\"",
+    "owner": "opt_str",
+    "evidence": "The caller supplies an opaque identity for the opening user message. The native session owner persists that correlation without selecting run policy or granting authority."
+  },
+  {
+    "scope": "native-runner-option-helpers",
+    "file": "crates/harn-vm/src/llm/agent_session_host/lifecycle.rs",
     "expression": "\"iterations\"",
     "owner": "opt_int",
     "evidence": "Measured iteration count is supplied by the runner result."
@@ -106,6 +113,13 @@
   },
   {
     "scope": "native-runner-option-helpers",
+    "file": "crates/harn-vm/src/llm/helpers/options/text_channel_tools.rs",
+    "expression": "\"_tool_contract_rendered\"",
+    "owner": "opt_bool",
+    "evidence": "Internal rendering receipt from the agent loop: its system prompt carries the json/text tool-call contract, so text-channel tools are not a silent drop."
+  },
+  {
+    "scope": "native-runner-option-helpers",
     "file": "crates/harn-vm/src/llm/helpers/options/extract.rs",
     "expression": "\"_done_sentinel_form\"",
     "owner": "opt_str",
@@ -117,5 +131,12 @@
     "expression": "\"_iteration\"",
     "owner": "opt_int",
     "evidence": "The current iteration number is supplied by the runner for event and tool-dispatch evidence."
+  },
+  {
+    "scope": "native-runner-option-helpers",
+    "file": "crates/harn-vm/src/llm/call.rs",
+    "expression": "\"_user_visible\"",
+    "owner": "opt_bool",
+    "evidence": "The agent loop marks its main request as the turn a person is waiting to read; the schema loop streams that request's visible deltas to the host bridge only then."
   }
 ]

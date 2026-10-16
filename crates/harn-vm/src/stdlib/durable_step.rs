@@ -9,7 +9,7 @@ use crate::event_log::{
 };
 use crate::llm::vm_value_to_json;
 use crate::runtime_limits::RuntimeLimits;
-use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
+use crate::stdlib::macros::harn_builtin;
 use crate::value::{value_structural_hash_key, VmError, VmValue};
 use crate::vm::{AsyncBuiltinCtx, Vm};
 
@@ -55,9 +55,7 @@ pub(crate) fn reset_durable_step_state() {
 
 pub(crate) fn register_durable_step_builtins(vm: &mut Vm) {
     register_step_namespace(vm);
-    for def in MODULE_BUILTINS {
-        vm.register_builtin_def(def);
-    }
+    crate::stdlib::macros::register_module_builtins(vm, module_path!());
 }
 
 #[harn_builtin(
@@ -88,24 +86,19 @@ async fn step_inspect_impl(
     step_inspect(&ctx, args).await
 }
 
-pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[&STEP_RUN_IMPL_DEF, &STEP_INSPECT_IMPL_DEF];
-
 fn register_step_namespace(vm: &mut Vm) {
     let names = ["run", "inspect"];
     vm.set_global(
         "step",
         VmValue::dict(
-            std::iter::once((
-                "_namespace".to_string(),
-                VmValue::String(arcstr::ArcStr::from("step")),
-            ))
-            .chain(names.into_iter().map(|name| {
-                (
-                    name.to_string(),
-                    VmValue::BuiltinRef(arcstr::ArcStr::from(format!("step.{name}"))),
-                )
-            }))
-            .collect::<BTreeMap<_, _>>(),
+            std::iter::once(("_namespace".to_string(), VmValue::string("step")))
+                .chain(names.into_iter().map(|name| {
+                    (
+                        name.to_string(),
+                        VmValue::BuiltinRef(arcstr::ArcStr::from(format!("step.{name}"))),
+                    )
+                }))
+                .collect::<BTreeMap<_, _>>(),
         ),
     );
 }
@@ -191,13 +184,13 @@ async fn step_inspect(ctx: &AsyncBuiltinCtx, args: Vec<VmValue>) -> Result<VmVal
     let namespace = parse_step_inspect_namespace(args, &child_vm)?;
     let topic = topic_for_namespace(&namespace)?;
     let records = read_step_records(&ensure_step_event_log(), &topic).await?;
-    Ok(VmValue::List(std::sync::Arc::new(
+    Ok(VmValue::list(
         records
             .into_iter()
             .filter(|record| record.namespace == namespace)
             .map(|record| record_to_value(&record))
             .collect(),
-    )))
+    ))
 }
 
 fn parse_step_run_request(args: Vec<VmValue>) -> Result<StepRunRequest, VmError> {
@@ -360,11 +353,7 @@ fn call_args_for_handler(
 }
 
 fn default_namespace(vm: &Vm) -> String {
-    if let Some(source_file) = vm
-        .source_file
-        .as_deref()
-        .filter(|value| !value.trim().is_empty())
-    {
+    if let Some(source_file) = vm.source_file().filter(|value| !value.trim().is_empty()) {
         return source_file.to_string();
     }
     if let Some(project_root) = vm.project_root() {
@@ -500,6 +489,21 @@ mod tests {
     fn explicit_input_hashes_are_stable_and_type_sensitive() {
         assert_eq!(input_hash(&vm_str("1")), input_hash(&vm_str("1")));
         assert_ne!(input_hash(&vm_str("1")), input_hash(&VmValue::Int(1)));
+    }
+
+    #[test]
+    fn replay_hashes_preserve_legacy_mixed_numeric_set_fingerprints() {
+        let integers = VmValue::set([VmValue::Int(9_007_199_254_740_993)]);
+        let floats = VmValue::set([VmValue::Float(9_007_199_254_740_992.0)]);
+        assert!(crate::value::values_equal(&integers, &floats));
+        assert_eq!(
+            input_hash(&integers),
+            "sha256:e6d5bfa77829658a4c1a204f90b6debecd7c893fe502439d7f9bbad5646bf446"
+        );
+        assert_eq!(
+            input_hash(&floats),
+            "sha256:5463f5a066233fd615208517046fe1247644e9d9886bb85ae6e04cb1c20af8e9"
+        );
     }
 
     #[test]

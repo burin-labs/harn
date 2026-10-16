@@ -33,13 +33,13 @@ pub(super) fn run_eval_pack_command(
         .spawn()
         .map_err(|e| VmError::Runtime(format!("eval pack command spawn failed: {e}")))?;
     let stdout_reader = child.stdout.take().map(|mut pipe| {
-        std::thread::spawn(move || {
+        crate::runtime_stack::spawn(move || {
             let mut bytes = Vec::new();
             pipe.read_to_end(&mut bytes).map(|_| bytes)
         })
     });
     let stderr_reader = child.stderr.take().map(|mut pipe| {
-        std::thread::spawn(move || {
+        crate::runtime_stack::spawn(move || {
             let mut bytes = Vec::new();
             pipe.read_to_end(&mut bytes).map(|_| bytes)
         })
@@ -121,13 +121,13 @@ fn shell_command(command: &str) -> Result<Command, VmError> {
     }
     #[cfg(windows)]
     {
-        let mut cmd = Command::new("cmd");
+        let mut cmd = crate::process_sandbox::session_std_command("cmd")?;
         cmd.args(["/C", command]);
         Ok(cmd)
     }
     #[cfg(not(windows))]
     {
-        let mut cmd = Command::new("/bin/sh");
+        let mut cmd = crate::process_sandbox::session_std_command("/bin/sh")?;
         cmd.args(["-c", command]);
         Ok(cmd)
     }
@@ -144,7 +144,7 @@ fn argv_command(argv: &[String]) -> Result<Command, VmError> {
             "eval pack argv command program must not be empty".to_string(),
         ));
     }
-    let mut command = Command::new(program);
+    let mut command = crate::process_sandbox::session_std_command(program)?;
     command.args(args);
     Ok(command)
 }
@@ -292,7 +292,7 @@ fn parse_live_outcome_stdout(stdout: &str) -> Result<EvalPackLiveVerifyOutcome, 
                 .ok_or_else(|| serde_json::Error::io(std::io::ErrorKind::UnexpectedEof.into()))
                 .and_then(|line| serde_json::from_str(line.trim()))
         })
-        .map_err(|error| format!("live executor stdout did not contain a JSON outcome: {error}"))
+        .map_err(|_| payload_parse_error("live executor JSON outcome").to_string())
 }
 
 pub(super) fn live_outcome_verification(outcome: &EvalPackLiveVerifyOutcome) -> String {
@@ -465,4 +465,40 @@ fn json_value_usize(value: &serde_json::Value) -> Option<usize> {
         .as_u64()
         .and_then(|value| usize::try_from(value).ok())
         .or_else(|| value.as_i64().and_then(|value| usize::try_from(value).ok()))
+}
+
+#[cfg(test)]
+mod payload_error_tests {
+    use super::*;
+
+    #[test]
+    fn executor_output_parser_redacts_invalid_values_and_preserves_valid_outcomes() {
+        for (stdout, valid) in [
+            (r#"{"stage_count":"private-stdout-canary"}"#, false),
+            (r#"{"stage_count":1,"passed":true}"#, true),
+            ("progress\n{\"stage_count\":1,\"passed\":true}", true),
+        ] {
+            let mut failures = Vec::new();
+            let outcome = live_outcome_from_executor_output(
+                EvalPackCommandOutput {
+                    exit_code: 0,
+                    stdout: stdout.into(),
+                    stderr: String::new(),
+                    timed_out: false,
+                    wall_time_seconds: 0.0,
+                },
+                &mut failures,
+            );
+            if valid {
+                assert!(failures.is_empty(), "{failures:?}");
+                assert_eq!(outcome.stage_count, Some(1));
+                assert_eq!(outcome.passed, Some(true));
+            } else {
+                assert_eq!(
+                    failures,
+                    ["Runtime error: live executor JSON outcome parse error: payload does not match expected schema"]
+                );
+            }
+        }
+    }
 }

@@ -10,7 +10,7 @@ import { create, domain_wildcard } from "std/net_policy"
 fn main(harness: Harness) {
   const policy = create({allow: [domain_wildcard("*.github.com")], default: "deny"})
   const restricted = harness.with_net_policy(policy)
-  const body = restricted.net.get("https://api.github.com/v1/users")
+  const body = restricted.net.get("https://api.github.com/v1/users").body
   harness.stdio.println("api=" + body)
   let apex_err = nil
   try {

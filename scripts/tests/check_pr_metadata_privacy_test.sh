@@ -50,7 +50,7 @@ jq -n \
   '{pull_request: {title: $title, body: $body, base: {sha: $base}, head: {sha: $head}}}' \
   >"$clean_event"
 clean_output="$("$repo/scripts/check_pr_metadata_privacy.sh" "$clean_event")"
-if [[ "$clean_output" != 'public metadata: sources=3 commits=1 pending=0' ]]; then
+if [[ "$clean_output" != 'public metadata: sources=4 commits=1 pending=0' ]]; then
   echo "error: clean metadata must report every measured source and commit" >&2
   printf '%s\n' "$clean_output" >&2
   exit 1
@@ -121,7 +121,7 @@ if grep -qF "$denied_token" "$captured"; then
   echo "error: a denied commit token leaked into public output" >&2
   exit 1
 fi
-if ! grep -q "^public metadata: sources=3 commits=1 pending=1$" "$captured"; then
+if ! grep -q "^public metadata: sources=4 commits=1 pending=1$" "$captured"; then
   echo "error: denied commit metadata must report the measured shape" >&2
   cat "$captured" >&2
   exit 1
@@ -160,13 +160,41 @@ if ! grep -Eq "^commit/$denied_subject_head/message:1: sha256:[0-9a-f]{12}$" \
   exit 1
 fi
 
+# The lines a range adds are public text: the bare brand word in a new line
+# fails as the added-lines source, even with clean title, body and commits.
+brand="$(printf '%s' "${product:0:1}" | tr '[:lower:]' '[:upper:]')${product:1}"
+git -C "$repo" switch -q -c added-lines
+printf 'Review after the %s integration lands.\n' "$brand" >"$repo/added.md"
+git -C "$repo" add added.md
+git -C "$repo" commit -q -m 'Document the review point'
+added_head="$(git -C "$repo" rev-parse HEAD)"
+git -C "$repo" switch -q feature
+jq -n \
+  --arg title 'Document the review point' \
+  --arg body 'Public details.' \
+  --arg base "$denied_subject_head" \
+  --arg head "$added_head" \
+  '{pull_request: {title: $title, body: $body, base: {sha: $base}, head: {sha: $head}}}' \
+  >"$fixture_root/added.json"
+if "$repo/scripts/check_pr_metadata_privacy.sh" "$fixture_root/added.json" >"$captured" 2>&1; then
+  echo "error: an added line naming the downstream brand must fail" >&2
+  exit 1
+fi
+if ! grep -q '^pending sources: added-lines$' "$captured" \
+  || ! grep -Eq '^added.md:1: sha256:[0-9a-f]{12}$' "$captured" \
+  || grep -qiF "$product" "$captured"; then
+  echo "error: an added-line match must name only the added-lines source and location" >&2
+  cat "$captured" >&2
+  exit 1
+fi
+
 # Merge-group events scan their exact base..head range without inventing absent
 # title/body fields.
 merge_event="$fixture_root/merge-group.json"
 jq -n --arg base "$base_sha" --arg head "$clean_head" \
   '{merge_group: {base_sha: $base, head_sha: $head}}' >"$merge_event"
 merge_output="$("$repo/scripts/check_pr_metadata_privacy.sh" "$merge_event")"
-if [[ "$merge_output" != 'public metadata: sources=1 commits=1 pending=0' ]]; then
+if [[ "$merge_output" != 'public metadata: sources=2 commits=1 pending=0' ]]; then
   echo "error: merge-group metadata must scan its measured commit range" >&2
   printf '%s\n' "$merge_output" >&2
   exit 1

@@ -6,7 +6,7 @@
 
 use harn_lexer::FixEdit;
 use harn_parser::{diagnostic::find_closest_match, DiagnosticCode as Code};
-use harn_vm::stdlib::template::{filters, lint::LintConstruct};
+use harn_prompt_syntax::{filters, lint::LintConstruct};
 
 use crate::diagnostic::{LintDiagnostic, LintSeverity};
 
@@ -51,7 +51,7 @@ pub(crate) fn check(constructs: &[LintConstruct], source: &str) -> Vec<LintDiagn
 #[cfg(test)]
 mod tests {
     use crate::lint_prompt_template;
-    use harn_vm::stdlib::template::filters;
+    use harn_prompt_syntax::filters;
 
     fn unknown_filters(source: &str) -> Vec<crate::LintDiagnostic> {
         lint_prompt_template(source, None, &[])

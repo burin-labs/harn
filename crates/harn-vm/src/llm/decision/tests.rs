@@ -8,6 +8,8 @@
 #[path = "replay_tests.rs"]
 mod replay_tests;
 
+use crate::NativeBuiltinCtxExt;
+use crate::NativeVmExt;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -43,6 +45,7 @@ fn contract(window: usize, max_questions: Option<usize>) -> DecisionContract {
         input_price_per_mtok: Some(0.042),
         output_price_per_mtok: Some(0.0),
         served_model_id: "fixture".into(),
+        upstream_provider: None,
     }
 }
 
@@ -95,6 +98,43 @@ fn question_identity_includes_rubric_descriptions() {
         question_set_digest(&original),
         question_set_digest(&original.clone())
     );
+}
+
+#[test]
+fn boolean_criteria_are_closed_and_change_the_cache_identity() {
+    let plain = questions_value();
+    let make = |criteria| {
+        VmValue::dict(vec![(
+            "safe",
+            VmValue::dict(vec![
+                ("kind", VmValue::string("boolean")),
+                ("instructions", VmValue::string("Is this safe to run?")),
+                ("criteria", criteria),
+            ]),
+        )])
+    };
+    let rubric = make(VmValue::dict(vec![
+        ("true", VmValue::string("Only reads")),
+        ("false", VmValue::string("Mutates files")),
+    ]));
+    let plain = QuestionSet::from_value(&plain).unwrap();
+    let rubric = QuestionSet::from_value(&rubric).unwrap();
+    assert_ne!(
+        super::question_set_digest(&plain),
+        super::question_set_digest(&rubric)
+    );
+    assert!(
+        matches!(&rubric.questions[0].body, QuestionBody::BooleanWithCriteria(criteria) if criteria.yes == "Only reads" && criteria.no == "Mutates files")
+    );
+    for criteria in [
+        VmValue::dict(vec![("true", VmValue::string("Only reads"))]),
+        VmValue::dict(vec![
+            ("true", VmValue::string("Only reads")),
+            ("false", VmValue::Int(1)),
+        ]),
+    ] {
+        assert!(QuestionSet::from_value(&make(criteria)).is_err());
+    }
 }
 
 fn distribution(pairs: &[(&str, f64)]) -> BTreeMap<String, f64> {
@@ -441,8 +481,12 @@ fn the_policy_digest_covers_the_threshold() {
         backend: BackendKind::StructuredLlm,
         provider: "mock".into(),
         model: "fixture".into(),
-        effort: "low".into(),
-        temperature: 0.0,
+        effort: Some("low".into()),
+        temperature: Some(0.0),
+        max_tokens: None,
+        top_p: None,
+        seed: None,
+        timeout_ms: None,
         native_options_supplied: false,
         threshold,
         evaluation_cost_limit: Some(1.0),
@@ -474,6 +518,58 @@ fn runtime_policy_uses_the_closed_registry_and_optional_caps_are_explicit_in_ide
 }
 
 // --- Through the evaluator, with the request counter as the instrument ------
+
+#[test]
+fn chat_overrides_change_identity_and_admission_without_allowing_retry_options() {
+    let value = policy_value(0.5, 1.0);
+    let default = EvaluationPolicy::from_value(&value).unwrap();
+    let mut effort_fields = value.as_dict().unwrap().clone();
+    effort_fields.remove("effort");
+    let omitted = EvaluationPolicy::from_value(&VmValue::dict(effort_fields.clone())).unwrap();
+    assert_eq!(omitted.effort, None);
+    effort_fields.insert(
+        crate::value::intern_key("effort"),
+        VmValue::String("none".into()),
+    );
+    let explicit_none = EvaluationPolicy::from_value(&VmValue::dict(effort_fields)).unwrap();
+    assert_eq!(explicit_none.effort.as_deref(), Some("none"));
+    assert_ne!(omitted.digest(), explicit_none.digest());
+    for (key, setting) in [
+        ("max_tokens", VmValue::Int(192)),
+        ("top_p", VmValue::Float(0.9)),
+        ("seed", VmValue::Int(8543)),
+        ("timeout_ms", VmValue::Int(30000)),
+    ] {
+        let mut fields = value.as_dict().unwrap().clone();
+        fields.insert(crate::value::intern_key(key), setting);
+        let changed = EvaluationPolicy::from_value(&VmValue::dict(fields)).unwrap();
+        assert_ne!(default.digest(), changed.digest(), "{key}");
+        assert!(
+            changed.native_options_supplied,
+            "native routes must refuse {key}"
+        );
+    }
+    for (key, setting) in [
+        ("effort", VmValue::String("unset".into())),
+        ("max_tokens", VmValue::Int(0)),
+        ("timeout_ms", VmValue::Int(-1)),
+        ("top_p", VmValue::Float(1.1)),
+        ("schema_retries", VmValue::Int(1)),
+    ] {
+        let mut fields = value.as_dict().unwrap().clone();
+        fields.insert(crate::value::intern_key(key), setting);
+        assert!(
+            EvaluationPolicy::from_value(&VmValue::dict(fields)).is_err(),
+            "{key}"
+        );
+    }
+    let route = contract::decision_contract_for_route("openai", "gpt-5.4-nano").unwrap();
+    let default_bound = super::admitted_cost_bound(&route, 100, None).unwrap();
+    let small_bound = super::admitted_cost_bound(&route, 100, Some(192)).unwrap();
+    assert!(small_bound > 0.0 && small_bound < default_bound);
+    let expected_difference = (2048.0 - 192.0) * route.output_price_per_mtok.unwrap() / 1_000_000.0;
+    assert!((default_bound - small_bound - expected_difference).abs() < 1e-12);
+}
 
 fn policy_value(threshold: f64, evaluation_cost_limit: f64) -> VmValue {
     VmValue::dict(vec![
@@ -532,18 +628,34 @@ fn run(
     policy: VmValue,
     scripted: Vec<super::mock::MockOutcome>,
 ) -> (String, super::receipt::EvaluationReceipt, u32) {
-    let backend = Arc::new(MockDecisionBackend::scripted(scripted));
-    let _guard = super::install_backend(backend.clone());
     // The route the policies below name. A window of 4096 tokens is small
     // enough that the oversized-state test crosses it and large enough that
     // every other state here fits, so one route serves all of them.
-    let _route = super::install_route("mock", "fixture", contract(4096, None));
+    let (outcome, receipt, requests) =
+        run_on(contract(4096, None), state, questions, policy, scripted);
+    (outcome.kind.to_string(), receipt, requests)
+}
+
+fn run_on(
+    route: DecisionContract,
+    state: VmValue,
+    questions: VmValue,
+    policy: VmValue,
+    scripted: Vec<super::mock::MockOutcome>,
+) -> (
+    super::outcome::Outcome,
+    super::receipt::EvaluationReceipt,
+    u32,
+) {
+    let backend = Arc::new(MockDecisionBackend::scripted(scripted));
+    let _guard = super::install_backend(backend.clone());
+    let _route = super::install_route("mock", "fixture", route);
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .expect("runtime");
     let outcome = runtime.block_on(async {
-        let mut vm = crate::Vm::new();
+        let mut vm = crate::new_vm();
         crate::register_vm_stdlib(&mut vm);
         let ctx = crate::vm::AsyncBuiltinCtx::for_test(vm.child_vm());
         let result = super::evaluate(
@@ -570,7 +682,7 @@ fn run(
         result
     });
     let receipt = super::last_receipt().expect("every evaluation records a receipt");
-    (outcome.0.kind.to_string(), receipt, backend.request_count())
+    (outcome.0, receipt, backend.request_count())
 }
 
 #[test]
@@ -655,6 +767,53 @@ fn an_answer_below_the_threshold_is_low_confidence_not_a_verdict() {
     );
     assert_eq!(kind, "low_confidence");
     assert_eq!(requests, 1);
+}
+
+#[test]
+fn a_thirteen_question_limit_refuses_fourteen_before_dispatch() {
+    for count in [13, 14] {
+        let questions = VmValue::dict(
+            (0..count)
+                .map(|index| {
+                    (
+                        format!("m{index}"),
+                        VmValue::dict(vec![
+                            ("kind", VmValue::string("boolean")),
+                            (
+                                "instructions",
+                                VmValue::string(format!("Keep message {index}?")),
+                            ),
+                        ]),
+                    )
+                })
+                .collect::<Vec<_>>(),
+        );
+        let mut response = answering(0.95);
+        let answer = response.answers.remove("safe").unwrap();
+        response.answers = (0..count)
+            .map(|index| (format!("m{index}"), answer.clone()))
+            .collect();
+        let (outcome, receipt, requests) = run_on(
+            contract(4096, Some(13)),
+            VmValue::string("shared state"),
+            questions,
+            policy_value(0.5, 1.0),
+            vec![Ok(response)],
+        );
+        assert_eq!(receipt.questions.len(), count);
+        if count == 13 {
+            assert_eq!(outcome.kind, "answered");
+            assert_eq!(
+                requests, 1,
+                "positive control reaches the same dispatch counter"
+            );
+        } else {
+            assert_eq!(outcome.kind, "question_invalid");
+            assert_eq!(field(&outcome.into_value(), "reason"), "too_many_questions");
+            assert_eq!(requests, 0);
+            assert_eq!(receipt.physical_attempts, 0);
+        }
+    }
 }
 
 #[test]
@@ -830,6 +989,71 @@ fn an_evaluation_cost_bound_over_the_limit_refuses_before_dispatch() {
     assert_eq!(requests, 0);
 }
 
+fn native_policy() -> VmValue {
+    VmValue::dict(vec![
+        ("backend", VmValue::String("native_decision".into())),
+        ("provider", VmValue::String("mock".into())),
+        ("model", VmValue::String("fixture".into())),
+        ("threshold", VmValue::Float(0.5)),
+        ("evaluation_cost_limit", VmValue::Float(0.01)),
+        ("run_cost_limit", VmValue::Float(0.5)),
+    ])
+}
+
+fn run_native() -> (VmValue, super::receipt::EvaluationReceipt, u32) {
+    let route = DecisionContract {
+        protocol: DecisionProtocol::OpenrouterDecisions,
+        structured_output_strategy: None,
+        output_price_per_mtok: Some(0.0),
+        ..contract(4096, None)
+    };
+    let (outcome, receipt, requests) = run_on(
+        route,
+        VmValue::dict(vec![("text", VmValue::String("short".into()))]),
+        questions_value(),
+        native_policy(),
+        vec![Ok(answering(0.95))],
+    );
+    (outcome.into_value(), receipt, requests)
+}
+
+fn field(value: &VmValue, key: &str) -> String {
+    value
+        .as_dict()
+        .and_then(|fields| fields.get(key))
+        .map(|value| value.display())
+        .unwrap_or_default()
+}
+
+#[test]
+fn a_native_decision_after_an_unreserved_chat_call_reports_the_admission_refusal() {
+    use crate::llm::admission::{reserve, swap_scope, AdmissionScope};
+    let previous = swap_scope(AdmissionScope::default());
+    // Control: a fresh execution installs the policy's run ceiling and dispatches.
+    let (outcome, _, requests) = run_native();
+    assert_eq!(field(&outcome, "kind"), "answered");
+    assert_eq!(requests, 1);
+
+    // A chat call with no budget runs unreserved, so the policy's run ceiling
+    // can no longer be installed for this execution.
+    swap_scope(AdmissionScope::default());
+    let mut chat = crate::llm::api::options::base_opts("openai");
+    chat.model = "gpt-5.6-luna".into();
+    chat.provider_overrides = None;
+    chat.budget = None;
+    let request = crate::llm::api::LlmRequestPayload::from(&chat);
+    let tokens = crate::llm::cost_context::LlmCallTokenProjection::for_options(&chat);
+    assert!(reserve(&chat, &request, tokens).unwrap().is_none());
+
+    let (outcome, receipt, requests) = run_native();
+    swap_scope(previous);
+    assert_eq!(requests, 0, "the refusal precedes transport");
+    assert_eq!(field(&outcome, "kind"), "unavailable");
+    // No provider was asked, so this is not a credential or entitlement denial.
+    assert_eq!(field(&outcome, "reason"), "admission_refused");
+    assert_eq!(receipt.admission_reason.as_deref(), Some("late_activation"));
+}
+
 #[test]
 fn the_single_boolean_projection_shares_the_evaluator() {
     let args = super::predicate_arguments(&[
@@ -873,7 +1097,7 @@ fn the_dispatched_request_carries_the_admitted_profile_unchanged() {
         .build()
         .expect("runtime");
     runtime.block_on(async {
-        let mut vm = crate::Vm::new();
+        let mut vm = crate::new_vm();
         crate::register_vm_stdlib(&mut vm);
         let ctx = crate::vm::AsyncBuiltinCtx::for_test(vm);
         super::evaluate(
@@ -892,8 +1116,8 @@ fn the_dispatched_request_carries_the_admitted_profile_unchanged() {
     assert_eq!(seen.len(), 1, "one evaluation, one physical request");
     assert_eq!(seen[0].provider, "mock");
     assert_eq!(seen[0].model, "fixture");
-    assert_eq!(seen[0].effort, "low");
-    assert_eq!(seen[0].temperature, 0.0);
+    assert_eq!(seen[0].effort.as_deref(), Some("low"));
+    assert_eq!(seen[0].temperature, Some(0.0));
     assert_eq!(seen[0].question_ids, vec!["safe".to_string()]);
     assert_eq!(
         seen[0].state.get("text").and_then(|text| text.as_str()),

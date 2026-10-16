@@ -16,7 +16,9 @@
 //! cases, never a pass, and a runner class that declares it must enforce
 //! (`HARN_REQUIRE_LANDLOCK_TESTS`) turns any `not_measured` into a failure.
 
-use harn_hostlib::sandbox::conformance::run_conformance;
+use std::io::Write;
+
+use harn_hostlib::sandbox::conformance::run_conformance_with_progress;
 use harn_vm::process_sandbox::conformance::ConformanceCase;
 
 /// Present in the launcher's environment and never declared by the session,
@@ -67,14 +69,12 @@ impl Drop for UndeclaredName {
 ///
 /// The run must fail exactly these: a new failure is a regression, and a case
 /// that starts holding means the fix landed and its entry must go. Windows
-/// runs the command tool's children outside the AppContainer today (#8738),
-/// so every filesystem refusal escapes and the backend's own socket refusal
-/// never happens.
+/// runs with no OS sandbox confinement (#8838). The enforcement table declares
+/// its filesystem and network dimensions not enforced, so those cases must be
+/// observed escaping and are not listed here; the socket cases have no
+/// dimension and stay gaps.
 const KNOWN_GAPS: &[&str] = if cfg!(windows) {
     &[
-        "fs.outside_write_refused",
-        "fs.outside_read_refused",
-        "fs.sibling_temp_read_refused",
         "unix_socket.bind_under_root",
         "unix_socket.bind_under_root_with_network",
         "unix_socket.bind_outside_root_refused",
@@ -105,10 +105,13 @@ fn every_sandbox_conformance_case_holds_on_the_active_backend() {
         "--nocapture",
     ]);
 
-    let report = run_conformance();
-    for case in &report.cases {
-        println!("{}", case.receipt_line());
-    }
+    let report = run_conformance_with_progress(|progress| {
+        // Write directly so libtest's in-memory print capture cannot swallow
+        // progress when a test process is killed before it returns.
+        let mut stdout = std::io::stdout().lock();
+        writeln!(stdout, "{}", progress.receipt_line()).expect("write case progress");
+        stdout.flush().expect("flush case progress");
+    });
     println!("{}", report.summary_line());
 
     assert_eq!(report.cases.len(), ConformanceCase::ALL.len());

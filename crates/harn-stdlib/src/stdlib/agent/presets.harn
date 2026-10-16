@@ -628,22 +628,22 @@ fn __captain_tool_layers(harness: Harness, kind: string, opts: dict) {
   let layers = []
   const audit_sink = __captain_layer_value(opts, "audit_sink", nil)
   if audit_sink != nil {
-    layers = layers.appending(with_audit_log(harness.clock, harness.fs, audit_sink))
+    layers.push(with_audit_log(harness.clock, harness.fs, audit_sink))
   }
   const telemetry = __captain_layer_value(opts, "telemetry", nil)
   if telemetry != nil {
-    layers = layers.appending(with_telemetry(harness, telemetry))
+    layers.push(with_telemetry(harness, telemetry))
   }
   if kind == "merge_captain" {
     const consent_fn = __captain_layer_value(opts, "consent", __captain_consent_default(kind))
     if consent_fn != nil {
-      layers = layers.appending(with_consent(harness.clock, consent_fn))
+      layers.push(with_consent(harness.clock, consent_fn))
     }
   }
   if kind == "oncall_captain" {
     const rate_limit = __captain_layer_value(opts, "rate_limit", __captain_rate_limit_default(kind))
     if rate_limit != nil {
-      layers = layers.appending(with_rate_limit(harness.runtime, rate_limit))
+      layers.push(with_rate_limit(harness.runtime, rate_limit))
     }
   }
   if kind == "release_captain" {
@@ -654,14 +654,12 @@ fn __captain_tool_layers(harness: Harness, kind: string, opts: dict) {
       } else {
         {message: "release_captain preview"}
       }
-      layers = layers.appending(with_dry_run(dry))
+      layers.push(with_dry_run(dry))
     }
   }
   const handoff_sink = __captain_layer_value(opts, "handoff_sink", nil)
   if handoff_sink != nil {
-    layers = layers.appending(
-      with_handoff_artifact({sink: handoff_sink, source: opts?.persona ?? kind}),
-    )
+    layers.push(with_handoff_artifact({sink: handoff_sink, source: opts?.persona ?? kind}))
   }
   return layers
 }
@@ -689,7 +687,7 @@ fn __captain_handler_layers(harness: Harness, opts: dict) {
     } else {
       {sink: logging_sink}
     }
-    layers = layers.appending(with_logging(harness, logging_opts))
+    layers.push(with_logging(harness, logging_opts))
   }
   return layers
 }
@@ -764,9 +762,9 @@ fn __preset_model_steps(models: list?, provider: any) {
   let steps = []
   for model in models ?? [] {
     if type_of(model) == "dict" || provider == nil {
-      steps = steps.appending(model)
+      steps.push(model)
     } else {
-      steps = steps.appending({model: model, provider: provider})
+      steps.push({model: model, provider: provider})
     }
   }
   return steps

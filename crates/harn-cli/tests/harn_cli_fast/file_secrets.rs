@@ -61,6 +61,51 @@ fn native_file_grant_read_and_revoke_cross_process_boundaries() {
 }
 
 #[test]
+fn env_first_chain_persists_writes_to_the_durable_provider() {
+    // `env` precedes the durable provider in the default chain. A write must
+    // still reach the durable provider, and the receipt must say which one
+    // stored it; an env-only write would vanish when this process exits.
+    let directory = private_directory();
+    let file = directory.path().join("secrets.json");
+    let output = harn_e2e_command()
+        .env_clear()
+        .env("PATH", std::env::var_os("PATH").unwrap_or_default())
+        .env("HOME", directory.path())
+        .env("HARN_SECRET_PROVIDERS", "env,file")
+        .env("HARN_SECRET_FILE_PATH", &file)
+        .env("HARN_LLM_CALLS_DISABLED", "1")
+        .current_dir(directory.path())
+        .args([
+            "run",
+            "--environment-policy",
+            "isolated",
+            "-e",
+            r#"harness.stdio.println(json_stringify(harness.secrets.write("application/token", "synthetic-only")))"#,
+        ])
+        .output()
+        .expect("run native Harn");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let receipt: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("write receipt is JSON");
+    assert_eq!(receipt["provider"], "file", "{receipt}");
+
+    let reader = run(
+        directory.path(),
+        Some(&file),
+        r#"assert(harness.secrets.read("application/token") == "synthetic-only")"#,
+    );
+    assert!(
+        reader.status.success(),
+        "a new process reads the durable write: {}",
+        String::from_utf8_lossy(&reader.stderr)
+    );
+}
+
+#[test]
 fn native_file_configuration_and_corruption_fail_without_exposing_values() {
     let directory = private_directory();
     let program = r#"harness.secrets.write("application/token", "synthetic-only")"#;

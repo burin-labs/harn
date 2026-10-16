@@ -7,9 +7,33 @@ pub(crate) struct ProjectCatalogEntry {
     pub(crate) anchors: &'static [&'static str],
     pub(crate) lockfiles: &'static [&'static str],
     pub(crate) source_globs: &'static [&'static str],
-    pub(crate) default_build_cmd: Option<&'static str>,
-    pub(crate) default_test_cmd: Option<&'static str>,
+    pub(crate) commands: ProjectCommands,
     pub(crate) anchor_score: f64,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum ProjectCommands {
+    Shell {
+        build: Option<&'static str>,
+        test: Option<&'static str>,
+    },
+    PackageScripts,
+}
+
+impl ProjectCatalogEntry {
+    pub(crate) fn default_build_cmd(&self) -> Option<String> {
+        match self.commands {
+            ProjectCommands::Shell { build, .. } => build.map(str::to_string),
+            ProjectCommands::PackageScripts => None,
+        }
+    }
+
+    pub(crate) fn default_test_cmd(&self) -> Option<String> {
+        match self.commands {
+            ProjectCommands::Shell { test, .. } => test.map(str::to_string),
+            ProjectCommands::PackageScripts => None,
+        }
+    }
 }
 
 pub(crate) const PROJECT_CATALOG: &[ProjectCatalogEntry] = &[
@@ -21,8 +45,10 @@ pub(crate) const PROJECT_CATALOG: &[ProjectCatalogEntry] = &[
         anchors: &["Cargo.toml"],
         lockfiles: &["Cargo.lock"],
         source_globs: &["*.rs", "src/**/*.rs", "crates/**/*.rs", "tests/**/*.rs"],
-        default_build_cmd: Some("cargo build"),
-        default_test_cmd: Some("cargo test"),
+        commands: ProjectCommands::Shell {
+            build: Some("cargo build"),
+            test: Some("cargo test"),
+        },
         anchor_score: 0.5,
     },
     ProjectCatalogEntry {
@@ -33,8 +59,10 @@ pub(crate) const PROJECT_CATALOG: &[ProjectCatalogEntry] = &[
         anchors: &["go.mod"],
         lockfiles: &["go.sum"],
         source_globs: &["*.go", "cmd/**/*.go", "internal/**/*.go", "pkg/**/*.go"],
-        default_build_cmd: Some("go build ./..."),
-        default_test_cmd: Some("go test ./..."),
+        commands: ProjectCommands::Shell {
+            build: Some("go build ./..."),
+            test: Some("go test ./..."),
+        },
         anchor_score: 0.5,
     },
     ProjectCatalogEntry {
@@ -50,8 +78,10 @@ pub(crate) const PROJECT_CATALOG: &[ProjectCatalogEntry] = &[
             "requirements.lock",
         ],
         source_globs: &["*.py", "src/**/*.py", "tests/**/*.py"],
-        default_build_cmd: None,
-        default_test_cmd: Some("pytest"),
+        commands: ProjectCommands::Shell {
+            build: None,
+            test: Some("pytest"),
+        },
         anchor_score: 0.5,
     },
     ProjectCatalogEntry {
@@ -62,8 +92,10 @@ pub(crate) const PROJECT_CATALOG: &[ProjectCatalogEntry] = &[
         anchors: &["composer.json"],
         lockfiles: &["composer.lock"],
         source_globs: &["*.php", "app/**/*.php", "src/**/*.php", "tests/**/*.php"],
-        default_build_cmd: None,
-        default_test_cmd: Some("composer test"),
+        commands: ProjectCommands::Shell {
+            build: None,
+            test: Some("composer test"),
+        },
         anchor_score: 0.5,
     },
     ProjectCatalogEntry {
@@ -72,12 +104,7 @@ pub(crate) const PROJECT_CATALOG: &[ProjectCatalogEntry] = &[
         frameworks: &[],
         build_systems: &["npm"],
         anchors: &["tsconfig.json", "package.json"],
-        lockfiles: &[
-            "package-lock.json",
-            "pnpm-lock.yaml",
-            "yarn.lock",
-            "bun.lockb",
-        ],
+        lockfiles: &crate::package_scripts::LOCKFILE_NAMES,
         source_globs: &[
             "*.ts",
             "*.tsx",
@@ -85,8 +112,7 @@ pub(crate) const PROJECT_CATALOG: &[ProjectCatalogEntry] = &[
             "src/**/*.tsx",
             "tests/**/*.ts",
         ],
-        default_build_cmd: Some("npm run build"),
-        default_test_cmd: Some("npm test"),
+        commands: ProjectCommands::PackageScripts,
         anchor_score: 0.2,
     },
     ProjectCatalogEntry {
@@ -95,12 +121,7 @@ pub(crate) const PROJECT_CATALOG: &[ProjectCatalogEntry] = &[
         frameworks: &[],
         build_systems: &["npm"],
         anchors: &["package.json"],
-        lockfiles: &[
-            "package-lock.json",
-            "pnpm-lock.yaml",
-            "yarn.lock",
-            "bun.lockb",
-        ],
+        lockfiles: &crate::package_scripts::LOCKFILE_NAMES,
         source_globs: &[
             "*.js",
             "*.jsx",
@@ -109,8 +130,7 @@ pub(crate) const PROJECT_CATALOG: &[ProjectCatalogEntry] = &[
             "src/**/*.js",
             "src/**/*.jsx",
         ],
-        default_build_cmd: Some("npm run build"),
-        default_test_cmd: Some("npm test"),
+        commands: ProjectCommands::PackageScripts,
         anchor_score: 0.1,
     },
     ProjectCatalogEntry {
@@ -126,8 +146,7 @@ pub(crate) const PROJECT_CATALOG: &[ProjectCatalogEntry] = &[
             "pages/**/*.js",
             "app/**/*.js",
         ],
-        default_build_cmd: Some("npm run build"),
-        default_test_cmd: Some("npm test"),
+        commands: ProjectCommands::PackageScripts,
         anchor_score: 0.7,
     },
     ProjectCatalogEntry {
@@ -138,8 +157,10 @@ pub(crate) const PROJECT_CATALOG: &[ProjectCatalogEntry] = &[
         anchors: &["Gemfile"],
         lockfiles: &["Gemfile.lock"],
         source_globs: &["*.rb", "app/**/*.rb", "lib/**/*.rb", "spec/**/*.rb"],
-        default_build_cmd: None,
-        default_test_cmd: Some("bundle exec rspec"),
+        commands: ProjectCommands::Shell {
+            build: None,
+            test: Some("bundle exec rspec"),
+        },
         anchor_score: 0.5,
     },
 ];

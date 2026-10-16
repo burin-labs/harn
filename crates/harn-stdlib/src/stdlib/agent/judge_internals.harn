@@ -25,6 +25,7 @@ pub type CompletionJudgeAdmission = {
   admitted: bool,
   remaining_ms: int?,
   operation_budget_ms: int?,
+  requested_operation_budget_ms?: int?,
   deadline_reserve_ms: int?,
   provider_timeout_ms?: int?,
   prompt_chars?: int,
@@ -110,6 +111,9 @@ pub fn __judge_emit_decision(
       escalation_target: verdict?.escalation_target,
       judge_outcome: verdict?.judge_outcome,
       terminal_evidence_preserved: verdict?.terminal_evidence_preserved ?? false,
+      // The owning validator already bound requirement IDs to evidence.
+      // Preserve that decision; consumers must not reconstruct it from prose.
+      requirement_report: verdict?.requirement_report,
       // The judge's own answer beside the answer of record, and the typed
       // override when the two differ. Without the pair a reader cannot tell an
       // override from the judge's word, which is how a record came to report
@@ -138,13 +142,17 @@ pub fn __judge_completion_admission(
   } else {
     to_int(deadline_at_ms) - to_int(now_ms)
   }
-  const admitted = remaining_ms == nil
-    || remaining_ms
-      >= to_int(operation_budget_ms) + to_int(reserve_ms)
+  const allocated_budget_ms = if remaining_ms == nil {
+    operation_budget_ms
+  } else {
+    min(operation_budget_ms, max(0, remaining_ms - reserve_ms))
+  }
+  const admitted = allocated_budget_ms > 0
   return {
     admitted: admitted,
     remaining_ms: remaining_ms,
-    operation_budget_ms: operation_budget_ms,
+    operation_budget_ms: allocated_budget_ms,
+    requested_operation_budget_ms: operation_budget_ms,
     deadline_reserve_ms: reserve_ms,
     outcome: if admitted {
       "admitted"
@@ -305,6 +313,29 @@ pub fn __judge_resolve_model(
 }
 
 /**
+ * Why `model` cannot be a judge, or nil when it can.
+ *
+ * Every judge asks for a structured verdict. A model the catalog lists without
+ * the `text_generation` operation (a label-only decision model) cannot produce
+ * one. A model the catalog does not list is allowed: the catalog is the
+ * authority only for the rows it has.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: internal
+ * @example: __judge_schema_unsupported_message(harness.llm, "openrouter/typesafe/jev-latest")
+ */
+pub fn __judge_schema_unsupported_message(llm: HarnessLlm, model: string) -> string? {
+  const operations = llm.model_info(model)?.catalog?.operations
+  if type_of(operations) != "list" || operations.contains("text_generation") {
+    return nil
+  }
+  return "judge model `" + model + "` serves only "
+    + join(operations.map({ op -> to_string(op) }), ", ")
+    + "; a judge needs a text-generation model that can return its verdict schema"
+}
+
+/**
  * What a caller is told when no judge model is configured.
  *
  * Names the setting and the reason, so the reader does not have to guess which
@@ -378,6 +409,29 @@ pub fn __judge_run_checkpoint(
       admission: refusal,
     }
   }
+  // A model the catalog declares without text generation (a label-only
+  // decision model) can never return the judge's schema. Refuse before any
+  // receipt or call, with its own status, instead of failing the same way on
+  // every invocation.
+  const unsupported = __judge_schema_unsupported_message(harness.llm, resolved_judge.model)
+  if unsupported != nil {
+    const refusal = {
+      schema: "harn.completion_judge_admission.v1",
+      checkpoint_name: checkpoint_name,
+      admitted: false,
+      judge_model: resolved_judge.model,
+      judge_model_source: resolved_judge.source,
+      outcome: "schema_unsupported",
+    }
+    if checkpoint_name == "agent.completion_judge" {
+      agent_emit_event(harness.agent, payload.session_id, "typed_checkpoint", refusal)
+    }
+    return {
+      checkpoint: {ok: false, status: "schema_unsupported", error: unsupported, receipt: refusal},
+      duration_ms: 0,
+      admission: refusal,
+    }
+  }
   const mock_scope = if checkpoint_name == "agent.completion_judge" {
     "completion.judge"
   } else if checkpoint_name == "agent.step_judge" {
@@ -385,18 +439,10 @@ pub fn __judge_run_checkpoint(
   } else {
     "default"
   }
-  const operation_budget_ms = if checkpoint_name == "agent.completion_judge" {
+  const requested_operation_budget_ms = if checkpoint_name == "agent.completion_judge" {
     max(1, to_int(judge_cfg?.operation_timeout_ms) ?? __COMPLETION_JUDGE_DEFAULT_TIMEOUT_MS)
   } else {
     nil
-  }
-  const provider_timeout_ms = if checkpoint_name == "agent.completion_judge" {
-    min(
-      operation_budget_ms,
-      max(1, to_int(judge_cfg?.timeout_ms ?? base?.timeout_ms) ?? operation_budget_ms),
-    )
-  } else {
-    to_int(judge_cfg?.timeout_ms ?? base?.timeout_ms)
   }
   const deadline_reserve_ms = if checkpoint_name == "agent.completion_judge" {
     max(
@@ -413,7 +459,7 @@ pub fn __judge_run_checkpoint(
     __judge_completion_admission(
       admission_now_ms,
       deadline_at_ms,
-      operation_budget_ms,
+      requested_operation_budget_ms,
       deadline_reserve_ms,
     )
   } else {
@@ -424,6 +470,15 @@ pub fn __judge_run_checkpoint(
       deadline_reserve_ms: nil,
       outcome: "not_applicable",
     }
+  }
+  const operation_budget_ms = deadline_admission.operation_budget_ms
+  const provider_timeout_ms = if checkpoint_name == "agent.completion_judge" {
+    min(
+      operation_budget_ms,
+      max(1, to_int(judge_cfg?.timeout_ms ?? base?.timeout_ms) ?? operation_budget_ms),
+    )
+  } else {
+    to_int(judge_cfg?.timeout_ms ?? base?.timeout_ms)
   }
   const admitted = deadline_admission.admitted
   const admission = deadline_admission
@@ -718,7 +773,7 @@ pub fn __completion_gate_combine_verify(verify: any) {
       all_ok = false
       const finding = to_string(verdict?.findings ?? "")
       if finding != "" {
-        findings = findings.appending(finding)
+        findings.push(finding)
       }
     }
   }
@@ -1353,8 +1408,27 @@ pub fn __completion_gate_apply_budget(verdict: dict, vetoes_used: int, max_vetoe
 const __COMPLETION_JUDGE_ERROR_ATTEMPTS: int = 2
 
 /**
+ * True when the judge's route could not run at all: the call failed on a
+ * credential or host configuration gap (`auth` or `environment`) before any
+ * reply existed. Nothing was graded, a retry meets the same gap, and the error
+ * text is configuration, not feedback the model could act on.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: internal
+ * @example: __judge_checkpoint_route_unavailable(checkpoint)
+ */
+pub fn __judge_checkpoint_route_unavailable(checkpoint: dict) -> bool {
+  const category = checkpoint?.error_category
+  return !(checkpoint?.ok ?? false)
+    && (category == "auth" || category == "environment")
+    && to_string(checkpoint?.raw_text ?? "") == ""
+}
+
+/**
  * True when the judge never produced a reading because it could not run inside
- * its deadline, as opposed to running and returning something unreadable.
+ * its deadline or its route could not run, as opposed to running and returning
+ * something unreadable.
  *
  * @effects: []
  * @errors: []
@@ -1364,6 +1438,8 @@ const __COMPLETION_JUDGE_ERROR_ATTEMPTS: int = 2
 pub fn __judge_checkpoint_unavailable(checkpoint: dict) -> bool {
   return checkpoint?.status == "admission_refused"
     || checkpoint?.status == "model_unconfigured"
+    || checkpoint?.status == "schema_unsupported"
+    || __judge_checkpoint_route_unavailable(checkpoint)
     || checkpoint?.status == "timeout"
     || checkpoint?.error_category == "timeout"
     || checkpoint?.error?.status == "timeout"

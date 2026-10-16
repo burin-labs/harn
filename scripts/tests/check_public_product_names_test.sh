@@ -79,6 +79,71 @@ if grep -qF "$fixture_token" "$metadata_capture"; then
   exit 1
 fi
 
+# New text refuses the bare brand word, which the compound names miss ("after
+# the <brand> integration lands"), but not the organisation's legal name.
+brand="$(printf '%s' "${product:0:1}" | tr '[:lower:]' '[:upper:]')${product:1}"
+if printf 'Review this after the %s integration lands.\n' "$brand" \
+  | "$fixture_root/scripts/check_public_product_names.sh" --stdin-label pull-request-metadata \
+    >"$metadata_capture" 2>&1; then
+  echo "error: the bare brand word in new text must fail the scan" >&2
+  exit 1
+fi
+if grep -qiF "$product" "$metadata_capture"; then
+  echo "error: the metadata scan echoed the matched brand word" >&2
+  exit 1
+fi
+if ! printf 'Copyright (c) 2026 %s Labs, LLC\n' "$brand" \
+  | "$fixture_root/scripts/check_public_product_names.sh" --stdin-label pull-request-metadata; then
+  echo "error: the organisation's legal name must pass the scan" >&2
+  exit 1
+fi
+
+# --- Added lines: a range's new lines meet the new-text rule -----------------
+git -C "$fixture_root" config user.name 'Product Name Test'
+git -C "$fixture_root" config user.email 'product-names@example.invalid'
+git -C "$fixture_root" config commit.gpgSign false
+printf 'intro\nLegacy note naming %s.\n' "$brand" >"$fixture_root/docs/legacy.md"
+git -C "$fixture_root" add docs/legacy.md scripts/
+git -C "$fixture_root" commit -q -m 'Base'
+added_base="$(git -C "$fixture_root" rev-parse HEAD)"
+# The tracked tree is held only to the compound names, so legacy text passes.
+if ! "$fixture_root/scripts/check_public_product_names.sh"; then
+  echo "error: the tracked tree must not apply the new-text rule" >&2
+  exit 1
+fi
+printf 'one\ntwo\nReview after the %s projection proof.\n' "$brand" >"$fixture_root/docs/new.md"
+printf 'history naming %s\n' "$brand" >"$fixture_root/CHANGELOG.md"
+printf 'more\n' >>"$fixture_root/docs/legacy.md"
+git -C "$fixture_root" add docs/new.md docs/legacy.md CHANGELOG.md
+git -C "$fixture_root" commit -q -m 'Add text'
+added_head="$(git -C "$fixture_root" rev-parse HEAD)"
+added_capture="$fixture_root/added-captured.txt"
+if "$fixture_root/scripts/check_public_product_names.sh" --added-lines "$added_base" "$added_head" \
+  >"$added_capture" 2>&1; then
+  echo "error: an added line naming the bare brand must fail the scan" >&2
+  exit 1
+fi
+if [[ "$(grep -c ': sha256:' "$added_capture")" -ne 1 ]] \
+  || ! grep -Eq '^docs/new.md:3: sha256:[0-9a-f]{12}$' "$added_capture"; then
+  echo "error: only the added line must be reported, by path and new-file line" >&2
+  cat "$added_capture" >&2
+  exit 1
+fi
+if grep -qiF "$product" "$added_capture"; then
+  echo "error: the added-line scan echoed the matched brand word" >&2
+  exit 1
+fi
+printf 'one\ntwo\nReview after a downstream host projects it.\n' >"$fixture_root/docs/new.md"
+git -C "$fixture_root" add docs/new.md
+git -C "$fixture_root" commit -q -m 'Reword'
+if ! "$fixture_root/scripts/check_public_product_names.sh" --added-lines "$added_base" \
+  "$(git -C "$fixture_root" rev-parse HEAD)"; then
+  echo "error: host-neutral added lines must pass the scan" >&2
+  exit 1
+fi
+git -C "$fixture_root" rm -q --cached docs/legacy.md docs/new.md CHANGELOG.md
+rm -f "$fixture_root/docs/legacy.md" "$fixture_root/docs/new.md" "$fixture_root/CHANGELOG.md"
+
 # --- Arm 1: a planted downstream product name must fail ----------------------
 printf 'see %s-code#1\n' "$product" >"$fixture_root/docs/public.md"
 git -C "$fixture_root" add docs/public.md scripts/

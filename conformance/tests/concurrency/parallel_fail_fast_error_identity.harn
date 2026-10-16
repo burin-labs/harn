@@ -1,15 +1,40 @@
-pipeline test(harness: Harness, task: unknown) {
-  // The propagated error is deterministic: branch 0 fails immediately while
-  // branch 1 is still yielding, so branch 0's error is the one reported —
-  // the first failure in source order among branches that actually failed.
-  // The yielding sibling is aborted and its error never surfaces.
-  parallel each [0, 1] { n ->
-    if n == 0 {
-      throw "branch zero failed"
+/**
+ * Fail-fast error identity: the error that propagates out of `parallel each`
+ * is the one from the branch that actually failed. A sibling still in flight
+ * is cancelled, and its cancellation never replaces the initiating error,
+ * whichever index each branch has.
+ *
+ * The failing branch waits until its sibling is running before it throws, and
+ * the sibling cannot finish or fail on its own, so the outcome does not depend
+ * on how the runtime schedules branches across workers (harn#9236).
+ */
+fn fail_one(runtime: HarnessRuntime, failing: int) -> string {
+  const sibling_started = runtime.atomic(0)
+  const sibling_finished = runtime.atomic(0)
+  const never = runtime.atomic(0)
+  const outcome = try {
+    parallel each [0, 1] { n ->
+      if n == failing {
+        while runtime.atomic_get(sibling_started) == 0 {
+          runtime.yield_now()
+        }
+        throw "branch ${n} failed"
+      }
+      runtime.atomic_set(sibling_started, 1)
+      while runtime.atomic_get(never) == 0 {
+        runtime.yield_now()
+      }
+      runtime.atomic_set(sibling_finished, 1)
+      throw "sibling ${n} was not cancelled"
     }
-    for _ in range(0, 64) {
-      harness.runtime.yield_now()
-    }
-    throw "branch one failed"
+    "no error"
+  } catch (error) {
+    "caught: ${error}"
   }
+  return "${outcome}; sibling finished: ${runtime.atomic_get(sibling_finished)}"
+}
+
+pipeline test(harness: Harness, task: unknown) {
+  harness.stdio.println(fail_one(harness.runtime, 0))
+  harness.stdio.println(fail_one(harness.runtime, 1))
 }

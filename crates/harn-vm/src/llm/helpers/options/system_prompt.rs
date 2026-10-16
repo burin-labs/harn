@@ -8,7 +8,7 @@ pub(super) enum SystemPromptPosition {
 }
 
 pub(super) fn system_prompt_error(message: impl Into<String>) -> VmError {
-    VmError::Thrown(VmValue::String(arcstr::ArcStr::from(message.into())))
+    VmError::Thrown(VmValue::string(message.into()))
 }
 
 /// Parse a fragment's `position`. Canonical spellings only: `"before"`
@@ -169,6 +169,26 @@ fn context_call_role(options: Option<&crate::value::DictMap>) -> Result<String, 
         .unwrap_or_else(|| "unattributed".to_string()))
 }
 
+/// The agent session whose directive envelope this call continues: the
+/// named `session_id`, else the ambient session. An auxiliary call such as a
+/// completion judge keeps its session for attribution but continues no
+/// conversation, so it receives neither the envelope nor its authority
+/// declaration, and the directives stay pending for the agent's next turn.
+pub(crate) fn directive_session_id(
+    options: Option<&crate::value::DictMap>,
+) -> Result<Option<String>, VmError> {
+    if crate::llm::mock::is_auxiliary_call_role(&context_call_role(options)?) {
+        return Ok(None);
+    }
+    Ok(options
+        .and_then(|options| options.get("session_id"))
+        .and_then(|value| match value {
+            VmValue::String(value) if !value.is_empty() => Some(value.to_string()),
+            _ => None,
+        })
+        .or_else(crate::agent_sessions::current_session_id))
+}
+
 /// Render one fragment dict into its block. An optional `title` becomes a
 /// `## <title>` heading above the trimmed content.
 pub(super) fn render_system_fragment(content: &str, part: &crate::value::DictMap) -> String {
@@ -311,7 +331,20 @@ pub(crate) fn assemble_system_prompt(
     use crate::llm::prompt::{assemble, FragmentBucket, PromptFragment};
 
     let call_role = context_call_role(options)?;
-    if let Some(replacement) = replacement_system_prompt(options)? {
+    let directive_authority = directive_session_id(options)?
+        .filter(|session_id| crate::agent_sessions::exists(session_id))
+        .map(|session_id| {
+            let nonce = super::reminders::directive_nonce_for_session(&session_id);
+            super::reminders::directive_nonce_instructions(&nonce)
+        });
+    if let Some(mut replacement) = replacement_system_prompt(options)? {
+        if let Some(directive_authority) = directive_authority
+            .as_deref()
+            .filter(|authority| !replacement.contains(authority))
+        {
+            replacement.push_str("\n\n");
+            replacement.push_str(directive_authority);
+        }
         let mut assembled = crate::llm::prompt::replace(replacement);
         assembled.set_call_role(call_role);
         assembled.set_actor_chain(current_actor_chain_json());
@@ -365,6 +398,30 @@ pub(crate) fn assemble_system_prompt(
     // tool's own presence. Tool and instruction share one source of truth and
     // cannot drift. Dormant until a tool actually carries `guidance`.
     append_tool_guidance_fragments(&mut fragments, options);
+
+    if let Some(directive_authority) = directive_authority.filter(|authority| {
+        !fragments
+            .iter()
+            .any(|fragment| fragment.body.contains(authority))
+    }) {
+        // Session reentry carries the saved primary prompt, including this
+        // declaration, as one primary fragment. Insert it next to that same
+        // primary text on the first turn so later tool guidance cannot move
+        // across it and change the provider-visible prompt bytes.
+        let index = fragments
+            .iter()
+            .position(|fragment| fragment.id == "primary" || fragment.id == "primary:system")
+            .map_or(0, |index| index + 1);
+        fragments.insert(
+            index,
+            PromptFragment::new(
+                "directive-authority",
+                "harn-runtime",
+                FragmentBucket::Before,
+                directive_authority,
+            ),
+        );
+    }
 
     // Directives are intentionally NOT folded into the system fragments here.
     // The one context envelope is appended at the trailing user slot so the

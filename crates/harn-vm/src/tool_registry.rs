@@ -9,15 +9,23 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde_json::Value as JsonValue;
 
 use crate::tool_annotations::{SideEffectLevel, ToolKind};
-use crate::value::{VmClosure, VmDictExt, VmError, VmValue};
+use crate::value::{VmDictExt, VmError, VmValue};
 
 mod cli_projection;
 mod contract;
+mod executable;
+pub use executable::{
+    executable_tools, executable_tools_for_audience, ExecutableTool, ToolInvocationRequirement,
+};
+pub(crate) mod handler_result;
+pub use handler_result::tool_handler_output_schema;
 mod invocation;
+pub(crate) mod preparation_scope;
 pub use contract::*;
+pub(crate) use invocation::tool_registry_catalog_for_tool;
 pub use invocation::{
     application_error_cli_envelope, application_error_mcp_result, classify_tool_failure,
-    classify_tool_result, tool_runtime_error_summary, ToolFailureClassification,
+    classify_tool_result, result_to_json, tool_runtime_error_summary, ToolFailureClassification,
     ToolInvocationError, ToolInvocationOutcome,
 };
 
@@ -56,10 +64,7 @@ pub fn project_tools_for_audience(
         .map(|wrapper| (**wrapper).clone())
         .unwrap_or_default();
     validation_registry.put_str("_type", "tool_registry");
-    validation_registry.insert(
-        crate::value::intern_key("tools"),
-        VmValue::List(std::sync::Arc::new(entries.clone())),
-    );
+    validation_registry.put("tools", VmValue::list(entries.clone()));
     let catalog = tool_registry_catalog(&VmValue::dict(validation_registry))?;
     let projected = entries
         .into_iter()
@@ -69,20 +74,11 @@ pub fn project_tools_for_audience(
 
     if let Some(wrapper) = wrapper {
         let mut projected_registry = (**wrapper).clone();
-        projected_registry.insert(
-            crate::value::intern_key("tools"),
-            VmValue::List(std::sync::Arc::new(projected)),
-        );
+        projected_registry.put("tools", VmValue::list(projected));
         Ok(VmValue::dict(projected_registry))
     } else {
-        Ok(VmValue::List(std::sync::Arc::new(projected)))
+        Ok(VmValue::list(projected))
     }
-}
-
-/// Normalized catalog entry paired with its one executable Harn handler.
-pub struct ExecutableTool {
-    pub catalog: ToolCatalogEntry,
-    pub handler: VmClosure,
 }
 
 /// Normalize a registry into the versioned transport-neutral catalog.
@@ -133,58 +129,6 @@ pub fn tool_registry_schema(registry: &VmValue) -> Result<JsonValue, VmError> {
         .validate()
         .map_err(|error| VmError::Runtime(format!("tool_schema: {error}")))?;
     serde_json::to_value(catalog).map_err(|error| VmError::Runtime(format!("tool_schema: {error}")))
-}
-
-/// Normalize a registry and require one local Harn closure per tool.
-pub fn executable_tools(registry: &VmValue) -> Result<Vec<ExecutableTool>, VmError> {
-    executable_tools_matching(registry, None)
-}
-
-/// Normalize executable tools, then require handlers only for entries exposed
-/// to the requested adapter. An excluded alternate-executor entry must not
-/// prevent an adapter from loading the tools it can actually invoke.
-pub fn executable_tools_for_audience(
-    registry: &VmValue,
-    audience: ToolAudience,
-) -> Result<Vec<ExecutableTool>, VmError> {
-    executable_tools_matching(registry, Some(audience))
-}
-
-fn executable_tools_matching(
-    registry: &VmValue,
-    audience: Option<ToolAudience>,
-) -> Result<Vec<ExecutableTool>, VmError> {
-    let registry_dict = registry_dict(registry)?;
-    let entries = registry_entries(registry_dict)?;
-    let catalog = tool_registry_catalog(registry)?;
-    let mut executable = Vec::with_capacity(entries.len());
-    for (entry, catalog) in entries.iter().zip(catalog.tools) {
-        if audience.is_some_and(|audience| !catalog.governance.allows(audience)) {
-            continue;
-        }
-        let VmValue::Dict(entry) = entry else {
-            return Err(VmError::Runtime(
-                "tool registry entries must be objects".into(),
-            ));
-        };
-        let Some(VmValue::Closure(handler)) = entry.get("handler") else {
-            return Err(VmError::Runtime(format!(
-                "tool registry entry {:?} has no local Harn handler closure",
-                catalog.name
-            )));
-        };
-        executable.push(ExecutableTool {
-            catalog,
-            handler: handler.as_ref().clone(),
-        });
-    }
-    Ok(executable)
-}
-
-/// Convert a handler result to portable JSON without stringifying unsupported
-/// runtime-only values such as closures or capability handles.
-pub fn result_to_json(value: &VmValue) -> Result<JsonValue, String> {
-    crate::llm::helpers::vm_value_to_export_json_strict(value, "result")
 }
 
 /// Validate one definition as it enters a registry. Cross-entry invariants are

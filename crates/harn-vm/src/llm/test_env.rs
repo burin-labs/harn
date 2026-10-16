@@ -121,6 +121,76 @@ impl Drop for ScopedEnvVar {
     }
 }
 
+/// Every variable the AWS credential and region chains read offline.
+const AWS_DISCOVERY_ENV: &[&str] = &[
+    "AWS_REGION",
+    "AWS_DEFAULT_REGION",
+    "BEDROCK_REGION",
+    "AWS_PROFILE",
+    "AWS_ACCESS_KEY_ID",
+    "AWS_SECRET_ACCESS_KEY",
+    "AWS_SESSION_TOKEN",
+    "AWS_WEB_IDENTITY_TOKEN_FILE",
+    "AWS_ROLE_ARN",
+    "AWS_CONTAINER_CREDENTIALS_RELATIVE_URI",
+    "AWS_CONTAINER_CREDENTIALS_FULL_URI",
+];
+
+/// A host with no provider configured: every catalog credential variable and
+/// every AWS discovery variable removed, and the AWS shared config and
+/// credentials files pointed at empty files so the developer's own `~/.aws`
+/// cannot answer. Individual variables can be set back with [`Self::set`].
+pub(crate) struct UnconfiguredProviderEnv {
+    vars: Vec<ScopedEnvVar>,
+    aws_dir: tempfile::TempDir,
+}
+
+impl Drop for UnconfiguredProviderEnv {
+    /// Restore newest first, so a variable [`Self::set`] after its removal
+    /// gets its original value back rather than the removed state.
+    fn drop(&mut self) {
+        while self.vars.pop().is_some() {}
+    }
+}
+
+impl UnconfiguredProviderEnv {
+    pub(crate) fn new() -> Self {
+        let mut names: std::collections::BTreeSet<String> = AWS_DISCOVERY_ENV
+            .iter()
+            .map(|name| name.to_string())
+            .collect();
+        for provider in crate::llm_config::provider_names() {
+            if let Some(definition) = crate::llm_config::provider_config(&provider) {
+                names.extend(crate::llm_config::auth_env_names(&definition.auth_env));
+            }
+        }
+        let mut vars: Vec<ScopedEnvVar> = names
+            .into_iter()
+            .map(|name| ScopedEnvVar::remove(Box::leak(name.into_boxed_str())))
+            .collect();
+        let aws_dir = tempfile::tempdir().expect("temp AWS config dir");
+        let config = aws_dir.path().join("config");
+        let credentials = aws_dir.path().join("credentials");
+        std::fs::write(&config, "").expect("empty AWS config");
+        std::fs::write(&credentials, "").expect("empty AWS credentials");
+        vars.push(ScopedEnvVar::set("AWS_CONFIG_FILE", &config));
+        vars.push(ScopedEnvVar::set(
+            "AWS_SHARED_CREDENTIALS_FILE",
+            &credentials,
+        ));
+        Self { vars, aws_dir }
+    }
+
+    pub(crate) fn set(&mut self, key: &'static str, value: &str) {
+        self.vars.push(ScopedEnvVar::set(key, value));
+    }
+
+    /// The directory holding the (initially empty) AWS shared files.
+    pub(crate) fn aws_dir(&self) -> &std::path::Path {
+        self.aws_dir.path()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

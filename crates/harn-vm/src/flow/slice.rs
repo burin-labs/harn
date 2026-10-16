@@ -220,6 +220,7 @@ pub struct SliceDerivationInput<'a> {
 }
 
 #[derive(Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum SliceDerivationError {
     MissingIntent(IntentId),
     MissingAtom(AtomId),

@@ -398,12 +398,14 @@ impl Env for RealEnv {
         // mise: `mise where ruby@3.2` -> install dir; bin is `<dir>/bin`.
         // asdf: `asdf where ruby 3.2` -> install dir; bin is `<dir>/bin`.
         let output = match resolver {
-            "mise" => std::process::Command::new(&resolver_bin)
+            "mise" => harn_vm::process_sandbox::session_std_command(&resolver_bin)
+                .ok()?
                 .arg("where")
                 .arg(&tool_arg)
                 .output()
                 .ok()?,
-            "asdf" => std::process::Command::new(&resolver_bin)
+            "asdf" => harn_vm::process_sandbox::session_std_command(&resolver_bin)
+                .ok()?
                 .arg("where")
                 .arg(&decl.tool)
                 .arg(&decl.version)

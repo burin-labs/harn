@@ -3,6 +3,7 @@ import "std/agent/loop_resource_dispatch"
 import "std/agent/loop_result_status"
 import "std/agent/loop_support"
 import "std/agent/loop_tool_calls"
+import { __agent_refresh_goal_pins } from "std/agent/pins"
 import { __agent_stall_verification_dispatch } from "std/agent/stall_checkpoint"
 import { AgentStallState } from "std/agent/stall_types"
 import { __agent_stall_fold_verify_state } from "std/agent/stall_verification"
@@ -14,6 +15,7 @@ pub type AgentLoopCompletedDispatchStall = {state: AgentStallState, no_informati
 pub type AgentIterationInfo = {
   tool_count: int,
   text: string,
+  prose_characters: int,
   provider: string,
   model: string,
   serving_base_url: string,
@@ -207,7 +209,7 @@ pub fn __merge_tool_names(existing: list?, additions: list?) {
   const values = additions ?? []
   for name in values {
     if name != "" && !contains(merged, name) {
-      merged = merged.appending(name)
+      merged.push(name)
     }
   }
   return merged
@@ -407,6 +409,7 @@ pub fn __iteration_info_payload(
   return {
     tool_count: tool_count,
     text: visible_text,
+    prose_characters: len(visible_text),
     provider: llm_result?.provider ?? "",
     model: llm_result?.model ?? "",
     serving_base_url: telemetry?.serving_base_url ?? "",
@@ -573,16 +576,17 @@ pub fn __agent_loop_record_budget_stop(
   current_max: any,
   reason: any,
 ) {
-  return decisions.appending(
-    {
-      iteration: iteration,
-      action: "stop",
-      old_limit: current_max,
-      new_limit: current_max,
-      reason: reason,
-      status: "budget_exhausted",
-    },
-  )
+  return decisions
+    + [
+      {
+        iteration: iteration,
+        action: "stop",
+        old_limit: current_max,
+        new_limit: current_max,
+        reason: reason,
+        status: "budget_exhausted",
+      },
+    ]
 }
 
 pub fn __stall_judge_opts(
@@ -792,16 +796,17 @@ pub fn __agent_loop_record_terminal_callback_continue(
   old_limit: any,
   new_limit: any,
 ) {
-  return decisions.appending(
-    {
-      iteration: iteration,
-      action: "extend",
-      old_limit: old_limit,
-      new_limit: new_limit,
-      reason: "terminal_callback_continue",
-      status: "",
-    },
-  )
+  return decisions
+    + [
+      {
+        iteration: iteration,
+        action: "extend",
+        old_limit: old_limit,
+        new_limit: new_limit,
+        reason: "terminal_callback_continue",
+        status: "",
+      },
+    ]
 }
 
 pub fn __agent_loop_state_budget_fields(
@@ -1108,6 +1113,9 @@ pub fn agent_stage(
     const result = agent_session_drain_bridge_injections(agent, session_id, "audit_only")
     delivered = delivered + (result?.delivered ?? 0)
   }
+  if delivered > 0 || kind == "iteration_start" {
+    __agent_refresh_goal_pins(agent, session_id)
+  }
   let typed_delivered = 0
   if modes.typed_delivery != nil {
     const pending = agent_session_drain_host_injections(
@@ -1213,6 +1221,9 @@ pub fn agent_direct_llm_options(
       session_id: session_id,
       tool_format: turn_llm_opts.tool_format,
       _directives_rendered: true,
+      // `agent_build_turn_system_fragments` renders the json/text tool-call
+      // contract for this call; `llm_call` refuses text-channel tools without it.
+      _tool_contract_rendered: true,
       _iteration: iteration,
       _call_stage: "work",
       _system_fragments: turn_prompt.fragments,
@@ -1304,7 +1315,9 @@ pub const AGENT_LOOP_REJECTED_TURN_MARKER: string =
  * boundary the pending directive is anchored to and delays that directive by a
  * full round — the model would be asked to try again without being told why.
  * Passing a replacement keeps the turn count stable, so the directive still
- * lands on the next round. Drop only where no directive is owed.
+ * lands on the next round. Drop only where no directive is owed. The next turn
+ * boundary always commits the rejection right after the replacement, restating
+ * it when the same text is already in history, so no request ends on it.
  *
  * The replacement is a bookkeeping turn, not an answer. The runtime flags it
  * as such when it writes it, so the run's final text reports the last draft

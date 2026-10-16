@@ -264,6 +264,7 @@ pub struct EventLogDescription {
 }
 
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum LogError {
     Config(String),
     InvalidTopic(String),

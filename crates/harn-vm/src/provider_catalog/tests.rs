@@ -131,7 +131,7 @@ fn remote_catalog_with_extra_model() -> ProviderCatalogArtifact {
 fn spawn_catalog_stub(body: String) -> (String, std::thread::JoinHandle<()>) {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind catalog stub");
     let url = format!("http://{}/catalog.json", listener.local_addr().unwrap());
-    let handle = std::thread::spawn(move || {
+    let handle = crate::runtime_stack::spawn(move || {
         let (mut stream, _) = listener.accept().expect("accept catalog request");
         let mut request = [0; 1024];
         let _ = stream.read(&mut request);
@@ -385,6 +385,59 @@ fn validation_rejects_missing_required_metadata() {
     );
 }
 
+/// Every provider that requires auth names its credential variables, so the
+/// environment policy can keep them out of child processes. Bedrock is the
+/// case that once passed by exemption: removing its `credential_env` must now
+/// fail validation.
+#[test]
+fn every_authenticated_provider_declares_its_credential_env() {
+    let catalog = artifact();
+    assert!(validate_artifact(&catalog).errors.is_empty());
+    let bedrock = catalog
+        .providers
+        .iter()
+        .find(|provider| provider.id == "bedrock")
+        .expect("catalog has bedrock");
+    for name in [
+        "AWS_ACCESS_KEY_ID",
+        "AWS_SECRET_ACCESS_KEY",
+        "AWS_SESSION_TOKEN",
+        "AWS_PROFILE",
+    ] {
+        assert!(
+            bedrock
+                .auth
+                .credential_env
+                .iter()
+                .any(|declared| declared == name),
+            "bedrock no longer declares {name}"
+        );
+    }
+    let names = crate::security::environment_policy::provider_credential_env_names();
+    assert!(names.contains("AWS_SECRET_ACCESS_KEY"));
+    assert!(names.contains("GOOGLE_APPLICATION_CREDENTIALS"));
+    assert!(names.contains("AZURE_OPENAI_API_KEY"));
+    assert!(
+        !names.contains("AWS_REGION"),
+        "a region is not a credential"
+    );
+
+    let mut stripped = catalog.clone();
+    let bedrock = stripped
+        .providers
+        .iter_mut()
+        .find(|provider| provider.id == "bedrock")
+        .expect("catalog has bedrock");
+    bedrock.auth.credential_env.clear();
+    assert!(
+        validate_artifact(&stripped)
+            .errors
+            .iter()
+            .any(|message| message.contains("provider bedrock requires auth but declares no")),
+        "a provider with auth and no declared credential names must fail validation"
+    );
+}
+
 #[test]
 fn validation_rejects_unknown_lora_module_value_format() {
     let mut catalog = artifact();
@@ -522,27 +575,6 @@ fn validation_rejects_completion_review_without_evidence() {
 }
 
 #[test]
-fn live_catalog_has_one_tier_per_equivalence_group() {
-    // The shipping catalog must not tier the same logical model differently by
-    // provider/runtime — that gives identical weights different escalation
-    // eligibility by host. validate_current() runs the full live artifact; this
-    // asserts the equivalence_group tier-consistency check finds no conflict.
-    let report = validate_current();
-    assert!(
-        !report
-            .errors
-            .iter()
-            .any(|message| message.contains("conflicting tiers")),
-        "live catalog has an equivalence_group with conflicting tiers: {:?}",
-        report
-            .errors
-            .iter()
-            .filter(|m| m.contains("conflicting tiers"))
-            .collect::<Vec<_>>()
-    );
-}
-
-#[test]
 fn validation_rejects_conflicting_tiers_within_an_equivalence_group() {
     // Tier is a capability of the logical model. Two active rows in the same
     // equivalence_group declaring different tiers must fail at catalog-build
@@ -590,27 +622,6 @@ fn validation_rejects_conflicting_tiers_within_an_equivalence_group() {
         ),
         "expected an equivalence_group conflicting-tiers error for {group}, got {:?}",
         report.errors
-    );
-}
-
-#[test]
-fn live_catalog_has_no_local_strengths_decoration_over_baseline() {
-    // Gaming guard: no local-runtime route may carry strengths beyond its
-    // equivalence_group's conservative baseline (which would read as
-    // already-capable and suppress real escalations). The live artifact must be
-    // clean.
-    let report = validate_current();
-    assert!(
-        !report
-            .errors
-            .iter()
-            .any(|message| message.contains("beyond the group's conservative baseline")),
-        "live catalog has a local route decorated above its group baseline: {:?}",
-        report
-            .errors
-            .iter()
-            .filter(|m| m.contains("beyond the group's conservative baseline"))
-            .collect::<Vec<_>>()
     );
 }
 

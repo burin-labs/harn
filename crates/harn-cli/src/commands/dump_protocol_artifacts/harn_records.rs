@@ -91,6 +91,7 @@ fn field_kind(
         TypeExpr::Named(name) => match name.as_str() {
             "string" => FieldKind::String,
             "int" => FieldKind::Integer(Integer::Harn),
+            "float" => FieldKind::Number,
             "bool" => FieldKind::Bool,
             name if ["ExternalAction", "ToolPermission", "ConnectorSetup"]
                 .iter()

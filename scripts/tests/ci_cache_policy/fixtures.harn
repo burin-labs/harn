@@ -15,51 +15,6 @@ pub fn windows_runner_expression() -> string {
   )
 }
 
-pub fn windows_nightly_runner_expression() -> string {
-  return gha_expression(
-    "vars.HARN_CI_ENABLE_BLACKSMITH_WINDOWS == 'true' && 'blacksmith-16vcpu-windows-2025' || 'windows-latest'",
-  )
-}
-
-pub fn windows_tier_expression() -> string {
-  return gha_expression(
-    "vars.HARN_CI_ENABLE_BLACKSMITH_WINDOWS == 'true' && 'blacksmith' || 'github-hosted'",
-  )
-}
-
-pub fn windows_timeout_expression() -> string {
-  return gha_expression("vars.HARN_CI_ENABLE_BLACKSMITH_WINDOWS == 'true' && 60 || 90")
-}
-
-pub fn windows_warm_restore_step() {
-  return {
-    name: "Restore Windows workspace warm artifact",
-    id: "windows-warm-restore",
-    "continue-on-error": true,
-    env: {GH_TOKEN: gha_expression("github.token")},
-    run:
-      "./scripts/ci/workspace_warm_artifact.sh windows download-and-restore --repo owner/repo\necho windows_warm_restore=miss >> $GITHUB_OUTPUT",
-  }
-}
-
-pub fn windows_warm_report_step() {
-  return {
-    name: "Report Windows warm restore outcome",
-    if: "always()",
-    env: {
-      RESTORE_RESULT: gha_expression(
-        "steps.windows-warm-restore.outputs.windows_warm_restore || 'miss'",
-      ),
-      RESTORE_PRODUCER_COMMIT: gha_expression(
-        "steps.windows-warm-restore.outputs.windows_warm_restore_producer_commit || 'unavailable'",
-      ),
-      RESTORE_RUN_ID: gha_expression(
-        "steps.windows-warm-restore.outputs.windows_warm_restore_run_id || 'unavailable'",
-      ),
-    },
-  }
-}
-
 pub fn ci_concurrency() {
   return {
     group: gha_expression("github.workflow")
@@ -140,7 +95,7 @@ pub fn macos_warm_policy() -> MacosWorkspaceWarmPolicy {
 
 pub fn policy() -> CiCachePolicy {
   return {
-    schema_version: 6,
+    schema_version: 7,
     rust_cache_action: "./.github/actions/rust-cache",
     node_cache_action: "./.github/actions/node-cache",
     persistent_ref: "refs/heads/main",
@@ -158,6 +113,7 @@ pub fn policy() -> CiCachePolicy {
       {workflow: "windows-nightly.yml", job: "nextest", shared_key: "workspace-windows"},
       {workflow: "macos-nightly.yml", job: "nextest", shared_key: "workspace-macos"},
     ],
+    harn_check_cache_writers: [{workflow: "ci.yml", job: "harn-audit", family: "audit"}],
   }
 }
 
@@ -186,7 +142,7 @@ pub fn release_warm_cache_path_policy() -> ReleaseWarmCachePathPolicy {
 
 /** Address setup steps by id so inserting one cannot silently shift a fixture. */
 pub fn setup_step_by_id(workflow: dict, id: string) {
-  return (workflow?.jobs?.setup?.steps ?? []).filter({ step -> step?.id == id }).to_list()[0]
+  return (workflow.jobs.setup.steps ?? []).filter({ step -> step.id == id }).to_list()[0]
 }
 
 /**
@@ -209,10 +165,10 @@ pub fn release_binary_workflow() {
     concurrency: {
       group: "build-release-binaries-"
         + gha_expression(
-          "(github.event_name == 'workflow_dispatch' && inputs.benchmark_source_sha != '' && format('benchmark-{0}', inputs.benchmark_source_sha)) || (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.warm_cache_only)) && 'warm-main' || (github.event_name == 'push' && format('branch-{0}', github.run_id)) || github.ref_name",
+          "(github.event_name == 'workflow_dispatch' && inputs.benchmark_only && format('benchmark-{0}-{1}', inputs.benchmark_source_sha || github.sha, github.sha)) || ((github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.source_candidate)) && 'source-main') || (github.event_name == 'workflow_dispatch' && inputs.warm_cache_only && 'warm-main') || (github.event_name == 'push' && format('branch-{0}', github.run_id)) || github.ref_name",
         ),
       "cancel-in-progress": gha_expression(
-        "github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.warm_cache_only)",
+        "github.event_name == 'workflow_dispatch' && inputs.warm_cache_only && !inputs.source_candidate && !inputs.benchmark_only",
       ),
     },
     jobs: {
@@ -240,11 +196,7 @@ pub fn release_binary_workflow() {
           },
         ],
       },
-      prepare_cli_aot: {
-        "runs-on": gha_expression(
-          "vars.HARN_RELEASE_ENABLE_BLACKSMITH_LINUX == 'true' && needs.setup.outputs.cli_aot_primary_runner || needs.setup.outputs.cli_aot_standard_runner",
-        ),
-      },
+      prepare_cli_aot: {"runs-on": gha_expression("needs.setup.outputs.cli_aot_standard_runner")},
       build: {
         if: "needs.setup.outputs.should_build_binaries == 'true'",
         concurrency: {
@@ -333,6 +285,9 @@ pub fn setup_harn_action() {
 pub fn action() {
   return {
     inputs: {
+      "source-key": {default: ""},
+      "broad-restore-prefix": {default: ""},
+      "cache-bin": {default: "false"},
       "cache-workspace-crates": {default: "false"},
       "prune-superseded-release-generations": {default: "false"},
       "target-dir": {default: ""},
@@ -350,34 +305,52 @@ pub fn action() {
           },
         },
         {
-          uses: "actions/cache/restore@exact-pin",
-          if: "inputs.broad-restore-prefix != ''",
-          "continue-on-error": true,
-          with: {
-            path: gha_expression("env.CARGO_HOME || '~/.cargo'")
-              + "/registry\n"
-              + gha_expression("env.CARGO_HOME || '~/.cargo'")
-              + "/git\n"
-              + gha_expression("env.CARGO_TARGET_DIR || format('{0}/target', github.workspace)"),
-            key: gha_expression("inputs.broad-restore-prefix") + gha_expression("github.sha"),
-            "restore-keys": gha_expression("inputs.broad-restore-prefix"),
+          id: "cache-paths",
+          env: {
+            CACHE_SHARED_KEY: gha_expression("inputs.shared-key"),
+            CACHE_EXPLICIT_SOURCE_KEY: gha_expression("inputs.source-key"),
+            CACHE_SOURCE_KEY: gha_expression(
+              "inputs.source-key || (inputs.cache-workspace-crates == 'true' && hashFiles('Cargo.lock', 'Cargo.toml', 'crates/**', 'spec/**', 'tree-sitter-harn/**')) || ''",
+            ),
           },
+          run: "Retained workspace cache has no measured source fingerprint\n-workspace-crates-v3\nv0-rust-$"
+            + "{shared}-\n[package.metadata.harn]\nsource = \"$"
+            + "{source}\"\nrestore-prefix=$"
+            + "{fallback}\npaths<<harn-cache-paths\nworkspaces<<harn-cache-workspaces\n.harn-workspace-source",
         },
         {
+          id: "cache",
           uses: "Swatinem/rust-cache@exact-pin",
           "continue-on-error": true,
+          env: {SEGMENT_DOWNLOAD_TIMEOUT_MINS: "2"},
           with: {
-            "shared-key": gha_expression(
-              "format('{0}{1}', inputs.source-key != '' && format('{0}-{1}', inputs.shared-key, inputs.source-key) || inputs.shared-key, inputs.cache-workspace-crates == 'true' && '-workspace-crates-v1' || '')",
-            ),
+            "shared-key": gha_expression("steps.cache-paths.outputs.shared-key"),
             "cache-workspace-crates": gha_expression("inputs.cache-workspace-crates"),
             "cache-targets": gha_expression("inputs.target-dir == ''"),
-            "cache-directories": gha_expression("inputs.target-dir"),
+            "cache-directories": gha_expression(
+              "format('{0} {1}', inputs.target-dir, inputs.cache-workspace-crates == 'true' && '.harn-workspace-source' || '')",
+            ),
+            workspaces: gha_expression("steps.cache-paths.outputs.workspaces"),
             "save-if": gha_expression("inputs.save == 'true' && github.ref == 'refs/heads/main'"),
           },
         },
+        {
+          uses: "actions/cache/restore@exact-pin",
+          if:
+            "steps.cache-paths.outputs.restore-prefix != '' && steps.cache.outputs.cache-hit != 'true'",
+          "continue-on-error": true,
+          env: {SEGMENT_DOWNLOAD_TIMEOUT_MINS: "2"},
+          with: {
+            path: gha_expression("steps.cache-paths.outputs.paths"),
+            key: gha_expression("steps.cache-paths.outputs.restore-prefix")
+              + gha_expression("github.sha"),
+            "restore-keys": gha_expression("steps.cache-paths.outputs.restore-prefix"),
+          },
+        },
+        {id: "reuse", run: "./scripts/ci/reuse_workspace_crates.sh restore"},
       ],
     },
+    outputs: {"source-current": {value: gha_expression("steps.reuse.outputs.source-current")}},
   }
 }
 
@@ -431,6 +404,25 @@ pub fn workflows() {
           ],
         },
         macos: {
+          name: "Rust on macOS (deny-warnings build + lint)",
+          needs: ["changes", "macos-lint"],
+          permissions: {contents: "read", actions: "read"},
+          steps: [
+            {
+              run: "./scripts/ci/require_macos_lint.sh",
+              env: {MATRIX_RESULT: gha_expression("needs.macos-lint.result")},
+            },
+          ],
+        },
+        "macos-lint": {
+          name: "Rust on macOS strict lint (" + gha_expression("matrix.kind") + ")",
+          "runs-on": "macos-latest",
+          strategy: {
+            "fail-fast": false,
+            matrix: {
+              include: [{kind: "workspace"}, {kind: "lean-lsp"}, {kind: "freshness-checker"}],
+            },
+          },
           env: {RUSTFLAGS: "-D warnings"},
           steps: [
             {uses: "actions/checkout@exact-pin"},
@@ -446,74 +438,10 @@ pub fn workflows() {
               uses: "./.github/actions/rust-cache",
               with: {"shared-key": "workspace-macos", "source-key": native_source_key()},
             },
-            {name: "Clippy all targets (deny warnings)", run: "./scripts/ci/run_rust_lint_lane.sh"},
-          ],
-        },
-        windows: {
-          "runs-on": windows_runner_expression(),
-          "timeout-minutes": windows_timeout_expression(),
-          permissions: {contents: "read", actions: "read"},
-          env: {HARN_RUNNER_TIER: windows_tier_expression()},
-          steps: [
-            {uses: "actions/checkout@exact-pin"},
             {
-              name: "Set up Dev Drive",
-              if: gha_expression(
-                "vars.HARN_WINDOWS_DEVDRIVE == 'on' && env.HARN_RUNNER_TIER == 'github-hosted'",
-              ),
-              uses: "samypr100/setup-dev-drive@exact-pin",
-              with: {
-                "drive-size": gha_expression(
-                  "github.event_name == 'pull_request' && '25GB' || '50GB'",
-                ),
-              },
-            },
-            {uses: "./.github/actions/rust-toolchain"},
-            {
-              name: "Report Windows storage (initial)",
-              id: "windows-storage-initial",
-              if: "always()",
-              run: "./scripts/ci/windows_storage_budget.sh report initial",
-            },
-            windows_warm_restore_step(),
-            {
-              uses: "./.github/actions/rust-cache",
-              if:
-                "steps.windows-warm-restore.outputs.windows_warm_restore != 'hit' && steps.windows-warm-restore.outputs.windows_warm_restore_reason != 'insufficient_space'",
-              with: windows_cache_inputs(),
-            },
-            windows_warm_report_step(),
-            {
-              name: "Report Windows storage (after restore)",
-              if: "always()",
-              run: "./scripts/ci/windows_storage_budget.sh report after_restore",
-            },
-            {
-              name: "Compile Windows tests and run unit slice",
-              id: "windows-native-tests",
-              env: {RUST_MIN_STACK: "16777216"},
-              run:
-                "cargo nextest run --features internal-freshness-checker\nprintf 'completed_epoch=%s\\n' \"$(date +%s)\" >> \"$GITHUB_OUTPUT\"",
-            },
-            {
-              name: "Produce exact Windows Harn binary",
-              run:
-                "HARN_BIN='' ./scripts/ci_warm_harn_bin.sh --profile test --github-env \"$GITHUB_ENV\"",
-            },
-            {
-              name: "Smoke test harn run",
-              env: {
-                WINDOWS_NATIVE_TEST_COMPLETED_EPOCH: gha_expression(
-                  "steps.windows-native-tests.outputs.completed_epoch",
-                ),
-              },
-              run:
-                "harn_bin=\"$(HARN_BIN='' HARN_BIN_NO_BUILD=1 ./scripts/harn_bin.sh --no-build --print)\"\n[[ \"$harn_bin\" -ef \"$harn_bin\" ]]\n\"$harn_bin\" run smoke.harn\necho \"$WINDOWS_NATIVE_TEST_COMPLETED_EPOCH\"",
-            },
-            {
-              name: "Report Windows storage (terminal)",
-              if: "always()",
-              run: "./scripts/ci/windows_storage_budget.sh report terminal",
+              name: "Clippy all targets (deny warnings)",
+              run: "./scripts/ci/run_rust_lint_lane.sh --leg \"" + gha_expression("matrix.kind")
+                + "\"",
             },
           ],
         },
@@ -531,18 +459,31 @@ pub fn workflows() {
       },
     },
     "windows-nightly.yml": {
-      permissions: {contents: "read", actions: "write"},
+      on: {schedule: [{cron: "0 7 * * *"}], workflow_dispatch: nil, pull_request: nil},
+      permissions: {contents: "read"},
       jobs: {
+        route: {
+          outputs: {run: gha_expression("steps.decide.outputs.run")},
+          steps: [
+            {uses: "actions/checkout@exact-pin"},
+            {
+              name: "Decide whether this event runs native Windows",
+              id: "decide",
+              run:
+                "source .github/scripts/release-ref.sh\nrun=\"$(release_pr_only_lane_run \"$EVENT_NAME\" \"$PR_HEAD_REF\")\"\necho \"run=$run\" >> \"$GITHUB_OUTPUT\"",
+            },
+          ],
+        },
         nextest: {
-          "runs-on": windows_nightly_runner_expression(),
-          env: {HARN_RUNNER_TIER: windows_tier_expression()},
+          needs: "route",
+          if: "needs.route.outputs.run == 'true'",
+          permissions: {contents: "read", actions: "write"},
+          "runs-on": "windows-latest",
           steps: [
             {uses: "actions/checkout@exact-pin"},
             {
               name: "Set up Dev Drive",
-              if: gha_expression(
-                "vars.HARN_WINDOWS_DEVDRIVE == 'on' && env.HARN_RUNNER_TIER == 'github-hosted'",
-              ),
+              if: gha_expression("vars.HARN_WINDOWS_DEVDRIVE == 'on'"),
               uses: "samypr100/setup-dev-drive@exact-pin",
               with: {"drive-size": "50GB"},
             },

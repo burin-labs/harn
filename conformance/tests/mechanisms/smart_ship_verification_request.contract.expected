@@ -1,0 +1,5 @@
+older_execution_refused=true
+copied_request_refused=true
+unsigned_request_rebinding_refused=true
+fresh_execution_accepted=true
+explicit_compatible_reuse_accepted=true

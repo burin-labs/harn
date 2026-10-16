@@ -97,6 +97,7 @@ impl DurableAgentEventProjector {
                 mutation_status,
                 changed_paths,
                 data,
+                health,
                 executor,
                 parsing,
                 raw_input,
@@ -114,6 +115,7 @@ impl DurableAgentEventProjector {
                     && *mutation_status == ToolMutationStatus::Unknown
                     && changed_paths.is_none()
                     && data.is_none()
+                    && health.is_none()
                     && executor.is_none();
                 if !pure_streaming_snapshot {
                     self.remove(&key);

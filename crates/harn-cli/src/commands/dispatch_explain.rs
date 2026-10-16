@@ -38,6 +38,8 @@ pub(crate) struct DispatchExplanation {
     pub live_endpoint_family: Option<String>,
     pub native_tool_wire_format: String,
     pub base_url_host: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub chat_wire_contract: Option<harn_vm::llm_config::ProviderChatWireContract>,
     pub tool_format: String,
     pub native_tools: bool,
     pub structured_output: Option<String>,
@@ -336,6 +338,7 @@ pub(crate) fn explain(
         live_endpoint_family,
         native_tool_wire_format: caps.native_tool_wire_format,
         base_url_host,
+        chat_wire_contract: harn_vm::llm_config::provider_chat_wire_contract(provider),
         tool_format,
         native_tools: caps.native_tools,
         structured_output: caps.structured_output,
@@ -1193,6 +1196,28 @@ fn print_human_explanation(report: &DispatchExplanation) {
     }
     println!("  tool_wire:        {}", report.native_tool_wire_format);
     println!("  base_url_host:    {}", report.base_url_host);
+    if let Some(contract) = &report.chat_wire_contract {
+        println!(
+            "  chat_endpoint:    {} (source: {})",
+            contract.chat_endpoint,
+            contract
+                .sources
+                .chat_endpoint
+                .as_ref()
+                .map(ToString::to_string)
+                .unwrap_or_else(|| "unset".into())
+        );
+        println!(
+            "  chat_api_adapter: {} (source: {})",
+            serde_json::to_value(contract.chat_api_adapter).expect("adapter serializes"),
+            contract
+                .sources
+                .chat_api_adapter
+                .as_ref()
+                .map(ToString::to_string)
+                .unwrap_or_else(|| "model default".into())
+        );
+    }
     println!("  tool_format:      {}", report.tool_format);
     println!("  native_tools:     {}", report.native_tools);
     println!(

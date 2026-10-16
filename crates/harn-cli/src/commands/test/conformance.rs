@@ -19,6 +19,26 @@ use empty_run::{
 use lint::{format_conformance_lint_diagnostics, lint_expectation_error};
 use selection::{conformance_filter_matches, resolve_conformance_selection};
 
+/// Warm the stdlib bytecode cache before any case runs. Cases that spawn a
+/// `harn run` child otherwise compile the stdlib in that child, concurrently
+/// with every sibling, inside the case's hang deadline (harn#8575).
+pub(super) fn warm_stdlib_before_cases(threads: usize, json: bool) {
+    let started = std::time::Instant::now();
+    let report = harn_vm::warm_embedded_stdlib(threads);
+    if json {
+        return;
+    }
+    eprintln!(
+        "harn conformance: warmed {} of {} stdlib module(s) in {:.1}s",
+        report.warmed,
+        report.modules,
+        started.elapsed().as_secs_f64()
+    );
+    for (module, error) in &report.failed {
+        eprintln!("harn conformance: stdlib module {module} left lazy: {error}");
+    }
+}
+
 fn conformance_llm_mock_mode(harn_file: &Path) -> CliLlmMockMode {
     let fixture = harn_file.with_extension("llm-mock.jsonl");
     if fixture.is_file() {
@@ -1253,6 +1273,7 @@ pub(crate) async fn run_conformance_tests(
                 duration_ms: evaluation.duration_ms,
                 timeout: None,
                 phases: None,
+                work: None,
                 timing_spans: Vec::new(),
                 message: if junit_passed { None } else { message.clone() },
                 captured_output: None,
@@ -1284,6 +1305,7 @@ pub(crate) async fn run_conformance_tests(
                 duration_ms: evaluation.duration_ms,
                 timeout: None,
                 phases: None,
+                work: None,
                 timing_spans: Vec::new(),
                 message: None,
                 captured_output: None,
@@ -1310,6 +1332,7 @@ pub(crate) async fn run_conformance_tests(
                 duration_ms: evaluation.duration_ms,
                 timeout: None,
                 phases: None,
+                work: None,
                 timing_spans: Vec::new(),
                 message: Some(msg),
                 captured_output: None,

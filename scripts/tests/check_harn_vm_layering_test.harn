@@ -1,0 +1,29 @@
+import { back_edges, growth, layer_index, top_module } from "../check_harn_vm_layering"
+
+const LAYERS = [["value"], ["vm"], ["llm"], ["stdlib"]]
+
+pipeline test_top_module_folds_files_and_directories(harness: Harness, task: unknown) {
+  assert_eq(top_module("crates/harn-vm/src/llm/agent/mod.rs"), "llm")
+  assert_eq(top_module("crates/harn-vm/src/value.rs"), "value")
+  assert_eq(top_module("crates/harn-vm/src/stdlib/fs.rs"), "stdlib")
+}
+
+pipeline test_only_upward_references_count(harness: Harness, task: unknown) {
+  const index = layer_index(LAYERS)
+  const text = "use crate::value::Value;\nuse crate::stdlib::fs;\nlet x = crate::stdlib::y;\n"
+    + "use crate::llm::self_ref;\nuse crate::unlisted::thing;\n"
+  // `value` is below `llm`; `llm` is itself; `unlisted` is not in any layer.
+  assert_eq(back_edges("llm", text, index), {"llm->stdlib": 2})
+  // A module outside the layer table is not constrained at all.
+  assert_eq(back_edges("unlisted", text, index), {})
+  assert_eq(back_edges("stdlib", text, index), {})
+}
+
+pipeline test_growth_names_new_and_grown_pairs(harness: Harness, task: unknown) {
+  const baseline = {"vm->stdlib": 3}
+  assert_eq(growth({"vm->stdlib": 3}, baseline), [])
+  assert_eq(growth({"vm->stdlib": 2}, baseline), [])
+  assert_eq(growth({"vm->stdlib": 4}, baseline), ["vm->stdlib: 4 (baseline 3)"])
+  // A pair the baseline never had may not appear at all.
+  assert_eq(growth({"value->vm": 1}, baseline), ["value->vm: 1 (baseline 0)"])
+}

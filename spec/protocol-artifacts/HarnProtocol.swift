@@ -100,6 +100,7 @@ public enum HarnProtocolConstants {
         "host_tool_result",
         "input_guardrail_verdict",
         "iteration_end",
+        "session_health",
         "iteration_start",
         "judge_decision",
         "judge_started",
@@ -126,6 +127,7 @@ public enum HarnProtocolConstants {
         "tool_batch_disposition",
         "tool_call_audit",
         "tool_format_override",
+        "turn_phase_changed",
         "typed_checkpoint",
     ]
     public static let toolLifecycleExtensionFields: [String] = [
@@ -137,6 +139,8 @@ public enum HarnProtocolConstants {
         "errorCategory",
         "executionDurationMs",
         "executor",
+        "health",
+        "intent",
         "mutationStatus",
         "parsing",
         "rawInputPartial",
@@ -563,12 +567,61 @@ public struct HarnExternalActionPolicyEvaluation: Codable, Sendable, Equatable {
     public let outcome: HarnExternalActionPolicyEvaluationOutcome
     public let reasonCode: String
     public let policyId: String?
+    public let review: HarnExternalActionDecisionReview?
 
     enum CodingKeys: String, CodingKey {
         case layer
         case outcome
         case reasonCode = "reason_code"
         case policyId = "policy_id"
+        case review
+    }
+}
+
+public struct HarnExternalActionReviewProbability: Codable, Sendable, Equatable {
+    public let label: String
+    public let probability: Double
+}
+
+public struct HarnExternalActionReviewAnswer: Codable, Sendable, Equatable {
+    public let questionId: String
+    public let kind: String
+    public let confidence: Double
+    public let confidenceKind: String
+    public let verdict: Bool?
+    public let probability: Double?
+    public let label: String?
+    public let score: Double?
+    public let probabilities: [HarnExternalActionReviewProbability]
+
+    enum CodingKeys: String, CodingKey {
+        case questionId = "question_id"
+        case kind
+        case confidence
+        case confidenceKind = "confidence_kind"
+        case verdict
+        case probability
+        case label
+        case score
+        case probabilities
+    }
+}
+
+public struct HarnExternalActionDecisionReview: Codable, Sendable, Equatable {
+    public let receipt: String
+    public let outcome: String
+    public let rule: String
+    public let applied: Bool
+    public let minimumConfidence: Double?
+    public let answers: [HarnExternalActionReviewAnswer]
+
+    enum CodingKeys: String, CodingKey {
+        case receipt
+        case outcome
+        case rule
+        case applied
+        case minimumConfidence = "minimum_confidence"
+        case answers
     }
 }
 
@@ -1040,6 +1093,7 @@ public enum HarnACPDispatchedMethod: String, Codable, Sendable, CaseIterable {
     case harnSessionRecapQuery = "harn.session_recap.query"
     case harnSessionTimelineQuery = "harn.session_timeline.query"
     case harnSessionViewQuery = "harn.session_view.query"
+    case harnSessionHistoryBoundaries = "harn.session_history.boundaries"
     case harnSessionTimelineSubscribe = "harn.session_timeline.subscribe"
     case harnSessionTimelineUnsubscribe = "harn.session_timeline.unsubscribe"
     case sessionNew = "session/new"
@@ -1111,6 +1165,7 @@ public enum HarnACPDispatchedMethod: String, Codable, Sendable, CaseIterable {
         "harn.session_recap.query",
         "harn.session_timeline.query",
         "harn.session_view.query",
+        "harn.session_history.boundaries",
         "harn.session_timeline.subscribe",
         "harn.session_timeline.unsubscribe",
         "session/new",
@@ -1193,6 +1248,7 @@ public enum HarnACPHandledMethod: String, Codable, Sendable, CaseIterable {
     case harnSessionRecapQuery = "harn.session_recap.query"
     case harnSessionTimelineQuery = "harn.session_timeline.query"
     case harnSessionViewQuery = "harn.session_view.query"
+    case harnSessionHistoryBoundaries = "harn.session_history.boundaries"
     case harnSessionTimelineSubscribe = "harn.session_timeline.subscribe"
     case harnSessionTimelineUnsubscribe = "harn.session_timeline.unsubscribe"
     case sessionNew = "session/new"
@@ -1265,6 +1321,7 @@ public enum HarnACPHandledMethod: String, Codable, Sendable, CaseIterable {
         "harn.session_recap.query",
         "harn.session_timeline.query",
         "harn.session_view.query",
+        "harn.session_history.boundaries",
         "harn.session_timeline.subscribe",
         "harn.session_timeline.unsubscribe",
         "session/new",
@@ -1656,6 +1713,8 @@ public struct HarnAgentTerminalClass: RawRepresentable, Codable, Sendable, Hasha
     public static let contextOverflow = Self(rawValue: "context_overflow")
     public static let providerMisconfigured = Self(rawValue: "provider_misconfigured")
     public static let providerUnavailable = Self(rawValue: "provider_unavailable")
+    public static let providerContentPolicy = Self(rawValue: "provider_content_policy")
+    public static let providerBilling = Self(rawValue: "provider_billing")
     public static let rateLimited = Self(rawValue: "rate_limited")
     public static let timeout = Self(rawValue: "timeout")
     public static let resourceBusy = Self(rawValue: "resource_busy")
@@ -1664,6 +1723,7 @@ public struct HarnAgentTerminalClass: RawRepresentable, Codable, Sendable, Hasha
     public static let agentLoopProtocolFailure = Self(rawValue: "agent_loop_protocol_failure")
     public static let parseDropped = Self(rawValue: "parse_dropped")
     public static let genericThrow = Self(rawValue: "generic_throw")
+    public static let managedSpendPaused = Self(rawValue: "managed_spend_paused")
 
     /// Every value this binding was generated from, in wire order. A value
     /// outside it is valid and preserved; it is simply not listed here.
@@ -1671,6 +1731,8 @@ public struct HarnAgentTerminalClass: RawRepresentable, Codable, Sendable, Hasha
         "context_overflow",
         "provider_misconfigured",
         "provider_unavailable",
+        "provider_content_policy",
+        "provider_billing",
         "rate_limited",
         "timeout",
         "resource_busy",
@@ -1679,6 +1741,7 @@ public struct HarnAgentTerminalClass: RawRepresentable, Codable, Sendable, Hasha
         "agent_loop_protocol_failure",
         "parse_dropped",
         "generic_throw",
+        "managed_spend_paused",
     ].map { Self(rawValue: $0) }
 
     /// Whether this value is part of the vocabulary this binding was generated from.
@@ -1902,10 +1965,10 @@ public struct HarnLlmErrorKind: RawRepresentable, Codable, Sendable, Hashable, C
     public var description: String { rawValue }
 }
 
-/// Canonical provider-failure reason carried in `reason` on the
+/// Canonical LLM failure reason carried in `reason` on the
 ///          `harn.acp.prompt_error.v1` envelope. Owned by `harn_vm`'s `LlmErrorReason`.
-///          The sibling `code` field is a PROVIDER PASSTHROUGH with no closed set: it is
-///          opaque diagnostic text, and a host must never branch on it. Branch on `reason`.
+///          Includes local policy refusals before provider I/O. The sibling `code`
+///          field is opaque diagnostic text with no closed set; branch on `reason`.
 /// Open vocabulary: the static members are the values this binding was generated
 /// from, and any other wire string is preserved verbatim so a newer Harn never
 /// breaks an older consumer.
@@ -1939,6 +2002,8 @@ public struct HarnLlmErrorReason: RawRepresentable, Codable, Sendable, Hashable,
     public static let billingLimit = Self(rawValue: "billing_limit")
     public static let outputBudgetExhausted = Self(rawValue: "output_budget_exhausted")
     public static let unknown = Self(rawValue: "unknown")
+    public static let policyDenied = Self(rawValue: "policy_denied")
+    public static let managedSpendPaused = Self(rawValue: "managed_spend_paused")
 
     /// Every value this binding was generated from, in wire order. A value
     /// outside it is valid and preserved; it is simply not listed here.
@@ -1957,6 +2022,8 @@ public struct HarnLlmErrorReason: RawRepresentable, Codable, Sendable, Hashable,
         "billing_limit",
         "output_budget_exhausted",
         "unknown",
+        "policy_denied",
+        "managed_spend_paused",
     ].map { Self(rawValue: $0) }
 
     /// Whether this value is part of the vocabulary this binding was generated from.
@@ -1984,11 +2051,14 @@ public struct HarnACPPromptErrorData: Codable, Sendable, Equatable {
     public var kind: String?
     /// Wire string for `HarnLlmErrorReason`.
     public var reason: String?
-    /// PROVIDER PASSTHROUGH. Opaque diagnostic text with no closed set and no
-    /// Harn-owned vocabulary. Never branch on it; branch on `reason`.
+    public var origin: String?
+    public var rule: String?
+    /// Opaque provider or local diagnostic text with no closed set.
+    /// Never branch on it; branch on `reason`.
     public var code: String?
     public var retryable: Bool?
     public var retryAfterMs: Int?
+    public var machineSpend: HarnMachineSpendExhaustion?
     public var provider: String?
     public var model: String?
 }
@@ -2622,6 +2692,7 @@ public struct HarnToolLifecycleMeta: Codable, Sendable, Equatable {
     public var errorCategory: HarnToolCallErrorCategory?
     public var executionDurationMs: Double?
     public var executor: HarnACPToolExecutor?
+    public var intent: String?
     public var mutationStatus: HarnToolMutationStatus?
     public var parsing: Bool?
     public var rawInputPartial: String?
@@ -2766,6 +2837,7 @@ public struct HarnACPSessionUpdateEnvelope: Codable, Sendable, Equatable {
     public var sessionUpdate: HarnACPSessionUpdate
     public var content: HarnACPValue?
     public var messageId: String?
+    public var historySourceEventId: String?
     public var entries: [HarnACPValue]?
     public var harnPlanDocument: HarnPlanDocument?
     public var keptTurnCount: Int?
@@ -2784,6 +2856,7 @@ public struct HarnACPSessionUpdateEnvelope: Codable, Sendable, Equatable {
         case sessionUpdate
         case content
         case messageId
+        case historySourceEventId
         case entries
         case harnPlanDocument
         case keptTurnCount
@@ -3702,6 +3775,7 @@ public struct HarnACPTranscriptCompactedUpdateMetaHarn: Codable, Sendable, Equat
     public var compactionPolicy: HarnACPValue
     public var recap: HarnACPValue
     public var sourceMeasurement: HarnACPValue
+    public var classification: HarnACPValue
     public var replayed: Bool?
 
     enum CodingKeys: String, CodingKey {
@@ -3724,6 +3798,7 @@ public struct HarnACPTranscriptCompactedUpdateMetaHarn: Codable, Sendable, Equat
         case compactionPolicy
         case recap
         case sourceMeasurement
+        case classification
         case replayed
     }
 
@@ -3748,6 +3823,7 @@ public struct HarnACPTranscriptCompactedUpdateMetaHarn: Codable, Sendable, Equat
         compactionPolicy = try values.decode(HarnACPValue.self, forKey: .compactionPolicy)
         recap = try values.decode(HarnACPValue.self, forKey: .recap)
         sourceMeasurement = try values.decode(HarnACPValue.self, forKey: .sourceMeasurement)
+        classification = try values.decode(HarnACPValue.self, forKey: .classification)
         replayed = try values.decodeIfPresent(Bool.self, forKey: .replayed)
     }
 
@@ -3772,6 +3848,7 @@ public struct HarnACPTranscriptCompactedUpdateMetaHarn: Codable, Sendable, Equat
         try values.encode(compactionPolicy, forKey: .compactionPolicy)
         try values.encode(recap, forKey: .recap)
         try values.encode(sourceMeasurement, forKey: .sourceMeasurement)
+        try values.encode(classification, forKey: .classification)
         try values.encodeIfPresent(replayed, forKey: .replayed)
     }
 }
@@ -4131,6 +4208,7 @@ public enum HarnACPTypedSessionUpdate: Codable, Sendable, Equatable {
             if value["_meta"]?["harn"] != nil {
             if value["_meta"]?["harn"]?["archivedMessages"] == nil { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta.harn.archivedMessages is required") }
             if (value["_meta"]?["harn"]?["archivedMessages"]?.intValue ?? 0) < 0 { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta.harn.archivedMessages is below its minimum") }
+            if value["_meta"]?["harn"]?["classification"] == nil { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta.harn.classification is required") }
             if value["_meta"]?["harn"]?["compactionPolicy"] == nil { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta.harn.compactionPolicy is required") }
             if value["_meta"]?["harn"]?["engineStrategy"] == nil { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta.harn.engineStrategy is required") }
             if value["_meta"]?["harn"]?["estimatedTokensAfter"] == nil { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta.harn.estimatedTokensAfter is required") }
@@ -4227,7 +4305,7 @@ public enum HarnACPTypedSessionUpdate: Codable, Sendable, Equatable {
 public let harnPreparedSessionSchema = "harn.prepared_session.v1"
 public enum HarnPreparedSessionState: String, Codable, Sendable { case needsApproval = "needs_approval", ready, blocked, active, delta, stopped, pivoted, terminal }
 public enum HarnPreparedSessionCommand: String, Codable, Sendable { case approvalDecision = "approval_decision", attach, turn, requestDelta = "request_delta", stop, pivot, finish }
-public struct HarnPreparedSessionApprovalDecision: Codable, Sendable, Equatable { public var batch_fingerprint: String; public var approved: Bool; public var decider: String }
+public struct HarnPreparedSessionApprovalDecision: Codable, Sendable, Equatable { public var request_id: String; public var batch_fingerprint: String; public var approved: Bool; public var decider: String }
 public struct HarnPreparedSessionBinding: Codable, Sendable, Equatable { public var session_id: String; public var workspace_fingerprint: String; public var runtime: HarnACPValue; public var consumer: HarnACPValue }
 public struct HarnPreparedRuntimeAttachment: Codable, Sendable, Equatable { public var session_id: String; public var workspace_fingerprint: String; public var runtime: HarnACPValue; public var consumer: HarnACPValue }
 public struct HarnPreparedSessionLease: Codable, Sendable, Equatable {
@@ -4788,4 +4866,181 @@ public struct HarnPlanDocument: Codable, Sendable, Equatable {
         case createdAt = "created_at"
         case updatedAt = "updated_at"
     }
+}
+public enum HarnMachineSpendPeriod: String, Codable, Sendable, CaseIterable {
+    case day = "day"
+    case month = "month"
+    case lifetime = "lifetime"
+
+    public static let allCases: [Self] = [
+        "day",
+        "month",
+        "lifetime",
+    ].map { Self(rawValue: $0)! }
+}
+
+public enum HarnInferenceAdmissionStatus: String, Codable, Sendable, CaseIterable {
+    case admitted = "admitted"
+    case denied = "denied"
+    case unknown = "unknown"
+
+    public static let allCases: [Self] = [
+        "admitted",
+        "denied",
+        "unknown",
+    ].map { Self(rawValue: $0)! }
+}
+
+public enum HarnInferenceAdmissionReach: String, Codable, Sendable, CaseIterable {
+    case localOnly = "local_only"
+    case hostedOpenWeight = "hosted_open_weight"
+    case anyHosted = "any_hosted"
+
+    public static let allCases: [Self] = [
+        "local_only",
+        "hosted_open_weight",
+        "any_hosted",
+    ].map { Self(rawValue: $0)! }
+}
+
+public enum HarnInferenceAdmissionDataPosture: String, Codable, Sendable, CaseIterable {
+    case `default` = "default"
+    case strictestAvailable = "strictest_available"
+
+    public static let allCases: [Self] = [
+        "default",
+        "strictest_available",
+    ].map { Self(rawValue: $0)! }
+}
+
+public enum HarnInferenceAdmissionDataControlsOutcome: String, Codable, Sendable, CaseIterable {
+    case notRequested = "not_requested"
+    case applied = "applied"
+    case noControlAvailable = "no_control_available"
+    case providerUnresearched = "provider_unresearched"
+
+    public static let allCases: [Self] = [
+        "not_requested",
+        "applied",
+        "no_control_available",
+        "provider_unresearched",
+    ].map { Self(rawValue: $0)! }
+}
+
+public enum HarnInferenceAdmissionDataControlsRefusal: String, Codable, Sendable, CaseIterable {
+    case trainingWithoutControl = "training_without_control"
+
+    public static let allCases: [Self] = [
+        "training_without_control",
+    ].map { Self(rawValue: $0)! }
+}
+
+public struct HarnMachineSpendExhaustion: Codable, Sendable, Equatable {
+    public let period: HarnMachineSpendPeriod
+    public let limitMicrousd: Int
+    public let reservedMicrousd: Int
+    public let remainingMicrousd: Int
+    public let resetAtUnixMs: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case period
+        case limitMicrousd = "limit_microusd"
+        case reservedMicrousd = "reserved_microusd"
+        case remainingMicrousd = "remaining_microusd"
+        case resetAtUnixMs = "reset_at_unix_ms"
+    }
+}
+
+public struct HarnInferenceAdmissionBoundary: Codable, Sendable, Equatable {
+    public let reach: HarnInferenceAdmissionReach
+    public let allowTrainingDiscounts: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case reach
+        case allowTrainingDiscounts = "allow_training_discounts"
+    }
+}
+
+public struct HarnInferenceAdmissionRequest: Codable, Sendable, Equatable {
+    public let provider: String
+    public let model: String
+    public let boundary: HarnInferenceAdmissionBoundary?
+    public let dataControls: HarnInferenceAdmissionDataPosture?
+
+    enum CodingKeys: String, CodingKey {
+        case provider
+        case model
+        case boundary
+        case dataControls = "data_controls"
+    }
+}
+
+public struct HarnInferenceAdmissionSnapshot: Codable, Sendable, Equatable {
+    public let schema: String
+    public let provider: String
+    public let model: String
+    public let status: HarnInferenceAdmissionStatus
+    public let trainingControlPlanned: Bool
+    public let dataPosture: HarnInferenceAdmissionDataPosture
+    public let dataControlsNote: String?
+    public let dataControlsOutcome: HarnInferenceAdmissionDataControlsOutcome?
+    public let dataControlsRefusal: HarnInferenceAdmissionDataControlsRefusal?
+    public let effectiveBoundary: HarnInferenceAdmissionBoundary?
+    public let governingRule: String?
+    public let localRuntime: Bool?
+    public let openWeight: Bool?
+    public let trainingDefault: String?
+
+    enum CodingKeys: String, CodingKey {
+        case schema
+        case provider
+        case model
+        case status
+        case trainingControlPlanned = "training_control_planned"
+        case dataPosture = "data_posture"
+        case dataControlsNote = "data_controls_note"
+        case dataControlsOutcome = "data_controls_outcome"
+        case dataControlsRefusal = "data_controls_refusal"
+        case effectiveBoundary = "effective_boundary"
+        case governingRule = "governing_rule"
+        case localRuntime = "local_runtime"
+        case openWeight = "open_weight"
+        case trainingDefault = "training_default"
+    }
+}
+public struct HarnCanonicalSessionBoundary: Codable, Sendable, Equatable {
+    public let schema: String
+    public let sessionId: String
+    public let eventId: Int64?
+    public let recordHash: String?
+
+    enum CodingKeys: String, CodingKey {
+        case schema
+        case sessionId = "session_id"
+        case eventId = "event_id"
+        case recordHash = "record_hash"
+    }
+}
+
+public struct HarnCanonicalHistoryPosition: Codable, Sendable, Equatable {
+    public let sourceEventId: String
+    public let originSessionId: String
+    public let beforeBoundary: HarnCanonicalSessionBoundary
+    public let boundary: HarnCanonicalSessionBoundary
+
+    enum CodingKeys: String, CodingKey {
+        case sourceEventId = "source_event_id"
+        case originSessionId = "origin_session_id"
+        case beforeBoundary = "before_boundary"
+        case boundary
+    }
+}
+
+public struct HarnCanonicalHistoryBoundaries: Codable, Sendable, Equatable {
+    public let tip: HarnCanonicalSessionBoundary
+    public let positions: [HarnCanonicalHistoryPosition]
+}
+
+public struct HarnACPPromptCorrelation: Codable, Sendable, Equatable {
+    public let messageId: String?
 }

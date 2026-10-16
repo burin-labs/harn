@@ -173,9 +173,8 @@ pub(crate) fn evaluate(_plan_paths: &[PathBuf]) -> Result<CounterfactualReport, 
 fn run_plan_source(source: &str, plan_path: &Path) -> Result<JsonValue, String> {
     let source = source.to_string();
     let plan_path = plan_path.to_path_buf();
-    std::thread::Builder::new()
+    harn_parser::runtime_stack::builder()
         .name("harn-counterfactual-plan".to_string())
-        .stack_size(crate::CLI_RUNTIME_STACK_SIZE)
         .spawn(move || run_plan_source_inner(&source, &plan_path))
         .map_err(|error| format!("failed to start counterfactual plan runner: {error}"))?
         .join()
@@ -224,7 +223,7 @@ fn run_plan_source_inner(source: &str, plan_path: &Path) -> Result<JsonValue, St
         let sandbox = CounterfactualSandbox::enter(&store_base)?;
         let _session_guard =
             harn_vm::agent_sessions::enter_current_session(sandbox.session_id.clone());
-        let mut vm = harn_vm::Vm::new();
+        let mut vm = harn_vm::new_vm();
         harn_vm::register_vm_stdlib(&mut vm);
         crate::install_default_hostlib(&mut vm);
         harn_vm::register_store_builtins(&mut vm, &store_base);

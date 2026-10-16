@@ -1,13 +1,26 @@
-//! Model Context Protocol (MCP) adapter facade.
+//! Model Context Protocol (MCP) server.
 //!
-//! Transport code, wire-shape helpers, and auth/header validation live in
-//! focused child modules so the public server surface stays easy to audit.
-//! Module map: `transport` owns HTTP/stdio routing, `schema` owns JSON-RPC
-//! result shaping and call normalization, and `auth` owns request metadata plus
-//! transport header validation.
+//! This is Harn's one MCP protocol server. It serves either the `pub fn`s a
+//! module exports or the tools, resources, and prompts a script publishes
+//! (see `source`); sessions, authorization, task ownership, result envelopes,
+//! and the stdio and Streamable HTTP transports are the same for both.
+//!
+//! Module map: `source` owns what is served, `script` hosts a script registry
+//! and its VM, `transport` owns HTTP/SSE routing, `schema` owns JSON-RPC
+//! result shaping and call normalization, and `auth` owns request metadata
+//! plus transport header validation.
+//!
+//! The method match below is hand-written rather than delegated to the
+//! official SDK's server side. That SDK is already the client and owns the
+//! wire types this server negotiates with, but its server handler does not
+//! carry the stable per-request `_meta` profile, the tasks extension, the
+//! result envelope, or `harn.hitl.respond`, so routing through it would add
+//! adapters without removing any of this logic.
 
 mod auth;
 mod schema;
+mod script;
+mod source;
 #[cfg(test)]
 mod tests;
 mod transport;
@@ -16,9 +29,11 @@ use crate::transport::{
     read_jsonrpc_stdio_frame, write_jsonrpc_stdio_message, JsonRpcStdioFrameStyle,
 };
 use schema::{
-    build_call_request, derived_server_name, paged_result, parse_error_response, request_key,
-    tool_call_error, tool_call_success,
+    build_call_request, derived_server_name, parse_error_response, request_key, tool_call_error,
+    tool_call_success,
 };
+pub use script::{McpScriptReloader, McpScriptRuntime};
+use source::{ExportsSource, McpSource, ToolInvocation};
 use transport::{http_post_request, notify_channel};
 
 use std::collections::{BTreeMap, HashMap};
@@ -38,8 +53,7 @@ use axum::{Json, Router};
 use futures::channel::mpsc::{unbounded, UnboundedReceiver};
 use futures::{stream, StreamExt};
 use harn_vm::mcp_protocol::{
-    self, apply_result_envelope, negotiate_http_request, server_discover_result,
-    standard_name_header_value, McpCacheHint,
+    self, negotiate_http_request, server_discover_result, standard_name_header_value,
 };
 use serde_json::{json, Value as JsonValue};
 use tokio::sync::mpsc;
@@ -54,6 +68,8 @@ use crate::{
 pub const MCP_PROTOCOL_VERSION: &str = mcp_protocol::PROTOCOL_VERSION;
 
 const MCP_PROTOCOL_HEADER: &str = mcp_protocol::MCP_HEADER_PROTOCOL_VERSION;
+
+const SERVER_CARD_URI: &str = "well-known://mcp-card";
 
 #[derive(Clone, Debug)]
 pub struct McpHttpServeOptions {
@@ -73,22 +89,41 @@ impl Default for McpHttpServeOptions {
 }
 
 pub struct McpServerConfig {
-    pub core: DispatchCore,
+    source: McpSource,
     pub server_name: Option<String>,
     pub server_card: Option<JsonValue>,
+    pub auth_policy: AuthPolicy,
 }
 
 impl McpServerConfig {
+    /// Serve the `pub fn`s `core` dispatches, under the core's auth policy.
     pub fn new(core: DispatchCore) -> Self {
         Self {
             server_name: Some(derived_server_name(core.catalog())),
             server_card: None,
-            core,
+            auth_policy: core.auth_policy().clone(),
+            source: McpSource::Exports(Box::new(ExportsSource::new(core))),
+        }
+    }
+
+    /// Serve a script-published registry. It names itself, so
+    /// `server_name` stays unset.
+    pub fn script(runtime: McpScriptRuntime) -> Self {
+        Self {
+            server_name: None,
+            server_card: None,
+            auth_policy: AuthPolicy::default(),
+            source: McpSource::Script(runtime),
         }
     }
 
     pub fn with_server_card(mut self, card: JsonValue) -> Self {
         self.server_card = Some(card);
+        self
+    }
+
+    pub fn with_auth_policy(mut self, auth_policy: AuthPolicy) -> Self {
+        self.auth_policy = auth_policy;
         self
     }
 }
@@ -99,14 +134,11 @@ pub struct McpServer {
     descriptor: AdapterDescriptor,
     server_name: String,
     server_card: Option<JsonValue>,
-    catalog: ExportCatalog,
-    tool_catalog: harn_vm::tool_registry::ToolCatalog,
-    mcp_tools: Vec<JsonValue>,
-    context: McpContextCatalog,
     auth_policy: AuthPolicy,
-    executor: DispatchRuntime,
-    /// Tasks handed out for `@job` exports. Same lifecycle as the orchestrator
-    /// and script servers (`harn_vm::mcp_tasks`).
+    source: McpSource,
+    /// Tasks this server handed out, owned by the principal that created
+    /// each one. Same lifecycle as the orchestrator server
+    /// (`harn_vm::mcp_tasks`).
     tasks: Arc<harn_vm::mcp_tasks::McpTaskStore>,
 }
 
@@ -204,7 +236,7 @@ struct StreamJob {
     request_id: JsonValue,
     request_key: String,
     tool_name: String,
-    arguments: JsonValue,
+    params: JsonValue,
     progress_token: Option<JsonValue>,
     request_profile: mcp_protocol::McpRequestProfile,
     context: RequestContext,
@@ -215,15 +247,6 @@ struct StreamJob {
 
 impl McpServer {
     pub fn new(config: McpServerConfig) -> Self {
-        let server_name = config
-            .server_name
-            .unwrap_or_else(|| derived_server_name(config.core.catalog()));
-        let core = Arc::new(config.core);
-        let catalog = core.catalog().clone();
-        let tool_catalog = core.tool_catalog().clone();
-        let mcp_tools = core.mcp_tools().to_vec();
-        let context = McpContextCatalog::discover(&catalog.script_path);
-        let auth_policy = core.auth_policy().clone();
         Self {
             tasks: Arc::new(harn_vm::mcp_tasks::McpTaskStore::new()),
             descriptor: AdapterDescriptor {
@@ -232,14 +255,10 @@ impl McpServer {
                 supports_streaming: true,
                 supports_cancel: true,
             },
-            server_name,
+            server_name: config.server_name.unwrap_or_else(|| "harn".to_string()),
             server_card: config.server_card,
-            catalog,
-            tool_catalog,
-            mcp_tools,
-            context,
-            auth_policy,
-            executor: DispatchRuntime::start("MCP", core),
+            auth_policy: config.auth_policy,
+            source: config.source,
         }
     }
 
@@ -258,6 +277,7 @@ impl McpServer {
             }
             Ok::<(), String>(())
         });
+        let list_changes = self.spawn_list_change_notifier(session.clone(), tx.clone());
 
         eprintln!("[harn] MCP workflow server ready on stdio");
 
@@ -270,6 +290,11 @@ impl McpServer {
                     continue;
                 }
             };
+            // Stdio is request/response. A stray response has no
+            // server-initiated request to match.
+            if request.get("method").is_none() {
+                continue;
+            }
             let auth = AuthRequest {
                 method: "STDIO".to_string(),
                 path: String::new(),
@@ -282,10 +307,52 @@ impl McpServer {
                 .await;
         }
 
+        if let Some(list_changes) = list_changes {
+            list_changes.abort();
+        }
         drop(tx);
         writer
             .await
             .map_err(|error| format!("stdio writer task failed: {error}"))?
+    }
+
+    /// Tell an initialized stdio client when a reloaded script changed what
+    /// is listed.
+    fn spawn_list_change_notifier(
+        &self,
+        session: SharedSession,
+        tx: mpsc::UnboundedSender<JsonValue>,
+    ) -> Option<tokio::task::JoinHandle<()>> {
+        let McpSource::Script(script) = &self.source else {
+            return None;
+        };
+        if !script.list_changes() {
+            return None;
+        }
+        let mut changes = script.subscribe_changes();
+        Some(tokio::spawn(async move {
+            loop {
+                match changes.recv().await {
+                    Ok(()) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                }
+                if !session.with_connection(|connection| connection.is_ready_for_notifications()) {
+                    continue;
+                }
+                for method in [
+                    "notifications/tools/list_changed",
+                    "notifications/resources/list_changed",
+                    "notifications/prompts/list_changed",
+                ] {
+                    if tx
+                        .send(harn_vm::jsonrpc::notification(method, json!({})))
+                        .is_err()
+                    {
+                        return;
+                    }
+                }
+            }
+        }))
     }
 
     pub async fn run_http(self: Arc<Self>, options: McpHttpServeOptions) -> Result<(), String> {
@@ -321,6 +388,55 @@ impl McpServer {
         crate::tls::serve_router_from_tcp(listener, router, &options.tls)
             .await
             .map_err(|error| format!("MCP HTTP server failed: {error}"))
+    }
+
+    /// Answer one in-process JSON-RPC message for a host that embeds this
+    /// server, such as a local app shell. The request is authorized as an
+    /// in-process caller; a `tools/call` runs to completion and its terminal
+    /// response is returned. Notifications return `None`.
+    ///
+    /// Boxed so an embedding host's own handler frame stays small; the
+    /// request future carries the whole dispatch path.
+    pub fn handle_request(
+        self: Arc<Self>,
+        request: JsonValue,
+    ) -> futures::future::BoxFuture<'static, Option<JsonValue>> {
+        Box::pin(async move {
+            let auth = AuthRequest {
+                method: "IN_PROCESS".to_string(),
+                ..AuthRequest::default()
+            };
+            match self
+                .process_message(request, SharedSession::new(), auth)
+                .await
+            {
+                ImmediateResult::Response(response) => Some(response),
+                ImmediateResult::Accepted => None,
+                ImmediateResult::Stream(job) => self.run_job_to_response(*job).await,
+                ImmediateResult::TaskStream { immediate, job } => {
+                    tokio::spawn(async move { self.execute_streaming_job(*job, discard()).await });
+                    Some(immediate)
+                }
+            }
+        })
+    }
+
+    /// Run a streaming job and keep only its terminal response.
+    async fn run_job_to_response(&self, job: StreamJob) -> Option<JsonValue> {
+        let request_id = job.request_id.clone();
+        let terminal = Arc::new(Mutex::new(None));
+        let sink = terminal.clone();
+        self.execute_streaming_job(
+            job,
+            notify_channel(move |message| {
+                if message.get("method").is_none() && message.get("id") == Some(&request_id) {
+                    *sink.lock().expect("terminal response poisoned") = Some(message);
+                }
+            }),
+        )
+        .await;
+        let response = terminal.lock().expect("terminal response poisoned").take();
+        response
     }
 
     async fn handle_stdio_message(
@@ -374,7 +490,7 @@ impl McpServer {
                     &params,
                     JsonValue::Object(self.server_capabilities()),
                     self.server_info(),
-                    self.catalog.instructions.as_deref(),
+                    self.source.identity().instructions.as_deref(),
                 )
             });
             return match result {
@@ -386,8 +502,11 @@ impl McpServer {
         }
 
         if request.get("id").is_none() {
-            if method == "notifications/cancelled" {
-                self.handle_cancel_notification(&session, &params);
+            match method {
+                "notifications/initialized" => session
+                    .with_connection(|connection| connection.accept_initialized_notification()),
+                "notifications/cancelled" => self.handle_cancel_notification(&session, &params),
+                _ => {}
             }
             return ImmediateResult::Accepted;
         }
@@ -426,16 +545,26 @@ impl McpServer {
 
         let response = match method {
             "ping" => harn_vm::jsonrpc::response(id, json!({})),
-            "tools/list" => harn_vm::jsonrpc::response(id, self.tools_list_result(&params)),
-            "tools/call" => match self.prepare_stream_job(
+            "harn.hitl.respond" => handle_hitl_respond(id, &params).await,
+            "tools/list" => mcp_protocol::list_response(
                 id,
-                params,
-                request_profile,
-                session,
-                connection,
-                auth,
-                task_access,
-            ) {
+                method,
+                "tools",
+                &params,
+                self.source.tool_entries(),
+            ),
+            "tools/call" => match self
+                .prepare_stream_job(
+                    id,
+                    params,
+                    request_profile,
+                    session,
+                    connection,
+                    auth,
+                    task_access,
+                )
+                .await
+            {
                 Ok((job, Some(immediate))) => {
                     return ImmediateResult::TaskStream {
                         immediate,
@@ -452,22 +581,36 @@ impl McpServer {
             mcp_protocol::METHOD_TASKS_CANCEL => {
                 self.tasks.handle_cancel(&task_access, id, &params)
             }
-            "resources/list" => harn_vm::jsonrpc::response(id, self.resources_list_result(&params)),
-            "resources/read" => self.handle_resources_read(id, &params),
-            "resources/templates/list" => {
-                harn_vm::jsonrpc::response(id, self.resources_templates_list_result(&params))
-            }
-            "prompts/list" => harn_vm::jsonrpc::response(id, self.prompts_list_result(&params)),
-            "prompts/get" => self.handle_prompts_get(id, &params),
-            mcp_protocol::METHOD_COMPLETION_COMPLETE => {
-                self.handle_completion_complete(id, &params)
-            }
+            "resources/list" => mcp_protocol::list_response(
+                id,
+                method,
+                "resources",
+                &params,
+                self.resource_entries(),
+            ),
+            "resources/read" => self.handle_resources_read(id, &params).await,
+            "resources/templates/list" => mcp_protocol::list_response(
+                id,
+                method,
+                "resourceTemplates",
+                &params,
+                self.source.resource_template_entries(),
+            ),
+            "prompts/list" => mcp_protocol::list_response(
+                id,
+                method,
+                "prompts",
+                &params,
+                self.source.prompt_entries(),
+            ),
+            "prompts/get" => self.source.get_prompt(id, &params).await,
+            mcp_protocol::METHOD_COMPLETION_COMPLETE => self.source.complete(id, &params).await,
             _ => {
                 harn_vm::jsonrpc::error_response(id, -32601, &format!("Method not found: {method}"))
             }
         };
         if request_profile.uses_result_envelope() {
-            ImmediateResult::Response(envelope(response, cache_hint_for_method(method)))
+            ImmediateResult::Response(mcp_protocol::apply_response_envelope(response, method))
         } else {
             ImmediateResult::Response(response)
         }
@@ -477,53 +620,63 @@ impl McpServer {
         let result = server_discover_result(
             JsonValue::Object(self.server_capabilities()),
             self.server_info(),
-            self.catalog.instructions.as_deref(),
+            self.source.identity().instructions.as_deref(),
         );
         harn_vm::jsonrpc::response(id, result)
     }
 
     fn server_capabilities(&self) -> serde_json::Map<String, JsonValue> {
+        let source = self.source.capabilities();
+        let family = if source.list_changed {
+            json!({"listChanged": true})
+        } else {
+            json!({})
+        };
         let mut capabilities = serde_json::Map::new();
-        if !self.catalog.functions.is_empty() {
-            capabilities.insert("tools".to_string(), json!({}));
+        if source.tools || source.list_changed {
+            capabilities.insert("tools".to_string(), family.clone());
         }
-        if self.server_card.is_some() || self.context.has_resources() {
-            capabilities.insert("resources".to_string(), json!({}));
+        if source.resources || self.server_card.is_some() || source.list_changed {
+            capabilities.insert("resources".to_string(), family.clone());
         }
-        if self.context.has_prompts() {
-            capabilities.insert("prompts".to_string(), json!({}));
+        if source.prompts || source.list_changed {
+            capabilities.insert("prompts".to_string(), family);
         }
-        if self.context.has_resources() || self.context.has_prompts() {
+        if source.resources || source.prompts {
             capabilities.insert(
                 "completions".to_string(),
                 mcp_protocol::completions_capability(),
             );
         }
-        // Advertised only when at least one export declares `@job`. A server
-        // whose script has no long-running entrypoint has nothing to serve as a
-        // task, and telling a client otherwise would leave it unable to
-        // distinguish "no tasks here" from "your task is gone".
-        if self.has_task_capable_export() {
-            capabilities.insert("extensions".to_string(), mcp_protocol::tasks_capability());
+        // Tasks are advertised only when some tool may run as one. A server
+        // with no task-capable tool has nothing to serve as a task, and telling
+        // a client otherwise would leave it unable to distinguish "no tasks
+        // here" from "your task is gone".
+        let mut extensions = serde_json::Map::new();
+        if source.tasks {
+            if let JsonValue::Object(tasks) = mcp_protocol::tasks_capability() {
+                extensions.extend(tasks);
+            }
+        }
+        if source.mcp_apps {
+            extensions.insert(
+                "io.modelcontextprotocol/ui".to_string(),
+                json!({"mimeTypes": ["text/html;profile=mcp-app"]}),
+            );
+        }
+        if !extensions.is_empty() {
+            capabilities.insert("extensions".to_string(), JsonValue::Object(extensions));
         }
         capabilities
     }
 
-    /// Whether any export declares `@job`, and so could be run as a task.
-    fn has_task_capable_export(&self) -> bool {
-        self.catalog
-            .functions
-            .values()
-            .any(|function| function.job.is_some())
-    }
-
     fn server_info(&self) -> JsonValue {
+        let identity = self.source.identity();
         let mut server_info = json!({
-            "name": self.server_name,
-            "version": env!("CARGO_PKG_VERSION"),
+            "name": identity.name.as_deref().unwrap_or(&self.server_name),
+            "version": identity.version,
         });
-        if let Some(title) = self
-            .catalog
+        if let Some(title) = identity
             .instructions
             .as_deref()
             .and_then(|text| text.lines().next())
@@ -535,7 +688,7 @@ impl McpServer {
         if let Some(card) = &self.server_card {
             server_info["card"] = card.clone();
         }
-        if let Some(icons) = self.context.server_icons() {
+        if let Some(icons) = identity.icons {
             server_info["icons"] = icons;
         }
         server_info
@@ -584,7 +737,7 @@ impl McpServer {
         }
     }
 
-    fn prepare_stream_job(
+    async fn prepare_stream_job(
         &self,
         request_id: JsonValue,
         params: JsonValue,
@@ -599,50 +752,53 @@ impl McpServer {
             .and_then(JsonValue::as_str)
             .unwrap_or_default()
             .to_string();
-        if self.catalog.function(&tool_name).is_none() {
+        let Some(task_support) = self.source.task_support(&tool_name) else {
             return Err(harn_vm::jsonrpc::error_response(
                 request_id,
                 -32602,
                 &format!("Unknown tool: {tool_name}"),
             ));
+        };
+        // The tool's declaration and the client's capability both have to
+        // allow a task, so neither side can force the other into a lifecycle
+        // it did not ask for. A tool that requires one refuses a plain call
+        // outright, so a client cannot get the work done by not asking.
+        let wants_task = mcp_protocol::client_supports_tasks(&params);
+        if task_support == harn_vm::mcp_tasks::McpTaskSupport::Required && !wants_task {
+            return Err(mcp_protocol::missing_tasks_capability_response(request_id));
         }
-        let arguments = params
-            .get("arguments")
-            .cloned()
-            .unwrap_or_else(|| json!({}));
-        let progress_token = params
-            .pointer("/_meta/progressToken")
-            .cloned()
-            .filter(harn_vm::mcp_progress::is_valid_progress_token);
-        // `@job` is the declaration; the client capability is the request. Both
-        // have to be present, so neither side can force the other into a
-        // lifecycle it did not ask for.
-        let task = (self
-            .catalog
-            .function(&tool_name)
-            .is_some_and(|function| function.job.is_some())
-            && mcp_protocol::client_supports_tasks(&params))
-        .then(|| {
-            self.tasks
-                .begin(task_access, Some(harn_vm::mcp_tasks::DEFAULT_TASK_TTL_MS))
-        })
-        .transpose()
-        .map_err(|error| {
-            harn_vm::jsonrpc::error_response(request_id.clone(), -32000, &error.to_string())
-        })?;
+        let as_task = task_support.allows_task() && wants_task;
+        if as_task {
+            if let Some(refusal) = self.source.admit_tool(&request_id, &params).await {
+                return Err(refusal);
+            }
+        }
+        let task = as_task
+            .then(|| {
+                self.tasks
+                    .begin(task_access, Some(harn_vm::mcp_tasks::DEFAULT_TASK_TTL_MS))
+            })
+            .transpose()
+            .map_err(|error| {
+                harn_vm::jsonrpc::error_response(request_id.clone(), -32000, &error.to_string())
+            })?;
         let task_response = task.as_ref().map(|task| {
             harn_vm::mcp_tasks::task_created_response(
                 request_id.clone(),
                 task.task(),
-                "The requested Harn job is running as an MCP task.",
+                "The requested Harn tool is running as an MCP task.",
             )
         });
+        let progress_token = params
+            .pointer("/_meta/progressToken")
+            .cloned()
+            .filter(harn_vm::mcp_progress::is_valid_progress_token);
         let request_key = request_key(&request_id);
         let job = StreamJob {
             request_id,
             request_key,
             tool_name,
-            arguments,
+            params,
             progress_token,
             request_profile,
             context: RequestContext {
@@ -674,46 +830,33 @@ impl McpServer {
             },
         );
 
-        let progress_ctx = job.progress_token.clone().map(|token| {
+        let progress = job.progress_token.clone().map(|token| {
             let bus = harn_vm::mcp_progress::ProgressBus::new(notify.clone());
             harn_vm::mcp_progress::ProgressContext::new(bus, token)
         });
-
-        let request = match build_call_request(
-            &self.descriptor.id,
-            job.context.connection.client_identity(),
-            &job.tool_name,
-            job.arguments,
-            job.context.auth,
+        let invocation = ToolInvocation {
+            request_id: job.request_id,
+            tool_name: job.tool_name,
+            params: job.params,
+            client_identity: job.context.connection.client_identity().to_string(),
+            auth: job.context.auth,
             cancel_token,
-            progress_ctx,
-            Some(mcp_request_id_to_string(&job.request_id)),
-        ) {
-            Ok(request) => request,
-            Err(error) => {
-                job.context.session.remove_call(&job.request_key);
-                notify(harn_vm::jsonrpc::error_response(
-                    job.request_id,
-                    -32602,
-                    &error,
-                ));
-                return;
-            }
+            progress,
+            as_task: job.task.is_some(),
         };
 
-        let result = if let Some(task) = job.task.as_ref() {
-            run_until_task_cancelled(task, self.executor.call(request)).await
+        let outcome = if let Some(task) = job.task.as_ref() {
+            run_until_task_cancelled(task, self.source.call_tool(invocation)).await
         } else {
-            Some(self.executor.call(request).await)
+            Some(self.source.call_tool(invocation).await)
         };
         job.context.session.remove_call(&job.request_key);
-        let Some(result) = result else {
+        let Some(outcome) = outcome else {
             if let Some(task) = job.task {
                 task.cancel();
             }
             return;
         };
-        let execution_cancelled = matches!(&result, Err(DispatchError::Cancelled(_)));
         if cancelled.load(Ordering::SeqCst) {
             if let Some(task) = job.task {
                 task.cancel();
@@ -721,60 +864,17 @@ impl McpServer {
             return;
         }
 
-        let response = match result {
-            Ok(response) => harn_vm::jsonrpc::response(
-                job.request_id,
-                tool_call_success(response, &self.tool_catalog),
-            ),
-            Err(DispatchError::Validation(message)) => {
-                harn_vm::jsonrpc::error_response(job.request_id, -32602, &message)
-            }
-            Err(DispatchError::Unauthorized(message)) => {
-                harn_vm::jsonrpc::error_response(job.request_id, -32001, &message)
-            }
-            Err(DispatchError::Forbidden { required, granted }) => {
-                forbidden_jsonrpc_error_response(job.request_id, &required, &granted)
-            }
-            // `@policy(kinds:)` is a `harn serve site` admission gate; the
-            // MCP transport never raises it, but map it to the same
-            // authorization error code defensively, using its tenant-safe
-            // message.
-            Err(error @ DispatchError::ForbiddenPrincipalKind { .. }) => {
-                harn_vm::jsonrpc::error_response(job.request_id, -32001, &error.message())
-            }
-            Err(DispatchError::MissingExport(message)) => {
-                harn_vm::jsonrpc::error_response(job.request_id, -32602, &message)
-            }
-            Err(DispatchError::Application(error)) => harn_vm::jsonrpc::response(
-                job.request_id,
-                harn_vm::tool_registry::application_error_mcp_result(&error),
-            ),
-            Err(DispatchError::Contract(error)) => {
-                harn_vm::jsonrpc::response(job.request_id, tool_call_error(error.to_string()))
-            }
-            Err(DispatchError::Execution(message))
-            | Err(DispatchError::Cancelled(message))
-            | Err(DispatchError::Io(message))
-            | Err(DispatchError::Cache(message)) => {
-                harn_vm::jsonrpc::response(job.request_id, tool_call_error(message))
-            }
-            Err(error @ DispatchError::RateLimited { .. })
-            | Err(error @ DispatchError::BudgetExceeded { .. })
-            | Err(error @ DispatchError::SecretBackend(_)) => {
-                harn_vm::jsonrpc::response(job.request_id, tool_call_error(error.message()))
-            }
-        };
         // A task call's client is polling `tasks/get`, not reading this stream,
         // so the terminal response is filed rather than written. Progress
         // notifications above still went to the wire: those are addressed by
         // `progressToken`, which is a property of the request and independent
         // of how the result comes back.
         if let Some(task) = job.task {
-            if execution_cancelled {
+            if outcome.cancelled {
                 task.cancel();
                 return;
             }
-            match task_outcome(response) {
+            match task_outcome(outcome.response) {
                 Ok(result) => task
                     .complete_with_tool_result(result, job.request_profile.uses_result_envelope()),
                 Err(error) => task.complete(Err(error), job.request_profile.uses_result_envelope()),
@@ -782,37 +882,33 @@ impl McpServer {
             return;
         }
         let response = if job.request_profile.uses_result_envelope() {
-            envelope(response, None)
+            mcp_protocol::apply_response_envelope(outcome.response, "tools/call")
         } else {
-            response
+            outcome.response
         };
         notify(response);
     }
 
-    fn tools_list_result(&self, params: &JsonValue) -> JsonValue {
-        paged_result("tools", self.mcp_tools.clone(), params)
-    }
-
-    fn resources_list_result(&self, params: &JsonValue) -> JsonValue {
+    fn resource_entries(&self) -> Vec<JsonValue> {
         let mut resources = Vec::new();
         if self.server_card.is_some() {
             resources.push(json!({
-                "uri": "well-known://mcp-card",
+                "uri": SERVER_CARD_URI,
                 "name": "Server Card",
                 "description": "MCP Server Card advertising this server's identity and capabilities",
                 "mimeType": "application/json",
             }));
         }
-        resources.extend(self.context.resource_entries());
-        paged_result("resources", resources, params)
+        resources.extend(self.source.resource_entries());
+        resources
     }
 
-    fn handle_resources_read(&self, id: JsonValue, params: &JsonValue) -> JsonValue {
+    async fn handle_resources_read(&self, id: JsonValue, params: &JsonValue) -> JsonValue {
         let uri = params
             .get("uri")
             .and_then(JsonValue::as_str)
             .unwrap_or_default();
-        if uri == "well-known://mcp-card" {
+        if uri == SERVER_CARD_URI {
             if let Some(card) = &self.server_card {
                 return harn_vm::jsonrpc::response(
                     id,
@@ -826,109 +922,42 @@ impl McpServer {
                 );
             }
         }
-        if let Some((text, mime_type)) = self.context.read_resource(uri) {
-            return harn_vm::jsonrpc::response(
-                id,
-                json!({
-                    "contents": [{
-                        "uri": uri,
-                        "text": text,
-                        "mimeType": mime_type,
-                    }]
-                }),
-            );
-        }
-        harn_vm::jsonrpc::error_response(id, -32002, &format!("Resource not found: {uri}"))
+        self.source.read_resource(id, params).await
     }
+}
 
-    fn resources_templates_list_result(&self, params: &JsonValue) -> JsonValue {
-        paged_result(
-            "resourceTemplates",
-            self.context.resource_templates(),
-            params,
-        )
-    }
-
-    fn prompts_list_result(&self, params: &JsonValue) -> JsonValue {
-        paged_result("prompts", self.context.prompt_entries(), params)
-    }
-
-    fn handle_prompts_get(&self, id: JsonValue, params: &JsonValue) -> JsonValue {
-        let name = params
-            .get("name")
-            .and_then(JsonValue::as_str)
-            .unwrap_or_default();
-        let arguments = params
-            .get("arguments")
-            .cloned()
-            .unwrap_or_else(|| json!({}));
-        match self.context.get_prompt(name, &arguments) {
-            Ok(value) => harn_vm::jsonrpc::response(id, value),
-            Err(error)
-                if error.starts_with("Unknown prompt")
-                    || error.starts_with("Missing required argument")
-                    || error.starts_with("prompt arguments") =>
-            {
-                harn_vm::jsonrpc::error_response(id, -32602, &error)
+/// Record a host's answer to a pending human-in-the-loop request in the
+/// working directory's event log, where the waiting handler reads it.
+///
+/// Boxed so the event log's backend futures do not deepen the type of every
+/// request future; crates that embed the HTTP router would otherwise overflow
+/// the compiler's recursion limit proving that future `Send`.
+fn handle_hitl_respond(
+    id: JsonValue,
+    params: &JsonValue,
+) -> futures::future::BoxFuture<'static, JsonValue> {
+    let response = serde_json::from_value::<harn_vm::HitlHostResponse>(params.clone());
+    Box::pin(async move {
+        let response = match response {
+            Ok(response) => response,
+            Err(error) => {
+                return harn_vm::jsonrpc::error_response(
+                    id,
+                    -32602,
+                    &format!("invalid harn.hitl.respond params: {error}"),
+                )
             }
-            Err(error) => harn_vm::jsonrpc::error_response(id, -32603, &error),
-        }
-    }
-
-    fn handle_completion_complete(&self, id: JsonValue, params: &JsonValue) -> JsonValue {
-        let Some(ref_type) = params.pointer("/ref/type").and_then(JsonValue::as_str) else {
-            return harn_vm::jsonrpc::error_response(id, -32602, "completion ref.type is required");
         };
-        let Some(argument_name) = params
-            .pointer("/argument/name")
-            .and_then(JsonValue::as_str)
-            .filter(|value| !value.is_empty())
-        else {
-            return harn_vm::jsonrpc::error_response(
-                id,
-                -32602,
-                "completion argument.name is required",
-            );
-        };
-        let value = params
-            .pointer("/argument/value")
-            .and_then(JsonValue::as_str)
-            .unwrap_or_default();
-        match ref_type {
-            "ref/prompt" => {
-                let name = params
-                    .pointer("/ref/name")
-                    .and_then(JsonValue::as_str)
-                    .unwrap_or_default();
-                match self.context.complete_prompt(name, argument_name, value) {
-                    Ok(completion) => {
-                        harn_vm::jsonrpc::response(id, json!({ "completion": completion }))
-                    }
-                    Err(error) => harn_vm::jsonrpc::error_response(id, -32602, &error),
-                }
-            }
-            "ref/resource" => {
-                let uri_template = params
-                    .pointer("/ref/uri")
-                    .and_then(JsonValue::as_str)
-                    .unwrap_or_default();
-                match self
-                    .context
-                    .complete_resource_template(uri_template, argument_name, value)
-                {
-                    Ok(completion) => {
-                        harn_vm::jsonrpc::response(id, json!({ "completion": completion }))
-                    }
-                    Err(error) => harn_vm::jsonrpc::error_response(id, -32602, &error),
-                }
-            }
-            other => harn_vm::jsonrpc::error_response(
-                id,
-                -32602,
-                &format!("Unsupported completion ref.type: {other}"),
-            ),
+        let cwd = std::env::current_dir().ok();
+        match harn_vm::append_hitl_response(cwd.as_deref(), response).await {
+            Ok(_) => harn_vm::jsonrpc::response(id, json!({ "ok": true })),
+            Err(error) => harn_vm::jsonrpc::error_response(id, -32000, &error),
         }
-    }
+    })
+}
+
+fn discard() -> Arc<dyn Fn(JsonValue) + Send + Sync> {
+    notify_channel(|_| {})
 }
 
 /// Await execution while giving an already-observed task cancellation the
@@ -955,59 +984,6 @@ fn task_access(principal: &crate::AuthenticatedPrincipal) -> harn_vm::mcp_tasks:
     )
 }
 
-/// Render a JSON-RPC request id into a stable string for the obs
-/// ambient `request_id`. Numbers and strings round-trip as-is; `null`
-/// and any other unexpected shape fall back to a fresh `req_*` id so
-/// every dispatch still carries one through to `harness.obs.*`.
-fn mcp_request_id_to_string(id: &JsonValue) -> String {
-    match id {
-        JsonValue::String(text) => text.clone(),
-        JsonValue::Number(number) => number.to_string(),
-        _ => crate::http_codec::fresh_request_id(),
-    }
-}
-
-fn envelope(mut response: JsonValue, cache: Option<&'static McpCacheHint>) -> JsonValue {
-    if let Some(result) = response.get_mut("result") {
-        apply_result_envelope(result, cache);
-    }
-    response
-}
-
-/// Map a JSON-RPC method to its conservative cache hint. Read/list
-/// methods get a TTL; everything else is `None`, which still routes
-/// through [`envelope`] so Stable clients see `resultType`.
-fn cache_hint_for_method(method: &str) -> Option<&'static McpCacheHint> {
-    const LIST: McpCacheHint = McpCacheHint::list_default();
-    const READ: McpCacheHint = McpCacheHint::read_default();
-    match method {
-        "tools/list" | "resources/list" | "resources/templates/list" | "prompts/list" => {
-            Some(&LIST)
-        }
-        "resources/read" => Some(&READ),
-        _ => None,
-    }
-}
-
-/// Standard JSON-RPC error response for a scope mismatch. The error
-/// body carries the canonical `forbidden` payload so MCP clients can
-/// render an actionable prompt without parsing the message string.
-fn forbidden_jsonrpc_error_response(
-    id: JsonValue,
-    required: &std::collections::BTreeSet<String>,
-    granted: &std::collections::BTreeSet<String>,
-) -> JsonValue {
-    json!({
-        "jsonrpc": "2.0",
-        "id": id,
-        "error": {
-            "code": -32003,
-            "message": crate::forbidden_message(required, granted),
-            "data": crate::forbidden_data_payload(required, granted),
-        }
-    })
-}
-
 /// Reduce a finished JSON-RPC response to the MCP result the task store files.
 ///
 /// A JSON-RPC `error` means the request failed before it produced a tool
@@ -1024,21 +1000,11 @@ fn task_outcome(response: JsonValue) -> Result<JsonValue, String> {
     Ok(response.get("result").cloned().unwrap_or(json!({})))
 }
 
+/// Every method that reads or acts on what the server serves requires an
+/// authorized caller when the server has an auth policy. Only liveness and
+/// discovery stay public, so a method added later is protected by default.
 fn requires_protocol_auth(method: &str) -> bool {
-    matches!(
-        method,
-        "tools/list"
-            | "tools/call"
-            | "resources/list"
-            | "resources/read"
-            | "resources/templates/list"
-            | "prompts/list"
-            | "prompts/get"
-            | mcp_protocol::METHOD_COMPLETION_COMPLETE
-            | mcp_protocol::METHOD_TASKS_GET
-            | mcp_protocol::METHOD_TASKS_UPDATE
-            | mcp_protocol::METHOD_TASKS_CANCEL
-    )
+    !matches!(method, "ping" | mcp_protocol::METHOD_SERVER_DISCOVER)
 }
 
 #[async_trait::async_trait(?Send)]

@@ -130,6 +130,7 @@ accounting lives under `usage`. The typed contract is
 | `data` | any | Parsed and optionally schema-validated value when `output` requests JSON |
 | `thinking` | string | Reasoning trace (when `thinking` is enabled) |
 | `thinking_summary` | string | Provider-supplied summary of the reasoning trace, when available |
+| `effective_reasoning_effort` | record | Provider-confirmed effort: `{status: "reported", level: string, source: string}` or `{status: "not_reported"}`. See [Effective reasoning effort](#effective-reasoning-effort). |
 | `stop_reason` | string | Provider-native stop vocabulary (`"end_turn"`, `"max_tokens"`, `"tool_use"`, `"stop_sequence"`), kept for forensics — prefer `outcome` |
 | `tool_calls` | `list<LlmToolCall>` | Dispatchable tool calls, merged from the provider-native and text-protocol channels. Always present, possibly empty. |
 | `native_tool_calls` | `list<LlmToolCall>` | Provider-native tool calls only. Always present, possibly empty. |
@@ -147,6 +148,35 @@ The four text channels each have a distinct job — none are aliases.
 pre-projection source with protocol tags intact, `visible_text` is the
 sanitized human-visible output, and `canonical_text` is the canonical
 replay form of a tagged-protocol response.
+
+#### Effective reasoning effort
+
+`effective_reasoning_effort` is always present on a completed call. The
+Responses API supplies the level through its response's `reasoning.effort`
+field. Harn compares that echo with the final request after provider overrides.
+It doesn't infer a level from the requested effort, thinking budget, or token count.
+
+The record has `status: "reported"`, `level`, and one of these `source` values:
+
+| Source | Meaning |
+|---|---|
+| `operator` | The caller selected the echoed level. |
+| `catalog` | A catalog default selected the echoed level. |
+| `policy` | The reasoning policy selected the echoed level. |
+| `request` | The request selected the level, but its selection source is unavailable. |
+| `provider_default` | The request omitted effort and the provider echoed its default. |
+| `provider_adjusted` | The provider echoed a different level from the request. |
+
+Without a usable echo, the record is `{status: "not_reported"}`. This also
+applies to older recordings and providers without an effort echo.
+[Responses configuration updates](https://developers.openai.com/api/docs/guides/reasoning#change-reasoning-mid-conversation)
+can supersede the echoed request setting. Calls with configuration updates or
+an opaque `previous_response_id` therefore return `not_reported`.
+
+The same observation appears in provider response events, transcript
+`provider_payload` metadata, durable assistant messages under
+`_harn.effective_reasoning_effort`, and `usage.provider_telemetry`. Streaming calls
+include it on the terminal chunk.
 
 #### Usage
 
@@ -267,9 +297,6 @@ so callers do not re-implement them: `llm_response_is_empty`,
 
 ### Options dict
 
-This section is reference material. For a step-by-step upgrade from older
-spellings, see [Migrating to 0.10](../migrations/v0.10.md#llm-call-options).
-
 `LlmCallOptions` in `std/llm/options` is the checked authoring surface. Annotate
 a binding or use `llm_options({...})`:
 
@@ -343,6 +370,7 @@ catalog source data and pass only the stable ladder name from policy code.
 | `prefill` | string | Assistant prefill where the route supports it. |
 | `previous_response_id` | string | OpenAI Responses conversation-state link. |
 | `data_controls` | string | Requested provider retention/training posture: `"default"` or `"strictest_available"`. See [Provider data controls](providers.md#provider-data-controls). |
+| `inference_boundary` | dict | Optional ceiling with `reach` (`local_only`, `hosted_open_weight`, or `any_hosted`) and `allow_training_discounts` (bool). Harn checks the resolved route before live transport and records the governing rule plus catalog evidence in the data-controls receipt. See [Inference destination boundaries](providers.md#inference-destination-boundaries). |
 
 Each system fragment has `{content, title?, position?: "before"|"after",
 enabled?}`. Use `system_before`, `system_after`, and `with_system_fragments`
@@ -501,6 +529,11 @@ wire boundary. Blank reasons do not bypass the catalog gates.
 | `stream` | bool | Enable streaming transport. |
 | `speed` | string | Serving intent: `standard` or `fast`. |
 
+A streaming call emits nonempty replayed text as one delta, without another
+provider request. Cached predicate results follow the same rule. Recorded
+responses don't preserve token timing or chunk boundaries. Mock fixtures
+preserve their scripted chunk order.
+
 `speed: "fast"` is admitted only when the selected route advertises a usable
 fast tier. Premium pricing applies only when provider telemetry confirms that
 tier. Explicit `cache: true` and `prompt_cache_ttl` require authored capability
@@ -508,6 +541,21 @@ support because Harn must lower them to a provider-specific wire shape. A TTL
 must also appear in the route's `prompt_cache_ttls` list. `cache: false` is an
 opt-out, not capability intent. `cache` does not memoize full responses; use
 `with_cache` from `std/llm/handlers` for Harn-owned response caching.
+
+Every `provider_call_request` transcript receipt records what happened to the
+prompt-cache breakpoint in `prompt_cache_breakpoint.outcome`:
+
+| Outcome | Meaning |
+|---|---|
+| `placed` | Harn added its marker; `style` is `top_level` or `last_block`. |
+| `not_requested` | The call turned caching off. |
+| `unsupported` | The route does not declare prompt caching. |
+| `automatic` | The route caches without a request marker, so none was sent. |
+| `deferred_to_existing_marker` | A `cache_control` marker you supplied on a content block, a tool-result block, or a tool definition takes precedence, so Harn added none. Only the prefixes you marked are cached. A marker directly on a message, or on a whitespace-only text block, does not count, because provider egress removes it. |
+
+A provider returns `cache_read_input_tokens: 0` without an error both when no
+breakpoint was sent and when the cached prefix is below the model's minimum
+length. Read this field to tell the two apart.
 
 Streaming applies three independent limits on every SSE and NDJSON provider:
 `timeout_ms` bounds the whole request, `HARN_LLM_FIRST_TOKEN_TIMEOUT` bounds
@@ -875,8 +923,7 @@ fn(call) -> {ok: true, value: <llm dict>}
 
 `with_retry`'s `max_attempts: N` counts total attempts. Migrating
 `llm_retries: K` (removed in 0.10): pass `max_attempts: K + 1` — the
-removed option counted retries *after* the first attempt. See
-[Migrating to 0.10](../migrations/v0.10.md).
+removed option counted retries *after* the first attempt.
 
 See [Composable callers and middleware](../stdlib/llm-handlers.md)
 for the full module catalog (`handlers`, `ensemble`, `refine`,
@@ -989,6 +1036,8 @@ unreserved attempt is refused. Independent top-level executions have separate
 ledgers. Allocate disjoint budgets to separate processes: for an experiment,
 actor and grader allocations across both arms must sum to the whole allowance.
 The runtime does not turn separate process budgets into a shared batch cap.
+For a runnable actor/grader sequence with disjoint process allocations, see
+[Run an experiment inside one allowance](../cookbooks/conservative-experiment.md).
 
 Full, streaming, offthread, retry, and fallback attempts use the same admission
 boundary. Complete, consistent provider token counters release only the unused
@@ -1022,6 +1071,9 @@ admission even when missing usage prevents complete settlement.
 Denials retain the terminal `budget_exceeded` contract and add a typed
 `admission_reason`, such as `unknown_pricing`, `unsupported_billing_shape`, or
 `insufficient_allowance`.
+`harness.llm.call_safe(...).error` declares both `admission_reason` and
+`provider_call_count` as optional fields, so scripts can read the reason and
+measured dispatch count directly.
 
 These are reservation facts, separate from the existing actual-usage totals
 and their unknown-usage indicators; `settled_upper_usd` is not billed spend.

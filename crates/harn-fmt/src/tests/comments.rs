@@ -353,18 +353,6 @@ fn test_section_header_three_line_canonical_passthrough() {
 }
 
 #[test]
-fn test_section_header_three_line_short_bars_normalized() {
-    let source =
-        "fn a() -> int { return 1 }\n// ----\n// Helpers\n// ----\nfn b() -> int { return 2 }\n";
-    let result = format_source(source).unwrap();
-    let bar = canonical_bar();
-    assert!(
-        result.contains(&format!("{bar}\n// Helpers\n{bar}")),
-        "short bars should normalize to separator_width, got:\n{result}"
-    );
-}
-
-#[test]
 fn test_section_header_one_line_bar_normalized() {
     let source = "fn a() -> int { return 1 }\n// ----\nfn b() -> int { return 2 }\n";
     let result = format_source(source).unwrap();

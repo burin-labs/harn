@@ -1,0 +1,244 @@
+import { assert_error_contains } from "std/testing"
+import { PackageBuild, PackageCandidate, build_package_candidate } from "../build"
+import { qualify_package_report } from "../lib"
+import {
+  CANDIDATE_MANIFEST_FILE,
+  validate_candidate_manifest,
+} from "burin-ci-checks/candidate_manifest"
+
+fn git(process: HarnessProcess, root: string, args: list<string>) -> string {
+  const result = process.run(
+    {
+      program: "git",
+      cwd: root,
+      args: [
+        "-c",
+        "user.name=Package Fixture",
+        "-c",
+        "user.email=fixture@example.invalid",
+        "-c",
+        "commit.gpgsign=false",
+        "-c",
+        "core.hooksPath=.git/no-hooks",
+      ]
+        + args,
+    },
+  )
+  require result.success && result.exit_code == 0, "fixture Git failed: " + result.stderr
+  return result.stdout.trim()
+}
+
+pipeline test_the_actual_archive_is_qualified_and_a_reached_test_failure_cannot_be_promoted(
+  harness: Harness,
+) {
+  const root = harness.fs.mkdtemp_in_workspace("package-archive-")
+  defer {
+    harness.fs.delete(root)
+  }
+  const project = path_join(root, "project")
+  harness.fs.mkdir(project)
+  harness.fs.mkdir(path_join(project, "tests"))
+  harness.fs.write_text(
+    path_join(project, "harn.toml"),
+    "[package]\nname = \"portable-fixture\"\nversion = \"0.1.0\"\ndescription = \"A portable archive qualification fixture.\"\nlicense = \"MIT OR Apache-2.0\"\nrepository = \"https://github.com/acme/project\"\nharn = \">=0.10.166,<0.11\"\ndocs_url = \"README.md\"\n\n[exports]\nlib = \"lib.harn\"\n\n[tests]\nroots = [\"tests\"]\n",
+  )
+  harness.fs.write_text(
+    path_join(project, ".gitignore"),
+    ".harn/\n.harn-*/\n**/.harn/\n**/.harn-*/\n",
+  )
+  harness.fs.write_text(
+    path_join(project, "README.md"),
+    "# Portable fixture\n\nReturn one measured answer.\n",
+  )
+  harness.fs.write_text(
+    path_join(project, "lib.harn"),
+    "/** Return the fixture's answer. */\npub fn answer() -> int { return 42 }\n",
+  )
+  const test_file = path_join(project, "tests/test_answer.harn")
+  harness.fs.write_text(
+    test_file,
+    "import { answer } from \"../lib\"\n\npipeline test_actual_answer() { assert_eq(answer(), 42) }\n",
+  )
+  for license in ["LICENSE-MIT", "LICENSE-APACHE"] {
+    harness.fs.copy(
+      path_join(harness.fs.runtime_paths().asset_root, "../../..", license),
+      path_join(project, license),
+    )
+  }
+  const binary = harness.env.get("HARN_BIN") ?? "harn"
+  for args in [["install"], ["fmt", project], ["package", "docs", project]] {
+    const result = harness.process.run(
+      {program: binary, args: args, cwd: project, timeout_ms: 30000},
+    )
+    assert(result.success && result.exit_code == 0, result.stderr)
+  }
+  git(harness.process, project, ["init", "--quiet"])
+  git(harness.process, project, ["add", "--all"])
+  git(harness.process, project, ["commit", "--quiet", "-m", "portable archive baseline"])
+  const source = git(harness.process, project, ["rev-parse", "HEAD"])
+  const request: PackageBuild = {
+    package_directory: project,
+    output: path_join(root, "passing"),
+    harn: binary,
+    expected_source: source,
+    expected_name: "portable-fixture",
+    identity: {repository: "acme/project", source: source, run: "123", attempt: "1"},
+  }
+  const host = pick(harness, ["fs", "process", "env"])
+  assert_error_contains(
+    fn() { build_package_candidate(
+      host,
+      request + {expected_source: "0123456789abcdef0123456789abcdef01234567"},
+    ) },
+    "workflow source",
+  )
+  assert(!harness.fs.exists(request.output))
+  const wrong = "0123456789abcdef0123456789abcdef01234567"
+  assert_error_contains(
+    fn() { build_package_candidate(
+      host,
+      request + {expected_source: wrong, identity: request.identity + {source: wrong}},
+    ) },
+    "checkout differs",
+  )
+  assert(!harness.fs.exists(request.output))
+  const request_file = path_join(root, "request.json")
+  harness.fs.write_text(request_file, json_stringify(request))
+  const command = path_join(harness.fs.runtime_paths().asset_root, "../cli.harn")
+  const executed = harness.process.run(
+    {
+      program: binary,
+      args: [
+        "run",
+        "--environment-policy",
+        "isolated",
+        "--write-root",
+        root,
+        command,
+        "--",
+        request_file,
+      ],
+      cwd: root,
+      timeout_ms: 120000,
+    },
+  )
+  assert(executed.success && executed.exit_code == 0, executed.stderr)
+  const passing: PackageCandidate = schema_expect(
+    json_parse(executed.stdout),
+    schema_of(PackageCandidate),
+  )
+  assert_eq(passing.test_cases, 1)
+  assert(passing.verification.required > 0)
+  assert_eq(passing.verification.passed, passing.verification.required)
+  assert_eq(passing.verification.pending, [])
+  assert_eq(passing.archive_digest, "sha256:" + sha256_hex(harness.fs.read_bytes(passing.archive)))
+  const manifest = validate_candidate_manifest(json_parse(harness.fs.read_text(passing.manifest)))
+  assert_eq(basename(passing.manifest), CANDIDATE_MANIFEST_FILE)
+  assert_eq(manifest.sourceCommit, source)
+  assert_eq(
+    manifest.artifacts.filter({ item -> item.kind == "archive" }).to_list()[0]!.target,
+    "portable",
+  )
+  for artifact in manifest.artifacts {
+    assert_eq(
+      artifact.sha256,
+      sha256_hex(harness.fs.read_bytes(path_join(request.output, artifact.file))),
+    )
+  }
+  harness.fs.write_text(
+    test_file,
+    "import { answer } from \"../lib\"\n\npipeline test_actual_answer() { assert_eq(answer(), 43) }\n",
+  )
+  const formatted = harness.process.run({program: binary, args: ["fmt", test_file], cwd: project})
+  assert(formatted.success && formatted.exit_code == 0, formatted.stderr)
+  git(harness.process, project, ["add", "tests/test_answer.harn"])
+  git(harness.process, project, ["commit", "--quiet", "-m", "reach a failing test"])
+  const failed_source = git(harness.process, project, ["rev-parse", "HEAD"])
+  const failed_output = path_join(root, "failing")
+  const failure = unwrap_err(
+    build_package_candidate(
+      host,
+      request
+        + {
+          expected_source: failed_source,
+          output: failed_output,
+          identity: request.identity + {source: failed_source},
+        },
+    ),
+  )
+  assert(failure.verification!.failed.contains("package tests"))
+  assert(!harness.fs.exists(path_join(failed_output, CANDIDATE_MANIFEST_FILE)))
+  const receipt = harness.fs.read_text(path_join(failed_output, "verification.json"))
+  assert(receipt.contains("test_actual_answer"))
+  assert(receipt.contains("1 failed"))
+  harness.fs.write_text(
+    test_file,
+    "import { answer } from \"../lib\"\n\npipeline test_actual_answer(harness: Harness) {\n  assert_eq(answer(), 42)\n  harness.fs.write_text(path_join(harness.fs.runtime_paths().asset_root, \"test_answer.harn\"), \"pipeline test_replaced_after_execution() {\\n  assert(false)\\n}\\n\")\n}\n",
+  )
+  const format_mutation = harness.process.run(
+    {program: binary, args: ["fmt", test_file], cwd: project},
+  )
+  assert(format_mutation.success && format_mutation.exit_code == 0, format_mutation.stderr)
+  git(harness.process, project, ["add", "tests/test_answer.harn"])
+  git(
+    harness.process,
+    project,
+    ["commit", "--quiet", "-m", "mutate a package input after the test compiles"],
+  )
+  const mutation_source = git(harness.process, project, ["rev-parse", "HEAD"])
+  const mutation_output = path_join(root, "mutating")
+  assert_error_contains(
+    fn() { build_package_candidate(
+      host,
+      request
+        + {
+          expected_source: mutation_source,
+          output: mutation_output,
+          identity: request.identity + {source: mutation_source},
+        },
+    ) },
+    "unpacked package inputs changed",
+  )
+  assert(!harness.fs.exists(path_join(mutation_output, CANDIDATE_MANIFEST_FILE)))
+  harness.fs.write_text(
+    test_file,
+    "import { answer } from \"../lib\"\n\npipeline test_actual_answer(harness: Harness) {\n  assert_eq(answer(), 42)\n  harness.fs.write_text(path_join(harness.fs.runtime_paths().asset_root, \"../../portable-fixture-0.1.0.tar.gz\"), \"substituted archive\")\n}\n",
+  )
+  const format_archive = harness.process.run(
+    {program: binary, args: ["fmt", test_file], cwd: project},
+  )
+  assert(format_archive.success && format_archive.exit_code == 0, format_archive.stderr)
+  git(harness.process, project, ["add", "tests/test_answer.harn"])
+  git(
+    harness.process,
+    project,
+    ["commit", "--quiet", "-m", "substitute the archive during passing tests"],
+  )
+  const substituted_source = git(harness.process, project, ["rev-parse", "HEAD"])
+  const substituted_output = path_join(root, "substituted-archive")
+  assert_error_contains(
+    fn() { build_package_candidate(
+      host,
+      request
+        + {
+          expected_source: substituted_source,
+          output: substituted_output,
+          identity: request.identity + {source: substituted_source},
+        },
+    ) },
+    "candidate archive changed during verification",
+  )
+  assert_eq(
+    harness.fs.read_text(path_join(substituted_output, "portable-fixture-0.1.0.tar.gz")),
+    "substituted archive",
+  )
+  const observed = unwrap(
+    qualify_package_report(
+      json_parse(harness.fs.read_text(path_join(substituted_output, "verification.json"))),
+      0,
+    ),
+  )
+  assert(observed.required > 0)
+  assert_eq(observed.passed, observed.required)
+  assert(!harness.fs.exists(path_join(substituted_output, CANDIDATE_MANIFEST_FILE)))
+}

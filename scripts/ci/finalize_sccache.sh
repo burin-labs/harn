@@ -3,8 +3,51 @@
 # runner's orphan-process cleanup cannot turn a successful proof into a flake.
 set -euo pipefail
 
+# A job that compiled through Kache reports its checkout session. The host's
+# sccache counters would describe other runners' work instead.
+if [[ "$(basename -- "${RUSTC_WRAPPER:-}")" == kache ]]; then
+  root="${GITHUB_WORKSPACE:-$PWD}"
+  report_status=0
+  report="$("$RUSTC_WRAPPER" report --last-build --root "$root" --format json 2>&1)" || report_status=$?
+  if [[ "$report_status" -ne 0 ]]; then
+    printf '%s\n' "$report"
+    echo "::warning title=Kache measurement unavailable::Report command failed with exit ${report_status}; cache activity is unknown."
+    exit 0
+  fi
+  # The checkout session may span several Cargo commands. Its identity and
+  # retained events must be present before zero hits can mean a cold cache.
+  if ! measurement="$(jq -ce --arg root "$root" '
+    def counter: type == "number" and . >= 0 and floor == .;
+    select(.schema_version == 1) |
+    select(.meta.session.root == $root) |
+    select(.meta.session.inferred | type == "boolean") |
+    .summary as $s |
+    select([$s.total_crates, $s.local_hits, $s.prefetch_hits, $s.remote_hits,
+      $s.dups, $s.misses, $s.errors, $s.passthroughs] | all(.[]; counter)) |
+    select($s.total_crates > 0) |
+    select($s.total_crates == ($s.local_hits + $s.prefetch_hits +
+      $s.remote_hits + $s.dups + $s.misses)) |
+    {scope: "checkout_session", inferred: .meta.session.inferred,
+      per_job_attribution: "unmeasured",
+      requests: $s.total_crates,
+      hits: ($s.local_hits + $s.prefetch_hits + $s.remote_hits),
+      misses: $s.misses, duplicates: $s.dups, errors: $s.errors,
+      passthroughs: $s.passthroughs}
+  ' <<< "$report" 2>/dev/null)"; then
+    echo "::warning title=Kache measurement unavailable::Report lacks a matching session with valid nonempty compiler counters; cache activity is unknown."
+    exit 0
+  fi
+  echo "Kache measured: $measurement"
+  if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
+    fence='```'
+    printf '### Kache\n\n%sjson\n%s\n%s\n' "$fence" "$measurement" "$fence" >> "$GITHUB_STEP_SUMMARY"
+  fi
+  echo "::notice title=Kache::HARN_COMPILER_CACHE=kache $measurement"
+  exit 0
+fi
+
 sccache_bin="${SCCACHE_PATH:-sccache}"
-if ! command -v "$sccache_bin" >/dev/null 2>&1; then
+if ! command -v "$sccache_bin" > /dev/null 2>&1; then
   echo "::notice title=sccache unavailable::Compiler-cache activity was not measured; sccache is not installed."
   exit 0
 fi
@@ -36,20 +79,19 @@ elif ! counters="$(jq -er '
   select(.cache_misses.counts | all(.[]; counter)) |
   [.compile_requests, ([.cache_hits.counts[]] | add // 0),
    ([.cache_misses.counts[]] | add // 0)] | @tsv
-' <<< "$stats" 2>/dev/null)"; then
+' <<< "$stats" 2> /dev/null)"; then
   echo "::warning title=sccache measurement unavailable::Stats response lacks valid compiler-cache counters; cache activity is unknown."
 else
   IFS=$'\t' read -r compile_requests cache_hits cache_misses <<< "$counters"
 
-  # Subtract the counters this job started from, when they were recorded. The
-  # server on a shared runner is host-wide and long-lived, so its totals
-  # describe every job that has ever compiled there. Reporting those as this
-  # job's result would let a cold job inherit a warm neighbour's hits.
-  scope=cumulative
+  # The baseline bounds a server-wide observation interval, not client
+  # attribution. Concurrent jobs contribute to the same counters; neither
+  # an interval nor a cumulative total proves this job's cache warmth.
+  scope=server_cumulative
   baseline_path="${SCCACHE_BASELINE_PATH:-${RUNNER_TEMP:-}/sccache-baseline.json}"
-  if [[ -n "${RUNNER_TEMP:-}" || -n "${SCCACHE_BASELINE_PATH:-}" ]] \
-    && [[ -r "$baseline_path" ]] \
-    && base_counters="$(jq -er '
+  if [[ -n "${RUNNER_TEMP:-}" || -n "${SCCACHE_BASELINE_PATH:-}" ]] &&
+    [[ -r "$baseline_path" ]] &&
+    base_counters="$(jq -er '
       def counter: type == "number" and . >= 0 and floor == .;
       .stats | select(type == "object") |
       select(.compile_requests | counter) |
@@ -57,7 +99,7 @@ else
       select(.cache_misses.counts | type == "object") |
       [.compile_requests, ([.cache_hits.counts[]] | add // 0),
        ([.cache_misses.counts[]] | add // 0)] | @tsv
-    ' "$baseline_path" 2>/dev/null)"; then
+    ' "$baseline_path" 2> /dev/null)"; then
     IFS=$'\t' read -r base_requests base_hits base_misses <<< "$base_counters"
     # A server restarted mid-job resets its counters, which would make the
     # delta negative. Name that rather than reporting a nonsense number.
@@ -65,20 +107,28 @@ else
       compile_requests=$((compile_requests - base_requests))
       cache_hits=$((cache_hits - base_hits))
       cache_misses=$((cache_misses - base_misses))
-      scope=job
+      scope=server_interval
     else
       echo "::warning title=sccache counters reset::The cache server restarted during this job; reporting cumulative host counters."
     fi
   fi
 
+  measurement=$(jq -cn --arg scope "$scope" \
+    --argjson requests "$compile_requests" --argjson hits "$cache_hits" \
+    --argjson misses "$cache_misses" \
+    '{scope: $scope, per_job_attribution: "unmeasured", requests: $requests,
+      hits: $hits, misses: $misses}')
+  echo "sccache measured: ${measurement}"
+  # The scalar record and cold warning keep their established text so log
+  # readers matching it keep working. The scope token names what was measured.
   echo "sccache measured (${scope}): requests=${compile_requests} hits=${cache_hits} misses=${cache_misses}"
   if [[ "$compile_requests" -eq 0 ]]; then
-    echo "::notice title=sccache unused::No compile requests were observed."
+    echo "::notice title=sccache unused::No compile requests were observed in ${scope}."
   elif [[ "$((cache_hits + cache_misses))" -ge 100 && "$cache_hits" -eq 0 ]]; then
     echo "::warning title=sccache is cold::${cache_misses} cacheable compilations produced zero cache hits."
   fi
 fi
 
 if [[ "${HARN_RUNNER_TIER:-}" != "self-hosted" && "${HARN_SHARED_SCCACHE:-}" != "on" ]]; then
-  "$sccache_bin" --stop-server >/dev/null 2>&1 || true
+  "$sccache_bin" --stop-server > /dev/null 2>&1 || true
 fi

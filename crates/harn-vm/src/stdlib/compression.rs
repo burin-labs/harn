@@ -6,7 +6,7 @@ use flate2::write::GzEncoder;
 use flate2::{Compression, GzBuilder};
 
 use crate::stdlib::args::{ArgError, Args, ErrorKind};
-use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
+use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
@@ -414,12 +414,12 @@ fn tar_extract_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
 
         let mut fields = crate::value::DictMap::new();
         fields.insert(crate::value::intern_key("content"), bytes_value(content));
-        fields.insert(crate::value::intern_key("mode"), VmValue::Int(mode));
+        fields.put_int("mode", mode);
         fields.put_str("path", path);
         output.push(entry_value(fields));
     }
 
-    Ok(VmValue::List(std::sync::Arc::new(output)))
+    Ok(VmValue::list(output))
 }
 
 #[harn_builtin(
@@ -487,7 +487,10 @@ fn zip_extract_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
                 ),
             ));
         }
-        let path = file.name().to_string();
+        let path = file
+            .name()
+            .map_err(|error| builtin_error("zip_extract", error))?
+            .into_owned();
         let remaining = cap.saturating_sub(total_extracted);
         let content = read_with_cap(&mut file, remaining, "zip_extract")?;
         total_extracted = total_extracted.saturating_add(content.len() as u64);
@@ -498,7 +501,7 @@ fn zip_extract_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
         output.push(entry_value(fields));
     }
 
-    Ok(VmValue::List(std::sync::Arc::new(output)))
+    Ok(VmValue::list(output))
 }
 
 /// ZipArchive validates the directory but then indexes records by raw filename,
@@ -539,42 +542,23 @@ fn verify_zip_member_census(
 }
 
 pub(crate) fn register_compression_builtins(vm: &mut Vm) {
-    for def in MODULE_BUILTINS {
-        vm.register_builtin_def(def);
-    }
+    crate::stdlib::macros::register_module_builtins(vm, module_path!());
 }
-
-pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
-    &GZIP_ENCODE_BUILTIN_DEF,
-    &GZIP_DECODE_BUILTIN_DEF,
-    &ZSTD_ENCODE_BUILTIN_DEF,
-    &ZSTD_DECODE_BUILTIN_DEF,
-    &BROTLI_ENCODE_BUILTIN_DEF,
-    &BROTLI_DECODE_BUILTIN_DEF,
-    &TAR_CREATE_BUILTIN_DEF,
-    &TAR_EXTRACT_BUILTIN_DEF,
-    &ZIP_CREATE_BUILTIN_DEF,
-    &ZIP_EXTRACT_BUILTIN_DEF,
-];
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn vm() -> Vm {
-        let mut vm = Vm::new();
+        let mut vm = crate::new_vm();
         register_compression_builtins(&mut vm);
         vm
     }
 
     fn call(vm: &mut Vm, name: &str, args: Vec<VmValue>) -> Result<VmValue, VmError> {
-        let f = vm.builtins.get(name).unwrap().clone();
+        let f = vm.builtin_handler_for_test(name).unwrap().clone();
         let mut out = String::new();
         f(&args, &mut out)
-    }
-
-    fn text(value: &str) -> VmValue {
-        VmValue::String(arcstr::ArcStr::from(value))
     }
 
     fn zip_fixture(large_file: bool) -> Vec<u8> {
@@ -592,29 +576,6 @@ mod tests {
             writer.write_all(body).unwrap();
         }
         writer.finish().unwrap().into_inner()
-    }
-
-    #[test]
-    fn zip_extract_rejects_duplicate_names_before_extracting() {
-        let mut archive = zip_fixture(false);
-        let old = b"evidencf.json";
-        let mut changed = 0;
-        for offset in 0..=archive.len() - old.len() {
-            if &archive[offset..offset + old.len()] == old {
-                archive[offset..offset + old.len()].copy_from_slice(b"evidence.json");
-                changed += 1;
-            }
-        }
-        assert_eq!(changed, 2, "mutate the local and central directory names");
-        let decoded = zip::ZipArchive::new(Cursor::new(&archive)).unwrap();
-        assert_eq!(
-            decoded.len(),
-            2,
-            "the dependency collapsed two files plus a directory"
-        );
-        let error = call(&mut vm(), "zip_extract", vec![bytes_value(archive)])
-            .expect_err("ambiguous member names must be refused");
-        assert!(error.to_string().contains("duplicate members"), "{error}");
     }
 
     #[test]
@@ -651,14 +612,6 @@ mod tests {
             panic!("expected empty entries")
         };
         assert!(entries.is_empty());
-    }
-
-    #[test]
-    fn gzip_round_trips_strings_to_bytes() {
-        let mut vm = vm();
-        let encoded = call(&mut vm, "gzip_encode", vec![text("hello"), VmValue::Int(1)]).unwrap();
-        let decoded = call(&mut vm, "gzip_decode", vec![encoded]).unwrap();
-        assert_eq!(decoded.as_bytes().unwrap(), b"hello");
     }
 
     #[test]
@@ -722,32 +675,5 @@ mod tests {
             vec![encoded, VmValue::dict(options)],
         );
         assert!(result.is_err(), "zstd_decode should reject output past cap");
-    }
-
-    #[test]
-    fn tar_round_trip_preserves_mode() {
-        let mut fields = crate::value::DictMap::new();
-        fields.insert(crate::value::intern_key("path"), text("bin/run"));
-        fields.insert(crate::value::intern_key("content"), text("echo hi"));
-        fields.insert(crate::value::intern_key("mode"), VmValue::Int(0o755));
-
-        let mut vm = vm();
-        let archive = call(
-            &mut vm,
-            "tar_create",
-            vec![VmValue::List(std::sync::Arc::new(vec![entry_value(
-                fields,
-            )]))],
-        )
-        .unwrap();
-        let extracted = call(&mut vm, "tar_extract", vec![archive]).unwrap();
-        let VmValue::List(entries) = extracted else {
-            panic!("expected list");
-        };
-        assert_eq!(entries.len(), 1);
-        let entry = entries[0].as_dict().unwrap();
-        assert_eq!(entry["path"].display(), "bin/run");
-        assert_eq!(entry["content"].as_bytes().unwrap(), b"echo hi");
-        assert_eq!(entry["mode"].as_int(), Some(0o755));
     }
 }

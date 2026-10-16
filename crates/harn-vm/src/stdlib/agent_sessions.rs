@@ -9,7 +9,7 @@ use std::path::PathBuf;
 
 use crate::agent_sessions;
 use crate::stdlib::args::{Args, ErrorKind, Options};
-use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
+use crate::stdlib::macros::harn_builtin;
 use crate::value::{ErrorCategory, VmError, VmValue};
 
 #[path = "agent_sessions_close_status.rs"]
@@ -23,56 +23,8 @@ const ERR_KIND: ErrorKind = ErrorKind::Thrown;
 use crate::vm::Vm;
 
 pub fn register_agent_session_builtins(vm: &mut Vm) {
-    for def in MODULE_BUILTINS {
-        vm.register_builtin_def(def);
-    }
+    crate::stdlib::macros::register_module_builtins(vm, module_path!());
 }
-
-pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
-    &AGENT_SESSION_OPEN_BUILTIN_DEF,
-    &AGENT_SESSION_EXISTS_BUILTIN_DEF,
-    &AGENT_SESSION_LENGTH_BUILTIN_DEF,
-    &AGENT_SESSION_SNAPSHOT_BUILTIN_DEF,
-    &AGENT_SESSION_ANCESTRY_BUILTIN_DEF,
-    &AGENT_SESSION_CURRENT_ID_BUILTIN_DEF,
-    &AGENT_SESSION_RECORD_CHANGED_PATH_BUILTIN_DEF,
-    &AGENT_SESSION_ACTOR_CHAIN_BUILTIN_DEF,
-    &ACTOR_CHAIN_VALIDATE_SCOPE_ATTENUATION_BUILTIN_DEF,
-    &AGENT_SESSION_TOOL_FORMAT_BUILTIN_DEF,
-    &AGENT_SESSION_SYSTEM_PROMPT_BUILTIN_DEF,
-    &AGENT_SESSION_WORKSPACE_ANCHOR_BUILTIN_DEF,
-    &AGENT_SESSION_SET_WORKSPACE_ANCHOR_BUILTIN_DEF,
-    &AGENT_SESSION_WORKSPACE_POLICY_BUILTIN_DEF,
-    &AGENT_SESSION_SET_WORKSPACE_POLICY_BUILTIN_DEF,
-    &AGENT_SESSION_SCRATCHPAD_BUILTIN_DEF,
-    &AGENT_SESSION_SET_SCRATCHPAD_BUILTIN_DEF,
-    &AGENT_SESSION_CLEAR_SCRATCHPAD_BUILTIN_DEF,
-    &AGENT_SESSION_ADD_ROOT_BUILTIN_DEF,
-    &AGENT_SESSION_REMOVE_ROOT_BUILTIN_DEF,
-    &AGENT_SESSION_LIST_ROOTS_BUILTIN_DEF,
-    &AGENT_SESSION_CLAIM_TOOL_FORMAT_BUILTIN_DEF,
-    &AGENT_SESSION_RESET_BUILTIN_DEF,
-    &AGENT_SESSION_FORK_BUILTIN_DEF,
-    &AGENT_SESSION_FORK_AT_BUILTIN_DEF,
-    &AGENT_SESSION_ROLLBACK_BUILTIN_DEF,
-    &AGENT_SESSION_REDO_BUILTIN_DEF,
-    &AGENT_SESSION_CLOSE_BUILTIN_DEF,
-    &AGENT_SESSION_TRIM_BUILTIN_DEF,
-    &AGENT_SESSION_ATTACH_BUILTIN_DEF,
-    &AGENT_SESSION_TAKEOVER_BUILTIN_DEF,
-    &AGENT_SESSION_DETACH_BUILTIN_DEF,
-    &AGENT_SESSION_HEARTBEAT_BUILTIN_DEF,
-    &AGENT_SESSION_LIVE_CLIENTS_BUILTIN_DEF,
-    &AGENT_SESSION_CLIENT_INJECT_PROMPT_BUILTIN_DEF,
-    &AGENT_SESSION_ROUTE_PERMISSION_BUILTIN_DEF,
-    &AGENT_SESSION_INJECT_BUILTIN_DEF,
-    &AGENT_SESSION_POST_EVENT_BUILTIN_DEF,
-    &AGENT_SESSION_DRAIN_INBOX_BUILTIN_DEF,
-    &AGENT_SESSION_SEED_FROM_JSONL_BUILTIN_DEF,
-    &AGENT_SESSION_REANCHOR_BUILTIN_DEF,
-    &AGENT_SESSION_COMPACT_BUILTIN_DEF,
-    &CANCEL_IN_FLIGHT_TOOL_CALL_BUILTIN_DEF,
-];
 
 fn err(msg: impl Into<String>) -> VmError {
     ERR_KIND.err(msg.into())
@@ -226,7 +178,8 @@ fn ok_result(fields: &[(&str, serde_json::Value)]) -> VmValue {
     crate::stdlib::json_to_vm_value(&serde_json::Value::Object(result))
 }
 
-const AGENT_SESSION_OPEN_OPT_KEYS: &[&str] = &["workspace_anchor", "workspace_policy"];
+const AGENT_SESSION_OPEN_OPT_KEYS: &[&str] =
+    &["workspace_anchor", "workspace_policy", "parent", "actor"];
 const AGENT_SESSION_ADD_ROOT_OPT_KEYS: &[&str] = &["mount_mode", "reason"];
 const AGENT_SESSION_ATTACH_OPT_KEYS: &[&str] = &[
     "mode",
@@ -243,7 +196,7 @@ const AGENT_SESSION_METADATA_OPT_KEYS: &[&str] = &["metadata"];
     effects = [],
     sig = "agent_session_open(id?: string, opts?: dict) -> string",
     category = "agent.session",
-    doc = "Open or create a first-class agent session. opts may carry workspace_anchor and workspace_policy."
+    doc = "Open or create a first-class agent session. opts may carry workspace_anchor, workspace_policy, and parent with an optional actor to open a delegated child whose actor chain gains that actor."
 )]
 fn agent_session_open_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let id = arg_string_opt(args, 0, "agent_session_open", "id")?;
@@ -252,14 +205,7 @@ fn agent_session_open_builtin(args: &[VmValue], _out: &mut String) -> Result<VmV
         Some(VmValue::Dict(opts)) => opts.as_ref().clone(),
         _ => return Err(err("agent_session_open: `opts` must be a dict or nil")),
     };
-    for key in opts.keys() {
-        if !AGENT_SESSION_OPEN_OPT_KEYS.contains(&key.as_str()) {
-            let expected = AGENT_SESSION_OPEN_OPT_KEYS.join(", ");
-            return Err(err(format!(
-                "agent_session_open: unknown option key '{key}' (expected one of: {expected})"
-            )));
-        }
-    }
+    reject_unknown_opts(&opts, "agent_session_open", AGENT_SESSION_OPEN_OPT_KEYS)?;
     let workspace_policy = match opts.get("workspace_policy") {
         None | Some(VmValue::Nil) => None,
         Some(value) => Some(
@@ -282,7 +228,9 @@ fn agent_session_open_builtin(args: &[VmValue], _out: &mut String) -> Result<VmV
             .map_err(|message| err(format!("agent_session_open: {message}")))?,
         ),
     };
-    let resolved = agent_sessions::open_or_create(id)
+    let parent = opt_string(&opts, "agent_session_open", "parent")?;
+    let actor = opt_string(&opts, "agent_session_open", "actor")?;
+    let resolved = agent_sessions::open_session(id, parent.as_deref(), actor.as_deref())
         .map_err(|error| err(format!("agent_session_open: {error}")))?;
     if let Some(policy) = workspace_policy {
         agent_sessions::set_workspace_policy(&resolved, policy)
@@ -292,7 +240,7 @@ fn agent_session_open_builtin(args: &[VmValue], _out: &mut String) -> Result<VmV
         agent_sessions::set_workspace_anchor(&resolved, Some(anchor))
             .map_err(|message| err(format!("agent_session_open: {message}")))?;
     }
-    Ok(VmValue::String(arcstr::ArcStr::from(resolved)))
+    Ok(VmValue::string(resolved))
 }
 
 #[harn_builtin(
@@ -475,7 +423,7 @@ fn agent_session_list_roots_builtin(
     exposure = "runtime_internal",
     effects = [],
     sig = "agent_session_exists(id: string) -> bool",
-    category = "agent.session",
+    read_only_preparation = true, category = "agent.session",
     doc = "Return whether an agent session exists."
 )]
 fn agent_session_exists_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
@@ -529,22 +477,22 @@ fn agent_session_ancestry_builtin(args: &[VmValue], _out: &mut String) -> Result
             crate::value::intern_key("parent_id"),
             ancestry
                 .parent_id
-                .map(|value| VmValue::String(arcstr::ArcStr::from(value)))
+                .map(VmValue::string)
                 .unwrap_or(VmValue::Nil),
         ),
         (
             crate::value::intern_key("child_ids"),
-            VmValue::List(std::sync::Arc::new(
+            VmValue::list(
                 ancestry
                     .child_ids
                     .into_iter()
-                    .map(|value| VmValue::String(arcstr::ArcStr::from(value)))
+                    .map(VmValue::string)
                     .collect(),
-            )),
+            ),
         ),
         (
             crate::value::intern_key("root_id"),
-            VmValue::String(arcstr::ArcStr::from(ancestry.root_id)),
+            VmValue::string(ancestry.root_id),
         ),
     ])))
 }
@@ -563,7 +511,7 @@ fn agent_session_current_id_builtin(
     _out: &mut String,
 ) -> Result<VmValue, VmError> {
     Ok(agent_sessions::current_session_id()
-        .map(|id| VmValue::String(arcstr::ArcStr::from(id)))
+        .map(VmValue::string)
         .unwrap_or(VmValue::Nil))
 }
 
@@ -737,7 +685,7 @@ fn agent_session_tool_format_builtin(
         )));
     }
     Ok(agent_sessions::tool_format(&id)
-        .map(|value| VmValue::String(arcstr::ArcStr::from(value)))
+        .map(VmValue::string)
         .unwrap_or(VmValue::Nil))
 }
 
@@ -759,7 +707,7 @@ fn agent_session_system_prompt_builtin(
         )));
     }
     Ok(agent_sessions::system_prompt(&id)
-        .map(|value| VmValue::String(arcstr::ArcStr::from(value)))
+        .map(VmValue::string)
         .unwrap_or(VmValue::Nil))
 }
 
@@ -924,7 +872,7 @@ fn agent_session_fork_builtin(args: &[VmValue], _out: &mut String) -> Result<VmV
     match agent_sessions::fork(&src, dst)
         .map_err(|error| err(format!("agent_session_fork: {error}")))?
     {
-        Some(new_id) => Ok(VmValue::String(arcstr::ArcStr::from(new_id))),
+        Some(new_id) => Ok(VmValue::string(new_id)),
         None => Err(err(format!(
             "agent_session_fork: failed to fork session '{src}'"
         ))),
@@ -953,7 +901,7 @@ fn agent_session_fork_at_builtin(args: &[VmValue], _out: &mut String) -> Result<
     match agent_sessions::fork_at(&src, keep_first as usize, dst)
         .map_err(|error| err(format!("agent_session_fork_at: {error}")))?
     {
-        Some(new_id) => Ok(VmValue::String(arcstr::ArcStr::from(new_id))),
+        Some(new_id) => Ok(VmValue::string(new_id)),
         None => Err(err(format!(
             "agent_session_fork_at: failed to fork session '{src}'"
         ))),
@@ -1339,18 +1287,15 @@ fn agent_session_drain_inbox_builtin(
         .into_iter()
         .map(|entry| {
             let mut dict = crate::value::DictMap::new();
-            dict.insert(
-                crate::value::intern_key("sequence"),
-                VmValue::Int(entry.sequence as i64),
-            );
+            dict.put_int("sequence", entry.sequence as i64);
             dict.put_str("kind", entry.kind);
             dict.put_str("content", entry.content);
             dict.put_str("source", entry.source);
-            dict.insert(crate::value::intern_key("ts_ms"), VmValue::Int(entry.ts_ms));
+            dict.put_int("ts_ms", entry.ts_ms);
             VmValue::dict(dict)
         })
         .collect::<Vec<_>>();
-    Ok(VmValue::List(std::sync::Arc::new(entries)))
+    Ok(VmValue::list(entries))
 }
 
 const SEED_FROM_JSONL_OPT_KEYS: &[&str] = &[
@@ -1770,13 +1715,7 @@ async fn cancel_in_flight_tool_call_builtin(
     let mut result = crate::value::DictMap::new();
     result.put_str("status", final_status);
     result.put_str("call_id", call_id);
-    result.insert(
-        crate::value::intern_key("tool"),
-        outcome
-            .tool_name
-            .map(|name| VmValue::String(arcstr::ArcStr::from(name)))
-            .unwrap_or(VmValue::Nil),
-    );
+    result.put_nullable_str("tool", outcome.tool_name);
     result.put_str("reason", reason);
     Ok(VmValue::dict(result))
 }

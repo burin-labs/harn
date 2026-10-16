@@ -16,7 +16,11 @@ pub type GitHubApiAdapters = {request: fn(string) -> GitHubApiAttempt, wait: fn(
 
 const DEFAULT_RETRY_POLICY: GitHubApiRetryPolicy = {max_attempts: 3, delay_ms: 1000}
 
-/** Classify only known transport failures as retryable. */
+/**
+ * Classify only known transport failures as retryable. "stream error: stream ID"
+ * is an HTTP/2 stream the server reset, e.g. "stream ID 1; CANCEL; received from peer";
+ * "(HTTP 502)" is how gh itself reports a gateway error.
+ */
 pub fn github_api_failure_kind(attempt: GitHubApiAttempt) -> GitHubApiFailureKind {
   if attempt.timed_out {
     return "transient_transport"
@@ -27,15 +31,22 @@ pub fn github_api_failure_kind(attempt: GitHubApiAttempt) -> GitHubApiFailureKin
     || detail.contains("connection reset")
     || detail.contains("connection timed out")
     || detail.contains("unexpected eof")
+    || detail.contains("stream error: stream id")
     || detail.contains("temporarily unavailable")
     || detail.contains("502 bad gateway")
     || detail.contains("503 service unavailable")
-    || detail.contains("504 gateway timeout") {
+    || detail.contains("504 gateway timeout")
+    || detail.contains("(http 502)")
+    || detail.contains("(http 503)")
+    || detail.contains("(http 504)")
+    || regex_match("(?m)^gh: http (502|503|504)\\r?$", detail.trim()) != nil {
     return "transient_transport"
   }
   return "command"
 }
 
+// gh can omit the reason phrase and parentheses. Match the complete
+// status line so a neighbouring status such as 5030 is not retryable.
 /** Run one read-only GitHub API request with bounded transport recovery. */
 pub fn github_api_json_with_retry(
   adapters: GitHubApiAdapters,

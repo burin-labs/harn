@@ -217,6 +217,7 @@ pub struct WebhookIntakeRequest {
 }
 
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum WebhookIntakeError {
     Config(String),
     UnknownIntake(String),

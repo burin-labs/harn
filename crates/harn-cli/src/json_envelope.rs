@@ -376,7 +376,13 @@ pub fn catalog() -> Vec<SchemaEntry> {
             command: "test --json-out",
             schema_version: crate::test_report::USER_TEST_REPORT_SCHEMA_VERSION,
             description:
-                "User-test report with typed timeout, per-case and aggregate phases, module attribution, and duration distribution.",
+                "User-test report with counted per-case VM work, typed timeout, per-case and aggregate phases, module attribution, and duration distribution.",
+            schema_json: None,
+        },
+        SchemaEntry {
+            command: "test --verify-shards",
+            schema_version: crate::test_shard_coverage::SCHEMA_VERSION,
+            description: "Source-bound complete shard inventory, observed coverage, missing and duplicate cases, and failing names.",
             schema_json: None,
         },
         SchemaEntry {
@@ -476,7 +482,7 @@ pub fn catalog() -> Vec<SchemaEntry> {
             command: "mcp presets",
             schema_version: crate::commands::mcp::presets::MCP_PRESETS_SCHEMA_VERSION,
             description:
-                "Canonical catalog of well-known MCP server presets (Notion, Linear, GitHub, filesystem): id, transport, command/url template, auth kind, and required placeholders.",
+                "Canonical catalog of well-known MCP server presets (Linear, GitHub, filesystem, and others): id, transport, command/url template, auth kind, and required placeholders.",
             schema_json: None,
         },
     ]

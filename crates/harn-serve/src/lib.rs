@@ -9,6 +9,14 @@ mod dispatch_environment;
 pub mod embed;
 mod error;
 mod exports;
+
+/// Package-backed outbound credential discovery shared with the Harn CLI.
+/// Keep the returned value alive through grant selection and initialization
+/// so its immutable package generation remains leased.
+pub use harn_package::{
+    try_load_provider_connectors, try_load_root_provider_connectors, PackageError,
+    ResolvedProviderConnectors,
+};
 #[cfg(feature = "hostlib-full")]
 mod harn_reference_resolver;
 pub mod http_codec;
@@ -24,7 +32,6 @@ pub mod sessions;
 pub mod streaming;
 pub mod tls;
 pub mod transport;
-mod vm_thread;
 pub mod ws;
 
 /// Enter Harn hostlib's private process-guardian mode, when requested.
@@ -58,24 +65,27 @@ pub(crate) use adapter::DispatchRuntime;
 pub use adapter::{AdapterDescriptor, TransportAdapter};
 pub use adapters::a2a::{A2aHttpServeOptions, A2aServer, A2aServerConfig, A2A_PROTOCOL_VERSION};
 pub use adapters::acp::{
-    acp_persisted_session_item, resolve_acp_session_project_root, run_acp_channel_server,
-    run_acp_channel_server_with_handle, run_acp_server, run_acp_websocket_server, AcpChannelHandle,
-    AcpContentBlock, AcpEmbeddedResource, AcpHarnMeta, AcpJsonRpcError, AcpJsonRpcErrorResponse,
-    AcpJsonRpcId, AcpJsonRpcRequest, AcpJsonRpcResponse, AcpMeta, AcpOutput, AcpProfileConfig,
-    AcpPromptErrorData, AcpPromptErrorSchema, AcpRuntimeConfigurator, AcpSandboxConfig, AcpServer,
-    AcpServerConfig, AcpSessionCancelToolCallParams, AcpSessionIdParams, AcpSessionInjectContent,
-    AcpSessionInjectMode, AcpSessionInjectParams, AcpSessionMessageIdParams, AcpSessionNewParams,
-    AcpSessionProjectRootError, AcpSessionPromptParams, AcpSessionPromptResult,
-    AcpSessionReplaceInjectParams, AcpSessionRestoreResult, AcpWebSocketServeOptions,
-    NoopAcpRuntimeConfigurator, ACP_METHOD_INITIALIZE, ACP_METHOD_SESSION_CANCEL,
-    ACP_METHOD_SESSION_CANCEL_TOOL_CALL, ACP_METHOD_SESSION_CLOSE, ACP_METHOD_SESSION_INJECT,
-    ACP_METHOD_SESSION_LOAD, ACP_METHOD_SESSION_NEW, ACP_METHOD_SESSION_PENDING_INJECTIONS,
-    ACP_METHOD_SESSION_PROMPT, ACP_METHOD_SESSION_REPLACE_INJECT, ACP_METHOD_SESSION_RESUME,
-    ACP_METHOD_SESSION_REVOKE_INJECT, ACP_PROMPT_ERROR_DATA_SCHEMA,
+    acp_persisted_session_item, confine_acp_server_process, resolve_acp_session_project_root,
+    run_acp_channel_server, run_acp_channel_server_with_handle, run_acp_server,
+    run_acp_websocket_server, AcpChannelHandle, AcpContentBlock, AcpEmbeddedResource, AcpHarnMeta,
+    AcpJsonRpcError, AcpJsonRpcErrorResponse, AcpJsonRpcId, AcpJsonRpcRequest, AcpJsonRpcResponse,
+    AcpMeta, AcpOutput, AcpProfileConfig, AcpPromptErrorData, AcpPromptErrorSchema,
+    AcpRuntimeConfigurator, AcpSandboxConfig, AcpServer, AcpServerConfig, AcpServerConfinement,
+    AcpSessionCancelToolCallParams, AcpSessionEnvironmentConfig, AcpSessionIdParams,
+    AcpSessionInjectContent, AcpSessionInjectMode, AcpSessionInjectParams, AcpSessionLoadParams,
+    AcpSessionMessageIdParams, AcpSessionNewParams, AcpSessionProjectRootError,
+    AcpSessionPromptParams, AcpSessionPromptResult, AcpSessionReplaceInjectParams,
+    AcpSessionRestoreResult, AcpWebSocketServeOptions, NoopAcpRuntimeConfigurator,
+    ACP_METHOD_INITIALIZE, ACP_METHOD_SESSION_CANCEL, ACP_METHOD_SESSION_CANCEL_TOOL_CALL,
+    ACP_METHOD_SESSION_CLOSE, ACP_METHOD_SESSION_INJECT, ACP_METHOD_SESSION_LOAD,
+    ACP_METHOD_SESSION_NEW, ACP_METHOD_SESSION_PENDING_INJECTIONS, ACP_METHOD_SESSION_PROMPT,
+    ACP_METHOD_SESSION_REPLACE_INJECT, ACP_METHOD_SESSION_RESUME, ACP_METHOD_SESSION_REVOKE_INJECT,
+    ACP_PROMPT_ERROR_DATA_SCHEMA,
 };
 pub use adapters::api::{ApiHttpServeOptions, ApiServer, ApiServerConfig};
 pub use adapters::mcp::{
-    McpHttpServeOptions, McpServer, McpServerConfig, McpStdioServer, MCP_PROTOCOL_VERSION,
+    McpHttpServeOptions, McpScriptReloader, McpScriptRuntime, McpServer, McpServerConfig,
+    McpStdioServer, MCP_PROTOCOL_VERSION,
 };
 pub use adapters::site::{
     SiteAuth, SiteAuthContext, SiteAuthOutcome, SiteHttpServeOptions, SiteServer, SiteServerConfig,

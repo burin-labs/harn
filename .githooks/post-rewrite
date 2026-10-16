@@ -5,14 +5,11 @@
 #
 # Why this hook exists:
 #   `spec/HARN_SPEC.md` and `docs/src/language-spec.md` are both generated
-#   from the per-chapter sources in `spec/chapters/`. The repo configures a
-#   custom merge driver `merge.harn-generated.driver = true` (see
-#   scripts/configure_merge_drivers.sh) that silently keeps the current side
-#   of the merge instead of combining both. That works during plain merges
-#   where the user regenerates afterwards, but during a rebase it silently
-#   drops the author's regenerated files — the chapter sources are preserved
-#   (they have their own 3-way merge), but the generated copies revert to the
-#   upstream version. CI then fails on `make check-language-spec`.
+#   from the per-chapter sources in `spec/chapters/`. Both mirrors are marked
+#   `-merge` in .gitattributes, so a rebase that meets a concurrent spec edit
+#   stops on a conflict instead of combining generated text line by line. The
+#   chapter sources merge normally, and the resolved mirror has to be
+#   regenerated from them, or CI fails on `make check-language-spec`.
 #
 # What this does:
 #   When the most recent rewrite touched a `spec/chapters/*.md` source,

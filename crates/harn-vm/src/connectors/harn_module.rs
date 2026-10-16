@@ -21,7 +21,7 @@ use crate::stdlib::register_vm_stdlib;
 #[cfg(test)]
 use crate::triggers::dispatcher::InboxEnvelope;
 use crate::triggers::test_util::clock;
-use crate::value::{ErrorCategory, VmClosure, VmError, VmValue};
+use crate::value::{VmClosure, VmValue};
 use crate::vm::Vm;
 use crate::{
     postprocess_normalized_event, redact_headers, ClientError, Connector, ConnectorClient,
@@ -33,7 +33,9 @@ use crate::{
 
 pub mod abi;
 mod contract;
+mod errors;
 pub use contract::{load_contract, HarnConnectorContract};
+use errors::{connector_error_to_client, vm_error_to_connector, vm_error_to_connector_for_export};
 
 thread_local! {
     static ACTIVE_HARN_CONNECTOR_CTX: RefCell<Vec<ConnectorCtx>> = const { RefCell::new(Vec::new()) };
@@ -317,9 +319,8 @@ impl HarnConnectorWorker {
     ) -> Result<Arc<Self>, ConnectorError> {
         let (tx, rx) = mpsc::channel();
         let run = crate::egress::bind_policy_context(move || run_worker_loop(module_path, rx));
-        let join = std::thread::Builder::new()
+        let join = crate::runtime_stack::builder()
             .name(format!("harn-connector-{}", provider_id.as_str()))
-            .stack_size(crate::RUNTIME_STACK_SIZE)
             .spawn(run)
             .map_err(|error| ConnectorError::HarnRuntime(error.to_string()))?;
         Ok(Arc::new(Self {
@@ -783,11 +784,11 @@ fn parse_harn_normalized_event(
         &normalized.headers.unwrap_or_else(|| raw.headers.clone()),
         &HeaderRedactionPolicy::default(),
     );
-    let provider_payload = ProviderPayload::Extension(crate::ExtensionProviderPayload {
-        provider: provider_id.as_str().to_string(),
-        schema_name: payload_schema.harn_schema_name.clone(),
-        raw: normalized.payload,
-    });
+    let provider_payload = ProviderPayload::extension(
+        provider_id.as_str(),
+        &payload_schema.harn_schema_name,
+        normalized.payload,
+    );
     Ok(TriggerEvent {
         id: TriggerEventId::new(),
         provider: provider_id.clone(),
@@ -858,7 +859,7 @@ async fn load_module_runtime(
     // this module's own import resolution, so keeping the thread-local pinned
     // is purely a caller-facing concern.
     let _source_dir_guard = crate::stdlib::process::SourceDirGuard::capture();
-    let mut base_vm = Vm::new();
+    let mut base_vm = crate::new_vm();
     register_vm_stdlib(&mut base_vm);
     let store_base = module_path.parent().unwrap_or_else(|| Path::new("."));
     crate::store::register_store_builtins(&mut base_vm, store_base);
@@ -977,50 +978,6 @@ impl Drop for ActiveHarnConnectorCtxGuard {
         ACTIVE_HARN_CONNECTOR_CTX.with(|slot| {
             slot.borrow_mut().pop();
         });
-    }
-}
-
-fn vm_error_to_connector(error: VmError) -> ConnectorError {
-    ConnectorError::HarnRuntime(vm_error_message(error))
-}
-
-fn vm_error_to_connector_for_export(export: &str, error: VmError) -> ConnectorError {
-    match &error {
-        VmError::CategorizedError {
-            category: ErrorCategory::ToolRejected,
-            message,
-        } => ConnectorError::HarnRuntime(format!(
-            "connector export '{export}' violated effect policy: {message}"
-        )),
-        _ => vm_error_to_connector(error),
-    }
-}
-
-fn connector_error_to_client(error: ConnectorError) -> ClientError {
-    match error {
-        ConnectorError::HarnRuntime(message) => client_error_from_message(message),
-        other => ClientError::Other(other.to_string()),
-    }
-}
-
-fn client_error_from_message(message: String) -> ClientError {
-    if let Some(detail) = message.strip_prefix("method_not_found:") {
-        return ClientError::MethodNotFound(detail.trim().to_string());
-    }
-    if let Some(detail) = message.strip_prefix("invalid_args:") {
-        return ClientError::InvalidArgs(detail.trim().to_string());
-    }
-    if let Some(detail) = message.strip_prefix("rate_limited:") {
-        return ClientError::RateLimited(detail.trim().to_string());
-    }
-    ClientError::Other(message)
-}
-
-fn vm_error_message(error: VmError) -> String {
-    match error {
-        VmError::Thrown(VmValue::String(message)) => message.to_string(),
-        VmError::Thrown(value) => vm_value_to_json(&value).to_string(),
-        other => other.to_string(),
     }
 }
 
@@ -1384,11 +1341,11 @@ fn trigger_event_from_normalized(
     let tenant_id = normalized.tenant_id.map(TenantId::new);
     let source_headers = normalized.headers.unwrap_or_default();
     let headers = redact_headers(&source_headers, &HeaderRedactionPolicy::default());
-    let provider_payload = ProviderPayload::Extension(crate::ExtensionProviderPayload {
-        provider: provider_id.as_str().to_string(),
-        schema_name: payload_schema.harn_schema_name.clone(),
-        raw: normalized.payload,
-    });
+    let provider_payload = ProviderPayload::extension(
+        provider_id.as_str(),
+        &payload_schema.harn_schema_name,
+        normalized.payload,
+    );
     Ok(TriggerEvent {
         id: TriggerEventId::new(),
         provider: provider_id.clone(),

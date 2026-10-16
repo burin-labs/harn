@@ -1,5 +1,6 @@
 // @harn-entrypoint-category agent.stdlib
 import { agent_emit_event } from "std/agent/state"
+import { agent_tool_handler_result } from "std/agent/tool_lifecycle"
 import { filter_nil, pick_keys } from "std/collections"
 import { ToolRegistry } from "std/tools"
 
@@ -207,7 +208,8 @@ fn __subagent_pause_tool(agent: HarnessAgent, args: dict) {
     throw "subagent_pause: reason is required"
   }
   __agent_lifecycle_tool_audit(agent, "subagent_pause", "parent", reason, handle)
-  return suspend_agent(agent, handle, reason, {initiator: "parent"})
+  const result = suspend_agent(agent, handle, reason, {initiator: "parent"})
+  return agent_tool_handler_result(to_string(result), result)
 }
 
 fn __subagent_resume_tool(agent: HarnessAgent, args: dict) {
@@ -220,7 +222,8 @@ fn __subagent_resume_tool(agent: HarnessAgent, args: dict) {
     throw "subagent_resume: continue_transcript must be a bool"
   }
   __agent_lifecycle_tool_audit(agent, "subagent_resume", "parent", "resume requested", handle)
-  return resume_agent(agent, handle, args?.input, continue_transcript)
+  const result = resume_agent(agent, handle, args?.input, continue_transcript)
+  return agent_tool_handler_result(to_string(result), result)
 }
 
 fn __subagent_stop_tool(agent: HarnessAgent, args: dict) {
@@ -237,7 +240,8 @@ fn __subagent_stop_tool(agent: HarnessAgent, args: dict) {
     reason = "parent requested stop"
   }
   __agent_lifecycle_tool_audit(agent, "subagent_stop", "parent", reason, handle)
-  return agent_stop(agent, handle, {graceful: graceful, reason: reason})
+  const result = agent_stop(agent, handle, {graceful: graceful, reason: reason})
+  return agent_tool_handler_result(to_string(result), result)
 }
 
 fn __agent_await_resumption_tool(_args: unknown) {
@@ -616,7 +620,7 @@ pub fn wait_agent<TWorker>(agents: HarnessAgent, worker_or_workers: TWorker) -> 
   if type_of(worker_or_workers) == "list" {
     let results = []
     for item in worker_or_workers {
-      results = results.appending(wait_agent(agents, item))
+      results.push(wait_agent(agents, item))
     }
     return results
   }
@@ -735,7 +739,7 @@ fn __sub_agent_string_list(value: list?, label: string) {
     }
     const text = trim(item)
     if text != "" && !contains(out, text) {
-      out = out.appending(text)
+      out.push(text)
     }
   }
   return out
@@ -894,14 +898,14 @@ fn __fanout_chunks(items: list, width: int) {
   let chunks = []
   let current = []
   for item in items {
-    current = current.appending(item)
+    current.push(item)
     if len(current) >= size {
-      chunks = chunks.appending(current)
+      chunks.push(current)
       current = []
     }
   }
   if len(current) > 0 {
-    chunks = chunks.appending(current)
+    chunks.push(current)
   }
   return chunks
 }
@@ -1005,7 +1009,7 @@ pub fn agent_fanout(harness: Harness, requests: list, options: any = nil) {
   let normalized = []
   let index = 0
   for entry in requests {
-    normalized = normalized.appending(__fanout_normalize_request(entry, index))
+    normalized.push(__fanout_normalize_request(entry, index))
     index = index + 1
   }
   let results = []
@@ -1033,12 +1037,12 @@ pub fn agent_fanout(harness: Harness, requests: list, options: any = nil) {
       } catch (spawn_error) {
         {spawned: false, error: spawn_error}
       }
-      outcomes = outcomes.appending(outcome)
+      outcomes.push(outcome)
     }
     let live_handles = []
     for outcome in outcomes {
       if outcome.spawned {
-        live_handles = live_handles.appending(outcome.handle)
+        live_handles.push(outcome.handle)
       }
     }
     const waited = wait_agent(harness.agent, live_handles)
@@ -1055,7 +1059,7 @@ pub fn agent_fanout(harness: Harness, requests: list, options: any = nil) {
       } else {
         summary = __fanout_spawn_error_summary(outcome.error)
       }
-      results = results.appending(__fanout_result(request, base + offset, summary))
+      results.push(__fanout_result(request, base + offset, summary))
       offset = offset + 1
     }
     base = base + len(wave)

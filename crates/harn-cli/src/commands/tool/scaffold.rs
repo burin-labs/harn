@@ -106,9 +106,8 @@ mod tests {
         let temp = tempfile::tempdir().expect("tempdir");
         let destination = temp.path().join("example-tool");
         let destination_arg = destination.display().to_string();
-        let result = std::thread::Builder::new()
+        let result = harn_parser::runtime_stack::builder()
             .name("typed-tool-scaffold".to_string())
-            .stack_size(crate::CLI_RUNTIME_STACK_SIZE)
             .spawn(move || {
                 let runtime = tokio::runtime::Builder::new_current_thread()
                     .enable_all()

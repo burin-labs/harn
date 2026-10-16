@@ -24,7 +24,6 @@ use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process;
-use std::thread;
 
 use harn_vm::subtask::{scope_placement, SubtaskPlacement};
 use harn_vm::testbench::annotations::{
@@ -43,7 +42,6 @@ use crate::cli::{
     TestBenchRunArgs, TestBenchValidateAnnotationsArgs,
 };
 use crate::commands::run::{execute_run, CliLlmMockMode, RunOutcome, RunProfileOptions};
-use crate::CLI_RUNTIME_STACK_SIZE;
 
 /// Default starting point for `--clock paused` runs. Picked to be
 /// stable, RFC-3339-friendly, and after every prerequisite Y2K38
@@ -133,9 +131,8 @@ async fn run_with_des_runtime(
     llm_mode: CliLlmMockMode,
 ) -> RunOutcome {
     let (tx, rx) = std::sync::mpsc::channel();
-    thread::Builder::new()
+    harn_parser::runtime_stack::builder()
         .name("harn-des".to_string())
-        .stack_size(CLI_RUNTIME_STACK_SIZE)
         .spawn(move || {
             let rt = tokio::runtime::Builder::new_current_thread()
                 .enable_all()

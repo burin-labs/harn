@@ -580,9 +580,9 @@ impl ChannelContext {
     fn current(ctx: Option<&crate::vm::AsyncBuiltinCtx>) -> Self {
         let mut context = Self::default();
         if let Some(vm) = ctx.map(crate::vm::AsyncBuiltinCtx::child_vm) {
-            context.task_id = Some(vm.runtime_context.task_id.clone());
-            context.root_task_id = Some(vm.runtime_context.root_task_id.clone());
-            context.scope_id = vm.runtime_context.scope_id.clone();
+            context.task_id = Some(vm.runtime_context().task_id.clone());
+            context.root_task_id = Some(vm.runtime_context().root_task_id.clone());
+            context.scope_id = vm.runtime_context().scope_id.clone();
             if let VmValue::Dict(values) = crate::runtime_context::runtime_context_value(&vm) {
                 context.workflow_id = dict_string(&values, "workflow_id");
                 context.run_id = dict_string(&values, "run_id");
@@ -1501,7 +1501,7 @@ fn emit_channel_transcript_event(kind: &'static str, payload: serde_json::Value)
     };
     let event = LogEvent::new(kind, payload);
     if tokio::runtime::Handle::try_current().is_ok() {
-        if let Ok(join) = std::thread::Builder::new()
+        if let Ok(join) = crate::runtime_stack::builder()
             .name("harn-channel-transcript".to_string())
             .spawn(move || {
                 let _ = futures::executor::block_on(log.append(&topic, event));

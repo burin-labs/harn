@@ -22,8 +22,11 @@
 #     32k state ceiling, because that is the bound a caller has to plan against
 #     and the one OpenRouter publishes for the route.
 #     https://docs.typesafe.ai/models, https://openrouter.ai/typesafe
-#   * Text and structured JSON only; no image, audio, or video input.
-#     https://docs.typesafe.ai/concepts/system-one
+#   * Text and structured JSON on Harn's evaluator. TypeSafe announced opt-in
+#     images, box questions (1.14 only), and 262k context on October 14.
+#     These require explicit experimental headers and assets and are not
+#     advertised as ordinary chat vision or larger default request limits.
+#     https://typesafe.ai/blog/jev-1-14
 #
 # `logical_model` and `equivalence_group` are shared so that cross-route
 # equivalence is visible to a human reading the catalog. They are NOT a
@@ -53,6 +56,99 @@ open_weight = false
 strengths = ["speed", "cheap"]
 availability = "unknown"
 row_kind = "snapshot"
+family = "typesafe-jev"
+lineage = "typesafe-jev-1"
+
+# Jev 1.14 shipped under jev-preview on October 14. As of October 15,
+# jev-latest still points at 1.13; the announcement plans to move it a week
+# after launch. No formal sunset was announced for either version.
+# https://docs.typesafe.ai/models
+[models."typesafe/jev-1.14.0"]
+name = "Jev 1.14.0 (TypeSafe)"
+provider = "typesafe"
+wire_model = "jev-1.14.0"
+logical_model = "typesafe-jev-1.14"
+equivalence_group = "typesafe-jev-1.14"
+operations = ["decision"]
+context_window = 32000
+pricing = { input_per_mtok = 0.042, output_per_mtok = 0.0 }
+tier = "small"
+open_weight = false
+availability = "unknown"
+row_kind = "snapshot"
+released = "2026-10-14"
+family = "typesafe-jev"
+lineage = "typesafe-jev-1"
+
+[models."typesafe/jev-preview"]
+name = "Jev Preview (TypeSafe)"
+provider = "typesafe"
+wire_model = "jev-preview"
+logical_model = "typesafe-jev-1.14"
+equivalence_group = "typesafe-jev-1.14"
+operations = ["decision"]
+context_window = 32000
+pricing = { input_per_mtok = 0.042, output_per_mtok = 0.0 }
+tier = "small"
+open_weight = false
+availability = "unknown"
+row_kind = "selector"
+current_snapshot = "typesafe/jev-1.14.0"
+family = "typesafe-jev"
+lineage = "typesafe-jev-1"
+
+# Vercel's October 15 model index exposes both immutable versions alongside
+# typesafe-ai/jev. Keep the generic selector's recorded 1.13 identity until
+# a live response proves its revision changed.
+[models."vercel/typesafe-ai/jev-1.13.0"]
+name = "Jev 1.13.0 (Vercel AI Gateway)"
+provider = "vercel_ai_gateway"
+availability = "unknown"
+wire_model = "typesafe-ai/jev-1.13.0"
+logical_model = "typesafe-jev-1.13"
+equivalence_group = "typesafe-jev-1.13"
+operations = ["decision"]
+context_window = 32000
+pricing = { input_per_mtok = 0.042, output_per_mtok = 0.0 }
+tier = "small"
+open_weight = false
+row_kind = "snapshot"
+family = "typesafe-jev"
+lineage = "typesafe-jev-1"
+
+[models."vercel/typesafe-ai/jev-1.14.0"]
+name = "Jev 1.14.0 (Vercel AI Gateway)"
+provider = "vercel_ai_gateway"
+availability = "unknown"
+wire_model = "typesafe-ai/jev-1.14.0"
+logical_model = "typesafe-jev-1.14"
+equivalence_group = "typesafe-jev-1.14"
+operations = ["decision"]
+context_window = 32000
+pricing = { input_per_mtok = 0.042, output_per_mtok = 0.0 }
+tier = "small"
+open_weight = false
+row_kind = "snapshot"
+released = "2026-10-14"
+family = "typesafe-jev"
+lineage = "typesafe-jev-1"
+
+# The decisions endpoint has a model-specific index; absence from the chat
+# /models list is not deprecation evidence for a decision-only route.
+# https://openrouter.ai/api/v1/models/typesafe/jev-1.14/endpoints
+[models."openrouter/typesafe/jev-1.14"]
+name = "Jev 1.14 (OpenRouter)"
+provider = "openrouter"
+wire_model = "typesafe/jev-1.14"
+logical_model = "typesafe-jev-1.14"
+equivalence_group = "typesafe-jev-1.14"
+operations = ["decision"]
+context_window = 32000
+pricing = { input_per_mtok = 0.042, output_per_mtok = 0.0 }
+tier = "small"
+open_weight = false
+row_kind = "snapshot"
+released = "2026-10-14"
 family = "typesafe-jev"
 lineage = "typesafe-jev-1"
 
@@ -126,14 +222,15 @@ lineage = "typesafe-jev-1"
 
 # OpenRouter moving selector. On 2026-09-26 a boolean question sent to
 # `~typesafe/jev-latest` on /api/alpha/decisions came back from
-# typesafe/jev-1.13-20260917. https://openrouter.ai/api/v1/models/~typesafe/jev-latest/endpoints
+# typesafe/jev-1.13-20260917. On 2026-10-15 it returned
+# typesafe/jev-1.14-20261014, ahead of the direct TypeSafe stable alias.
 [models."openrouter/typesafe/jev-latest"]
 name = "Jev Latest (OpenRouter)"
 blurb = "Follows TypeSafe's current Jev release through OpenRouter's alpha decisions endpoint."
 provider = "openrouter"
 wire_model = "~typesafe/jev-latest"
-logical_model = "typesafe-jev-1.13"
-equivalence_group = "typesafe-jev-1.13"
+logical_model = "typesafe-jev-1.14"
+equivalence_group = "typesafe-jev-1.14"
 served_variant = "openrouter"
 operations = ["decision"]
 context_window = 32000
@@ -142,6 +239,6 @@ tier = "small"
 open_weight = false
 strengths = ["speed", "cheap"]
 row_kind = "selector"
-current_snapshot = "openrouter/typesafe/jev-1.13"
+current_snapshot = "openrouter/typesafe/jev-1.14"
 family = "typesafe-jev"
 lineage = "typesafe-jev-1"

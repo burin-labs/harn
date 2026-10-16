@@ -18,9 +18,9 @@ use wait_timeout::ChildExt;
 
 use super::super::{
     evaluate_context_pack_suggestion_expectations, generate_context_pack_suggestions, new_id,
-    normalize_friction_events_json, now_unix_seconds_text, parse_json_value,
-    run_persona_eval_ladder, ContextPackSuggestionExpectation, ContextPackSuggestionOptions,
-    FrictionEvent,
+    normalize_friction_events_json, now_unix_seconds_text, parse_json_payload, parse_json_value,
+    payload_parse_error, run_persona_eval_ladder, ContextPackSuggestionExpectation,
+    ContextPackSuggestionOptions, FrictionEvent,
 };
 use super::diff::diff_run_records;
 use super::json::{clarifying_max_questions, clarifying_min_questions, normalize_question_text};
@@ -37,6 +37,7 @@ use super::types::{
 };
 use crate::value::{VmError, VmValue};
 
+use crate::orchestration::artifact_files::resolve_manifest_path;
 use ledger::eval_pack_manifest_model;
 pub use ledger::{
     eval_ledger_append_rows_report, eval_ledger_prior_commit_rows_report, eval_ledger_read_report,
@@ -47,7 +48,7 @@ use replay::*;
 pub use replay::{evaluate_run_against_fixture, evaluate_run_suite, replay_fixture_from_run};
 use report::*;
 
-const EVAL_LEDGER_ROW_SCHEMA: &str = "harn.eval.ledger.row.v1";
+const EVAL_LEDGER_ROW_SCHEMA: &str = "harn.eval.ledger.row.v2";
 const EVAL_LEDGER_RUN_STATE_SCHEMA: &str = "harn.eval.run-state.v1";
 const EVAL_LEDGER_RESUME_PLAN_SCHEMA: &str = "harn.eval.resume-plan.v1";
 const EVAL_LEDGER_ROW_KIND: &str = "eval.ledger.row";
@@ -97,7 +98,8 @@ pub struct EvalPackLiveVerifyOutcome {
     #[serde(alias = "wallTimeSeconds")]
     pub wall_time_seconds: f64,
     #[serde(alias = "costUsd")]
-    pub cost_usd: f64,
+    pub cost_usd: Option<f64>,
+    pub known_cost_usd: Option<f64>,
     #[serde(default, alias = "producedPaths")]
     pub produced_paths: Vec<String>,
     #[serde(default, alias = "toolCallSummary", alias = "tool_summary")]
@@ -192,8 +194,8 @@ pub fn normalize_eval_suite_manifest(value: &VmValue) -> Result<EvalSuiteManifes
 pub fn load_eval_suite_manifest(path: &Path) -> Result<EvalSuiteManifest, VmError> {
     let content = std::fs::read_to_string(path)
         .map_err(|e| VmError::Runtime(format!("failed to read eval suite manifest: {e}")))?;
-    let mut manifest: EvalSuiteManifest = serde_json::from_str(&content)
-        .map_err(|e| VmError::Runtime(format!("failed to parse eval suite manifest: {e}")))?;
+    let mut manifest: EvalSuiteManifest =
+        serde_json::from_str(&content).map_err(|_| payload_parse_error("eval suite manifest"))?;
     if manifest.base_dir.is_none() {
         manifest.base_dir = path.parent().map(|parent| parent.display().to_string());
     }
@@ -205,11 +207,9 @@ pub fn load_eval_pack_manifest(path: &Path) -> Result<EvalPackManifest, VmError>
         .map_err(|e| VmError::Runtime(format!("failed to read eval pack manifest: {e}")))?;
     let mut manifest: EvalPackManifest =
         if path.extension().and_then(|ext| ext.to_str()) == Some("json") {
-            serde_json::from_str(&content)
-                .map_err(|e| VmError::Runtime(format!("failed to parse eval pack JSON: {e}")))?
+            serde_json::from_str(&content).map_err(|_| payload_parse_error("eval pack JSON"))?
         } else {
-            toml::from_str(&content)
-                .map_err(|e| VmError::Runtime(format!("failed to parse eval pack TOML: {e}")))?
+            toml::from_str(&content).map_err(|_| payload_parse_error("eval pack TOML"))?
         };
     normalize_eval_pack_manifest(&mut manifest)?;
     if manifest.base_dir.is_none() {
@@ -603,8 +603,7 @@ fn render_split_validation_errors(report: &EvalPackSplitValidationReport) -> Vec
 fn load_replay_fixture(path: &Path) -> Result<ReplayFixture, VmError> {
     let content = std::fs::read_to_string(path)
         .map_err(|e| VmError::Runtime(format!("failed to read replay fixture: {e}")))?;
-    serde_json::from_str(&content)
-        .map_err(|e| VmError::Runtime(format!("failed to parse replay fixture: {e}")))
+    serde_json::from_str(&content).map_err(|_| payload_parse_error("replay fixture"))
 }
 
 fn load_run_record_from_fixture_ref(
@@ -612,8 +611,7 @@ fn load_run_record_from_fixture_ref(
     base_dir: Option<&Path>,
 ) -> Result<RunRecord, VmError> {
     if let Some(inline) = &fixture.inline {
-        let run: RunRecord = serde_json::from_value(inline.clone())
-            .map_err(|e| VmError::Runtime(format!("failed to parse inline run record: {e}")))?;
+        let run: RunRecord = parse_json_payload(inline.clone(), "inline run record")?;
         return Ok(run);
     }
     let path = fixture.path.as_deref().ok_or_else(|| {
@@ -630,8 +628,7 @@ fn load_replay_fixture_from_ref(
     base_dir: Option<&Path>,
 ) -> Result<ReplayFixture, VmError> {
     if let Some(inline) = &fixture.inline {
-        return serde_json::from_value(inline.clone())
-            .map_err(|e| VmError::Runtime(format!("failed to parse inline replay fixture: {e}")));
+        return parse_json_payload(inline.clone(), "inline replay fixture");
     }
     let path = fixture.path.as_deref().ok_or_else(|| {
         VmError::Runtime(format!(
@@ -640,17 +637,6 @@ fn load_replay_fixture_from_ref(
         ))
     })?;
     load_replay_fixture(&resolve_manifest_path(base_dir, path))
-}
-
-fn resolve_manifest_path(base_dir: Option<&Path>, path: &str) -> PathBuf {
-    let path_buf = PathBuf::from(path);
-    if path_buf.is_absolute() {
-        path_buf
-    } else if let Some(base_dir) = base_dir {
-        base_dir.join(path_buf)
-    } else {
-        path_buf
-    }
 }
 
 pub fn evaluate_run_suite_manifest(
@@ -1079,6 +1065,7 @@ fn evaluate_eval_pack_live_verify_trial(
         outcome.timed_out,
         outcome.wall_time_seconds,
         outcome.cost_usd,
+        outcome.known_cost_usd,
         failures,
         warnings,
         informational,
@@ -1158,10 +1145,8 @@ fn evaluate_eval_pack_run_trial(
             .as_ref()
             .map(|usage| usage.total_duration_ms as f64 / 1000.0)
             .unwrap_or_default(),
-        run.usage
-            .as_ref()
-            .map(|usage| usage.total_cost)
-            .unwrap_or_default(),
+        run.usage.as_ref().and_then(|usage| usage.cost_usd),
+        run.usage.as_ref().map(|usage| usage.known_cost_usd),
         failures,
         warnings,
         informational,
@@ -1211,7 +1196,8 @@ fn evaluate_eval_pack_friction_trial(
         events.len(),
         false,
         0.0,
-        0.0,
+        Some(0.0),
+        Some(0.0),
         failures,
         warnings,
         informational,

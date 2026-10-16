@@ -7,10 +7,12 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::{Arc, OnceLock, RwLock};
 
+use super::chat_wire::{apply_chat_wire_sources, ProviderChatWireSources};
 use super::*;
 
 static CONFIG: OnceLock<Arc<ProvidersConfig>> = OnceLock::new();
 static CONFIG_PATHS: OnceLock<Vec<PathBuf>> = OnceLock::new();
+static CONFIG_CHAT_WIRE_SOURCES: OnceLock<ProviderChatWireSources> = OnceLock::new();
 static RUNTIME_CATALOG_OVERLAY: OnceLock<RwLock<Option<ProvidersConfig>>> = OnceLock::new();
 
 /// Lowest-precedence external provider overlay supplied by an embedding host.
@@ -109,11 +111,9 @@ fn load_config_snapshot() -> &'static Arc<ProvidersConfig> {
         );
         let host_path = std::env::var(HOST_PROVIDERS_CONFIG_ENV).ok();
         let user_path = std::env::var("HARN_PROVIDERS_CONFIG").ok();
-        let home_path = should_load_home_config()
-            .then(dirs_or_home)
-            .flatten()
-            .map(|home| format!("{home}/.config/harn/providers.toml"));
-        let (config, paths) = load_external_config_layers(
+        let home_path =
+            user_providers_config_path().map(|path| path.to_string_lossy().into_owned());
+        let (config, paths, sources) = load_external_config_layers_with_sources(
             default_config(),
             host_path.as_deref(),
             user_path.as_deref(),
@@ -121,31 +121,69 @@ fn load_config_snapshot() -> &'static Arc<ProvidersConfig> {
             verbose_config_logging,
         );
         let _ = CONFIG_PATHS.set(paths);
+        let _ = CONFIG_CHAT_WIRE_SOURCES.set(sources);
         Arc::new(config)
     })
 }
 
 /// Merge the host layer and then the user-global layer. An explicit user path
 /// keeps the established fallback to the home file when it cannot be loaded.
+#[cfg(test)]
 pub(super) fn load_external_config_layers(
-    mut config: ProvidersConfig,
+    config: ProvidersConfig,
     host_path: Option<&str>,
     user_path: Option<&str>,
     home_path: Option<&str>,
     verbose: bool,
 ) -> (ProvidersConfig, Vec<PathBuf>) {
+    let (config, paths, _) =
+        load_external_config_layers_with_sources(config, host_path, user_path, home_path, verbose);
+    (config, paths)
+}
+
+fn load_external_config_layers_with_sources(
+    mut config: ProvidersConfig,
+    host_path: Option<&str>,
+    user_path: Option<&str>,
+    home_path: Option<&str>,
+    verbose: bool,
+) -> (ProvidersConfig, Vec<PathBuf>, ProviderChatWireSources) {
     let mut loaded_paths = Vec::new();
+    let mut sources = ProviderChatWireSources::new();
+    apply_chat_wire_sources(&mut sources, &config, ProviderConfigLayer::Embedded);
     if let Some(path) = host_path {
-        merge_external_config(&mut config, path, verbose, &mut loaded_paths);
+        merge_external_config(
+            &mut config,
+            path,
+            verbose,
+            &mut loaded_paths,
+            &mut sources,
+            ProviderConfigLayer::HostConfig { path: path.into() },
+        );
     }
-    let user_loaded = user_path
-        .is_some_and(|path| merge_external_config(&mut config, path, verbose, &mut loaded_paths));
+    let user_loaded = user_path.is_some_and(|path| {
+        merge_external_config(
+            &mut config,
+            path,
+            verbose,
+            &mut loaded_paths,
+            &mut sources,
+            ProviderConfigLayer::UserConfig { path: path.into() },
+        )
+    });
     if !user_loaded {
         if let Some(path) = home_path {
-            merge_external_config(&mut config, path, false, &mut loaded_paths);
+            merge_external_config(
+                &mut config,
+                path,
+                false,
+                &mut loaded_paths,
+                &mut sources,
+                ProviderConfigLayer::UserConfig { path: path.into() },
+            );
         }
     }
-    (config, loaded_paths)
+    (config, loaded_paths, sources)
 }
 
 fn merge_external_config(
@@ -153,11 +191,14 @@ fn merge_external_config(
     path: &str,
     verbose: bool,
     loaded_paths: &mut Vec<PathBuf>,
+    sources: &mut ProviderChatWireSources,
+    layer: ProviderConfigLayer,
 ) -> bool {
     let Some(overlay) = read_external_config(path, verbose) else {
         return false;
     };
     config.merge_from(&overlay);
+    apply_chat_wire_sources(sources, &overlay, layer);
     loaded_paths.push(PathBuf::from(path));
     true
 }
@@ -196,283 +237,14 @@ fn read_external_config(path: &str, verbose: bool) -> Option<ProvidersConfig> {
     }
 }
 
-fn should_load_home_config() -> bool {
-    // Unit tests should cover embedded defaults plus explicit overlays, not
-    // whichever provider file happens to exist on the developer machine.
-    !cfg!(test)
+/// `providers.toml` in the user configuration directory. The directory's one
+/// owner is [`crate::user_dirs::config_dir`]; the test environment points
+/// `XDG_CONFIG_HOME` at an empty directory, so tests never read a developer's
+/// provider overlay.
+pub fn user_providers_config_path() -> Option<std::path::PathBuf> {
+    crate::user_dirs::config_file("providers.toml")
 }
 
-/// Parse a provider/model catalog overlay in the same shape as
-/// `providers.toml` or `[llm]` package-manifest sections.
-pub fn parse_config_toml(src: &str) -> Result<ProvidersConfig, toml::de::Error> {
-    parse_config_toml_with_diagnostics(src).map(|parsed| parsed.config)
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ProviderConfigDiagnostic {
-    pub path: String,
-    pub message: String,
-}
-
-impl std::fmt::Display for ProviderConfigDiagnostic {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        if self.path.is_empty() {
-            write!(formatter, "{}", self.message)
-        } else {
-            write!(formatter, "{}: {}", self.path, self.message)
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct ParsedProvidersConfig {
-    pub config: ProvidersConfig,
-    pub diagnostics: Vec<ProviderConfigDiagnostic>,
-}
-
-/// Parse a provider/model catalog overlay and report keys the schema would
-/// otherwise silently ignore. Unknown model/provider fields usually mean a
-/// catalog migration was missed; keep serde as the schema source of truth
-/// instead of hand-maintaining duplicate top-level allowlists.
-pub fn parse_config_toml_with_diagnostics(
-    src: &str,
-) -> Result<ParsedProvidersConfig, toml::de::Error> {
-    let mut diagnostics = Vec::new();
-    let deserializer = toml::Deserializer::parse(src)?;
-    let config = serde_ignored::deserialize(deserializer, |path| {
-        diagnostics.push(unknown_field_diagnostic(path.to_string()));
-    })?;
-    diagnostics.extend(patch_model_unknown_field_diagnostics(src));
-    Ok(ParsedProvidersConfig {
-        config,
-        diagnostics,
-    })
-}
-
-fn unknown_field_diagnostic(path: String) -> ProviderConfigDiagnostic {
-    let hint = if path.ends_with(".fast_mode") || path == "fast_mode" {
-        " `fast_mode` was removed in v0.10.1; use `serving_tiers` with an explicit request knob instead."
-    } else {
-        ""
-    };
-    ProviderConfigDiagnostic {
-        path,
-        message: format!("unknown providers.toml field was ignored.{hint}"),
-    }
-}
-
-fn patch_model_unknown_field_diagnostics(src: &str) -> Vec<ProviderConfigDiagnostic> {
-    let Ok(value) = toml::from_str::<toml::Value>(src) else {
-        return Vec::new();
-    };
-    let Some(patch_models) = value
-        .get("patch")
-        .and_then(|patch| patch.get("models"))
-        .and_then(toml::Value::as_table)
-    else {
-        return Vec::new();
-    };
-    let mut diagnostics = Vec::new();
-    for (model_id, patch) in patch_models {
-        collect_model_patch_unknowns(
-            &format!("patch.models.{model_id}"),
-            patch,
-            model_patch_schema(),
-            &mut diagnostics,
-        );
-    }
-    diagnostics
-}
-
-fn collect_model_patch_unknowns(
-    path: &str,
-    value: &toml::Value,
-    schema: &PatchSchema,
-    diagnostics: &mut Vec<ProviderConfigDiagnostic>,
-) {
-    let Some(table) = value.as_table() else {
-        return;
-    };
-    for (key, child) in table {
-        if schema.freeform.contains(&key.as_str()) {
-            continue;
-        }
-        if let Some((_, nested)) = schema
-            .nested
-            .iter()
-            .find(|(nested_key, _)| *nested_key == key.as_str())
-        {
-            collect_model_patch_unknowns(&format!("{path}.{key}"), child, nested, diagnostics);
-            continue;
-        }
-        if schema.fields.contains(&key.as_str()) {
-            continue;
-        }
-        diagnostics.push(unknown_field_diagnostic(format!("{path}.{key}")));
-    }
-}
-
-struct PatchSchema {
-    fields: &'static [&'static str],
-    freeform: &'static [&'static str],
-    nested: &'static [(&'static str, PatchSchema)],
-}
-
-fn model_patch_schema() -> &'static PatchSchema {
-    static MODEL_PATCH_SCHEMA: PatchSchema = PatchSchema {
-        fields: &[
-            "name",
-            "operations",
-            "provider",
-            "context_window",
-            "logical_model",
-            "equivalence_group",
-            "served_variant",
-            "wire_model",
-            "api_dialect",
-            "rate_limits",
-            "performance",
-            "architecture",
-            "local_memory",
-            "runtime_context_window",
-            "stream_timeout",
-            "capabilities",
-            "pricing",
-            "deprecated",
-            "deprecation_note",
-            "sunset_date",
-            "superseded_by",
-            "serving_tiers",
-            "quality_tags",
-            "availability",
-            "tier",
-            "open_weight",
-            "strengths",
-            "benchmarks",
-            "family",
-            "lineage",
-            "complementary_with",
-            "avoid_as_reviewer_for",
-            "completion_review",
-            "released",
-            "row_kind",
-            "current_snapshot",
-            "embedding_dim",
-            "embedding_max_tokens",
-        ],
-        freeform: &["benchmarks"],
-        nested: &[
-            ("pricing", pricing_patch_schema()),
-            ("rate_limits", rate_limits_patch_schema()),
-            ("performance", performance_patch_schema()),
-            ("architecture", architecture_patch_schema()),
-            ("local_memory", local_memory_patch_schema()),
-            ("completion_review", completion_review_patch_schema()),
-        ],
-    };
-    &MODEL_PATCH_SCHEMA
-}
-
-const fn pricing_patch_schema() -> PatchSchema {
-    PatchSchema {
-        fields: &[
-            "input_per_mtok",
-            "output_per_mtok",
-            "cache_read_per_mtok",
-            "cache_write_per_mtok",
-            "input_token_bands",
-        ],
-        freeform: &[],
-        nested: &[],
-    }
-}
-
-const fn rate_limits_patch_schema() -> PatchSchema {
-    PatchSchema {
-        fields: &[
-            "rpm",
-            "rph",
-            "rpd",
-            "tpm",
-            "tph",
-            "tpd",
-            "input_tpm",
-            "output_tpm",
-            "concurrency",
-            "tier",
-            "source_url",
-            "last_verified",
-            "notes",
-        ],
-        freeform: &[],
-        nested: &[],
-    }
-}
-
-const fn performance_patch_schema() -> PatchSchema {
-    PatchSchema {
-        fields: &[
-            "observed_ttft_ms",
-            "output_tokens_per_sec",
-            "time_to_answer_s",
-            "source",
-            "source_url",
-            "last_verified",
-            "sample_size",
-            "notes",
-        ],
-        freeform: &[],
-        nested: &[],
-    }
-}
-
-const fn architecture_patch_schema() -> PatchSchema {
-    PatchSchema {
-        fields: &[
-            "parameter_count_b",
-            "active_parameter_count_b",
-            "moe",
-            "quantization",
-            "precision",
-            "license",
-            "tokenizer",
-            "knowledge_cutoff",
-            "source_url",
-            "last_verified",
-        ],
-        freeform: &[],
-        nested: &[],
-    }
-}
-
-const fn local_memory_patch_schema() -> PatchSchema {
-    PatchSchema {
-        fields: &[
-            "measured_resident_gib",
-            "measured_context_window",
-            "measured_cache_type",
-            "base_resident_gib",
-            "kv_cache_gib_per_1k_ctx",
-            "cache_type_multipliers",
-            "default_cache_type",
-            "safety_margin_gib",
-            "max_recommended_context",
-            "source_url",
-            "last_verified",
-            "notes",
-        ],
-        freeform: &["cache_type_multipliers"],
-        nested: &[],
-    }
-}
-
-const fn completion_review_patch_schema() -> PatchSchema {
-    PatchSchema {
-        fields: &["scrutiny", "max_judge_calls", "evidence"],
-        freeform: &[],
-        nested: &[],
-    }
-}
 /// Returns the highest-precedence loaded provider config path, if any.
 /// Returns `None` when built-in defaults are active.
 pub fn loaded_config_path() -> Option<std::path::PathBuf> {
@@ -484,6 +256,36 @@ pub fn loaded_config_paths() -> &'static [PathBuf] {
     // Force lazy init so CONFIG_PATHS is populated even when no file loads.
     let _ = load_config();
     CONFIG_PATHS.get().map(Vec::as_slice).unwrap_or_default()
+}
+
+/// Inspect the effective chat wire contract and the layers that selected it.
+/// Uses the already-loaded files, followed by the active runtime and execution
+/// overlays; no diagnostic reread can disagree with the cached serving config.
+pub fn provider_chat_wire_contract(provider: &str) -> Option<ProviderChatWireContract> {
+    let _ = load_config();
+    LLM_CONFIG_OVERRIDES_CONTEXT.with(|cell| {
+        let user = cell.borrow();
+        let runtime = runtime_catalog_overlay()
+            .read()
+            .expect("runtime catalog overlay poisoned");
+        let config =
+            effective_config_snapshot(load_config_snapshot(), runtime.as_ref(), user.as_ref());
+        let definition = config.providers.get(provider)?;
+        let mut sources = CONFIG_CHAT_WIRE_SOURCES
+            .get()
+            .and_then(|sources| sources.get(provider))
+            .cloned()
+            .unwrap_or_default();
+        for (overlay, layer) in [
+            (runtime.as_ref(), ProviderConfigLayer::RuntimeCatalog),
+            (user.as_ref(), ProviderConfigLayer::ExecutionOverride),
+        ] {
+            if let Some(definition) = overlay.and_then(|config| config.providers.get(provider)) {
+                sources.apply(definition, &layer);
+            }
+        }
+        Some(sources.contract(definition))
+    })
 }
 
 /// Install per-run provider config overlays. The overlay uses the same shape as
@@ -595,31 +397,6 @@ fn merge_config_overlays(
     merged
 }
 
-/// Provider config built purely from the compiled-in `EMBEDDED_PROVIDERS_TOML`
-/// snapshot, ignoring every ambient layer: the developer's
-/// `~/.config/harn/providers.toml`, `HARN_PROVIDERS_CONFIG`, the process
-/// runtime-catalog overlay, and thread-local user overrides.
-///
-/// This is the hermetic source of truth for *generating* the checked-in
-/// `spec/provider-catalog/*` artifacts. Artifact generation must be a pure
-/// function of the source tree so a developer's personal aliases/providers
-/// never leak into shipped artifacts (which then makes clean CI flag drift).
-/// Runtime catalog presentation must keep using [`effective_config`] /
-/// [`effective_config_with_user_overrides`], which legitimately reflect the
-/// host's live configuration.
-///
-/// An optional explicit overlay (e.g. a `--overlay` file named on the command
-/// line) is merged on top of the embedded base. Unlike the home file and env
-/// layers, that overlay is a declared, reproducible input rather than ambient
-/// machine state, so it is safe to honor while staying hermetic.
-pub fn embedded_config(explicit_overlay: Option<&ProvidersConfig>) -> ProvidersConfig {
-    let mut config = default_config();
-    if let Some(overlay) = explicit_overlay {
-        config.merge_from(overlay);
-    }
-    config
-}
-
 pub(crate) fn effective_config_with_user_overrides(
     user_overrides: Option<&ProvidersConfig>,
 ) -> ProvidersConfig {
@@ -632,15 +409,6 @@ pub(crate) fn effective_config_with_user_overrides(
 fn runtime_catalog_overlay() -> &'static RwLock<Option<ProvidersConfig>> {
     RUNTIME_CATALOG_OVERLAY.get_or_init(|| RwLock::new(None))
 }
-
-fn dirs_or_home() -> Option<String> {
-    crate::user_dirs::home_dir().map(|home| home.to_string_lossy().into_owned())
-}
-
-/// Embedded copy of generated `llm/providers.toml`, built from
-/// `llm/catalog_sources/**/*.toml` by `harn provider catalog generate`.
-/// Edit the fragments, not this generated snapshot or this string.
-const EMBEDDED_PROVIDERS_TOML: &str = include_str!("../llm/providers.toml");
 
 /// Parse the embedded generated `providers.toml` into the runtime
 /// `ProvidersConfig`.
@@ -656,8 +424,7 @@ const EMBEDDED_PROVIDERS_TOML: &str = include_str!("../llm/providers.toml");
 /// invariant violation that should fail every test, not silently
 /// degrade in production.
 pub(crate) fn default_config() -> ProvidersConfig {
-    parse_config_toml(EMBEDDED_PROVIDERS_TOML)
-        .expect("embedded providers.toml must parse — invariant checked by harn-vm tests")
+    harn_provider_catalog::config::packaged_config().clone()
 }
 
 #[cfg(test)]
@@ -670,6 +437,55 @@ pub(crate) fn merge_global_config(overlay: ProvidersConfig) -> ProvidersConfig {
 #[cfg(test)]
 mod snapshot_tests {
     use super::*;
+
+    #[test]
+    fn endpoint_only_user_layer_resets_host_adapter_and_its_source() {
+        let directory = tempfile::tempdir().unwrap();
+        let host = directory.path().join("host.toml");
+        let home = directory.path().join("home.toml");
+        std::fs::write(&host, "[providers.ollama]\nchat_endpoint = '/v1/chat/completions'\nchat_api_adapter = 'ollama_openai_compat'\n").unwrap();
+        std::fs::write(&home, "[providers.ollama]\nchat_endpoint = '/api/chat'\n").unwrap();
+        let (config, paths, sources) = load_external_config_layers_with_sources(
+            default_config(),
+            host.to_str(),
+            None,
+            home.to_str(),
+            false,
+        );
+        assert_eq!(paths, vec![host, home.clone()]);
+        let contract = sources["ollama"]
+            .clone()
+            .contract(&config.providers["ollama"]);
+        assert_eq!(contract.chat_endpoint, "/api/chat");
+        assert_eq!(contract.chat_api_adapter, ChatApiAdapter::ModelDefault);
+        let source = Some(ProviderConfigLayer::UserConfig {
+            path: home.to_string_lossy().into_owned(),
+        });
+        assert_eq!(contract.sources.chat_endpoint, source);
+        assert_eq!(contract.sources.chat_api_adapter, source);
+
+        // An unrelated later layer must preserve the measured wire contract.
+        std::fs::write(
+            &home,
+            "[providers.ollama]\nbase_url = 'http://localhost:11435'\n",
+        )
+        .unwrap();
+        let (config, _, sources) = load_external_config_layers_with_sources(
+            default_config(),
+            paths[0].to_str(),
+            None,
+            home.to_str(),
+            false,
+        );
+        assert_eq!(
+            config.providers["ollama"].chat_api_adapter,
+            Some(ChatApiAdapter::OllamaOpenAiCompat)
+        );
+        assert!(matches!(
+            sources["ollama"].chat_api_adapter,
+            Some(ProviderConfigLayer::HostConfig { .. })
+        ));
+    }
 
     fn config(default_provider: &str, qc_defaults: &[(&str, &str)]) -> ProvidersConfig {
         ProvidersConfig {

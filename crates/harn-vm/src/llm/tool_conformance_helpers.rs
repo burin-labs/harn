@@ -1,3 +1,4 @@
+use crate::value::VmDictExt;
 use std::collections::BTreeMap;
 
 use serde_json::{json, Value};
@@ -5,19 +6,35 @@ use serde_json::{json, Value};
 use super::TOOL_PROBE_TOOL_NAME;
 use crate::value::VmValue;
 
+pub(super) fn chat_url(
+    def: &crate::llm_config::ProviderDef,
+    base_url: &str,
+) -> Result<String, String> {
+    let endpoint = if def.chat_endpoint.trim().is_empty() {
+        "/v1/chat/completions"
+    } else {
+        def.chat_endpoint.as_str()
+    };
+    let url = if endpoint.starts_with("http://") || endpoint.starts_with("https://") {
+        endpoint.to_string()
+    } else if endpoint.starts_with('/') {
+        format!("{}{}", base_url.trim_end_matches('/'), endpoint)
+    } else {
+        format!("{}/{}", base_url.trim_end_matches('/'), endpoint)
+    };
+    reqwest::Url::parse(&url)
+        .map(|_| url.clone())
+        .map_err(|error| format!("invalid provider chat URL '{url}': {error}"))
+}
+
 pub(crate) fn apply_stream_transport_fields(
     provider: &str,
     model: &str,
     streaming: bool,
     body: &mut Value,
 ) {
-    let caps = crate::llm::capabilities::lookup(provider, model);
-    let dialect =
-        crate::llm::api::DialectContract::new(caps.message_wire_format, caps.live_endpoint_family);
-    let endpoint = crate::llm_config::provider_config(provider)
-        .map(|definition| definition.chat_endpoint)
-        .unwrap_or_default();
-    dialect.apply_stream_transport_fields(body, provider, &endpoint, streaming);
+    crate::llm::api::DialectContract::for_route(provider, model)
+        .apply_stream_transport_fields(body, provider, streaming);
 }
 
 pub(crate) fn aggregate_stream_text(text: &str, _provider: &str) -> Value {
@@ -192,17 +209,17 @@ pub(crate) fn probe_tool_registry() -> VmValue {
         vm_str("The marker value to echo."),
     );
     let mut params = BTreeMap::new();
-    params.insert("value".to_string(), VmValue::dict(value_param));
+    params.put("value", VmValue::dict(value_param));
     let tool = vm_dict(&[
         ("name", vm_str(TOOL_PROBE_TOOL_NAME)),
         ("description", vm_str("Echo the probe marker exactly.")),
         ("parameters", VmValue::dict(params)),
     ]);
-    vm_dict(&[("tools", VmValue::List(std::sync::Arc::new(vec![tool])))])
+    vm_dict(&[("tools", VmValue::list(vec![tool]))])
 }
 
 fn vm_str(value: &str) -> VmValue {
-    VmValue::String(arcstr::ArcStr::from(value))
+    VmValue::string(value)
 }
 
 fn vm_dict(pairs: &[(&str, VmValue)]) -> VmValue {

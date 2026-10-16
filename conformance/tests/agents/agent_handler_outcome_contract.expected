@@ -1,0 +1,11 @@
+helper handler reached
+helper false schema_validation
+mutable false schema_validation
+success handler reached
+success true nil
+failure false tool_error
+rejected false tool_rejected
+result_error false tool_error
+result_ok true nil
+nominal_error false tool_error
+nominal_ok true nil

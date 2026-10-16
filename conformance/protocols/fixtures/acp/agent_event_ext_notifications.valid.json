@@ -275,6 +275,22 @@
         "override": null,
         "reason": "repeated_verification_failures",
         "reasoning": "needs one more concrete action",
+        "requirementReport": {
+          "complete": false,
+          "pending_count": 1,
+          "pending_names": ["Reach the requested handler."],
+          "reported_count": 1,
+          "required_count": 1,
+          "rows": [{
+            "evidence_refs": [9],
+            "evidence_roles": ["deterministic_verification"],
+            "met": false,
+            "name": "Reach the requested handler.",
+            "requirement_id": "behavior",
+            "status": "unsupported"
+          }],
+          "schema": "harn.completion_requirement_report.v1"
+        },
         "sessionId": "session-1",
         "source": "deterministic",
         "terminalEvidencePreserved": null,
@@ -628,6 +644,36 @@
       "jsonrpc": "2.0",
       "method": "_harn/agentEvent",
       "params": {
+        "heuristics": {},
+        "iteration": null,
+        "kind": "session_health",
+        "rolling": {
+          "diagnostic_trend": null,
+          "edits_since_verification": null,
+          "last_stop_class": null,
+          "nonzero_command_exit_rate": null,
+          "prose_to_tool_balance": null,
+          "tool_call_success_rate": null,
+          "turn_wall_time": null
+        },
+        "schema_version": 1,
+        "sessionId": "session-1",
+        "session_id": "session-1",
+        "turn": {
+          "diagnostic_trend": null,
+          "edits_since_verification": null,
+          "last_stop_class": null,
+          "nonzero_command_exit_rate": null,
+          "prose_to_tool_balance": null,
+          "tool_call_success_rate": null,
+          "turn_wall_time": null
+        }
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "method": "_harn/agentEvent",
+      "params": {
         "iteration": 0,
         "kind": "purpose_label",
         "label": "Searching for GitHub issues",
@@ -635,6 +681,36 @@
         "source": "declared",
         "toolCallCount": 3,
         "toolCallIds": []
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "method": "_harn/agentEvent",
+      "params": {
+        "kind": "turn_phase_changed",
+        "phase": "generating",
+        "sessionId": "session-1"
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "method": "_harn/agentEvent",
+      "params": {
+        "candidate_reply": "candidate",
+        "kind": "turn_phase_changed",
+        "phase": "verifying",
+        "sessionId": "session-1"
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "method": "_harn/agentEvent",
+      "params": {
+        "kind": "turn_phase_changed",
+        "outcome": { "kind": "natural", "owner": "agent", "reason": "done" },
+        "phase": "terminal",
+        "reply": "final",
+        "sessionId": "session-1"
       }
     }
   ],

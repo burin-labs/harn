@@ -12,7 +12,13 @@ pub(crate) async fn run(args: TryArgs) {
         std::process::exit(1);
     }
 
-    let resolved = resolve_try_model();
+    let resolved = match resolve_try_model() {
+        Ok(resolved) => resolved,
+        Err(error) => {
+            eprintln!("{error}");
+            std::process::exit(1);
+        }
+    };
 
     let _max = ScopedEnvVar::set("HARN_TRY_MAX_ITERS", &args.max_iterations.to_string());
     let _provider = ScopedEnvVar::set("HARN_TRY_PROVIDER", &resolved.provider);
@@ -44,27 +50,30 @@ struct ResolvedTryModel {
     model: String,
 }
 
-fn resolve_try_model() -> ResolvedTryModel {
+fn resolve_try_model() -> Result<ResolvedTryModel, String> {
     if let Ok(provider) = std::env::var("HARN_LLM_PROVIDER") {
         let provider = provider.trim().to_string();
         if !provider.is_empty() && !provider.eq_ignore_ascii_case("auto") {
-            let model = std::env::var("HARN_LLM_MODEL")
-                .ok()
-                .map(|raw| harn_vm::llm_config::resolve_model(&raw).0)
-                .unwrap_or_else(|| harn_vm::llm_config::default_model_for_provider(&provider));
-            return ResolvedTryModel { provider, model };
+            let model = if let Ok(raw) = std::env::var("HARN_LLM_MODEL") {
+                harn_vm::llm_config::resolve_model(&raw).0
+            } else {
+                harn_vm::llm_config::default_model_for_provider(&provider)
+                    .map_err(|error| error.to_string())?
+            };
+            return Ok(ResolvedTryModel { provider, model });
         }
     }
 
     if let Ok(raw_model) = std::env::var("HARN_LLM_MODEL") {
         let resolved = harn_vm::llm_config::resolve_model_info(&raw_model);
-        return ResolvedTryModel {
+        return Ok(ResolvedTryModel {
             provider: resolved.provider,
             model: resolved.id,
-        };
+        });
     }
 
     let provider = harn_vm::llm_config::default_provider();
-    let model = harn_vm::llm_config::default_model_for_provider(&provider);
-    ResolvedTryModel { provider, model }
+    let model = harn_vm::llm_config::default_model_for_provider(&provider)
+        .map_err(|error| error.to_string())?;
+    Ok(ResolvedTryModel { provider, model })
 }

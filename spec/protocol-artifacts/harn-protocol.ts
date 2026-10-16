@@ -139,6 +139,8 @@ export const AGENT_TERMINAL_CLASSES = [
   "context_overflow",
   "provider_misconfigured",
   "provider_unavailable",
+  "provider_content_policy",
+  "provider_billing",
   "rate_limited",
   "timeout",
   "resource_busy",
@@ -147,6 +149,7 @@ export const AGENT_TERMINAL_CLASSES = [
   "agent_loop_protocol_failure",
   "parse_dropped",
   "generic_throw",
+  "managed_spend_paused",
 ] as const
 export type AgentTerminalClass = (typeof AGENT_TERMINAL_CLASSES)[number]
 
@@ -223,6 +226,8 @@ export const LLM_ERROR_REASONS = [
   "billing_limit",
   "output_budget_exhausted",
   "unknown",
+  "policy_denied",
+  "managed_spend_paused",
 ] as const
 export type LlmErrorReason = (typeof LLM_ERROR_REASONS)[number]
 
@@ -250,6 +255,7 @@ export const HARN_AGENT_EVENT_KINDS = [
   "host_tool_result",
   "input_guardrail_verdict",
   "iteration_end",
+  "session_health",
   "iteration_start",
   "judge_decision",
   "judge_started",
@@ -276,6 +282,7 @@ export const HARN_AGENT_EVENT_KINDS = [
   "tool_batch_disposition",
   "tool_call_audit",
   "tool_format_override",
+  "turn_phase_changed",
   "typed_checkpoint",
 ] as const
 export type HarnAgentEventKind = (typeof HARN_AGENT_EVENT_KINDS)[number]
@@ -647,6 +654,33 @@ export interface HarnExternalActionPolicyEvaluation {
   outcome: HarnExternalActionPolicyEvaluationOutcome
   reason_code: string
   policy_id?: string
+  review?: HarnExternalActionDecisionReview
+}
+
+export interface HarnExternalActionReviewProbability {
+  label: string
+  probability: number
+}
+
+export interface HarnExternalActionReviewAnswer {
+  question_id: string
+  kind: string
+  confidence: number
+  confidence_kind: string
+  verdict?: boolean
+  probability?: number
+  label?: string
+  score?: number
+  probabilities: HarnExternalActionReviewProbability[]
+}
+
+export interface HarnExternalActionDecisionReview {
+  receipt: string
+  outcome: string
+  rule: string
+  applied: boolean
+  minimum_confidence?: number
+  answers: HarnExternalActionReviewAnswer[]
 }
 
 export interface HarnExternalActionDecision {
@@ -1036,9 +1070,12 @@ export interface HarnACPPromptErrorData {
   category?: string
   kind?: string
   reason?: string
+  origin?: string
+  rule?: string
   code?: string
   retryable?: boolean
   retryAfterMs?: number
+  machineSpend?: HarnMachineSpendExhaustion
   provider?: string
   model?: string
 }
@@ -1144,6 +1181,7 @@ export interface HarnToolLifecycleMeta {
   errorCategory?: HarnToolCallErrorCategory
   executionDurationMs?: number
   executor?: ACPToolExecutor
+  intent?: string
   mutationStatus?: HarnToolMutationStatus
   parsing?: boolean
   rawInputPartial?: string
@@ -1201,11 +1239,13 @@ export interface ACPToolCallUpdate {
 export interface ACPMessageChunkUpdate {
   sessionUpdate: "agent_message_chunk" | "agent_thought_chunk" | "user_message_chunk"
   content: ACPContentBlock
+  historySourceEventId?: string | null
 }
 
 export interface ACPUserMessageUpdate {
   sessionUpdate: "user_message"
   messageId: string
+  historySourceEventId?: string | null
   content: ACPContentBlock[]
 }
 
@@ -1539,6 +1579,7 @@ export interface ACPTranscriptCompactedUpdateMetaHarn {
   compactionPolicy: ACPValue
   recap: ACPValue
   sourceMeasurement: ACPValue
+  classification: ACPValue
   replayed?: boolean
 }
 
@@ -1992,7 +2033,7 @@ export interface HarnSessionTimelineUpdate {
 export const HARN_PREPARED_SESSION_SCHEMA = "harn.prepared_session.v1" as const
 export type HarnPreparedSessionState = "needs_approval" | "ready" | "blocked" | "active" | "delta" | "stopped" | "pivoted" | "terminal"
 export type HarnPreparedSessionCommand = "approval_decision" | "attach" | "turn" | "request_delta" | "stop" | "pivot" | "finish"
-export interface HarnPreparedSessionApprovalDecision { batch_fingerprint: string; approved: boolean; decider: string }
+export interface HarnPreparedSessionApprovalDecision { request_id: string; batch_fingerprint: string; approved: boolean; decider: string }
 export interface HarnPreparedSessionBinding { session_id: string; workspace_fingerprint: string; runtime: ACPValue; consumer: ACPValue }
 export interface HarnPreparedRuntimeAttachment { session_id: string; workspace_fingerprint: string; runtime: ACPValue; consumer: ACPValue }
 export interface HarnPreparedSessionLease {
@@ -2393,4 +2434,102 @@ export interface HarnPlanDocument {
   resolution_receipts: HarnPlanCommentResolutionReceipt[]
   created_at: string
   updated_at: string
+}
+export const HARN_MACHINE_SPEND_PERIOD_VALUES = [
+  "day",
+  "month",
+  "lifetime",
+] as const
+export type HarnMachineSpendPeriod = (typeof HARN_MACHINE_SPEND_PERIOD_VALUES)[number]
+
+export const HARN_INFERENCE_ADMISSION_STATUS_VALUES = [
+  "admitted",
+  "denied",
+  "unknown",
+] as const
+export type HarnInferenceAdmissionStatus = (typeof HARN_INFERENCE_ADMISSION_STATUS_VALUES)[number]
+
+export const HARN_INFERENCE_ADMISSION_REACH_VALUES = [
+  "local_only",
+  "hosted_open_weight",
+  "any_hosted",
+] as const
+export type HarnInferenceAdmissionReach = (typeof HARN_INFERENCE_ADMISSION_REACH_VALUES)[number]
+
+export const HARN_INFERENCE_ADMISSION_DATA_POSTURE_VALUES = [
+  "default",
+  "strictest_available",
+] as const
+export type HarnInferenceAdmissionDataPosture = (typeof HARN_INFERENCE_ADMISSION_DATA_POSTURE_VALUES)[number]
+
+export const HARN_INFERENCE_ADMISSION_DATA_CONTROLS_OUTCOME_VALUES = [
+  "not_requested",
+  "applied",
+  "no_control_available",
+  "provider_unresearched",
+] as const
+export type HarnInferenceAdmissionDataControlsOutcome = (typeof HARN_INFERENCE_ADMISSION_DATA_CONTROLS_OUTCOME_VALUES)[number]
+
+export const HARN_INFERENCE_ADMISSION_DATA_CONTROLS_REFUSAL_VALUES = [
+  "training_without_control",
+] as const
+export type HarnInferenceAdmissionDataControlsRefusal = (typeof HARN_INFERENCE_ADMISSION_DATA_CONTROLS_REFUSAL_VALUES)[number]
+
+export interface HarnMachineSpendExhaustion {
+  period: HarnMachineSpendPeriod
+  limit_microusd: number
+  reserved_microusd: number
+  remaining_microusd: number
+  reset_at_unix_ms?: number | null
+}
+
+export interface HarnInferenceAdmissionBoundary {
+  reach: HarnInferenceAdmissionReach
+  allow_training_discounts: boolean
+}
+
+export interface HarnInferenceAdmissionRequest {
+  provider: string
+  model: string
+  boundary?: HarnInferenceAdmissionBoundary | null
+  data_controls?: HarnInferenceAdmissionDataPosture
+}
+
+export interface HarnInferenceAdmissionSnapshot {
+  schema: string
+  provider: string
+  model: string
+  status: HarnInferenceAdmissionStatus
+  training_control_planned: boolean
+  data_posture: HarnInferenceAdmissionDataPosture
+  data_controls_note?: string | null
+  data_controls_outcome?: HarnInferenceAdmissionDataControlsOutcome
+  data_controls_refusal?: HarnInferenceAdmissionDataControlsRefusal
+  effective_boundary?: HarnInferenceAdmissionBoundary | null
+  governing_rule?: string | null
+  local_runtime?: boolean | null
+  open_weight?: boolean | null
+  training_default?: string | null
+}
+export interface HarnCanonicalSessionBoundary {
+  schema: string
+  session_id: string
+  event_id?: number | null
+  record_hash?: string | null
+}
+
+export interface HarnCanonicalHistoryPosition {
+  source_event_id: string
+  origin_session_id: string
+  before_boundary: HarnCanonicalSessionBoundary
+  boundary: HarnCanonicalSessionBoundary
+}
+
+export interface HarnCanonicalHistoryBoundaries {
+  tip: HarnCanonicalSessionBoundary
+  positions: HarnCanonicalHistoryPosition[]
+}
+
+export interface HarnACPPromptCorrelation {
+  messageId?: string
 }

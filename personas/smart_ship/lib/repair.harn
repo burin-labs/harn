@@ -1,0 +1,121 @@
+import { AgentTerminalOutcome } from "std/agent/contracts"
+import { agent_loop } from "std/agent/loop"
+import { AgentSpec } from "std/agent/options"
+import { ToolRegistry } from "std/tools"
+
+/** Evidence and reviewed intent supplied by the incident owner, without forge credentials. */
+pub type RepairContext = {
+  incident: string,
+  snapshot: string,
+  intent: list<string>,
+  failure: string,
+  files: list<string>,
+}
+
+/** The installation chooses its model and finite attempt limits. */
+pub type RepairModel = {
+  provider: string,
+  model: string,
+  max_iterations: int,
+  max_output_tokens: int,
+  timeout_ms: int,
+  max_usd: float,
+  verification_tools: list<string>,
+}
+
+/**
+ * An agent's terminal is diagnostic evidence; only independent verification can promote its proposal.
+ */
+pub type RepairRun = {
+  incident: string,
+  snapshot: string,
+  session: string,
+  run: string,
+  terminal: AgentTerminalOutcome,
+  successful_tools: list<string>,
+  provider_calls: int,
+  input_tokens: int,
+  output_tokens: int,
+  cost_usd: float?,
+  known_cost_usd: float,
+  unpriced_calls: int,
+  usage_unknown_calls: int,
+}
+
+/** Use the standard agent runtime with an explicit, closed tool surface and measured spend. */
+pub fn run_repair(
+  harness: Harness,
+  context: RepairContext,
+  tools: ToolRegistry,
+  config: RepairModel,
+  current_allowance: fn() -> float?,
+) -> RepairRun {
+  const allowance = current_allowance()
+  require allowance != nil && config.max_usd <= allowance,
+    "repair requires fresh authority and a reserved spend allowance"
+  require context.incident != "" && context.snapshot != "" && context.failure != ""
+    && len(context.files) > 0
+    && len(context.intent) > 0,
+    "repair requires a claimed incident, source identity, failed evidence, files, and reviewed intent"
+  require config.provider != "" && config.model != "" && config.max_iterations > 0
+    && config.max_output_tokens > 0
+    && config.timeout_ms > 0
+    && config.max_usd > 0.0
+    && config.max_usd < 1000000.0,
+    "repair requires a model and bounded iteration, token, time, and spend limits"
+  require len(tools.tools) > 0, "repair tools must be explicitly supplied by the effect owner"
+  require len(config.verification_tools) > 0,
+    "repair must name the installation's verification tools"
+  const prompt =
+    "Repair this failed integration. Preserve every reviewed intent. Read the relevant files, "
+    + "make a forward correction, and run the available verification tool. Do not weaken tests, restore "
+    + "a superseded change, or claim that your answer proves success. The controller independently "
+    + "verifies the resulting source before publication.\n\n"
+    + json_stringify(context)
+  const options: AgentSpec = {
+    provider: config.provider,
+    model: config.model,
+    tools: tools,
+    max_tokens: config.max_output_tokens,
+    iteration_budget: {
+      mode: "fixed",
+      max: config.max_iterations,
+      total_cost_usd: config.max_usd,
+      wall_clock_ms: config.timeout_ms,
+    },
+    subagents: false,
+    subagent_tools: false,
+    require_successful_tools: config.verification_tools,
+    stop_after_successful_tools: config.verification_tools,
+    final_wrapup: false,
+    loop_control: { _state ->
+      const remaining = current_allowance()
+      if remaining != nil && config.max_usd <= remaining {
+        nil
+      } else {
+        {action: "stop", reason: "repair authority revoked"}
+      }
+    },
+  }
+  const result = agent_loop(
+    harness,
+    prompt,
+    "Use only the supplied workspace tools to propose a repair.",
+    options,
+  )
+  return {
+    incident: context.incident,
+    snapshot: context.snapshot,
+    session: result.session_id,
+    run: result.run_id,
+    terminal: result.terminal,
+    successful_tools: result.tools.successful,
+    provider_calls: result.provider_call_count,
+    input_tokens: result.llm.input_tokens,
+    output_tokens: result.llm.output_tokens,
+    cost_usd: result.cost_usd,
+    known_cost_usd: result.known_cost_usd,
+    unpriced_calls: result.unpriced_calls,
+    usage_unknown_calls: result.usage_unknown_calls,
+  }
+}

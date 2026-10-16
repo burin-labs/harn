@@ -9,6 +9,15 @@ import {
 
 pub type CiCacheWriter = {workflow: string, job: string, shared_key: string}
 
+/**
+ * A job allowed to save one family of Harn's own check cache from main.
+ *
+ * Kept apart from the Rust writers because the two caches share nothing but
+ * the storage pool: a Rust writer names a Swatinem shared key, this names the
+ * lane whose gates produced the check results.
+ */
+pub type HarnCheckCacheWriter = {workflow: string, job: string, family: string}
+
 pub type WindowsWorkspaceWarmPolicy = {
   artifact_name: string,
   manifest_schema: string,
@@ -39,7 +48,7 @@ pub type MacosWorkspaceWarmPolicy = {
 }
 
 pub type CiCachePolicy = {
-  schema_version: 6,
+  schema_version: 7,
   rust_cache_action: "./.github/actions/rust-cache",
   node_cache_action: "./.github/actions/node-cache",
   persistent_ref: "refs/heads/main",
@@ -49,6 +58,7 @@ pub type CiCachePolicy = {
   windows_workspace_warm: WindowsWorkspaceWarmPolicy,
   macos_workspace_warm: MacosWorkspaceWarmPolicy,
   writers: list<CiCacheWriter>,
+  harn_check_cache_writers: list<HarnCheckCacheWriter>,
 }
 
 pub type ReleaseWarmCachePathPolicy = {release_build_inputs: list<string>}
@@ -58,6 +68,8 @@ pub const POLICY_PATH = ".github/cache-policy.json"
 pub const RELEASE_WARM_CACHE_PATH_POLICY = ".github/release-warm-cache-paths.yml"
 
 pub const RELEASE_BINARY_WORKFLOW = "build-release-binaries.yml"
+
+pub const RELEASE_RUNNER_POLICY_PATH = ".github/release-runner-policy.json"
 
 pub const RELEASE_PATH_FILTER_ACTION = "dorny/paths-filter"
 
@@ -73,10 +85,10 @@ pub const RELEASE_PATH_FILTER_OUTPUT = "$"
 pub const RELEASE_PATH_FILTER_BRANCH = "[[ \"$RELEASE_BUILD_INPUTS_CHANGED\" == \"true\" ]]"
 
 pub const RELEASE_WORKFLOW_CONCURRENCY_GROUP = "build-release-binaries-$"
-  + "{{ (github.event_name == 'workflow_dispatch' && inputs.benchmark_source_sha != '' && format('benchmark-{0}', inputs.benchmark_source_sha)) || (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.warm_cache_only)) && 'warm-main' || (github.event_name == 'push' && format('branch-{0}', github.run_id)) || github.ref_name }}"
+  + "{{ (github.event_name == 'workflow_dispatch' && inputs.benchmark_only && format('benchmark-{0}-{1}', inputs.benchmark_source_sha || github.sha, github.sha)) || ((github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.source_candidate)) && 'source-main') || (github.event_name == 'workflow_dispatch' && inputs.warm_cache_only && 'warm-main') || (github.event_name == 'push' && format('branch-{0}', github.run_id)) || github.ref_name }}"
 
 pub const RELEASE_WORKFLOW_CANCEL_POLICY = "$"
-  + "{{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.warm_cache_only) }}"
+  + "{{ github.event_name == 'workflow_dispatch' && inputs.warm_cache_only && !inputs.source_candidate && !inputs.benchmark_only }}"
 
 pub const RELEASE_BUILD_CONCURRENCY_GROUP = "build-release-binaries-build-$"
   + "{{ (github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.setup.outputs.build_mode == 'warm' && format('warm-{0}', matrix.target)) || format('{0}-{1}', github.run_id, matrix.target) }}"
@@ -86,17 +98,10 @@ pub const RELEASE_BUILD_CANCEL_POLICY = "$"
 
 pub const RELEASE_BUILD_IF = "needs.setup.outputs.should_build_binaries == 'true'"
 
-pub const RELEASE_AOT_PRIMARY_OUTPUT = "needs.setup.outputs.cli_aot_primary_runner"
-
 pub const RELEASE_AOT_STANDARD_OUTPUT = "needs.setup.outputs.cli_aot_standard_runner"
-
-pub const RELEASE_AOT_SETUP_PRIMARY = "$"
-  + "{{ steps.resolve.outputs.cli_aot_primary_runner }}"
 
 pub const RELEASE_AOT_SETUP_STANDARD = "$"
   + "{{ steps.resolve.outputs.cli_aot_standard_runner }}"
-
-pub const RELEASE_AOT_FALLBACK_SWITCH = "vars.HARN_RELEASE_ENABLE_BLACKSMITH_LINUX == 'true'"
 
 pub const RELEASE_CACHE_BUDGET_IF =
   "always() && needs.setup.outputs.build_mode == 'warm' && needs.setup.outputs.should_build_binaries == 'true' && needs.build.result != 'cancelled'"
@@ -159,22 +164,18 @@ pub const COLOCATED_TESTS_DISABLE_VAR = "HARN_CI_DISABLE_COLOCATED_TESTS"
 // with it.
 pub const RUNNER_TIER_ENV = "HARN_RUNNER_TIER"
 
-pub const HOSTED_LINUX_RUNNER = "ubuntu-latest"
+pub const HOSTED_LINUX_RUNNER = "ubuntu-24.04"
 
 /**
- * The producer's hosted rung, which is deliberately not the shared one.
+ * The producers' rung after the owned pool: GitHub's free standard runner.
  *
- * The persistent compile lane is the only job whose work is bounded by the
- * box rather than by waiting, so it is the only one worth paying a larger
- * vendor runner for. Every other hosted Linux job stays on the shared
- * default, which is what keeps a change here from quietly moving the whole
- * workflow onto paid capacity.
+ * This repository is public, and public-repository CI runs only on free
+ * standard runners or owned machines (harn#9370): no larger GitHub runner,
+ * Ubicloud or Blacksmith, even though the producers build slower on 4 vCPU.
  */
-pub const PRODUCER_HOSTED_LINUX_RUNNER = "ubuntu-8core"
+pub const PRODUCER_HOSTED_LINUX_RUNNER = "ubuntu-24.04"
 
 pub const HOSTED_RUNNER_TIER = "github-hosted"
-
-pub const BLACKSMITH_RUNNER_TIER = "blacksmith"
 
 /**
  * The org's own Linux pool. Named as its own tier rather than folded into the
@@ -191,23 +192,11 @@ pub const SELFHOSTED_LINUX_BIG_RUNNER = "[\"self-hosted\", \"Linux\", \"X64\", \
 /** The census pool that answers for that label set. */
 pub const SELFHOSTED_LINUX_BIG_POOL = "linux_big"
 
-pub const BLACKSMITH_ENABLE_VAR = "HARN_CI_ENABLE_BLACKSMITH_LINUX"
-
 /** The step that names where the slow E2E suite is about to land. */
 pub const E2E_CAPACITY_DECISION_STEP = "Decide where the slow E2E suite lands"
 
 /** The input that carries the evacuation switch into that decision. */
-pub const E2E_EVACUATION_INPUT = "FLEET_EVACUATION"
-
-pub const BLACKSMITH_8CPU_RUNNER = "blacksmith-8vcpu-ubuntu-2404"
-
 pub const RUST_CACHE_ACTION = "./.github/actions/rust-cache"
-
-// Authorized ci.yml cache writers must grant actions: write. The workflow
-// top-level token is contents/read-only; without a job-level grant, Swatinem
-// save fails under continue-on-error and the Linux workspace-tests cache stays
-// empty (#5003).
-pub const CI_CACHE_WRITE_JOBS = ["package-audit", "rust-check-inputs", "rust-cache-refresh"]
 
 // Compile fan-out on the producer is measured, not typed, and the ceiling now
 // rests on a measurement rather than on a fear. It lives in
@@ -253,9 +242,19 @@ pub const BUILD_BUDGET_PRODUCER_PROFILE = "producer"
 // the single owner of the value — ci.yml carries the same number.
 pub const EXECUTION_ONLY_TIMEOUT_MINUTES = "35"
 
-pub const ARTIFACT_READY_JOB = "rust-artifacts-ready"
+// Lanes that run the shared Harn CLI depend on its producer directly. A
+// waiter job that polled for the artifact held a hosted runner for the
+// whole build, which counts against the org's concurrent-job cap, to save
+// the producer's few seconds of post-upload bookkeeping.
+pub const CLI_PRODUCER_JOB = "rust-cli"
+
+pub const LIVE_CLI_CONSUMER_IF = "$"
+  + "{{ !cancelled() && needs.changes.outputs.rust == 'true' && needs.rust-cli.result == 'success' }}"
 
 pub const SECURITY_READY_JOB = "security-tests-ready"
+
+/** The CLI producer skips its build when a main push restores its merge group's bundle. */
+pub const PROVEN_CLI_BUILD_GUARD = "steps.proven-cli.outputs.found != 'true'"
 
 // A cold merge-group producer has taken ~15.5m to publish the CLI, and a later
 // healthy producer remained queued for more than 16m before compilation. The
@@ -265,6 +264,15 @@ pub const ARTIFACT_WAIT_MAX_ATTEMPTS = "270"
 
 pub const ARTIFACT_WAIT_INTERVAL_SECONDS = "10"
 
+// About ten waiters start in every run and share one installation limit. A
+// running producer's state is re-read on every sixth poll only (the inventory
+// read between is a free 304 while nothing changes), and a rate limit is
+// waited out up to 40 minutes, inside the shortest waiter's job timeout,
+// because a refused read says nothing about the build and must not fail it.
+pub const ARTIFACT_WAIT_STATE_EVERY_POLLS = "6"
+
+pub const ARTIFACT_WAIT_RATE_LIMIT_MAX_SECONDS = "2400"
+
 pub const ARTIFACT_READY_TIMEOUT_MINUTES = "50"
 
 pub const HARN_AUDIT_TIMEOUT_MINUTES = "65"
@@ -273,6 +281,8 @@ pub const LIVE_ARTIFACT_CONSUMERS = [
   "audit-scripts",
   "ci-walltime-report",
   "fast-policy-gates",
+  "package-audit",
+  "release-residual-audit",
   "source-length-ratchet",
 ]
 
@@ -298,8 +308,13 @@ pub const LIVE_ARTIFACT_CONSUMERS = [
  * stranded in `audit-scripts`: they cost 24 seconds together. The rest of
  * that job is fourteen minutes and stays where it is, which is a cost
  * argument and not a claim that it should not be able to refuse.
+ *
+ * `shell-gates` carries the hermetic shell gates from the same lane: about
+ * four and a half minutes of shell tests over fakes, no build and no Harn
+ * binary, so it starts with the run on a free hosted runner and finishes
+ * inside the merge group's wall.
  */
-pub const CHEAP_PR_REFUSAL_JOBS = ["fast-policy-gates", "source-length-ratchet"]
+pub const CHEAP_PR_REFUSAL_JOBS = ["fast-policy-gates", "shell-gates", "source-length-ratchet"]
 
 /**
  * Event terms that put a job behind the merge.
@@ -361,11 +376,50 @@ pub const E2E_WORKFLOW_CONCURRENCY_GROUP = "$"
 pub const E2E_WORKFLOW_CANCEL_POLICY = "$"
   + "{{ github.event_name == 'pull_request' && github.event.action == 'synchronize' }}"
 
-pub const MAIN_ONLY_RUST_IF =
-  "github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.outputs.rust == 'true'"
+/**
+ * Main-only lanes read `rust_paths`, the paths filter, never `rust`, the
+ * heavy-lane decision. A main push whose exact commit already passed on
+ * merge_group sets `rust` false to skip duplicate heavy lanes, and no merge
+ * group runs a main-only lane, so gating one on `rust` stops it for good the
+ * day that proof works. The proof could not succeed from 2026-09-06 until
+ * 2026-10, which hid that trap.
+ */
+pub const MAIN_ONLY_RUST_PATHS_IF =
+  "github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.outputs.rust_paths == 'true'"
 
-pub const MAIN_ONLY_POLICY_IF = MAIN_ONLY_RUST_IF
-  + " && needs.rust-artifacts-ready.result == 'success'"
+/** ci-status reads the same paths decision the main-only policy lane runs on. */
+pub const MAIN_ONLY_POLICY_SELECTED_ENV = "$" + "{{ needs.changes.outputs.rust_paths }}"
+
+/** ci-status's skip allowance for repository policies, spelled once. */
+pub const MAIN_ONLY_POLICY_SKIP_TEST = "test \"$" + "{EVENT_NAME}:$" + "{GIT_REF}:$"
+  + "{RUST_PATHS_SELECTED}\" != \"push:refs/heads/main:true\""
+
+/**
+ * On a proven push the artifact barrier names the merge-group run whose CLI
+ * stands in for this run's, and every main-only consumer downloads from it.
+ */
+/** Skips a slow proof family in the post-merge tier (harn#9495). */
+pub const POST_MERGE_TIER_GUARD = "needs.changes.outputs.post_merge_tier != 'true'"
+
+/**
+ * The Windows cross-compile check is the one Windows admission lane: every
+ * pull request and merge-group candidate that selects the full suite, plus
+ * Rust-changing main pushes. Only the pull request can honor a `CI-Scope:
+ * full` declaration, because a merge group cannot read the body.
+ */
+pub const WINDOWS_CROSS_CHECK_IF =
+  "((github.event_name == 'pull_request' || github.event_name == 'merge_group') && "
+  + POST_MERGE_TIER_GUARD
+  + ") || (github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.outputs.rust == 'true')"
+
+/** `ci-status` requires the cross-check exactly where the job itself must run. */
+pub const WINDOWS_CROSS_REQUIRED_ENV = "$" + "{{ " + WINDOWS_CROSS_CHECK_IF + " }}"
+
+// `!cancelled()` because the producer's capacity ancestors skip outside
+// pull requests, and a skip reaches every dependent without a status check.
+pub const MAIN_ONLY_POLICY_IF = "$" + "{{ !cancelled() && "
+  + MAIN_ONLY_RUST_PATHS_IF
+  + " && needs.rust-cli.result == 'success' }}"
 
 pub const CI_CACHE_REFRESH_CONCURRENCY_GROUP = "harn-ci-rust-cache-refresh"
 
@@ -399,7 +453,14 @@ pub const CACHE_PRUNE_INPUT = "prune-superseded-release-generations"
 // deps-only entry and save.ts exits without replacing it (#5003).
 pub const WORKSPACE_CACHE_INPUT = "cache-workspace-crates"
 
-pub const WORKSPACE_CACHE_GENERATION = "workspace-crates-v1"
+// v3: retained entries add a synthetic source manifest to Swatinem's lock hash.
+// Its restore prefix remains OS-, architecture- and toolchain-specific, so a
+// source miss can reuse the prior compatible generation without crossing them.
+pub const WORKSPACE_CACHE_GENERATION = "workspace-crates-v3"
+
+// Saved beside the target directory by every workspace-crate cache entry; see
+// scripts/ci/reuse_workspace_crates.sh for why it cannot live in the target.
+pub const WORKSPACE_SOURCE_RECORD_DIR = ".harn-workspace-source"
 
 pub const RELEASE_CACHE_WORKFLOW = "build-release-binaries.yml"
 
@@ -488,21 +549,7 @@ pub const MACOS_WARM_PULL_REQUEST_GUARD = "$"
 pub const WINDOWS_WARM_RELEASE_CERTIFY_GUARD = "$"
   + "{{ startsWith(github.ref_name, 'release-certify/') }}"
 
-pub const WINDOWS_BLACKSMITH_ENABLE_VAR = "HARN_CI_ENABLE_BLACKSMITH_WINDOWS"
-
 pub const HOSTED_WINDOWS_RUNNER = "windows-latest"
-
-pub const BLACKSMITH_8CPU_WINDOWS_RUNNER = "blacksmith-8vcpu-windows-2025"
-
-// The nightly compiles and runs the WHOLE workspace, not an affected-crate
-// closure, so it is the one Windows lane where core count buys real wall time.
-// The cache generation it writes does not depend on vCPU count, so the producer
-// and its consumer may sit on different sizes of the same tier.
-pub const BLACKSMITH_16CPU_WINDOWS_RUNNER = "blacksmith-16vcpu-windows-2025"
-
-pub const WINDOWS_WARM_RESTORE_STEP = "Restore Windows workspace warm artifact"
-
-pub const WINDOWS_WARM_REPORT_STEP = "Report Windows warm restore outcome"
 
 pub const WINDOWS_STORAGE_REPORT_MARKER = "windows_storage_budget.sh report"
 
@@ -513,47 +560,41 @@ pub const WINDOWS_STORAGE_REPORT_MARKER = "windows_storage_budget.sh report"
  */
 pub const WINDOWS_STORAGE_HEADROOM_FLAG = "--require-free-headroom"
 
-pub const WINDOWS_STORAGE_INITIAL_STEP = "Report Windows storage (initial)"
-
-pub const WINDOWS_STORAGE_INITIAL_STEP_ID = "windows-storage-initial"
-
-pub const WINDOWS_STORAGE_AFTER_RESTORE_STEP = "Report Windows storage (after restore)"
-
 pub const WINDOWS_STORAGE_TERMINAL_STEP = "Report Windows storage (terminal)"
 
 pub const WINDOWS_NIGHTLY_STORAGE_BEFORE_STEP = "Report Windows storage (before build)"
 
-pub const WINDOWS_WARM_RESTORE_STEP_ID = "windows-warm-restore"
-
 pub const MACOS_WARM_RESTORE_STEP_ID = "macos-warm-restore"
-
-pub const WINDOWS_CACHE_FALLBACK_GUARD =
-  "steps.windows-warm-restore.outputs.windows_warm_restore != 'hit' && "
-  + "steps.windows-warm-restore.outputs.windows_warm_restore_reason != 'insufficient_space'"
-
-pub const WINDOWS_TEST_STEP = "Compile Windows tests and run unit slice"
-
-pub const WINDOWS_TEST_STEP_ID = "windows-native-tests"
-
-pub const WINDOWS_TEST_COMPLETED_EXPRESSION = "$"
-  + "{{ steps.${WINDOWS_TEST_STEP_ID}.outputs.completed_epoch }}"
-
-// This checker rejects the old CI telemetry key; it does not declare a
-// Harn-owned environment variable, so keep the forbidden spelling non-contiguous.
-pub const WINDOWS_LEGACY_HARN_TELEMETRY = "HARN_" + "NATIVE_TEST_COMPLETED_EPOCH"
-
-pub const WINDOWS_BINARY_PRODUCER_STEP = "Produce exact Windows Harn binary"
-
-pub const WINDOWS_SMOKE_STEP = "Smoke test harn run"
 
 pub const WINDOWS_NIGHTLY_TEST_STEP = "Run workspace nextest"
 
 pub const WINDOWS_TEST_STACK_BYTES = "16777216"
 
+/** The one owner of release head-ref recognition that workflow steps source. */
+pub const RELEASE_REF_HELPER = ".github/scripts/release-ref.sh"
+
+/** The release-ref function that decides whether a release-PR-only lane runs. */
+pub const RELEASE_PR_ONLY_LANE_FN = "release_pr_only_lane_run"
+
+/** The native Windows nightly's routing job, step, and published decision. */
+pub const WINDOWS_ROUTE_JOB = "route"
+
+pub const WINDOWS_ROUTE_STEP = "Decide whether this event runs native Windows"
+
+pub const WINDOWS_ROUTE_STEP_ID = "decide"
+
+pub const WINDOWS_ROUTE_OUTPUT = "$" + "{{ steps.${WINDOWS_ROUTE_STEP_ID}.outputs.run }}"
+
+pub const WINDOWS_NIGHTLY_RELEASE_ROUTE_IF = "needs.${WINDOWS_ROUTE_JOB}.outputs.run == 'true'"
+
 pub const MACOS_CACHE_KEY = "workspace-macos"
+
+pub const NATIVE_SOURCE_PATHS = ["Cargo.lock", "Cargo.toml", "crates", "spec", "tree-sitter-harn"]
 
 pub const NATIVE_SOURCE_FINGERPRINT_BODY =
   "hashFiles('Cargo.lock', 'Cargo.toml', 'crates/**', 'spec/**', 'tree-sitter-harn/**')"
+
+pub const WORKSPACE_REUSE_SCRIPT = "scripts/ci/reuse_workspace_crates.sh"
 
 pub const NATIVE_CACHE_INPUTS = [
   "CARGO_INCREMENTAL",
@@ -607,7 +648,7 @@ pub fn macos_workspace_warm_schema() {
 pub fn policy_schema() {
   return schema_closed_object(
     {
-      schema_version: schema_literal(6),
+      schema_version: schema_literal(7),
       rust_cache_action: schema_literal("./.github/actions/rust-cache"),
       node_cache_action: schema_literal("./.github/actions/node-cache"),
       persistent_ref: schema_literal("refs/heads/main"),
@@ -622,6 +663,17 @@ pub fn policy_schema() {
             workflow: schema_string() + {pattern: "^[a-z0-9-]+[.]yml$"},
             job: schema_string() + {pattern: "^[a-z0-9-]+$"},
             shared_key: schema_string() + {min_length: 1},
+          },
+        ),
+      ),
+      harn_check_cache_writers: schema_list(
+        schema_closed_object(
+          {
+            workflow: schema_string() + {pattern: "^[a-z0-9-]+[.]yml$"},
+            job: schema_string() + {pattern: "^[a-z0-9-]+$"},
+            // The prune script accepts exactly this alphabet, so a family it
+            // would refuse cannot be registered.
+            family: schema_string() + {pattern: "^[a-z0-9-]+$"},
           },
         ),
       ),
@@ -640,15 +692,6 @@ pub fn policy_schema() {
  */
 pub fn windows_nightly_dev_drive_size(warm: WindowsWorkspaceWarmPolicy) -> string {
   return warm.dev_drive_size_full_workspace
-}
-
-pub fn windows_ci_dev_drive_size(warm: WindowsWorkspaceWarmPolicy) -> string {
-  return "$"
-    + "{{ github.event_name == 'pull_request' && '"
-    + warm.dev_drive_size_default
-    + "' || '"
-    + warm.dev_drive_size_full_workspace
-    + "' }}"
 }
 
 pub fn release_warm_cache_path_policy_schema() {
@@ -833,9 +876,7 @@ pub fn release_warm_cache_concurrency_errors(workflow: dict) -> list<string> {
   if trim(workflow?.concurrency?.["cancel-in-progress"] ?? "")
     != RELEASE_WORKFLOW_CANCEL_POLICY {
     errors = errors
-      + [
-        "${RELEASE_BINARY_WORKFLOW} must reserve workflow cancellation for full scheduled/manual warms",
-      ]
+      + ["${RELEASE_BINARY_WORKFLOW} must reserve workflow cancellation for manual warms"]
   }
   const build_concurrency = workflow?.jobs?.build?.concurrency
   if trim(workflow?.jobs?.build?.if ?? "") != RELEASE_BUILD_IF {
@@ -860,10 +901,6 @@ pub fn release_warm_cache_concurrency_errors(workflow: dict) -> list<string> {
 pub fn release_aot_runner_errors(workflow: dict) -> list<string> {
   let errors: list<string> = []
   const setup_outputs = workflow?.jobs?.setup?.outputs ?? {}
-  if setup_outputs?.cli_aot_primary_runner != RELEASE_AOT_SETUP_PRIMARY {
-    errors = errors
-      + ["${RELEASE_BINARY_WORKFLOW}:setup must project the policy-selected CLI AOT primary runner"]
-  }
   if setup_outputs?.cli_aot_standard_runner != RELEASE_AOT_SETUP_STANDARD {
     errors = errors
       + [
@@ -871,15 +908,11 @@ pub fn release_aot_runner_errors(workflow: dict) -> list<string> {
       ]
   }
   const runner = trim(workflow?.jobs?.prepare_cli_aot?.["runs-on"] ?? "")
-  for required in [
-    RELEASE_AOT_PRIMARY_OUTPUT,
-    RELEASE_AOT_STANDARD_OUTPUT,
-    RELEASE_AOT_FALLBACK_SWITCH,
-  ] {
-    if !contains(runner, required) {
-      errors = errors
-        + ["${RELEASE_BINARY_WORKFLOW}:prepare_cli_aot runner selection must include ${required}"]
-    }
+  if runner != "$" + "{{ ${RELEASE_AOT_STANDARD_OUTPUT} }}" {
+    errors = errors
+      + [
+        "${RELEASE_BINARY_WORKFLOW}:prepare_cli_aot must use only the free standard runner ${RELEASE_AOT_STANDARD_OUTPUT}",
+      ]
   }
   return errors
 }
@@ -898,7 +931,7 @@ pub fn policy_from_validated(value: dict) -> CiCachePolicy {
   const warm = value.windows_workspace_warm
   const macos_warm = value.macos_workspace_warm
   return {
-    schema_version: 6,
+    schema_version: 7,
     rust_cache_action: "./.github/actions/rust-cache",
     node_cache_action: "./.github/actions/node-cache",
     persistent_ref: "refs/heads/main",
@@ -931,6 +964,10 @@ pub fn policy_from_validated(value: dict) -> CiCachePolicy {
       },
     )
       .to_list(),
+    harn_check_cache_writers: value.harn_check_cache_writers.map(
+      { writer -> return {workflow: writer.workflow, job: writer.job, family: writer.family} },
+    )
+      .to_list(),
   }
 }
 
@@ -950,6 +987,12 @@ pub fn ci_cache_policy_parse(value: any) -> CiCachePolicy? {
   )
     .to_list()
   if len(writer_keys) == 0 || len(writer_keys) != len(writer_keys.unique()) {
+    return nil
+  }
+  // One writer per family: two jobs saving one family would each prune the
+  // other's generation, so the family would hold whichever finished last.
+  const check_families = policy.harn_check_cache_writers.map({ writer -> writer.family }).to_list()
+  if len(check_families) != len(check_families.unique()) {
     return nil
   }
   return policy
@@ -1026,41 +1069,52 @@ pub fn remote_sccache_errors(value: any, path: string = "") -> list<string> {
 
 pub fn cache_target_input_errors(action: dict, step: dict) -> list<string> {
   const expected_cache_targets = "$" + "{{ inputs.target-dir == '' }}"
-  const expected_cache_directories = "$" + "{{ inputs.target-dir }}"
+  const expected_cache_directories = "$"
+    + "{{ format('{0} {1}', inputs.target-dir, inputs.cache-workspace-crates == 'true' && '${WORKSPACE_SOURCE_RECORD_DIR}' || '') }}"
   if trim(action?.inputs?.["target-dir"]?.default ?? "") != ""
     || trim(step?.with?.["cache-targets"] ?? "")
       != expected_cache_targets
     || trim(step?.with?.["cache-directories"] ?? "")
-      != expected_cache_directories {
+      != expected_cache_directories
+    || trim(step?.with?.workspaces ?? "")
+      != "$" + "{{ steps.cache-paths.outputs.workspaces }}" {
     return ["${ACTION_PATH} must cache an explicit Cargo target directory directly"]
   }
   return []
 }
 
-pub fn cache_action_errors(policy: CiCachePolicy, action: dict) -> list<string> {
+/** Keep source-record comparison on the same roots that define the cache key. */
+pub fn native_source_projection_errors(script: string) -> list<string> {
+  const paths = join(NATIVE_SOURCE_PATHS, " ")
+  if !contains(script, "SOURCE_PATHS=(${paths})")
+    || !contains(script, "git diff --quiet \"$recorded\" \"$head\" -- \"$" + "{SOURCE_PATHS[@]}\"")
+    || !contains(script, "git ls-files --others --exclude-standard -- \"$" + "{SOURCE_PATHS[@]}\"") {
+    return ["${WORKSPACE_REUSE_SCRIPT} must compare the canonical native source fingerprint roots"]
+  }
+  return []
+}
+
+fn workspace_cache_generation_errors(action: dict, steps: list) -> list<string> {
   let errors: list<string> = []
-  const steps = action?.runs?.steps ?? []
-  const upstream = steps.filter({ step -> step_uses(step).starts_with(UPSTREAM_CACHE_PREFIX) })
-    .to_list()
   const broad_restore = steps.filter(
     { step -> step_uses(step).starts_with(UPSTREAM_CACHE_RESTORE_PREFIX) },
   )
     .to_list()
-  if len(upstream) != 1 {
-    return ["${ACTION_PATH} must contain exactly one pinned upstream Rust cache step"]
-  }
+  const identities = steps.filter({ step -> trim(step?.id ?? "") == "cache-paths" }).to_list()
   if len(broad_restore) != 1 {
     errors = errors
       + ["${ACTION_PATH} must contain one pinned restore-only broad Rust cache fallback step"]
   } else {
     const restore_if = trim(broad_restore[0]?.if ?? "")
-    if !contains(restore_if, "inputs.broad-restore-prefix != ''") {
-      errors = errors + ["${ACTION_PATH} broad fallback must be opt-in per caller"]
+    if restore_if
+      != "steps.cache-paths.outputs.restore-prefix != '' && steps.cache.outputs.cache-hit != 'true'" {
+      errors = errors
+        + ["${ACTION_PATH} broad fallback must run only after the precise source generation misses"]
     }
     const restore_keys = trim(broad_restore[0]?.with?.["restore-keys"] ?? "")
     const restore_key = trim(broad_restore[0]?.with?.key ?? "")
-    if !contains(restore_keys, "inputs.broad-restore-prefix")
-      || !contains(restore_key, "inputs.broad-restore-prefix")
+    if !contains(restore_keys, "steps.cache-paths.outputs.restore-prefix")
+      || !contains(restore_key, "steps.cache-paths.outputs.restore-prefix")
       || !contains(restore_key, "github.sha") {
       errors = errors
         + ["${ACTION_PATH} broad fallback must restore by prefix without becoming a writer"]
@@ -1069,18 +1123,112 @@ pub fn cache_action_errors(policy: CiCachePolicy, action: dict) -> list<string> 
       errors = errors + ["${ACTION_PATH} broad fallback must keep cache-service failures non-fatal"]
     }
     const restore_paths = trim(broad_restore[0]?.with?.path ?? "")
-    if !contains(restore_paths, "env.CARGO_HOME")
-      || !contains(restore_paths, "env.CARGO_TARGET_DIR") {
+    if restore_paths != "$" + "{{ steps.cache-paths.outputs.paths }}" {
       errors = errors
-        + ["${ACTION_PATH} broad fallback must follow the active Cargo home and target directory"]
+        + [
+          "${ACTION_PATH} broad fallback must use the precise cache step's normalized archive paths",
+        ]
+    }
+  }
+  if len(identities) != 1 {
+    errors = errors + ["${ACTION_PATH} must resolve one Rust cache identity and archive path set"]
+  } else {
+    const identity = identities[0]
+    const expected_source = "$"
+      + "{{ inputs.source-key || (inputs.cache-workspace-crates == 'true' && ${NATIVE_SOURCE_FINGERPRINT_BODY}) || '' }}"
+    if trim(identity?.env?.CACHE_SOURCE_KEY ?? "") != expected_source
+      || trim(identity?.env?.CACHE_EXPLICIT_SOURCE_KEY ?? "")
+        != "$" + "{{ inputs.source-key }}"
+      || trim(identity?.env?.CACHE_SHARED_KEY ?? "")
+        != "$" + "{{ inputs.shared-key }}" {
+      errors = errors
+        + [
+          "${ACTION_PATH} must derive retained workspace generations from the canonical source fingerprint",
+        ]
+    }
+    const identity_run = to_string(identity?.run ?? "")
+    for required in [
+      "Retained workspace cache has no measured source fingerprint",
+      "-workspace-crates-v3",
+      "[package.metadata.harn]",
+      "source = \"$" + "{source}\"",
+      "restore-prefix=$" + "{fallback}",
+      "paths<<harn-cache-paths",
+      "workspaces<<harn-cache-workspaces",
+      WORKSPACE_SOURCE_RECORD_DIR,
+    ] {
+      if !contains(identity_run, required) {
+        errors = errors
+          + [
+            "${ACTION_PATH} cache identity resolver is missing required generation behavior: ${required}",
+          ]
+      }
+    }
+  }
+  let identity_index = -1
+  let upstream_index = -1
+  let broad_index = -1
+  for {index, value: candidate} in steps.enumerate() {
+    if trim(candidate?.id ?? "") == "cache-paths" {
+      identity_index = index
+    }
+    if step_uses(candidate).starts_with(UPSTREAM_CACHE_PREFIX) {
+      upstream_index = index
+    }
+    if step_uses(candidate).starts_with(UPSTREAM_CACHE_RESTORE_PREFIX) {
+      broad_index = index
+    }
+  }
+  if identity_index < 0 || upstream_index <= identity_index || broad_index <= upstream_index {
+    errors = errors
+      + [
+        "${ACTION_PATH} must try the precise source generation before its dependency-compatible fallback",
+      ]
+  }
+  const reuse_steps = steps.filter(
+    { candidate ->
+      trim(candidate?.id ?? "") == "reuse"
+        && trim(candidate?.run ?? "") == "./scripts/ci/reuse_workspace_crates.sh restore"
+    },
+  )
+    .to_list()
+  if len(reuse_steps) != 1
+    || trim(action?.outputs?.["source-current"]?.value ?? "")
+      != "$" + "{{ steps.reuse.outputs.source-current }}" {
+    errors = errors
+      + ["${ACTION_PATH} must publish measured workspace source currency from its reuse boundary"]
+  }
+  return errors
+}
+
+pub fn cache_action_errors(policy: CiCachePolicy, action: dict) -> list<string> {
+  let errors: list<string> = []
+  const steps = action?.runs?.steps ?? []
+  const upstream = steps.filter({ step -> step_uses(step).starts_with(UPSTREAM_CACHE_PREFIX) })
+    .to_list()
+  if len(upstream) != 1 {
+    return ["${ACTION_PATH} must contain exactly one pinned upstream Rust cache step"]
+  }
+  errors = errors + workspace_cache_generation_errors(action, steps)
+  for restore in steps.filter(
+    { step ->
+      return step_uses(step).starts_with(UPSTREAM_CACHE_PREFIX)
+        || step_uses(step).starts_with(UPSTREAM_CACHE_RESTORE_PREFIX)
+    },
+  )
+    .to_list() {
+    if trim(to_string(restore?.env?.SEGMENT_DOWNLOAD_TIMEOUT_MINS ?? "")) != "2" {
+      errors = errors
+        + ["${ACTION_PATH} Rust cache restores must bound each download segment to two minutes"]
     }
   }
   const step = upstream[0]
-  const expected_shared_key = "$"
-    + "{{ format('{0}{1}', inputs.source-key != '' && format('{0}-{1}', inputs.shared-key, inputs.source-key) || inputs.shared-key, inputs.cache-workspace-crates == 'true' && '-${WORKSPACE_CACHE_GENERATION}' || '') }}"
+  const expected_shared_key = "$" + "{{ steps.cache-paths.outputs.shared-key }}"
   if trim(step?.with?.["shared-key"] ?? "") != expected_shared_key
     || trim(step?.with?.key ?? "")
-      != "" {
+      != ""
+    || trim(step?.id ?? "")
+      != "cache" {
     errors = errors
       + [
         "${ACTION_PATH} must compose source-key and workspace retention into the effective upstream shared-key",
@@ -1415,6 +1563,82 @@ pub fn effective_job_env(workflow: dict, job: dict, key: string) -> string {
   return trim(to_string(value))
 }
 
+/** Explicit workflow variables hashed by the pinned Rust cache action. */
+fn rust_cache_environment(
+  workflow: dict,
+  job: dict,
+  step: dict,
+  matrix: dict = {},
+) -> dict<string, string> {
+  const declared = {...workflow?.env ?? {}, ...job?.env ?? {}, ...step?.env ?? {}}
+  let environment: dict<string, string> = {}
+  for key in declared.keys().sorted() {
+    // Swatinem c193711: src/config.ts defaults, matched by prefix.
+    if !["CARGO", "CC", "CFLAGS", "CXX", "CMAKE", "RUST"].any(
+      { prefix -> key.starts_with(prefix) },
+    ) {
+      continue
+    }
+    let value = to_string(declared[key])
+    for name in matrix.keys() {
+      value = replace(value, "$" + "{{ matrix.${name} }}", to_string(matrix[name]))
+    }
+    if value != "" {
+      environment[key] = value
+    }
+  }
+  return environment
+}
+
+/** Match the three merge-gate build graphs to their cache writers. */
+pub fn linux_cache_environment_errors(workflows: dict) -> list<string> {
+  const refresh = workflows["rust-cache-refresh.yml"] ?? {}
+  let writers: dict<string, dict<string, string>> = {}
+  for job in (refresh?.jobs ?? {}).values() {
+    for row in job?.strategy?.matrix?.include ?? [] {
+      for step in matching_steps(job, RUST_CACHE_ACTION) {
+        const family = replace(cache_family(step), "$" + "{{ matrix.cache_key }}", row.cache_key)
+        writers[family] = rust_cache_environment(refresh, job, step, row)
+      }
+    }
+  }
+  let errors: list<string> = []
+  for workflow in workflows.keys().sorted() {
+    if workflow != "ci.yml" {
+      continue
+    }
+    const document = workflows[workflow]
+    for name in (document?.jobs ?? {}).keys().sorted() {
+      if !["rust-cli", "rust-check-inputs", "package-audit"].contains(name) {
+        continue
+      }
+      const job = document.jobs[name]
+      for step in matching_steps(job, RUST_CACHE_ACTION) {
+        const family = cache_family(step)
+        const writer = writers[family]
+        if writer == nil {
+          errors = errors + ["${workflow}:${name}:${family} has no Rust cache environment writer"]
+          continue
+        }
+        if save_requested(step) {
+          continue
+        }
+        const reader = rust_cache_environment(document, job, step)
+        if reader != writer {
+          errors = errors
+            + [
+              "${workflow}:${name}:${family} compiler environment differs from its Rust cache writer: reader="
+                + json_stringify(reader)
+                + " writer="
+                + json_stringify(writer),
+            ]
+        }
+      }
+    }
+  }
+  return errors
+}
+
 pub fn cache_key_inputs(
   workflow: dict,
   job: dict,
@@ -1538,6 +1762,38 @@ pub fn rust_cache_reader_errors(policy: CiCachePolicy, workflows: dict) -> list<
   return errors
 }
 
+/**
+ * A writer that saves workspace crates must take part in workspace crate
+ * reuse on both ends: run the restore, which drops any inherited source
+ * record, and record its own commit only after a successful build. A writer
+ * that skipped either could save a record naming a tree its artifacts were not
+ * built from, and a later restore would pass stale crates as fresh.
+ */
+pub fn workspace_reuse_writer_errors(
+  workflow: string,
+  job: string,
+  job_doc: dict,
+  cache_step: dict,
+) -> list<string> {
+  if lowercase(trim(to_string(cache_step?.with?.["cache-workspace-crates"] ?? "false"))) != "true" {
+    return []
+  }
+  const reuses = lowercase(trim(to_string(cache_step?.with?.["reuse-workspace-crates"] ?? "false")))
+    == "true"
+  const records = (job_doc?.steps ?? []).any(
+    { step ->
+      contains(to_string(step?.run ?? ""), "scripts/ci/reuse_workspace_crates.sh record")
+        && contains(to_string(step?.if ?? ""), "success()")
+    },
+  )
+  if reuses && records {
+    return []
+  }
+  return [
+    "${workflow}:${job} saves workspace crates, so it must restore with reuse-workspace-crates and record its source only on success",
+  ]
+}
+
 pub fn ci_cache_policy_errors(
   policy: CiCachePolicy,
   action: dict,
@@ -1571,6 +1827,7 @@ pub fn ci_cache_policy_errors(
           errors = errors + [ephemeral_error]
         }
         if uses == policy.rust_cache_action && save_requested(step) {
+          errors = errors + workspace_reuse_writer_errors(workflow, job, jobs[job], step)
           const shared_key = trim(step?.with?.["shared-key"] ?? "")
           // Expand matrix.cache_key writers (rust-cache-refresh dual Linux keys).
           let expanded_keys: list<string> = [shared_key]
@@ -1616,6 +1873,7 @@ pub fn ci_cache_policy_errors(
     }
   }
   return errors + rust_cache_reader_errors(policy, workflows)
+    + linux_cache_environment_errors(workflows)
 }
 
 /**
@@ -1669,16 +1927,14 @@ pub fn e2e_workflow_concurrency_errors(workflow: dict) -> list<string> {
   )
 }
 
+/**
+ * The owned rung reads the capacity job's named route, not the census. The
+ * script is the one owner of that decision, and a census the routing
+ * expression parsed itself would fail the whole job on malformed JSON instead
+ * of falling back hosted by name.
+ */
 pub fn owned_producer_condition() -> string {
-  return "(github.event_name == 'pull_request'"
-    + "\n  && github.event.pull_request.head.repo.full_name == github.repository"
-    + "\n  && needs.runner-availability.outputs.selfhosted_disabled == ''"
-    + "\n  && needs.runner-availability.outputs.capacity != ''"
-    + "\n  && fromJSON(needs.runner-availability.outputs.capacity).${SELFHOSTED_LINUX_BIG_POOL}.online > 0"
-}
-
-pub fn paid_producer_condition() -> string {
-  return "(github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository))"
+  return "(needs.rust-producer-capacity.outputs.route == 'owned'"
 }
 
 /**
@@ -1687,60 +1943,380 @@ pub fn paid_producer_condition() -> string {
  * about which events reach which capacity: a mirror that drifted from its
  * `runs-on` is how a tier guard starts naming a route the job never took.
  */
-pub fn producer_rung_expression(paid: string, owned: string, hosted: string) -> string {
+/**
+ * The workspace producer's rungs. An empty `owned` drops that rung; `hosted`,
+ * the free standard runner, is the rung every producer keeps. Merge groups
+ * take the hosted rung: the owned capacity decision routes pull requests
+ * only, and the datacenter host's merge-group route ran the security archive
+ * past its step limit (#9428).
+ */
+pub type ProducerRungs = {owned: string, hosted: string}
+
+pub fn producer_rung_expression(rungs: ProducerRungs) -> string {
+  const {owned, hosted} = rungs
+  // An empty `owned` drops the owned rung: a lane that must not wait on the
+  // owned pool's per-host compile budget goes straight to free hosted capacity.
+  const owned_rung = if owned == "" {
+    ""
+  } else {
+    "${owned_producer_condition()}" + "\n  && ${owned})" + "\n  || "
+  }
   return "$"
-    + "{{ (vars.${BLACKSMITH_ENABLE_VAR} == 'true'"
-    + "\n  && ${paid_producer_condition()}"
-    + "\n  && ${paid})"
-    + "\n  || ${owned_producer_condition()}"
-    + "\n  && ${owned})"
-    + "\n  || ${hosted} }}"
+    + "{{ "
+    + owned_rung
+    + hosted
+    + " }}"
 }
 
-pub fn producer_runner_expression(runner: string) -> string {
+/**
+ * Linux runner label prefixes whose hosts cannot confine a Harn child.
+ *
+ * Since #9068 a Harn child process on Linux refuses to start without Landlock
+ * or bubblewrap, and Blacksmith's Linux image has neither ("Linux bubblewrap
+ * is not available on this host"). Every Linux lane here runs Harn or its
+ * tests, so none may resolve to these runners. Windows and macOS Blacksmith
+ * runners are not Linux and are not listed.
+ */
+pub const LANDLOCK_INCAPABLE_LINUX_RUNNER_PREFIXES = ["blacksmith-"]
+
+fn linux_runner_label(label: string) -> bool {
+  return contains(label, "ubuntu") || contains(label, "linux") || contains(label, "Linux")
+}
+
+/**
+ * A selector and every job-matrix expression it references.
+ *
+ * Reusable workflows may route `runs-on` through a callee matrix whose value
+ * is itself `inputs.os`. Follow that chain here so every policy consumer sees
+ * the same selector graph. The depth bound makes malformed cyclic matrices
+ * finite while preserving substantially deeper chains than GitHub workflows
+ * use in practice.
+ */
+fn runner_selector_expressions(
+  workflow: dict,
+  job: dict,
+  selector: unknown,
+  depth: int = 0,
+) -> list<string> {
+  const expression = to_string(selector ?? "")
+  let texts: list<string> = [expression]
+  if depth >= 4 {
+    return texts
+  }
+  const matrix = job?.strategy?.matrix ?? {}
+  for {key: name, value: values} in matrix {
+    if name != "include" && name != "exclude" && contains(expression, "matrix.${name}") {
+      if type_of(values) == "list" {
+        for value in values {
+          texts = texts + runner_selector_expressions(workflow, job, value, depth + 1)
+        }
+      } else {
+        texts = texts + runner_selector_expressions(workflow, job, values, depth + 1)
+      }
+    }
+  }
+  for row in matrix?.include ?? [] {
+    for {key: name, value: value} in row {
+      if contains(expression, "matrix.${name}") {
+        texts = texts + runner_selector_expressions(workflow, job, value, depth + 1)
+      }
+    }
+  }
+  return texts.unique()
+}
+
+/** Every runner label a selector can resolve to through its owning job. */
+fn runner_selector_labels(workflow: dict, job: dict, selector: unknown) -> list<string> {
+  let texts = runner_selector_expressions(workflow, job, selector)
+  for input_kind in ["workflow_dispatch", "workflow_call"] {
+    for {key: name, value: input} in (workflow["on"]?.[input_kind]?.inputs ?? {}) {
+      if texts.any({ text -> contains(text, "inputs.${name}") }) {
+        texts = texts + [to_string(input?.default ?? "")]
+        for option in input?.options ?? [] {
+          texts = texts + [to_string(option)]
+        }
+      }
+    }
+  }
+  let labels: list<string> = []
+  for text in texts {
+    labels = labels
+      + regex_captures("[A-Za-z0-9][A-Za-z0-9._-]*", text).map({ hit -> to_string(hit.match) })
+        .to_list()
+  }
+  return labels.unique().sorted()
+}
+
+/** Every Linux runner label a job can resolve to from its `runs-on`. */
+fn job_runner_labels(workflow: dict, job: dict) -> list<string> {
+  return runner_selector_labels(workflow, job, job["runs-on"])
+}
+
+/** `workflow_call` inputs that select a runner anywhere in the reusable workflow. */
+fn workflow_call_runner_inputs(workflow: dict) -> list<string> {
+  let names: list<string> = []
+  for name in (workflow["on"]?.workflow_call?.inputs ?? {}).keys() {
+    for job in (workflow?.jobs ?? {}).values() {
+      if runner_selector_expressions(workflow, job, job?.["runs-on"]).any(
+        { text -> contains(text, "inputs.${name}") },
+      ) {
+        names = names + [name]
+      }
+    }
+  }
+  return names.unique().sorted()
+}
+
+fn landlock_incapable_label(label: string) -> bool {
+  return LANDLOCK_INCAPABLE_LINUX_RUNNER_PREFIXES.any({ prefix -> starts_with(label, prefix) })
+    && linux_runner_label(label)
+}
+
+/**
+ * Every Linux runner the release runner policy can hand a build: each target's
+ * runner for every mode, and the CLI AOT generator's. The release build jobs
+ * read these through `fromJSON` matrices, so the workflow scan cannot see them.
+ */
+pub fn release_runner_policy_landlock_errors(policy: dict) -> list<string> {
+  let errors: list<string> = []
+  for target in policy?.targets ?? [] {
+    for {key: mode, value: runner} in (target?.runners ?? {}) {
+      if landlock_incapable_label(to_string(runner)) {
+        errors = errors
+          + [
+            "release-runner-policy.json:${target?.target} ${mode} runner ${runner} cannot confine a Harn child (no Landlock or bubblewrap)",
+          ]
+      }
+    }
+  }
+  for {key: role, value: runner} in (policy?.jobs?.cli_aot ?? {}) {
+    if landlock_incapable_label(to_string(runner)) {
+      errors = errors
+        + [
+          "release-runner-policy.json:cli_aot ${role} runner ${runner} cannot confine a Harn child (no Landlock or bubblewrap)",
+        ]
+    }
+  }
+  return errors
+}
+
+/** Every workflow and the release runner policy, in one contract. */
+pub fn linux_confinement_errors(workflows: dict, release_runner_policy: dict) -> list<string> {
+  let errors: list<string> = []
+  for name in workflows.keys().sorted() {
+    errors = errors + landlock_incapable_runner_errors(name, workflows[name] ?? {})
+  }
+  return errors + release_runner_policy_landlock_errors(release_runner_policy)
+}
+
+fn paid_public_runner_selector(token: string, release_runner_policy: dict) -> bool {
+  const label = lowercase(token)
+  const registered = release_runner_policy?.runner_registry?.[token]
+  return contains(label, "blacksmith")
+    || contains(label, "ubicloud")
+    || regex_match(r"^(ubuntu|windows)-[0-9]+core", label) != nil
+    || regex_match(r"^(macos|xcode)-[a-z0-9._-]+-(large|xlarge)$", label) != nil
+    || (registered != nil
+      && (registered?.usd_per_minute != nil || registered?.provider != "github"))
+}
+
+fn active_release_runner_errors(release_runner_policy: dict) -> list<string> {
+  let errors: list<string> = []
+  for target in release_runner_policy?.targets ?? [] {
+    for {key: mode, value: runner} in (target?.runners ?? {}) {
+      if paid_public_runner_selector(to_string(runner), release_runner_policy) {
+        errors = errors
+          + [
+            "release-runner-policy.json:${target?.target} ${mode} runner ${runner} is paid public-repository capacity",
+          ]
+      }
+    }
+  }
+  for {key: role, value: runner} in (release_runner_policy?.jobs?.cli_aot ?? {}) {
+    if paid_public_runner_selector(to_string(runner), release_runner_policy) {
+      errors = errors
+        + [
+          "release-runner-policy.json:cli_aot ${role} runner ${runner} is paid public-repository capacity",
+        ]
+    }
+  }
+  return errors
+}
+
+pub const PAID_CAPACITY_ROUTE_INPUTS = [
+  "FLEET_EVACUATION",
+  "PAID_LINUX_PROVIDER",
+  "CAPACITY_VENDOR_RUNNER",
+]
+
+/** Every active workflow runner selector and capacity route must stay free or owned. */
+pub fn public_repository_runner_errors(
+  workflows: dict,
+  release_runner_policy: dict,
+) -> list<string> {
+  let errors: list<string> = []
+  for workflow_name in workflows.keys().sorted() {
+    const workflow = workflows[workflow_name] ?? {}
+    for {key: job_name, value: job} in (workflow?.jobs ?? {}) {
+      for label in job_runner_labels(workflow, job) {
+        if paid_public_runner_selector(label, release_runner_policy) {
+          errors = errors
+            + [
+              "${workflow_name}:${job_name} runner selection can resolve through paid token ${label}",
+            ]
+        }
+      }
+      const reusable = trim(to_string(job?.uses ?? ""))
+      if starts_with(reusable, "./.github/workflows/") {
+        const callee_name = basename(reusable)
+        const callee = workflows[callee_name]
+        for input in workflow_call_runner_inputs(callee ?? {}) {
+          const supplied = job?.with?.[input]
+            ?? callee?.["on"]?.workflow_call?.inputs?.[input]?.default
+          for label in runner_selector_labels(workflow, job, supplied) {
+            if paid_public_runner_selector(label, release_runner_policy) {
+              errors = errors
+                + [
+                  "${workflow_name}:${job_name} passes paid runner token ${label} to ${callee_name} input ${input}",
+                ]
+            }
+          }
+        }
+      }
+      for step in job?.steps ?? [] {
+        if contains(to_string(step?.run ?? ""), "runner_capacity.sh") {
+          for input in PAID_CAPACITY_ROUTE_INPUTS {
+            if step?.env?.[input] != nil || effective_job_env(workflow, job, input) != "<unset>" {
+              errors = errors
+                + [
+                  "${workflow_name}:${job_name} runner capacity decision must not accept paid route input ${input}",
+                ]
+            }
+          }
+        }
+      }
+    }
+  }
+  return errors + active_release_runner_errors(release_runner_policy)
+}
+
+/** No Linux job may resolve to a runner that cannot confine a Harn child. */
+pub fn landlock_incapable_runner_errors(workflow_name: string, workflow: dict) -> list<string> {
+  let errors: list<string> = []
+  for {key: job_name, value: job} in (workflow?.jobs ?? {}) {
+    for label in job_runner_labels(workflow, job) {
+      if landlock_incapable_label(label) {
+        errors = errors
+          + [
+            "${workflow_name}:${job_name} can resolve to ${label}, a Linux runner that cannot confine a Harn child (no Landlock or bubblewrap)",
+          ]
+      }
+    }
+  }
+  return errors
+}
+
+/**
+ * Whether a producer may land on the shared owned pool.
+ *
+ * The shared CLI may not. Every Harn proof lane waits for it, and an owned
+ * carrier shares four cores among six runners, so its compile budget is one
+ * job: with no target restored and no sccache it hit its 31-minute step
+ * timeout in run 36987728246, while a cold build on the vendor rung took
+ * 693s. Its reserved runners did no better: their compiles ran in the host's
+ * shared compiler cache server and took a median 22.9 minutes against 15.7
+ * hosted (#9435), so it always runs on the free hosted runner. The workspace
+ * test producer keeps the shared owned rung; nothing waits on its finish
+ * except the verdict.
+ */
+pub fn producer_uses_owned_pool(job_name: string) -> bool {
+  return job_name != "rust-cli"
+}
+
+pub fn producer_runner_expression(owned_rung: bool = true) -> string {
   return producer_rung_expression(
-    "'${runner}'",
-    "fromJSON('${SELFHOSTED_LINUX_BIG_RUNNER}')",
-    "'${PRODUCER_HOSTED_LINUX_RUNNER}'",
+    {
+      owned: owned_rung ? "fromJSON('${SELFHOSTED_LINUX_BIG_RUNNER}')" : "",
+      hosted: "'${PRODUCER_HOSTED_LINUX_RUNNER}'",
+    },
   )
 }
 
-pub fn producer_tier_expression() -> string {
+pub fn producer_tier_expression(owned_rung: bool = true) -> string {
   return producer_rung_expression(
-    "'${BLACKSMITH_RUNNER_TIER}'",
-    "'${SELFHOSTED_RUNNER_TIER}'",
-    "'${HOSTED_RUNNER_TIER}'",
+    {owned: owned_rung ? "'${SELFHOSTED_RUNNER_TIER}'" : "", hosted: "'${HOSTED_RUNNER_TIER}'"},
   )
+}
+
+/**
+ * Main-only lanes on a push the merge group already proved for its exact
+ * commit: they still run, gated on `rust_paths`, and read the proving run's
+ * shared CLI, and ci-status still requires repository policies there.
+ */
+fn proven_push_main_only_errors(jobs: dict) -> list<string> {
+  let errors: list<string> = []
+  // The main-only lanes outlive the heavy-lane skip on a proven push, and use
+  // the merge group's CLI when they do. Both halves are needed: the right
+  // condition with this run's download fails on a run that built nothing.
+  const size_if = trim(jobs["binary-size-signal"]?.if ?? "")
+  if !contains(size_if, "needs.changes.outputs.rust_paths == 'true'")
+    || contains(size_if, "needs.changes.outputs.rust == ") {
+    errors = errors
+      + ["ci.yml:binary-size-signal must record main's baseline on every Rust-changing main push"]
+  }
+  for consumer in ["audit-scripts", "binary-size-signal"] {
+    let downloads = 0
+    let sourced = 0
+    for step in jobs[consumer]?.steps ?? [] {
+      if contains(to_string(step?.uses ?? ""), "download-artifact-with-retry") {
+        downloads = downloads + 1
+        // Every run builds its own CLI (harn#9495): a download that names
+        // another run would measure a binary this commit did not build.
+        if step?.with?.["run-id"] == nil {
+          sourced = sourced + 1
+        }
+      }
+    }
+    if downloads != 1 || sourced != 1 {
+      errors = errors
+        + ["ci.yml:${consumer} must download the shared CLI this run built"]
+    }
+  }
+  const status_step = step_by_name(jobs["ci-status"]?.steps ?? [], "Verify required CI jobs")
+  const status_run = status_step?.run ?? ""
+  if trim(to_string(status_step?.env?.RUST_PATHS_SELECTED ?? "")) != MAIN_ONLY_POLICY_SELECTED_ENV
+    || !contains(status_run, MAIN_ONLY_POLICY_SKIP_TEST) {
+    errors = errors
+      + [
+        "ci.yml:ci-status must require repository policies on every Rust-changing main push, proven or not",
+      ]
+  }
+  return errors
 }
 
 /** Keep integration ratchets and publication tails off pull-request runners. */
 pub fn minimal_pr_capacity_errors(ci: dict, publish: dict) -> list<string> {
   let errors: list<string> = []
   const jobs = ci?.jobs ?? {}
-  const elastic_runner = "$"
-    + "{{ vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true' && (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && 'blacksmith-8vcpu-ubuntu-2404' || 'ubuntu-latest' }}"
-  for name in [ARTIFACT_READY_JOB, SECURITY_READY_JOB] {
-    if trim(jobs[name]?.["runs-on"] ?? "") != "ubuntu-latest" {
-      errors = errors + ["ci.yml:${name} must use GitHub-hosted ubuntu-latest"]
+  // The Clippy and Harn proof lanes used to switch to Blacksmith Linux, which
+  // cannot confine a Harn child; they run on the shared hosted runner.
+  for name in [SECURITY_READY_JOB, "rust-checks", "harn-audit"] {
+    if trim(jobs[name]?.["runs-on"] ?? "") != HOSTED_LINUX_RUNNER {
+      errors = errors + ["ci.yml:${name} must use GitHub-hosted ${HOSTED_LINUX_RUNNER}"]
     }
   }
-  for name in ["rust-checks", "harn-audit"] {
-    if trim(jobs[name]?.["runs-on"] ?? "") != elastic_runner {
-      errors = errors + ["ci.yml:${name} must use the shared elastic Linux runner switch"]
-    }
-  }
-  // The Rust workspace producer carries one more rung than its siblings.
+  // The Rust workspace producer carries more rungs than its siblings.
   // A same-repository pull request prefers the owned pool when its census
-  // reports online carriers, including a busy pool that must queue work.
-  // Merge groups and main pushes are deliberately NOT eligible: main pushes are
-  // the authorized cache writer, and merge throughput must not depend on a
-  // residential machine's health, which is the objection #6217 recorded when it
-  // removed the previous ladder.
+  // reports an idle carrier; a fully busy pool routes hosted (#9086).
+  // Merge groups take the hosted rung: merge throughput must not depend on an
+  // owned machine's health (#6217), and the datacenter host's merge-group
+  // route ran the security archive past its step limit (#9428). Main pushes
+  // are NOT eligible either: they are the authorized cache writer.
   if trim(jobs["rust-check-inputs"]?.["runs-on"] ?? "")
-    != producer_runner_expression(BLACKSMITH_8CPU_RUNNER) {
+    != producer_runner_expression() {
     errors = errors
       + [
-        "ci.yml:rust-check-inputs must ladder the elastic switch, the owned ${SELFHOSTED_LINUX_BIG_POOL} pool on same-repository pull requests, then GitHub-hosted",
+        "ci.yml:rust-check-inputs must ladder the owned ${SELFHOSTED_LINUX_BIG_POOL} pool on same-repository pull requests, then ${PRODUCER_HOSTED_LINUX_RUNNER}",
       ]
   }
   // Stays behind the merge on COST, not on principle: fourteen minutes, most
@@ -1750,6 +2326,7 @@ pub fn minimal_pr_capacity_errors(ci: dict, publish: dict) -> list<string> {
   if trim(jobs["audit-scripts"]?.if ?? "") != MAIN_ONLY_POLICY_IF {
     errors = errors + ["ci.yml:audit-scripts must run on Rust-changing main pushes only"]
   }
+  errors = errors + proven_push_main_only_errors(jobs)
   // Asserted PRESENT on pull requests, not merely permitted there. Without
   // this, restoring an event condition would be a silent revert to a gate
   // that can only turn the default branch red after the fact, and a gate's
@@ -1778,26 +2355,46 @@ pub fn minimal_pr_capacity_errors(ci: dict, publish: dict) -> list<string> {
       }
     }
   }
-  if trim(jobs["windows-cross-check"]?.if ?? "") != MAIN_ONLY_RUST_IF {
-    errors = errors + ["ci.yml:windows-cross-check must run on Rust-changing main pushes only"]
+  const cross_check = jobs["windows-cross-check"] ?? {}
+  if trim(cross_check?.if ?? "") != WINDOWS_CROSS_CHECK_IF {
+    errors = errors
+      + [
+        "ci.yml:windows-cross-check must run on every full-suite pull request and merge-group candidate and on Rust-changing main pushes",
+      ]
+  }
+  // Off the critical path: it waits on the cheap `changes` router only.
+  const cross_needs = cross_check?.needs
+  if cross_needs != "changes" && cross_needs != ["changes"] {
+    errors = errors + ["ci.yml:windows-cross-check must need only changes"]
   }
   const status = jobs["ci-status"] ?? {}
   for name in [
     "audit-scripts",
     "fast-policy-gates",
+    "shell-gates",
     "windows-cross-check",
-    ARTIFACT_READY_JOB,
+    CLI_PRODUCER_JOB,
     SECURITY_READY_JOB,
   ] {
     if !(status?.needs ?? []).contains(name) {
       errors = errors + ["ci.yml:ci-status must retain ${name}"]
     }
   }
-  const status_run = step_by_name(status?.steps ?? [], "Verify required CI jobs")?.run ?? ""
+  const status_step = step_by_name(status?.steps ?? [], "Verify required CI jobs")
+  const status_run = status_step?.run ?? ""
+  // The skip allowance must read the same condition the job runs under, so a
+  // merge-group candidate cannot pass the aggregate with the check skipped.
+  if trim(to_string(status_step?.env?.WINDOWS_CROSS_REQUIRED ?? "")) != WINDOWS_CROSS_REQUIRED_ENV
+    || !contains(status_run, "[ \"$WINDOWS_CROSS_REQUIRED\" != \"true\" ]") {
+    errors = errors
+      + [
+        "ci.yml:ci-status must require the Windows cross-compile check wherever the job itself must run",
+      ]
+  }
   for message in [
     "Repository policy checks failed or skipped on a Rust-changing main push.",
     "Fast repository policy gates failed or skipped while Rust proof was required.",
-    "Windows cross-compile check failed or skipped on a Rust-changing main push.",
+    "Windows cross-compile check failed or skipped on a merge-group candidate or a Rust-changing main push.",
   ] {
     if !contains(status_run, message) {
       errors = errors + ["ci.yml:ci-status does not enforce '${message}'"]
@@ -1818,47 +2415,90 @@ pub fn minimal_pr_capacity_errors(ci: dict, publish: dict) -> list<string> {
 }
 
 /**
- * Keep the slow suite evacuable through the same paid-capacity switch.
+ * Keep the slow suite's capacity decision explicit.
  *
- * The switch has to reach two places, and only one of them is the routing
- * expression. The capacity job names where this suite is about to land, and a
- * name that reads the owned census while the switch sends the job to elastic
- * paid capacity is worse than no name at all: it attributes the run to a rung
- * it never touched. So the switch is required on `runs-on` and on the input
- * the capacity script actually measures the route from.
- *
- * This checks that seam rather than a specific environment variable on the
- * job. The suite derives its own compiler and thread budget on the runner it
- * lands on, so there is no longer a static budget variable to name, and a
- * rule that named one would pass by matching a string while the switch failed
- * to reach the route.
+ * Public repository jobs may use owned capacity or the standard hosted
+ * fallback. `public_repository_runner_errors` separately refuses every paid
+ * route input, including ones hidden behind this capacity decision.
  */
 pub fn e2e_elastic_capacity_errors(e2e: dict) -> list<string> {
-  const job = e2e?.jobs?.e2e ?? {}
   const capacity_job = e2e?.jobs?.["e2e-capacity"] ?? {}
   const capacity_step = step_by_name(capacity_job?.steps ?? [], E2E_CAPACITY_DECISION_STEP)
   let errors: list<string> = []
-  if !contains(to_string(job?.["runs-on"] ?? ""), "vars.${BLACKSMITH_ENABLE_VAR} == 'true'") {
-    errors = errors
-      + ["e2e.yml:e2e must let ${BLACKSMITH_ENABLE_VAR} override owned Linux capacity"]
-  }
-  if !contains(to_string(job?.["runs-on"] ?? ""), BLACKSMITH_8CPU_RUNNER) {
-    errors = errors + ["e2e.yml:e2e must route the paid override to ${BLACKSMITH_8CPU_RUNNER}"]
-  }
   if capacity_step == nil {
     errors = errors
       + ["e2e.yml:e2e-capacity must keep the '${E2E_CAPACITY_DECISION_STEP}' step"]
     return errors
   }
-  if !contains(
-    to_string(capacity_step?.env?.[E2E_EVACUATION_INPUT] ?? ""),
-    "vars.${BLACKSMITH_ENABLE_VAR} == 'true'",
-  ) {
+  return errors
+}
+
+pub const CONSUMER_CANARY_WORKFLOW = "consumer-canary.yml"
+
+pub const CONSUMER_CANARY_JOB = "consumers"
+
+pub const CONSUMER_CANARY_ACTIONS = ["actions/checkout@", "actions/create-github-app-token@"]
+
+/**
+ * Keep the consumer canary from publishing anything its consumer produced.
+ *
+ * The consumer it rehearses may be private, and this repository's logs,
+ * artifacts and step summaries are public. The job may check out this
+ * revision, mint its credential and run the canary script, which prints only
+ * the verdict, the link and the wall time. Any other action is a way for the
+ * consumer's content to leave, an upload most directly, so it is refused by
+ * shape rather than by name. A step summary is refused the same way. The
+ * consumer's identity must come from a secret: the runner prints each step's
+ * inputs and environment, and masks only secrets.
+ */
+pub fn consumer_canary_errors(
+  workflow: dict,
+  observer: dict? = nil,
+  node: dict? = nil,
+) -> list<string> {
+  const job = workflow?.jobs?.[CONSUMER_CANARY_JOB]
+  if job == nil {
+    return ["${CONSUMER_CANARY_WORKFLOW}:${CONSUMER_CANARY_JOB} must define the consumer canary"]
+  }
+  let errors: list<string> = []
+  if contains(json_stringify(job), "vars.CONSUMER_CANARY_REPOSITORY") {
     errors = errors
       + [
-        "e2e.yml:e2e-capacity must pass ${BLACKSMITH_ENABLE_VAR} to the route it measures "
-          + "as ${E2E_EVACUATION_INPUT}",
+        "${CONSUMER_CANARY_WORKFLOW}:${CONSUMER_CANARY_JOB} must read the consumer's identity from secrets.CONSUMER_CANARY_REPOSITORY, which the runner masks",
       ]
+  }
+  for step in job?.steps ?? [] {
+    const uses = step_uses(step)
+    if step?.id == "pairing-node" {
+      const canonical = node?.runs?.steps?.[0]?.uses
+      if !to_string(canonical ?? "").starts_with("actions/setup-node@") || uses != canonical
+        || step?.with != {"node-version": "22"}
+        || keys(step).any(fn(key) { return !["id", "name", "uses", "with"].contains(key) }) {
+        errors = errors
+          + ["consumer pairing runtime must use the canonical Node action with closed inputs"]
+      }
+      continue
+    }
+    if uses == "./.github/actions/observe-consumer" {
+      if observer?.runs?.using != "composite" || len(observer?.runs?.steps ?? []) == 0 {
+        errors = errors + ["consumer observer must define nonempty composite steps"]
+      } else {
+        // Check the composite's actual effects with the same publication
+        // policy. Naming a local action must not hide an upload or summary.
+        errors = errors + consumer_canary_errors({jobs: {consumers: {steps: observer.runs.steps}}})
+      }
+      continue
+    }
+    if uses != "" && !CONSUMER_CANARY_ACTIONS.any({ prefix -> uses.starts_with(prefix) }) {
+      errors = errors
+        + [
+          "${CONSUMER_CANARY_WORKFLOW}:${CONSUMER_CANARY_JOB} must not run ${uses}; only checkout, the credential mint and the qualified pairing runtime may run beside the canary script",
+        ]
+    }
+    if contains(to_string(step?.run ?? ""), "GITHUB_STEP_SUMMARY") {
+      errors = errors
+        + ["${CONSUMER_CANARY_WORKFLOW}:${CONSUMER_CANARY_JOB} must not write a step summary"]
+    }
   }
   return errors
 }

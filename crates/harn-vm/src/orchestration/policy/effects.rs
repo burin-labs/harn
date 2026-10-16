@@ -11,143 +11,21 @@
 //! downstream consumers see a single deduped, deterministically ordered list.
 
 use std::borrow::Cow;
-use std::collections::{BTreeMap, BTreeSet, HashSet};
-
-use serde::{Deserialize, Serialize};
+use std::collections::{BTreeMap, BTreeSet};
 
 use harn_ir::{CallClassification, Capability, LiteralValue, NodeSemantics};
 use harn_parser::{Node, SNode};
 
-use super::effect_call_cache::resolve_runtime_resources;
 use super::CapabilityPolicy;
+pub(crate) use crate::runtime_effects::runtime_effects_from_contract;
+use crate::runtime_effects::{effect_kind_from_contract, effect_scope_from_contract};
+pub use crate::runtime_effects::{EffectKind, EffectRecord, EffectScope};
+#[cfg(test)]
 use crate::VmValue;
-
-/// Discriminator for the kind of effect captured. Matches the
-/// classification used by the OpenTrustGraph receipt format (E5.5).
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Ord, PartialOrd, Hash)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum EffectKind {
-    /// Reads or writes against the host's stdio streams.
-    Stdio,
-    /// Filesystem access (read, write, list, delete, ...).
-    Fs,
-    /// Network access (HTTP, SSE, WebSocket).
-    Net,
-    /// Environment-variable access.
-    Env,
-    /// Wall or monotonic clock access.
-    Clock,
-    /// Nondeterministic random source access.
-    Random,
-    /// Child-process execution or observation.
-    Process,
-    /// Secret custody access.
-    Secret,
-    /// Logs, traces, metrics, and request-correlation state.
-    Observability,
-    /// Durable transcript channel access.
-    Channel,
-    /// Durable or execution-local state access.
-    State,
-    /// Other typed host-service access.
-    Host,
-    /// Opaque authority that public values cannot manufacture.
-    Authority,
-    /// LLM calls with known provider and model receipt metadata.
-    Llm {
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        provider: Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        model: Option<String>,
-    },
-    /// Pipeline-declared tool dispatched through the agent loop.
-    Tool { name: String },
-    /// Bridged host capability call (`host_call(capability.operation, ...)`).
-    Hostcall { name: String },
-    /// Targeted delegation to a named persona / sub-agent identity.
-    Persona { id: String },
-    /// Spawn / sub-agent / worker dispatch primitives.
-    Spawn,
-}
-
-/// What kind of interaction the effect represents. Mirrors the
-/// `read | write | mutate | observe` taxonomy the receipt schema uses.
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Ord, PartialOrd, Hash)]
-#[serde(rename_all = "snake_case")]
-pub enum EffectScope {
-    /// Pure read: no observable state change for other actors.
-    Read,
-    /// Write that creates or replaces state owned by this effect.
-    Write,
-    /// Mutation of state that may already be observed by other actors.
-    Mutate,
-    /// Side-channel observation (stdio sink, telemetry emission, ...).
-    Observe,
-}
-
-/// Single typed effect carried on a `HandoffArtifact.effects` entry.
-///
-/// `resource` is an opaque, statically-known target identifier (path,
-/// URL, tool id, persona id). The dispatcher (E5.4) is free to enforce
-/// ⊆ against the resource string; when no resource can be derived the
-/// field stays `None`.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Ord, PartialOrd, Hash)]
-pub struct EffectRecord {
-    pub kind: EffectKind,
-    pub scope: EffectScope,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub resource: Option<crate::value::HarnStr>,
-}
-
-impl EffectRecord {
-    pub fn new(kind: EffectKind, scope: EffectScope) -> Self {
-        Self {
-            kind,
-            scope,
-            resource: None,
-        }
-    }
-
-    pub fn with_resource(mut self, resource: impl Into<crate::value::HarnStr>) -> Self {
-        let resource = resource.into();
-        self.resource = if resource.is_empty() {
-            None
-        } else {
-            Some(resource)
-        };
-        self
-    }
-}
-
-/// Execution-local, thread-safe-at-the-owner accumulator for runtime effects.
-///
-/// Effect evidence is a set. VM-local caches avoid repeated access to this
-/// shared execution-tree owner while child VMs still converge on one receipt.
-#[derive(Default)]
-pub(crate) struct ExecutedEffectRecorder {
-    effects: HashSet<EffectRecord>,
-}
 
 struct StaticEffectRecord {
     effect: EffectRecord,
     contract: Option<harn_builtin_meta::BuiltinContract>,
-}
-
-impl ExecutedEffectRecorder {
-    pub(crate) fn record(&mut self, specs: &[harn_builtin_meta::EffectSpec], args: &[VmValue]) {
-        self.effects
-            .extend(runtime_effects_from_contract(specs, args));
-    }
-
-    pub(crate) fn snapshot(&self) -> Vec<EffectRecord> {
-        let mut effects = self.effects.iter().cloned().collect::<Vec<_>>();
-        effects.sort();
-        effects
-    }
-
-    pub(crate) fn clear(&mut self) {
-        self.effects.clear();
-    }
 }
 
 /// Compute the effect set for a child agent's entrypoint module.
@@ -238,101 +116,6 @@ fn effects_from_call(call: &harn_ir::CallSemantics) -> Vec<StaticEffectRecord> {
             .collect();
     }
     Vec::new()
-}
-
-pub(crate) fn runtime_effects_from_contract(
-    specs: &[harn_builtin_meta::EffectSpec],
-    args: &[VmValue],
-) -> Vec<EffectRecord> {
-    let mut records = Vec::new();
-    let llm_specs = specs
-        .iter()
-        .filter(|spec| spec.kind == harn_builtin_meta::EffectKind::Llm)
-        .collect::<Vec<_>>();
-    if let Some(first) = llm_specs.first() {
-        let mut provider = None;
-        let mut model = None;
-        for spec in &llm_specs {
-            for selector in spec.resources {
-                let harn_builtin_meta::ResourceSelector::Field { path, .. } = selector else {
-                    continue;
-                };
-                let value = resolve_runtime_resources(*selector, args)
-                    .into_iter()
-                    .next();
-                match path.last().copied() {
-                    Some("provider") => provider = value.map(|value| value.to_string()),
-                    Some("model") => model = value.map(|value| value.to_string()),
-                    _ => {}
-                }
-            }
-        }
-        records.push(EffectRecord::new(
-            EffectKind::Llm { provider, model },
-            effect_scope_from_contract(first.access),
-        ));
-    }
-    for spec in specs {
-        if spec.kind == harn_builtin_meta::EffectKind::Llm {
-            continue;
-        }
-        let kind = effect_kind_from_contract(spec.kind);
-        let scope = effect_scope_from_contract(spec.access);
-        let resources = spec
-            .resources
-            .iter()
-            .flat_map(|selector| resolve_runtime_resources(*selector, args))
-            .collect::<Vec<_>>();
-        if resources.is_empty() {
-            records.push(EffectRecord::new(kind, scope));
-        } else {
-            records.extend(
-                resources
-                    .into_iter()
-                    .map(|resource| EffectRecord::new(kind.clone(), scope).with_resource(resource)),
-            );
-        }
-    }
-    records
-}
-
-fn effect_kind_from_contract(kind: harn_builtin_meta::EffectKind) -> EffectKind {
-    use harn_builtin_meta::EffectKind as ContractKind;
-    match kind {
-        ContractKind::Stdio => EffectKind::Stdio,
-        ContractKind::Fs => EffectKind::Fs,
-        ContractKind::Network => EffectKind::Net,
-        ContractKind::Llm => EffectKind::Llm {
-            provider: None,
-            model: None,
-        },
-        ContractKind::Tool => EffectKind::Tool {
-            name: String::new(),
-        },
-        ContractKind::Mcp => EffectKind::Tool {
-            name: "mcp".to_string(),
-        },
-        ContractKind::Worker => EffectKind::Spawn,
-        ContractKind::Process => EffectKind::Process,
-        ContractKind::Env => EffectKind::Env,
-        ContractKind::Clock => EffectKind::Clock,
-        ContractKind::Random => EffectKind::Random,
-        ContractKind::Host => EffectKind::Host,
-        ContractKind::Authority => EffectKind::Authority,
-        ContractKind::Secret => EffectKind::Secret,
-        ContractKind::Observability => EffectKind::Observability,
-        ContractKind::Channel => EffectKind::Channel,
-        ContractKind::State => EffectKind::State,
-    }
-}
-
-fn effect_scope_from_contract(access: harn_builtin_meta::EffectAccess) -> EffectScope {
-    match access {
-        harn_builtin_meta::EffectAccess::Read => EffectScope::Read,
-        harn_builtin_meta::EffectAccess::Write => EffectScope::Write,
-        harn_builtin_meta::EffectAccess::Mutate => EffectScope::Mutate,
-        harn_builtin_meta::EffectAccess::Observe => EffectScope::Observe,
-    }
 }
 
 fn resolve_contract_resources(

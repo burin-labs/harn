@@ -1,5 +1,21 @@
 {
   "schema_version": "harn.release_audit_contract.v1",
+  "platforms": [
+    {
+      "name": "macos",
+      "required": true,
+      "workflow_path": ".github/workflows/macos-nightly.yml",
+      "required_job": "Workspace nextest (macos-latest)",
+      "required_steps": ["Run workspace nextest", "Smoke test harn run", "Verify release test-case performance"]
+    },
+    {
+      "name": "windows",
+      "required": false,
+      "workflow_path": ".github/workflows/windows-nightly.yml",
+      "required_job": "Workspace nextest (windows-latest)",
+      "required_steps": ["Run workspace nextest"]
+    }
+  ],
   "lanes": [
     {"name": "rust-audit", "runner": "run_rust_audit", "proof": "merge_group"},
     {"name": "harn-audit", "runner": "run_harn_audit", "proof": "merge_group"},
@@ -32,27 +48,193 @@
     {
       "name": "Check Rust code",
       "job_id": "rust-checks",
-      "matrix_kind": "",
+      "matrix_kind": "workspace",
       "proofs": ["rust-audit"],
       "steps": [
         {
           "id": "release-audit-rust-lint",
           "condition": "",
-          "run": "./scripts/ci/run_rust_lint_lane.sh"
+          "run": "./scripts/ci/run_rust_lint_lane.sh --leg \"${{ matrix.kind }}\""
         }
       ]
     },
     {
-      "name": "Rust workspace tests",
-      "job_id": "rust-check-inputs",
-      "matrix_kind": "",
+      "name": "Check Rust code (lean LSP features)",
+      "job_id": "rust-checks",
+      "matrix_kind": "lean-lsp",
+      "proofs": ["rust-audit"],
+      "steps": [
+        {
+          "id": "release-audit-rust-lint",
+          "condition": "",
+          "run": "./scripts/ci/run_rust_lint_lane.sh --leg \"${{ matrix.kind }}\""
+        }
+      ]
+    },
+    {
+      "name": "Check Rust code (freshness checker)",
+      "job_id": "rust-checks",
+      "matrix_kind": "freshness-checker",
+      "proofs": ["rust-audit"],
+      "steps": [
+        {
+          "id": "release-audit-rust-lint",
+          "condition": "",
+          "run": "./scripts/ci/run_rust_lint_lane.sh --leg \"${{ matrix.kind }}\""
+        }
+      ]
+    },
+    {
+      "name": "Rust workspace tests (tooling)",
+      "job_id": "rust-test-partitions",
+      "matrix_kind": "partition-1",
       "proofs": ["rust-audit"],
       "steps": [
         {
           "id": "release-audit-rust-test",
-          "condition": "vars.HARN_CI_DISABLE_COLOCATED_TESTS != 'true'",
+          "condition": "",
           "required_env": {"HARN_LLM_CALLS_DISABLED": "1"},
-          "run": "set -euo pipefail; host_bound_filter=\"$(scripts/ci/host_bound_rust_test_filter.sh)\"; scripts/ci/run_rust_test_lane.sh cargo nextest run --locked --workspace --profile ci -E \"not (${host_bound_filter})\""
+          "run": "scripts/ci/run_rust_test_lane.sh bash scripts/ci/run_workspace_tests.sh \"$HARN_EXT_TEST_PARTITION\""
+        }
+      ]
+    },
+    {
+      "name": "Rust workspace tests (rest 1/4)",
+      "job_id": "rust-test-partitions",
+      "matrix_kind": "partition-2",
+      "proofs": ["rust-audit"],
+      "steps": [
+        {
+          "id": "release-audit-rust-test",
+          "condition": "",
+          "required_env": {"HARN_LLM_CALLS_DISABLED": "1"},
+          "run": "scripts/ci/run_rust_test_lane.sh bash scripts/ci/run_workspace_tests.sh \"$HARN_EXT_TEST_PARTITION\""
+        }
+      ]
+    },
+    {
+      "name": "Rust workspace tests (rest 2/4)",
+      "job_id": "rust-test-partitions",
+      "matrix_kind": "partition-3",
+      "proofs": ["rust-audit"],
+      "steps": [
+        {
+          "id": "release-audit-rust-test",
+          "condition": "",
+          "required_env": {"HARN_LLM_CALLS_DISABLED": "1"},
+          "run": "scripts/ci/run_rust_test_lane.sh bash scripts/ci/run_workspace_tests.sh \"$HARN_EXT_TEST_PARTITION\""
+        }
+      ]
+    },
+    {
+      "name": "Rust workspace tests (rest 3/4)",
+      "job_id": "rust-test-partitions",
+      "matrix_kind": "partition-4",
+      "proofs": ["rust-audit"],
+      "steps": [
+        {
+          "id": "release-audit-rust-test",
+          "condition": "",
+          "required_env": {"HARN_LLM_CALLS_DISABLED": "1"},
+          "run": "scripts/ci/run_rust_test_lane.sh bash scripts/ci/run_workspace_tests.sh \"$HARN_EXT_TEST_PARTITION\""
+        }
+      ]
+    },
+    {
+      "name": "Rust workspace tests (rest 4/4)",
+      "job_id": "rust-test-partitions",
+      "matrix_kind": "partition-5",
+      "proofs": ["rust-audit"],
+      "steps": [
+        {
+          "id": "release-audit-rust-test",
+          "condition": "",
+          "required_env": {"HARN_LLM_CALLS_DISABLED": "1"},
+          "run": "scripts/ci/run_rust_test_lane.sh bash scripts/ci/run_workspace_tests.sh \"$HARN_EXT_TEST_PARTITION\""
+        }
+      ]
+    },
+    {
+      "name": "Rust workspace tests (vm 1/3)",
+      "job_id": "rust-test-partitions",
+      "matrix_kind": "partition-6",
+      "proofs": ["rust-audit"],
+      "steps": [
+        {
+          "id": "release-audit-rust-test",
+          "condition": "",
+          "required_env": {"HARN_LLM_CALLS_DISABLED": "1"},
+          "run": "scripts/ci/run_rust_test_lane.sh bash scripts/ci/run_workspace_tests.sh \"$HARN_EXT_TEST_PARTITION\""
+        }
+      ]
+    },
+    {
+      "name": "Rust workspace tests (vm 2/3)",
+      "job_id": "rust-test-partitions",
+      "matrix_kind": "partition-7",
+      "proofs": ["rust-audit"],
+      "steps": [
+        {
+          "id": "release-audit-rust-test",
+          "condition": "",
+          "required_env": {"HARN_LLM_CALLS_DISABLED": "1"},
+          "run": "scripts/ci/run_rust_test_lane.sh bash scripts/ci/run_workspace_tests.sh \"$HARN_EXT_TEST_PARTITION\""
+        }
+      ]
+    },
+    {
+      "name": "Rust workspace tests (vm 3/3)",
+      "job_id": "rust-test-partitions",
+      "matrix_kind": "partition-8",
+      "proofs": ["rust-audit"],
+      "steps": [
+        {
+          "id": "release-audit-rust-test",
+          "condition": "",
+          "required_env": {"HARN_LLM_CALLS_DISABLED": "1"},
+          "run": "scripts/ci/run_rust_test_lane.sh bash scripts/ci/run_workspace_tests.sh \"$HARN_EXT_TEST_PARTITION\""
+        }
+      ]
+    },
+    {
+      "name": "Rust workspace tests (vm integration)",
+      "job_id": "rust-test-partitions",
+      "matrix_kind": "partition-9",
+      "proofs": ["rust-audit"],
+      "steps": [
+        {
+          "id": "release-audit-rust-test",
+          "condition": "",
+          "required_env": {"HARN_LLM_CALLS_DISABLED": "1"},
+          "run": "scripts/ci/run_rust_test_lane.sh bash scripts/ci/run_workspace_tests.sh \"$HARN_EXT_TEST_PARTITION\""
+        }
+      ]
+    },
+    {
+      "name": "Rust workspace tests (cli unit)",
+      "job_id": "rust-test-partitions",
+      "matrix_kind": "partition-10",
+      "proofs": ["rust-audit"],
+      "steps": [
+        {
+          "id": "release-audit-rust-test",
+          "condition": "",
+          "required_env": {"HARN_LLM_CALLS_DISABLED": "1"},
+          "run": "scripts/ci/run_rust_test_lane.sh bash scripts/ci/run_workspace_tests.sh \"$HARN_EXT_TEST_PARTITION\""
+        }
+      ]
+    },
+    {
+      "name": "Rust workspace tests (cli integration)",
+      "job_id": "rust-test-partitions",
+      "matrix_kind": "partition-11",
+      "proofs": ["rust-audit"],
+      "steps": [
+        {
+          "id": "release-audit-rust-test",
+          "condition": "",
+          "required_env": {"HARN_LLM_CALLS_DISABLED": "1"},
+          "run": "scripts/ci/run_rust_test_lane.sh bash scripts/ci/run_workspace_tests.sh \"$HARN_EXT_TEST_PARTITION\""
         }
       ]
     },
@@ -65,36 +247,99 @@
         {
           "id": "release-audit-rust-security",
           "condition": "",
-          "run": "set -euo pipefail; host_bound_filter=\"$(scripts/ci/host_bound_rust_test_filter.sh)\"; scripts/ci/run_rust_test_lane.sh cargo nextest run --profile ci --success-output immediate --no-tests fail --archive-file \"$RUNNER_TEMP/harn-security/harn-security-tests.tar.zst\" --workspace-remap \"$GITHUB_WORKSPACE\" -E \"${host_bound_filter}\""
+          "run": "set -euo pipefail; host_bound_filter=\"$(scripts/ci/host_bound_rust_test_filter.sh)\"; scripts/ci/run_rust_test_lane.sh cargo-nextest nextest run --profile ci --success-output immediate --no-tests fail --archive-file \"$RUNNER_TEMP/harn-security/harn-security-tests.tar.zst\" --workspace-remap \"$GITHUB_WORKSPACE\" -E \"${host_bound_filter}\""
         }
       ]
     },
     {
-    "name": "Run Harn conformance tests",
-    "job_id": "harn-audit",
-    "matrix_kind": "conformance",
+      "name": "Run Harn conformance tests (1/4)",
+      "job_id": "harn-audit",
+      "matrix_kind": "conformance-1",
       "proofs": ["harn-audit"],
       "steps": [
         {
           "id": "release-audit-harn",
           "condition": "",
-        "run": "args=(--phase \"${{ matrix.kind }}\")\nif [ \"$TREE_SITTER_PARSER_PREFLIGHTED\" = true ]; then\n  args+=(--tree-sitter-parser-preflighted)\nfi\n./scripts/audit_gates.sh \"${args[@]}\"\n"
-      }
-    ]
-  },
-  {
-    "name": "Check Harn sources and generated files",
-    "job_id": "harn-audit",
-    "matrix_kind": "audit",
-    "proofs": [
-      "harn-audit"
-    ],
-    "steps": [
-      {
-        "id": "release-audit-harn",
-        "condition": "",
-        "run": "args=(--phase \"${{ matrix.kind }}\")\nif [ \"$TREE_SITTER_PARSER_PREFLIGHTED\" = true ]; then\n  args+=(--tree-sitter-parser-preflighted)\nfi\n./scripts/audit_gates.sh \"${args[@]}\"\n"
-      }
+          "run": "args=(--phase \"${{ matrix.phase }}\" \"${{ matrix.selector }}\")\nif [ \"$TREE_SITTER_PARSER_PREFLIGHTED\" = true ]; then\n  args+=(--tree-sitter-parser-preflighted)\nfi\n./scripts/audit_gates.sh \"${args[@]}\"\n"
+        }
+      ]
+    },
+    {
+      "name": "Run Harn conformance tests (2/4)",
+      "job_id": "harn-audit",
+      "matrix_kind": "conformance-2",
+      "proofs": ["harn-audit"],
+      "steps": [
+        {
+          "id": "release-audit-harn",
+          "condition": "",
+          "run": "args=(--phase \"${{ matrix.phase }}\" \"${{ matrix.selector }}\")\nif [ \"$TREE_SITTER_PARSER_PREFLIGHTED\" = true ]; then\n  args+=(--tree-sitter-parser-preflighted)\nfi\n./scripts/audit_gates.sh \"${args[@]}\"\n"
+        }
+      ]
+    },
+    {
+      "name": "Run Harn conformance tests (3/4)",
+      "job_id": "harn-audit",
+      "matrix_kind": "conformance-3",
+      "proofs": ["harn-audit"],
+      "steps": [
+        {
+          "id": "release-audit-harn",
+          "condition": "",
+          "run": "args=(--phase \"${{ matrix.phase }}\" \"${{ matrix.selector }}\")\nif [ \"$TREE_SITTER_PARSER_PREFLIGHTED\" = true ]; then\n  args+=(--tree-sitter-parser-preflighted)\nfi\n./scripts/audit_gates.sh \"${args[@]}\"\n"
+        }
+      ]
+    },
+    {
+      "name": "Run Harn conformance tests (4/4)",
+      "job_id": "harn-audit",
+      "matrix_kind": "conformance-4",
+      "proofs": ["harn-audit"],
+      "steps": [
+        {
+          "id": "release-audit-harn",
+          "condition": "",
+          "run": "args=(--phase \"${{ matrix.phase }}\" \"${{ matrix.selector }}\")\nif [ \"$TREE_SITTER_PARSER_PREFLIGHTED\" = true ]; then\n  args+=(--tree-sitter-parser-preflighted)\nfi\n./scripts/audit_gates.sh \"${args[@]}\"\n"
+        }
+      ]
+    },
+    {
+      "name": "Check Harn sources and generated files",
+      "job_id": "harn-audit",
+      "matrix_kind": "audit",
+      "proofs": ["harn-audit"],
+      "steps": [
+        {
+          "id": "release-audit-harn",
+          "condition": "",
+          "run": "args=(--phase \"${{ matrix.phase }}\" \"${{ matrix.selector }}\")\nif [ \"$TREE_SITTER_PARSER_PREFLIGHTED\" = true ]; then\n  args+=(--tree-sitter-parser-preflighted)\nfi\n./scripts/audit_gates.sh \"${args[@]}\"\n"
+        }
+      ]
+    },
+    {
+      "name": "Check Harn documentation",
+      "job_id": "harn-audit",
+      "matrix_kind": "audit-docs",
+      "proofs": ["harn-audit"],
+      "steps": [
+        {
+          "id": "release-audit-harn",
+          "condition": "",
+          "run": "args=(--phase \"${{ matrix.phase }}\" \"${{ matrix.selector }}\")\nif [ \"$TREE_SITTER_PARSER_PREFLIGHTED\" = true ]; then\n  args+=(--tree-sitter-parser-preflighted)\nfi\n./scripts/audit_gates.sh \"${args[@]}\"\n"
+        }
+      ]
+    },
+    {
+      "name": "Run Harn script tests",
+      "job_id": "harn-audit",
+      "matrix_kind": "audit-scripts",
+      "proofs": ["harn-audit"],
+      "steps": [
+        {
+          "id": "release-audit-harn",
+          "condition": "",
+          "run": "args=(--phase \"${{ matrix.phase }}\" \"${{ matrix.selector }}\")\nif [ \"$TREE_SITTER_PARSER_PREFLIGHTED\" = true ]; then\n  args+=(--tree-sitter-parser-preflighted)\nfi\n./scripts/audit_gates.sh \"${args[@]}\"\n"
+        }
       ]
     }
   ]

@@ -156,7 +156,8 @@ fn resolve_routing_inner(
     let provider = provider
         .map(str::to_string)
         .unwrap_or_else(harn_vm::llm_config::default_provider);
-    let model = harn_vm::llm_config::default_model_for_provider(&provider);
+    let model = harn_vm::llm_config::default_model_for_provider(&provider)
+        .map_err(|error| error.to_string())?;
     Ok(ChatRouting {
         endpoint: resolve_endpoint(&provider),
         label: model.clone(),

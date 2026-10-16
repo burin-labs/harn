@@ -98,7 +98,7 @@ top-level keys before `v0.8`).
 | `turn_end_condition` | dict | Present when `turn_end_condition` is configured. `{invocations, vetoes, max_invocations, cap_reached}` — the per-session turn-end-judge call/veto counts, the resolved top-level cap (`nil` when disabled or not configured), and whether that cap was hit. This is separate from `turn_end_condition.cadence.max_invocations`, which only gates when the judge is due |
 
 `judge_decision` agent events carry `{verdict, confirm, reason, reasoning,
-next_step, trigger, escalation_recommended?, escalation_target?}`.
+next_step, trigger, escalation_recommended?, escalation_target?, requirement_report?}`.
 `verify_completion` closures, `verify_completion_judge`,
 and `turn_end_condition` all use this event, so harnesses can measure completion-gate
 class fire rates from structured fields instead of parsing feedback prose.
@@ -124,6 +124,43 @@ turn for repair, its `feedback_injected` event includes
 missing-tool-call claim also includes `tool_name`. The ACP extension projection
 uses `turnClaimedForRepair` and `toolName`. Event-log, replay, and evaluation
 consumers can use these fields without matching the injected feedback text.
+
+### Missing tool-call recovery
+
+`missing_tool_call_recovery` defaults to enabled for provider-backed loops.
+It classifies assistant text when the parser found no call and recovery remains
+eligible. A successful native tool call or an active completion judge owns the
+terminal turn, so recovery doesn't classify that turn again.
+
+The classifier asks one boolean intent question and one choice over candidate
+tools through `harness.llm.evaluate_request`. Without `evaluation`, it uses
+`structured_llm` on the loop's provider and model, including any classifier
+`provider` or `model` override. A route declaring a native decision protocol
+selects `native_decision`. An explicit `evaluation: EvaluationPolicy`
+selects the route and backend, including `native_decision`. Native evaluation
+requires conservative run budget authority from the start of the run.
+
+On the inherited chat route, classifier `max_tokens` defaults to `192`,
+`temperature` to `0.0`, and `effort` to `none`. Optional `top_p`, `seed`, and
+`timeout_ms` retain their transport meanings. An explicit `evaluation` supplies
+its own chat settings. Automatically selected native policies omit chat defaults;
+explicit chat settings remain in the evaluation policy and native evaluation
+refuses them without a recovery nudge.
+
+`confidence_threshold` defaults to `0.65`. Recovery requires both intent and
+target confidence to meet that floor. A confident negative intent doesn't need
+a confident target. The evaluator policy threshold is set to zero so the
+consumer can apply those rules to both answers. Refused or unavailable answers
+produce `ambiguous`; cancellation propagates. Each live verdict includes the
+closed `decision` outcome and its evaluation receipt reference.
+
+`classifier` accepts a typed `MissingToolCallClassifier` for deterministic
+consumer fixtures. Fixture verdicts are explicit records; assistant wording
+doesn't manufacture their labels. Fixture success doesn't measure model quality.
+See [Decision evaluation](../predicates.md#runtime-vocabulary-and-routes) for
+the policy, request limits, telemetry, and backend confidence meanings.
+
+### LLM result counters
 
 Nested `llm` fields:
 
@@ -269,48 +306,30 @@ full agent loop (tools, judges, compaction) without losing the conversation.
 
 ### Streaming visible-text deltas
 
-A chat-shaped harness that wants to render — or transform — tokens as they
-arrive no longer has to abandon `agent_loop` for a raw `harness.llm.stream_call`. Pass an
-`on_delta` closure and each per-turn model call is issued through the streaming
-transport; the callback fires once per streamed chunk of the assistant's
-**visible text**:
+A full agent run publishes its answer after tool effects and completion checks
+finish. Pass `on_delta` to receive that admitted reply once. Provider deltas,
+tool-batch prose, rejected candidates, and retry attempts remain private.
+Use typed tool events for live progress and the existing turn phase for
+generating, verifying, and terminal state.
 
 ```harn,ignore
 agent_loop(harness, "summarize the diff", nil, {
   provider: "anthropic",
   model: "claude-sonnet-5",
-  on_delta: { delta -> render_token(delta) },
+  on_delta: { reply -> render_answer(reply) },
 })
 ```
 
 Semantics:
 
-- **Observational.** `on_delta` is a pure side-effect seam — its return value is
-  ignored, and the loop's transcript is always the true concatenation of the raw
-  deltas. To *mask* a stream (e.g. hide a `<secret>…</secret>` span mid-render,
-  even when the tag is split across chunks), fold each delta through
-  `agent_private_stream_delta` from `std/agent/stream` inside your callback; that
-  transforms what you display without altering the transcript the model sees.
-- **A complete turn is preserved.** The streaming call returns the same
-  normalized result as `harness.llm.call`, so native tool calls and usage survive intact
-  and tool dispatch is unaffected. `on_delta` fires only for visible text — it
-  never streams tool-call fragments (a deliberate v1 limitation, aligned with the
-  [tool-calling north-star](../../rfcs/tool-calling-north-star.md) dialect
-  phases).
-- **Graceful non-streaming fallback.** When a provider returns a complete
-  response without incremental deltas (the mock provider, cached results, or a
-  transport that does not stream), `on_delta` still fires exactly once with the
-  full visible text, so harness code sees a uniform "at least one delta, and the
-  concatenation equals the visible text" contract. `harness.llm.provider_capabilities(...)`
-  reports `requires_streaming` for models that must stream.
-- **Attempts are observable.** Schema retries, routing failover, and
-  context-overflow reissues can each start a fresh provider call. `on_delta`
-  reports visible text from every attempted call in order; callers that render a
-  single final transcript should treat the callback as live progress, not as the
-  authoritative persisted assistant message.
-- **Composes with `llm_caller`.** `on_delta` only affects the *default* per-turn
-  caller. A custom `llm_caller` short-circuits before the streaming path, so a
-  caller that does not itself stream simply never fires `on_delta`.
+- The callback is observational. Its return value and errors do not change the
+  run's result.
+- Canonical provider messages, tool calls, and usage are retained. A
+  source-bound publication receipt records which draft was admitted without
+  creating another assistant turn or charging usage again.
+- Streaming and non-streaming transports use the same publication boundary,
+  including custom `llm_caller` results. An empty or rejected reply produces no
+  callback. Direct LLM streaming keeps its token-level contract.
 
 ### agent_loop options
 
@@ -342,7 +361,7 @@ Same as `harness.llm.call`, plus additional options:
 | `max_nudges` | int | `8` | Max consecutive text-only responses before stopping |
 | `nudge` | string | see below | Custom message to send when nudging the agent |
 | `llm_caller` | closure | nil | Custom caller wrapping the per-turn `harness.llm.call`. The resilience surface: compose `with_retry` / `with_fallback` from `std/llm/handlers` here. See [Composable callers and middleware](../stdlib/llm-handlers.md). |
-| `on_delta` | closure | nil | Observational streaming callback `delta -> nil`, invoked once per streamed chunk of the assistant's visible text during each turn. Lets chat-shaped harnesses render or transform the token stream without leaving `agent_loop`. See [Streaming visible-text deltas](#streaming-visible-text-deltas). |
+| `on_delta` | closure | nil | Observational callback invoked once with the admitted visible reply. See [Streaming visible-text deltas](#streaming-visible-text-deltas). |
 | `reasoning_policy` | string/bool | `"auto"` | Provider-aware reasoning policy. `auto` chooses a task/scale-appropriate setting; `off` disables thinking where possible and otherwise uses the provider's lowest reasoning floor; explicit levels run from `minimal` through `max`. Caller-supplied `thinking` or `effort` wins. |
 | `reasoning_scale` | string | `"medium"` | Scale hint for `reasoning_policy: "auto"`: `small`, `medium`, or `large`. |
 | `reasoning_task` | string | inferred | Task hint for `reasoning_policy: "auto"`: `chat`, `agent`, `code`, `verify`, or `summarize` |
@@ -375,7 +394,7 @@ Same as `harness.llm.call`, plus additional options:
 | `prompts` / `prompt_overrides` | dict | nil | Override validated logical agent prompt ids such as `agent.loop_contract`, `agent.tool_contract_text`, and `agent.completion_judge_system` with a prompt asset path, `{text}`, `{path}`, or render closure. Unknown ids are rejected. For typo-resistant authoring, pass the typed override shape through `agent_prompt_overrides(...)` from `std/agent/prompts` |
 | `post_turn_callback` | closure | nil | Hook called after each turn. Receives turn metadata and may inject a message, request an immediate stage stop, claim one exact next tool with `next_tool_claim: {tool_name}`, or merge next-turn options such as `llm_options: {tool_choice: "none"}`. Rich verdicts may include `feedback_kind: string` to give injected feedback a stable semantic identity |
 | `deadline_ms` | int | nil | Monotonic duration from `agent_loop` entry. The earliest of this value and `iteration_budget.wall_clock_ms` is the enclosing terminal deadline used for completion-judge admission. It is a duration, never a cross-process absolute timestamp. |
-| `verify_completion` | closure | nil | Hook called when the loop is about to stop naturally. Return `nil`/`true` to accept the stop or feedback text to veto and continue |
+| `verify_completion` | closure | nil | Hook called when the loop is about to stop naturally. Return `nil`/`true` to accept, feedback text or `{confirm: false}` to veto and continue, or `{confirm: false, action: "stop_unverified", reason: "host_check_failed"}` to end as `completion_unverified` and withhold the unverified reply. A final refusal requires a nonempty reason; contradictory or unknown actions are refused as invalid results. |
 | `verify_completion_judge` | bool/dict | nil | Structured judge for a proposed stop. `true` uses defaults. A dict may set `provider`, `model`, `system`, `feedback_fallback`, `operation_timeout_ms` (default `60000`), `deadline_reserve_ms` (default `5000`), and `max_invocations` (default `5`; `0` disables the cap). The loop ends as `completion_unverified` when the judge cannot fit before the loop deadline, times out, or reaches its cap. |
 | `turn_end_condition` | bool/dict | nil | Structured judge for natural completion or a done sentinel. The model returns `{verdict, detail}` where `verdict` is `done` or `continue`; `detail` is supporting evidence for `done`, or the single gap and next action for `continue`. Harn produces `stop_unverified` when a deadline or policy limit prevents a verdict. It shares the timeout fields above and supports `max_invocations` plus `cadence: {every?, when?, max_invocations?, min_iterations_before_first?}`. |
 | `step_judge` | dict | nil | Per-turn structured judge that runs after an assistant turn and before tool dispatch. Dict configs may include `provider`, `model`, `on_veto` (`"replace"` or `"retain"`), `max_attempts`, `skip_when_empty`, `skip_when_stalled`, and `skip_when_iterations_remaining` (default `1`, skips when no regeneration turn remains). Skips emit `step_judge_decision` with `skipped: true` |
@@ -596,7 +615,7 @@ Caller contract: `fn(call) -> {ok, value | status, error?}` where
 The pre-0.10 `llm_retries` / `llm_backoff_ms` options were removed —
 the loop is fail-fast on transient provider errors unless a composed
 `llm_caller` retries them; the `removed-llm-options` lint hard-errors
-on usage (see [Migrating to 0.10](../migrations/v0.10.md)). See
+on usage. See
 [Composable callers and middleware](../stdlib/llm-handlers.md) for the
 full middleware catalog.
 
@@ -637,6 +656,40 @@ Available strategies:
 | `"summarize_middle"` | Summarize older messages and keep the latest suffix verbatim |
 | `"summarize_all"` | Summarize all compactable prompt-visible messages |
 | `"hybrid"` | Summarize older messages, keep the latest suffix, and use truncate as the hard-limit fallback |
+| `"classify"` | Classify eligible archived messages as keep, reword, or drop; preserve low-confidence content without a positional hard-limit pass |
+
+The `classify` strategy requires `compaction.classify.policy`, using the existing
+`EvaluationPolicy` contract from `std/predicate`. Its `threshold` is the confidence
+floor: below it, drop becomes reword and reword becomes keep. A failed rewrite
+keeps the original message. Messages selected by the existing pinning policy
+(the latest three markers) and the latest prior recap bypass classification;
+the latest user message anchors every evaluation window.
+
+Native classification requires conservative run budget authority admitted from
+the start. It refuses late activation after unreserved chat spend, preserving
+source instead of treating earlier unknown charges as zero.
+
+| Classification option | Default | Meaning |
+|---|---|---|
+| `policy` | required | Evaluator route, backend, confidence floor, and budget authority |
+| `max_rounds` | `2` | Positive round limit; later rounds consider only raw keep decisions while the byte budget is unmet |
+| `window_tokens` | route state window | Positive tighter window bound; question counts also respect the route contract |
+| `fixture` | absent | Typed `CompactionClassifyFixture` from `std/agent/compaction_classify` for offline decisions |
+| `rewrite_fixture` | absent | Typed function from a list of `CompactionClassifyItem` to `{index, text}` records |
+
+Only a window-planning refusal before dispatch uses observation-mask fallback.
+Other classifier failures return an error without changing the transcript.
+An all-drop result still passes through the lifecycle's nonempty-source guard;
+setting the floor to zero does not authorize replacing nonempty source with an
+empty recap. Cancellation propagates before fallback and commits no transcript
+edit. An explicit `summarize_prompt` path runs the configured summary after
+classification, preserving protected text verbatim.
+
+Summary and rewrite calls retain admitted route, privacy, and budget settings
+while replacing conversation state and removing tool authority. Nonempty raw
+provider wire overrides cannot safely cross this isolated-request boundary and
+are refused. Rewrite refusal preserves source; ordinary summary failure follows
+its declared fallback policy.
 
 Compaction emits `TranscriptCompacted` live events and transcript
 `compaction` events with `reason`, `strategy`, `engine_strategy`,
@@ -646,6 +699,19 @@ Compaction emits `TranscriptCompacted` live events and transcript
 `compaction_policy`, so replay tools can verify which trigger, policy, engine,
 and host/user instruction lane ran. `source_measurement: nil` means the path did
 not measure source or summary bytes; contained zeroes are measured zeroes.
+
+Receipt schema 2 adds optional `classification` evidence: status, confidence
+floor, rounds, byte budget and result size, whether the budget was met, whether
+the configured summary ran, decisions, and any predispatch fallback reason.
+Each decision carries its source index, question id, reported choice and
+confidence provenance, evaluator receipt id, round, fixture/evaluation source,
+applied choice, and application reason. The byte result describes this stage
+before separately appended policy or repair guidance. The same typed evidence
+reaches transcript events, run records, and client notifications. Legacy receipts
+retain schema 1; absent classification means that stage was not measured.
+
+Offline fixtures prove application, admission, and lifecycle behavior. They do
+not establish classifier quality or improved task success on real conversations.
 
 Hosts can attach first-class compaction instructions without building custom
 prompt concatenation. The typed `CompactionPolicy` shape accepts
@@ -951,7 +1017,7 @@ Preset roles, defaults summarized:
 | `verify` | `verifier` | unset | false | 0 | adaptive `{initial: 1, max: 5, extend_by: 1}` | unset | `turn_end_condition: true` |
 | `merge_captain` | `tool_using` | `native` | true | 3 | adaptive `{initial: 8, max: 60, extend_by: 4}` | enabled, threshold 3 | both `nil`; default consent denies writes |
 | `review_captain` | `tool_using` | `native` | true | 3 | adaptive `{initial: 6, max: 30, extend_by: 3}` | enabled, threshold 3 | both `nil` |
-| `oncall_captain` | `tool_using` | `native` | true | 3 | adaptive `{initial: 6, max: 24, extend_by: 3}` | enabled, threshold 3 | both `nil`; default `with_rate_limit(harness.runtime, {max_calls: 50})` |
+| `oncall_captain` | `tool_using` | `native` | true | 3 | adaptive `{initial: 6, max: 24, extend_by: 3}` | enabled, threshold 3 | both `nil`; default `tool_middleware.with_rate_limit(harness.runtime, {max_calls: 50})` |
 | `release_captain` | `tool_using` | `native` | true | 3 | adaptive `{initial: 8, max: 40, extend_by: 4}` | enabled, threshold 3 | both `nil`; opt-in `with_dry_run` shadow runs |
 
 ### Captain presets
@@ -1272,6 +1338,13 @@ when it reaches its next terminal decision.
 A callback that throws is attempted once. If it also fails while recording a
 thrown loop error, the propagated error retains both causes.
 
+`std/agent/failure_types` names the loop's structured errors. The
+`AgentLoopTerminalCallbackFailure` record carries `cause.terminal_error` and
+`cause.callback_error`. `AgentLoopProtocolFailure` identifies an empty provider
+request refused before dispatch. `AgentLoopFailure` combines those records
+with `AgentLoopCancelledFailure` and the loop's string errors. Misspelled or
+missing record fields fail checking.
+
 ### Example with retry
 
 ```harn
@@ -1585,7 +1658,14 @@ agent/persona/mode, capability operation, and repeated-call counts. Deny wins
 over ask, ask wins over allow, and unmatched tools are approved. Active
 approval policies deny sensitive filenames such as `.env` and private keys by
 default, and declared host-absolute paths outside the workspace require an
-explicit `external_roots` allowance. Ask decisions call
+explicit `external_roots` allowance. Each root carries an `access` mode,
+`read` (the default, and the meaning of a bare path string) or `read_write`;
+a call that is not read-only is refused under a `read` root with
+`external_root_read_only`. The one exception is a command-running call
+(`process_exec`) whose child provably cannot write the declared path: the
+active policy is `os_hardened`, the platform is macOS or Linux, and the
+backend's installed rules refuse every write to that path. Unmeasured is
+refused, never admitted. Ask decisions call
 `session/request_permission`; the host request and the transcript event both
 carry a `policyDecision` receipt with matched rule and rationale.
 

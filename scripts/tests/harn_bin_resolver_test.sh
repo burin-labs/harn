@@ -41,10 +41,22 @@ replace_executable_with_marker() {
 
 tmp_root=$(mktemp -d)
 cleanup() {
+  cd "$repo_root" || return
   rm -rf "$tmp_root"
   harn_refresh_cargo_target_dir_cache >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
+
+# Mock Cargo needs a real source identity, not the entire caller's checkout.
+# Keep that identity small and stable while retaining every freshness refusal.
+mock_repo="$tmp_root/mock-repo"
+git init --quiet -b main "$mock_repo"
+printf 'Resolver fixture source\n' > "$mock_repo/README"
+git -C "$mock_repo" add README
+git -C "$mock_repo" -c user.name='Resolver fixture' \
+  -c user.email='resolver-fixture@example.invalid' -c commit.gpgsign=false \
+  -c core.hooksPath=/dev/null commit --quiet -m 'Seed resolver fixture'
+cd "$mock_repo"
 
 fake_bin="$tmp_root/harn"
 cat > "$fake_bin" <<'SH'
@@ -240,7 +252,8 @@ case "$*" in
   "metadata --format-version=1 --no-deps")
     printf '{"target_directory":"%s"}\n' "${FAKE_METADATA_TARGET_DIR:?}"
     ;;
-  "build --quiet --bin harn --bin harn-freshness-check --features internal-freshness-checker")
+  "build --quiet --bin harn --bin harn-freshness-check --features internal-freshness-checker" | \
+  "build --quiet -p harn-cli --bin harn --bin harn-freshness-check -p harn-cli-aot-gen --bin harn-cli-aot-gen --features harn-cli/internal-freshness-checker")
     mkdir -p "${CARGO_TARGET_DIR:?}/debug"
     cat > "$CARGO_TARGET_DIR/debug/harn" <<'BIN'
 #!/usr/bin/env bash
@@ -293,6 +306,9 @@ CHECKER
       > "$CARGO_TARGET_DIR/debug/harn.build-freshness"
     escaped_harn="${CARGO_TARGET_DIR// /\\ }/debug/harn"
     printf '%s:\n' "$escaped_harn" > "$CARGO_TARGET_DIR/debug/harn.d"
+    if [[ " $* " == *" --bin harn-cli-aot-gen "* ]]; then
+      cp "$CARGO_TARGET_DIR/debug/harn" "$CARGO_TARGET_DIR/debug/harn-cli-aot-gen"
+    fi
     ;;
   *)
     echo "unexpected cargo invocation: $*" >&2
@@ -301,6 +317,9 @@ CHECKER
 esac
 SH
 chmod +x "$fake_cargo_bin/cargo"
+cp "$repo_root/scripts/tests/fixtures/harn_bin/fake_rustc.sh" "$fake_cargo_bin/rustc"
+chmod +x "$fake_cargo_bin/rustc"
+export FAKE_RUST_TOOLCHAIN_FILE="$repo_root/rust-toolchain.toml"
 
 # The production watchdog uses `sleep`, but a sub-second sleep is not a stable
 # test clock under runner load. This PATH-scoped adapter rendezvous with the
@@ -684,6 +703,7 @@ internal-freshness-checker = []
 blake3 = "1.8.7"
 buildid = "=1.0.5"
 hex = "0.4"
+harn-parser = { path = "runtime-stack-owner" }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61.2", features = [
@@ -691,12 +711,25 @@ windows-sys = { version = "0.61.2", features = [
     "Win32_Storage_FileSystem",
 ] }
 TOML
+# This fixture compiles the production freshness owner, including its shared
+# stack dependency. Copy the actual dependency module into a minimal crate so
+# the fixture remains self-contained without duplicating the stack policy.
+mkdir -p "$cargo_fixture/runtime-stack-owner/src"
+cat > "$cargo_fixture/runtime-stack-owner/Cargo.toml" <<'TOML'
+[package]
+name = "harn-parser"
+version = "0.0.0"
+edition = "2021"
+TOML
+printf 'pub mod runtime_stack;\n' > "$cargo_fixture/runtime-stack-owner/src/lib.rs"
+cp "$repo_root/crates/harn-parser/src/runtime_stack.rs" \
+  "$cargo_fixture/runtime-stack-owner/src/runtime_stack.rs"
 mkdir -p "$cargo_fixture/src/bin" "$cargo_fixture/src/bootstrap"
 cp "$repo_root/crates/harn-cli/src/bin/harn-freshness-check.rs" \
   "$cargo_fixture/src/bin/harn-freshness-check.rs"
 cp "$repo_root/crates/harn-cli/src/bootstrap/freshness_manifest.rs" \
   "$cargo_fixture/src/bootstrap/freshness_manifest.rs"
-cp "$repo_root/crates/harn-cli/src/path_policy.rs" \
+cp "$repo_root/crates/harn-package/src/path_policy.rs" \
   "$cargo_fixture/src/path_policy.rs"
 cat > "$cargo_fixture/src/main.rs" <<'RS'
 #![allow(dead_code)]
@@ -841,6 +874,8 @@ echo "no-build freshness verification invoked Cargo" >&2
 exit 97
 SH
 chmod +x "$no_cargo_bin/cargo"
+cp "$fake_cargo_bin/rustc" "$no_cargo_bin/rustc"
+chmod +x "$no_cargo_bin/rustc"
 (
   cd "$cargo_fixture"
   CARGO_TARGET_DIR="$cargo_target" PATH="$no_cargo_bin:$PATH" \
@@ -1825,6 +1860,40 @@ fi
 if [[ -s "$record" ]]; then
   echo "invalid wrapper retry policy invoked Cargo before validation" >&2
   cat "$record" >&2
+  exit 1
+fi
+
+# Package preparation must select all three tools through the same resolver,
+# retaining its compiled provenance instead of replacing Harn afterward.
+: > "$record"
+CARGO_TARGET_DIR="$target_dir" \
+  FAKE_CARGO_RECORD="$record" FAKE_CARGO_MODE=success \
+  HARN_CARGO_LEASE_MODE=off \
+  HARN_BUILD_FRESHNESS_ID=0000000000000000000000000000000000000000 \
+  PATH="$fake_cargo_bin:$PATH" \
+  harn_run_cargo_probe_with_deadline "$expected_bin" dev unlocked package-verification \
+  > "$tmp_root/package-tools.out" 2> "$tmp_root/package-tools.err"
+package_probe_args='args=build --quiet -p harn-cli --bin harn --bin harn-freshness-check -p harn-cli-aot-gen --bin harn-cli-aot-gen --features harn-cli/internal-freshness-checker'
+if ! grep -Fxq "$package_probe_args" "$record" || \
+   [[ ! -x "$target_dir/debug/harn-cli-aot-gen" ]] || \
+   ! grep -Fxq "$expected_bin" "$tmp_root/package-tools.out"; then
+  echo 'package tools were not built in the canonical feature graph' >&2
+  cat "$record" "$tmp_root/package-tools.err" >&2
+  exit 1
+fi
+
+: > "$record"
+if HARN_BIN_NO_BUILD=1 CARGO_TARGET_DIR="$target_dir" \
+  FAKE_CARGO_RECORD="$record" PATH="$fake_cargo_bin:$PATH" \
+  "$minimum_bash" "$repo_root/scripts/harn_bin.sh" --print --package-tools \
+  > "$tmp_root/package-tools-no-build.out" 2> "$tmp_root/package-tools-no-build.err"; then
+  echo 'package tools overrode the no-build boundary' >&2
+  exit 1
+else
+  status=$?
+fi
+if [[ "$status" -ne 2 || -s "$record" ]]; then
+  echo 'package tools reached Cargo despite the no-build boundary' >&2
   exit 1
 fi
 

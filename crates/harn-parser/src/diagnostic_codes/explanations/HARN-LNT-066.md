@@ -1,44 +1,42 @@
 # HARN-LNT-066 — the result of a pure collection method is discarded
 
-A `list` / `dict` / `set` / `string` method was called as a statement and its
-result thrown away, so the call has no effect at all.
+A copy-returning `list` / `dict` / `set` / `string` method was called as a
+statement and its result thrown away, so the call has no effect at all.
 
-Every method on Harn's built-in collections is **pure**. They are persistent,
-copy-on-write values: `appending` clones the receiver, adds an item, and
-returns a *new* list. It never modifies the receiver.
+Copy-returning methods such as `sorted`, `reversed`, `lower`, and `windows`
+leave the receiver alone and return a *new* value. Harn's collections are
+persistent, copy-on-write values, so nothing else observes the call.
 
 ```harn
-const l = []
-l.appending(1)      // error[HARN-LNT-066]: no effect — `l` is still []
-l.appending(2)      // error[HARN-LNT-066]
-// l == []
+let l = [3, 1, 2]
+l.sorted()      // error[HARN-LNT-066]: no effect — `l` is still [3, 1, 2]
+// l == [3, 1, 2]
 ```
 
-The method name reads as a value-producing operation, but its result still has
-to be consumed. Without this diagnostic, discarding it would typecheck, run
-without error, and quietly build an empty list.
+Without this diagnostic, discarding the result would typecheck, run without
+error, and quietly leave the receiver unchanged.
 
 ## How to fix
 
-Assign the result back. Because the binding's value changes, it must be `let`
-rather than `const` (see the binding rule in the language spec — `const` means
-this binding's value never changes):
+Call the mutating counterpart to change the binding in place, which needs a
+`let` binding (`const` means this binding's value never changes):
 
 ```harn
-let l = []
-l = l.appending(1)
-l = l.appending(2)
-// l == [1, 2]
+let l = [3, 1, 2]
+l.sort()
+// l == [1, 2, 3]
 ```
 
-When building a collection in a loop, the same shape applies:
+Or bind the new value:
 
 ```harn
-let out = []
-for item in items {
-  out = out.appending(transform(item))
-}
+const l = [3, 1, 2]
+const ordered = l.sorted()
 ```
+
+Mutating methods (`push`, `pop`, `insert`, `extend`, `clear`, `sort`,
+`sort_by`, `reverse`, set `add`/`remove`, dict `remove`) change their receiver,
+so calling one as a statement is the point and this lint never fires for them.
 
 To call a method purely for a side effect inside it — which only a closure
 argument can produce — the result is not discarded in the same sense, and this

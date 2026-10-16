@@ -24,6 +24,7 @@ const INVALID_RESPONSE_FINGERPRINTS: &[&[&str]] = &[
 /// artifacts so hosts branch on the owner's vocabulary instead of inventing
 /// sibling strings.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[non_exhaustive]
 pub enum LlmErrorKind {
     Transient,
     Terminal,
@@ -57,6 +58,7 @@ impl LlmErrorKind {
 /// artifacts. `code`, by contrast, is a provider passthrough with no closed
 /// set: hosts must treat it as opaque diagnostic text and never branch on it.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[non_exhaustive]
 pub enum LlmErrorReason {
     RateLimit,
     ServerError,
@@ -84,6 +86,12 @@ pub enum LlmErrorReason {
     /// a larger cap or a smaller request, never a byte-identical replay.
     OutputBudgetExhausted,
     Unknown,
+    /// Harn refused inference under its host/session policy before provider I/O.
+    /// Provider response bodies cannot claim this locally owned reason.
+    PolicyDenied,
+    /// A declared managed service paused inference under its spending policy.
+    /// This is not the caller's personal account balance or a retryable throttle.
+    ManagedSpendPaused,
 }
 
 impl LlmErrorReason {
@@ -104,6 +112,8 @@ impl LlmErrorReason {
         Self::BillingLimit,
         Self::OutputBudgetExhausted,
         Self::Unknown,
+        Self::PolicyDenied,
+        Self::ManagedSpendPaused,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -122,6 +132,8 @@ impl LlmErrorReason {
             Self::BillingLimit => "billing_limit",
             Self::OutputBudgetExhausted => "output_budget_exhausted",
             Self::Unknown => "unknown",
+            Self::PolicyDenied => "policy_denied",
+            Self::ManagedSpendPaused => "managed_spend_paused",
         }
     }
 
@@ -141,6 +153,8 @@ impl LlmErrorReason {
             "billing_limit" => Some(Self::BillingLimit),
             "output_budget_exhausted" => Some(Self::OutputBudgetExhausted),
             "unknown" => Some(Self::Unknown),
+            "policy_denied" => Some(Self::PolicyDenied),
+            "managed_spend_paused" => Some(Self::ManagedSpendPaused),
             _ => None,
         }
     }
@@ -169,6 +183,7 @@ impl LlmErrorReason {
             | Self::BillingLimit
             | Self::OutputBudgetExhausted
             | Self::Unknown => LlmErrorKind::Terminal,
+            Self::PolicyDenied | Self::ManagedSpendPaused => LlmErrorKind::Terminal,
         }
     }
 }
@@ -234,26 +249,7 @@ pub(crate) fn retry_after_header(headers: &reqwest::header::HeaderMap) -> Option
 
 /// Parse an RFC 7231 Retry-After field value into a bounded delay.
 pub(crate) fn parse_retry_after_value(value: &str) -> Option<u64> {
-    const MAX_MS: u64 = 60_000;
-    let value = value.trim();
-    let numeric_prefix = value
-        .chars()
-        .take_while(|character| character.is_ascii_digit() || *character == '.')
-        .collect::<String>();
-    if let Ok(seconds) = numeric_prefix.parse::<f64>() {
-        if !seconds.is_finite() || seconds < 0.0 {
-            return None;
-        }
-        return Some(((seconds * 1000.0) as u64).min(MAX_MS));
-    }
-    let target = httpdate::parse_http_date(value).ok()?;
-    Some(
-        target
-            .duration_since(std::time::SystemTime::now())
-            .map(|duration| duration.as_millis() as u64)
-            .unwrap_or(0)
-            .min(MAX_MS),
-    )
+    crate::http::retry_after_hint(value).map(|(millis, _)| millis)
 }
 
 fn provider_http_error_value(
@@ -280,8 +276,9 @@ fn provider_http_error_value(
     fields.put_str("kind", classified.kind.as_str());
     fields.put_str("reason", classified.reason.as_str());
     fields.put_str("message", classified.message);
-    if let Some(ms) = retry_after.and_then(parse_retry_after_value) {
-        fields.insert("retry_after_ms".to_string(), VmValue::Int(ms as i64));
+    if let Some((ms, exceeds_cap)) = retry_after.and_then(crate::http::retry_after_hint) {
+        fields.put_int("retry_after_ms", ms as i64);
+        fields.put_bool("retry_after_exceeds_cap", exceeds_cap);
     }
     let quota = quota.and_then(|quota| {
         Some((
@@ -294,10 +291,10 @@ fn provider_http_error_value(
         let mut snapshot = std::collections::BTreeMap::new();
         snapshot.put_str("schema", "harn.llm.provider_token_quota.v1");
         snapshot.put_str("resource", "tokens");
-        snapshot.insert("limit".to_string(), VmValue::Int(limit));
-        snapshot.insert("used".to_string(), VmValue::Int(used));
-        snapshot.insert("window_ms".to_string(), VmValue::Int(window_ms));
-        fields.insert("provider_quota".to_string(), VmValue::dict(snapshot));
+        snapshot.put_int("limit", limit);
+        snapshot.put_int("used", used);
+        snapshot.put_int("window_ms", window_ms);
+        fields.put("provider_quota", VmValue::dict(snapshot));
     }
     VmError::Thrown(VmValue::dict(fields))
 }
@@ -306,6 +303,13 @@ fn provider_http_error_value(
 fn category_owned_by_llm_reason(reason: LlmErrorReason) -> Option<ErrorCategory> {
     match reason {
         LlmErrorReason::InvalidRequest => Some(ErrorCategory::InvalidRequest),
+        // A billing stop arrives as HTTP 429. Taking the status's category
+        // (`rate_limit`) made every retry layer back off and resend into the
+        // same refusal. `reason: billing_limit` names it; `generic` is the
+        // category nothing retries.
+        LlmErrorReason::BillingLimit | LlmErrorReason::ManagedSpendPaused => {
+            Some(ErrorCategory::Generic)
+        }
         _ => None,
     }
 }
@@ -344,7 +348,7 @@ pub(crate) fn classify_provider_http_error(
     retry_after: Option<&str>,
     body: &str,
 ) -> LlmErrorInfo {
-    let (kind, reason) = classify_http_status_and_body(status, body);
+    let (kind, reason) = classify_http_status_and_body(provider, status, body);
     let body_summary = sanitize_provider_error_body(body);
     let mut msg = format!(
         "{provider} HTTP {status} [{}]: {body_summary}",
@@ -371,7 +375,7 @@ pub(crate) fn classify_provider_http_error(
 /// valid terminal provider error does not fall through to premature EOF.
 pub(crate) fn classify_provider_stream_error(provider: &str, body: &str, partial: bool) -> VmError {
     let json = serde_json::from_str::<serde_json::Value>(body).ok();
-    let explicit = explicit_stream_error_taxonomy(json.as_ref());
+    let explicit = explicit_stream_error_taxonomy(provider, json.as_ref());
     // Read the provider's own error message, not the whole frame: Fireworks
     // attaches `raw_output` with the prompt and completion text, and a prompt
     // that merely mentions a channel must not make a request fault retryable.
@@ -390,7 +394,7 @@ pub(crate) fn classify_provider_stream_error(provider: &str, body: &str, partial
         None if malformed => (LlmErrorKind::Transient, LlmErrorReason::InvalidResponse),
         // No HTTP status on an in-band SSE error frame; classify from body
         // fingerprints only (neutral status avoids status-forced reasons).
-        None => classify_http_status_and_body(reqwest::StatusCode::OK, body),
+        None => classify_http_status_and_body(provider, reqwest::StatusCode::OK, body),
     };
     let body_summary = sanitize_provider_error_body(body);
     let mut message = if malformed {
@@ -417,17 +421,39 @@ pub(crate) fn classify_provider_stream_error(provider: &str, body: &str, partial
 }
 
 fn explicit_stream_error_taxonomy(
+    provider: &str,
     json: Option<&serde_json::Value>,
 ) -> Option<(LlmErrorKind, LlmErrorReason)> {
     let json = json?;
+    if let Some(taxonomy) = managed_spend_pause_taxonomy(provider, json) {
+        return Some(taxonomy);
+    }
     let kind = json_taxonomy_str(json, "kind").and_then(LlmErrorKind::parse);
-    let reason = json_taxonomy_str(json, "reason").and_then(LlmErrorReason::parse);
+    let reason = json_taxonomy_str(json, "reason")
+        .and_then(LlmErrorReason::parse)
+        .filter(|reason| {
+            !matches!(
+                reason,
+                LlmErrorReason::PolicyDenied | LlmErrorReason::ManagedSpendPaused
+            )
+        });
     match (kind, reason) {
         (Some(kind), Some(reason)) => Some((kind, reason)),
         (None, Some(reason)) => Some((reason.default_kind(), reason)),
         (Some(kind), None) => Some((kind, LlmErrorReason::Unknown)),
         (None, None) => None,
     }
+}
+
+/// Only a registry-declared managed transport may report a service spending pause.
+/// Ignore prose and force terminal handling even if the frame claims transient.
+fn managed_spend_pause_taxonomy(
+    provider: &str,
+    json: &serde_json::Value,
+) -> Option<(LlmErrorKind, LlmErrorReason)> {
+    (crate::llm::managed_supply::is_managed_transport(provider)
+        && json_taxonomy_str(json, "reason") == Some(LlmErrorReason::ManagedSpendPaused.as_str()))
+    .then_some((LlmErrorKind::Terminal, LlmErrorReason::ManagedSpendPaused))
 }
 
 fn json_taxonomy_str<'a>(json: &'a serde_json::Value, key: &str) -> Option<&'a str> {
@@ -634,6 +660,37 @@ fn redact_provider_error_secrets(text: &str) -> String {
         .into_owned()
 }
 
+/// Keep normalized provider facts authoritative when observation consumes a VM error.
+/// Flattening a dict into prose lets quoted upstream text reclassify the refusal.
+pub(crate) fn classify_vm_llm_error(error: &VmError) -> LlmErrorInfo {
+    if let VmError::Thrown(VmValue::Dict(fields)) = error {
+        if let Some(reason) = fields.get("reason").and_then(|value| {
+            if let VmValue::String(value) = value {
+                LlmErrorReason::parse(value)
+            } else {
+                None
+            }
+        }) {
+            let kind = fields
+                .get("kind")
+                .and_then(|value| {
+                    if let VmValue::String(value) = value {
+                        LlmErrorKind::parse(value)
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or_else(|| reason.default_kind());
+            return LlmErrorInfo {
+                kind,
+                reason,
+                message: error.to_string(),
+            };
+        }
+    }
+    classify_llm_error(crate::value::error_to_category(error), &error.to_string())
+}
+
 pub(crate) fn classify_llm_error(category: ErrorCategory, message: &str) -> LlmErrorInfo {
     if let Some((kind, reason)) = classify_error_message_taxonomy(message) {
         return LlmErrorInfo {
@@ -671,6 +728,8 @@ pub(crate) fn classify_llm_error(category: ErrorCategory, message: &str) -> LlmE
 /// same condition as prose.
 const BILLING_STOP_CODES: &[&str] = &[
     "insufficient_quota",
+    "billing_limit",
+    "credit_balance_exhausted",
     "billing_hard_limit_reached",
     "billing_not_active",
     "account_deactivated",
@@ -726,10 +785,41 @@ pub(crate) fn is_billing_stop(body: &str, body_lower: &str) -> bool {
         .any(|marker| body_lower.contains(marker))
 }
 
+fn openrouter_rejected_parameters(body: &str) -> bool {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(body) else {
+        return false;
+    };
+    let error = value.get("error").unwrap_or(&value);
+    if let Some(step) = error
+        .pointer("/metadata/failed_routing_step")
+        .and_then(serde_json::Value::as_str)
+    {
+        // An earlier parameter filter can remove some endpoints while another
+        // constraint ultimately removes the rest. Only the final step proves
+        // that parameter support exhausted the available routes.
+        return step == "Filter by Parameters";
+    }
+    // Older responses omit routing metadata. Match the provider's explicit
+    // rejection message, never a parameter name in arbitrary response data.
+    error
+        .get("message")
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|message| {
+            message.starts_with("No endpoints found that can handle the requested parameters.")
+        })
+}
+
 fn classify_http_status_and_body(
+    provider: &str,
     status: reqwest::StatusCode,
     body: &str,
 ) -> (LlmErrorKind, LlmErrorReason) {
+    if let Some(taxonomy) = serde_json::from_str::<serde_json::Value>(body)
+        .ok()
+        .and_then(|json| managed_spend_pause_taxonomy(provider, &json))
+    {
+        return taxonomy;
+    }
     // Patterns cover vLLM, OpenAI, Anthropic, and most OpenAI-compatibles.
     let body_lower = body.to_lowercase();
 
@@ -752,6 +842,9 @@ fn classify_http_status_and_body(
     }
     if matches!(status.as_u16(), 408 | 504 | 522 | 524) || body_lower.contains("timeout") {
         return (LlmErrorKind::Transient, LlmErrorReason::Timeout);
+    }
+    if provider == "openrouter" && openrouter_rejected_parameters(body) {
+        return (LlmErrorKind::Terminal, LlmErrorReason::InvalidRequest);
     }
     if is_model_unavailable(&body_lower) || matches!(status.as_u16(), 404 | 410) {
         return (LlmErrorKind::Terminal, LlmErrorReason::ModelUnavailable);

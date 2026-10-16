@@ -182,7 +182,7 @@ For real providers, see:
 - [Connector authoring](./connectors/authoring.md) — package layout and
   setup metadata schema.
 - [Connector OAuth](./orchestrator/oauth.md) — provider-specific flows
-  for GitHub, Linear, Slack, and Notion.
+  for GitHub, Linear, and Slack.
 - [Connector parity matrix](./connectors/parity-matrix.md) — which
   providers are wired today.
 

@@ -1,3 +1,5 @@
+import { CompletionPrecheckConfig } from "std/agent/completion_precheck"
+import { GoalSpec } from "std/agent/goal_contract"
 import { AgentStallCheckpoint } from "std/agent/stall_types"
 // Canonical declarations for the typed agent-loop option surface.
 // `std/agent/options` is the public facade and re-exports these aliases.
@@ -7,6 +9,7 @@ import { AgentStallCheckpoint } from "std/agent/stall_types"
 // parity is pinned by `crates/harn-vm/src/orchestration/typed_options_parity.rs`.
 import { LlmBudget, Logprobs, Mirostat, PredictedOutput } from "std/llm/options"
 import { TokenBias } from "std/llm/tokenizer"
+import { EvaluationOutcome, EvaluationPolicy } from "std/predicate"
 
 /** The shared provider budget plus the agent loop's aggregate token limit. */
 pub type AgentLlmBudget = LlmBudget & {max_total_tokens?: int}
@@ -39,6 +42,7 @@ pub type MissingToolCallVerdict = {
   classifier_kind?: string,
   model?: string,
   typed_checkpoint?: any,
+  decision?: EvaluationOutcome,
   error?: string,
 }
 
@@ -56,6 +60,8 @@ pub type MissingToolCallRecoveryOptions = {
   max_tokens?: int,
   temperature?: float,
   classifier?: MissingToolCallCustomClassifier,
+  /** Explicit decision route; absent selects from the loop route's capabilities. */
+  evaluation?: EvaluationPolicy,
   /**
    * Whether a claimed tool call may reach the provider as a decode grammar.
    * Off with the claim still on is a fallback turn. Read at
@@ -255,6 +261,7 @@ pub type CompletionRequirementContract = {requirements: list<CompletionRequireme
  * Rust twin: none — judges are stdlib-owned.
  */
 pub type JudgeConfig = {
+  goal?: GoalSpec,
   provider?: string,
   model?: string,
   system?: string,
@@ -273,6 +280,7 @@ pub type JudgeConfig = {
   operation_timeout_ms?: int,
   deadline_reserve_ms?: int,
   requirement_contract?: CompletionRequirementContract,
+  precheck?: CompletionPrecheckConfig,
   cadence?: {every?: int, when?: any, max_invocations?: int, min_iterations_before_first?: int},
 }
 
@@ -355,6 +363,11 @@ pub type AgentModelSpec = {
   // Requested provider retention/training posture. See LlmCallOptions; every
   // turn's telemetry.data_controls receipt reports what actually happened.
   data_controls?: "default" | "strictest_available",
+  // A host's route ceiling. Harn checks the resolved route before transport.
+  inference_boundary?: {
+    reach: "local_only" | "hosted_open_weight" | "any_hosted",
+    allow_training_discounts: bool,
+  },
   store?: bool | dict,
   background?: bool,
   truncation?: string,
@@ -544,6 +557,8 @@ pub type AgentLifecycleSpec = {
 pub type AgentContextSpec = {
   /** Initial user message content; omitted content uses the task text. */
   initial_user_content?: string | list<dict>,
+  /** Explicit caller identity for the opening user message; never a source event ID. */
+  initial_user_message_id?: string,
   /** Root for the canonical durable session store used by this run. */
   root?: string,
   transcript_projection?: string | dict,

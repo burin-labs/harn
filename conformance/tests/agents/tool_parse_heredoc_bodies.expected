@@ -4,6 +4,12 @@
   prose=""
   answer=null
   done=null
+# empty line before the tag is the final newline
+  calls=1 errors=0 violations=0 stray=1
+  call edit {"action":"create","content":"package main\n","path":"main.go"}
+  prose=""
+  answer=null
+  done=null
 # heredoc body with backticks
   calls=1 errors=0 violations=0 stray=1
   call edit {"action":"create","content":"package manifest\n\nimport \"testing\"\n\nfunc TestYAML(t *testing.T) {\n    yaml := `\nversion: \"1.0\"\nservices:\n  web:\n    image: nginx\n`\n    if yaml == \"\" {\n        t.Fatal(\"empty\")\n    }\n}","path":"parser_test.go"}

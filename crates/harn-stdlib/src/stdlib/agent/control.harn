@@ -393,16 +393,17 @@ fn __agent_record_budget_decision(
   reason: string,
   status: string,
 ) -> list<AgentLoopBudgetDecision> {
-  return decisions.appending(
-    {
-      iteration: iteration,
-      action: action,
-      old_limit: old_limit,
-      new_limit: new_limit,
-      reason: reason,
-      status: status,
-    },
-  )
+  return decisions
+    + [
+      {
+        iteration: iteration,
+        action: action,
+        old_limit: old_limit,
+        new_limit: new_limit,
+        reason: reason,
+        status: status,
+      },
+    ]
 }
 
 fn __agent_progress_summary_text(

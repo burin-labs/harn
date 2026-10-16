@@ -1,0 +1,53 @@
+import { agent_dispatch_tool_call } from "std/agent/primitives"
+import { agent_tool_handler_result } from "std/agent/tool_lifecycle"
+import { tool_registry_from } from "std/tools"
+
+fn main(harness: Harness) {
+  const root = harness.fs.mkdtemp_in_workspace("handler-output-schema")
+  const tools = tool_registry_from(
+    [
+      {
+        name: "payload",
+        description: "Return structured data with separate feedback.",
+        parameters: {valid: {type: "boolean", required: true}},
+        returns: {
+          type: "object",
+          properties: {count: {type: "integer"}},
+          required: ["count"],
+          additionalProperties: false,
+        },
+        handler: { args ->
+          harness.fs.write_text(path_join(root, to_string(args.valid)), "called")
+          agent_tool_handler_result(
+            "Producer feedback",
+            {
+              count: if args.valid {
+                3
+              } else {
+                "three"
+              },
+            },
+          )
+        },
+      },
+    ],
+  )
+  const valid = agent_dispatch_tool_call(
+    harness.tools,
+    {id: "valid", name: "payload", arguments: {valid: true}},
+    tools,
+  )
+  assert(valid.ok)
+  assert(valid.result.data == {count: 3})
+  assert(valid.rendered_result == "Producer feedback")
+  const invalid = agent_dispatch_tool_call(
+    harness.tools,
+    {id: "invalid", name: "payload", arguments: {valid: false}},
+    tools,
+  )
+  assert(!invalid.ok)
+  assert(invalid.error_category == "schema_validation")
+  assert(harness.fs.read_text(path_join(root, "true")) == "called")
+  assert(harness.fs.read_text(path_join(root, "false")) == "called")
+  harness.stdio.println("handler data validated")
+}

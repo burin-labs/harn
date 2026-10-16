@@ -45,7 +45,7 @@ fn __coerce_tool_calls(value: any) -> list {
       throw "tool_calls[" + to_string(idx) + "] is missing `name`"
     }
     const args = item["arguments"] ?? item["args"] ?? {}
-    out = out.appending({name: name, args: args})
+    out.push({name: name, args: args})
     idx = idx + 1
   }
   return out
@@ -150,7 +150,7 @@ fn __convert_jsonl(content: string, trace_id: string) -> list<string> {
         continue
       }
     }
-    fixtures = fixtures.appending(__record_to_fixture(value, line_no))
+    fixtures.push(__record_to_fixture(value, line_no))
   }
   if trace_id != "" && len(fixtures) == 0 {
     throw "trace filter matched no records"

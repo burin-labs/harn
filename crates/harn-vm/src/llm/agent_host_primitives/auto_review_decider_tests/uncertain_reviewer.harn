@@ -1,0 +1,33 @@
+fn reviewer(_request: dict) {
+  return {
+    approved: false,
+    reviewer_answered: true,
+    rationale: "A person must review this candidate.",
+    evaluation_review: {
+      disposition: "needs_review",
+      rule: "low_confidence",
+      minimum_confidence: 0.99,
+      presentation: {
+        summary: "The safety review needs your judgment.",
+        details: ["Safe: yes (60% answer probability)"],
+      },
+      outcome: {
+        kind: "low_confidence",
+        receipt: "evaluation-fixture",
+        threshold: 0.99,
+        question_ids: ["safe"],
+        candidates: {
+          safe: {
+            kind: "boolean",
+            verdict: true,
+            probability: 0.6,
+            confidence: 0.6,
+            confidence_kind: "binary_probability",
+            evidence: "fixture",
+            evidence_kind: "input_reference",
+          },
+        },
+      },
+    },
+  }
+}

@@ -17,7 +17,7 @@ pipeline test_batched_evaluation_budget_cut(harness: Harness) {
     {
       disposition: choice("Keep or drop?", {keep: "still needed", drop: "superseded"}),
       risk: score("How risky?", ["low", "high"]),
-      safe: boolean("Safe to run?"),
+      safe: boolean("Safe to run?", {true: "Only reads", false: "Mutates files"}),
     },
     policy,
   )

@@ -1,22 +1,16 @@
 //! Lookup and user-override facade: owns public lookup helpers.
 
 use std::collections::BTreeSet;
-use std::sync::OnceLock;
 
 use serde::Deserialize;
 
 use super::model::{Capabilities, CapabilitiesFile, ProviderLimits};
 use super::overrides::{current_user_overrides, set_user_overrides as set_context_overrides};
-use super::rule::lookup_with;
-use super::BUILTIN_TOML;
-
-static BUILTIN: OnceLock<CapabilitiesFile> = OnceLock::new();
+use super::rule::resolve_with_features;
+use harn_provider_catalog::capabilities::{CapabilityRoute, CapabilityRules};
 
 pub(super) fn builtin() -> &'static CapabilitiesFile {
-    BUILTIN.get_or_init(|| {
-        toml::from_str::<CapabilitiesFile>(BUILTIN_TOML)
-            .expect("capabilities.toml must parse at build time")
-    })
+    harn_provider_catalog::capabilities::builtin_file()
 }
 
 /// The shipped (built-in) capability matrix. Public so the footgun gate in
@@ -171,6 +165,22 @@ pub(crate) fn effective_capability_route<'a>(
     }
 }
 
+/// The capability rule(s) that decided a route, as an author would find them:
+/// table header, `model_match`, and origin (a user overlay such as a
+/// `harn.toml` `[capabilities]` table, or Harn's built-in sources). `None`
+/// when no rule names the route. Refusals, steer notes and `harn check` cite
+/// this so a provider quirk is attributed to the row that caused it.
+pub fn capability_rule_provenance(provider: &str, model: &str) -> Option<String> {
+    let user = current_user_overrides();
+    let model = crate::llm_config::capability_model_id(provider, model);
+    let resolution = CapabilityRules::new(builtin(), user.as_ref()).resolve(CapabilityRoute {
+        provider,
+        model: &model,
+        responses_api: false,
+    });
+    (!resolution.provenance.is_empty()).then(|| resolution.provenance.join(", then "))
+}
+
 /// [`lookup`] through [`effective_capability_route`].
 pub fn lookup_for_mockable_route(provider: &str, model: &str) -> Capabilities {
     let (provider, model) = effective_capability_route(provider, model);
@@ -200,23 +210,26 @@ pub fn lookup_with_user_overrides(
     user_overrides: Option<&CapabilitiesFile>,
 ) -> Capabilities {
     let model = crate::llm_config::capability_model_id(provider, model);
-    finish_lookup(
+    resolve_with_features(
         provider,
-        lookup_with(provider, &model, builtin(), user_overrides),
+        &model,
+        builtin(),
+        user_overrides,
+        crate::llm_config::provider_has_feature(provider, "responses_api"),
     )
+    .capabilities()
 }
 
 pub fn lookup_with_base_file(provider: &str, model: &str, base: &CapabilitiesFile) -> Capabilities {
     let model = crate::llm_config::capability_model_id(provider, model);
-    finish_lookup(provider, lookup_with(provider, &model, base, None))
-}
-
-fn finish_lookup(provider: &str, caps: Capabilities) -> Capabilities {
-    finish_lookup_with_responses(
+    resolve_with_features(
         provider,
-        caps,
+        &model,
+        base,
+        None,
         crate::llm_config::provider_has_feature(provider, "responses_api"),
     )
+    .capabilities()
 }
 
 /// Resolve source-owned rules and wire identities without ambient registry state.
@@ -226,38 +239,13 @@ pub fn lookup_with_source_config(
     base: &CapabilitiesFile,
     config: &crate::llm_config::ProvidersConfig,
 ) -> Capabilities {
-    let model = crate::llm_config::capability_model_id_for_config(provider, model, config);
-    let responses = config.providers.get(provider).is_some_and(|provider| {
-        provider
-            .features
-            .iter()
-            .any(|feature| feature == "responses_api")
-    });
-    finish_lookup_with_responses(
-        provider,
-        lookup_with(provider, &model, base, None),
-        responses,
-    )
-}
-
-fn finish_lookup_with_responses(
-    provider: &str,
-    mut caps: Capabilities,
-    responses: bool,
-) -> Capabilities {
-    if provider != "openai" && provider != "mock" && !responses {
-        caps.responses_api = false;
-        caps.chat_completions_unsupported = false;
+    let resolved =
+        harn_provider_catalog::CatalogView::new(config, base, None).capabilities(provider, model);
+    if provider != "mock" && !resolved.matched() && !resolved.has_defaults() {
+        let model = crate::llm_config::capability_model_id_for_config(provider, model, config);
+        super::diagnostics::warn_unmatched_route_once(provider, &model);
     }
-    if provider != "openai" && provider != "mock" {
-        caps.hosted_tools.clear();
-        caps.remote_mcp = false;
-        caps.conversation_state = false;
-        caps.compaction = false;
-        caps.background_mode = false;
-        caps.tool_approval_policy = None;
-    }
-    caps
+    resolved.capabilities()
 }
 
 #[cfg(test)]
@@ -290,16 +278,6 @@ mod tests {
         reset();
         let caps = lookup("anthropic", "claude-opus-4-7");
         assert!(caps.provider_route_denylist.is_empty());
-    }
-
-    #[test]
-    fn strict_openai_compat_rows_require_tool_result_adjacency() {
-        reset();
-        assert!(lookup("moonshot", "moonshot/kimi-k2.6").requires_tool_result_adjacency);
-        assert!(lookup("moonshot", "moonshot/kimi-k2.7-code").requires_tool_result_adjacency);
-        assert!(lookup("minimax", "MiniMax-M2").requires_tool_result_adjacency);
-        assert!(lookup("minimax", "MiniMax-M2.7").requires_tool_result_adjacency);
-        assert!(!lookup("openai", "gpt-4o").requires_tool_result_adjacency);
     }
 
     #[test]
@@ -418,6 +396,21 @@ mod tests {
         assert!(!legacy.thinking_modes.iter().any(|m| m == "effort"));
     }
 
+    #[test]
+    fn zai_glm53_flash_requires_thinking_while_glm52_can_disable_it() {
+        reset();
+        let flash = lookup("zai", "glm-5.3-flash");
+        assert!(!flash.reasoning_disable_supported);
+        assert!(!flash.reasoning_none_supported);
+        assert_eq!(
+            flash.reasoning_wire_format.as_deref(),
+            Some("thinking_type")
+        );
+
+        let previous = lookup("zai", "glm-5.2");
+        assert!(previous.reasoning_disable_supported);
+    }
+
     /// Every claim here was measured against Google's live endpoint on
     /// 2026-09-03, with an unknown-model negative control returning 404 first
     /// so a 200 means the route actually ran.
@@ -524,6 +517,18 @@ mod tests {
     #[test]
     fn computer_use_style_projects_per_provider() {
         reset();
+        for model in ["claude-haiku-5-5", "claude-sonnet-5-5", "claude-opus-5-5"] {
+            assert_eq!(
+                lookup("anthropic", model).computer_use_style,
+                Some(super::super::ComputerUseStyle::NativeAnthropicToolset),
+                "{model}"
+            );
+        }
+        assert_ne!(
+            lookup("anthropic", "claude-haiku-5-6").computer_use_style,
+            Some(super::super::ComputerUseStyle::NativeAnthropicToolset),
+            "unprobed generations do not inherit the toolset claim"
+        );
         // Anthropic vision models get the native-Anthropic projection style,
         // XGA screenshot scaling, and advertise the `computer_use` hosted tool.
         for model in [
@@ -719,24 +724,25 @@ mod tests {
         // reasoning fields, so without a dedicated `*gpt-oss*` row gpt-oss
         // would fall through to reasoning-OFF and the eval loop would bill a
         // noncommittal. Tool wire support is provider-specific: the pay-per-token
-        // routes (OpenRouter, Fireworks, DeepInfra, SambaNova) ride Harn's TEXT
-        // channel — their provider-native Harmony path drops tool calls into the
+        // routes (OpenRouter, DeepInfra, SambaNova) ride Harn's TEXT channel —
+        // their provider-native Harmony path drops tool calls into the
         // reasoning/commentary channel (empty `tool_calls` / billed-noncommittal,
         // see the DeepInfra/SambaNova rows + vLLM #22578/#44216, SGLang
         // #8976/#10738, openai/harmony #68). Within the text channel they use the
         // escape-free heredoc (`text`) grammar rather than fenced-JSON, because
         // gpt-oss double-escapes the backslashes a JSON string arg requires and
         // corrupts `\\`-heavy code bodies (empirical A/B 2026-06-21: text beats
-        // json on both dispatch and byte-fidelity). Only the native-clean direct
-        // routes (Cerebras, Groq) still use provider-native tools.
+        // json on both dispatch and byte-fidelity). Fireworks and the direct
+        // routes (Cerebras, Groq) use provider-native tools; the Fireworks row
+        // records the 2026-09-27 re-measurement and its revert trigger.
         reset();
         for (provider, model, native_tools, preferred_tool_format) in [
             ("openrouter", "openai/gpt-oss-120b", false, "text"),
             (
                 "fireworks",
                 "accounts/fireworks/models/gpt-oss-120b",
-                false,
-                "text",
+                true,
+                "native",
             ),
             ("deepinfra", "openai/gpt-oss-120b", false, "text"),
             ("sambanova", "sambanova/gpt-oss-120b", false, "text"),

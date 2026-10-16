@@ -99,9 +99,13 @@ CLI parsing, help, shell completion, MCP, tasks, replay, and exported function
 dispatch all use that object. They do not rebuild command trees, compile
 schemas, or recover component context per request.
 
-A raw Harn `throw` becomes application data only when the tool has an
-`errorSchema` and the value satisfies it. Undeclared throws and VM control
-failures remain runtime errors. A declared throw with the wrong shape is a
+A source-authored `throw` in a callable with `throws E` carries declared
+application provenance. It becomes application data when the tool has an
+`errorSchema` and the value satisfies it. An undeclared dependency throw stays
+a runtime error even when its value matches that schema. Compiler-generated
+rethrows through `finally`, `defer`, `try*`, and exhausted retries preserve the
+original error and channel; an explicit catch-and-throw in a declared callable
+can select the application channel. A declared throw with the wrong shape is a
 contract violation. Human diagnostics never stringify an undeclared thrown
 value; they report only its value-free runtime category. CLI and MCP consume
 this one classification: JSON CLI
@@ -109,6 +113,12 @@ output uses a closed failure envelope, while MCP returns `isError: true` with
 typed data below
 `_meta["com.harnlang/toolContract"].applicationError`. Neither adapter
 publishes error data as success `structuredContent`.
+
+The canonical versioned handler-result envelope also declares application
+failures explicitly through `"error"` or `"rejected"`. These preserve their
+portable data and disposition across adapters. An optional `errorSchema`
+constrains the failure payload; its absence leaves the shape open. This does
+not change undeclared throws or VM control failures.
 
 This contract sits below both transport formats. OpenAPI
 [Response Objects](https://spec.openapis.org/oas/v3.1.1.html#response-object)

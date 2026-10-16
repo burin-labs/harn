@@ -68,7 +68,7 @@ impl StoreState {
     fn get(&mut self, key: &str) -> VmValue {
         self.ensure_loaded();
         match self.data.get(key) {
-            Some(v) => json_to_vm(v),
+            Some(v) => json_to_vm_value(v),
             None => VmValue::Nil,
         }
     }
@@ -97,32 +97,8 @@ impl StoreState {
     }
 }
 
+use crate::json_to_vm_value;
 use crate::value::vm_to_storage_json as vm_to_json;
-
-fn json_to_vm(jv: &serde_json::Value) -> VmValue {
-    match jv {
-        serde_json::Value::Null => VmValue::Nil,
-        serde_json::Value::Bool(b) => VmValue::Bool(*b),
-        serde_json::Value::Number(n) => {
-            if let Some(i) = n.as_i64() {
-                VmValue::Int(i)
-            } else {
-                VmValue::Float(n.as_f64().unwrap_or(0.0))
-            }
-        }
-        serde_json::Value::String(s) => VmValue::String(arcstr::ArcStr::from(s.as_str())),
-        serde_json::Value::Array(arr) => {
-            VmValue::List(std::sync::Arc::new(arr.iter().map(json_to_vm).collect()))
-        }
-        serde_json::Value::Object(map) => {
-            let mut m = BTreeMap::new();
-            for (k, v) in map {
-                m.insert(k.clone(), json_to_vm(v));
-            }
-            VmValue::dict(m)
-        }
-    }
-}
 
 /// Register persistent key-value store builtins on a VM.
 ///
@@ -183,11 +159,9 @@ fn register_store_state(vm: &mut Vm, state: StoreState) {
         "store_list",
         move |_args, _out| {
             let keys = s.lock().list();
-            Ok(VmValue::List(std::sync::Arc::new(
-                keys.into_iter()
-                    .map(|k| VmValue::String(arcstr::ArcStr::from(k)))
-                    .collect(),
-            )))
+            Ok(VmValue::list(
+                keys.into_iter().map(VmValue::string).collect(),
+            ))
         },
     );
 
@@ -228,7 +202,7 @@ mod tests {
         reset_active_event_log();
         let existing = install_memory_for_current_thread(8);
         let temp_dir = tempfile::tempdir().expect("tempdir");
-        let mut vm = Vm::new();
+        let mut vm = crate::new_vm();
 
         register_store_builtins(&mut vm, temp_dir.path());
 

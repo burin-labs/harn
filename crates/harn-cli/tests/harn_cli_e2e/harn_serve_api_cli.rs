@@ -11,20 +11,11 @@ use std::time::Duration;
 use futures::StreamExt;
 use serde_json::{json, Value};
 use tempfile::TempDir;
-use test_util::process::harn_e2e_command;
+use test_util::process::{harn_e2e_command, ChildGuard};
 
 const PROCESS_READY_TIMEOUT: Duration = Duration::from_mins(1);
 const TASK_TERMINAL_TIMEOUT: Duration = Duration::from_secs(30);
 const TEST_API_KEY: &str = "fixture-api-key-6799";
-
-struct ChildGuard(Child);
-
-impl Drop for ChildGuard {
-    fn drop(&mut self) {
-        let _ = self.0.kill();
-        let _ = self.0.wait();
-    }
-}
 
 fn write_privileged_project(temp: &TempDir) -> std::path::PathBuf {
     fs::create_dir(temp.path().join(".git")).expect("project boundary");
@@ -124,7 +115,15 @@ async fn serve_api_honors_manifest_authority_on_a_submitted_task() {
     let (rx, stderr) =
         test_util::stdio_jsonrpc::spawn_line_reader(child.0.stderr.take().expect("stderr pipe"));
     let url = wait_for_listener(&mut child.0, &rx);
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder()
+        .default_headers(reqwest::header::HeaderMap::from_iter([(
+            reqwest::header::HeaderName::from_static("harn-agents-protocol-version"),
+            reqwest::header::HeaderValue::from_static(
+                harn_serve::adapters::api::API_PROTOCOL_VERSION,
+            ),
+        )]))
+        .build()
+        .expect("protocol-aware API client");
 
     let session: Value = client
         .post(format!("{url}/v1/sessions"))

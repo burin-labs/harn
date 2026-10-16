@@ -97,7 +97,7 @@ pub(crate) struct RunsReportArgs {
         .args(["report", "run_record", "from_session"])
 ))]
 pub(crate) struct RunsReviewArgs {
-    /// Review an existing harn.run_report.v1 JSON file.
+    /// Review an existing harn.run_report.v2 JSON file.
     #[arg(long, value_name = "PATH")]
     pub report: Option<PathBuf>,
     /// Build and review a report directly from this root run record.

@@ -15,7 +15,7 @@
 # count    2  crates/harn-stdlib/src/stdlib/agent/daemon.harn
 # count   13  crates/harn-stdlib/src/stdlib/agent/events.harn
 # count    2  crates/harn-stdlib/src/stdlib/agent/fact.harn
-# count    8  crates/harn-stdlib/src/stdlib/agent/goal.harn
+# count    6  crates/harn-stdlib/src/stdlib/agent/goal.harn
 # count    2  crates/harn-stdlib/src/stdlib/agent/governors.harn
 # count    4  crates/harn-stdlib/src/stdlib/agent/guardrails.harn
 # count    5  crates/harn-stdlib/src/stdlib/agent/host_tools.harn
@@ -24,7 +24,7 @@
 # count    1  crates/harn-stdlib/src/stdlib/agent/loop.harn
 # count    4  crates/harn-stdlib/src/stdlib/agent/loop_call_resolution.harn
 # count   11  crates/harn-stdlib/src/stdlib/agent/loop_foundation.harn
-# count   30  crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn
+# count   28  crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn
 # count    1  crates/harn-stdlib/src/stdlib/agent/loop_result_status.harn
 # count    1  crates/harn-stdlib/src/stdlib/agent/loop_run.harn
 # count   12  crates/harn-stdlib/src/stdlib/agent/loop_support.harn
@@ -115,7 +115,6 @@
 # count    6  crates/harn-stdlib/src/stdlib/stdlib_composition.harn
 # count   30  crates/harn-stdlib/src/stdlib/stdlib_connectors_github.harn
 # count   11  crates/harn-stdlib/src/stdlib/stdlib_connectors_linear.harn
-# count    9  crates/harn-stdlib/src/stdlib/stdlib_connectors_notion.harn
 # count    7  crates/harn-stdlib/src/stdlib/stdlib_connectors_shared.harn
 # count   13  crates/harn-stdlib/src/stdlib/stdlib_connectors_slack.harn
 # count   19  crates/harn-stdlib/src/stdlib/stdlib_context.harn
@@ -203,11 +202,9 @@ crates/harn-stdlib/src/stdlib/agent/fact.harn::invalidate_facts
 crates/harn-stdlib/src/stdlib/agent/fact.harn::store_fact
 crates/harn-stdlib/src/stdlib/agent/goal.harn::goal
 crates/harn-stdlib/src/stdlib/agent/goal.harn::goal_check
-crates/harn-stdlib/src/stdlib/agent/goal.harn::goal_context_fragment
 crates/harn-stdlib/src/stdlib/agent/goal.harn::goal_pin
 crates/harn-stdlib/src/stdlib/agent/goal.harn::goal_prompt_part
 crates/harn-stdlib/src/stdlib/agent/goal.harn::goal_reloop
-crates/harn-stdlib/src/stdlib/agent/goal.harn::goal_text
 crates/harn-stdlib/src/stdlib/agent/goal.harn::with_goal
 crates/harn-stdlib/src/stdlib/agent/governors.harn::compose_post_turn
 crates/harn-stdlib/src/stdlib/agent/governors.harn::governor_post_turn
@@ -283,8 +280,6 @@ crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn::__intra_turn_re
 crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn::__intra_turn_resource_keys
 crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn::__intra_turn_result_mutated
 crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn::__invoke_tool_with_index
-crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn::__resolve_intra_turn_failure_fanout_cap
-crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn::__resolve_max_concurrent_tools
 crates/harn-stdlib/src/stdlib/agent/loop_result_status.harn::__tool_result_name
 crates/harn-stdlib/src/stdlib/agent/loop_run.harn::__agent_loop_run
 crates/harn-stdlib/src/stdlib/agent/loop_support.harn::__agent_loop_build_turn_prompt
@@ -931,15 +926,6 @@ crates/harn-stdlib/src/stdlib/stdlib_connectors_linear.harn::reset
 crates/harn-stdlib/src/stdlib/stdlib_connectors_linear.harn::search
 crates/harn-stdlib/src/stdlib/stdlib_connectors_linear.harn::update_issue
 crates/harn-stdlib/src/stdlib/stdlib_connectors_linear.harn::wait_until_issue_state
-crates/harn-stdlib/src/stdlib/stdlib_connectors_notion.harn::api_call
-crates/harn-stdlib/src/stdlib/stdlib_connectors_notion.harn::append_blocks
-crates/harn-stdlib/src/stdlib/stdlib_connectors_notion.harn::configure
-crates/harn-stdlib/src/stdlib/stdlib_connectors_notion.harn::create_comment
-crates/harn-stdlib/src/stdlib/stdlib_connectors_notion.harn::get_page
-crates/harn-stdlib/src/stdlib/stdlib_connectors_notion.harn::query_database
-crates/harn-stdlib/src/stdlib/stdlib_connectors_notion.harn::reset
-crates/harn-stdlib/src/stdlib/stdlib_connectors_notion.harn::search
-crates/harn-stdlib/src/stdlib/stdlib_connectors_notion.harn::update_page
 crates/harn-stdlib/src/stdlib/stdlib_connectors_shared.harn::git_forge_pull_request_topic
 crates/harn-stdlib/src/stdlib/stdlib_connectors_shared.harn::git_forge_writeback_comment
 crates/harn-stdlib/src/stdlib/stdlib_connectors_shared.harn::oauth2_token_refresh
@@ -993,14 +979,11 @@ crates/harn-stdlib/src/stdlib/stdlib_coordination.harn::coord_send
 crates/harn-stdlib/src/stdlib/stdlib_coordination.harn::coord_subscribe
 crates/harn-stdlib/src/stdlib/stdlib_coordination.harn::coord_wait_reply
 crates/harn-stdlib/src/stdlib/stdlib_coordination.harn::coord_with_dir_lock
-crates/harn-stdlib/src/stdlib/stdlib_edit.harn::edit_add_parameter
 crates/harn-stdlib/src/stdlib/stdlib_edit.harn::edit_change_return_type
-crates/harn-stdlib/src/stdlib/stdlib_edit.harn::edit_change_signature
 crates/harn-stdlib/src/stdlib/stdlib_edit.harn::edit_extract_function
 crates/harn-stdlib/src/stdlib/stdlib_edit.harn::edit_extract_variable
 crates/harn-stdlib/src/stdlib/stdlib_edit.harn::edit_inline
 crates/harn-stdlib/src/stdlib/stdlib_edit.harn::edit_move_decl
-crates/harn-stdlib/src/stdlib/stdlib_edit.harn::edit_reorder_parameters
 crates/harn-stdlib/src/stdlib/stdlib_experiments.harn::append_message
 crates/harn-stdlib/src/stdlib/stdlib_experiments.harn::chain_of_draft
 crates/harn-stdlib/src/stdlib/stdlib_experiments.harn::custom

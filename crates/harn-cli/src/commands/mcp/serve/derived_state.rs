@@ -135,7 +135,7 @@ mod tests {
         let older_state = state.clone();
         let older_started_in_thread = older_started.clone();
         let release_older_in_thread = release_older.clone();
-        let older = std::thread::spawn(move || {
+        let older = harn_parser::runtime_stack::spawn(move || {
             older_state.refresh_from("older manifest".to_string(), || {
                 older_started_in_thread.wait();
                 release_older_in_thread.wait();

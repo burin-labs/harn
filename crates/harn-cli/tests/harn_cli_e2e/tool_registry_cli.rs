@@ -5,6 +5,63 @@ use serde_json::Value as JsonValue;
 use crate::test_util::process::harn_e2e_command;
 
 #[test]
+fn prepared_tool_cannot_bypass_consent_through_direct_cli_execution() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let path = temp.path().join("prepared.harn");
+    for prepared in [false, true] {
+        let preparation = if prepared {
+            "prepare: {_args -> {}},"
+        } else {
+            ""
+        };
+        fs::write(
+            &path,
+            format!(
+                r#"
+import {{ tool_registry_from }} from "std/tools"
+fn main(harness: Harness) {{
+  harness.tools.mcp_tools(tool_registry_from([{{
+    name: "inspect",
+    description: "Read an approved operation",
+    parameters: {{}},
+    {preparation}
+    handler: {{_args -> "HANDLER_REACHED"}},
+  }}]))
+}}
+"#
+            ),
+        )
+        .expect("write tool registry");
+        let output = harn_e2e_command()
+            .args(["tool", "run"])
+            .arg(&path)
+            .args(["inspect", "--json"])
+            .output()
+            .expect("run tool");
+        if prepared {
+            assert!(!output.status.success());
+            assert!(
+                String::from_utf8_lossy(&output.stderr)
+                    .contains("requires approved invocation preparation"),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            assert!(!String::from_utf8_lossy(&output.stdout).contains("HANDLER_REACHED"));
+        } else {
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            assert_eq!(
+                serde_json::from_slice::<JsonValue>(&output.stdout).unwrap(),
+                "HANDLER_REACHED"
+            );
+        }
+    }
+}
+
+#[test]
 fn declared_tool_runs_through_the_cli_argument_dictionary() {
     let temp = tempfile::tempdir().expect("tempdir");
     let path = temp.path().join("declared.harn");
@@ -312,23 +369,30 @@ fn tool_registry_cli_emits_typed_application_errors_without_raw_human_data() {
 fn tool_registry_cli_does_not_render_a_top_level_thrown_value() {
     let temp = tempfile::tempdir().expect("tempdir");
     let script = temp.path().join("startup-failure.harn");
-    fs::write(
-        &script,
+    for source in [
         r#"throw {message: "PRIVATE-CUSTOMER-DIAGNOSTIC-123456"}"#,
-    )
-    .expect("write startup failure");
-
-    let output = harn_e2e_command()
-        .args(["tool", "run", &script.display().to_string()])
-        .output()
-        .expect("startup failure");
-    assert!(!output.status.success());
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        stderr.contains("tool threw an undeclared value"),
-        "{stderr}"
-    );
-    assert!(!stderr.contains("PRIVATE-CUSTOMER-DIAGNOSTIC"), "{stderr}");
+        r#"fn main(harness: Harness) throws string { throw "PRIVATE-CUSTOMER-DIAGNOSTIC-123456" }"#,
+    ] {
+        fs::write(&script, source).expect("write startup failure");
+        for prefix in [
+            vec!["tool", "run"],
+            vec!["serve", "mcp", "--surface", "script"],
+        ] {
+            let output = harn_e2e_command()
+                .args(prefix)
+                .arg(&script)
+                .output()
+                .expect("startup failure");
+            assert_eq!(output.status.code(), Some(1));
+            assert!(output.stdout.is_empty(), "{output:?}");
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            assert!(
+                stderr.contains("tool threw an undeclared value"),
+                "{stderr}"
+            );
+            assert!(!stderr.contains("PRIVATE-CUSTOMER-DIAGNOSTIC"), "{stderr}");
+        }
+    }
 }
 
 #[test]

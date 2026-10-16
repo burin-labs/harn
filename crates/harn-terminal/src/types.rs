@@ -232,6 +232,7 @@ pub struct WaitIdleResult {
 
 /// Errors returned by terminal-session operations.
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum TerminalError {
     /// A caller-provided argument is invalid.
     #[error("invalid terminal-session argument: {0}")]

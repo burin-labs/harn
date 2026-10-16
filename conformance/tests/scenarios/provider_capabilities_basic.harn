@@ -100,10 +100,10 @@ pipeline test(harness: Harness, task: unknown) {
     "fireworks",
     "accounts/fireworks/models/gpt-oss-120b",
   )
-  assert(!fireworks_gpt_oss.native_tools, "Fireworks GPT-OSS disables native tools")
+  assert(fireworks_gpt_oss.native_tools, "Fireworks GPT-OSS uses native tools")
   assert(
-    fireworks_gpt_oss.preferred_tool_format == "text",
-    "Fireworks GPT-OSS defaults to heredoc text tools",
+    fireworks_gpt_oss.preferred_tool_format == "native",
+    "Fireworks GPT-OSS defaults to native tools",
   )
   assert(
     fireworks_gpt_oss.text_tool_wire_format_supported,
@@ -115,7 +115,7 @@ pipeline test(harness: Harness, task: unknown) {
   const deepinfra_gpt_oss = harness.llm.provider_capabilities("deepinfra", "openai/gpt-oss-120b")
   // DeepInfra's gpt-oss native (Harmony) channel drops tool calls into the
   // private reasoning channel — pinned to the TEXT channel as a footgun fix
-  // (mirrors the Fireworks/OpenRouter gpt-oss rows above).
+  // (mirrors the OpenRouter gpt-oss row above).
   assert(!deepinfra_gpt_oss.native_tools, "DeepInfra GPT-OSS disables native tools")
   assert(
     deepinfra_gpt_oss.preferred_tool_format == "text",
@@ -142,10 +142,12 @@ pipeline test(harness: Harness, task: unknown) {
   assert(kimi27.thinking_modes[0] == "enabled", "Kimi K2.7 Code always thinks")
   assert(kimi27.allowed_tool_choice_modes[0] == "auto", "Kimi K2.7 Code allows auto tool choice")
   assert(kimi27.allowed_tool_choice_modes[1] == "none", "Kimi K2.7 Code allows none tool choice")
-  assert(!kimi27.temperature_supported, "Kimi K2.7 Code has fixed temperature")
-  assert(!kimi27.top_p_supported, "Kimi K2.7 Code has fixed top_p")
-  assert(!kimi27.frequency_penalty_supported, "Kimi K2.7 Code has fixed penalties")
-  assert(!kimi27.presence_penalty_supported, "Kimi K2.7 Code has fixed penalties")
+  // 2026-10-02: the route ignores Moonshot AI's endpoints, the only ones that
+  // drop sampling or reject the penalties, so all four are forwarded.
+  assert(kimi27.temperature_supported, "Kimi K2.7 Code forwards temperature")
+  assert(kimi27.top_p_supported, "Kimi K2.7 Code forwards top_p")
+  assert(kimi27.frequency_penalty_supported, "Kimi K2.7 Code forwards frequency_penalty")
+  assert(kimi27.presence_penalty_supported, "Kimi K2.7 Code forwards presence_penalty")
   const qwen37_plus = harness.llm.provider_capabilities("openrouter", "qwen/qwen3.7-plus")
   assert(qwen37_plus.native_tools, "OpenRouter Qwen3.7 Plus exposes native tools")
   assert(qwen37_plus.prompt_caching, "OpenRouter Qwen3.7 Plus exposes prompt caching")

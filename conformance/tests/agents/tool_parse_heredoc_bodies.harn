@@ -30,6 +30,22 @@ EOF
 })""",
     sample_registry(),
   )
+  // The newline before the tag closes the body, so an empty line before the
+  // tag is how a whole file keeps its final newline.
+  probe(
+    harness.agent,
+    harness.stdio,
+    "empty line before the tag is the final newline",
+    """edit({
+    action: "create",
+    path: "main.go",
+    content: <<EOF
+package main
+
+EOF
+})""",
+    sample_registry(),
+  )
   // Go raw-string backticks and a YAML document inside the body.
   probe(
     harness.agent,

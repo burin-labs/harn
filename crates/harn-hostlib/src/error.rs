@@ -14,6 +14,7 @@ use harn_vm::{VmError, VmValue};
 /// through [`HostlibError::Unimplemented`] so embedders and tests can
 /// distinguish intentionally scaffolded contracts from runtime failures.
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum HostlibError {
     /// The method exists in the registration table but has no implementation
     /// yet. This is the canonical scaffold-stage error: it tells callers
@@ -76,6 +77,8 @@ pub enum HostlibError {
         builtin: &'static str,
         /// Stable kind such as `not_found` or `permission_denied`.
         kind: &'static str,
+        /// Executable proven absent before spawning, if known.
+        missing_program: Option<Box<str>>,
         /// Human-readable OS error.
         message: String,
         /// Canonical caller-selected directory, absent when the command
@@ -126,6 +129,15 @@ pub enum HostlibError {
         /// The verbatim floor rationale (never-approvable reason).
         message: String,
     },
+    /// A spawn required a platform sandbox mechanism this host cannot supply.
+    /// Converts to the VM's own typed refusal, never to a message string.
+    #[error("{refusal}")]
+    SandboxMechanismUnavailable {
+        /// Fully-qualified builtin name.
+        builtin: &'static str,
+        /// Harn's typed refusal.
+        refusal: Box<harn_vm::process_sandbox::SandboxMechanismUnavailable>,
+    },
 }
 
 impl HostlibError {
@@ -140,6 +152,7 @@ impl HostlibError {
             | HostlibError::NativeSecretStoreUnavailable { builtin, .. }
             | HostlibError::ProcessSpawn { builtin, .. }
             | HostlibError::SandboxViolation { builtin, .. }
+            | HostlibError::SandboxMechanismUnavailable { builtin, .. }
             | HostlibError::SandboxUnsupported { builtin, .. }
             | HostlibError::CatastrophicFloor { builtin, .. } => builtin,
         }
@@ -148,6 +161,14 @@ impl HostlibError {
 
 impl From<HostlibError> for VmError {
     fn from(err: HostlibError) -> VmError {
+        // A missing sandbox mechanism is the VM's own typed error; the `catch`
+        // value is its structured refusal, identical to a VM-made spawn's.
+        let err = match err {
+            HostlibError::SandboxMechanismUnavailable { refusal, .. } => {
+                return VmError::SandboxMechanismUnavailable(refusal);
+            }
+            other => other,
+        };
         // Surface as a `Thrown` dict so Harn `try`/`catch` can pattern-match
         // on `kind`, `builtin`, and `message`. This matches how the existing
         // `host_call` error path shapes its exceptions.
@@ -160,6 +181,7 @@ impl From<HostlibError> for VmError {
             HostlibError::ProcessSpawn { kind, .. } => *kind,
             HostlibError::SandboxViolation { .. } => "tool_rejected",
             HostlibError::SandboxUnsupported { .. } => "sandbox_unsupported",
+            HostlibError::SandboxMechanismUnavailable { .. } => "tool_rejected",
             HostlibError::CatastrophicFloor { .. } => "catastrophic_floor",
         };
         // Carry the offending path on sandbox violations so `catch` blocks
@@ -177,6 +199,12 @@ impl From<HostlibError> for VmError {
             _ => None,
         };
         let builtin = err.builtin();
+        let missing_program = match &err {
+            HostlibError::ProcessSpawn {
+                missing_program, ..
+            } => missing_program.clone(),
+            _ => None,
+        };
         let is_process_spawn = matches!(&err, HostlibError::ProcessSpawn { .. });
         let process_cwd = match &err {
             HostlibError::ProcessSpawn {
@@ -190,6 +218,9 @@ impl From<HostlibError> for VmError {
         dict.put_str("kind", kind);
         dict.put_str("builtin", builtin);
         dict.put_str("message", message);
+        if let Some(program) = missing_program {
+            dict.put_str("missing_program", program.as_ref());
+        }
         if is_process_spawn {
             dict.put_str("error", "io_error");
             dict.put_str("operation", "process_spawn");
@@ -226,6 +257,7 @@ mod tests {
         let error = HostlibError::ProcessSpawn {
             builtin: "hostlib_tools_run_command",
             kind: "not_found",
+            missing_program: Some("missing-tool".into()),
             message: "No such file or directory".to_string(),
             requested_cwd: Some("/workspace/project".to_string()),
             cwd: "/workspace/project".to_string(),
@@ -236,6 +268,7 @@ mod tests {
         let field = |name| fields.get(name).map(VmValue::display);
         assert_eq!(field("error").as_deref(), Some("io_error"));
         assert_eq!(field("kind").as_deref(), Some("not_found"));
+        assert_eq!(field("missing_program").as_deref(), Some("missing-tool"));
         assert_eq!(field("operation").as_deref(), Some("process_spawn"));
         assert_eq!(field("category").as_deref(), Some("environment"));
         assert_eq!(

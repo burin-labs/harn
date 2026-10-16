@@ -636,6 +636,7 @@ pub fn render_type_diagnostic(
     let severity = match diag.severity {
         crate::typechecker::DiagnosticSeverity::Error => "error",
         crate::typechecker::DiagnosticSeverity::Warning => "warning",
+        crate::typechecker::DiagnosticSeverity::Info => "info",
     };
     let related = diag
         .related
@@ -693,6 +694,9 @@ pub fn parser_error_code(err: &crate::parser::ParserError) -> crate::diagnostic_
         }
         crate::parser::ParserError::UnexpectedEof { .. } => {
             crate::diagnostic_codes::Code::ParserUnexpectedEof
+        }
+        crate::parser::ParserError::RemovedRangeSyntax { .. } => {
+            crate::diagnostic_codes::Code::ParserRemovedRangeSyntax
         }
     }
 }
@@ -760,14 +764,8 @@ fn diagnostic_span_char_len(source: &str, source_line: &str, span: &Span) -> usi
     if span.end <= span.start || span.start >= source.len() {
         return 1;
     }
-    let mut start = span.start.min(source.len());
-    while start > 0 && !source.is_char_boundary(start) {
-        start -= 1;
-    }
-    let mut end = span.end.min(source.len());
-    while end < source.len() && !source.is_char_boundary(end) {
-        end += 1;
-    }
+    let start = source.floor_char_boundary(span.start);
+    let end = source.ceil_char_boundary(span.end);
     let span_len = source
         .get(start..end)
         .map(|text| text.lines().next().unwrap_or(text).chars().count().max(1))
@@ -844,6 +842,9 @@ pub fn parser_error_message(err: &ParserError) -> String {
         ParserError::UnexpectedEof { expected, .. } => {
             format!("unexpected end of file, expected {expected}")
         }
+        ParserError::RemovedRangeSyntax { .. } => {
+            "`start to end` ranges were removed; ranges are `start..end` (end excluded) or `start..=end` (end included)".to_string()
+        }
     }
 }
 
@@ -852,11 +853,15 @@ pub fn parser_error_label(err: &ParserError) -> &'static str {
         ParserError::Unexpected { got, .. } if got == "Newline" => "line break not allowed here",
         ParserError::Unexpected { .. } => "unexpected token",
         ParserError::UnexpectedEof { .. } => "file ends here",
+        ParserError::RemovedRangeSyntax { .. } => "retired range keyword",
     }
 }
 
 pub fn parser_error_help(err: &ParserError) -> Option<&'static str> {
     match err {
+        ParserError::RemovedRangeSyntax { .. } => Some(
+            "write `a..=b` for `a to b` and `a..b` for `a to b exclusive`; `harn fix --apply --migrate-operator-syntax <path>` rewrites every range and keeps `??` groupings",
+        ),
         ParserError::UnexpectedEof { expected, .. } | ParserError::Unexpected { expected, .. } => {
             match expected.as_str() {
                 "}" => Some("add a closing `}` to finish this block"),

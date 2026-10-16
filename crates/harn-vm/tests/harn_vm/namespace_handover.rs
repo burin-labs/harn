@@ -5,6 +5,149 @@
 //! program. That program is this crate's own process helper, so the case
 //! measures the handover rather than whatever shell the host image ships.
 
+#[cfg(target_os = "linux")]
+#[test]
+fn unavailable_landlock_fixture() {
+    if std::env::var_os("BWRAP_LEGACY_HANDOVER_FIXTURE").is_none() {
+        return;
+    }
+    use harn_vm::orchestration::{CapabilityPolicy, SandboxProfile};
+    let policy = CapabilityPolicy {
+        sandbox_profile: SandboxProfile::Worktree,
+        ..CapabilityPolicy::default()
+    };
+    harn_vm::orchestration::push_execution_policy(policy);
+    let result = harn_vm::process_sandbox::transferable_confinement("/usr/bin/true");
+    harn_vm::orchestration::pop_execution_policy();
+    let Err(harn_vm::VmError::SandboxMechanismUnavailable(refusal)) = result else {
+        panic!("a Landlock-only handover must not return seccomp-only confinement");
+    };
+    assert_eq!(
+        refusal.mechanism,
+        harn_vm::process_sandbox::SandboxMechanism::LinuxLandlock
+    );
+    assert_eq!(
+        refusal.availability,
+        harn_vm::process_sandbox::SandboxMechanismAvailability::AbsentOnHost
+    );
+}
+
+#[cfg(target_os = "linux")]
+fn landlock_unavailable_fixture_command(name: &str) -> std::process::Command {
+    use std::os::unix::process::CommandExt;
+    let mut command = std::process::Command::new(std::env::current_exe().unwrap());
+    command.args(["--exact", name, "--nocapture"]);
+    let instructions = [
+        libc::sock_filter {
+            code: (libc::BPF_LD | libc::BPF_W | libc::BPF_ABS) as u16,
+            jt: 0,
+            jf: 0,
+            k: 0,
+        },
+        libc::sock_filter {
+            code: (libc::BPF_JMP | libc::BPF_JEQ | libc::BPF_K) as u16,
+            jt: 0,
+            jf: 1,
+            k: libc::SYS_landlock_create_ruleset as u32,
+        },
+        libc::sock_filter {
+            code: (libc::BPF_RET | libc::BPF_K) as u16,
+            jt: 0,
+            jf: 0,
+            k: libc::SECCOMP_RET_ERRNO | libc::ENOSYS as u32,
+        },
+        libc::sock_filter {
+            code: (libc::BPF_RET | libc::BPF_K) as u16,
+            jt: 0,
+            jf: 0,
+            k: libc::SECCOMP_RET_ALLOW,
+        },
+    ];
+    // SAFETY: the fork callback only reads owned instructions and calls prctl.
+    unsafe {
+        command.pre_exec(move || {
+            let filter = libc::sock_fprog {
+                len: instructions.len() as u16,
+                filter: instructions.as_ptr().cast_mut(),
+            };
+            if libc::prctl(libc::PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0
+                || libc::prctl(libc::PR_SET_SECCOMP, libc::SECCOMP_MODE_FILTER, &filter) != 0
+            {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(())
+        });
+    }
+    command
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn unavailable_landlock_never_returns_a_seccomp_only_handover() {
+    let mut command =
+        landlock_unavailable_fixture_command("namespace_handover::unavailable_landlock_fixture");
+    command.env("BWRAP_LEGACY_HANDOVER_FIXTURE", "1");
+    let result = command.output().unwrap();
+    assert!(result.status.success(), "{result:?}");
+    assert!(
+        String::from_utf8_lossy(&result.stdout).contains("1 passed; 0 failed"),
+        "the refusal fixture must actually execute: {result:?}"
+    );
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn setup_probe_environment_fixture() {
+    let Some(mode) = std::env::var_os("BWRAP_PROBE_LOADER_FIXTURE") else {
+        return;
+    };
+    // Only the exact selected test runs in this disposable child. Mutating
+    // its environment cannot affect another in-process test or its launcher.
+    if mode == "diagnostic" {
+        std::env::set_var("LD_TRACE_LOADED_OBJECTS", "1");
+    }
+    if harn_vm::process_sandbox::active_backend_filesystem_available() {
+        println!("setup-probe-confined-marker-reached");
+    } else {
+        println!("setup-probe-unavailable");
+    }
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn setup_probe_ignores_ambient_payload_loader_controls_in_isolated_children() {
+    let run = |mode: &str| {
+        let result = landlock_unavailable_fixture_command(
+            "namespace_handover::setup_probe_environment_fixture",
+        )
+        .env("BWRAP_PROBE_LOADER_FIXTURE", mode)
+        .output()
+        .unwrap();
+        assert!(result.status.success(), "{result:?}");
+        let output = String::from_utf8(result.stdout).unwrap();
+        assert!(
+            output.contains("1 passed; 0 failed"),
+            "fixture must actually run: {output}"
+        );
+        output
+    };
+    let baseline = run("baseline");
+    if baseline.contains("setup-probe-unavailable") {
+        eprintln!("NOT EXERCISED: functional bubblewrap namespaces unavailable");
+        assert_ne!(std::env::var("BWRAP_REQUIRE_TESTS").as_deref(), Ok("1"));
+        return;
+    }
+    assert!(
+        baseline.contains("setup-probe-confined-marker-reached"),
+        "{baseline}"
+    );
+    let diagnostic = run("diagnostic");
+    assert!(
+        diagnostic.contains("setup-probe-confined-marker-reached"),
+        "{diagnostic}"
+    );
+}
+
 /// The ruleset descriptor actually reaches the far side of an `exec`, and the
 /// hook that makes it do so is what carries it.
 ///

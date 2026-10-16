@@ -282,6 +282,9 @@ fn generate_go_with_payloads(payloads: &SessionUpdatePayloads) -> String {
     append_go_prepared_session_types(&mut out);
     append_go_session_recap_types(&mut out);
     super::plan_records::append(&mut out, super::records::Target::Go);
+    super::inference_admission::append(&mut out, super::records::Target::Go);
+    super::canonical_history::append(&mut out, super::records::Target::Go);
+    super::prompt_correlation::append(&mut out, super::records::Target::Go);
     out
 }
 
@@ -464,9 +467,12 @@ type HarnACPPromptErrorData struct {
 	Category *string `json:"category,omitempty"`
 	Kind *string `json:"kind,omitempty"`
 	Reason *string `json:"reason,omitempty"`
+	Origin *string `json:"origin,omitempty"`
+	Rule *string `json:"rule,omitempty"`
 	Code *string `json:"code,omitempty"`
 	Retryable *bool `json:"retryable,omitempty"`
 	RetryAfterMs *int64 `json:"retryAfterMs,omitempty"`
+	MachineSpend *HarnMachineSpendExhaustion `json:"machineSpend,omitempty"`
 	Provider *string `json:"provider,omitempty"`
 	Model *string `json:"model,omitempty"`
 }
@@ -557,6 +563,7 @@ type HarnToolLifecycleMeta struct {
 	ErrorCategory       *string         `json:"errorCategory,omitempty"`
 	ExecutionDurationMs *float64        `json:"executionDurationMs,omitempty"`
 	Executor            json.RawMessage `json:"executor,omitempty"`
+	Intent              *string         `json:"intent,omitempty"`
 	MutationStatus      *HarnToolMutationStatus `json:"mutationStatus,omitempty"`
 	Parsing             *bool           `json:"parsing,omitempty"`
 	RawInputPartial     *string         `json:"rawInputPartial,omitempty"`
@@ -623,6 +630,7 @@ type ACPSessionUpdateEnvelope struct {
 	SessionUpdate    string             `json:"sessionUpdate"`
 	Content          json.RawMessage    `json:"content,omitempty"`
 	MessageID        *string            `json:"messageId,omitempty"`
+	HistorySourceEventID *string        `json:"historySourceEventId,omitempty"`
 	Entries          []json.RawMessage  `json:"entries,omitempty"`
 	KeptTurnCount    *int               `json:"keptTurnCount,omitempty"`
 	RemovedTurnCount *int               `json:"removedTurnCount,omitempty"`

@@ -10,7 +10,7 @@ import { create, host } from "std/net_policy"
 fn main(harness: Harness) {
   const policy = create({allow: [host("api.anthropic.com", [443])], default: "deny"})
   const restricted = harness.with_net_policy(policy)
-  const ok = restricted.net.get("https://api.anthropic.com/v1/messages")
+  const ok = restricted.net.get("https://api.anthropic.com/v1/messages").body
   harness.stdio.println("ok=" + ok)
   let port_err = nil
   try {

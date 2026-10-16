@@ -31,14 +31,15 @@ pub(super) fn resolve_model_selection(
     }
 
     let provider = super::vm_resolve_provider(options);
-    let selector = super::vm_resolve_model_selector(options, &provider);
+    let selector =
+        super::vm_resolve_model_selector(options, &provider).map_err(model_resolution_error)?;
     let resolution =
         crate::llm_config::resolve_model_request_for_active_call(&selector, Some(&provider))
             .map_err(model_resolution_error)?;
     Ok((provider, resolution.resolved_model.clone(), resolution))
 }
 
-pub(super) fn model_resolution_error(error: crate::llm_config::ModelResolutionError) -> VmError {
+pub(crate) fn model_resolution_error(error: crate::llm_config::ModelResolutionError) -> VmError {
     let mut fields = DictMap::default();
     fields.put_str("origin", "local");
     fields.put_str("category", "invalid_request");

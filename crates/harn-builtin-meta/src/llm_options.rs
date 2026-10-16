@@ -169,6 +169,7 @@ pub const LLM_CALL_OPTION_FIELDS: &[ShapeFieldDescriptor] = &[
     ShapeFieldDescriptor::optional("max_tool_calls", TY_INT),
     // --- Provider data controls (retention / training) ---
     ShapeFieldDescriptor::optional("data_controls", TY_STRING),
+    ShapeFieldDescriptor::optional("inference_boundary", TY_DICT),
     // --- Provider escape hatch (namespaced; never silently dropped) ---
     ShapeFieldDescriptor::optional("provider_options", TY_DICT),
     // --- Observability & experiments ---

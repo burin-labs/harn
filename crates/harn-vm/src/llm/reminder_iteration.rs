@@ -518,7 +518,7 @@ mod tests {
     fn concurrent_provider_evaluations_inject_one_durable_reminder() {
         let session_id = crate::agent_sessions::open_or_create_for_test(None);
         let runtime = crate::agent_sessions::active_session_runtime();
-        let reports = std::thread::scope(|scope| {
+        let reports = crate::runtime_stack::scope(|scope| {
             let handles: Vec<_> = (0..8)
                 .map(|_| {
                     let runtime = runtime.clone();

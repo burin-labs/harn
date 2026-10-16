@@ -39,6 +39,7 @@ type CiLatencyPolicy = {
   topology_epoch: string,
   full_run_jobs: list<CiSentinel>,
   slo: CiLatencySlo,
+  verdict_job?: string,
 }
 
 type CiStepSample = {run_id: int, job: string, name: string, duration_ms: int}
@@ -273,6 +274,10 @@ pub fn parse_ci_latency_policy(text: string) -> CiLatencyPolicy {
   if slo.min_samples > slo.window_samples {
     throw "CI latency policy min_samples cannot exceed window_samples"
   }
+  const verdict_job = raw.verdict_job ?? ""
+  if raw.verdict_job != nil && verdict_job.trim() == "" {
+    throw "CI latency policy verdict_job must name a job when present"
+  }
   return {
     schema_version: 1,
     repository: repository,
@@ -281,7 +286,36 @@ pub fn parse_ci_latency_policy(text: string) -> CiLatencyPolicy {
     topology_epoch: topology_epoch,
     full_run_jobs: sentinels,
     slo: slo,
+    verdict_job: verdict_job,
   }
+}
+
+/**
+ * The run as a merge waits on it: from creation to the verdict job's success.
+ *
+ * Work the verdict does not wait for (package verification) can keep a run
+ * open well after the merge, so the run's own end overstates merge latency.
+ * Without a named verdict job, or when this run has no successful one, the
+ * run's own end stands, which can only overstate the wait, never hide it.
+ */
+pub fn run_until_verdict(
+  run: CiDetailedRunSample,
+  jobs: list<CiDetailedJobSample>,
+  verdict_job: string,
+) -> CiDetailedRunSample {
+  if verdict_job == "" {
+    return run
+  }
+  for job in jobs {
+    if job.run_id == run.id && job.name == verdict_job && job.conclusion == "success" {
+      const until_verdict = job.start_delay_ms + job.duration_ms
+      if until_verdict < run.duration_ms {
+        return run + {duration_ms: until_verdict}
+      }
+      return run
+    }
+  }
+  return run
 }
 
 fn detailed_run_samples_from_api(data: any, topology_epoch: string) -> list<CiDetailedRunSample> {
@@ -308,6 +342,52 @@ fn detailed_run_samples_from_api(data: any, topology_epoch: string) -> list<CiDe
   return samples
 }
 
+/**
+ * Which capacity class ran a job, read from its runner name and `runs-on`
+ * labels.
+ *
+ * Vendor runners are classified by their label prefix before anything else.
+ * Blacksmith and Ubicloud both register just in time as self-hosted runners,
+ * so `runner.environment` and a `self-hosted` label cannot tell their paid
+ * minutes from the owned pool's free ones. GitHub's larger runners carry
+ * their size label (`ubuntu-8core`) and their own runner name, not the
+ * `GitHub Actions` name of the standard ones.
+ */
+pub fn runner_class(runner_name: string, labels: list) -> string {
+  const names = labels.map({ label -> to_string(label) }).to_list()
+  if runner_name.starts_with("blacksmith-")
+    || names.any({ label -> label.starts_with("blacksmith-") }) {
+    return "blacksmith"
+  }
+  if names.any({ label -> label.starts_with("ubicloud-") }) {
+    return "ubicloud"
+  }
+  if names.contains("self-hosted") {
+    return "self-hosted"
+  }
+  const hosted_labels = names.filter(
+    { label ->
+      label.starts_with("ubuntu-") || label.starts_with("macos-")
+        || label.starts_with("windows-")
+    },
+  )
+    .to_list()
+  // Larger runners bill per minute even on a public repository; the
+  // standard-size ones do not.
+  if hosted_labels.any({ label -> regex_match("-([0-9]+-?cores?|x?large)$", label) != nil }) {
+    return "github-larger"
+  }
+  if runner_name.starts_with("GitHub Actions ") || len(hosted_labels) > 0 {
+    return "github-hosted"
+  }
+  return "unassigned"
+}
+
+/** True when a runner class bills per minute for this public repository. */
+pub fn runner_class_is_paid(class: string) -> bool {
+  return ["blacksmith", "ubicloud", "github-larger"].contains(class)
+}
+
 fn detailed_job_samples_from_api(
   run_id: int,
   run_created_at: string,
@@ -330,21 +410,7 @@ fn detailed_job_samples_from_api(
           + [{run_id: run_id, job: name, name: step_name, duration_ms: step_duration_ms}]
       }
     }
-    const runner_name = to_string(raw?.runner_name ?? "")
-    const labels = raw?.labels ?? []
-    const runner = if runner_name.starts_with("blacksmith-")
-      || labels.any({ label -> to_string(label).starts_with("blacksmith-") }) {
-      "blacksmith"
-    } else if labels.contains("self-hosted") {
-      "self-hosted"
-    } else if runner_name.starts_with("GitHub Actions ")
-      || labels.contains("ubuntu-latest")
-      || labels.contains("macos-latest")
-      || labels.contains("windows-latest") {
-      "github-hosted"
-    } else {
-      "unassigned"
-    }
+    const runner = runner_class(to_string(raw?.runner_name ?? ""), raw?.labels ?? [])
     samples = samples
       + [
         {
@@ -438,9 +504,11 @@ fn build_latency_report(
   candidates: list<CiDetailedRunSample>,
   all_jobs: list<CiDetailedJobSample>,
 ) -> CiLatencyReport {
+  const verdict_job = policy.verdict_job ?? ""
   const qualifying = candidates.filter(
     { run -> run_has_full_coverage(run.id, all_jobs, policy.full_run_jobs) },
   )
+    .map({ run -> run_until_verdict(run, all_jobs, verdict_job) })
     .to_list()
   const qualifying_ids = qualifying.map({ run -> run.id }).to_list()
   const jobs = all_jobs.filter(
@@ -549,10 +617,17 @@ pipeline main(harness: Harness, task: unknown) {
   const workflow = policy?.workflow ?? to_string(parsed.workflow)
   const event = policy?.event ?? to_string(parsed.event)
   const limit = min(100, max(1, to_int(parsed.limit) ?? DEFAULT_LIMIT))
+  // GitHub's unbounded success filter can return historical runs. The
+  // policy already owns the admissible epoch; apply it to the API query too.
+  const created_bound = if policy == nil {
+    ""
+  } else {
+    "&created=%3E%3D${policy.topology_epoch}"
+  }
   const runs_data = github_api_json(
     harness.process,
     harness.clock,
-    "/repos/${repository}/actions/workflows/${workflow}/runs?event=${event}&status=success&per_page=${limit}",
+    "/repos/${repository}/actions/workflows/${workflow}/runs?event=${event}&status=success&per_page=${limit}${created_bound}",
   )
   if policy == nil {
     const runs = run_samples_from_api(runs_data)

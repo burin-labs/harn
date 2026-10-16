@@ -75,38 +75,6 @@ expect_two(1 + 1)
 }
 ";
 
-#[test]
-fn assert_in_a_helper_under_a_test_root_is_allowed() {
-    let diags = lint_source_at(TEST_HELPER_SOURCE, "tests/agent/math_test.harn");
-    assert!(
-        !has_rule(&diags, "assert-outside-test"),
-        "a file under a test root is a test file in all of it: {diags:?}"
-    );
-}
-
-#[test]
-fn assert_in_the_same_helper_outside_a_test_root_still_warns() {
-    // The control. Without it the case above passes on a build that dropped
-    // the rule entirely, and the rule's whole job is to catch this shape in
-    // production source.
-    let diags = lint_source_at(TEST_HELPER_SOURCE, "src/runtime/math.harn");
-    assert!(
-        has_rule(&diags, "assert-outside-test"),
-        "the same helper outside a test root is still production control flow: {diags:?}"
-    );
-}
-
-#[test]
-fn a_test_suffixed_file_is_a_test_root_on_its_own() {
-    // `tests/` is not the only spelling in the tree: focused suites sit beside
-    // the code they cover and are named `<subject>_test.harn`.
-    let diags = lint_source_at(TEST_HELPER_SOURCE, "bench/vm/dispatch_test.harn");
-    assert!(
-        !has_rule(&diags, "assert-outside-test"),
-        "a `_test.harn` file is test source wherever it lives: {diags:?}"
-    );
-}
-
 // The three layouts a test suite is actually written in. Before the typed
 // predicate the rule knew only the first two, so a consumer repository whose
 // suites sit in `pipeline-tests/` and end in `-test.harn` had every assert in

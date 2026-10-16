@@ -30,11 +30,6 @@ impl ProcessSpawner for RealSpawner {
     fn spawn(&self, spec: SpawnSpec) -> Result<Box<dyn ProcessHandle>, ProcessError> {
         #[cfg(unix)]
         if spec.owner_death == super::OwnerDeathPolicy::KillContainment {
-            if spec.use_stdin {
-                return Err(ProcessError::InvalidArgv(
-                    "owner-death containment reserves stdin for the liveness pipe".to_string(),
-                ));
-            }
             if !matches!(spec.output_capture, OutputCapture::Pipe) {
                 return Err(ProcessError::InvalidArgv(
                     "owner-death containment requires piped output".to_string(),
@@ -46,8 +41,12 @@ impl ProcessSpawner for RealSpawner {
                 ));
             }
             let cleanup_token = harn_vm::op_interrupt::new_process_cleanup_token();
-            let (mut command, request) =
-                super::owner_death::prepare_guardian(&spec, cleanup_token.clone())?;
+            let super::owner_death::PreparedGuardian {
+                mut command,
+                request,
+                missing_program,
+                verifier_witness,
+            } = super::owner_death::prepare_guardian(&spec, cleanup_token.clone())?;
             let mut child = match spawn_retrying_executable_busy(|| command.spawn(), thread::sleep)
             {
                 Ok(child) => child,
@@ -94,10 +93,39 @@ impl ProcessSpawner for RealSpawner {
                         );
                         let _ = child.wait();
                         harn_vm::op_interrupt::remove_process_owner_group_journal(&cleanup_token);
+                        if matches!(
+                            error,
+                            ProcessError::SpawnIo {
+                                kind: "not_found",
+                                ..
+                            }
+                        ) {
+                            if let Some(program) = missing_program {
+                                return Err(ProcessError::ProgramNotFound { program });
+                            }
+                        }
                         return Err(error);
                     }
                 };
-            return Ok(real_process(
+            let payload_stdin = if spec.use_stdin {
+                match super::owner_death::payload_stdin(&liveness) {
+                    Ok(stdin) => Some(stdin),
+                    Err(error) => {
+                        let _ = harn_vm::op_interrupt::signal_pid_tree_and_group_with_report(
+                            child.id(),
+                            9,
+                        );
+                        let _ = child.wait();
+                        harn_vm::op_interrupt::remove_process_owner_group_journal(&cleanup_token);
+                        return Err(ProcessError::Spawn(format!(
+                            "create guardian payload input: {error}"
+                        )));
+                    }
+                }
+            } else {
+                None
+            };
+            let mut process = real_process(
                 child,
                 cleanup_token,
                 Some(liveness),
@@ -105,14 +133,25 @@ impl ProcessSpawner for RealSpawner {
                 Some(guardian_pid),
                 Some(payload_pid),
                 None,
-            ));
+            );
+            process.missing_program = missing_program;
+            process.payload_stdin = payload_stdin;
+            process.verifier_witness = verifier_witness;
+            return Ok(Box::new(process));
         }
 
         let PreparedSpawn {
             mut command,
             cleanup_token,
-            ..
+            env_cleared,
+            source_verifier_bound,
+            verifier_witness,
         } = prepare_command(&spec, None)?;
+        let missing_program = if source_verifier_bound {
+            None
+        } else {
+            super::program_lookup::missing_program(&spec, &command, env_cleared)
+        };
         #[cfg(target_os = "windows")]
         let owner_job = if spec.owner_death == super::OwnerDeathPolicy::KillContainment
             || spec.configure_process_group
@@ -127,8 +166,17 @@ impl ProcessSpawner for RealSpawner {
         };
         #[cfg(not(target_os = "windows"))]
         let owner_job = None;
-        let mut child = spawn_retrying_executable_busy(|| command.spawn(), thread::sleep)
-            .map_err(map_spawn_error)?;
+        let mut child =
+            spawn_retrying_executable_busy(|| command.spawn(), thread::sleep).map_err(|error| {
+                if error.kind() == io::ErrorKind::NotFound {
+                    if let Some(program) = missing_program.as_ref() {
+                        return ProcessError::ProgramNotFound {
+                            program: program.clone(),
+                        };
+                    }
+                }
+                map_spawn_error(error)
+            })?;
         if let Err(error) = harn_vm::op_interrupt::record_current_process_owner_group(child.id()) {
             let _ = harn_vm::op_interrupt::signal_pid_tree_and_group_with_report(child.id(), 9);
             let _ = child.wait();
@@ -153,15 +201,10 @@ impl ProcessSpawner for RealSpawner {
             }
         }
 
-        Ok(real_process(
-            child,
-            cleanup_token,
-            None,
-            None,
-            None,
-            None,
-            owner_job,
-        ))
+        let mut process = real_process(child, cleanup_token, None, None, None, None, owner_job);
+        process.missing_program = missing_program;
+        process.verifier_witness = verifier_witness;
+        Ok(Box::new(process))
     }
 }
 
@@ -169,6 +212,8 @@ impl ProcessSpawner for RealSpawner {
 /// report back: whether its environment was cleared, so that `get_envs()` is
 /// the child's WHOLE environment rather than a patch over an inherited one.
 pub(crate) struct PreparedSpawn {
+    pub(crate) verifier_witness: Option<harn_vm::verifier_provenance::VerifierExecutionWitness>,
+    pub(crate) source_verifier_bound: bool,
     pub(crate) command: Command,
     pub(crate) cleanup_token: String,
     /// Read only by the Unix process-owner guardian; Windows contains a
@@ -181,28 +226,63 @@ pub(crate) fn prepare_command(
     spec: &SpawnSpec,
     cleanup_token: Option<String>,
 ) -> Result<PreparedSpawn, ProcessError> {
+    validate_program(spec)?;
+    #[cfg(target_os = "linux")]
+    let pinned = super::program_lookup::pinned_verifier(spec, &[])?;
+    #[cfg(target_os = "linux")]
+    let (program, args) = pinned
+        .as_ref()
+        .map_or((&spec.program, spec.args.as_slice()), |value| {
+            (&value.program, value.args.as_slice())
+        });
+    #[cfg(not(target_os = "linux"))]
+    let (program, args) = (&spec.program, spec.args.as_slice());
+    let command = process_sandbox::std_command_for_with_env_state(program, args)
+        .map_err(ProcessError::sandbox_setup)?;
+    let prepared = prepare_command_from(spec, cleanup_token, command)?;
+    #[cfg(target_os = "linux")]
+    let mut prepared = prepared;
+    #[cfg(target_os = "linux")]
+    if let Some(pinned) = pinned {
+        if prepared.command.get_program() != std::ffi::OsStr::new(&pinned.program) {
+            return Err(ProcessError::Spawn(
+                "isolated source verifier launcher wrapping is unmeasured".to_string(),
+            ));
+        }
+        harn_vm::verifier_provenance::validate_pinned_environment(
+            &prepared.command,
+            prepared.env_cleared,
+        )
+        .map_err(ProcessError::Spawn)?;
+        pinned.descriptors.attach(&mut prepared.command);
+        prepared.source_verifier_bound = true;
+        prepared.verifier_witness = Some(pinned.witness);
+    }
+    Ok(prepared)
+}
+
+pub(crate) fn validate_program(spec: &SpawnSpec) -> Result<(), ProcessError> {
     if spec.program.is_empty() {
         return Err(ProcessError::InvalidArgv(
             "first element of argv must be a non-empty program name".to_string(),
         ));
     }
+    Ok(())
+}
 
-    let (mut command, session_closed) =
-        process_sandbox::std_command_for_with_env_state(&spec.program, &spec.args)
-            .map_err(|e| ProcessError::SandboxSetup(format!("{e:?}")))?;
+pub(crate) fn prepare_command_from(
+    spec: &SpawnSpec,
+    cleanup_token: Option<String>,
+    (mut command, session_closed): (Command, bool),
+) -> Result<PreparedSpawn, ProcessError> {
     let env_cleared = session_closed || spec.env_mode == EnvMode::Replace;
 
-    let mut env: Vec<_> = spec
+    let env: Vec<_> = spec
         .env
         .iter()
         .map(|(key, value)| (key.clone(), value.clone()))
         .collect();
-    let mut env_remove = spec.env_remove.clone();
-    process_sandbox::apply_active_rustc_wrapper_policy(
-        &mut env,
-        &mut env_remove,
-        spec.cwd.as_deref(),
-    );
+    let env_remove = spec.env_remove.clone();
 
     if let Some(cwd) = spec.cwd.as_ref() {
         process_sandbox::enforce_process_cwd(cwd)
@@ -250,7 +330,7 @@ pub(crate) fn prepare_command(
             let granted: std::collections::BTreeSet<String> = session
                 .receipts()
                 .into_iter()
-                .filter_map(|receipt| receipt.exposed_as_env)
+                .filter_map(|receipt| receipt.child_visible_env().map(str::to_string))
                 .collect();
             for (key, _) in std::env::vars_os() {
                 if let Some(name) = key.to_str() {
@@ -305,6 +385,13 @@ pub(crate) fn prepare_command(
         command.env(key, value);
     }
 
+    // Fresh cleanup tokens must not turn each spawn into a new wrapper measurement.
+    process_sandbox::apply_active_rustc_wrapper_policy_for_command(
+        &spec.program,
+        &spec.args,
+        &mut command,
+        env_cleared,
+    );
     log_spawn_context(&command, spec.env_mode);
 
     if spec.configure_process_group {
@@ -351,7 +438,12 @@ pub(crate) fn prepare_command(
         (_, false) => Stdio::null(),
     });
 
+    process_sandbox::validate_command_environment(&mut command, env_cleared)
+        .map_err(ProcessError::sandbox_setup)?;
+
     Ok(PreparedSpawn {
+        verifier_witness: None,
+        source_verifier_bound: false,
         command,
         cleanup_token,
         env_cleared,
@@ -473,7 +565,14 @@ pub fn replace_current_process(spec: SpawnSpec) -> Result<std::convert::Infallib
     let inherited_cleanup_token = std::env::var(harn_vm::op_interrupt::PROCESS_CLEANUP_TOKEN_ENV)
         .ok()
         .filter(|token| !token.is_empty());
-    let mut command = prepare_command(&spec, inherited_cleanup_token)?.command;
+    let prepared = prepare_command(&spec, inherited_cleanup_token)?;
+    if prepared.verifier_witness.is_some() {
+        return Err(ProcessError::InvalidArgv(
+            "prepared verifier completion cannot be observed after replacing its owner process"
+                .into(),
+        ));
+    }
+    let mut command = prepared.command;
     // `exec` replaces this process on success, so the only value it can return
     // is an error. It loses the same race for the same reason, so it crosses
     // the window the same way.
@@ -487,6 +586,9 @@ pub fn replace_current_process(spec: SpawnSpec) -> Result<std::convert::Infallib
 }
 
 struct RealProcess {
+    verifier_receipt: Option<harn_vm::verifier_provenance::VerifierExecutionReceipt>,
+    verifier_witness: Option<harn_vm::verifier_provenance::VerifierExecutionWitness>,
+    missing_program: Option<String>,
     pid: u32,
     pgid: Option<u32>,
     #[cfg(not(target_os = "windows"))]
@@ -494,6 +596,8 @@ struct RealProcess {
     killer: Arc<dyn ProcessKiller>,
     child: Option<Child>,
     stdin: Option<ChildStdin>,
+    #[cfg(unix)]
+    payload_stdin: Option<super::owner_death::PayloadStdin>,
     stdout: Option<ChildStdout>,
     stderr: Option<ChildStderr>,
     owner_liveness: Option<ChildStdin>,
@@ -511,7 +615,7 @@ fn real_process(
     killer_pid: Option<u32>,
     #[cfg(target_os = "windows")] owner_job: Option<Arc<super::windows::KillOnCloseJob>>,
     #[cfg(not(target_os = "windows"))] _owner_job: Option<()>,
-) -> Box<dyn ProcessHandle> {
+) -> RealProcess {
     let pid = reported_pid.unwrap_or_else(|| child.id());
     let pgid = child_process_group_id(pid);
     let killer: Arc<dyn ProcessKiller> = Arc::new(RealKiller {
@@ -520,7 +624,10 @@ fn real_process(
         #[cfg(target_os = "windows")]
         owner_job,
     });
-    Box::new(RealProcess {
+    RealProcess {
+        verifier_witness: None,
+        verifier_receipt: None,
+        missing_program: None,
         pid,
         pgid,
         #[cfg(not(target_os = "windows"))]
@@ -528,16 +635,25 @@ fn real_process(
         killer,
         child: Some(child),
         stdin: None,
+        #[cfg(unix)]
+        payload_stdin: None,
         stdout: None,
         stderr,
         owner_liveness,
         stdin_taken: false,
         stdout_taken: false,
         stderr_taken: false,
-    })
+    }
 }
 
 impl RealProcess {
+    fn witnessed_exit(&mut self, status: std::process::ExitStatus) -> io::Result<ExitStatus> {
+        if let Some(witness) = self.verifier_witness.as_ref() {
+            self.verifier_receipt = Some(witness.receipt()?);
+        }
+        Ok(decode_status(status))
+    }
+
     fn ensure_pipes_taken(&mut self) {
         if let Some(child) = self.child.as_mut() {
             if self.owner_liveness.is_none() && self.stdin.is_none() && !self.stdin_taken {
@@ -554,6 +670,16 @@ impl RealProcess {
 }
 
 impl ProcessHandle for RealProcess {
+    fn verifier_execution_receipt(
+        &self,
+    ) -> Option<harn_vm::verifier_provenance::VerifierExecutionReceipt> {
+        self.verifier_receipt.clone()
+    }
+
+    fn missing_program(&self) -> Option<&str> {
+        self.missing_program.as_deref()
+    }
+
     fn pid(&self) -> Option<u32> {
         Some(self.pid)
     }
@@ -569,6 +695,10 @@ impl ProcessHandle for RealProcess {
     fn take_stdin(&mut self) -> Option<Box<dyn Write + Send>> {
         self.ensure_pipes_taken();
         self.stdin_taken = true;
+        #[cfg(unix)]
+        if let Some(stdin) = self.payload_stdin.take() {
+            return Some(Box::new(stdin));
+        }
         self.stdin
             .take()
             .map(|s| Box::new(s) as Box<dyn Write + Send>)
@@ -603,7 +733,9 @@ impl ProcessHandle for RealProcess {
         let deadline = timeout.map(|timeout| Instant::now() + timeout);
         loop {
             match child.try_wait()? {
-                Some(status) => return Ok(WaitOutcome::Exited(decode_status(status))),
+                Some(status) => {
+                    return self.witnessed_exit(status).map(WaitOutcome::Exited);
+                }
                 None => {
                     if interrupt() {
                         if owner_death_contained {
@@ -666,7 +798,7 @@ impl ProcessHandle for RealProcess {
             .as_mut()
             .ok_or_else(|| io::Error::other("child already reaped"))?;
         let status = child.wait()?;
-        Ok(decode_status(status))
+        self.witnessed_exit(status)
     }
 }
 

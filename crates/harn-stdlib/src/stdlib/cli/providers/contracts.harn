@@ -7,7 +7,27 @@ pub type ProviderPortableProbeOption = "temperature" \
   | "presence_penalty" \
   | "stop"
 
-pub type ProviderOptionProbeVerdict = "accepted" | "rejected" | "inconclusive" | "gated_locally"
+pub type ProviderOptionProbeVerdict = "accepted" \
+  | "rejected" \
+  | "inconclusive" \
+  | "gated_locally" \
+  | "excluded_by_account_policy"
+
+pub type ProviderOptionQualification = "stable_endpoint" | "changing_pool"
+
+pub type ProviderOptionProbeContext = {
+  endpoint: {provider: string, model: string, route: string},
+  option: ProviderPortableProbeOption,
+  catalog: {field: string, claimed_supported: bool, qualification: ProviderOptionQualification},
+  ungated: bool,
+}
+
+pub type ProviderOptionProbePriorAttempt = {
+  verdict: ProviderOptionProbeVerdict,
+  reason: string?,
+  error: string?,
+  control_response_model: string?,
+}
 
 pub type ProviderOptionProbeAttempt = {
   verdict: ProviderOptionProbeVerdict,
@@ -19,13 +39,22 @@ pub type ProviderOptionProbeAttempt = {
   input_tokens?: int,
   output_tokens?: int,
   cost_usd?: float,
+  retry_count?: int,
+  retry_from?: ProviderOptionProbePriorAttempt,
+  retry_after_ms?: int,
+  retry_after_exceeds_cap?: bool,
+  observed_cost_count?: int,
+  observed_usage_count?: int,
+  control_error?: string,
+  response_model?: string,
+  control_response_model?: string,
 }
 
 pub type ProviderOptionProbeReport = {
-  schema_version: "harn.provider_option_probe.v1",
+  schema_version: "harn.provider_option_probe.v2",
   endpoint: {provider: string, model: string, route: string},
   option: ProviderPortableProbeOption,
-  catalog: {field: string, claimed_supported: bool},
+  catalog: {field: string, claimed_supported: bool, qualification: ProviderOptionQualification},
   probe: {
     ungated: bool,
     request_count: int,
@@ -34,7 +63,7 @@ pub type ProviderOptionProbeReport = {
     attempt: ProviderOptionProbeAttempt,
   },
   diff: {
-    status: "match" | "drift" | "unmeasured",
+    status: "match" | "drift" | "unavailable" | "unmeasured",
     claimed_supported: bool,
     observed_supported: bool?,
   },

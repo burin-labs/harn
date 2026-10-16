@@ -30,66 +30,6 @@ pub fn unix_socket_json_request(
   return net.unix_socket_json_request(path, request, options ?? {})
 }
 
-fn __http_date_pad2(value: any) {
-  const text = to_string(to_int(value) ?? 0)
-  if len(text) == 1 {
-    return "0" + text
-  }
-  return text
-}
-
-fn __http_date_month_number(name: string?) {
-  const months = {
-    apr: "04",
-    aug: "08",
-    dec: "12",
-    feb: "02",
-    jan: "01",
-    jul: "07",
-    jun: "06",
-    mar: "03",
-    may: "05",
-    nov: "11",
-    oct: "10",
-    sep: "09",
-  }
-  return months[lowercase(name)]
-}
-
-fn __http_date_ms(clock: HarnessClock, raw: any) {
-  const matches = regex_captures(
-    "^[A-Za-z]{3},\\s+(\\d{1,2})\\s+([A-Za-z]{3})\\s+(\\d{4})\\s+(\\d{2}):(\\d{2}):(\\d{2})\\s+GMT$",
-    raw,
-  )
-  if len(matches) == 0 {
-    return nil
-  }
-  const parts = matches[0].groups
-  const month = __http_date_month_number(parts[1])
-  if month == nil {
-    return nil
-  }
-  const iso = parts[2] + "-" + month + "-" + __http_date_pad2(parts[0])
-    + "T"
-    + parts[3]
-    + ":"
-    + parts[4]
-    + ":"
-    + parts[5]
-    + "Z"
-  const parsed = try {
-    date_parse(iso)
-  }
-  if is_err(parsed) {
-    return nil
-  }
-  const delta_seconds = to_float(unwrap(parsed)) - clock.timestamp()
-  if delta_seconds <= 0.0 {
-    return 0
-  }
-  return to_int(delta_seconds * 1000.0)
-}
-
 /**
  * Parse an HTTP `Retry-After` header value into a wait in milliseconds.
  *
@@ -103,26 +43,5 @@ fn __http_date_ms(clock: HarnessClock, raw: any) {
  * @example: http_retry_after_ms(harness.clock, "120")
  */
 pub fn http_retry_after_ms(clock: HarnessClock, value: any) -> int? {
-  const raw = trim(to_string(value ?? ""))
-  if raw == "" {
-    return nil
-  }
-  const seconds = to_float(raw)
-  if seconds != nil {
-    if seconds <= 0.0 {
-      return 0
-    }
-    return to_int(seconds * 1000.0)
-  }
-  const parsed = try {
-    date_parse(raw)
-  }
-  if is_ok(parsed) {
-    const delta_seconds = to_float(unwrap(parsed)) - clock.timestamp()
-    if delta_seconds <= 0.0 {
-      return 0
-    }
-    return to_int(delta_seconds * 1000.0)
-  }
-  return __http_date_ms(clock, raw)
+  return __http_retry_after_ms_at(to_string(value ?? ""), clock.timestamp())
 }

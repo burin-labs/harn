@@ -1,5 +1,6 @@
 import { agent_emit_event, agent_session_messages } from "std/agent/state"
 import { agent_tool_is_read_only } from "std/agent/tool_annotations"
+import { agent_tool_handler_result } from "std/agent/tool_lifecycle"
 // Read-only stance: an intent-armed, least-privilege tool window with a
 // justified, consent-verified escape hatch.
 //
@@ -27,6 +28,7 @@ import { agent_tool_is_read_only } from "std/agent/tool_annotations"
 // from annotations, and elevation is verified, evidenced, and traced.
 // Ships default-OFF and experimental.
 import { __tool_surface_filter_registry, __tool_surface_policy_tools } from "std/agent/tool_surface"
+import { with_default_temperature } from "std/llm/safe"
 
 fn __stance_config(opts: dict) {
   return opts?.read_only_stance ?? {}
@@ -57,14 +59,14 @@ fn __stance_read_only_names(registry: dict, policy: dict?, hard_keep: list?, esc
   }
   for name in hard_keep ?? [] {
     if !contains(names, name) {
-      names = names.appending(name)
+      names.push(name)
     }
   }
   for entry in __stance_registry_entries(registry) {
     const name = __stance_entry_name(entry)
     if agent_tool_is_read_only(entry, policy, name) {
       if name != "" && !contains(names, name) {
-        names = names.appending(name)
+        names.push(name)
       }
     }
   }
@@ -80,7 +82,7 @@ fn __stance_policy_patch(opts: dict, escape_tool: any) {
   if type_of(allowed) != "list" || len(allowed) == 0 || contains(allowed, escape_tool) {
     return {policy: policy}
   }
-  return {policy: policy + {tools: allowed.appending(escape_tool)}}
+  return {policy: policy + {tools: allowed + [escape_tool]}}
 }
 
 fn __stance_recent_user_messages(agent: HarnessAgent, session_id: any, limit: int = 6) {
@@ -92,7 +94,7 @@ fn __stance_recent_user_messages(agent: HarnessAgent, session_id: any, limit: in
   let recent = []
   for message in messages ?? [] {
     if (message?.role ?? "") == "user" {
-      recent = recent.appending(to_string(message?.content ?? ""))
+      recent.push(to_string(message?.content ?? ""))
     }
   }
   const count = len(recent)
@@ -145,12 +147,15 @@ pub fn agent_stance_default_consent_check(
     },
     required: ["consent", "reasoning"],
   }
-  const llm_options = (options ?? {})
-    + {
-      output: {schema: schema, strict: true, validation: "error"},
-      temperature: 0,
-      _call_stage: "guard",
-    }
+  const llm_options = with_default_temperature(
+    llm,
+    (options ?? {})
+      + {
+        output: {schema: schema, strict: true, validation: "error"},
+        mock_scope: "agent.stance_consent",
+        _call_stage: "guard",
+      },
+  )
   const outcome = try {
     llm.call(prompt, nil, llm_options)
   } catch (e) {
@@ -205,19 +210,21 @@ fn __stance_register_escape_tool(
     )
     if granted {
       harness.runtime.atomic_set(grant_flag, 1)
-      {
+      const result = {
         granted: true,
         message: "Write access re-enabled: user consent verified. Mutating tools return next turn.",
         reason: verdict?.reason ?? "",
       }
+      agent_tool_handler_result(to_string(result), result)
     } else {
-      {
+      const result = {
         granted: false,
         message: "Denied: no express or implied user consent to modify the workspace was found."
           + " Ask the user directly whether to proceed with changes, then call this tool again"
           + " citing their answer.",
         reason: verdict?.reason ?? "",
       }
+      agent_tool_handler_result(to_string(result), result, "rejected")
     }
   }
   return tool_define(

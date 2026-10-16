@@ -76,7 +76,9 @@ fn content_hash(path: &Path) -> Result<blake3::Hash, String> {
     let mut file = File::open(path)
         .map_err(|error| format!("cannot open executable {}: {error}", path.display()))?;
     let mut hasher = blake3::Hasher::new();
-    let mut buffer = [0_u8; 1024 * 1024];
+    // Heap, not stack: this runs on the main thread, and Windows gives the
+    // main thread 1 MiB, so a 1 MiB array overflows it (harn#8893).
+    let mut buffer = vec![0_u8; 1024 * 1024];
     loop {
         let count = file
             .read(&mut buffer)

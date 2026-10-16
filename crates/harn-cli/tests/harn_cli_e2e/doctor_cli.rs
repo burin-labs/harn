@@ -17,6 +17,96 @@ fn binary_path() -> std::path::PathBuf {
 }
 
 #[test]
+fn sandbox_doctor_streams_all_cases_without_polluting_json() {
+    use harn_vm::process_sandbox::conformance::ConformanceCase;
+
+    let output = Command::new(binary_path())
+        .args(["doctor", "sandbox", "--json"])
+        .env(
+            "SANDBOX_CONFORMANCE_UNDECLARED_NAME",
+            "must-not-reach-child",
+        )
+        .output()
+        .expect("spawn sandbox doctor");
+    let parsed: serde_json::Value = serde_json::from_slice(&output.stdout)
+        .expect("progress must leave stdout as one JSON envelope");
+    assert_eq!(parsed["schemaVersion"], 1);
+    let data = &parsed["data"];
+    let cases = data["cases"].as_array().expect("case reports");
+    assert_eq!(cases.len(), ConformanceCase::ALL.len());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let receipts: Vec<_> = stderr
+        .lines()
+        .filter(|line| line.starts_with("harn.sandbox_conformance"))
+        .collect();
+    assert_eq!(receipts.len(), 2 * cases.len(), "{stderr}");
+    for (index, (case, contract)) in cases.iter().zip(ConformanceCase::ALL).enumerate() {
+        assert_eq!(case["case"], contract.id());
+        assert_eq!(
+            receipts[2 * index],
+            format!(
+                "harn.sandbox_conformance_start case={} completed={index} pending={}",
+                contract.id(),
+                cases.len() - index,
+            ),
+        );
+        assert!(receipts[2 * index + 1]
+            .starts_with(&format!("harn.sandbox_conformance case={} ", contract.id())));
+        assert!(receipts[2 * index + 1].contains(&format!(
+            "\"verdict\":\"{}\"",
+            case["verdict"].as_str().expect("verdict"),
+        )));
+    }
+    let holds = cases.iter().all(|case| {
+        matches!(
+            case["verdict"].as_str(),
+            Some("conforms" | "not_applicable")
+        )
+    });
+    assert_eq!(output.status.code(), Some(i32::from(!holds)), "{stderr}");
+    assert_eq!(parsed["ok"], holds);
+    if holds {
+        assert!(parsed["error"].is_null());
+    } else {
+        assert_eq!(parsed["error"]["code"], "sandbox_conformance_failed");
+    }
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[test]
+fn sandbox_doctor_refuses_an_escape_in_the_json_envelope() {
+    let output = Command::new(binary_path())
+        .args(["doctor", "sandbox", "--json"])
+        .env("HARN_HANDLER_SANDBOX", "off")
+        .env(
+            "SANDBOX_CONFORMANCE_UNDECLARED_NAME",
+            "must-not-reach-child",
+        )
+        .output()
+        .expect("spawn deliberately unconfined sandbox doctor");
+    let parsed: serde_json::Value = serde_json::from_slice(&output.stdout)
+        .expect("a failed measurement still yields one JSON envelope");
+    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(parsed["schemaVersion"], 1);
+    assert_eq!(parsed["ok"], false);
+    assert_eq!(parsed["error"]["code"], "sandbox_conformance_failed");
+    let cases = parsed["data"]["cases"].as_array().expect("retained report");
+    assert_eq!(
+        cases.len(),
+        harn_vm::process_sandbox::conformance::ConformanceCase::ALL.len()
+    );
+    let escaped = cases
+        .iter()
+        .find(|case| case["case"] == "fs.outside_write_refused")
+        .expect("outside-write refusal was measured");
+    assert_eq!(escaped["verdict"], "escaped");
+    assert!(escaped["target"]
+        .as_str()
+        .expect("escaped target")
+        .ends_with("/outside/probe.txt"));
+}
+
+#[test]
 fn doctor_json_smoke() {
     let output = Command::new(binary_path())
         .args(["doctor", "--json"])

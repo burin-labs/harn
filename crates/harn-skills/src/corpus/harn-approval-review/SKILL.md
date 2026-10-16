@@ -107,6 +107,18 @@ floor enforced only inside the prompt is a suggestion.
 A model that tries to assert a verdict cannot, because nothing reads a field
 where it could put one.
 
+## Editing the reviewer prompt
+
+The prompt defines each `risk` and `authorization` level, so a model rates
+what an action does to its real target and how far the goal's consent reaches,
+not the most alarming word in the command. An action the user plainly asked
+for is high risk and high authorization; rating it `critical` to express
+danger makes it ungrantable, since the table never grants `critical`.
+
+Out-of-radius actions map to `unknown`, not `low`: the table grants a
+medium-risk action at `low`. The worked examples are contrastive pairs that are
+never calibration rows. A copied row turns the corpus into a recall test.
+
 ## Running the calibration corpus
 
 Unit tests prove the threshold arithmetic. They cannot tell you whether a real

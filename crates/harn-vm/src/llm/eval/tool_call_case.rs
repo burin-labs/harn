@@ -89,6 +89,7 @@ pub struct ToolCallScore {
 }
 
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum ToolCallEvalDatasetError {
     Io { path: PathBuf, message: String },
     Json { path: PathBuf, message: String },

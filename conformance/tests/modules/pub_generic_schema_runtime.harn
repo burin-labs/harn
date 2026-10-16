@@ -1,0 +1,47 @@
+import { Pair } from "pub_generic_schema_facade"
+import { Checked, Receipt } from "pub_generic_schema_owner"
+
+type Tag = {source: "consumer"}
+
+type Payload = {name: string, count: int}
+
+type Stored = Receipt<Payload>
+
+type Nested = Pair<Stored, list<Receipt<string>>>
+
+type CheckedPayload = Checked<Payload>
+
+fn stored_matches(value: unknown) -> bool {
+  return schema_is(value, Stored)
+}
+
+fn nested_matches(value: unknown) -> bool {
+  return schema_is(value, Nested)
+}
+
+fn checked_matches(value: unknown) -> bool {
+  return schema_is(value, CheckedPayload)
+}
+
+pipeline default(harness: Harness) {
+  assert(schema_is({source: "consumer"}, Tag))
+  const original: Stored = {tag: {source: "owner"}, payload: {name: "measured", count: 2}}
+  const decoded: Stored = schema_expect(json_parse(json_stringify(original)), schema_of(Stored))
+  assert(decoded.payload.name == "measured")
+  assert(stored_matches(decoded))
+  assert(!stored_matches({tag: {source: "consumer"}, payload: {name: "measured", count: 2}}))
+  assert(!stored_matches({tag: {source: "owner"}, payload: {name: "measured", count: "2"}}))
+  assert(!stored_matches({tag: {source: "owner"}, payload: {name: "measured"}}))
+  const nested: unknown = {left: original, right: [{tag: {source: "owner"}, payload: "ok"}]}
+  assert(nested_matches(nested))
+  assert(!nested_matches({left: original, right: [{tag: {source: "owner"}, payload: 3}]}))
+  const checked = {
+    value: decoded.payload,
+    schema: schema_of(Payload),
+    check: fn(value: Payload) { return value.count > 0 },
+  }
+  assert(checked_matches(checked))
+  assert(!checked_matches(checked + {check: "not a callback"}))
+  assert(!checked_matches(checked + {schema: "not a schema dictionary"}))
+  harness.stdio.println("imported generic schemas validate archived payloads")
+}

@@ -13,6 +13,8 @@ pub struct ComplementaryReviewerOptions {
     pub author_provider: Option<String>,
     pub intent: ComplementaryReviewerIntent,
     pub max_price_multiplier: Option<f64>,
+    pub min_price_cap_per_mtok: Option<f64>,
+    pub max_price_cap_per_mtok: Option<f64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -68,7 +70,7 @@ pub enum ReviewerFallbackCode {
     /// The author model's family could not be resolved, so no independent
     /// family comparison is possible.
     UnknownAuthorFamily,
-    /// Different-family candidates exist but none satisfy `max_price_multiplier`.
+    /// Different-family candidates exist but none satisfy the configured price cap.
     NoDiffFamilyWithinPrice,
     /// No active, serverless, different-family reviewer is cataloged at all.
     NoDiffFamilyServerless,
@@ -216,7 +218,7 @@ pub(super) fn pick_complementary_reviewer_with_availability(
         if exceeds_price_cap(
             author_identity.pricing.as_ref(),
             candidate_identity.pricing.as_ref(),
-            options.max_price_multiplier,
+            &options,
         ) {
             rejected_by_price += 1;
             continue;
@@ -245,10 +247,14 @@ pub(super) fn pick_complementary_reviewer_with_availability(
 
     let Some(best) = candidates.into_iter().next() else {
         if rejected_by_price > 0 {
-            let cap = options.max_price_multiplier.unwrap_or_default();
             return fallback(
                 ReviewerFallbackCode::NoDiffFamilyWithinPrice,
-                format!("no different-family reviewer satisfied max_price_multiplier {cap}"),
+                format!(
+                    "no different-family reviewer satisfied max_price_multiplier {:?}, min_price_cap_per_mtok {:?}, max_price_cap_per_mtok {:?}",
+                    options.max_price_multiplier,
+                    options.min_price_cap_per_mtok,
+                    options.max_price_cap_per_mtok,
+                ),
             );
         }
         if diff_family_seen == 0 {
@@ -390,18 +396,32 @@ fn tier_rank(tier: &str) -> u8 {
 fn exceeds_price_cap(
     author_pricing: Option<&ModelPricing>,
     candidate_pricing: Option<&ModelPricing>,
-    max_price_multiplier: Option<f64>,
+    options: &ComplementaryReviewerOptions,
 ) -> bool {
-    let Some(max_price_multiplier) = max_price_multiplier else {
-        return false;
+    let relative_cap = options.max_price_multiplier.and_then(|multiplier| {
+        pricing_total(author_pricing)
+            .filter(|total| *total > 0.0)
+            .map(|total| total * multiplier)
+    });
+    let affordable_cap = match (relative_cap, options.min_price_cap_per_mtok) {
+        (Some(relative), Some(floor)) => Some(relative.max(floor)),
+        (Some(relative), None) => Some(relative),
+        (None, Some(floor)) => Some(floor),
+        (None, None) => None,
     };
-    let Some(author_total) = pricing_total(author_pricing) else {
+    let effective_cap = match (affordable_cap, options.max_price_cap_per_mtok) {
+        (Some(cap), Some(ceiling)) => Some(cap.min(ceiling)),
+        (Some(cap), None) => Some(cap),
+        (None, Some(ceiling)) => Some(ceiling),
+        (None, None) => None,
+    };
+    let Some(effective_cap) = effective_cap else {
         return false;
     };
     let Some(candidate_total) = pricing_total(candidate_pricing) else {
         return true;
     };
-    author_total > 0.0 && candidate_total > author_total * max_price_multiplier
+    candidate_total > effective_cap
 }
 
 fn cost_estimate(

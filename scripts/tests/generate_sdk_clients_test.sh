@@ -43,7 +43,7 @@ expected_args="$(cat <<'EOF'
 typescript@6.0.3-test
 openapi-ts
 -i
-./spec/openapi.yaml
+./crates/harn-serve/openapi.yaml
 -o
 __OUTPUT__
 -p
@@ -59,3 +59,4 @@ expected_args="${expected_args/__OUTPUT__/$TMP\/output\/typescript}"
 manifest="$TMP/output/typescript/harn-sdk-generation.txt"
 grep -Fxq 'generator=@hey-api/openapi-ts@0.97.0-test' "$manifest"
 grep -Fxq 'typescript=typescript@6.0.3-test' "$manifest"
+grep -Fxq 'openapi_spec=crates/harn-serve/openapi.yaml' "$manifest"

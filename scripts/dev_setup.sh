@@ -5,6 +5,8 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 # shellcheck source=lib/file_time.sh
 source "$ROOT_DIR/scripts/lib/file_time.sh"
+# shellcheck source=lib/cargo_env.sh
+source "$ROOT_DIR/scripts/lib/cargo_env.sh"
 
 SETUP_STATE_DIR="${HARN_DEV_SETUP_STATE_DIR:-$ROOT_DIR/.codex/dev-setup}"
 SETUP_PROFILE="${HARN_DEV_SETUP_PROFILE:-full}"
@@ -344,38 +346,7 @@ install_locked_node_dependencies() {
 }
 
 build_sccache_rustc_wrapper() {
-  local source_path="$ROOT_DIR/scripts/sccache_rustc_wrapper.rs"
-  local source_hash host_triple executable_suffix wrapper_dir wrapper_path temporary_path
-  source_hash="$(shasum -a 256 < "$source_path" | awk '{print $1}')"
-  host_triple="$(rustc -vV | sed -n 's/^host: //p')"
-  if [[ -z "$host_triple" ]]; then
-    echo "error: rustc did not report a host triple for the sccache wrapper" >&2
-    return 1
-  fi
-
-  executable_suffix=""
-  case "${OS:-$(uname -s)}" in
-    Windows_NT | MINGW* | MSYS* | CYGWIN*) executable_suffix=".exe" ;;
-  esac
-  wrapper_dir="$HARN_DEV_SETUP_STORAGE_ROOT/sccache-wrapper/$host_triple-$source_hash"
-  wrapper_path="$wrapper_dir/harn-sccache-wrapper$executable_suffix"
-  if [[ ! -x "$wrapper_path" ]]; then
-    mkdir -p "$wrapper_dir"
-    temporary_path="$wrapper_path.tmp.$$"
-    rustc --edition=2021 -C strip=symbols "$source_path" -o "$temporary_path"
-    # A same-filesystem hard link publishes the complete executable atomically
-    # and never replaces a live wrapper, including on Windows. A concurrent
-    # publisher may win first; its source-addressed artifact is equivalent.
-    if ! ln "$temporary_path" "$wrapper_path" 2>/dev/null \
-      && [[ ! -x "$wrapper_path" ]]; then
-      rm -f "$temporary_path"
-      echo "error: failed to publish the sccache wrapper" >&2
-      return 1
-    fi
-    rm -f "$temporary_path"
-  fi
-
-  printf '%s\n' "$wrapper_path"
+  harn_build_sccache_wrapper "$ROOT_DIR" "$HARN_DEV_SETUP_STORAGE_ROOT"
 }
 
 echo "=== Harn dev setup ==="
@@ -401,7 +372,6 @@ echo "Setup storage root -> ${HARN_DEV_SETUP_STORAGE_ROOT}"
 
 git config core.hooksPath .githooks
 echo "Configured git hooks path -> .githooks"
-./scripts/configure_merge_drivers.sh
 
 explicit_target_dir="${HARN_DEV_TARGET_DIR:-}"
 target_dir="${explicit_target_dir}"
@@ -604,7 +574,11 @@ if [[ "${SETUP_PROFILE}" != "bootstrap" ]]; then
   # Rust-heavy lease between them, and lets the authoritative freshness build
   # queue behind unrelated work after setup has already compiled the binary.
   log "Building and proving the canonical Harn CLI"
-  HARN_BIN='' HARN_BIN_NO_BUILD=0 ./scripts/harn_bin.sh --print >/dev/null
+  # Fresh setup can compile the entire graph. Keep the resolver's shorter
+  # interactive default for ordinary commands, but let this cold build finish.
+  HARN_BIN='' HARN_BIN_NO_BUILD=0 \
+    HARN_BIN_CARGO_TIMEOUT_SECONDS="${HARN_BIN_CARGO_TIMEOUT_SECONDS:-3600}" \
+    ./scripts/harn_bin.sh --print >/dev/null
   # Signing mutates the canonical artifact identity, so refresh the receipt
   # only after the final bytes are in place and before publishing a target seed.
   ./scripts/sign_local_macos.sh

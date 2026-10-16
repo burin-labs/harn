@@ -1,0 +1,95 @@
+import { CompactionClassifyDecision, CompactionFixtureInput } from "std/agent/compaction_classify"
+import { with_llm_script } from "std/testing"
+
+fn low_drop(input: CompactionFixtureInput) -> list<CompactionClassifyDecision> {
+  let out: list<CompactionClassifyDecision> = []
+  for item in input.items {
+    out = out
+      + [
+        {
+          index: item.index,
+          question_id: "message_" + to_string(item.index),
+          choice: "drop",
+          confidence: 0.2,
+          confidence_kind: "model_rationale",
+          evaluation_receipt: "fixture",
+        },
+      ]
+  }
+  return out
+}
+
+pipeline test(harness: Harness) {
+  const policy = {
+    backend: "structured_llm",
+    provider: "openai",
+    model: "gpt-4.1-mini",
+    temperature: 0.0,
+    threshold: 0.8,
+    evaluation_cost_limit: 1.0,
+  }
+  for limit in [1, 10000] {
+    with_llm_script(
+      harness.llm,
+      [{text: "{\"rewrites\":[{\"index\":0,\"text\":\"preserved evidence\"}]}"}],
+      { ->
+        const result = harness.agent.transcript_auto_compact(
+          [
+            {role: "user", content: "Necessary original evidence"},
+            {role: "user", content: "Current task"},
+          ],
+          {
+            compact_strategy: "classify",
+            token_threshold: 0,
+            keep_last: 1,
+            provider: "mock",
+            model: "mock",
+            budget: {max_input_tokens: limit},
+            classify: {policy: policy, fixture: low_drop},
+          },
+        )
+        if limit == 1 {
+          assert_eq(len(harness.llm.mock_calls()), 0)
+          assert_eq(
+            result.receipt.classification.decisions[0].application_reason,
+            "rewrite_unavailable",
+          )
+          assert(result.summary.contains("Necessary original evidence"))
+        } else {
+          assert_eq(len(harness.llm.mock_calls()), 1)
+          assert(result.summary.contains("preserved evidence"))
+        }
+      },
+    )
+  }
+  with_llm_script(
+    harness.llm,
+    [
+      {text: "{\"rewrites\":[{\"index\":1,\"text\":\"preserved evidence\"}]}"},
+      {text: "Configured summary of preserved evidence"},
+    ],
+    { ->
+      const result = harness.agent.transcript_auto_compact(
+        [
+          {role: "user", content: "[no-compact] pinned original"},
+          {role: "user", content: "Necessary original evidence"},
+          {role: "user", content: "Current task"},
+        ],
+        {
+          compact_strategy: "classify",
+          token_threshold: 0,
+          keep_last: 1,
+          provider: "mock",
+          model: "mock",
+          summarize_prompt: "../stdlib/compact_transcript_summary.harn.prompt",
+          classify: {policy: policy, fixture: low_drop},
+        },
+      )
+      assert_eq(len(harness.llm.mock_calls()), 2)
+      assert_eq(result.receipt.classification.summary_applied, true)
+      assert(result.summary.contains("[no-compact] pinned original"))
+      assert(result.summary.contains("Configured summary of preserved evidence"))
+    },
+  )
+  harness.stdio.println("prepared rewrite controls and configured summary preserve source")
+}

@@ -551,9 +551,8 @@ fn main(harness: Harness) {
 
         let spawn_run = |path: std::path::PathBuf, bytes: Arc<Mutex<Vec<u8>>>| {
             let first_event_barrier = barrier.clone();
-            std::thread::Builder::new()
+            harn_parser::runtime_stack::builder()
                 .name("harn-run-json-probe".to_string())
-                .stack_size(crate::CLI_RUNTIME_STACK_SIZE)
                 .spawn(move || {
                     tokio::runtime::Builder::new_current_thread()
                         .enable_all()

@@ -42,11 +42,11 @@ pipeline default(harness: Harness) {
   harness.stdio.println(agent_tool_single_workspace_write_name(tools))
   harness.stdio.println(
     agent_tool_single_workspace_write_name(
-      {tools: tools.tools.appending(entry("second_edit", {kind: "edit"}))},
+      {tools: tools.tools + [entry("second_edit", {kind: "edit"})]},
     )
       == "",
   )
-  const multiple_writers = {tools: tools.tools.appending(entry("second_edit", {kind: "edit"}))}
+  const multiple_writers = {tools: tools.tools + [entry("second_edit", {kind: "edit"})]}
   harness.stdio.println(agent_tool_resolve_workspace_write_name(multiple_writers, nil, "edit"))
   harness.stdio.println(
     agent_tool_resolve_workspace_write_name(multiple_writers, nil, "read") == "",

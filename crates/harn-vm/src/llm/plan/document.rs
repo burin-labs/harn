@@ -340,6 +340,7 @@ impl PlanDocumentEvent {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
 pub enum PlanDocumentError {
     #[error(
         "plan document {document_id} revision conflict: expected {expected_revision_id}, current revision is {current_revision_id}"

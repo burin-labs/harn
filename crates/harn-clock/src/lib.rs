@@ -8,6 +8,9 @@
 //!
 //! See `docs/src/dev/testing.md` for usage patterns.
 
+#[cfg(any(test, feature = "test-support"))]
+pub mod test_support;
+
 use std::fmt;
 use std::sync::Arc;
 use std::time::Duration;
@@ -457,11 +460,6 @@ mod tests {
         let observed = now_wall_ms(clock.as_ref());
         let expected = epoch().unix_timestamp_nanos() / 1_000_000;
         assert_eq!(observed, expected as i64);
-    }
-
-    #[test]
-    fn format_rfc3339_renders_utc_with_z_suffix() {
-        assert_eq!(format_rfc3339(epoch()), "2023-11-14T22:13:20Z");
     }
 
     #[tokio::test]

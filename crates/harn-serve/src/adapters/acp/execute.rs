@@ -1,6 +1,7 @@
 //! Pipeline execution glue — compiles and runs a Harn chunk under the
 //! ACP bridge, and loads MCP clients from host capabilities.
 
+use harn_vm::NativeVmExt;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -13,7 +14,7 @@ use super::{
 };
 
 #[derive(Debug)]
-pub(super) struct PromptExecutionError {
+pub struct PromptExecutionError {
     pub message: String,
     pub terminal_class: harn_vm::llm::AgentTerminalClass,
     /// Machine facts projected from the thrown error dict (provider/model of the
@@ -58,7 +59,7 @@ mod prompt_execution_error_tests {
 
     #[test]
     fn typed_vm_category_outweighs_misleading_message_prose() {
-        let vm = harn_vm::Vm::new();
+        let vm = harn_vm::new_vm();
         let error = harn_vm::VmError::CategorizedError {
             category: harn_vm::ErrorCategory::ToolRejected,
             message: "provider rate limit 429 in /tmp/run-429/result".to_string(),
@@ -73,7 +74,7 @@ mod prompt_execution_error_tests {
 
     #[test]
     fn ambiguous_vm_category_does_not_claim_provider_provenance() {
-        let vm = harn_vm::Vm::new();
+        let vm = harn_vm::new_vm();
         let error = harn_vm::VmError::CategorizedError {
             category: harn_vm::ErrorCategory::Auth,
             message: "missing harness tenant principal".to_string(),
@@ -88,7 +89,7 @@ mod prompt_execution_error_tests {
 
     #[test]
     fn resource_contention_preserves_its_typed_terminal_class() {
-        let vm = harn_vm::Vm::new();
+        let vm = harn_vm::new_vm();
         let error = harn_vm::VmError::CategorizedError {
             category: harn_vm::ErrorCategory::ResourceBusy,
             message: "session_store: database is locked".to_string(),
@@ -183,16 +184,16 @@ async fn configure_stable_vm(
 
 pub(super) async fn prepare_vm_baseline(
     source: &str,
-    source_path: &Path,
+    source_path: Option<&Path>,
     cwd: &Path,
     project_root: Option<&Path>,
     runtime_configurator: Arc<dyn AcpRuntimeConfigurator>,
 ) -> Result<harn_vm::VmBaseline, String> {
-    let mut vm = harn_vm::Vm::new();
+    let mut vm = harn_vm::new_vm();
     configure_stable_vm(
         &mut vm,
         source,
-        Some(source_path),
+        source_path,
         cwd,
         project_root,
         runtime_configurator,
@@ -219,7 +220,7 @@ pub(super) async fn execute_chunk(
     let mut vm = if let Some(baseline) = setup.baseline {
         baseline.instantiate()
     } else {
-        let mut vm = harn_vm::Vm::new();
+        let mut vm = harn_vm::new_vm();
         configure_stable_vm(
             &mut vm,
             setup.source,
@@ -256,8 +257,16 @@ pub(super) async fn execute_chunk(
             );
         }
     }
-    let mut mcp_globals =
-        load_host_mcp_clients(host_bridge.clone(), &served_host_capabilities).await;
+    // Host MCP servers are children of this session, so they start under its
+    // environment policy rather than the engine's whole environment. The
+    // policy is installed for the turn further down; declare it for the boot
+    // too, leaving any policy an enclosing surface installed in place.
+    let mut mcp_globals = {
+        let _environment = harn_vm::stdlib::process::declare_session_environment_if_absent(
+            setup.session_environment.clone(),
+        );
+        load_host_mcp_clients(host_bridge.clone(), &served_host_capabilities).await
+    };
     for global in AcpAmbientGlobal::ALL {
         let value = match global {
             AcpAmbientGlobal::Prompt => harn_vm::VmValue::String(arcstr::ArcStr::from(prompt.text)),
@@ -426,7 +435,10 @@ pub(super) async fn load_host_mcp_clients(
             "host/call",
             serde_json::json!({
                 "name": "project.mcp_config",
-                "args": {}
+                "args": {},
+                "_meta": {"harn": {"requestTrace":
+                    harn_vm::stdlib::host::trace::HostRequestTrace::new(None, &Default::default())
+                }},
             }),
         )
         .await
@@ -659,7 +671,7 @@ require_declared_operations_served = true
         let chunk = harn_vm::compile_source(&source).expect("compile inline pipeline");
 
         let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
-        let cancellation = super::super::SessionCancellation::default();
+        let cancellation = super::super::SessionCancellation::default().prepare_prompt();
         // Pre-cancel: this is what a `session/cancel` that raced ahead of
         // `session/prompt` looks like on the wire, and it lets this test stay
         // synchronous instead of racing a background cancel against the turn.
@@ -741,7 +753,7 @@ require_declared_operations_served = true
         .to_string();
         let chunk = harn_vm::compile_source(&source).expect("compile importing pipeline");
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
-        let cancellation = super::super::SessionCancellation::default();
+        let cancellation = super::super::SessionCancellation::default().prepare_prompt();
         let client_pending: Arc<
             TokioMutex<
                 std::collections::HashMap<u64, tokio::sync::oneshot::Sender<serde_json::Value>>,
@@ -847,9 +859,8 @@ require_declared_operations_served = true
                 session_environment: harn_vm::security::SessionEnvironment::inherited(),
             },
         );
-        tokio::time::timeout(std::time::Duration::from_secs(10), execution)
+        harn_clock::test_support::within("importing turn", execution)
             .await
-            .expect("importing turn completes within the test bound")
             .expect("importing turn executes");
         responder.abort();
         drop(bridge);

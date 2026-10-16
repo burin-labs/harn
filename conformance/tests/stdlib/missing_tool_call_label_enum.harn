@@ -1,0 +1,41 @@
+import { missing_tool_call_classifier } from "std/llm/missing_tool_call"
+import { llm_calls, llm_text, with_llm_script } from "std/testing"
+
+/**
+ * A target outside the candidate-tool enum refuses the evaluation once.
+ * Recovery fails open with `original_action: "error"`.
+ */
+pipeline test(harness: Harness) {
+  const request = {
+    session_id: "missing-tool-call-enum",
+    iteration: 1,
+    text: "Opaque fixture input.",
+    visible_text: nil,
+    tools: [{name: "edit", description: "Update an existing file"}],
+    tool_names: ["edit"],
+  }
+  with_llm_script(
+    harness.llm,
+    [
+      llm_text(
+        "{\"answers\":{\"intended\":{\"verdict\":true,\"confidence\":0.99,\"evidence\":\"fixture\"},\"tool\":{\"choice\":\"unregistered_tool\",\"confidence\":0.99,\"evidence\":\"out of set\"}}}",
+      ),
+    ],
+    { ->
+      const classify = missing_tool_call_classifier(
+        harness,
+        {provider: "openai", model: "gpt-5.4-nano"},
+      )
+      const result = classify(request)
+      const schema = llm_calls(harness.llm)[0].output_format.schema
+      harness.stdio.println(
+        json_stringify(schema.properties.answers.properties.tool.properties.choice.enum),
+      )
+      harness.stdio.println(result.classifier_kind)
+      harness.stdio.println(result.action)
+      harness.stdio.println(result.original_action)
+      harness.stdio.println(result.decision?.kind)
+      assert_eq(len(llm_calls(harness.llm)), 1)
+    },
+  )
+}

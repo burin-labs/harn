@@ -8,6 +8,9 @@
 /// the version of whichever host happens to emit a receipt.
 pub const KERNEL_VERSION: &str = env!("CARGO_PKG_VERSION");
 
+/// Crate-local source contribution to compiler and check cache identities.
+pub const SOURCE_FINGERPRINT: &str = env!("HARN_SOURCE_FINGERPRINT");
+
 /// Shared adapter ingress limits. Native and browser hosts enforce these
 /// before allocating or parsing untrusted wire inputs.
 pub const PORTABLE_MAX_SOURCE_BYTES: usize = 1024 * 1024;
@@ -54,7 +57,7 @@ pub use execution::{
 };
 pub use opcode::{
     opcode_abi_fingerprint, Op, OperandKind, Portability, OPCODE_ABI_ARTIFACT_VERSION,
-    OPCODE_ABI_FINGERPRINT_V4,
+    OPCODE_ABI_FINGERPRINT_V4, OPCODE_ABI_FINGERPRINT_V5,
 };
 pub use program::{BindingTypeSlot, Chunk, CompiledFunction, Constant, LocalSlotInfo, ParamSlot};
 

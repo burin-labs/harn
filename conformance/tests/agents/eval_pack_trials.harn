@@ -10,6 +10,8 @@ fn completed_run(id: string) -> dict {
     usage: {
       total_duration_ms: 1000,
       total_cost: 0.25,
+      cost_usd: 0.25,
+      known_cost_usd: 0.25,
       input_tokens: 3,
       output_tokens: 4,
       call_count: 1,
@@ -75,5 +77,33 @@ pipeline test(harness: Harness) {
   const baseline = [report.stats_rows[0]]
   const mismatch = [report.stats_rows[0] + {harness_config_fingerprint: "other-config"}]
   assert_eq(paired_case_deltas(baseline, mismatch), [])
+  for control in [
+    {name: "missing", usage: {}, pass: false, exact: nil},
+    {
+      name: "partial",
+      usage: {cost_usd: 0.1, known_cost_usd: 0.1, usage_unknown_calls: 1},
+      pass: false,
+      exact: nil,
+    },
+    {name: "below", usage: {cost_usd: 0.1, known_cost_usd: 0.1}, pass: true, exact: 0.1},
+    {name: "above", usage: {cost_usd: 0.6, known_cost_usd: 0.6}, pass: false, exact: 0.6},
+  ] {
+    const cost_run = completed_run("cost-" + control.name) + {usage: control.usage}
+    const cost_report = harness.runtime.eval_pack_run(
+      eval_pack_manifest(
+        {
+          id: "cost-" + control.name,
+          trials: 1,
+          fixtures: [{id: "cost-run", kind: "run-record", inline: cost_run}],
+          cases: [{id: "cost-case", run: "cost-run", thresholds: {max_cost_usd: 0.5}}],
+        },
+      ),
+    )
+    assert_eq(cost_report.pass, control.pass)
+    assert_eq(cost_report.cases[0].stats_row.cost_usd, control.exact)
+    if control.exact == nil {
+      assert("cost threshold is unmeasured" in cost_report.cases[0].trials[0].failures)
+    }
+  }
   harness.stdio.log("eval pack trials ok")
 }

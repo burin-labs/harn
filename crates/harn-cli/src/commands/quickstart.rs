@@ -114,7 +114,8 @@ async fn probe_ollama(model: Option<&str>) -> OllamaProbe {
     let selected_model = model
         .filter(|value| !value.trim().is_empty())
         .map(|value| value.trim().to_string())
-        .unwrap_or_else(|| harn_vm::llm_config::default_model_for_provider("ollama"));
+        .or_else(|| harn_vm::llm_config::default_model_for_provider("ollama").ok())
+        .unwrap_or_default();
     let mut options = harn_vm::llm::OllamaReadinessOptions::new(selected_model);
     options.tags_timeout = Duration::from_secs(2);
     let result = harn_vm::llm::ollama_readiness(options).await;
@@ -162,27 +163,32 @@ fn provider_choice(
     let def = harn_vm::llm_config::provider_config(name)?;
     let auth_envs = harn_vm::llm_config::auth_env_names(&def.auth_env);
     let auth_available = harn_vm::llm::provider_auth_status(name).available;
+    let model = default_model_for_choice(name, model, ollama)?;
     Some(ProviderChoice {
         name: name.to_string(),
-        model: default_model_for_choice(name, model, ollama),
+        model,
         auth_envs,
         auth_available,
     })
 }
 
-fn default_model_for_choice(provider: &str, model: Option<&str>, ollama: &OllamaProbe) -> String {
+fn default_model_for_choice(
+    provider: &str,
+    model: Option<&str>,
+    ollama: &OllamaProbe,
+) -> Option<String> {
     if let Some(model) = model.filter(|value| !value.trim().is_empty()) {
-        return model.trim().to_string();
+        return Some(model.trim().to_string());
     }
     if provider == "ollama" {
         if let Some(model) = recommended_ollama_selector(&ollama.available_models) {
-            return model;
+            return Some(model);
         }
         if let Some(model) = ollama.available_models.first() {
-            return ollama_selector_for_model(model);
+            return Some(ollama_selector_for_model(model));
         }
     }
-    harn_vm::llm_config::default_model_for_provider(provider)
+    harn_vm::llm_config::default_model_for_provider(provider).ok()
 }
 
 fn recommended_ollama_selector(available_models: &[String]) -> Option<String> {
@@ -199,6 +205,25 @@ fn ordered_ollama_models(available_models: &[String]) -> Vec<String> {
     local_readiness::recommended_models_for_provider("ollama", available_models)
 }
 
+fn requested_choice<'a>(
+    choices: &'a [ProviderChoice],
+    provider: &str,
+) -> Result<&'a ProviderChoice, String> {
+    choices
+        .iter()
+        .find(|choice| choice.name == provider)
+        .ok_or_else(|| {
+            if harn_vm::llm_config::provider_config(provider).is_some() {
+                match harn_vm::llm_config::default_model_for_provider(provider) {
+                    Err(error) => error.to_string(),
+                    Ok(_) => format!("provider '{provider}' is unavailable"),
+                }
+            } else {
+                format!("unknown provider '{provider}'")
+            }
+        })
+}
+
 fn choose_non_interactive(
     args: &QuickstartArgs,
     choices: &[ProviderChoice],
@@ -206,27 +231,10 @@ fn choose_non_interactive(
 ) -> Result<ProviderSelection, String> {
     let choice = if let Some(provider) = args.provider.as_deref() {
         let provider = provider.trim();
-        choices
-            .iter()
-            .find(|choice| choice.name == provider)
-            .ok_or_else(|| format!("unknown provider '{provider}'"))?
+        requested_choice(choices, provider)?
     } else {
-        choices
-            .iter()
-            .find(|choice| !choice.auth_envs.is_empty() && choice.auth_available)
-            .or_else(|| {
-                ollama
-                    .reachable
-                    .then(|| choices.iter().find(|choice| choice.name == "ollama"))
-                    .flatten()
-            })
-            .or_else(|| {
-                env::var("LOCAL_LLM_BASE_URL")
-                    .ok()
-                    .filter(|value| !value.trim().is_empty())
-                    .and_then(|_| choices.iter().find(|choice| choice.name == "local"))
-            })
-            .or_else(|| choices.iter().find(|choice| choice.name == "anthropic"))
+        preferred_choice_index(choices, ollama)
+            .map(|idx| &choices[idx])
             .ok_or_else(|| "no configurable providers found".to_string())?
     };
     Ok(selection_from_choice(choice, None))
@@ -239,17 +247,14 @@ fn choose_interactive(
 ) -> Result<ProviderSelection, String> {
     let choice = if let Some(provider) = args.provider.as_deref() {
         let provider = provider.trim();
-        choices
-            .iter()
-            .find(|choice| choice.name == provider)
-            .ok_or_else(|| format!("unknown provider '{provider}'"))?
+        requested_choice(choices, provider)?
     } else {
         println!();
         println!("Choose a provider:");
         for (idx, choice) in choices.iter().enumerate() {
             println!("  {}) {}", idx + 1, format_choice(choice, ollama));
         }
-        let default = default_choice_index(choices, ollama);
+        let default = preferred_choice_index(choices, ollama).unwrap_or(0);
         let answer = read_line(&format!("provider [{}]", default + 1))?;
         let selected = if answer.trim().is_empty() {
             default
@@ -328,7 +333,10 @@ fn selection_from_choice(choice: &ProviderChoice, api_key: Option<String>) -> Pr
     }
 }
 
-fn default_choice_index(choices: &[ProviderChoice], ollama: &OllamaProbe) -> usize {
+/// Provider quickstart picks when the user names none: a keyed provider whose
+/// credential is present, then reachable Ollama, then a configured local
+/// endpoint, then Anthropic. Callers decide what an empty preference means.
+fn preferred_choice_index(choices: &[ProviderChoice], ollama: &OllamaProbe) -> Option<usize> {
     choices
         .iter()
         .position(|choice| !choice.auth_envs.is_empty() && choice.auth_available)
@@ -345,7 +353,6 @@ fn default_choice_index(choices: &[ProviderChoice], ollama: &OllamaProbe) -> usi
                 .and_then(|_| choices.iter().position(|choice| choice.name == "local"))
         })
         .or_else(|| choices.iter().position(|choice| choice.name == "anthropic"))
-        .unwrap_or(0)
 }
 
 fn read_line(prompt_label: &str) -> Result<String, String> {
@@ -617,10 +624,7 @@ fn providers_config_path() -> PathBuf {
     env::var_os("HARN_PROVIDERS_CONFIG")
         .filter(|value| !value.is_empty())
         .map(PathBuf::from)
-        .or_else(|| {
-            harn_vm::user_dirs::home_dir()
-                .map(|home| home.join(".config").join("harn").join("providers.toml"))
-        })
+        .or_else(harn_vm::llm_config::user_providers_config_path)
         .unwrap_or_else(|| PathBuf::from(".config/harn/providers.toml"))
 }
 
@@ -853,34 +857,6 @@ mod tests {
         )
         .unwrap();
         assert_eq!(selected.provider, "anthropic");
-    }
-
-    #[test]
-    fn interactive_default_prefers_available_remote_provider() {
-        let choices = vec![
-            ProviderChoice {
-                name: "ollama".to_string(),
-                model: "llama3.2".to_string(),
-                auth_envs: Vec::new(),
-                auth_available: true,
-            },
-            ProviderChoice {
-                name: "anthropic".to_string(),
-                model: "claude-sonnet-4-20250514".to_string(),
-                auth_envs: vec!["ANTHROPIC_API_KEY".to_string()],
-                auth_available: true,
-            },
-        ];
-        let default = default_choice_index(
-            &choices,
-            &OllamaProbe {
-                reachable: true,
-                status: "ok".to_string(),
-                message: "ok".to_string(),
-                available_models: vec!["llama3.2".to_string()],
-            },
-        );
-        assert_eq!(choices[default].name, "anthropic");
     }
 
     #[test]

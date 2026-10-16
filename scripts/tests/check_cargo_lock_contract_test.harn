@@ -24,6 +24,31 @@ pipeline test_bare_invocation_is_a_violation(harness: Harness, task: unknown) {
 
 @test
 pipeline test_locked_and_frozen_both_satisfy(harness: Harness, task: unknown) {
+  assert_eq(len(step_violations("w.yml", "j", {run: "cargo-nextest nextest run --workspace"})), 1)
+  assert_eq(
+    len(step_violations("w.yml", "j", {run: "cargo-nextest nextest run --locked --workspace"})),
+    0,
+  )
+  assert_eq(
+    len(
+      step_violations(
+        "w.yml",
+        "j",
+        {run: "scripts/ci/run_rust_test_lane.sh cargo-nextest nextest run --workspace"},
+      ),
+    ),
+    1,
+  )
+  assert_eq(
+    len(
+      step_violations(
+        "w.yml",
+        "j",
+        {run: "cargo-nextest nextest run --archive-file /tmp/t.tar.zst"},
+      ),
+    ),
+    0,
+  )
   assert_eq(len(step_violations("w.yml", "j", {run: "cargo build --locked -p harn-cli"})), 0)
   assert_eq(len(step_violations("w.yml", "j", {run: "cargo build --frozen -p harn-cli"})), 0)
 }

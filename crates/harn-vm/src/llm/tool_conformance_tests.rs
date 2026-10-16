@@ -3,10 +3,37 @@ use std::collections::BTreeMap;
 use super::request::{probe_request_body, probe_request_payload, tool_probe_max_tokens};
 use super::*;
 
+#[tokio::test]
+async fn live_probes_refuse_retired_routes_on_adapter_and_raw_endpoints() {
+    for model in ["deepinfra/Qwen/Qwen3.8-2.4T-A95B", "Qwen/Qwen3.8-2.4T-A95B"] {
+        for base_url in [None, Some("http://127.0.0.1:9".to_string())] {
+            let mut options = ToolConformanceProbeOptions::new("deepinfra", model);
+            options.base_url = base_url;
+            let report = run_tool_conformance_probe(options).await;
+            assert_eq!(
+                report.cases.len(),
+                2,
+                "both streaming modes must be reached"
+            );
+            for case in report.cases {
+                assert!(!case.ok);
+                assert_eq!(case.classification, ToolProbeClassification::TransportError);
+                assert!(case
+                    .failure_reason
+                    .as_deref()
+                    .is_some_and(|reason| reason.contains("select a different model explicitly")));
+                assert_eq!(case.http_status, None);
+                assert_eq!(case.elapsed_ms, None, "refuse before the transport starts");
+                assert!(case.usage.is_none());
+            }
+        }
+    }
+}
+
 #[test]
 fn probe_resolves_catalog_key_to_provider_wire_model() {
     let resolved = llm_config::resolve_model_info("baseten-glm-5.2");
-    assert_eq!(resolved_probe_model_id(&resolved.id), "zai-org/GLM-5.2");
+    assert_eq!(llm_config::wire_model_id(&resolved.id), "zai-org/GLM-5.2");
 }
 
 #[test]
@@ -132,6 +159,42 @@ fn request_report_materializes_large_string_case_without_provider_call() {
         report.requests[1].request_body["stream_options"],
         json!({"include_usage": true})
     );
+}
+
+/// Routes that reject forced tool choice are probed with `auto`; the forced
+/// probe was a guaranteed 400 on them. Opus 5 still accepts forcing and is the
+/// control that keeps the named-tool shape, so a change that relaxed every
+/// route would fail here.
+#[test]
+fn probe_asks_with_auto_only_where_forced_tool_choice_is_rejected() {
+    for (provider, model, expected) in [
+        ("anthropic", "claude-opus-5-5", json!({"type": "auto"})),
+        ("anthropic", "claude-sonnet-5-5", json!({"type": "auto"})),
+        (
+            "anthropic",
+            "claude-opus-5",
+            json!({"type": "tool", "name": TOOL_PROBE_TOOL_NAME}),
+        ),
+    ] {
+        let report = tool_conformance_request_report(
+            provider,
+            model,
+            None,
+            vec![ToolProbeMode::NonStreaming],
+            ToolProbeCase::SingleToolCall,
+            ToolProbeRequestProfile::CatalogDefault,
+            "marker",
+        )
+        .expect("request report");
+        let request = &report.requests[0];
+        assert_eq!(request.request_body["tool_choice"], expected, "{model}");
+        assert_eq!(
+            request.validation.status,
+            ToolConformanceRequestValidationStatus::Pass,
+            "{model}: {:?}",
+            request.validation.issues
+        );
+    }
 }
 
 #[test]
@@ -1328,13 +1391,24 @@ fn aggregates_anthropic_streaming_tool_use_deltas() {
 
 #[test]
 fn report_satisfies_tool_probe_when_text_fallback_passes() {
-    let report = classify_tool_conformance_fixture(
+    let mut report = classify_tool_conformance_fixture(
         "llamacpp",
         "qwen",
         ToolProbeMode::NonStreaming,
         DEFAULT_TOOL_PROBE_MARKER,
         r#"{"content":"echo_marker({ value: \"harn_tool_probe_marker\" })"}"#,
     );
+    assert_eq!(
+        report.evidence_source,
+        ToolProbeEvidenceSource::SavedResponse
+    );
+    assert!(!report_satisfies_required_probe(&report, "tool_probe"));
+    let mut legacy = serde_json::to_value(&report).unwrap();
+    legacy.as_object_mut().unwrap().remove("evidence_source");
+    legacy["schema_version"] = serde_json::json!(1);
+    let legacy: ToolConformanceReport = serde_json::from_value(legacy).unwrap();
+    assert!(!report_satisfies_required_probe(&legacy, "tool_probe"));
+    report.evidence_source = ToolProbeEvidenceSource::LiveRequest;
     assert!(report_satisfies_required_probe(&report, "tool_probe"));
     assert!(!report_satisfies_required_probe(
         &report,

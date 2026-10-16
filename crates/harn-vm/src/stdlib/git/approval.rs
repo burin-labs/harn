@@ -15,8 +15,8 @@ pub(super) async fn enforce_git_approval(
         "cwd": display_path(&command.cwd),
         "affected_paths": command.affected_paths,
     });
-    let policy_decision = crate::orchestration::current_approval_policy()
-        .map(|policy| policy.evaluate_detailed(command.operation, &args));
+    let policy_decision = crate::orchestration::current_run_approval_policy()
+        .map(|policy| policy.evaluate_detailed_with_repeat(command.operation, &args, 0));
     if let Some(decision) = policy_decision
         .as_ref()
         .filter(|decision| decision.is_deny())
@@ -59,7 +59,8 @@ async fn request_permission(
     args: &JsonValue,
     policy_decision: Option<JsonValue>,
 ) -> Result<JsonValue, VmError> {
-    let Some(bridge) = ctx.and_then(|ctx| ctx.child_vm().bridge.clone()) else {
+    use crate::native_vm::NativeVmState;
+    let Some(bridge) = ctx.and_then(|ctx| ctx.child_vm().native().bridge.clone()) else {
         return Err(VmError::CategorizedError {
             message: format!("{operation}: approval required but no host bridge is attached"),
             category: crate::value::ErrorCategory::ToolRejected,
@@ -90,7 +91,7 @@ async fn request_permission(
                 approval_request_json,
                 &policy_decision.clone().unwrap_or(JsonValue::Null),
                 None,
-                crate::tool_annotations::ToolKind::Other,
+                None,
             ),
         )
         .await?;

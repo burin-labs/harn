@@ -1,0 +1,328 @@
+import { read_json_result, read_yaml } from "std/fs"
+import {
+  ci_cache_policy_parse,
+  harn_check_cache_action_errors,
+  harn_check_cache_writer_errors,
+} from "../check_ci_cache_policy"
+import "./ci_cache_policy/fixtures.harn"
+
+fn shipped_restore(fs: HarnessFs) -> dict {
+  return read_yaml(fs, "../../.github/actions/harn-check-cache/action.yml")
+}
+
+fn shipped_save(fs: HarnessFs) -> dict {
+  return read_yaml(fs, "../../.github/actions/harn-check-cache-save/action.yml")
+}
+
+/** Replace the one step of `action` whose `uses` or `run` starts with `marker`. */
+fn with_step(action: dict, marker: string, edit: fn(dict) -> dict) -> dict {
+  const steps = action.runs.steps.map(
+    { step ->
+      const uses = to_string(step?.uses ?? "")
+      const run = to_string(step?.run ?? "")
+      return if uses.starts_with(marker) || run.starts_with(marker) {
+        edit(step)
+      } else {
+        step
+      }
+    },
+  )
+    .to_list()
+  return {...action, runs: {...action.runs, steps: steps}}
+}
+
+fn audit_job(save_step: dict, actions_permission: string = "write") -> dict {
+  return {
+    permissions: {actions: actions_permission, contents: "read"},
+    strategy: {
+      matrix: {include: [{kind: "conformance-1"}, {kind: "audit", harn_check_cache: "audit"}]},
+    },
+    steps: [
+      {uses: "actions/checkout@exact-pin"},
+      {
+        uses: "./.github/actions/harn-check-cache",
+        if: "matrix.harn_check_cache != ''",
+        with: {family: gha_expression("matrix.harn_check_cache")},
+      },
+      {name: "Run gates", run: "./scripts/audit_gates.sh"},
+      save_step,
+    ],
+  }
+}
+
+/** A workflow that triggers the way a writer must: its own push and schedule. */
+fn writer_doc(jobs: dict) -> dict {
+  return {
+    on: {push: {branches: ["main"]}, schedule: [{cron: "27 */3 * * *"}], workflow_dispatch: {}},
+    jobs: jobs,
+  }
+}
+
+fn save_step() -> dict {
+  return {
+    name: "Save Harn check cache",
+    if: "matrix.harn_check_cache != ''",
+    "continue-on-error": true,
+    uses: "./.github/actions/harn-check-cache-save",
+    with: {family: gha_expression("matrix.harn_check_cache")},
+  }
+}
+
+@test
+pipeline test_harn_check_cache_shipped_actions_and_writers_pass(harness: Harness, task: unknown) {
+  assert_eq(
+    harn_check_cache_action_errors(shipped_restore(harness.fs), shipped_save(harness.fs)),
+    [],
+  )
+  const loaded = read_json_result(harness.fs, "../../.github/cache-policy.json")
+  assert(is_ok(loaded))
+  const policy = ci_cache_policy_parse(unwrap(loaded))
+  assert(policy != nil)
+  // Non-vacuous: the shipped policy registers the sources lane, the shipped
+  // refresh workflow really saves it, and ci.yml really restores it.
+  assert(policy.harn_check_cache_writers.any({ writer -> writer.family == "audit" }))
+  const shipped = {
+    "ci.yml": read_yaml(harness.fs, "../../.github/workflows/ci.yml"),
+    "harn-check-cache-refresh.yml": read_yaml(
+      harness.fs,
+      "../../.github/workflows/harn-check-cache-refresh.yml",
+    ),
+  }
+  assert_eq(harn_check_cache_writer_errors(policy, shipped), [])
+  // Without the refresh workflow, ci.yml's restores name families nobody saves.
+  assert(
+    harn_check_cache_writer_errors(policy, {"ci.yml": shipped["ci.yml"]}).contains(
+      "ci.yml:harn-audit:audit restores a Harn check cache family no writer saves; name a saved family or remove the step",
+    ),
+  )
+}
+
+@test
+pipeline test_harn_check_cache_rejects_ephemeral_writers_and_main_restores(
+  harness: Harness,
+  task: unknown,
+) {
+  const restore_on_main = with_step(
+    shipped_restore(harness.fs),
+    "actions/cache/restore@",
+    { step -> {...step, if: nil} },
+  )
+  assert(
+    harn_check_cache_action_errors(restore_on_main, shipped_save(harness.fs)).contains(
+      ".github/actions/harn-check-cache/action.yml must not restore on main; a writer that restores first carries superseded entries forever",
+    ),
+  )
+  const save_everywhere = with_step(
+    shipped_save(harness.fs),
+    "actions/cache/save@",
+    { step -> {...step, if: nil} },
+  )
+  assert(
+    harn_check_cache_action_errors(shipped_restore(harness.fs), save_everywhere).contains(
+      ".github/actions/harn-check-cache-save/action.yml must save only on refs/heads/main",
+    ),
+  )
+  const fatal = with_step(
+    shipped_save(harness.fs),
+    "actions/cache/save@",
+    { step -> {...step, "continue-on-error": false} },
+  )
+  assert(
+    harn_check_cache_action_errors(shipped_restore(harness.fs), fatal).contains(
+      "Harn check cache restore and save must keep cache-service failures non-fatal",
+    ),
+  )
+  const generic = shipped_restore(harness.fs)
+  const with_generic = {
+    ...generic,
+    runs: {
+      ...generic.runs,
+      steps: generic.runs.steps + [{uses: "actions/cache@exact-pin", with: {path: "x", key: "y"}}],
+    },
+  }
+  assert_eq(
+    harn_check_cache_action_errors(with_generic, shipped_save(harness.fs)),
+    [
+      ".github/actions/harn-check-cache/action.yml must hold one restore and .github/actions/harn-check-cache-save/action.yml one save, and nothing else may touch the cache",
+    ],
+  )
+}
+
+@test
+pipeline test_harn_check_cache_rejects_drifted_keys_and_unbounded_generations(
+  harness: Harness,
+  task: unknown,
+) {
+  const key_drift =
+    "Harn check cache restore and save must share one path set and one versioned per-commit key whose prefix is the restore fallback"
+  const other_path = with_step(
+    shipped_save(harness.fs),
+    "actions/cache/save@",
+    { step -> {...step, with: {...step.with, path: "~/.cache/harn-ci"}} },
+  )
+  assert(
+    harn_check_cache_action_errors(shipped_restore(harness.fs), other_path).contains(key_drift),
+  )
+  // A key without the commit suffix is written once and never replaced.
+  const fixed_key = "harn-check-cache-v1-" + gha_expression("inputs.family")
+  const unversioned = with_step(
+    shipped_restore(harness.fs),
+    "actions/cache/restore@",
+    { step -> {...step, with: {...step.with, key: fixed_key}} },
+  )
+  const unversioned_save = with_step(
+    shipped_save(harness.fs),
+    "actions/cache/save@",
+    { step -> {...step, with: {...step.with, key: fixed_key}} },
+  )
+  assert(harn_check_cache_action_errors(unversioned, unversioned_save).contains(key_drift))
+  const unpruned = with_step(
+    shipped_save(harness.fs),
+    "./scripts/prune_ci_cache_generations.sh",
+    { step -> {...step, run: "true"} },
+  )
+  assert(
+    harn_check_cache_action_errors(shipped_restore(harness.fs), unpruned).contains(
+      ".github/actions/harn-check-cache-save/action.yml must prune superseded generations after saving, so one generation per family survives",
+    ),
+  )
+  // Pruning before the save leaves two generations per family.
+  const shipped = shipped_save(harness.fs)
+  const reordered = {
+    ...shipped,
+    runs: {...shipped.runs, steps: [shipped.runs.steps[1], shipped.runs.steps[0]]},
+  }
+  assert(
+    harn_check_cache_action_errors(shipped_restore(harness.fs), reordered).contains(
+      ".github/actions/harn-check-cache-save/action.yml must prune superseded generations after saving, so one generation per family survives",
+    ),
+  )
+  const wrong_family = with_step(
+    shipped_save(harness.fs),
+    "./scripts/prune_ci_cache_generations.sh",
+    { step -> {...step, env: {...step.env, HARN_CACHE_FAMILY_PREFIX: "harn-check-cache-v1-"}} },
+  )
+  assert(
+    harn_check_cache_action_errors(shipped_restore(harness.fs), wrong_family).contains(
+      ".github/actions/harn-check-cache-save/action.yml must prune only on main, with the workflow token, the family the save wrote",
+    ),
+  )
+}
+
+@test
+pipeline test_harn_check_cache_writers_must_be_registered_active_and_restored(
+  harness: Harness,
+  task: unknown,
+) {
+  assert_eq(
+    harn_check_cache_writer_errors(
+      policy(),
+      {"ci.yml": writer_doc({"harn-audit": audit_job(save_step())})},
+    ),
+    [],
+  )
+  // An unregistered family, expanded from the matrix.
+  const extra = audit_job(save_step())
+  const rogue = {
+    ...extra,
+    strategy: {
+      matrix: {
+        include: extra.strategy.matrix.include
+          + [{kind: "audit-docs", harn_check_cache: "audit-docs"}],
+      },
+    },
+  }
+  assert(
+    harn_check_cache_writer_errors(policy(), {"ci.yml": writer_doc({"harn-audit": rogue})})
+      .contains("ci.yml:harn-audit:audit-docs is not an authorized Harn check cache writer"),
+  )
+  // A registered writer that no workflow runs.
+  assert(
+    harn_check_cache_writer_errors(policy(), {"ci.yml": {jobs: {}}}).contains(
+      "authorized Harn check cache writer is not active: ci.yml:harn-audit:audit",
+    ),
+  )
+  // A save with no earlier restore saves an empty directory.
+  const no_restore = audit_job(save_step())
+  const unrestored = {
+    ...no_restore,
+    steps: [no_restore.steps[0], no_restore.steps[2], no_restore.steps[3]],
+  }
+  assert(
+    harn_check_cache_writer_errors(policy(), {"ci.yml": writer_doc({"harn-audit": unrestored})})
+      .contains(
+        "ci.yml:harn-audit:audit must restore the same family earlier in the job, which is what points HARN_CACHE_DIR at the saved paths",
+      ),
+  )
+  // A failing save must not fail the gate, and the prune needs actions: write.
+  const fatal = audit_job({...save_step(), "continue-on-error": nil}, "read")
+  const fatal_errors = harn_check_cache_writer_errors(
+    policy(),
+    {"ci.yml": writer_doc({"harn-audit": fatal})},
+  )
+  assert(
+    fatal_errors.contains(
+      "ci.yml:harn-audit must not let a failed Harn check cache save fail the job",
+    ),
+  )
+  assert(
+    fatal_errors.contains(
+      "ci.yml:harn-audit must grant actions: write so its save can prune the superseded generation",
+    ),
+  )
+  // A restore of a family nothing saves misses forever and looks like a cold runner.
+  const reader = {
+    steps: [{uses: "./.github/actions/harn-check-cache", with: {family: "audit-renamed"}}],
+  }
+  assert(
+    harn_check_cache_writer_errors(
+      policy(),
+      {"ci.yml": writer_doc({"harn-audit": audit_job(save_step()), reader: reader})},
+    )
+      .contains(
+        "ci.yml:reader:audit-renamed restores a Harn check cache family no writer saves; name a saved family or remove the step",
+      ),
+  )
+}
+
+@test
+pipeline test_harn_check_cache_writer_cannot_depend_on_push_routing(
+  harness: Harness,
+  task: unknown,
+) {
+  const routed =
+    "ci.yml:harn-audit must write the Harn check cache on its own push-to-main and scheduled triggers, with no merge-queue trigger, needs, or job condition that push routing could skip"
+  const job = audit_job(save_step())
+  // The first writer: an audit lane gated on the push router's verdict.
+  const gated = {...job, needs: ["changes"], if: "needs.changes.outputs.rust == 'true'"}
+  assert(
+    harn_check_cache_writer_errors(policy(), {"ci.yml": writer_doc({"harn-audit": gated})})
+      .contains(routed),
+  )
+  // No scheduled backstop: a quiet main leaves the family unwritten.
+  const unscheduled = {on: {push: {branches: ["main"]}}, jobs: {"harn-audit": job}}
+  assert(harn_check_cache_writer_errors(policy(), {"ci.yml": unscheduled}).contains(routed))
+  // Riding the merge queue: the queue is optional.
+  const queued = {
+    on: {...writer_doc({})["on"], merge_group: {types: ["checks_requested"]}},
+    jobs: {"harn-audit": job},
+  }
+  assert(harn_check_cache_writer_errors(policy(), {"ci.yml": queued}).contains(routed))
+}
+
+@test
+pipeline test_harn_check_cache_policy_refuses_shared_families(harness: Harness, task: unknown) {
+  const base = policy()
+  assert(ci_cache_policy_parse(base) != nil)
+  const shared = {
+    ...base,
+    harn_check_cache_writers: base.harn_check_cache_writers
+      + [{workflow: "ci.yml", job: "other", family: "audit"}],
+  }
+  assert_eq(ci_cache_policy_parse(shared), nil)
+  const unprunable = {
+    ...base,
+    harn_check_cache_writers: [{workflow: "ci.yml", job: "harn-audit", family: "Audit_Sources"}],
+  }
+  assert_eq(ci_cache_policy_parse(unprunable), nil)
+}

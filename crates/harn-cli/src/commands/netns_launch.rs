@@ -49,7 +49,69 @@ pub(crate) fn run(args: NetnsLaunchArgs) -> Result<Infallible, String> {
         .payload
         .split_first()
         .ok_or_else(|| "namespace helper: no payload program".to_string())?;
-    run_impl(args.ruleset_fd, &args.seccomp_hex, program, payload_args)
+    if !args.close_fd.is_empty() {
+        return finalize_exec(&args.close_fd, program, payload_args);
+    }
+    run_impl(
+        args.ruleset_fd,
+        args.seccomp_hex
+            .as_deref()
+            .ok_or("namespace helper: no confinement")?,
+        program,
+        payload_args,
+    )
+}
+
+#[cfg(target_os = "linux")]
+fn finalize_exec(
+    descriptors: &[harn_vm::process_sandbox::DeviceMountFinalization],
+    program: &str,
+    args: &[String],
+) -> Result<Infallible, String> {
+    use std::os::unix::fs::MetadataExt;
+    let mut seen = std::collections::BTreeSet::new();
+    for device in descriptors {
+        let fd = device.descriptor;
+        if fd < 3 || !seen.insert(fd) {
+            return Err("namespace helper: invalid setup descriptor".into());
+        }
+        let mut source: libc::stat = unsafe { std::mem::zeroed() };
+        if unsafe { libc::fstat(fd, &raw mut source) } != 0 {
+            return Err("namespace helper: setup descriptor is not open".into());
+        }
+        let mounted = std::fs::metadata(&device.destination)
+            .map_err(|error| format!("namespace helper: cannot inspect mounted device: {error}"))?;
+        if source.st_dev != mounted.dev()
+            || source.st_ino != mounted.ino()
+            || source.st_rdev != mounted.rdev()
+            || source.st_mode != mounted.mode()
+        {
+            return Err("namespace helper: mounted device differs from its pinned source".into());
+        }
+    }
+    for device in descriptors {
+        if unsafe { libc::close(device.descriptor) } != 0 {
+            return Err(format!(
+                "namespace helper: could not close setup descriptor: {}",
+                io::Error::last_os_error()
+            ));
+        }
+    }
+    let mut command = Command::new(program);
+    command.args(args);
+    Err(format!(
+        "namespace helper: could not exec {program}: {}",
+        command.exec()
+    ))
+}
+
+#[cfg(not(target_os = "linux"))]
+fn finalize_exec(
+    _descriptors: &[harn_vm::process_sandbox::DeviceMountFinalization],
+    _program: &str,
+    _args: &[String],
+) -> Result<Infallible, String> {
+    Err("namespace helper: setup descriptor finalization is a Linux mechanism".into())
 }
 
 #[cfg(target_os = "linux")]

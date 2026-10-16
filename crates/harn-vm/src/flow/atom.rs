@@ -32,6 +32,7 @@ const ED25519_SIGNATURE_BYTES: usize = 64;
 /// Errors produced when constructing, encoding, decoding, signing, or
 /// verifying an `Atom`.
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum AtomError {
     /// JSON (de)serialization failure.
     Json(String),

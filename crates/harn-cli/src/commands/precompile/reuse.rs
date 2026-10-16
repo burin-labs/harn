@@ -10,9 +10,9 @@
 
 use std::path::{Path, PathBuf};
 
-use harn_vm::module_artifact::ModuleCompilationContext;
+use harn_vm::bytecode_cache::PrecompiledInterface;
 
-use crate::compiler_context::{imported_symbols_for_source, SourceCompilerAuthority};
+use crate::compiler_context::SourceCompilerAuthority;
 
 /// The keys the two artifacts for one source will be stored under.
 pub(super) struct ArtifactKeys {
@@ -37,27 +37,50 @@ impl ArtifactKeys {
     }
 }
 
-/// Derive both keys, and return the import graph projection they were derived
-/// from so the compile that may follow does not walk it a second time.
+/// Derive both bytecode keys from the prepared imported interface.
 pub(super) fn artifact_keys(
     source_path: &Path,
     source: &str,
     source_root: Option<&Path>,
     authority: &SourceCompilerAuthority,
-) -> (ArtifactKeys, ModuleCompilationContext) {
+    interface_dest: &Path,
+) -> Result<(ArtifactKeys, PrecompiledInterface), String> {
+    let mut interface =
+        harn_vm::bytecode_cache::prepare_precompiled_interface(interface_dest, source_path, source)
+            .map_err(|e| format!("prepare {}: {e}", interface_dest.display()))?;
+    if !interface.package_import_aliases().is_empty() {
+        let graph = harn_modules::build_with_source(source_path, source);
+        crate::package::ensure_reachable_dependencies_materialized(source_path, &graph)
+            .map_err(|e| e.to_string())?;
+        // Setup may publish a replacement package generation. Derive the
+        // artifact's contexts and keys from that generation, not the old one.
+        interface = harn_vm::bytecode_cache::prepare_precompiled_interface(
+            interface_dest,
+            source_path,
+            source,
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    let aliases = crate::package::declared_package_import_aliases(
+        source_path,
+        interface.package_import_aliases(),
+    )
+    .map_err(|e| e.to_string())?;
+    let digest = crate::package::reachable_dependency_lock_digest(source_path, &aliases)
+        .map_err(|e| e.to_string())?;
+    interface.set_package_authority(aliases, digest);
     let entry = if source_root.is_some() {
         harn_vm::bytecode_cache::CacheKey::from_relocatable_source(source_path, source)
     } else {
         harn_vm::bytecode_cache::CacheKey::from_source(source_path, source)
     };
-    let compilation_context = imported_symbols_for_source(source_path, source);
     let module_source = harn_vm::module_source::ModuleSource::from_text(source);
     let module = harn_vm::bytecode_cache::CacheKey::from_module_source(
         &module_source,
-        &compilation_context,
+        interface.context(),
         authority.module_provenance(),
     );
-    (ArtifactKeys { entry, module }, compilation_context)
+    Ok((ArtifactKeys { entry, module }, interface))
 }
 
 /// What one source cost this invocation.

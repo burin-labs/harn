@@ -134,12 +134,12 @@ live in [Engineering principles](docs/src/dev/engineering-principles.md):
   committed files; binary checks require a fresh Harn executable.
 - Generated/local paths include `docs/dist/`, `.harn-runs/`, `.harn/`,
   `.harn/receipts/`, `.claude/`, `.burin/`, `target/`, and `node_modules/`.
-- The prompt-template engine is
-  `crates/harn-vm/src/stdlib/template.rs`. Host and script rendering both use
-  `render_template_result`; do not add another parser or evaluator.
+- The prompt-template engine is `crates/harn-vm/src/stdlib/template/mod.rs`.
+  Host and script rendering both use `render_template_result`; do not add
+  another parser or evaluator.
 - Preserve pre-v2 `{{name}}` missing-identifier passthrough. New constructs
   fail with parse errors. Vocabulary lives in
-  `crates/harn-vm/src/stdlib/template/vocabulary.rs`; regenerate with
+  `crates/harn-prompt-syntax/src/vocabulary.rs`; regenerate with
   `make gen-prompt-grammar`.
 - Keep stdlib registration authoritative. Register builtins with
   `#[harn_builtin]`; linter and editor awareness derive from the live stdlib.
@@ -150,8 +150,8 @@ live in [Engineering principles](docs/src/dev/engineering-principles.md):
 
 - Model rows are `crates/harn-vm/src/llm/catalog_sources/`; capability rules are
   `crates/harn-vm/src/llm/capability_sources/`. Both aggregate into
-  `crates/harn-vm/src/llm/providers.toml` and
-  `crates/harn-vm/src/llm/capabilities.toml`, which are generated along with
+  `crates/harn-provider-catalog/src/providers.toml` and
+  `crates/harn-provider-catalog/src/capabilities.toml`, which are generated along with
   everything under `spec/provider-catalog/` and the provider docs. Edit the
   source fragments only.
 - Regenerate with `make gen-provider-catalog`, `make gen-provider-matrix`, and
@@ -177,6 +177,13 @@ live in [Engineering principles](docs/src/dev/engineering-principles.md):
 
 ## Verification
 
+- `Verify publishable crates` runs on every pull request and merge group that
+  touches the package surface, but `CI status` does not wait for it, so a PR
+  can merge before it finishes. Its result lands on the merged commit: a red
+  one on `main` blocks the next release until it is fixed, so fix it forward
+  at once. When you change a crate's `Cargo.toml`, `include` list, build
+  script, or dependency bounds, wait for that check on the PR before
+  enqueueing.
 - Start with the narrowest check through the owning interface.
 - Run one exact Rust test without unrelated nextest discovery with
   `HARN_TEST_ONE_NAME='module::tests::case' make test-one`. Set
@@ -199,7 +206,9 @@ live in [Engineering principles](docs/src/dev/engineering-principles.md):
 - Read one head's CI check state with
   `./scripts/gh_check_state.sh --repo OWNER/NAME --sha <40-hex>`: it reports the
   latest verdict per check name, counts queued work as pending, and exits 3 when
-  an expected check never reported. Do not hand-roll a `gh pr checks` parse.
+  an expected check never reported. When the verdict is missing it also names
+  any open PR that conflicts with its base, since GitHub runs no `pull_request`
+  CI on one. Do not hand-roll a `gh pr checks` parse.
 - Do not add real-time sleeps, wall-clock polling, `SystemTime::now()`, or short
   `recv_timeout` calls to tests. Use paused Tokio time, `EventLog::subscribe()`,
   or `OrchestratorHarness`; see `docs/src/dev/testing.md`.
@@ -238,8 +247,8 @@ live in [Engineering principles](docs/src/dev/engineering-principles.md):
   terms, why, the one risk or blind spot, and how you verified the claim at the
   level of the claim. Do not restate the Files or Checks tabs.
 - Use a closing keyword only when the pull request resolves the whole issue:
-  `Closes #N items: 1, 2, ...` for every enumerated sub-ask, or `Single-ask:
-  #N` when the issue is not enumerated. For partial work, use `Partial: #N
+  `Closes #N items: 1, 2, ...` for every enumerated sub-ask, or `Closes #N`
+  when the issue is not enumerated. For partial work, use `Partial: #N
   items: 1, 3` or `Refs #N`; never use a closing keyword. GitHub builds the
   closing link from the keyword and ignores the text after it, so a keyword on
   partial work closes the whole issue on merge however the line is worded.
@@ -248,23 +257,12 @@ live in [Engineering principles](docs/src/dev/engineering-principles.md):
 
 ## Release
 
-- Run live releases only through the `hosted-release.yml` workflow on
-  `burin-labs/harn-bump-fleet`, pinned to an exact current `origin/main` SHA,
-  and approve its protected `release` environment. Do not run the local
-  harness or `scripts/release_ship.sh` for a normal live release.
-- After the tag exists, resume durable post-tag proof from `harn-bump-fleet`
-  with
-  `scripts/watch_harn_release.sh --tag vX.Y.Z --repo <harn-checkout> --yes-live-release`.
-- Run the watcher from the `harn-bump-fleet` checkout so its pinned runtime,
-  environment loader, release lease, and cleanup authority stay canonical.
-  Completion requires the release PR, complete asset manifest, and transient-ref
-  cleanup. Cache warming is explicit: pass `--warm-cache` when required, and
-  otherwise retain its `not_requested` receipt instead of claiming it passed.
-  Downstream convergence belongs to hosted release and its `converge_fleet`
-  input; the crate publisher does not start a second update controller.
-- Dry-run the full release gate with
-  `./scripts/release_gate.sh full --bump patch --dry-run`.
-- Dry-run crate publishing with `./scripts/publish.sh --dry-run`.
+- Read `harn skill get release-harn --full`, or its version-matched source at
+  `crates/harn-skills/src/corpus/release-harn/SKILL.md`. Follow the linked
+  [maintainer release procedure](docs/src/maintainer-release.md) for commands,
+  admission, frozen candidates, recovery, and terminal publication evidence.
+- Keep release publication and downstream consumer convergence as separate
+  proofs. The owning workflows control both; don't add another controller.
 
 ## Merge overrides
 
@@ -275,21 +273,32 @@ live in [Engineering principles](docs/src/dev/engineering-principles.md):
   admin permission and refuses fork PRs. See
   [Merge overrides](docs/src/dev/merge-overrides.md) and the
   [`burin-labs/.github` README](https://github.com/burin-labs/.github#merge-overrides).
-- Prefer the normal merge queue whenever it is cheap enough.
+- Ship a ready PR by adding the `ship` label (Smart Ship arms it, lands it, and
+  reports on the PR; removing the label stops it). Without Smart Ship, land with
+  `gh pr merge --squash --auto`, which enqueues. Never use
+  `gh pr merge --admin`. The labels are the only supported way to skip the
+  queue, and the `merge queue` ruleset allows no admin bypass. GitHub ignores
+  `-merge` in `.gitattributes`, so the queue's generated-file check on the
+  combined tree is the only guard against two regenerations merging into a
+  stale file (#8817).
 
 <!-- BEGIN HARN SHARED AGENT CONTRACT: managed by harn-bump-fleet -->
 
 ## Ecosystem working agreement
 
-- Pursue the ambitious product outcome; make the seams boring with small typed
-  interfaces, explicit invariants, and deterministic projections.
-- Give each behavior one semantic owner. Generate or parity-test other surfaces
-  instead of maintaining competing implementations.
-- Work autonomously inside approved scope. Pause for destructive, production,
-  high-spend, ambiguous, or authority-expanding actions—not routine reversible work.
-- Treat stop, wait, stand down, and pivot as control events for long-lived work.
-- Match evidence to the claim: exercise the canonical user path, state the
-  falsifier, verify liveness and recovery, and record residual blind spots.
-- "Ship" means landed on main with required deploy and post-merge checks complete.
+- Build ambitious outcomes behind small typed interfaces; give behavior one owner
+  and generate or parity-test projections instead of duplicating policy.
+- Work autonomously within approved scope. Pause for destructive or production effects,
+  exceptional spend, material ambiguity, or new authority.
+- Treat stop, wait, stand down, pivot, and steer as control events.
+- Use the smallest owning product-path check. Add a falsifier for contested, load-bearing,
+  or potentially vacuous claims; record controls, recovery, and blind spots.
+- Evidence follows source/artifact identity. Reuse proof when relevant code, build inputs,
+  and dependencies are unchanged. Repeat affected checks for relevant changes, failures,
+  deployment, or packaging differences. Do not rebuild or recapture solely for main.
+- Ship means owning-main integration with terminal merge and applicable release/deploy
+  checks. Confirm landed content and result; an open PR is incomplete.
+- Use `ship` where deployed; otherwise use protected PRs: queue when required, or squash
+  with `--match-head-commit` after required reviews/checks. Never `--admin` or bypass protections.
 
 <!-- END HARN SHARED AGENT CONTRACT -->

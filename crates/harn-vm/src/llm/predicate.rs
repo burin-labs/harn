@@ -1,19 +1,12 @@
 //! Predicate runtime boundary. Frontend admission can ship independently, but
 //! a registered source method must never silently use unrestricted transport.
 
-use crate::stdlib::macros::{harn_builtin, register_builtin_defs, VmBuiltinDef};
 use crate::value::{VmError, VmValue};
 use crate::vm::{AsyncBuiltinCtx, Vm};
-
-const PREDICATE_BUILTINS: &[&VmBuiltinDef] = &[
-    &EVALUATE_PREDICATE_BUILTIN_DEF,
-    &EVALUATE_BUILTIN_DEF,
-    &EVALUATE_REQUEST_BUILTIN_DEF,
-    &ESTIMATE_STATE_TOKENS_BUILTIN_DEF,
-];
+use harn_builtin_macros::harn_builtin;
 
 pub(super) fn register(vm: &mut Vm) {
-    register_builtin_defs(vm, PREDICATE_BUILTINS);
+    harn_vm_core::builtin_support::register_module_builtins(vm, module_path!());
 }
 
 /// The single-boolean projection of `harness.llm.evaluate`: one boolean
@@ -94,12 +87,17 @@ mod tests {
 
     #[test]
     fn predicate_stdlib_types_match_the_capability_contract_in_both_directions() {
-        let declarations =
-            harn_stdlib::get_stdlib_source("predicate").expect("embedded predicate types");
+        let declarations = harn_modules::stdlib_catalog()
+            .source("predicate")
+            .expect("embedded predicate types");
         for (name, contract) in [
             ("PredicateVerdict", harn_builtin_meta::predicate::VERDICT),
             ("EvaluationPolicy", harn_builtin_meta::predicate::POLICY),
             ("PredicateOutcome", harn_builtin_meta::predicate::OUTCOME),
+            (
+                "BooleanCriteria",
+                harn_builtin_meta::predicate::BOOLEAN_CRITERIA,
+            ),
             (
                 "BooleanQuestion",
                 harn_builtin_meta::predicate::BOOLEAN_QUESTION,

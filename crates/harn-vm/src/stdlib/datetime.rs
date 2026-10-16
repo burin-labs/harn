@@ -5,16 +5,14 @@ use chrono::{
 };
 use chrono_tz::Tz;
 
-use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
+use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
 const DEFAULT_FORMAT: &str = "%Y-%m-%d %H:%M:%S";
 
 pub(crate) fn register_datetime_builtins(vm: &mut Vm) {
-    for def in MODULE_BUILTINS {
-        vm.register_builtin_def(def);
-    }
+    crate::stdlib::macros::register_module_builtins(vm, module_path!());
 }
 
 #[harn_builtin(
@@ -25,8 +23,8 @@ pub(crate) fn register_datetime_builtins(vm: &mut Vm) {
 fn date_now_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let now = Utc::now();
     let mut result = utc_datetime_dict(now);
-    result.insert(
-        crate::value::intern_key("timestamp"),
+    result.put(
+        "timestamp",
         VmValue::Float(now.timestamp_millis() as f64 / 1000.0),
     );
     result.put_str(
@@ -42,19 +40,16 @@ fn date_now_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
     sig = "date_now_iso() -> string", category = "datetime"
 )]
 fn date_now_iso_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    Ok(VmValue::String(arcstr::ArcStr::from(
+    Ok(VmValue::string(
         Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
-    )))
+    ))
 }
 
 pub(crate) fn date_dict_from_millis(millis: i64) -> Result<VmValue, VmError> {
     let now = DateTime::<Utc>::from_timestamp_millis(millis)
         .ok_or_else(|| VmError::Runtime(format!("clock timestamp is out of range: {millis}")))?;
     let mut result = utc_datetime_dict(now);
-    result.insert(
-        crate::value::intern_key("timestamp"),
-        VmValue::Float(millis as f64 / 1_000.0),
-    );
+    result.put("timestamp", VmValue::Float(millis as f64 / 1_000.0));
     result.put_str(
         "iso8601",
         now.to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
@@ -72,17 +67,17 @@ fn date_format_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
     let dt = datetime_from_arg(args.first(), "date_format")?;
     let fmt = args
         .get(1)
-        .map(|a| a.display())
-        .unwrap_or_else(|| DEFAULT_FORMAT.to_string());
-    if let Some(tz_arg) = args.get(2) {
-        let tz = parse_timezone(&tz_arg.display(), "date_format")?;
-        return Ok(VmValue::String(arcstr::ArcStr::from(
-            dt.with_timezone(&tz).format(&fmt).to_string(),
-        )));
+        .map_or_else(|| DEFAULT_FORMAT.to_string(), VmValue::display);
+    let mut formatted = String::new();
+    match args.get(2) {
+        Some(VmValue::Nil) | None => dt.format(&fmt).write_to(&mut formatted),
+        Some(tz_arg) => dt
+            .with_timezone(&parse_timezone(&tz_arg.display(), "date_format")?)
+            .format(&fmt)
+            .write_to(&mut formatted),
     }
-    Ok(VmValue::String(arcstr::ArcStr::from(
-        dt.format(&fmt).to_string(),
-    )))
+    .map_err(|_| vm_error("date_format: invalid format"))?;
+    Ok(VmValue::string(formatted))
 }
 
 #[harn_builtin(
@@ -124,9 +119,7 @@ fn date_to_zone_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
     let dt = datetime_from_arg(args.first(), "date_to_zone")?;
     let tz_arg = require_arg(args, 1, "date_to_zone", "timezone")?;
     let tz = parse_timezone(&tz_arg.display(), "date_to_zone")?;
-    Ok(VmValue::String(arcstr::ArcStr::from(
-        dt.with_timezone(&tz).to_rfc3339(),
-    )))
+    Ok(VmValue::string(dt.with_timezone(&tz).to_rfc3339()))
 }
 
 #[harn_builtin(
@@ -246,9 +239,7 @@ fn duration_to_seconds_impl(args: &[VmValue], _out: &mut String) -> Result<VmVal
 )]
 fn duration_to_human_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let duration = require_duration(args.first(), "duration_to_human")?;
-    Ok(VmValue::String(arcstr::ArcStr::from(
-        format_duration_human(duration),
-    )))
+    Ok(VmValue::string(format_duration_human(duration)))
 }
 
 #[harn_builtin(
@@ -266,7 +257,7 @@ fn weekday_name_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
             dt.with_timezone(&tz).format("%A").to_string()
         }
     };
-    Ok(VmValue::String(arcstr::ArcStr::from(name)))
+    Ok(VmValue::string(name))
 }
 
 #[harn_builtin(
@@ -284,29 +275,8 @@ fn month_name_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
             dt.with_timezone(&tz).format("%B").to_string()
         }
     };
-    Ok(VmValue::String(arcstr::ArcStr::from(name)))
+    Ok(VmValue::string(name))
 }
-
-pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
-    &DATE_NOW_IMPL_DEF,
-    &DATE_NOW_ISO_IMPL_DEF,
-    &DATE_FORMAT_IMPL_DEF,
-    &DATE_PARSE_IMPL_DEF,
-    &DATE_IN_ZONE_IMPL_DEF,
-    &DATE_TO_ZONE_IMPL_DEF,
-    &DATE_FROM_COMPONENTS_IMPL_DEF,
-    &DURATION_MS_IMPL_DEF,
-    &DURATION_SECONDS_IMPL_DEF,
-    &DURATION_MINUTES_IMPL_DEF,
-    &DURATION_HOURS_IMPL_DEF,
-    &DURATION_DAYS_IMPL_DEF,
-    &DATE_ADD_IMPL_DEF,
-    &DATE_DIFF_IMPL_DEF,
-    &DURATION_TO_SECONDS_IMPL_DEF,
-    &DURATION_TO_HUMAN_IMPL_DEF,
-    &WEEKDAY_NAME_IMPL_DEF,
-    &MONTH_NAME_IMPL_DEF,
-];
 
 fn require_arg<'a>(
     args: &'a [VmValue],
@@ -333,76 +303,31 @@ fn require_dict<'a>(
 }
 
 pub(crate) fn vm_error(message: impl Into<String>) -> VmError {
-    VmError::Thrown(VmValue::String(arcstr::ArcStr::from(message.into())))
+    VmError::Thrown(VmValue::string(message.into()))
 }
 
 fn utc_datetime_dict(dt: DateTime<Utc>) -> crate::value::DictMap {
     let mut result = crate::value::DictMap::new();
-    result.insert(
-        crate::value::intern_key("year"),
-        VmValue::Int(dt.year() as i64),
-    );
-    result.insert(
-        crate::value::intern_key("month"),
-        VmValue::Int(dt.month() as i64),
-    );
-    result.insert(
-        crate::value::intern_key("day"),
-        VmValue::Int(dt.day() as i64),
-    );
-    result.insert(
-        crate::value::intern_key("hour"),
-        VmValue::Int(dt.hour() as i64),
-    );
-    result.insert(
-        crate::value::intern_key("minute"),
-        VmValue::Int(dt.minute() as i64),
-    );
-    result.insert(
-        crate::value::intern_key("second"),
-        VmValue::Int(dt.second() as i64),
-    );
-    result.insert(
-        crate::value::intern_key("weekday"),
-        VmValue::Int(dt.weekday().num_days_from_sunday() as i64),
-    );
+    result.put_int("year", dt.year() as i64);
+    result.put_int("month", dt.month() as i64);
+    result.put_int("day", dt.day() as i64);
+    result.put_int("hour", dt.hour() as i64);
+    result.put_int("minute", dt.minute() as i64);
+    result.put_int("second", dt.second() as i64);
+    result.put_int("weekday", dt.weekday().num_days_from_sunday() as i64);
     result
 }
 
 fn zoned_datetime_dict(dt: DateTime<Tz>) -> crate::value::DictMap {
     let mut result = crate::value::DictMap::new();
-    result.insert(
-        crate::value::intern_key("year"),
-        VmValue::Int(dt.year() as i64),
-    );
-    result.insert(
-        crate::value::intern_key("month"),
-        VmValue::Int(dt.month() as i64),
-    );
-    result.insert(
-        crate::value::intern_key("day"),
-        VmValue::Int(dt.day() as i64),
-    );
-    result.insert(
-        crate::value::intern_key("hour"),
-        VmValue::Int(dt.hour() as i64),
-    );
-    result.insert(
-        crate::value::intern_key("minute"),
-        VmValue::Int(dt.minute() as i64),
-    );
-    result.insert(
-        crate::value::intern_key("second"),
-        VmValue::Int(dt.second() as i64),
-    );
-    result.insert(
-        crate::value::intern_key("weekday"),
-        VmValue::Int(dt.weekday().num_days_from_sunday() as i64),
-    );
-    result.insert(
-        crate::value::intern_key("offset_seconds"),
-        VmValue::Int(dt.offset().fix().local_minus_utc() as i64),
-    );
+    result.put_int("year", dt.year() as i64);
+    result.put_int("month", dt.month() as i64);
+    result.put_int("day", dt.day() as i64);
+    result.put_int("hour", dt.hour() as i64);
+    result.put_int("minute", dt.minute() as i64);
+    result.put_int("second", dt.second() as i64);
+    result.put_int("weekday", dt.weekday().num_days_from_sunday() as i64);
+    result.put_int("offset_seconds", dt.offset().fix().local_minus_utc() as i64);
     result.insert(
         crate::value::intern_key("timestamp"),
         timestamp_value(dt.with_timezone(&Utc)),
@@ -418,12 +343,16 @@ pub(crate) fn parse_timezone(raw: &str, builtin: &str) -> Result<Tz, VmError> {
 
 fn parse_datetime_auto(input: &str) -> Result<DateTime<Utc>, VmError> {
     let trimmed = input.trim();
-    if trimmed.is_empty() {
-        return Err(vm_error("Cannot parse date: "));
-    }
 
     if let Ok(dt) = DateTime::parse_from_rfc3339(trimmed) {
         return Ok(dt.with_timezone(&Utc));
+    }
+
+    // RFC 3339 requires seconds; ISO 8601 also permits minute precision.
+    for fmt in ["%Y-%m-%dT%H:%M%:z", "%Y-%m-%d %H:%M%:z"] {
+        if let Ok(dt) = DateTime::parse_from_str(trimmed, fmt) {
+            return Ok(dt.with_timezone(&Utc));
+        }
     }
 
     for fmt in [
@@ -431,6 +360,8 @@ fn parse_datetime_auto(input: &str) -> Result<DateTime<Utc>, VmError> {
         "%Y-%m-%dT%H:%M:%S%.f",
         "%Y-%m-%d %H:%M",
         "%Y-%m-%dT%H:%M",
+        "%Y-%m-%d %H:%MZ",
+        "%Y-%m-%dT%H:%MZ",
     ] {
         if let Ok(dt) = NaiveDateTime::parse_from_str(trimmed, fmt) {
             return Ok(Utc.from_utc_datetime(&dt));
@@ -444,33 +375,7 @@ fn parse_datetime_auto(input: &str) -> Result<DateTime<Utc>, VmError> {
         return Ok(Utc.from_utc_datetime(&dt));
     }
 
-    parse_datetime_digits_fallback(trimmed)
-}
-
-fn parse_datetime_digits_fallback(input: &str) -> Result<DateTime<Utc>, VmError> {
-    let parts: Vec<i64> = input
-        .split(|c: char| !c.is_ascii_digit())
-        .filter_map(|p| if p.is_empty() { None } else { p.parse().ok() })
-        .collect();
-    if parts.len() < 3 {
-        return Err(vm_error(format!("Cannot parse date: {input}")));
-    }
-
-    let year =
-        i32::try_from(parts[0]).map_err(|_| vm_error(format!("Invalid year: {}", parts[0])))?;
-    let month = u32::try_from(parts[1]).unwrap_or(0);
-    let day = u32::try_from(parts[2]).unwrap_or(0);
-    let hour = u32::try_from(parts.get(3).copied().unwrap_or(0)).unwrap_or(u32::MAX);
-    let minute = u32::try_from(parts.get(4).copied().unwrap_or(0)).unwrap_or(u32::MAX);
-    let second = u32::try_from(parts.get(5).copied().unwrap_or(0)).unwrap_or(u32::MAX);
-
-    validate_component_ranges(month, day, hour, minute, second)?;
-    let date = NaiveDate::from_ymd_opt(year, month, day)
-        .ok_or_else(|| vm_error(format!("Invalid date: {year:04}-{month:02}-{day:02}")))?;
-    let dt = date
-        .and_hms_opt(hour, minute, second)
-        .ok_or_else(|| vm_error(format!("Invalid time: {hour:02}:{minute:02}:{second:02}")))?;
-    Ok(Utc.from_utc_datetime(&dt))
+    Err(vm_error(format!("Cannot parse date: {input}")))
 }
 
 fn validate_component_ranges(

@@ -160,6 +160,7 @@ pub struct ReplayBenchmarkFixtureReceipt {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum ReplayBenchmarkError {
     Oracle(ReplayOracleError),
     Adapter(String),

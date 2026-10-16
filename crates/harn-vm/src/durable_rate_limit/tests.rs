@@ -1,17 +1,16 @@
 use super::*;
-use crate::{compile_source, register_vm_stdlib, reset_thread_local_state, Vm};
+use crate::{compile_source, register_vm_stdlib, reset_thread_local_state};
 use rusqlite::{params, Connection, TransactionBehavior};
 use std::path::{Path, PathBuf};
 use std::sync::{mpsc, Arc, Barrier};
 use std::time::Duration;
 
 const TRANSIENT_LOCK_TEST_BUSY_TIMEOUT_MS: u64 = 25;
-const TRANSIENT_LOCK_SIGNAL_TIMEOUT: Duration = Duration::from_secs(2);
 
 async fn run_harn(base_dir: &std::path::Path, source: &str) -> Vec<String> {
     reset_thread_local_state();
     let chunk = compile_source(source).expect("compile source");
-    let mut vm = Vm::new();
+    let mut vm = crate::new_vm();
     register_vm_stdlib(&mut vm);
     let (harness, _clock) = crate::Harness::test();
     vm.set_harness(harness);
@@ -190,7 +189,7 @@ fn concurrent_threads_do_not_over_reserve_shared_bucket() {
         let path = path.clone();
         let buckets = buckets.clone();
         let barrier = barrier.clone();
-        handles.push(std::thread::spawn(move || {
+        handles.push(crate::runtime_stack::spawn(move || {
             barrier.wait();
             try_reserve_once(&path, &buckets, 1_000).expect("reserve")
         }));
@@ -359,7 +358,7 @@ fn transient_sqlite_write_lock_retries_instead_of_erroring() {
     let path_for_thread = path.clone();
     let buckets = vec![bucket("provider:rpm", 1, 1, 60_000)];
     let (busy_tx, busy_rx) = mpsc::channel();
-    let handle = std::thread::spawn(move || {
+    let handle = crate::runtime_stack::spawn(move || {
         try_reserve_once_with_options(
             &path_for_thread,
             &buckets,
@@ -372,9 +371,10 @@ fn transient_sqlite_write_lock_retries_instead_of_erroring() {
         )
     });
 
-    busy_rx
-        .recv_timeout(TRANSIENT_LOCK_SIGNAL_TIMEOUT)
-        .expect("worker should observe the transient sqlite lock before retrying");
+    harn_clock::test_support::recv_within(
+        "worker observing the transient sqlite lock before retrying",
+        &busy_rx,
+    );
     drop(tx);
 
     let attempt = handle
@@ -518,9 +518,8 @@ pipeline main(harness: Harness, task: unknown) {
         let source = source.clone();
         let barrier = barrier.clone();
         handles.push(
-            std::thread::Builder::new()
+            crate::runtime_stack::builder()
                 .name("durable-rate-limit-probe".to_string())
-                .stack_size(crate::RUNTIME_STACK_SIZE)
                 .spawn(move || {
                     let runtime = tokio::runtime::Builder::new_current_thread()
                         .enable_time()

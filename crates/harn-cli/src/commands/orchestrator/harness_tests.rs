@@ -27,22 +27,21 @@ async fn wait_for_persona_completion(event_log: &std::sync::Arc<AnyEventLog>) {
         .iter()
         .any(|(_, event)| event.kind == "persona.run.completed")
     {
-        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(30);
-        loop {
-            let remaining = deadline
-                .checked_duration_since(tokio::time::Instant::now())
-                .expect("timed out waiting for persona completion");
-            let (_, event) = tokio::time::timeout(remaining, stream.next())
-                .await
-                .expect("timed out waiting for persona completion event")
-                .expect("persona event stream ended unexpectedly")
-                .expect("persona event stream error");
-            match event.kind.as_str() {
-                "persona.run.completed" => break,
-                "persona.run.failed" => panic!("persona run failed: {}", event.payload),
-                _ => {}
+        harn_clock::test_support::within("persona completion event", async {
+            loop {
+                let (_, event) = stream
+                    .next()
+                    .await
+                    .expect("persona event stream ended unexpectedly")
+                    .expect("persona event stream error");
+                match event.kind.as_str() {
+                    "persona.run.completed" => break,
+                    "persona.run.failed" => panic!("persona run failed: {}", event.payload),
+                    _ => {}
+                }
             }
-        }
+        })
+        .await;
     }
 }
 
@@ -127,22 +126,21 @@ async fn stream_trigger_route_uses_generic_stream_connector_in_process() {
     // until pump_dispatch_completed arrives, replacing SQLite polling.
     let topic = Topic::new("orchestrator.lifecycle").unwrap();
     let mut stream = event_log.clone().subscribe(&topic, None).await.unwrap();
-    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(30);
-    loop {
-        let remaining = deadline
-            .checked_duration_since(tokio::time::Instant::now())
-            .expect("timed out waiting for pump_dispatch_completed");
-        let (_, event) = tokio::time::timeout(remaining, stream.next())
-            .await
-            .expect("timed out waiting for pump_dispatch_completed event")
-            .expect("event stream ended unexpectedly")
-            .expect("event stream error");
-        if event.kind == "pump_dispatch_completed"
-            && event.payload["status"] == serde_json::json!("completed")
-        {
-            break;
+    harn_clock::test_support::within("pump_dispatch_completed event", async {
+        loop {
+            let (_, event) = stream
+                .next()
+                .await
+                .expect("event stream ended unexpectedly")
+                .expect("event stream error");
+            if event.kind == "pump_dispatch_completed"
+                && event.payload["status"] == serde_json::json!("completed")
+            {
+                break;
+            }
         }
-    }
+    })
+    .await;
     drop(stream);
 
     let marker: serde_json::Value =

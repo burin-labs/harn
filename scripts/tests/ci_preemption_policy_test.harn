@@ -10,6 +10,9 @@ const POLICY: RecoveryPolicy = {
   schema: "harn.ci_preemption_policy.v1",
   aggregate_job_names: ["CI status"],
   timeout_completion_grace_seconds: 90,
+  lost_verdict_routes: [
+    {workflow: "CI", job_names: ["Tests"], events: ["pull_request", "merge_group"]},
+  ],
 }
 
 fn workflow() -> dict {
@@ -211,4 +214,131 @@ pipeline test_merge_group_recovery_uses_structured_pr_identity(task: unknown) {
   assert_eq(receipt.classification, "configured_timeout")
   assert_eq(receipt.pr_number, 4113)
   assert_eq(receipt.planned_action, "requeue_merge_queue")
+}
+
+fn lost_job() -> dict {
+  return job(101, "Tests", "failure", "2026-08-28T18:03:30Z", "2026-08-28T18:04:00Z")
+    + {
+      steps: [
+        {
+          name: "Setup",
+          number: 1,
+          status: "completed",
+          conclusion: "success",
+          startedAt: "2026-08-28T18:03:30Z",
+          completedAt: "2026-08-28T18:03:35Z",
+        },
+        {name: "Test", number: 2, status: "in_progress", startedAt: "2026-08-28T18:03:35Z"},
+        {name: "Cleanup", number: 3, status: "pending"},
+      ],
+    }
+}
+
+pipeline test_lost_verdict_requires_exact_metadata_and_declared_route() {
+  const receipt = classify_recovery(run_with_jobs([lost_job()]), workflow(), POLICY, [], 1)
+  assert_eq(receipt.classification, "lost_job_verdict")
+  assert_eq(receipt.failed_job_count, 1)
+  assert_eq(receipt.retry_safe_job_count, 1)
+  assert_eq(receipt.unknown_job_count, 0)
+  assert_eq(receipt.inspected_job_count, 0)
+  assert_eq(receipt.evidence_complete, true)
+  assert_eq(receipt.jobs[0]?.log_available, false)
+  assert_eq(receipt.planned_action, "rerun_failed_jobs")
+  const base = lost_job()
+  for changed in [
+    base + {name: "Unlisted"},
+    base + {status: "in_progress"},
+    base + {conclusion: "cancelled"},
+    base + {steps: []},
+    base + {steps: [base.steps[0], base.steps[1]]},
+    base + {steps: [base.steps[0], base.steps[1] + {conclusion: "failure"}, base.steps[2]]},
+    base + {steps: [base.steps[0] + {conclusion: "failure"}, base.steps[1], base.steps[2]]},
+    base + {steps: [base.steps[0], base.steps[1], base.steps[2] + {status: "completed"}]},
+    base + {steps: [base.steps[0], base.steps[1], base.steps[2] + {number: 2}]},
+    base + {steps: [base.steps[0], base.steps[1], base.steps[2] + {startedAt: "invalid"}]},
+    base
+      + {
+        steps: [
+          base.steps[0],
+          base.steps[1] + {completedAt: "2026-08-28T18:04:00Z"},
+          base.steps[2],
+        ],
+      },
+  ] {
+    const refused = classify_recovery(run_with_jobs([changed]), workflow(), POLICY, [], 1)
+    assert_eq(refused.retry_safe_job_count, 0)
+    assert_eq(refused.planned_action, "none")
+  }
+  for patch in [{event: "push"}, {workflowName: "Deploy"}] {
+    const changed_run: GitHubRun = schema_expect(
+      run_with_jobs([base]) + patch,
+      schema_of(GitHubRun),
+    )
+    assert_eq(classify_recovery(changed_run, workflow(), POLICY, [], 1).planned_action, "none")
+  }
+}
+
+pipeline test_lost_verdict_log_mixed_evidence_and_second_attempt_are_not_retried() {
+  const available = classify_recovery(
+    run_with_jobs([lost_job()]),
+    workflow(),
+    POLICY,
+    [log(101, "failure")],
+    1,
+  )
+  assert_eq(available.classification, "job_failure")
+  assert_eq(available.planned_action, "none")
+  const mixed = classify_recovery(
+    run_with_jobs(
+      [lost_job(), job(102, "Lint", "failure", "2026-08-28T18:03:30Z", "2026-08-28T18:04:00Z")],
+    ),
+    workflow(),
+    POLICY,
+    [log(102, "failure")],
+    1,
+  )
+  assert_eq(mixed.classification, "mixed_failure")
+  assert_eq(mixed.failed_job_count, 2)
+  assert_eq(mixed.retry_safe_job_count, 1)
+  assert_eq(mixed.terminal_failure_job_count, 1)
+  assert_eq(mixed.planned_action, "none")
+  const second = classify_recovery(run_with_jobs([lost_job()], 2), workflow(), POLICY, [], 99)
+  assert_eq(second.classification, "lost_job_verdict")
+  assert_eq(second.planned_action, "none_max_attempts_reached")
+  const merge_run: GitHubRun = schema_expect(
+    run_with_jobs([lost_job()]) + {event: "merge_group"},
+    schema_of(GitHubRun),
+  )
+  assert_eq(
+    classify_recovery(merge_run, workflow(), POLICY, [], 1).planned_action,
+    "rerun_failed_jobs",
+  )
+}
+
+pipeline test_lost_verdict_accepts_gh_zero_time_encoding() {
+  const base = lost_job()
+  const zero = "0001-01-01T00:00:00Z"
+  const encoded = base
+    + {
+      steps: [
+        base.steps[0],
+        base.steps[1] + {conclusion: "", completedAt: zero},
+        base.steps[2] + {conclusion: "", startedAt: zero, completedAt: zero},
+      ],
+    }
+  const receipt = classify_recovery(run_with_jobs([encoded]), workflow(), POLICY, [], 1)
+  assert_eq(receipt.classification, "lost_job_verdict")
+  assert_eq(receipt.planned_action, "rerun_failed_jobs")
+  const skipped = encoded
+    + {
+      steps: [
+        encoded.steps[0] + {conclusion: "skipped", startedAt: zero, completedAt: zero},
+        encoded.steps[1],
+        encoded.steps[2],
+      ],
+    }
+  assert_eq(
+    classify_recovery(run_with_jobs([skipped]), workflow(), POLICY, [], 1).planned_action,
+    "rerun_failed_jobs",
+  )
 }

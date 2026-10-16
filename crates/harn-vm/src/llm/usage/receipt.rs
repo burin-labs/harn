@@ -116,10 +116,6 @@ impl ProviderUsageReceipt {
         self.input_tokens
     }
 
-    pub(crate) fn reported_total_tokens(&self) -> Option<i64> {
-        self.reported_total_tokens
-    }
-
     /// Retain cache facts alongside the token receipt. The parser already
     /// derives these from the same usage object on successful calls, so an
     /// unusable response must not change its accounting convention.

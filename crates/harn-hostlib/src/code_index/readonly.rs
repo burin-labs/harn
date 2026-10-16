@@ -101,7 +101,7 @@ pub(super) fn run_add_readonly_roots(
     }
 
     Ok(build_dict([
-        ("roots", VmValue::List(Arc::new(added))),
+        ("roots", VmValue::list(added)),
         ("readonly_root_count", VmValue::Int(guard.len() as i64)),
         ("readonly_files_indexed", VmValue::Int(total_files as i64)),
     ]))

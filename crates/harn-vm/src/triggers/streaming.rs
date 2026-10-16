@@ -772,7 +772,6 @@ mod tests {
         TriggerBindingSpec, TriggerHandlerSpec,
     };
     use crate::trust_graph::AutonomyTier;
-    use crate::vm::Vm;
 
     use super::*;
 
@@ -801,7 +800,7 @@ mod tests {
         let lib_path = dir.path().join("lib.harn");
         std::fs::write(&lib_path, source).expect("write harn source");
 
-        let mut vm = Vm::new();
+        let mut vm = crate::new_vm();
         register_vm_stdlib(&mut vm);
         vm.set_source_dir(dir.path());
         let exports = vm
@@ -812,6 +811,7 @@ mod tests {
         install_manifest_triggers(vec![TriggerBindingSpec {
             id: "stream-window-handler".to_string(),
             source: TriggerBindingSource::Manifest,
+            ingress_subscription: false,
             kind: "stream".to_string(),
             provider: ProviderId::from("kafka"),
             autonomy_tier: AutonomyTier::ActAuto,
@@ -963,7 +963,7 @@ pub fn local_fn(harness: Harness, event: TriggerEvent) -> int {
             .run_until(async {
                 let dir = tempfile::tempdir().unwrap();
                 let log = install_test_event_log();
-                let mut vm = Vm::new();
+                let mut vm = crate::new_vm();
                 register_vm_stdlib(&mut vm);
                 vm.set_source_dir(dir.path());
                 let dispatcher = Dispatcher::with_event_log(vm, log.clone());

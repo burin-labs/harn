@@ -192,49 +192,45 @@ fn measure_dispatch_batch(
         Condvar::new(),
     );
 
-    std::thread::scope(|scope| {
+    harn_parser::runtime_stack::scope(|scope| {
         let mut handles = Vec::with_capacity(workers);
         for worker in 0..workers {
             let count = iterations / workers + usize::from(worker < iterations % workers);
             let gate = &gate;
-            let handle = std::thread::Builder::new()
-                .name(format!("harn-portable-bench-{worker}"))
-                // Each worker runs the benchmarked program through
-                // `harn_kernel::start`, so it needs the runtime stack.
-                .stack_size(crate::CLI_RUNTIME_STACK_SIZE)
-                .spawn_scoped(scope, move || {
-                    let (state_lock, start_signal) = gate;
-                    let mut state = state_lock.lock().unwrap_or_else(|error| error.into_inner());
-                    state.ready += 1;
-                    // Workers and the coordinator share this condition
-                    // variable, so wake every waiter when readiness changes.
-                    start_signal.notify_all();
-                    while !state.released {
-                        state = start_signal
-                            .wait(state)
-                            .unwrap_or_else(|error| error.into_inner());
-                    }
-                    if state.cancelled {
-                        return Err("worker startup cancelled".to_string());
-                    }
-                    drop(state);
+            // Each worker runs the benchmarked program through
+            // `harn_kernel::start`, so it needs the runtime stack.
+            let handle = scope.spawn_named(format!("harn-portable-bench-{worker}"), move || {
+                let (state_lock, start_signal) = gate;
+                let mut state = state_lock.lock().unwrap_or_else(|error| error.into_inner());
+                state.ready += 1;
+                // Workers and the coordinator share this condition
+                // variable, so wake every waiter when readiness changes.
+                start_signal.notify_all();
+                while !state.released {
+                    state = start_signal
+                        .wait(state)
+                        .unwrap_or_else(|error| error.into_inner());
+                }
+                if state.cancelled {
+                    return Err("worker startup cancelled".to_string());
+                }
+                drop(state);
 
-                    let mut local_samples = Vec::with_capacity(count);
-                    for _ in 0..count {
-                        let started = Instant::now();
-                        let execution =
-                            harn_kernel::start(program, input.clone(), &GrantSet::pure());
-                        let elapsed = elapsed_ms(started);
-                        match completed_value(execution) {
-                            Ok(value) if value == *expected => local_samples.push(elapsed),
-                            Ok(_) => {
-                                return Err("terminal value changed".to_string());
-                            }
-                            Err(error) => return Err(error),
+                let mut local_samples = Vec::with_capacity(count);
+                for _ in 0..count {
+                    let started = Instant::now();
+                    let execution = harn_kernel::start(program, input.clone(), &GrantSet::pure());
+                    let elapsed = elapsed_ms(started);
+                    match completed_value(execution) {
+                        Ok(value) if value == *expected => local_samples.push(elapsed),
+                        Ok(_) => {
+                            return Err("terminal value changed".to_string());
                         }
+                        Err(error) => return Err(error),
                     }
-                    Ok(local_samples)
-                });
+                }
+                Ok(local_samples)
+            });
             match handle {
                 Ok(handle) => handles.push(handle),
                 Err(error) => {

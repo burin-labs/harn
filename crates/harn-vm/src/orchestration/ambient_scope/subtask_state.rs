@@ -9,6 +9,16 @@ use crate::redact::NamedPattern;
 use crate::security::SecurityPolicy;
 use crate::vm::subtask::{swap_subtask_placement_context, SubtaskPlacement};
 
+impl super::AmbientExecutionScope {
+    pub(crate) fn with_prepared_identity(
+        mut self,
+        context: crate::prepared_run::PreparedIdentityContext,
+    ) -> Self {
+        self.prepared_identity = Some(Arc::new(context));
+        self
+    }
+}
+
 /// Mechanically checked projection of `thread_local_audit.toml`'s
 /// `subtask_scope.captured` policy. Keep this beside the typed state that
 /// implements the policy; the whole-crate audit test rejects drift either way.
@@ -16,6 +26,8 @@ use crate::vm::subtask::{swap_subtask_placement_context, SubtaskPlacement};
 pub(super) const CAPTURED_THREAD_LOCAL_PROJECTION: &[&str] = &[
     "EXECUTION_POLICY_STACK",
     "EXECUTION_APPROVAL_POLICY_STACK",
+    "PREPARED_APPROVAL_POLICY",
+    "PREPARED_IDENTITY_CONTEXT",
     "OPERATOR_APPROVAL_GRANT_STACK",
     "COMMAND_POLICY_STACK",
     "DYNAMIC_PERMISSION_STACK",
@@ -35,11 +47,13 @@ pub(super) const CAPTURED_THREAD_LOCAL_PROJECTION: &[&str] = &[
     "APPROVAL_REVIEWER_DEPTH",
     "VM_EXECUTION_CONTEXT",
     "VM_SOURCE_DIR",
+    "SCOPED_PERSISTENT_STATE_ROOT",
     "CURRENT_MUTATION_SESSION",
     "SESSION_ENVIRONMENT_CONTEXT",
     "PROCESS_ADMISSION_CONTEXT",
     "CURRENT_HOST_BRIDGE",
     "CURRENT_LOOP_SINKS",
+    "CURRENT_AGENT_EVENT_TRANSPORT",
     "CURRENT_SESSION_STACK",
     "LLM_CONFIG_OVERRIDES_CONTEXT",
     "LLM_RUNTIME_PROVIDER_ENDPOINTS_CONTEXT",
@@ -47,6 +61,7 @@ pub(super) const CAPTURED_THREAD_LOCAL_PROJECTION: &[&str] = &[
     "LLM_MOCK_CONTEXT",
     "SCOPE",
     "EGRESS_POLICY_CONTEXT",
+    "AMBIENT_BOUNDARY",
     "ACTIVE_EXECUTION_SCOPE_STACK",
     "RUN_EVENT_SINK_CONTEXT",
     "SUBTASK_PLACEMENT_CONTEXT",
@@ -57,6 +72,8 @@ pub(super) const CAPTURED_THREAD_LOCAL_PROJECTION: &[&str] = &[
     "ACTIVE_EVENT_LOG",
     "MCP_CALL_BUDGET",
     "PG_QUERY_BUDGET",
+    "LLM_COST_BUDGET",
+    "LLM_TOKEN_BUDGET",
     "ACTIVE_TOOL_CALL_CANCELLATION_REGISTRY",
     "ACTIVE_WORKER_REGISTRY",
     "ACTIVE_DAEMON_REGISTRY",
@@ -82,6 +99,8 @@ pub(super) struct SubtaskAmbientState {
     event_log: Option<Arc<AnyEventLog>>,
     mcp_call_budget: Option<CallBudget>,
     pg_query_budget: Option<CallBudget>,
+    llm_cost_budget: Option<crate::llm::cost::budget::LlmCostBudget>,
+    llm_token_budget: Option<crate::llm::cost::budget::LlmTokenBudget>,
     tool_call_cancellations: Arc<crate::tool_call_cancellations::CancellationRegistry>,
     worker_registry: Arc<crate::stdlib::agents::agents_workers::WorkerRegistry>,
     daemon_registry: Arc<crate::stdlib::agents_daemon::DaemonRegistry>,
@@ -104,6 +123,8 @@ impl SubtaskAmbientState {
             event_log: clone_via_swap(crate::event_log::swap_active_event_log),
             mcp_call_budget: clone_via_swap(crate::call_budget::swap_mcp_call_budget),
             pg_query_budget: clone_via_swap(crate::call_budget::swap_pg_query_budget),
+            llm_cost_budget: crate::llm::cost::budget::capture_llm_cost_budget(),
+            llm_token_budget: crate::llm::cost::budget::capture_llm_token_budget(),
             tool_call_cancellations: clone_via_swap(
                 crate::tool_call_cancellations::swap_active_registry,
             ),
@@ -210,6 +231,14 @@ impl SubtaskAmbientState {
             crate::tool_call_cancellations::swap_active_registry,
         );
         swap_slot(
+            &mut self.llm_cost_budget,
+            crate::llm::cost::budget::swap_llm_cost_budget,
+        );
+        swap_slot(
+            &mut self.llm_token_budget,
+            crate::llm::cost::budget::swap_llm_token_budget,
+        );
+        swap_slot(
             &mut self.worker_registry,
             crate::stdlib::agents::agents_workers::swap_active_worker_registry,
         );
@@ -264,5 +293,62 @@ mod tests {
             .map(|name| (*name).to_string())
             .collect();
         assert_eq!(projection, policy);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn captured_child_scope_retains_transport_after_same_session_rebind() {
+        use crate::agent_events::{
+            emit_event, register_sink, AgentEvent, AgentEventSink, AgentEventTransport,
+        };
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+
+        struct Count(Arc<AtomicUsize>);
+        impl AgentEventSink for Count {
+            fn handle_event(&self, _: &AgentEvent) {
+                self.0.fetch_add(1, Ordering::SeqCst);
+            }
+        }
+        let transport = || {
+            let count = Arc::new(AtomicUsize::new(0));
+            (
+                AgentEventTransport::new(Arc::new(Count(count.clone()))),
+                count,
+            )
+        };
+        let session = format!("transport-child-{}", uuid::Uuid::now_v7());
+        let event = AgentEvent::IterationStart {
+            session_id: session.clone(),
+            iteration: 1,
+            provider: String::new(),
+            model: String::new(),
+        };
+        let (old, old_count) = transport();
+        let (new, new_count) = transport();
+        let durable = Arc::new(AtomicUsize::new(0));
+        register_sink(session.clone(), Arc::new(Count(durable.clone())));
+        let old_scope = old
+            .scope(async { crate::orchestration::AmbientExecutionScope::capture_inherited() })
+            .await;
+        new.scope(async {
+            emit_event(&event);
+            crate::orchestration::scope_ambient(old_scope, async {
+                emit_event(&event);
+                tokio::task::yield_now().await;
+                emit_event(&event);
+            })
+            .await;
+            emit_event(&event);
+        })
+        .await;
+        crate::agent_events::clear_session_sinks(&session);
+        assert_eq!(
+            (
+                old_count.load(Ordering::SeqCst),
+                new_count.load(Ordering::SeqCst)
+            ),
+            (2, 2)
+        );
+        assert_eq!(durable.load(Ordering::SeqCst), 4);
     }
 }

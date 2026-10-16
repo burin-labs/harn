@@ -1,6 +1,7 @@
 use super::*;
 use crate::event_log::EventLog;
 use crate::llm::mock::{push_llm_mock, reset_llm_mock_state, LlmMock};
+use crate::NativeBuiltinCtxExt;
 
 fn assistant_message(text: &str) -> VmValue {
     VmValue::dict(crate::value::DictMap::from_iter([
@@ -33,6 +34,7 @@ async fn execute_sub_agent_persists_one_stop_with_lineage() {
     crate::agent_sessions::inject_message(&parent, assistant_message("parent context")).unwrap();
     crate::agent_sessions::claim_tool_format(&parent, "text").unwrap();
     push_llm_mock(LlmMock {
+        effective_reasoning_effort: Default::default(),
         text: "child result".to_string(),
         tool_calls: Vec::new(),
         raw_tool_calls: Vec::new(),
@@ -80,7 +82,7 @@ async fn execute_sub_agent_persists_one_stop_with_lineage() {
         stop_emitted: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
     };
 
-    let mut vm = crate::Vm::new();
+    let mut vm = crate::new_vm();
     crate::register_vm_stdlib(&mut vm);
     let ctx = crate::vm::AsyncBuiltinCtx::for_test(vm);
     let result = execute_sub_agent(&ctx, spec).await.unwrap();
@@ -150,7 +152,21 @@ async fn execute_sub_agent_persists_one_stop_with_lineage() {
         .expect("flush subagent lifecycle");
     let topic =
         crate::event_log::Topic::new(format!("observability.agent_events.{parent}")).unwrap();
-    let lifecycle_events = lifecycle_log.read_range(&topic, None, 16).await.unwrap();
+    // Child observations share the parent's topic. The terminal can follow
+    // more than one page, so inspect the complete finite mock-run receipt.
+    let lifecycle_events = lifecycle_log
+        .read_range(&topic, None, usize::MAX)
+        .await
+        .unwrap();
+    assert!(
+        lifecycle_events.iter().any(|(_, event)| {
+            serde_json::from_value::<crate::agent_events::AgentEvent>(
+                event.payload["event"].clone(),
+            )
+            .is_ok_and(|event| event.session_id() == "child-subagent")
+        }),
+        "the parent observer must receive the executed child's events"
+    );
     let stops: Vec<_> = lifecycle_events
         .iter()
         .filter(|(_, event)| event.kind == "subagent_stop")

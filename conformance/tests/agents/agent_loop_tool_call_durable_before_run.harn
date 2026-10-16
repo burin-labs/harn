@@ -1,0 +1,81 @@
+import { agent_loop } from "std/agent/loop"
+import { llm_text, llm_tool_call, with_llm_script } from "std/testing"
+
+struct SlowOutcome {
+  success: bool
+}
+
+/**
+ * A tool call is in the canonical session store before its handler runs.
+ *
+ * The journal used to flush only before the next model call, so a process
+ * killed while a tool ran restored a session with no trace of that call
+ * (harn#9061). The handler reads the store from inside the call: what it sees
+ * is what a restore after a crash at that moment would replay.
+ */
+pipeline main(harness: Harness) {
+  harness.llm.provider_capabilities_install(
+    """
+[[provider.testcatalog]]
+model_match = "native-fixture-*"
+native_tools = true
+preferred_tool_format = "native"
+""",
+  )
+  defer {
+    harness.llm.provider_capabilities_clear()
+  }
+  const unique = harness.random.uuid()
+  const session_id = "tool-call-durable-before-run-" + unique
+  const store_root = path_join(harness.fs.workspace_temp_dir(), "tool-call-durable-" + unique)
+  let seen_while_running = []
+  const tools = tool_define(
+    tool_registry(),
+    "slow_command",
+    "Run a command that takes a while",
+    {
+      handler: { _args ->
+        for event in harness.agent.session_store_events(session_id, {root: store_root}).value {
+          const transcript_event = event.payload?.transcript_event ?? {}
+          if transcript_event.kind == "tool_call" || transcript_event.kind == "tool_call_update" {
+            seen_while_running = seen_while_running
+              + [
+                transcript_event.kind + ":" + to_string(transcript_event.metadata?.tool_name)
+                  + ":"
+                  + to_string(transcript_event.metadata?.status),
+              ]
+          }
+        }
+        return SlowOutcome {success: true}
+      },
+      parameters: {},
+      returns: {type: "object"},
+      annotations: {kind: "read", side_effect_level: "read_only"},
+    },
+  )
+  with_llm_script(
+    harness.llm,
+    [llm_tool_call("slow_command", {}), llm_text("Ran it.\n\n<done>##DONE##</done>")],
+    { ->
+      const result = agent_loop(
+        harness,
+        "Run the slow command.",
+        "You are an agent.",
+        {
+          provider: "testcatalog",
+          model: "native-fixture-route",
+          tools: tools,
+          tool_format: "native",
+          allowed_tools: ["slow_command"],
+          max_iterations: 3,
+          session_id: session_id,
+          root: store_root,
+        },
+      )
+      for row in seen_while_running {
+        harness.stdio.println(row)
+      }
+      harness.stdio.println(result.status)
+    },
+  )
+}

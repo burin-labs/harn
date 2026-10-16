@@ -37,6 +37,7 @@ pub(super) async fn build_llm_options() -> PortalLlmOptions {
         });
 
     let mut providers = Vec::new();
+    let catalog_models = llm_config::model_catalog_entries();
     for name in llm_config::provider_names() {
         let Some(def) = llm_config::provider_config(&name) else {
             continue;
@@ -44,29 +45,43 @@ pub(super) async fn build_llm_options() -> PortalLlmOptions {
         let base_url = llm_config::resolve_base_url(&def);
         let auth_envs = llm_config::auth_env_names(&def.auth_env);
         let auth_configured = harn_vm::llm::provider_auth_status(&name).available;
-        let viable = auth_configured;
-        let local = is_local_provider(&base_url);
+        let local = is_local_provider(&name, &base_url);
         let aliases = config
             .aliases
             .iter()
             .filter(|(_, alias)| alias.provider == name)
             .map(|(alias_name, _)| alias_name.clone())
             .collect::<Vec<_>>();
-        let mut models = if local {
-            discover_provider_models(&name, &base_url, &def)
-                .await
-                .unwrap_or_default()
+        let discovered = if local {
+            Some(discover_provider_models(&name, &base_url, &def).await)
         } else {
-            Vec::new()
+            None
         };
-        if let Some(default_model) = default_model_for_provider(&name) {
-            if !models.contains(&default_model) {
+        let viable = auth_configured
+            && discovered
+                .as_ref()
+                .is_none_or(|result| result.as_ref().is_ok_and(|models| !models.is_empty()));
+        let mut models = discovered.and_then(Result::ok).unwrap_or_default();
+        if !local {
+            models.extend(
+                catalog_models
+                    .iter()
+                    .filter(|(_, model)| model.provider == name && !model.deprecated)
+                    .map(|(id, model)| model.wire_model.clone().unwrap_or_else(|| id.clone())),
+            );
+        }
+        let default_model = llm_config::portal_default_model_for_provider(&name);
+        if let Some(default_model) = &default_model {
+            if !models.contains(default_model) {
                 models.insert(0, default_model.clone());
             }
         }
         for alias_name in &aliases {
             if let Some((resolved, _)) = llm_config::resolve_tier_model(alias_name, Some(&name)) {
-                if !models.contains(&resolved) {
+                if !models.contains(&resolved)
+                    && llm_config::model_catalog_entry_for_route(&name, &resolved)
+                        .is_some_and(|model| !model.deprecated)
+                {
                     models.push(resolved);
                 }
             }
@@ -84,7 +99,7 @@ pub(super) async fn build_llm_options() -> PortalLlmOptions {
             local,
             models,
             aliases,
-            default_model: default_model_for_provider(&name).unwrap_or_default(),
+            default_model: default_model.unwrap_or_default(),
         });
     }
 
@@ -103,31 +118,18 @@ pub(super) async fn build_llm_options() -> PortalLlmOptions {
     }
 }
 
-fn is_local_provider(base_url: &str) -> bool {
-    base_url.contains("127.0.0.1") || base_url.contains("localhost")
-}
-
-fn default_model_for_provider(provider: &str) -> Option<String> {
-    match provider {
-        "local" => std::env::var("LOCAL_LLM_MODEL")
+fn is_local_provider(provider: &str, base_url: &str) -> bool {
+    matches!(provider, "local" | "mlx" | "ollama")
+        || url::Url::parse(base_url)
             .ok()
-            .filter(|value| !value.is_empty())
-            .or_else(|| {
-                std::env::var("HARN_LLM_MODEL")
-                    .ok()
-                    .filter(|value| !value.is_empty())
+            .and_then(|url| {
+                url.host().map(|host| match host {
+                    url::Host::Domain(domain) => domain.eq_ignore_ascii_case("localhost"),
+                    url::Host::Ipv4(address) => address.is_loopback(),
+                    url::Host::Ipv6(address) => address.is_loopback(),
+                })
             })
-            .or_else(|| Some("gpt-4o".to_string())),
-        "mlx" => std::env::var("MLX_MODEL_ID")
-            .ok()
-            .filter(|value| !value.is_empty())
-            .or_else(|| Some("unsloth/Qwen3.6-35B-A3B-UD-MLX-4bit".to_string())),
-        "openai" => Some("gpt-4o".to_string()),
-        "ollama" => Some("llama3.2".to_string()),
-        "openrouter" => Some("Qwen/Qwen3.5-9B".to_string()),
-        "anthropic" => Some("claude-sonnet-4-20250514".to_string()),
-        _ => None,
-    }
+            .unwrap_or(false)
 }
 
 async fn discover_provider_models(
@@ -164,29 +166,45 @@ async fn discover_provider_models(
             })?
     };
     if !response.status().is_success() {
-        return Ok(Vec::new());
+        return Err(format!(
+            "failed to discover {provider} models: HTTP {}",
+            response.status()
+        ));
     }
     let payload = response
         .json::<serde_json::Value>()
         .await
         .map_err(|error| format!("failed to parse model list: {error}"))?;
-    let mut models = Vec::new();
-    if provider == "ollama" || def.chat_endpoint.contains("/api/chat") {
-        if let Some(entries) = payload.get("models").and_then(|value| value.as_array()) {
-            for entry in entries {
-                if let Some(name) = entry.get("name").and_then(|value| value.as_str()) {
-                    models.push(name.to_string());
-                }
-            }
-        }
-    } else if let Some(entries) = payload.get("data").and_then(|value| value.as_array()) {
-        for entry in entries {
-            if let Some(id) = entry.get("id").and_then(|value| value.as_str()) {
-                models.push(id.to_string());
-            }
-        }
-    }
+    let (entries, field) = if provider == "ollama" || def.chat_endpoint.contains("/api/chat") {
+        (
+            payload.get("models").and_then(|value| value.as_array()),
+            "name",
+        )
+    } else {
+        (payload.get("data").and_then(|value| value.as_array()), "id")
+    };
+    let entries = entries.ok_or_else(|| format!("invalid {provider} model list response"))?;
+    let mut models = entries
+        .iter()
+        .filter_map(|entry| entry.get(field).and_then(|value| value.as_str()))
+        .map(str::to_string)
+        .collect::<Vec<_>>();
     models.sort();
     models.dedup();
     Ok(models)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_local_provider;
+
+    #[test]
+    fn local_model_discovery_uses_provider_identity_or_loopback_host() {
+        assert!(is_local_provider("local", "http://192.168.1.40:8000"));
+        assert!(is_local_provider("custom", "http://[::1]:8000"));
+        assert!(!is_local_provider(
+            "openai",
+            "https://localhost.example.com/v1"
+        ));
+    }
 }

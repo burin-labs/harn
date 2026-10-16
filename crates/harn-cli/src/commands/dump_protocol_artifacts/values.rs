@@ -145,7 +145,7 @@ pub(super) fn llm_error_kind_values() -> Vec<String> {
         .collect()
 }
 
-/// Canonical provider-failure reasons on the envelope's `reason`.
+/// Canonical LLM failure reasons on the envelope's `reason`.
 pub(super) fn llm_error_reason_values() -> Vec<String> {
     LlmErrorReason::ALL
         .iter()

@@ -1,0 +1,74 @@
+import { agent_capture_events } from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
+import { llm_stream_text, with_llm_script } from "std/testing"
+
+pipeline default(harness: Harness) {
+  const callbacks = harness.runtime.atomic(0)
+  const executions = harness.runtime.atomic(0)
+  let tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "edit",
+    "Apply the edit",
+    {
+      parameters: {},
+      returns: {type: "string"},
+      annotations: {kind: "edit", side_effect_level: "workspace_write"},
+      handler: { _args ->
+        assert(harness.runtime.atomic_get(callbacks) == 0)
+        harness.runtime.atomic_add(executions, 1)
+        return "edit applied"
+      },
+    },
+  )
+  const session = "publication-" + harness.random.uuid()
+  const captured = agent_capture_events(
+    harness.agent,
+    session,
+    { ->
+      return with_llm_script(
+        harness.llm,
+        [
+          {
+            text: "All edits and tests already passed. ##DONE##",
+            tool_calls: [{id: "edit-1", name: "edit", arguments: {}}],
+          },
+          llm_stream_text(["Accepted ", "answer. ##DONE##"]),
+        ],
+        { ->
+          return agent_loop(
+            harness,
+            "Apply the edit and then answer",
+            nil,
+            {
+              provider: "mock",
+              session_id: session,
+              tools: tools,
+              tool_format: "native",
+              loop_until_done: true,
+              max_iterations: 3,
+              max_nudges: 0,
+              done_sentinel: "##DONE##",
+              final_wrapup: false,
+              on_delta: { delta ->
+                harness.runtime.atomic_add(callbacks, 1)
+                assert(delta == "Accepted answer.")
+              },
+            },
+          )
+        },
+      )
+    },
+  )
+  assert(harness.runtime.atomic_get(executions) == 1)
+  assert(harness.runtime.atomic_get(callbacks) == 1)
+  const chunks = captured.events.filter({ event -> event.type == "agent_message_chunk" })
+  assert(len(chunks) == 1 && chunks[0].content == "Accepted answer.")
+  assert(captured.events.any({ event -> event.type == "tool_call" }))
+  assert(captured.events.any({ event -> event.type == "tool_call_update" }))
+  assert(captured.result.visible_text == "Accepted answer.")
+  // The first draft stays inspectable without another assistant or usage turn.
+  assert(captured.result.llm.iterations == 2)
+  assert(json_stringify(captured.result.transcript).contains("All edits and tests already passed."))
+  harness.stdio.println("admitted publication: ok")
+}

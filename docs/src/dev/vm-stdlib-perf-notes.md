@@ -50,7 +50,7 @@ allocation-free.
 `let result = {}` accumulator with `result = result + {[k]: v}` per
 iteration — fresh `Rc<BTreeMap>` allocation per inserted entry plus a
 per-call closure dispatch in `filter_nil`. Every connector wrapper
-(`std/connectors/{github,linear,notion,slack}`), `std/context`,
+(`std/connectors/{github,linear,slack}`), `std/context`,
 `std/graphql`, the agents stdlib, and the workflow scaffolding leans on
 these helpers.
 

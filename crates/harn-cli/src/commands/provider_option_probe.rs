@@ -3,7 +3,7 @@
 //! The Harn script owns planning, provider-error classification, and the typed
 //! catalog diff. This shim owns the task-scoped authority a truthful negative
 //! probe needs: suspending catalog shaping for exactly the option named on the
-//! command line and limiting the observation to one physical provider request.
+//! command line and limiting each call to one physical provider request.
 
 use crate::cli::ProviderOptionProbeArgs;
 

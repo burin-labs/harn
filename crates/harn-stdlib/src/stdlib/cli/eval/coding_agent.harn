@@ -75,6 +75,9 @@ fn __safe_dict(value: any) -> dict {
  * markdown/summary lines stay byte-identical with the host formatter.
  */
 fn __format_float_6(value: any) -> string {
+  if value == nil {
+    return "unknown"
+  }
   const f = to_float(value) ?? 0.0
   const negative = f < 0.0
   const abs_f = if negative {
@@ -245,7 +248,7 @@ fn __render_rollup_table(title: string, rollups: list) -> string {
       + " | "
       + to_string(rd["total_runs"] ?? 0)
       + " | "
-      + __format_float_6(rd["total_cost_usd"] ?? 0.0)
+      + __format_float_6(rd["total_cost_usd"])
       + " |\n"
   }
   out = out + "\n"
@@ -289,7 +292,7 @@ fn __render_runs_table(runs: list) -> string {
       + " | "
       + to_string(input_tokens + output_tokens)
       + " | "
-      + __format_float_6(rd["cost_usd"] ?? 0.0)
+      + __format_float_6(rd["cost_usd"])
       + " | "
       + __markdown_link(
         to_string(rd["transcript_event_count"] ?? 0),
@@ -484,7 +487,9 @@ fn __render_markdown(summary: dict) -> string {
     + "\n- skipped: "
     + to_string(summary["skipped_runs"] ?? 0)
     + "\n- total_cost_usd: "
-    + __format_float_6(summary["total_cost_usd"] ?? 0.0)
+    + __format_float_6(summary["total_cost_usd"])
+    + "\n- known_cost_usd: "
+    + __format_float_6(summary["known_cost_usd"])
     + "\n\n"
   const rollups = __safe_dict(summary["rollups"])
   out = out + __render_rollup_table("By Fixture", rollups["by_fixture"])
@@ -544,7 +549,9 @@ fn __render_summary_line(summary: dict) -> string {
     + " passed, "
     + to_string(summary["skipped_runs"] ?? 0)
     + " skipped, total_cost_usd="
-    + __format_float_6(summary["total_cost_usd"] ?? 0.0)
+    + __format_float_6(summary["total_cost_usd"])
+    + ", known_cost_usd="
+    + __format_float_6(summary["known_cost_usd"])
 }
 
 /**

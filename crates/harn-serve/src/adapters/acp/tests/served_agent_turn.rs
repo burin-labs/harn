@@ -55,52 +55,64 @@ fn answer_host_capabilities(
 
 /// Send one `session/prompt` and return its response, answering the host
 /// capability handshake along the way.
-async fn prompt(
+pub(super) async fn prompt(
     request_tx: &mpsc::UnboundedSender<serde_json::Value>,
     response_rx: &mut mpsc::UnboundedReceiver<String>,
     session_id: &str,
     id: u64,
     source: &str,
 ) -> serde_json::Value {
+    prompt_with_identity(request_tx, response_rx, session_id, id, source, None).await
+}
+
+async fn prompt_with_identity(
+    request_tx: &mpsc::UnboundedSender<serde_json::Value>,
+    response_rx: &mut mpsc::UnboundedReceiver<String>,
+    session_id: &str,
+    id: u64,
+    source: &str,
+    message_id: Option<&str>,
+) -> serde_json::Value {
+    let mut params = serde_json::json!({
+        "sessionId": session_id,
+        "prompt": [{"type": "text", "text": source}],
+    });
+    if let Some(message_id) = message_id {
+        params["messageId"] = serde_json::json!(message_id);
+    }
     request_tx
         .send(serde_json::json!({
             "jsonrpc": "2.0",
             "id": id,
             "method": "session/prompt",
-            "params": {
-                "sessionId": session_id,
-                "prompt": [{"type": "text", "text": source}],
-            },
+            "params": params,
         }))
         .expect("send session/prompt");
 
-    let mut seen_methods = Vec::new();
-    tokio::time::timeout(std::time::Duration::from_secs(15), async {
+    harn_clock::test_support::within(&format!("session/prompt response {id}"), async {
         loop {
             let line = response_rx
                 .recv()
                 .await
                 .expect("ACP response channel closed");
             let message: serde_json::Value = serde_json::from_str(&line).expect("ACP JSON line");
+            if message["id"] != id {
+                eprintln!(
+                    "session/prompt response {id}: saw {}",
+                    message["method"]
+                        .as_str()
+                        .unwrap_or("<response-with-another-id>")
+                );
+            }
             if answer_host_capabilities(request_tx, &message) {
-                seen_methods.push("host/capabilities".to_string());
                 continue;
             }
             if message["id"] == id {
                 return message;
             }
-            seen_methods.push(
-                message["method"]
-                    .as_str()
-                    .unwrap_or("<response-with-another-id>")
-                    .to_string(),
-            );
         }
     })
     .await
-    .unwrap_or_else(|_| {
-        panic!("timed out waiting for session/prompt response {id}; saw {seen_methods:?}")
-    })
 }
 
 /// The falsifier for the served-path blocker, driven over the real ACP wire in
@@ -161,12 +173,13 @@ pipeline default(harness: Harness) {
                 )
                 .await;
 
-            let admitted = prompt(
+            let admitted = prompt_with_identity(
                 &request_tx,
                 &mut response_rx,
                 &session_id,
                 2,
                 "runtime-control",
+                Some("default-opening-caller"),
             )
             .await;
             assert!(
@@ -179,6 +192,14 @@ pipeline default(harness: Harness) {
                 admitted["result"]["stopReason"], "end_turn",
                 "default-mode control-plane turn should complete; got {}",
                 admitted["result"]
+            );
+            let transcript = harn_vm::agent_sessions::transcript(&session_id)
+                .expect("the default served agent opened its transcript");
+            let transcript = harn_vm::llm::vm_value_to_json(&transcript);
+            assert_eq!(transcript["messages"][0]["role"], "user", "{transcript}");
+            assert_eq!(
+                transcript["messages"][0]["messageId"], "default-opening-caller",
+                "{transcript}"
             );
 
             // The control: an unmarked write, on the same live session, that

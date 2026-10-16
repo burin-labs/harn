@@ -78,6 +78,8 @@ pub struct ToolScorecardRoute {
     pub model: String,
     pub catalog_claim: Option<ToolScorecardCatalogClaim>,
     pub report_count: usize,
+    /// Requirements satisfied by live reports, using the runtime admission rules.
+    pub passed_probes: Vec<String>,
     pub case_count: usize,
     pub successful_cases: usize,
     pub parseable_tool_call_cases: usize,

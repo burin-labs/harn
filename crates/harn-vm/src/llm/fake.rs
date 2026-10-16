@@ -336,7 +336,7 @@ impl LlmProviderChat for FakeLlmProvider {
         &'a self,
         request: &'a LlmRequestPayload,
         delta_tx: Option<DeltaSender>,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<LlmResult, VmError>> + 'a>> {
+    ) -> crate::llm::provider::ProviderChatFuture<'a> {
         Box::pin(self.chat_impl(request, delta_tx))
     }
 }
@@ -519,7 +519,9 @@ mod tests {
 
     fn fake_request() -> LlmRequestPayload {
         LlmRequestPayload {
+            reasoning_effort_source: crate::llm::ReasoningEffortSource::Request,
             data_controls: crate::llm_config::DataPosture::Default,
+            inference_boundary: None,
             provider: "fake".to_string(),
             model: "fake-model".to_string(),
             region: None,
@@ -544,6 +546,7 @@ mod tests {
             presence_penalty: None,
             parallel_tool_calls: None,
             provider_contract_probe: None,
+            portable_option_intent: Default::default(),
             fast: false,
             reasoning_mode: None,
             output_format: OutputFormat::Text,
@@ -721,7 +724,7 @@ mod tests {
             let chat = FakeLlmProvider.chat_impl(&request, None);
             tokio::pin!(chat);
 
-            // The chat future is parked on `tokio::time::sleep(60s)`. With
+            // The chat future is parked on the one-minute stall. With
             // a paused clock and no advance, polling once should leave it
             // pending — proving real wall-clock is not required.
             let polled = futures::poll!(&mut chat);

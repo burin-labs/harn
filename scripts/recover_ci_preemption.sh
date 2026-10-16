@@ -178,12 +178,17 @@ else
   workflow_path=$(gh api "/repos/$repo/actions/runs/$run_id" --jq '.path' \
     2> "$tmp_dir/workflow-metadata.err" || true)
   workflow_path="${workflow_path%@*}"
-  if [[ ! "$workflow_path" =~ ^\.github/workflows/[^/]+\.(yml|yaml)$ ]] \
-    || [[ ! -f "$repo_root/$workflow_path" ]]; then
+  if [[ ! "$workflow_path" =~ ^\.github/workflows/[^/]+\.(yml|yaml)$ ]]; then
     metadata_unavailable
     exit 0
   fi
-  cp -- "$repo_root/$workflow_path" "$workflow"
+  # Read the target repository's trusted default branch, including when this
+  # adapter runs from a SHA-pinned Harn checkout in a downstream repository.
+  if ! gh api "/repos/$repo/contents/$workflow_path" --jq '.content' \
+    2> "$tmp_dir/workflow-source.err" | base64 --decode > "$workflow"; then
+    metadata_unavailable
+    exit 0
+  fi
 fi
 
 while IFS= read -r job_id; do
@@ -245,12 +250,12 @@ fi
 planned_action=$(jq -r '.planned_action' <<< "$receipt")
 case "$planned_action" in
   rerun_failed_jobs)
-    gh run rerun "$(jq -r '.run_id' <<< "$receipt")" --repo "$repo" --failed
+    gh run rerun "$(jq -r '.run_id' <<< "$receipt")" --repo "$repo" --failed >&2
     ;;
   requeue_merge_queue)
     pr_number=$(jq -r '.pr_number // empty' <<< "$receipt")
     [[ "$pr_number" =~ ^[1-9][0-9]*$ ]] || die "policy selected requeue without a PR number"
-    gh pr merge "$pr_number" --repo "$repo" --auto --squash
+    gh pr merge "$pr_number" --repo "$repo" --auto --squash >&2
     ;;
   none|none_max_attempts_reached|manual_merge_group_recovery|manual_recovery)
     ;;

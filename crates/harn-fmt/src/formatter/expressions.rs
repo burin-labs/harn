@@ -1,5 +1,6 @@
 use harn_lexer::StringSegment;
-use harn_parser::{Node, ParallelMode, SNode, TypeExpr, TypedParam};
+use harn_parser::operators::{OperandSide, Precedence, RANGE_EXCLUSIVE, RANGE_INCLUSIVE};
+use harn_parser::{BinaryOperator, Node, ParallelMode, SNode, TypeExpr, TypedParam};
 
 use crate::helpers::*;
 
@@ -160,14 +161,11 @@ impl Formatter<'_> {
             Node::Identifier(name) => name.clone(),
             Node::DurationLiteral(ms) => format_duration(*ms),
             Node::BinaryOp { op, left, right } => {
-                if op == "+" && plus_chain_depth(left) >= 64 {
+                if matches!(op, BinaryOperator::Add) && plus_chain_depth(left) >= 64 {
                     return self.format_deep_plus_chain(node, indent, column);
                 }
-                let op_str = if op == "not_in" {
-                    "not in"
-                } else {
-                    op.as_str()
-                };
+                let op = *op;
+                let op_str = op.symbol();
                 let left_grouped = child_needs_parens(op, &left.node, false);
                 let right_grouped = child_needs_parens(op, &right.node, true);
                 let left_layout = layout.grouped_left(left_grouped);
@@ -199,7 +197,7 @@ impl Formatter<'_> {
                         r = format!("({r})");
                     }
                     let pad = "  ".repeat(indent + 1);
-                    if op_safe_after_newline(op_str) {
+                    if op.continues_across_newline() {
                         // Claim any trailing comment on the left operand's last
                         // line before we break, so it isn't orphaned. The
                         // statement-level trailing-comment pass only sees the
@@ -222,7 +220,7 @@ impl Formatter<'_> {
                 }
             }
             Node::UnaryOp { op, operand } => {
-                let expr = self.format_expr(operand, indent, column + text_width(op));
+                let expr = self.format_expr(operand, indent, column + text_width(op.symbol()));
                 if needs_parens_as_unary_operand(&operand.node) {
                     format!("{op}({expr})")
                 } else {
@@ -422,20 +420,25 @@ impl Formatter<'_> {
                 true_expr,
                 false_expr,
             } => {
-                // A range bound to a ternary part must be parenthesized: a bare
-                // range as the condition would swallow the `?:` into its end
-                // bound, and as a branch it simply fails to re-parse.
-                let cond =
-                    paren_if_range(self.format_expr(condition, indent, column), &condition.node);
+                let branch = |formatted: String, node: &SNode| {
+                    grouped_operand(
+                        formatted,
+                        Precedence::Ternary,
+                        &node.node,
+                        OperandSide::TernaryBranch,
+                    )
+                };
+                let cond = grouped_operand(
+                    self.format_expr(condition, indent, column),
+                    Precedence::Ternary,
+                    &condition.node,
+                    OperandSide::TernaryCondition,
+                );
                 let t_col = column_after(column, &cond) + 3;
                 let emitted_before_true = self.emitted_lines.borrow().clone();
-                let mut t =
-                    paren_if_range(self.format_expr(true_expr, indent, t_col), &true_expr.node);
+                let mut t = branch(self.format_expr(true_expr, indent, t_col), true_expr);
                 let mut f_col = column_after(t_col, &t) + 3;
-                let mut f = paren_if_range(
-                    self.format_expr(false_expr, indent, f_col),
-                    &false_expr.node,
-                );
+                let mut f = branch(self.format_expr(false_expr, indent, f_col), false_expr);
 
                 // ` : false_expr` belongs to the true branch's final line.
                 // If that real suffix overflows, let the true branch choose a
@@ -445,18 +448,15 @@ impl Formatter<'_> {
                 let true_suffix_width = 3 + false_first_width;
                 if column_after(t_col, &t) + true_suffix_width > self.line_width {
                     *self.emitted_lines.borrow_mut() = emitted_before_true;
-                    t = paren_if_range(
+                    t = branch(
                         self.format_expr_in_layout(
                             true_expr,
                             ExprLayout::new(indent, t_col).with_suffix_width(true_suffix_width),
                         ),
-                        &true_expr.node,
+                        true_expr,
                     );
                     f_col = column_after(t_col, &t) + 3;
-                    f = paren_if_range(
-                        self.format_expr(false_expr, indent, f_col),
-                        &false_expr.node,
-                    );
+                    f = branch(self.format_expr(false_expr, indent, f_col), false_expr);
                 }
                 format!("{cond} ? {t} : {f}")
             }
@@ -465,7 +465,7 @@ impl Formatter<'_> {
             } => {
                 let t = self.format_expr(target, indent, column);
                 let v_col = column_after(column, &t)
-                    + op.as_deref().map_or(3, |operator| text_width(operator) + 3);
+                    + op.map_or(3, |operator| text_width(operator.symbol()) + 3);
                 let v = self.format_expr(value, indent, v_col);
                 if let Some(op) = op {
                     format!("{t} {op}= {v}")
@@ -509,16 +509,27 @@ impl Formatter<'_> {
                 end,
                 inclusive,
             } => {
-                // A range bound that is itself a range needs parens; `a to b to c`
-                // is non-associative and would not re-parse.
-                let s = paren_if_range(self.format_expr(start, indent, column), &start.node);
-                let end_col = column_after(column, &s) + 4;
-                let e = paren_if_range(self.format_expr(end, indent, end_col), &end.node);
-                if *inclusive {
-                    format!("{s} to {e}")
+                // Range formation does not associate, and every looser operand
+                // (`??`, comparisons, a ternary) needs parens to stay a bound.
+                let operator = if *inclusive {
+                    RANGE_INCLUSIVE
                 } else {
-                    format!("{s} to {e} exclusive")
-                }
+                    RANGE_EXCLUSIVE
+                };
+                let s = grouped_operand(
+                    self.format_expr(start, indent, column),
+                    Precedence::Range,
+                    &start.node,
+                    OperandSide::Left,
+                );
+                let end_col = column_after(column, &s) + operator.len();
+                let e = grouped_operand(
+                    self.format_expr(end, indent, end_col),
+                    Precedence::Range,
+                    &end.node,
+                    OperandSide::Right,
+                );
+                format!("{s}{operator}{e}")
             }
             Node::Closure {
                 params,
@@ -1159,7 +1170,11 @@ impl Formatter<'_> {
         let mut cursor = root;
         loop {
             match &cursor.node {
-                Node::BinaryOp { op, left, right } if op == "+" => {
+                Node::BinaryOp {
+                    op: BinaryOperator::Add,
+                    left,
+                    right,
+                } => {
                     terms.push(right.as_ref());
                     cursor = left.as_ref();
                 }
@@ -1174,7 +1189,7 @@ impl Formatter<'_> {
         let mut output = self.format_expr(terms[0], indent, column);
         for term in terms.into_iter().skip(1) {
             let mut right = self.format_expr(term, indent, column_after(column, &output) + 3);
-            if child_needs_parens("+", &term.node, true) {
+            if child_needs_parens(BinaryOperator::Add, &term.node, true) {
                 right = format!("({right})");
             }
             let current_col = column_after(column, &output);
@@ -1279,7 +1294,7 @@ fn plus_chain_depth(node: &SNode) -> usize {
     let mut depth = 0;
     let mut cursor = node;
     while let Node::BinaryOp { op, left, .. } = &cursor.node {
-        if op != "+" {
+        if !matches!(op, BinaryOperator::Add) {
             break;
         }
         depth += 1;

@@ -85,8 +85,8 @@ fn a_profile_that_honors_the_fallback_reports_the_selector_as_honored() {
 #[test]
 fn caught_value_exposes_the_fields_a_consumer_would_have_parsed() {
     let error = match unavailable(
-        SandboxMechanism::WindowsAppContainer,
-        SandboxMechanismAvailability::EntryPointCannotAttach,
+        SandboxMechanism::MacosSandboxExec,
+        SandboxMechanismAvailability::AbsentOnHost,
         SandboxProfile::OsHardened,
     ) {
         Ok(_) => panic!("an OsHardened spawn must refuse an unattachable mechanism"),
@@ -110,8 +110,8 @@ fn caught_value_exposes_the_fields_a_consumer_would_have_parsed() {
         other => panic!("{key} must be a string, got {other:?}"),
     };
     assert_eq!(cause_string("schema"), SandboxMechanismUnavailable::SCHEMA);
-    assert_eq!(cause_string("mechanism"), "windows_app_container");
-    assert_eq!(cause_string("availability"), "entry_point_cannot_attach");
+    assert_eq!(cause_string("mechanism"), "macos_sandbox_exec");
+    assert_eq!(cause_string("availability"), "absent_on_host");
     assert_eq!(cause_string("profile"), "os_hardened");
     assert_eq!(cause_string("requirement"), "profile");
     assert!(

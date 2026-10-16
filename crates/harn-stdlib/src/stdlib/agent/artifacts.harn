@@ -207,19 +207,35 @@ pub type ServedMessageLineage = {
 
 pub type ServedContextProjectionLineage = {policy: string, event_ref?: string, prefix_hash?: string}
 
+// Why a lineage receipt lists every served message instead of continuing the
+// session's previous receipt.
+pub type ServedMessageLineageFullReason = "no_predecessor" | "prefix_diverged"
+
+pub type ServedMessageLineageBase = {kind: "full", reason: ServedMessageLineageFullReason} \
+  | {kind: "continuation", previous_lineage_id: string, previous_message_count: int}
+
+// Prefix-chained lineage (`harn.llm.message_lineage.v2`). `messages` holds only
+// the entries at positions `previous_message_count .. message_count`; a
+// `continuation` base names the receipt holding the earlier positions by its
+// `lineage_id`. Resolve chains with the runtime's lineage reader rather than
+// walking them by hand: it verifies every link and fails on a missing one.
 pub type ServedMessageLineageManifest = {
-  schema: "harn.llm.message_lineage.v1",
+  schema: "harn.llm.message_lineage.v2",
+  lineage_id: string,
   call_id: string,
   iteration: int,
   session_id?: string,
   projection: ServedContextProjectionLineage,
+  message_count: int,
+  base: ServedMessageLineageBase,
   messages: list<ServedMessageLineage>,
 }
 
-// Self-describing served-context receipt (`harn.llm.served_context.v1`). Every
-// hash is over redacted content. The ordered lineage resolves each message to
+// Self-describing served-context receipt (`harn.llm.served_context.v2`). Every
+// hash is over redacted content. The chained lineage resolves each message to
 // one content-addressed `served_message` event so a reader can reconstruct the
-// exact provider-visible sequence without verbose snapshots.
+// exact provider-visible sequence without verbose snapshots, and
+// `messages_content_hash` verifies the reconstructed array.
 pub type ServedContext = {
   schema: string,
   redaction: string,

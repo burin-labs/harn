@@ -19,7 +19,7 @@ pub type SessionId = String;
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ForkResult {
     pub child_session_id: SessionId,
-    pub forked_from_event_id: EventId,
+    pub forked_from_event_id: Option<EventId>,
     pub copied_event_count: usize,
 }
 
@@ -351,6 +351,8 @@ pub enum StoreContention {
     /// The operating-system lock does not distinguish a writer from another
     /// maintenance owner, so callers must not infer the contending process.
     ProjectLeaseHeld,
+    /// Another live executor owns this task identity.
+    TaskExecutionHeld,
 }
 
 impl std::fmt::Display for StoreContention {
@@ -360,6 +362,7 @@ impl std::fmt::Display for StoreContention {
             Self::DatabaseLocked => f.write_str("database_locked"),
             Self::MaintenanceActive => f.write_str("maintenance_active"),
             Self::ProjectLeaseHeld => f.write_str("project_lease_held"),
+            Self::TaskExecutionHeld => f.write_str("task_execution_held"),
         }
     }
 }
@@ -499,16 +502,60 @@ pub trait SessionStore: Send + Sync {
     /// without callers wiring the sink explicitly.
     fn hooks(&self) -> &StoreHooks;
 
+    /// Task admission is a backend capability. Unsupported stores cannot
+    /// silently dispatch tasks without durable retry and lifecycle facts.
+    fn task_store(&self) -> Option<&dyn crate::task::TaskStore> {
+        None
+    }
+
     async fn create(&self, request: CreateSession) -> StoreResult<SessionMeta>;
     async fn update(&self, session_id: &str, request: UpdateSession) -> StoreResult<SessionMeta>;
     async fn describe(&self, session_id: &str) -> StoreResult<SessionMeta>;
     async fn list(&self, filter: ListFilter) -> StoreResult<Vec<SessionMeta>>;
     async fn append(&self, session_id: &str, event: AppendEvent) -> StoreResult<StoredEvent>;
     async fn read(&self, session_id: &str, range: ReadRange) -> StoreResult<EventPage>;
+    /// Drain the canonical event sequence using the store's cursor contract.
+    async fn read_all(&self, session_id: &str) -> StoreResult<Vec<StoredEvent>> {
+        let mut events = Vec::new();
+        let mut cursor = None;
+        loop {
+            let page = self
+                .read(
+                    session_id,
+                    ReadRange {
+                        from_event_id: cursor,
+                        limit: Some(MAX_READ_BATCH),
+                        ..ReadRange::default()
+                    },
+                )
+                .await?;
+            cursor = page.next_cursor;
+            events.extend(page.events);
+            if cursor.is_none() {
+                return Ok(events);
+            }
+        }
+    }
+    /// Acknowledge durable rows through the same contract on every transport.
+    /// This read makes no claim about pending producer journals; their owner
+    /// must flush before requiring an acknowledgement for a newly emitted event.
+    async fn history_boundaries(
+        &self,
+        session_id: &str,
+    ) -> StoreResult<crate::CanonicalHistoryBoundaries> {
+        // A missing session must never look like an acknowledged empty history.
+        self.describe(session_id).await?;
+        let events = self.read_all(session_id).await?;
+        Ok(crate::CanonicalHistoryBoundaries::from_events(
+            session_id, &events,
+        ))
+    }
+    /// Copy an acknowledged event prefix, or no events for an explicit empty boundary.
+    /// Both cases retain the parent's metadata and explicit child lineage.
     async fn fork(
         &self,
         session_id: &str,
-        at_event_id: EventId,
+        boundary: crate::CanonicalSessionBoundary,
         child_id: Option<SessionId>,
     ) -> StoreResult<ForkResult>;
     async fn truncate(&self, session_id: &str, at_event_id: EventId)

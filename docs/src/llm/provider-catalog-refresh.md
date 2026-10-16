@@ -12,6 +12,18 @@ signals from provider sources, normalizes them, and emits:
   `.harn-runs/provider_catalog/refresh.json`, with adapter coverage,
   observations, provenance, conflicts, and typed drift.
 
+Refresh compares the stored rate card, including promotions, schedules, and
+input-token bands. `harness.llm.provider_catalog()` exposes that complete card
+without resolving it at the current time. Cost estimates and completed-call
+receipts resolve prices through the pricing engine, so an off-peak refresh does not
+mistake a scheduled discount for a changed base rate.
+
+Price comparison ignores source links, review notes, and generated window or
+promotion names. It expands weekday groups and applies the pricing engine's
+default cache multipliers before comparing schedules. Rates, dates, time
+boundaries, weekdays, UTC offsets, token thresholds, and tool fees still count
+as price changes. Reports and candidate patches retain the original records.
+
 The workflow never mutates the shipped catalog. The patch is a review
 aid: diff it against the TOML fragments under
 `crates/harn-vm/src/llm/catalog_sources/`, the capability fragments under
@@ -121,6 +133,11 @@ The model is limited to a schema-constrained extraction:
   and old/new values for changes that require them;
 - the model never receives a file mutation tool and never emits TOML.
 
+For an existing model, extraction sees that provider's catalog IDs, names,
+and current prices. An uncertain identity is rejected for review; an unknown
+ID in a price or retirement candidate cannot masquerade as a new-model
+addition.
+
 Deterministic code resolves the provider and model identity. For an existing
 model, it verifies the old value, finds exactly one owning source table, and
 applies the constrained edit. Duplicate identities are rejected. An
@@ -164,14 +181,25 @@ harn run \
 ```
 
 For a live extraction, omit `--extraction` and optionally choose `--provider`
-and `--model`. The extraction has a $0.10 per-notice cap. By default the script
-only writes an idempotent local receipt below
-`.harn/provider-catalog-notices/`. `--apply` requires a clean, dedicated
-worktree and runs catalog generation plus drift, artifact, documentation,
-support, and capability checks. `--open-pr` uses a stable branch derived from
-the notice digest, pushes it, and opens a **draft** PR. It never enables merge
-or auto-merge. A repeated notice reuses the same digest and returns an existing
-PR instead of creating another.
+and `--model`. Without `--model`, Harn uses that provider's catalog default;
+it does not pair a cross-provider tier alias with the selected provider.
+The live extraction schema requires a `candidate` field, allowing `null` when
+the notice has no catalog change. This keeps providers from omitting the change
+record while returning classification `candidate`.
+`--max-cost-usd` caps its one model call at $0.10 by default;
+`--extraction-timeout-secs` caps that call at 90 seconds by default. By
+default the script only writes an idempotent local receipt below
+`.harn/provider-catalog-notices/`. An incomplete new model writes a proposal
+beside the receipt, even with `--apply --open-pr`, and leaves Git untouched.
+A validated patch with `--apply` requires a clean, dedicated worktree and
+regenerates the catalog, matrix, and support projections before their checks.
+Pass `--harn-bin /absolute/path/to/harn` to use one already built Harn binary
+for generation and checks. The workflow runs the catalog's deterministic
+refresh, artifact, matrix, and support gates. CI also runs the sandbox and
+documentation snippet gates outside this nested Harn execution.
+`--open-pr` signs the commit, stages only tracked changes, and opens a
+**draft** PR on a stable branch derived from the notice digest. It never
+enables merge or auto-merge. A repeated notice returns the existing PR.
 
 ```bash
 git worktree add ../harn-provider-notice origin/main
@@ -258,6 +286,16 @@ TOML.
 
 ## Measuring portable option claims
 
+An option can depend on an explicitly selected effort. A capability rule with
+`portable_option_effort_support = { temperature = ["none"] }` admits temperature
+only when the resolved request selects `effort: "none"` and the route supports
+that effort. This condition overrides the route-wide temperature flag for that
+request. An omitted effort does not satisfy it, even when Harn represents both
+omission and explicit `none` as disabled reasoning. Direct GPT-6 Sol and Luna
+use this condition. OpenRouter clears the grant because its endpoints do not
+advertise temperature, even with `none`; structured evaluations there omit
+sampling rather than relying on a tolerated, unforwarded field.
+
 Use `harn provider option-probe` when the catalog says an endpoint accepts or
 rejects one of Harn's portable generation options. The command makes one small
 request through the normal provider adapter and compares the provider's answer
@@ -288,6 +326,29 @@ provider error taxonomy's structured `invalid_request` reason proves that the
 wire shape was rejected. The attempt owns its physical request count: a local
 gate reports zero requests and remains unmeasured, while a provider response or
 served-empty response reports one.
+
+Every rejection needs a successful control request without the selected option.
+If that control also fails, the option remains unmeasured with
+`failure_class: "control_failed"`. A timeout gets one immediate retry; a rate limit
+gets one retry after the runtime's `retry_after_ms`, or one second when it is
+absent. The HTTP error owner caps that hint at 60 seconds and preserves whether
+the provider requested a longer deadline. An over-cap provider deadline or
+typed delay remains unmeasured without a retry. A persistent rate limit remains
+unmeasured. Receipts include
+the retry and control in request, usage, and cost counts; an unpriced request
+remains an accounting gap even when a later request has a price.
+
+Ungated OpenRouter probes require endpoints that advertise all requested
+parameters. An explicit parameter-routing refusal is classified as
+`invalid_request`; a failure involving another routing filter remains
+unmeasured. Acceptance proves advertised support and request acceptance,
+not semantic enforcement of the option.
+
+An OpenRouter account privacy refusal produces `excluded_by_account_policy`
+with the provider message and no observed option-support value. The campaign
+counts these exclusions separately from eligible unmeasured cells. An exclusion
+cannot satisfy either measured control direction, and a campaign containing
+only exclusions remains incomplete. Preserve the account privacy settings.
 
 Normal calls use the catalog to reject or remove unsupported options before
 egress. A truthful negative probe must let its selected option reach the
@@ -327,12 +388,23 @@ harn run --no-sandbox scripts/provider_tool_probe_campaign.harn -- \
 
 Review the dry run, then add `--live`. A live option campaign is incomplete
 unless it contains at least one measured-supported and one measured-unsupported
-control. Its `claim_controls` receipt prints both counts and the unmeasured
-count, so zero observations cannot read as healthy. Individual
+control, with no unavailable or eligible unmeasured option cells. Its
+`claim_controls` receipt counts support, non-support, account-policy exclusions,
+unavailable backends, and unmeasured cells separately. A changing pool's
+controlled rejection measures current compatible-backend availability rather
+than stable non-support; its probe and control receipts retain the selected
+backend identities. Missing selection remains unmeasured. Individual
 `option-probe-*.json` receipts join the same catalog hash, runtime fingerprint,
 sharding, credential-name readiness, and budget ledger as tool-call receipts.
-Credential-missing and otherwise skipped option cells count as unmeasured in a
-live campaign, so partial endpoint coverage cannot satisfy the control.
+Credential-missing option cells count as unmeasured in a live campaign;
+account-policy exclusions have their own count. Partial eligible endpoint
+coverage cannot satisfy the control. Pass
+`--provider` to declare the providers a run is responsible for; a declared
+provider with no credential still fails the run. The weekly `Provider contract
+probe` workflow declares its providers in `PROBE_PROVIDERS` next to the secrets
+it receives. Catalog routes marked `availability = "dedicated"` are not
+selected, because a serverless request to a model the provider serves only
+from a deployment returns not-found whatever the option.
 
 Fixture mode intentionally covers only deterministic public sources.
 Live mode adds provider-owned `/models` sources across the hosted
@@ -463,10 +535,22 @@ reasoning_effort_levels = ["low", "high", "max"]  # measured, not asserted
 
 Harn authors edit small TOML fragments under
 `crates/harn-vm/src/llm/catalog_sources/`. Harn generates the embedded
-runtime snapshot at `crates/harn-vm/src/llm/providers.toml` from those
+runtime snapshot at `crates/harn-provider-catalog/src/providers.toml` from those
 fragments. Provider capability rules use the same pattern:
 `crates/harn-vm/src/llm/capability_sources/` generates
-`crates/harn-vm/src/llm/capabilities.toml`.
+`crates/harn-provider-catalog/src/capabilities.toml`.
+
+`00-base.toml` names the `default_provider`, used when a call names neither a
+provider nor a model. `40-defaults/provider-models.toml` records each
+provider's `runtime` and `portal` default; they may differ deliberately. A
+provider without a `runtime` entry has no default model, and a call naming only
+that provider fails before dispatch rather than borrowing another provider's
+model. The retired top-level `fallback_model` key is still accepted in
+overlays, and becomes the `runtime` default of the overlay's default provider. Keep those routes in the
+catalog rather than in Rust match tables. Catalog generation rejects unknown,
+provider-mismatched, or deprecated choices there, in `qc_defaults`, the three
+tier aliases, and model ladders. Host environment overrides for local models
+remain runtime input, so the built-in catalog cannot validate their IDs.
 
 ```bash
 # Regenerate providers.toml, capabilities.toml, and all checked-in
@@ -477,8 +561,8 @@ harn provider catalog generate
 harn provider catalog generate --check
 ```
 
-Direct edits to `crates/harn-vm/src/llm/providers.toml` and
-`crates/harn-vm/src/llm/capabilities.toml` are invalid. The files are
+Direct edits to `crates/harn-provider-catalog/src/providers.toml` and
+`crates/harn-provider-catalog/src/capabilities.toml` are invalid. The files are
 checked in so Harn can still embed known-good offline snapshots with
 `include_str!`, but `make check-provider-catalog` proves every checked-in
 provider catalog projection matches the fragments.
@@ -539,6 +623,13 @@ Matrix and support generation read the same on-disk catalog and capability
 fragments as `generate`. Run them from the repository root; fragment edits
 don't require rebuilding the CLI. Outside a checkout, missing source directories
 use embedded defaults. Present but invalid sources fail instead of falling back.
+
+Support generation recommends one route per provider and never picks one by
+price. A provider with an active chat route needs a `recommended_model` entry
+in `crates/harn-cli/data/provider_support_notes.toml` or a `qc_defaults`
+entry; otherwise `harn provider catalog support` fails and names it. Adding a
+new provider, or a cheaper row to an existing one, therefore cannot move a
+recommendation silently.
 
 Matrix generation is hermetic by default. To inspect local coding-agent parity
 receipts without changing checked-in output, pass them explicitly:
@@ -722,7 +813,7 @@ When harn-serve is not running, clients can still use the checked-in
 baseline. Product and user overlays should be composed in this order,
 with later layers winning per key:
 
-1. Harn's bundled provider catalog (`crates/harn-vm/src/llm/providers.toml`,
+1. Harn's bundled provider catalog (`crates/harn-provider-catalog/src/providers.toml`,
    generated from `crates/harn-vm/src/llm/catalog_sources/`, or the
    generated `provider-catalog.json` when the client cannot load TOML
    directly)
@@ -803,7 +894,7 @@ replace them without forking the entry script.
   requires_key}`. Removals only fire when at least one source for
   that provider successfully reported, so a missing API key never
   silently looks like a removal. Missing price fields mean “not reported,”
-  not “removed.” Active dated promotions are used for price comparison.
+  not “removed.” Stored dated promotions are compared by their dates and rates.
 - `render_markdown_report(drift, conflicts, adapter_runs, meta)` —
   renders the section-by-section markdown report (adapter status,
   added/removed/changed models, conflicts, unknown pricing,
@@ -829,10 +920,21 @@ Each adapter is a function `adapter(env, config) -> {run, observations}`.
 
 ### Entry script: `scripts/update_provider_catalog.harn`
 
-Wires four canonical adapters (Anthropic and OpenAI pricing pages,
-the OpenRouter public `/api/v1/models` index, and a key-gated
-Fireworks API stub). Each adapter spec is built by a small
-factory function so the manifest stays readable.
+Fixture mode replays Anthropic and OpenAI pricing pages, the OpenRouter
+public index, and a key-gated Fireworks source. Live mode reads model-index
+sources and its network allowlist from
+`spec/provider-catalog-refresh-sources.json`, including the public OpenRouter
+index. Each source selects an existing mapper by a closed, typed name and
+declares whether its index requires a key and who owns its observations.
+
+The provider catalog supplies credential environment names and authentication
+style. The source registry carries no duplicate credential aliases. Harn's VM
+catalog projects these facts from the same artifact used by catalog tooling
+and includes the provider's local or hosted classification.
+
+Both modes validate the source registry before running an adapter. Empty
+registries, duplicate source IDs, unknown providers, and malformed typed
+records fail the refresh, including the offline `--check` path.
 
 ## Provenance contract
 

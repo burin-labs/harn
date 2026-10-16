@@ -5,7 +5,7 @@ use super::*;
 
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
-use std::thread::{self, JoinHandle};
+use std::thread::JoinHandle;
 
 pub(crate) struct OneShotHttpServer {
     port: u16,
@@ -16,7 +16,7 @@ impl OneShotHttpServer {
     pub(crate) fn start() -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind loopback probe server");
         let port = listener.local_addr().expect("probe server addr").port();
-        let handle = thread::spawn(move || {
+        let handle = crate::runtime_stack::spawn(move || {
             if let Ok((mut stream, _)) = listener.accept() {
                 let mut buf = [0u8; 1024];
                 // A real client sends request bytes; the release connect from

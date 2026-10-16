@@ -1036,6 +1036,7 @@ pub fn blocked_command_response(
     result.insert("stderr_utf8_valid".to_string(), VmValue::Bool(true));
     result.put_str("combined", message);
     result.insert("success".to_string(), VmValue::Bool(false));
+    result.insert("verifier_receipt".to_string(), VmValue::Nil);
     result.put_str("error", "permission_denied");
     result.put_str("reason", message);
     result.put_str("audit_id", format!("audit_{command_id}"));
@@ -1339,7 +1340,7 @@ fn apply_command_rewrite(
         }
     }
     match string_field_raw(params, "mode").as_deref() {
-        Some("shell") => {
+        Some("shell" | "auto") => {
             params.remove("argv");
         }
         Some("argv") => {
@@ -1411,7 +1412,7 @@ fn command_request_json(params: &crate::value::DictMap) -> JsonValue {
         ),
         _ => None,
     });
-    let (shell, shell_resolution_error) = if mode == "shell" {
+    let (shell, shell_resolution_error) = if matches!(mode.as_str(), "shell" | "auto") {
         match crate::shells::resolve_shell_from_vm_params(params) {
             Ok(shell) => (
                 crate::llm::vm_value_to_json(&crate::shells::shell_descriptor_to_vm_value(&shell)),

@@ -11,6 +11,74 @@ use crate::orchestration::*;
 use crate::value::VmDictExt;
 
 #[tokio::test(flavor = "current_thread")]
+async fn compaction_fallback_does_not_override_cancellation() {
+    for (category, allow_fallback) in [
+        ("invalid_request", true),
+        ("cancelled", true),
+        ("invalid_request", false),
+    ] {
+        crate::llm::reset_llm_state();
+        crate::llm::push_llm_mock(
+            crate::llm::parse_llm_mock_value(&serde_json::json!({
+                "error": {"category": category, "message": "explicit typed control"}
+            }))
+            .expect("typed mock error"),
+        );
+        let mut options = crate::value::DictMap::new();
+        options.put_str("provider", "mock");
+        options.put_str("model", "mock");
+        let llm_opts = crate::llm::extract_llm_options(&[
+            crate::value::VmValue::string("compaction control"),
+            crate::value::VmValue::Nil,
+            crate::value::VmValue::dict(options),
+        ])
+        .expect("mock call options");
+        let original = vec![
+            serde_json::json!({"role": "user", "content": "old task"}),
+            serde_json::json!({"role": "assistant", "content": "necessary evidence"}),
+            serde_json::json!({"role": "user", "content": "current task"}),
+        ];
+        let mut messages = original.clone();
+        let mut config = AutoCompactConfig {
+            token_threshold: 0,
+            keep_last: 1,
+            compact_strategy: CompactStrategy::Llm,
+            fallback_strategy: allow_fallback.then_some(CompactStrategy::Truncate),
+            ..Default::default()
+        };
+        let result = run_compaction_lifecycle(
+            &mut messages,
+            &mut config,
+            Some(&llm_opts),
+            CompactLifecycle::new(CompactMode::Manual).with_hook_dispatch(false),
+        )
+        .await;
+        assert_eq!(
+            crate::llm::get_llm_mock_calls().len(),
+            1,
+            "primary strategy reached"
+        );
+        if category == "cancelled" || !allow_fallback {
+            let Err(error) = result else {
+                panic!("uncaught failure must propagate");
+            };
+            assert_eq!(
+                crate::value::error_to_category(&error),
+                crate::value::ErrorCategory::parse(category)
+            );
+            assert_eq!(messages, original, "failed compaction cannot mutate source");
+        } else {
+            let outcome = result
+                .expect("ordinary error falls back")
+                .expect("compaction fired");
+            assert_eq!(outcome.receipt.engine_strategy, "truncate");
+            assert_ne!(messages, original, "positive control reached fallback");
+        }
+        crate::llm::reset_llm_state();
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn manual_compaction_without_a_threshold_source_remains_unmeasured() {
     let mut messages = vec![
         serde_json::json!({"role": "user", "content": "old task"}),

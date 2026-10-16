@@ -177,7 +177,7 @@ fn __completion_claim_results(dispatch: AgentToolDispatch) -> list {
 
 fn __completion_claim_payload(result: dict) {
   const payload = result?.result
-  if payload?.schema == "harn.agent_tool_handler_result.v1" {
+  if payload?.schema == "harn.agent_tool_handler_result.v2" {
     return payload?.data
   }
   return payload

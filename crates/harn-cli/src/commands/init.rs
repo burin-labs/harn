@@ -150,9 +150,8 @@ mod tests {
         let destination = temp.path().join("typed-connector");
         fs::create_dir(&destination).expect("connector destination");
         let moved_destination = destination.clone();
-        let exit = std::thread::Builder::new()
+        let exit = harn_parser::runtime_stack::builder()
             .name("typed-connector-scaffold".to_string())
-            .stack_size(crate::CLI_RUNTIME_STACK_SIZE)
             .spawn(move || {
                 let runtime = tokio::runtime::Builder::new_current_thread()
                     .enable_all()
@@ -200,9 +199,8 @@ mod tests {
             let destination = temp.path().join(format!("fresh-{kind}"));
             fs::create_dir(&destination).expect("destination");
             let scaffold_target = destination.clone();
-            let exit = std::thread::Builder::new()
+            let exit = harn_parser::runtime_stack::builder()
                 .name(format!("{kind}-docs-scaffold"))
-                .stack_size(crate::CLI_RUNTIME_STACK_SIZE)
                 .spawn(move || {
                     let runtime = tokio::runtime::Builder::new_current_thread()
                         .enable_all()

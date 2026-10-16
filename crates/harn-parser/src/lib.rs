@@ -1,7 +1,11 @@
+/// Crate-local source contribution to compiler and check cache identities.
+pub const SOURCE_FINGERPRINT: &str = env!("HARN_SOURCE_FINGERPRINT");
+
 pub mod acp_ambient_globals;
 pub mod analysis;
 mod ast;
 pub mod ast_json;
+pub mod builtin_methods;
 pub mod builtin_signatures;
 pub mod const_eval;
 pub mod diagnostic;
@@ -9,8 +13,12 @@ pub mod diagnostic_codes;
 pub mod interpolation;
 pub mod lexical;
 mod namespace_demand;
+pub mod namespace_signatures;
+pub mod operator_migration;
+pub mod operators;
 pub mod param_annotations;
 mod parser;
+pub mod runtime_stack;
 pub mod stdlib_metadata;
 pub mod typechecker;
 pub mod visit;
@@ -21,7 +29,9 @@ pub use diagnostic_codes::{
     RepairId, RepairSafety, RepairTemplate, REPAIR_REGISTRY,
 };
 pub use namespace_demand::{namespace_import_demands, NamespaceDemand};
+pub use namespace_signatures::NamespaceMemberSignature;
 pub use parser::*;
+pub use runtime_stack::{PARSE_STACK_SIZE, RUNTIME_STACK_SIZE};
 pub use stdlib_metadata::{
     parse_for_span as parse_stdlib_metadata, synthesize_example, StdlibMetadata,
 };
@@ -187,6 +197,7 @@ pub fn static_signature_names() -> impl Iterator<Item = &'static str> {
 /// Error from a source processing pipeline stage. Wraps the inner error
 /// types so callers can dispatch on the failing stage.
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum PipelineError {
     Lex(harn_lexer::LexerError),
     Parse(ParserError),
@@ -232,6 +243,7 @@ impl PipelineError {
             PipelineError::Parse(e) => match e {
                 ParserError::Unexpected { span, .. } => Some(span),
                 ParserError::UnexpectedEof { span, .. } => Some(span),
+                ParserError::RemovedRangeSyntax { span } => Some(span),
             },
             PipelineError::TypeCheck(diag) => diag.span.as_ref(),
         }
@@ -268,12 +280,6 @@ pub fn check_source_strict(source: &str) -> Result<Vec<SNode>, PipelineError> {
 #[cfg(test)]
 mod pipeline_tests {
     use super::*;
-
-    #[test]
-    fn parse_source_valid() {
-        let program = parse_source("const x = 1").unwrap();
-        assert!(!program.is_empty());
-    }
 
     #[test]
     fn parse_source_lex_error() {

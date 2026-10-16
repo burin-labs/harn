@@ -9,6 +9,9 @@ use serde::{Deserialize, Serialize};
 use super::evidence::{approval_batch, fingerprint};
 use super::*;
 
+mod pending_approval;
+pub use pending_approval::PendingSessionApproval;
+
 pub const PREPARED_SESSION_SCHEMA: &str = "harn.prepared_session.v1";
 pub const PREPARED_SESSION_SCHEMA_ARTIFACT: &str = "schemas/prepared-session-v1.schema.json";
 pub const PREPARED_SESSION_V1_SCHEMA_JSON: &str =
@@ -45,6 +48,7 @@ pub struct PreparedRuntimeAttachment {
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct PreparedSessionApprovalDecision {
+    pub request_id: uuid::Uuid,
     pub batch_fingerprint: String,
     pub approved: bool,
     pub decider: AuthorityDecider,
@@ -205,7 +209,15 @@ impl PreparedSessionLeaseStore for FilePreparedSessionLeaseStore {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PendingPreparationState {
+    Waiting,
+    Decided,
+    Retired,
+}
+
 struct PendingPreparedSession {
+    identity: Arc<Mutex<PendingPreparationState>>,
     intent: RunIntent,
     host_facts: HostFacts,
     binding: PreparedSessionBindingV1,
@@ -227,6 +239,12 @@ impl ActivePreparedSession {
     /// envelope, including any approved semantic deltas.
     pub fn authorize(&self, requirement: &AuthorityRequirement) -> Result<(), String> {
         self.authority.authorize(requirement)
+    }
+
+    /// Publish the actual agent terminal to the shared authority receipt
+    /// owner before `finish` or `stop` retires this session.
+    pub fn record_agent_terminal(&self, terminal: crate::agent_events::AgentTerminalOutcome) {
+        self.authority.record_agent_terminal(terminal);
     }
 }
 
@@ -250,6 +268,28 @@ impl<E> PreparedSession<E> {
             ready: Mutex::new(BTreeMap::new()),
             pending_deltas: Mutex::new(BTreeMap::new()),
         }
+    }
+
+    /// Run an embedded turn in the attached session's authority and identity
+    /// scope. Local runtimes may pass a non-Send future; no extra executor or
+    /// thread is required. Each material operation must still call
+    /// `active.authorize` immediately before its side effect.
+    ///
+    /// Turn completion does not retire the session. The owner calls `finish`
+    /// or `stop` after its accepted lifecycle event.
+    pub async fn run_turn_with<F: std::future::Future>(
+        &self,
+        active: &ActivePreparedSession,
+        turn: F,
+    ) -> F::Output {
+        active.authority.mark_executor_invoked();
+        scope_prepared_identity(
+            active.authority.clone(),
+            self.run.identity_brokers.clone(),
+            self.run.identity_consumer.clone(),
+            turn,
+        )
+        .await
     }
 
     pub fn prepare(
@@ -293,6 +333,7 @@ impl<E> PreparedSession<E> {
                     .insert(
                         binding.session_id.clone(),
                         PendingPreparedSession {
+                            identity: Arc::new(Mutex::new(PendingPreparationState::Waiting)),
                             intent,
                             host_facts,
                             binding: binding.clone(),
@@ -326,12 +367,20 @@ impl<E> PreparedSession<E> {
         session_id: &str,
         decision: PreparedSessionApprovalDecision,
     ) -> PreparedSessionUpdate {
-        let Some(mut pending) = self
+        self.decide_bound(session_id, decision, None)
+    }
+
+    fn decide_bound(
+        &self,
+        session_id: &str,
+        decision: PreparedSessionApprovalDecision,
+        identity: Option<&Arc<Mutex<PendingPreparationState>>>,
+    ) -> PreparedSessionUpdate {
+        let mut pending_sessions = self
             .pending
             .lock()
-            .expect("prepared-session pending state poisoned")
-            .remove(session_id)
-        else {
+            .expect("prepared-session pending state poisoned");
+        let Some(pending) = pending_sessions.get(session_id) else {
             return blocked(
                 session_id.to_string(),
                 "prepared_session_not_waiting",
@@ -339,14 +388,25 @@ impl<E> PreparedSession<E> {
                 None,
             );
         };
-        if decision.batch_fingerprint != pending.batch.batch_fingerprint {
+        if decision.request_id != pending.batch.request_id
+            || decision.batch_fingerprint != pending.batch.batch_fingerprint
+            || identity.is_some_and(|identity| !Arc::ptr_eq(identity, &pending.identity))
+        {
             return blocked(
                 session_id.to_string(),
                 "prepared_session_approval_binding",
                 "approval decision does not match the grouped request",
-                Some(pending.receipt),
+                Some(pending.receipt.clone()),
             );
         }
+        let mut pending = pending_sessions
+            .remove(session_id)
+            .expect("validated pending session is held under the same lock");
+        *pending
+            .identity
+            .lock()
+            .expect("pending preparation state poisoned") = PendingPreparationState::Decided;
+        drop(pending_sessions);
         let mut decision_receipt = pending.receipt.clone();
         decision_receipt.stage = AuthorityReceiptStage::ApprovalDecision;
         decision_receipt.observed_at_ms = (self.run.now_ms)();
@@ -485,6 +545,18 @@ impl<E> PreparedSession<E> {
                 "prepared-session lease fingerprint is invalid",
             ));
         }
+        let intent_plan = super::engine::plan_from_intent(lease.intent.clone());
+        let intent_fingerprint =
+            fingerprint("harn prepared-run plan v1", &intent_plan).map_err(|error| {
+                blocked_update(&lease.session_id, "prepared_session_intent", &error)
+            })?;
+        if intent_fingerprint != lease.plan_fingerprint {
+            return Err(blocked_update(
+                &lease.session_id,
+                "prepared_session_intent_drift",
+                "serialized intent does not match the original prepared authority plan",
+            ));
+        }
         if attachment.session_id != lease.binding.session_id
             || attachment.workspace_fingerprint != lease.binding.workspace_fingerprint
             || attachment.runtime != lease.binding.runtime
@@ -516,6 +588,13 @@ impl<E> PreparedSession<E> {
         let authority_lease = if let Some(authority_lease) = local {
             authority_lease
         } else {
+            if !lease.intent.verifier_loaders.is_empty() {
+                return Err(blocked_update(
+                    &lease.session_id,
+                    "verifier_baseline_unmeasured",
+                    "the original host-owned verifier material is unavailable; attach cannot recapture it after mutation",
+                ));
+            }
             if let Some(approval) = &lease.approval {
                 if approval.approved {
                     host_facts
@@ -649,28 +728,40 @@ impl<E> PreparedSession<E> {
         active: &ActivePreparedSession,
         decision: PreparedSessionApprovalDecision,
     ) -> PreparedSessionUpdate {
-        let Some(pending) = self
+        let mut pending_deltas = self
             .pending_deltas
             .lock()
-            .expect("prepared-session delta state poisoned")
-            .remove(&active.lease.session_id)
-        else {
+            .expect("prepared-session delta state poisoned");
+        let Some(pending) = pending_deltas.get(&active.lease.session_id) else {
             return blocked_update(
                 &active.lease.session_id,
                 "prepared_session_delta_not_waiting",
                 "prepared session is not waiting for a delta approval",
             );
         };
-        let outcome = if decision.batch_fingerprint != pending.batch.batch_fingerprint {
-            PreparedSessionDelta::Blocked {
-                diagnostic: AuthorityDiagnostic {
-                    code: "prepared_session_delta_binding".to_string(),
-                    message: "delta approval does not match the semantic batch".to_string(),
-                    requirement_fingerprint: None,
-                    actionable: "Approve the exact pending delta batch.".to_string(),
+        if decision.request_id != pending.batch.request_id
+            || decision.batch_fingerprint != pending.batch.batch_fingerprint
+            || pending.delta.parent_lease_fingerprint != active.authority.lease().lease_fingerprint
+        {
+            return PreparedSessionUpdate::Delta {
+                session_id: active.lease.session_id.clone(),
+                outcome: PreparedSessionDelta::Blocked {
+                    diagnostic: AuthorityDiagnostic {
+                        code: "prepared_session_delta_binding".to_string(),
+                        message:
+                            "delta approval does not match the active lease and semantic batch"
+                                .to_string(),
+                        requirement_fingerprint: None,
+                        actionable: "Approve the exact pending delta batch.".to_string(),
+                    },
                 },
-            }
-        } else if !decision.approved {
+            };
+        }
+        let pending = pending_deltas
+            .remove(&active.lease.session_id)
+            .expect("validated pending delta is held under the same lock");
+        drop(pending_deltas);
+        let outcome = if !decision.approved {
             PreparedSessionDelta::Blocked {
                 diagnostic: AuthorityDiagnostic {
                     code: "prepared_session_delta_denied".to_string(),
@@ -694,16 +785,13 @@ impl<E> PreparedSession<E> {
     }
 }
 
-impl<E: PreparedRunExecutor> PreparedSession<E> {
-    pub async fn run_turn(&self, active: &ActivePreparedSession) -> Result<E::Output, E::Error> {
-        active.authority.mark_executor_invoked();
-        scope_prepared_identity(
-            active.authority.clone(),
-            self.run.identity_brokers.clone(),
-            self.run.identity_consumer.clone(),
-            self.run.executor.execute(&active.authority),
-        )
-        .await
+impl<E> PreparedSession<E> {
+    pub async fn run_turn(&self, active: &ActivePreparedSession) -> Result<E::Output, E::Error>
+    where
+        E: PreparedRunExecutor,
+    {
+        self.run_turn_with(active, self.run.executor.execute(&active.authority))
+            .await
     }
 
     pub fn finish(
@@ -727,9 +815,12 @@ impl<E: PreparedRunExecutor> PreparedSession<E> {
         active: ActivePreparedSession,
         pivot: bool,
     ) -> Result<PreparedSessionUpdate, String> {
+        active.authority.record_accepted_stop(pivot);
         let mut receipt = active
             .authority
             .terminal_receipt(false, (self.run.now_ms)());
+        // This control was accepted by the session owner. Preserve its typed
+        // outcome in durable evidence instead of reporting executor failure.
         receipt.diagnostics.push(AuthorityDiagnostic {
             code: if pivot {
                 "prepared_session_pivot"

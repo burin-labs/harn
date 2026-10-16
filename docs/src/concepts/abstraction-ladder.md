@@ -146,5 +146,3 @@ Harn without moving editor or terminal UI policy into the stdlib.
   (LLM call, iteration, agent loop, stage, workflow, session…).
 - [Coming from elsewhere](./sota-comparison.md) — what LangGraph / OpenAI / ACP
   call the same ideas.
-- [Migrating to 0.10](../migrations/v0.10.md) — the removed resilience options
-  (`llm_retries`, `llm_backoff_ms`, `transcript_policy`) and their replacements.

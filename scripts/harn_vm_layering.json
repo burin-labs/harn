@@ -1,0 +1,54 @@
+{
+  "baseline": {
+    "agent_events->orchestration": 6,
+    "agent_sessions->orchestration": 12,
+    "agent_sessions->stdlib": 17,
+    "connectors->stdlib": 9,
+    "llm->agent_events": 142,
+    "llm->agent_sessions": 420,
+    "llm->native_vm": 1,
+    "llm->orchestration": 276,
+    "llm->stdlib": 153,
+    "llm->triggers": 6,
+    "llm_config->llm": 55,
+    "llm_config->orchestration": 1,
+    "llm_config->stdlib": 12,
+    "orchestration->stdlib": 131,
+    "provider_catalog->llm": 8,
+    "provider_catalog->stdlib": 1,
+    "triggers->native_vm": 2,
+    "triggers->stdlib": 34
+  },
+  "layers": [
+    [
+      "value",
+      "tool_call_mutations",
+      "package_scripts"
+    ],
+    [
+      "vm",
+      "runtime_effects"
+    ],
+    [
+      "llm_config",
+      "provider_catalog"
+    ],
+    [
+      "llm"
+    ],
+    [
+      "agent_events",
+      "agent_sessions"
+    ],
+    [
+      "orchestration",
+      "triggers",
+      "connectors"
+    ],
+    [
+      "stdlib",
+      "harness_methods",
+      "native_vm"
+    ]
+  ]
+}

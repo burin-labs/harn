@@ -40,7 +40,7 @@ pipeline default(harness: Harness, task: unknown) {
   harness.stdio.log("First > 100: ${[10, 20, 60, 30].find({ x -> x > 100 })}")
   const config = {debug: true, verbose: false, level: 3}
   const overrides = {verbose: true, timeout: 30}
-  const merged = config.merging(overrides)
+  const merged = config.merge(overrides)
   harness.stdio.log("Merged keys: ${merged.keys()}")
   harness.stdio.log("Verbose: ${merged.verbose}")
   const nested = [[1, 2], [3], [4, 5, 6]]
@@ -52,7 +52,7 @@ pipeline default(harness: Harness, task: unknown) {
   const b = nil
   const c = "found"
   harness.stdio.log("Coalesce: ${a ?? b ?? c}")
-  const processed = "  Hello, World!  " |> { s -> s.trim() } |> { s -> s.lowercase() }
+  const processed = "  Hello, World!  " |> { s -> s.trim() } |> { s -> s.lower() }
     |> { s -> s.replace("world", "harn") }
   harness.stdio.log("Processed: ${processed}")
   harness.stdio.log("All stress tests passed!")

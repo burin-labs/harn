@@ -7,14 +7,18 @@
 # Short flagship aliases — these track whatever the current
 # generation is. Bump these when a successor lands.
 [aliases.sonnet]
-id = "claude-sonnet-5"
+id = "claude-sonnet-5-5"
 provider = "anthropic"
 
+[aliases.sonnet55]
+id = "claude-sonnet-5-5"
+provider = "anthropic"
+
+# Previous Sonnet generations, kept addressable for pinned workflows.
 [aliases.sonnet5]
 id = "claude-sonnet-5"
 provider = "anthropic"
 
-# Previous Sonnet generation, kept addressable for pinned workflows.
 [aliases.sonnet46]
 id = "claude-sonnet-4-6"
 provider = "anthropic"
@@ -52,15 +56,25 @@ id = "claude-fable-5"
 provider = "anthropic"
 
 [aliases.haiku]
+id = "claude-haiku-5-5"
+provider = "anthropic"
+
+[aliases.haiku55]
+id = "claude-haiku-5-5"
+provider = "anthropic"
+
+# Previous Haiku generation, kept addressable for pinned workflows. Unlike
+# Haiku 5.5 it accepts temperature and assistant prefill.
+[aliases.haiku45]
 id = "claude-haiku-4-5-20251001"
 provider = "anthropic"
 
 [aliases.frontier]
-id = "claude-sonnet-5"
+id = "claude-sonnet-5-5"
 provider = "anthropic"
 
 [aliases."tier/frontier"]
-id = "claude-sonnet-5"
+id = "claude-sonnet-5-5"
 provider = "anthropic"
 
 # Default balanced hosted route for routine coding-agent work.
@@ -79,9 +93,11 @@ id = "accounts/fireworks/models/gpt-oss-120b"
 provider = "fireworks"
 
 # GPT-6 tiers: Astra is the frontier, Sol the balanced tier (GPT-6 has no
-# Terra; Sol is cheaper than GPT-5.6 Terra), Luna the small tier.
+# Terra; Sol is cheaper than GPT-5.6 Terra), Luna the small tier. The balanced
+# tier tracks the newest Sol, GPT-6.1 Sol (2026-09-29); GPT-6 Sol stays
+# addressable by id and as `sol6`.
 [aliases."openai/mid"]
-id = "gpt-6-sol"
+id = "gpt-6.1-sol"
 provider = "openai"
 
 [aliases."openai/frontier"]
@@ -109,6 +125,14 @@ id = "gpt-6-astra"
 provider = "openai"
 
 [aliases.sol]
+id = "gpt-6.1-sol"
+provider = "openai"
+
+[aliases.sol61]
+id = "gpt-6.1-sol"
+provider = "openai"
+
+[aliases.sol6]
 id = "gpt-6-sol"
 provider = "openai"
 
@@ -325,12 +349,8 @@ id = "sambanova/Meta-Llama-3.3-70B-Instruct"
 provider = "sambanova"
 tool_format = "native"
 
-# probed 2026-06-24 (provider-tool-mode-sweep): native AND fenced-JSON both
-# corrupt backslash bodies (0/5), heredoc text 5/5 byte-clean. Pin text.
-[aliases."sambanova-minimax-m2.7"]
-id = "sambanova/MiniMax-M2.7"
-provider = "sambanova"
-tool_format = "text"
+# Retired the M2.7 alias after its recorded 2026-10-01 sunset. The historical
+# model row keeps its identity and retirement facts; M3 has its own selector.
 
 # M3 traffic was unavailable during the 2026-08-26 audit. Keep the proven
 # SambaNova MiniMax family format until a route-specific fidelity sweep passes.
@@ -373,6 +393,27 @@ provider = "openrouter"
 [aliases."together-qwen3.7-max"]
 id = "Qwen/Qwen3.7-Max"
 provider = "together"
+
+# Qwen 3.8 Max. OpenRouter publishes only the dated 0902 snapshot.
+[aliases."qwen3.8-max"]
+id = "qwen/qwen3.8-max-0902"
+provider = "openrouter"
+
+[aliases."openrouter-qwen3.8-max"]
+id = "qwen/qwen3.8-max-0902"
+provider = "openrouter"
+
+[aliases."deepinfra-qwen3.8-max"]
+id = "deepinfra/Qwen/Qwen3.8-Max"
+provider = "deepinfra"
+
+[aliases."openrouter-kimi-k3"]
+id = "moonshotai/kimi-k3"
+provider = "openrouter"
+
+[aliases."deepinfra-minimax-m3"]
+id = "deepinfra/MiniMaxAI/MiniMax-M3"
+provider = "deepinfra"
 
 # Qwen 3.6 via OpenRouter. These route through Harn capability rows that keep
 # provider-native tools, disable Qwen reasoning automatically for tool-bearing

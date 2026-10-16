@@ -1,0 +1,110 @@
+name: Build Smart Ship package
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_source_sha:
+        description: Exact main source to package, which must match this workflow run.
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: smart-ship-package-${{ github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  candidate:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - name: Check out the workflow's exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install the qualified runtime
+        id: harn
+        uses: ./.github/actions/setup-harn
+        with:
+          version: '0.10.166'
+      - name: Set up the stock Node executor
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+      - name: Install the locked manifest owner
+        working-directory: scripts/package-release
+        run: harn install --frozen
+      - name: Build and qualify the actual archive
+        env:
+          HARN_BIN: ${{ steps.harn.outputs.path }}
+          EXPECTED_SOURCE_SHA: ${{ inputs.expected_source_sha }}
+        run: >-
+          harn run --allow-process-network --write-root "$GITHUB_WORKSPACE"
+          --environment-policy isolated scripts/package-release/cli.harn -- workflow
+          "$GITHUB_WORKSPACE" "$HARN_BIN" "$EXPECTED_SOURCE_SHA" "$GITHUB_SHA"
+          "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT"
+      - name: Attest the qualified files
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: |
+            .harn/smart-ship-candidate/*.tar.gz
+            .harn/smart-ship-candidate/SHA256SUMS
+            .harn/smart-ship-candidate/package-release.json
+            .harn/smart-ship-candidate/verification.json
+            .harn/smart-ship-candidate/test-inventory.json
+            .harn/smart-ship-candidate/release-notes.md
+          predicate-type: https://harnlang.com/attestations/source-package/v1
+          predicate-path: .harn/smart-ship-candidate/predicate.json
+      - name: Upload the tested package files
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: harn-smart-ship-release-files
+          path: |
+            .harn/smart-ship-candidate/*.tar.gz
+            .harn/smart-ship-candidate/SHA256SUMS
+            .harn/smart-ship-candidate/package-release.json
+            .harn/smart-ship-candidate/verification.json
+            .harn/smart-ship-candidate/test-inventory.json
+            .harn/smart-ship-candidate/release-notes.md
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 30
+          overwrite: true
+      - name: Upload byte-identical metadata for bounded selection
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: harn-smart-ship-package-metadata
+          path: .harn/smart-ship-candidate/package-release.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 30
+          overwrite: true
+      - name: Upload the candidate manifest
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: candidate-manifest-${{ github.sha }}
+          path: .harn/smart-ship-candidate/candidate-manifest.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 30
+          overwrite: true
+      - name: Preserve observed verification diagnostics
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: smart-ship-package-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            .harn/smart-ship-candidate/verification.json
+            .harn/smart-ship-candidate/test-inventory.json
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 14

@@ -21,20 +21,31 @@ mod test_util;
 #[path = "../support/required_pr_e2e.rs"]
 mod required_pr_e2e;
 
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+mod acp_confinement_cli;
 mod acp_registry_manifest;
 mod acp_server_cli;
 mod agent_run_command_argv_coercion;
 mod artifact_manifest_schema;
 mod attributed_decl_cli;
+mod bubblewrap_fallback_e2e;
 mod cache_dir_cli;
 mod canon_dispatch;
 mod check_fmt_json_cli;
 mod check_result_cache;
 mod check_strict_cli;
+mod checkpoint_concurrency;
 mod codemod_dispatch;
 mod command_probe_parent_liveness;
 mod conformance_json_cli;
 mod conformance_process_lifetime_e2e;
+#[cfg(unix)]
+mod connect_legacy_recovery;
+#[cfg(unix)]
+mod connect_secret_env_redaction;
+#[cfg(unix)]
+mod connect_secret_store;
+mod conservative_experiment;
 mod coverage_cli;
 mod decision_route_admission;
 mod demo_cli_e2e;
@@ -44,6 +55,7 @@ mod dispatch_echo;
 mod dispatch_snapshot;
 mod doctor_cli;
 mod doctor_dispatch;
+mod durable_spend_policy;
 mod environment_registry_cli;
 mod eval_calibrate_cli;
 mod eval_cluster_dispatch;
@@ -56,6 +68,7 @@ mod evaluation_receipt_verification;
 mod explain_dispatch;
 mod git_config_sandbox_cli;
 mod graph_cli;
+mod guardian_namespace_e2e;
 mod harn_script_lint_rules_dispatch;
 mod harn_serve_api_cli;
 mod harn_serve_mcp_cli;
@@ -63,11 +76,13 @@ mod host_lease_cli;
 #[cfg(unix)]
 mod host_lease_crash_cli;
 mod hosted_worker_connectors_e2e;
+mod in_process_grant;
 mod json_schemas_cli;
 mod lint_changed_cli;
 mod lint_fix_exit_cli;
 mod lint_replay_version_upgrade_json_cli;
 mod lint_strict_cli;
+mod llm_fixture_policy;
 mod mcp_lazy_registration;
 mod mcp_server_cli;
 mod merge_captain_cli;
@@ -75,6 +90,7 @@ mod merge_captain_mock_cli;
 mod model_context;
 mod models_dispatch;
 mod native_rule_libraries;
+mod operator_syntax_migration_cli;
 mod orchestrator_cli;
 #[cfg(unix)]
 mod orchestrator_cli_e2e;
@@ -82,6 +98,7 @@ mod orchestrator_cli_e2e;
 mod orchestrator_inbox_dedupe;
 mod package_cache_sandbox_cli;
 mod package_generation_concurrency_cli_e2e;
+mod package_manager_roots_cli;
 mod package_registry_verify_cli;
 mod package_verify_cli;
 mod parse_tokens_cli;
@@ -89,9 +106,13 @@ mod path_metadata_persistence_cli;
 mod persona_activation_cli_e2e;
 mod pg_codegen_cli;
 mod precompile_dispatch;
+mod precompiled_interfaces;
 mod predicate_contract;
+#[cfg(target_os = "macos")]
+mod process_smoke_cli;
 mod provider_catalog_sources;
 mod provider_dispatch_audit;
+mod provider_option_qualification;
 mod providers_dispatch;
 mod replay_session_cli;
 mod routes_cli;
@@ -107,6 +128,8 @@ mod runs_export_training_cli;
 mod runs_view_cli;
 mod scaffold_dispatch;
 mod scan_dispatch;
+mod secret_absence;
+mod shard_coverage_cli;
 #[cfg(unix)]
 mod sidecar_version_cli;
 mod skills_cli;
@@ -118,6 +141,7 @@ mod trace_import_dispatch;
 mod trace_prefix_stability_cli;
 mod trusted_host_dispatch_cli;
 mod try_dispatch;
+mod typed_tool_outcomes;
 mod usage_cli;
 mod user_test_cli;
 mod user_test_reports_cli;
@@ -125,6 +149,24 @@ mod version_dispatch;
 mod workflow_authoring_eval;
 mod workflow_cli;
 mod workflow_patch_cli;
+
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+const _: [(&str, fn()); 2] = [
+    (
+        required_pr_e2e::CASES[15],
+        acp_confinement_cli::confine_workspace_holds_the_server_and_its_commands_to_the_workspace,
+    ),
+    (
+        required_pr_e2e::CASES[16],
+        acp_confinement_cli::without_confine_workspace_the_same_write_lands_outside,
+    ),
+];
+
+#[cfg(target_os = "macos")]
+const _: (&str, fn()) = (
+    required_pr_e2e::CASES[17],
+    process_smoke_cli::process_smoke_matches_the_hosts_measured_confinement,
+);
 
 const _: [(&str, fn()); 12] = [
     (

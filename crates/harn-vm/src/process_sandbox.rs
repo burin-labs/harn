@@ -4,8 +4,8 @@
 //! `harn-hostlib` deterministic-tool builtins) must funnel every spawn
 //! through these helpers so the active orchestration capability policy is
 //! enforced — Linux seccomp/landlock filters via `pre_exec`, macOS
-//! `sandbox-exec` wrapping, Windows AppContainer + Job Object launches
-//! through `command_output`, plus workspace-root cwd enforcement.
+//! `sandbox-exec` wrapping, no OS confinement on Windows (a warning, or a
+//! refusal under `os_hardened`), plus workspace-root cwd enforcement.
 //!
 //! The same surface also exposes [`check_fs_path_scope`] so embedders that
 //! resolve host *paths* on behalf of Harn scripts (the `harn-hostlib`
@@ -19,17 +19,66 @@
 
 pub use crate::stdlib::sandbox::{
     active_backend_available, active_backend_filesystem_available,
-    active_backend_filesystem_mechanism, active_backend_name, active_workspace_process_env,
-    apply_active_rustc_wrapper_policy, check_fs_path_scope, command_output, conformance,
-    deterministic_message_locale_env, enforce_process_cwd, infer_process_sandbox_mechanism,
-    is_process_sandbox_signal, process_spawn_error, process_violation_error,
-    push_process_sandbox_scope, render_policy_root, rustc_wrapper, std_command_for,
-    std_command_for_with_env_state, tokio_command_for, workspace_local_tmpdir, FsAccess,
-    ProcessCommandConfig, ProcessSandboxAssessment, ProcessSandboxDenialReporting,
-    ProcessSandboxGrants, ProcessSandboxMechanism, ProcessSandboxOperation, ProcessSandboxRefusal,
-    ProcessSandboxReportingContext, ProcessSandboxScope, ProcessSandboxScopeGuard,
-    SandboxMechanism, SandboxMechanismAvailability, SandboxMechanismUnavailable,
-    SandboxRequirement, SandboxViolation, MESSAGE_LOCALE_OVERRIDE_ENV,
+    active_backend_filesystem_mechanism, active_backend_mechanism, active_backend_mechanism_limits,
+    active_backend_name, active_workspace_process_env, apply_active_rustc_wrapper_policy,
+    apply_active_rustc_wrapper_policy_for_command, check_fs_path_scope,
+    check_git_metadata_path_scope, command_output, conformance, deterministic_message_locale_env,
+    enforce_process_cwd, enforcement, host_confinement, infer_process_sandbox_mechanism,
+    is_process_sandbox_signal, is_workspace_runtime_directory, process_spawn_error,
+    process_violation_error, push_process_sandbox_scope, render_policy_root, rustc_wrapper,
+    session_std_command, session_tokio_command, std_command_for, std_command_for_with_env_state,
+    tokio_command_for, tokio_command_for_with_env_state, validate_command_environment,
+    workspace_local_tmpdir, FsAccess, ProcessCommandConfig, ProcessSandboxAssessment,
+    ProcessSandboxDenialReporting, ProcessSandboxGrants, ProcessSandboxMechanism,
+    ProcessSandboxOperation, ProcessSandboxRefusal, ProcessSandboxReportingContext,
+    ProcessSandboxScope, ProcessSandboxScopeGuard, SandboxMechanism, SandboxMechanismAvailability,
+    SandboxMechanismUnavailable, SandboxRequirement, SandboxViolation, MESSAGE_LOCALE_OVERRIDE_ENV,
+    SANDBOX_CONFINEMENT_SCHEMA,
+};
+
+pub use crate::stdlib::git_topology::check_repository_metadata_scope;
+pub use crate::stdlib::sandbox::command_output_with_declared_roots;
+
+impl ProcessSandboxScope {
+    /// Parse the shared per-command workspace scope at the process boundary.
+    pub fn from_value(value: Option<&crate::VmValue>) -> Result<Self, crate::VmError> {
+        use crate::VmValue;
+        let invalid = |message: String| crate::VmError::TypeError(format!("sandbox: {message}"));
+        let map = match value {
+            None | Some(VmValue::Nil) => return Ok(Self::default()),
+            Some(VmValue::Dict(map)) => map,
+            Some(other) => {
+                return Err(invalid(format!("expected dict, got {}", other.type_name())))
+            }
+        };
+        let roots = match map.get("workspace_roots") {
+            None | Some(VmValue::Nil) => return Ok(Self::default()),
+            Some(VmValue::List(roots)) => roots,
+            Some(other) => {
+                return Err(invalid(format!(
+                    "workspace_roots must be a list of strings, got {}",
+                    other.type_name()
+                )))
+            }
+        };
+        let workspace_roots = roots
+            .iter()
+            .map(|root| match root {
+                VmValue::String(root) if !root.trim().is_empty() => Ok(root.to_string()),
+                _ => Err(invalid(
+                    "workspace_roots entries must be nonempty strings".into(),
+                )),
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(Self { workspace_roots })
+    }
+}
+
+/// Confine the running process, not a child, under a capability policy. An
+/// agent server calls this once before it serves; see the module for what a
+/// confined process's children inherit on each platform.
+pub use crate::stdlib::sandbox::self_confinement::{
+    confine_current_process, current_process_confinement, ProcessConfinement,
 };
 
 /// The subcommand the namespace helper is invoked as, and the flags that
@@ -54,6 +103,46 @@ pub const NETNS_RULESET_FD_FLAG: &str = "--ruleset-fd";
 /// Flag carrying the compiled seccomp program, hex-encoded.
 pub const NETNS_SECCOMP_FLAG: &str = "--seccomp-hex";
 
+/// Inherited setup descriptor to close before an already-confined payload exec.
+pub const NETNS_CLOSE_FD_FLAG: &str = "--close-fd";
+
+/// One device source whose mounted identity must hold before payload exec.
+/// The argument contract exists on every CLI platform; Linux executes it.
+#[derive(Clone, Debug)]
+pub struct DeviceMountFinalization {
+    pub descriptor: i32,
+    pub destination: std::path::PathBuf,
+}
+
+impl std::fmt::Display for DeviceMountFinalization {
+    fn fmt(&self, out: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(out, "{}:{}", self.descriptor, self.destination.display())
+    }
+}
+
+impl std::str::FromStr for DeviceMountFinalization {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        let (descriptor, destination) = value
+            .split_once(':')
+            .ok_or("device finalization requires FD:absolute-path")?;
+        let descriptor = descriptor
+            .parse::<i32>()
+            .map_err(|_| "invalid device descriptor")?;
+        let destination = std::path::PathBuf::from(destination);
+        if descriptor < 3 || !destination.is_absolute() || value.contains('\0') {
+            return Err(
+                "device finalization requires an owned descriptor and absolute path".into(),
+            );
+        }
+        Ok(Self {
+            descriptor,
+            destination,
+        })
+    }
+}
+
 /// The hook that carries the ruleset descriptor across that `exec`, without
 /// which the helper enters no ruleset while the layer above still reports the
 /// filesystem boundary as enforced.
@@ -63,6 +152,12 @@ pub const NETNS_SECCOMP_FLAG: &str = "--seccomp-hex";
 /// name costs two lines there for no benefit to a reader.
 #[cfg(target_os = "linux")]
 pub use crate::stdlib::sandbox::linux::keep_ruleset_across_exec;
+#[cfg(target_os = "linux")]
+pub(crate) use crate::stdlib::sandbox::linux::sealed_launch_bytes;
+#[cfg(target_os = "linux")]
+pub use crate::stdlib::sandbox::linux::DescriptorTransfer;
+#[cfg(target_os = "linux")]
+pub use crate::stdlib::sandbox::linux::{command_for_reexec, ReexecConfinement};
 /// Confinement an embedder builds here and enters in a process it re-execs.
 ///
 /// An embedder that spawns the payload directly never needs this: `pre_exec`

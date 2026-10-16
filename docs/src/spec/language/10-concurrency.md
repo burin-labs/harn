@@ -210,8 +210,10 @@ defer {
 ```
 
 Registers a block to run when the enclosing lexical scope exits — on normal
-fallthrough, on `return`, on `break` / `continue` out of an enclosing loop,
-or on an uncaught throw. Multiple `defer` blocks in the same scope execute
+fallthrough, on `return` (including the early return of a postfix `?`), on
+`break` / `continue` out of an enclosing loop,
+or on an error leaving the scope, including one raised by a called function
+or a failing operation. Multiple `defer` blocks in the same scope execute
 in LIFO (last-registered, first-executed) order, similar to Zig's `defer`.
 The deferred block runs in the scope where it was declared.
 
@@ -349,7 +351,7 @@ fn main(harness: Harness) {
     "state:customer-42", 250ms,
   )
   const slot = harness.runtime.sync_semaphore_acquire(
-    "connector:notion", 4, 1, 2s,
+    "connector:linear", 4, 1, 2s,
   )
   const gate = harness.runtime.sync_gate_acquire(
     "workflow-runner", 8, 5s,
@@ -499,7 +501,16 @@ compatibility boundary, and effective file-reader operands produced by the
 quote-aware command parser. Arbitrary string arguments and inert interpreter
 source are not paths. Declared host-absolute paths outside the workspace are
 denied unless `external_roots` covers the path or
-`allow_external_paths: true` is set. `ask` decisions call the host via
+`allow_external_paths: true` is set. Each `external_roots` entry is a path
+string or `{path, access}` with `access` one of `read` (the default) or
+`read_write`; a path string means `read`. The deepest root containing a path
+decides its mode. Under a `read` root, a call not known to be read-only is
+denied with id `external_root_read_only`, even when `allow_external_paths` is
+set. An approval-policy root does not by itself grant filesystem access: the
+file builtins and confined children read only the capability policy's
+`read_only_roots`, so a host projects a `read` root there to make it readable
+by them. Intersecting two approval policies keeps the
+narrower mode for a root both name. `ask` decisions call the host via
 `session/request_permission` and fail closed when no host bridge is attached.
 Each approval decision produces a `harn.permission_policy_decision.v1` receipt
 containing the matched rule, risk labels, normalized context, and rationale;

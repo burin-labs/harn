@@ -36,6 +36,18 @@ pub type LlmOutcomeKind = "complete" | "tool_use" | "truncated" | "refused" | "p
  */
 pub type LlmOutcome = {kind: LlmOutcomeKind, billed: bool}
 
+/** Who selected the effort the provider confirmed. */
+pub type ReasoningEffortSource = "operator" \
+  | "catalog" \
+  | "policy" \
+  | "request" \
+  | "provider_default" \
+  | "provider_adjusted"
+
+/** A response echo, or explicit absence of a usable report. */
+pub type EffectiveReasoningEffort = {status: "not_reported"} \
+  | {status: "reported", level: string, source: ReasoningEffortSource}
+
 /**
  * Single owner of ALL call accounting. No usage field is duplicated at the
  * envelope's top level.
@@ -158,6 +170,7 @@ pub type LlmResponse = {
   provider: string,
   usage: LlmUsage,
   outcome: LlmOutcome,
+  effective_reasoning_effort: EffectiveReasoningEffort,
   text: string,
   raw_text: string,
   visible_text: string,
@@ -192,6 +205,7 @@ pub type LlmStreamChunk = {
   role: string,
   stop_reason?: string,
   usage?: LlmUsage,
+  effective_reasoning_effort?: EffectiveReasoningEffort,
 }
 
 // -------------------------------------------------------------------------------------------------

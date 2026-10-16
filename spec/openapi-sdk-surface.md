@@ -1,7 +1,8 @@
 # Harn SDK OpenAPI surface audit
 
-`spec/openapi.yaml` is the canonical source for generated Harn Agents API SDKs.
-It covers the public REST and server-sent event surface exposed by
+`crates/harn-serve/openapi.yaml` is the canonical source for the server's
+published OpenAPI document and generated Harn Agents API SDKs. It covers the
+public REST and server-sent event surface exposed by
 `harn serve api`, including the stable local discovery paths and `/v1`
 operations that SDKs can model as normal request/response operations.
 

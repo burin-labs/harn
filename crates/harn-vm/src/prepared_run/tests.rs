@@ -13,8 +13,12 @@ use crate::orchestration::{
 
 use super::*;
 
+mod agent_terminal;
 mod executor_failures;
 mod identity_session;
+mod live_approval;
+#[cfg(target_os = "linux")]
+mod source_verifier;
 
 const NOW_MS: u64 = 1_000;
 const DEADLINE_MS: u64 = 61_000;
@@ -191,6 +195,7 @@ fn capability_policy() -> CapabilityPolicy {
 fn intent() -> RunIntent {
     RunIntent {
         intent_id: "steel-thread".to_string(),
+        verifier_loaders: Vec::new(),
         capability_policy: capability_policy(),
         network: vec![network("api.example.test")],
         secrets: vec![provider_secret("openai")],
@@ -257,6 +262,7 @@ fn net_policy() -> NetPolicy {
 fn host_facts() -> HostFacts {
     HostFacts {
         capability_ceiling: capability_policy(),
+        admitted_verifier_loaders: BTreeSet::new(),
         approval_policy: run_approval_policy(
             RunInteractivity::NonInteractive,
             ApprovalAvailability::Available,
@@ -300,6 +306,41 @@ fn executor_requirements() -> Vec<AuthorityRequirement> {
         AuthorityRequirement::Network(network("api.example.test")),
         AuthorityRequirement::Secret(provider_secret("openai")),
     ]
+}
+
+#[test]
+fn interactive_uncapped_dimensions_do_not_invent_authority_or_weaken_unattended_runs() {
+    let receipts = Arc::new(MemoryAuthorityReceiptSink::default());
+    let run = PreparedRun::with_clock((), receipts, Arc::new(|| NOW_MS));
+    let mut requested = intent();
+    requested.budget.time_ms = None;
+    requested.budget.turns = None;
+    let mut host = host_facts();
+    host.budget_ceiling.time_ms = None;
+    host.budget_ceiling.turns = None;
+
+    let unattended = run.prepare(requested.clone(), host.clone());
+    assert!(
+        matches!(unattended, PreparationOutcome::Blocked { ref diagnostics, .. }
+        if diagnostics.iter().any(|item| item.code == "incomplete_run_budget"))
+    );
+
+    requested.interactivity = RunInteractivity::Interactive;
+    host.approval_policy = run_approval_policy(
+        RunInteractivity::Interactive,
+        ApprovalAvailability::Available,
+        WorkspaceTrust::Trusted,
+    );
+    assert!(matches!(
+        run.prepare(requested.clone(), host.clone()),
+        PreparationOutcome::NeedsApproval { .. }
+    ));
+
+    host.budget_ceiling.turns = Some(12);
+    assert!(
+        matches!(run.prepare(requested, host), PreparationOutcome::Blocked { ref diagnostics, .. }
+        if diagnostics.iter().any(|item| item.code == "budget_ceiling" && item.message.contains("turns")))
+    );
 }
 
 fn prepared<E: PreparedRunExecutor>(
@@ -716,6 +757,128 @@ fn capability_root_outside_the_host_ceiling_blocks_during_preparation() {
 }
 
 #[test]
+fn requested_external_root_reaches_batched_approval_without_granting_access() {
+    let model_calls = Arc::new(AtomicUsize::new(0));
+    let run = PreparedRun::with_clock(
+        FixtureExecutor {
+            requirements: executor_requirements(),
+            model_calls: model_calls.clone(),
+        },
+        Arc::new(MemoryAuthorityReceiptSink::default()),
+        Arc::new(|| NOW_MS),
+    );
+    let mut host = host_facts();
+    host.approval_policy = RunApprovalPolicy::construct(host.approval_policy.posture(), |_| {
+        let mut policy = approval_policy();
+        policy.allow_external_paths = false;
+        policy
+    });
+    let root = AuthorityRequirement::FilesystemRead {
+        root: "/toolchains".to_string(),
+    };
+    match run.prepare(intent(), host) {
+        PreparationOutcome::NeedsApproval {
+            batched_requests,
+            receipt,
+        } => {
+            let decision = receipt
+                .policy_decisions
+                .iter()
+                .find(|decision| decision.requirement_fingerprint == requirement_fingerprint(&root))
+                .expect("the requested root reached the canonical policy evaluator");
+            assert_eq!(decision.action, "ask");
+            assert_eq!(
+                decision.matched_rule_id.as_deref(),
+                Some("review-prepared-run")
+            );
+            assert!(batched_requests
+                .groups
+                .iter()
+                .flat_map(|group| &group.requirement_fingerprints)
+                .any(|fingerprint| *fingerprint == requirement_fingerprint(&root)));
+            assert!(receipt.granted.is_empty());
+            assert!(!receipt.executor_invoked);
+        }
+        other => panic!("requested authority must be reviewed before access exists: {other:?}"),
+    }
+    assert_eq!(model_calls.load(Ordering::SeqCst), 0);
+}
+
+#[test]
+fn requested_root_preserves_authored_path_denial_and_sensitive_path_refusal() {
+    for sensitive in [false, true] {
+        let model_calls = Arc::new(AtomicUsize::new(0));
+        let run = PreparedRun::with_clock(
+            FixtureExecutor {
+                requirements: executor_requirements(),
+                model_calls: model_calls.clone(),
+            },
+            Arc::new(MemoryAuthorityReceiptSink::default()),
+            Arc::new(|| NOW_MS),
+        );
+        let root = if sensitive {
+            "/toolchains/.env"
+        } else {
+            "/toolchains"
+        };
+        let mut request = intent();
+        request.capability_policy.read_only_roots = vec![root.to_string()];
+        let mut host = host_facts();
+        host.approval_policy = RunApprovalPolicy::construct(host.approval_policy.posture(), |_| {
+            serde_json::from_value(json!({
+                "allow_sensitive_paths": !sensitive,
+                "allow_external_paths": false,
+                "rules": [{
+                    "id": "deny-requested-root", "action": "deny",
+                    "match": {"tool": "prepared_run.filesystem", "path": "/toolchains"}
+                }, {
+                    "id": "review-prepared-run", "action": "ask",
+                    "match": {"tool": "prepared_run.*"}
+                }]
+            }))
+            .expect("root authority policy")
+        });
+        let requirement = AuthorityRequirement::FilesystemRead {
+            root: root.to_string(),
+        };
+        match run.prepare(request, host) {
+            PreparationOutcome::Blocked {
+                diagnostics,
+                receipt: Some(receipt),
+            } => {
+                let fingerprint = requirement_fingerprint(&requirement);
+                assert!(diagnostics.iter().any(|diagnostic| {
+                    diagnostic.code == "policy_denied"
+                        && diagnostic.requirement_fingerprint.as_deref()
+                            == Some(fingerprint.as_str())
+                }));
+                let decision = receipt
+                    .policy_decisions
+                    .iter()
+                    .find(|decision| decision.requirement_fingerprint == fingerprint)
+                    .expect("owning refusal receipt");
+                assert_eq!(decision.action, "deny");
+                if sensitive {
+                    assert!(decision
+                        .risk_labels
+                        .iter()
+                        .any(|label| label == "sensitive_path"));
+                } else {
+                    assert_eq!(
+                        decision.matched_rule_id.as_deref(),
+                        Some("deny-requested-root")
+                    );
+                }
+                assert!(receipt.granted.is_empty());
+                assert!(!receipt.executor_invoked);
+            }
+            other => panic!("requested root must retain its owning refusal: {other:?}"),
+        }
+        assert_eq!(model_calls.load(Ordering::SeqCst), 0);
+    }
+}
+
+#[test]
 fn noninteractive_gui_capable_keyring_is_structurally_rejected() {
     let receipts = Arc::new(MemoryAuthorityReceiptSink::default());
     let executor = FixtureExecutor {
@@ -784,8 +947,13 @@ fn policy_denial_is_attributed_before_endpoint_health_or_eperm() {
 #[test]
 fn network_policy_refusal_has_its_own_gate() {
     let target = AuthorityRequirement::Network(network("blocked.example.test"));
+    let run_policy = run_approval_policy(
+        RunInteractivity::Interactive,
+        ApprovalAvailability::Available,
+        WorkspaceTrust::Trusted,
+    );
     let decision =
-        evaluate_requirement(&approval_policy(), &net_policy(), &target).expect("network decision");
+        evaluate_requirement(&run_policy, &net_policy(), &target).expect("network decision");
     assert!(decision.is_deny());
     assert_eq!(decision.denial_gate().as_str(), "network_policy");
     assert_eq!(
@@ -821,7 +989,7 @@ fn network_policy_refusal_has_its_own_gate() {
         ..Default::default()
     };
     let approval_decision = evaluate_requirement(
-        &configured,
+        &RunApprovalPolicy::construct(run_policy.posture(), |_| configured),
         &net_policy(),
         &AuthorityRequirement::Network(network("api.example.test")),
     )

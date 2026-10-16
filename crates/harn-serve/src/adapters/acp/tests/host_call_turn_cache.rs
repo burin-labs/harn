@@ -19,7 +19,7 @@ fn test_bridge(
         output: AcpOutput::Channel(tx),
         pending: server.pending.clone(),
         next_id_counter: AtomicU64::new(1),
-        cancellation: SessionCancellation::default(),
+        cancellation: SessionCancellation::default().prepare_prompt(),
         script_name: Mutex::new(String::new()),
         assistant_state: Mutex::new(VisibleTextState::default()),
     })
@@ -44,17 +44,16 @@ async fn turn_stable_read_is_served_without_an_acp_round_trip() {
     let memoized = VmValue::String(arcstr::ArcStr::from("memoized-input"));
     harn_vm::host_turn_cache::store("runtime", "pipeline_input", &params, &memoized);
 
-    // Bounded on purpose. A memo hit must not touch the wire at all, so this
-    // should complete instantly. If the memo is ever bypassed again the call
-    // falls through to a real `host/call` with nothing to answer it, and the
-    // 5-minute host_call timeout would make this guard take five minutes to
-    // report the regression it exists to catch. Fail in seconds instead.
-    let value = tokio::time::timeout(
-        std::time::Duration::from_secs(5),
+    // Bounded on purpose. A memo hit must not touch the wire at all. If the
+    // memo is ever bypassed again the call falls through to a real
+    // `host/call` with nothing to answer it, and the 5-minute host_call
+    // timeout would outlive nextest's kill. The hang ceiling reports that
+    // regression by name instead.
+    let value = harn_clock::test_support::within(
+        "memoized host_call (a hang means ACP bypassed the canonical memo and reached the wire)",
         dispatch_host_operation("runtime", "pipeline_input", &params),
     )
     .await
-    .expect("memo hit must not reach the wire; a timeout here means ACP bypassed canonical memo")
     .expect("memoized host_call");
 
     assert_eq!(
@@ -242,7 +241,7 @@ pipeline main(harness: Harness) {{
 "#
     );
     let chunk = harn_vm::compile_source(&source).expect("compile authority request");
-    let mut vm = harn_vm::Vm::new();
+    let mut vm = harn_vm::new_vm();
     harn_vm::register_vm_stdlib(&mut vm);
     let (harness, _clock) = harn_vm::Harness::test();
     vm.set_harness(harness);

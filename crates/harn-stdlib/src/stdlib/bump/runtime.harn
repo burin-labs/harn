@@ -20,6 +20,7 @@ import { compare_release, strip_v } from "std/semver"
 /** Everything the caller controls about one bump attempt. */
 pub type BumpOptions = {
   tag: string,
+  source_revision: string,
   repo: string,
   branch: string,
   base: string,
@@ -77,6 +78,9 @@ pub type BumpBaseAdoption = {
   detail: string,
 }
 
+/** Paths changed between two base identities; `ok == false` means unread. */
+pub type BumpBaseChanges = {ok: bool, paths: list<string>, detail: string}
+
 /** Observed state of an already-open bump PR, or nil when none exists. */
 pub type BumpPrState = {
   number: int,
@@ -90,7 +94,16 @@ pub type BumpPrState = {
 }
 
 /** Inputs to one atomic provider-owned branch + signed-commit publication. */
-pub type BumpCommitRequest = {branch: string, base_sha: string, headline: string}
+pub type BumpCommitRequest = {
+  branch: string,
+  base_sha: string,
+  headline: string,
+  expected_branch_oid?: string,
+  repair_commits?: list<string>,
+}
+
+/** Repair patches carried onto refreshed files before validation and publication. */
+pub type BumpRepairs = {ok: bool, commits: list<string>, conflicts: list<string>, detail: string}
 
 /** Result of atomically publishing the bump branch and signed commit. */
 pub type BumpCommitResult = {oid: string, url: string, branch_action: string}
@@ -104,6 +117,8 @@ pub type BumpAutoMerge = {enabled: bool, state: string, detail: string}
 /** How the consumer's current pin compares with the requested release. */
 pub type BumpVersionRelation = "behind" | "equal" | "ahead"
 
+pub type BumpRevisionRelation = "untracked" | "behind" | "equal" | "ahead" | "diverged"
+
 /**
  * The injected capability surface. Each field is a function the orchestrator
  * calls at a well-defined phase; swapping the record swaps live I/O for
@@ -113,12 +128,16 @@ pub type BumpAdapter = {
   resolve_target_tag: fn(string) -> string,
   release_ready: fn(string) -> ReleaseReadiness,
   read_current_version: fn() -> string,
+  read_current_revision: fn() -> string,
+  revision_relation: fn(string, string, string) -> BumpRevisionRelation,
   base_sha: fn() -> string,
-  apply_version: fn(string) -> BumpApplyOutcome,
+  apply_version: fn(string, string) -> BumpApplyOutcome,
+  preserve_repairs: fn(BumpPrState?, string) -> BumpRepairs,
   run_validation: fn() -> BumpValidation,
   working_changes: fn() -> BumpChangeSet,
   remote_base_head: fn() -> BumpBaseHead,
   adopt_base: fn(BumpBaseAdoptionRequest) -> BumpBaseAdoption,
+  base_changes: fn(string, string) -> BumpBaseChanges,
   find_bump_pr: fn() -> BumpPrState?,
   disable_auto_merge: fn(BumpPrState, string) -> bool,
   publish_commit: fn(BumpCommitRequest) -> BumpCommitResult,
@@ -134,11 +153,13 @@ pub type BumpAdapter = {
  */
 pub type BumpOutcome = "not_ready" \
   | "already_current" \
+  | "revision_conflict" \
   | "refresh_failed" \
   | "no_changes" \
   | "validation_failed" \
   | "base_advanced" \
   | "base_conflict" \
+  | "repair_conflict" \
   | "closed_noop" \
   | "committed"
 
@@ -153,8 +174,11 @@ pub type BumpReceipt = {
   repo: string,
   branch: string,
   target_tag: string,
+  target_revision: string,
   previous_version: string,
+  previous_revision: string,
   version_relation: BumpVersionRelation,
+  revision_relation: BumpRevisionRelation?,
   ready: bool,
   readiness_detail: string,
   changed: bool,
@@ -169,7 +193,10 @@ pub type BumpReceipt = {
   base_check_phase: "before_refresh" | "before_publication" | "before_arming" | nil,
   recovery: BumpRecovery,
   base_adoptions: int,
+  published_behind_base: bool,
   lease_recovered: bool,
+  repair_commits: list<string>,
+  repair_conflicts: list<string>,
   commit_oid: string?,
   pr_action: BumpPrAction,
   pr_number: int?,
@@ -197,6 +224,7 @@ pub fn bump_options(overrides: dict = {}) -> BumpOptions {
   const o = overrides ?? {}
   return {
     tag: to_string(o.tag ?? ""),
+    source_revision: to_string(o.source_revision ?? ""),
     repo: to_string(o.repo ?? ""),
     branch: to_string(o.branch ?? "automation/bump-harn-runtime"),
     base: to_string(o.base ?? "main"),
@@ -252,8 +280,11 @@ pub fn bump_changeset_empty(changeset: BumpChangeSet) -> bool {
 fn __bump_receipt_base(
   options: BumpOptions,
   target: string,
+  target_revision: string,
   previous: string,
+  previous_revision: string,
   relation: BumpVersionRelation,
+  revision_relation: BumpRevisionRelation?,
   readiness: ReleaseReadiness,
 ) -> BumpReceipt {
   return {
@@ -263,8 +294,11 @@ fn __bump_receipt_base(
     repo: options.repo,
     branch: options.branch,
     target_tag: target,
+    target_revision: target_revision,
     previous_version: previous,
+    previous_revision: previous_revision,
     version_relation: relation,
+    revision_relation: revision_relation,
     ready: readiness.ready,
     readiness_detail: readiness.detail,
     changed: false,
@@ -279,7 +313,10 @@ fn __bump_receipt_base(
     base_check_phase: nil,
     recovery: {kind: "none", base_oid: nil},
     base_adoptions: 0,
+    published_behind_base: false,
     lease_recovered: false,
+    repair_commits: [],
+    repair_conflicts: [],
     commit_oid: nil,
     pr_action: "none",
     pr_number: nil,
@@ -364,48 +401,171 @@ fn __base_advanced_receipt(
 }
 
 /**
- * The one abort a fresh retry cannot fix: the advanced base changed a path this
- * bump's refresh also authors, so adopting it would decide a contest between
- * two writers of the same artifact. Name the paths and stop.
+ * An overlapping refresh cannot be adopted inside the obsolete checkout.
+ * Request a fresh base so the successor re-reads both pins before deriving
+ * refreshed output from the new base and the requested release.
  */
 fn __base_conflict_receipt(
   options: BumpOptions,
   base: BumpBaseReconciliation,
   adoption: BumpBaseAdoption,
+  adoptions: int,
 ) -> BumpReceipt {
   const contested = if len(adoption.conflicts) > 0 {
     ["the advanced ${options.base} changed refreshed paths: ${join(adoption.conflicts, ", ")}"]
   } else {
     []
   }
-  return base.receipt
-    + {
-      outcome: "base_conflict",
-      ok: false,
-      recovery: {kind: "none", base_oid: base.receipt.observed_base_oid},
-      notes: base.receipt.notes
-        + [base.detail, "cannot adopt the advanced ${options.base}: ${adoption.detail}"]
-        + contested,
-    }
+  return __base_advanced_receipt(
+    options,
+    base,
+    adoptions,
+    ["cannot adopt the advanced ${options.base}: ${adoption.detail}"] + contested,
+  )
+    + {outcome: "base_conflict"}
+}
+
+/**
+ * Accept a base that advanced after validation when none of the incoming
+ * commits changed a path this bump's refresh authored. The validated tree is
+ * then an ordinary pull request behind its base, and the base branch's merge
+ * queue tests the merged result as it does every other change. Re-deriving
+ * instead costs a full refresh and validation per advance, which never
+ * converges on a base that merges faster than one validation runs (harn#9627).
+ * An overlapping or unreadable comparison is not disjoint, and falls back to
+ * adoption.
+ */
+fn __accept_disjoint_advance(
+  adapter: BumpAdapter,
+  base: BumpBaseReconciliation,
+) -> BumpBaseReconciliation? {
+  const validated = base.receipt.expected_base_oid
+  const observed = base.receipt.observed_base_oid
+  if base.current || validated == nil || observed == nil {
+    return nil
+  }
+  const changes = adapter.base_changes(validated ?? "", observed ?? "")
+  if !changes.ok {
+    return nil
+  }
+  const authored = set(base.receipt.refreshed)
+  if len(changes.paths.filter({ path -> set_contains(authored, path) }).to_list()) > 0 {
+    return nil
+  }
+  return {
+    current: true,
+    receipt: base.receipt
+      + {
+        published_behind_base: true,
+        notes: base.receipt.notes
+          + [
+            "${base.detail}; the ${len(changes.paths)} incoming path(s) touch no refreshed path, "
+              + "so the validated tree stays on ${validated} and the merge queue tests the merge",
+          ],
+      },
+    detail: "",
+  }
 }
 
 type BumpBasePreparation = {existing: BumpPrState?, base: BumpBaseReconciliation}
 
 fn __prepare_base_lease(adapter: BumpAdapter, receipt: BumpReceipt) -> BumpBasePreparation {
   const existing = adapter.find_bump_pr()
-  let next_receipt = receipt
-  if existing != nil && existing.auto_merge_enabled {
-    if !adapter.disable_auto_merge(existing, existing.base_oid) {
+  const base = __observe_base_lease(adapter, receipt, "before_refresh")
+  let next_receipt = base.receipt
+  const observed_oid = base.receipt.observed_base_oid
+  if existing != nil && existing.auto_merge_enabled && observed_oid != nil {
+    // The PR's base snapshot can predate main; guard the current branch head.
+    if !adapter.disable_auto_merge(existing, observed_oid) {
       throw "std/bump/runtime: failed to disable stale auto-merge on #${existing.number}"
     }
-    next_receipt = receipt
+    next_receipt = base.receipt
       + {
         lease_recovered: true,
         notes: receipt.notes
           + ["disarmed stale auto-merge on #${existing.number} before refresh"],
       }
   }
-  return {existing: existing, base: __observe_base_lease(adapter, next_receipt, "before_refresh")}
+  return {
+    existing: existing,
+    base: {current: base.current, receipt: next_receipt, detail: base.detail},
+  }
+}
+
+type BumpPins = {
+  version: string,
+  revision: string,
+  version_relation: BumpVersionRelation,
+  revision_relation: BumpRevisionRelation?,
+}
+
+fn __read_pins(
+  adapter: BumpAdapter,
+  target: string,
+  target_revision: string,
+  ready: bool,
+) -> BumpPins {
+  const previous = trim(adapter.read_current_version())
+  const relation = bump_version_relation(previous, target)
+  const previous_revision = if target_revision == "" {
+    ""
+  } else {
+    lowercase(trim(adapter.read_current_revision()))
+  }
+  return {
+    version: previous,
+    revision: previous_revision,
+    version_relation: relation,
+    revision_relation: if target_revision == "" || relation == "ahead" || !ready {
+      nil
+    } else {
+      adapter.revision_relation(previous_revision, target_revision, target)
+    },
+  }
+}
+
+/** The same readiness and monotonicity gate owns every checkout we adopt. */
+fn __pin_guard(receipt: BumpReceipt) -> BumpReceipt? {
+  if !receipt.ready {
+    return receipt
+      + {
+        outcome: "not_ready",
+        ok: true,
+        notes: receipt.notes + ["target release is not fully published yet"],
+      }
+  }
+  if receipt.version_relation == "equal"
+    && (receipt.revision_relation == nil || receipt.revision_relation == "equal") {
+    return receipt
+      + {
+        outcome: "already_current",
+        ok: true,
+        notes: receipt.notes + ["pin already matches ${receipt.target_tag}"],
+      }
+  }
+  if receipt.version_relation == "ahead" {
+    return receipt
+      + {
+        outcome: "already_current",
+        ok: true,
+        notes: receipt.notes
+          + [
+            "pin ${receipt.previous_version} is newer than requested target ${receipt.target_tag}; no downgrade applied",
+          ],
+      }
+  }
+  if receipt.revision_relation == "ahead" || receipt.revision_relation == "diverged" {
+    return receipt
+      + {
+        outcome: "revision_conflict",
+        ok: false,
+        notes: receipt.notes
+          + [
+            "source revision ${receipt.target_revision} is ${receipt.revision_relation} of current ${receipt.previous_revision}; no downgrade or divergent update applied",
+          ],
+      }
+  }
+  return nil
 }
 
 /**
@@ -419,32 +579,22 @@ fn __prepare_base_lease(adapter: BumpAdapter, receipt: BumpReceipt) -> BumpBaseP
  */
 pub fn run_bump(options: BumpOptions, adapter: BumpAdapter) -> BumpReceipt {
   const target = adapter.resolve_target_tag(options.tag)
+  const target_revision = lowercase(trim(options.source_revision))
   const readiness = adapter.release_ready(target)
-  const previous = trim(adapter.read_current_version())
-  const relation = bump_version_relation(previous, target)
-  let receipt = __bump_receipt_base(options, target, previous, relation, readiness)
-  // Phase 1 — release readiness gate. A target that is still publishing its
-  // assets is not an error; the scheduled rerun will pick it up.
-  if !readiness.ready {
-    return receipt
-      + {outcome: "not_ready", ok: true, notes: ["target release is not fully published yet"]}
-  }
-  // Phase 2 — idempotent no-op. Concurrent/scheduled reruns land here once the
-  // pin already matches, so the common steady state does zero mutation.
-  if relation == "equal" {
-    return receipt
-      + {outcome: "already_current", ok: true, notes: ["pin already matches ${target}"]}
-  }
-  // A bump is monotonic. A stale explicit target can race with a newer release
-  // landing on the base branch; treat the newer pin as satisfied and never
-  // turn that race into a downgrade PR.
-  if relation == "ahead" {
-    return receipt
-      + {
-        outcome: "already_current",
-        ok: true,
-        notes: ["pin ${previous} is newer than requested target ${target}; no downgrade applied"],
-      }
+  const pins = __read_pins(adapter, target, target_revision, readiness.ready)
+  let receipt = __bump_receipt_base(
+    options,
+    target,
+    target_revision,
+    pins.version,
+    pins.revision,
+    pins.version_relation,
+    pins.revision_relation,
+    readiness,
+  )
+  const guarded = __pin_guard(receipt)
+  if guarded != nil {
+    return guarded
   }
   // Any previously armed bump must stop before the long refresh begins. It
   // could otherwise merge while this attempt is validating a replacement.
@@ -479,10 +629,10 @@ pub fn run_bump(options: BumpOptions, adapter: BumpAdapter) -> BumpReceipt {
         },
       )
       if !adoption.ok {
-        // Contested paths need a human. Everything else — an unreachable oid,
-        // a failed fetch — stays a retryable race for the controller.
+        // Overlapping refresh output and unavailable commits both request a
+        // fresh checkout. Preserve the overlap's named outcome and paths.
         if len(adoption.conflicts) > 0 {
-          return __base_conflict_receipt(options, base, adoption)
+          return __base_conflict_receipt(options, base, adoption, adoptions)
         }
         return __base_advanced_receipt(
           options,
@@ -505,10 +655,22 @@ pub fn run_bump(options: BumpOptions, adapter: BumpAdapter) -> BumpReceipt {
       // The adoption itself can lose the race again; re-read before spending.
       base = __observe_base_lease(adapter, receipt, "before_refresh")
       receipt = base.receipt
+      const adopted_pins = __read_pins(adapter, target, target_revision, readiness.ready)
+      receipt = receipt
+        + {
+          previous_version: adopted_pins.version,
+          previous_revision: adopted_pins.revision,
+          version_relation: adopted_pins.version_relation,
+          revision_relation: adopted_pins.revision_relation,
+        }
+      const adopted_guard = __pin_guard(receipt)
+      if adopted_guard != nil {
+        return adopted_guard
+      }
       continue
     }
     // Phase 3 — write the pin and regenerate derived sources (lockfile, codegen).
-    const apply = adapter.apply_version(target)
+    const apply = adapter.apply_version(target, target_revision)
     receipt = receipt
       + {
         changed: apply.changed,
@@ -524,7 +686,27 @@ pub fn run_bump(options: BumpOptions, adapter: BumpAdapter) -> BumpReceipt {
           notes: receipt.notes + ["refresh failed: ${apply.detail}"],
         }
     }
-    if !apply.changed {
+    const repairs = adapter.preserve_repairs(existing, receipt.expected_base_oid ?? "")
+    receipt = receipt + {repair_commits: repairs.commits, repair_conflicts: repairs.conflicts}
+    if !repairs.ok {
+      return receipt
+        + {
+          outcome: "repair_conflict",
+          ok: false,
+          notes: receipt.notes
+            + [repairs.detail, "repair conflicts: ${join(repairs.conflicts, ", ")}"],
+        }
+    }
+    if len(repairs.commits) > 0 {
+      const repair_changes = adapter.working_changes()
+      receipt = receipt
+        + {
+          refreshed: (receipt.refreshed + repair_changes.additions + repair_changes.deletions)
+            .unique()
+            .to_list(),
+        }
+    }
+    if !apply.changed && len(repairs.commits) == 0 {
       return receipt
         + {
           outcome: "already_current",
@@ -585,9 +767,11 @@ pub fn run_bump(options: BumpOptions, adapter: BumpAdapter) -> BumpReceipt {
     }
     // Phase 6 — re-read the base immediately before publication. The connector
     // derives its payload against the local HEAD, so a tree proved against an
-    // older base can never be published as-is; the loop head decides whether
-    // this attempt adopts the new base or hands the race back.
+    // older base is published only on that older base, and only when the
+    // advance left every refreshed path alone. Otherwise the loop head decides
+    // whether this attempt adopts the new base or hands the race back.
     base = __observe_base_lease(adapter, receipt, "before_publication")
+    base = __accept_disjoint_advance(adapter, base) ?? base
     receipt = base.receipt
     if base.current {
       break
@@ -601,7 +785,13 @@ pub fn run_bump(options: BumpOptions, adapter: BumpAdapter) -> BumpReceipt {
   // under the observed base lease. The provider adapter owns the worktree
   // encoding and branch mutation as one deep operation.
   const commit = adapter.publish_commit(
-    {branch: options.branch, base_sha: base_sha, headline: "chore: bump Harn runtime to ${target}"},
+    {
+      branch: options.branch,
+      base_sha: base_sha,
+      headline: "chore: bump Harn runtime to ${target}",
+      expected_branch_oid: existing?.head_oid ?? "",
+      repair_commits: receipt.repair_commits,
+    },
   )
   receipt = receipt + {commit_oid: commit.oid}
   // Phase 8 — if the refreshed branch tree already matches base, the bump is a
@@ -673,7 +863,8 @@ pub fn run_bump(options: BumpOptions, adapter: BumpAdapter) -> BumpReceipt {
   // PR creation can itself race the base branch. Re-read immediately before
   // arming so any stale publication remains visible but cannot enter the
   // merge queue. The controller retries from a fresh base checkout.
-  const arm_base = __observe_base_lease(adapter, receipt, "before_arming")
+  const observed_arm_base = __observe_base_lease(adapter, receipt, "before_arming")
+  const arm_base = __accept_disjoint_advance(adapter, observed_arm_base) ?? observed_arm_base
   receipt = arm_base.receipt
   if !arm_base.current {
     return __base_advanced_receipt(options, arm_base, adoptions)

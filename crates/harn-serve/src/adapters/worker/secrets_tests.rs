@@ -274,7 +274,7 @@ pub fn read_own(harness: Harness, event: TriggerEvent) -> dict {
                 .await
                 .expect("enqueue own job");
 
-            let response = tokio::time::timeout(StdDuration::from_secs(5), async {
+            let response = harn_clock::test_support::within("tenant worker response", async {
                 loop {
                     let (_, event) = responses
                         .next()
@@ -287,8 +287,7 @@ pub fn read_own(harness: Harness, event: TriggerEvent) -> dict {
                     }
                 }
             })
-            .await
-            .expect("tenant worker response");
+            .await;
             assert_eq!(response.job_event_id, own.job_event_id);
             let outcome = response.outcome.expect("dispatch outcome");
             assert_eq!(outcome.status, DispatchStatus::Succeeded);

@@ -540,7 +540,7 @@ pub(crate) fn spawn_long_running_with_options(
     };
     let waiter_thread_name = waiter_context.handle_id.clone();
     let capture = options.capture;
-    std::thread::Builder::new()
+    harn_parser::runtime_stack::builder()
         .name(format!("hto-waiter-{waiter_thread_name}"))
         .spawn(move || {
             waiter_thread(waiter_context, cancel_state, capture);
@@ -645,7 +645,9 @@ fn waiter_thread(context: WaiterContext, cancel_state: Arc<CancelState>, capture
             })
         });
 
-    let status = handle.wait().ok();
+    let missing_program = handle.missing_program().map(str::to_string);
+    let waited = handle.wait();
+    let status = waited.as_ref().ok().copied();
 
     if let Some(thread) = stdout_thread {
         let _ = thread.join();
@@ -655,7 +657,7 @@ fn waiter_thread(context: WaiterContext, cancel_state: Arc<CancelState>, capture
     }
     done.store(true, Ordering::Release);
     drop(progress_thread);
-    let (stdout, stderr) = {
+    let (stdout, mut stderr) = {
         let state = context
             .output_feed
             .state
@@ -663,6 +665,10 @@ fn waiter_thread(context: WaiterContext, cancel_state: Arc<CancelState>, capture
             .unwrap_or_else(|poison| poison.into_inner());
         (state.stdout.clone(), state.stderr.clone())
     };
+    if let Err(error) = waited.as_ref() {
+        stderr
+            .extend_from_slice(format!("\nharn: process completion refused: {error}\n").as_bytes());
+    }
 
     let cancellation = cancel_state.complete_wait();
     let cancelled = cancellation.cancelled;
@@ -673,13 +679,15 @@ fn waiter_thread(context: WaiterContext, cancel_state: Arc<CancelState>, capture
         .is_some_and(|status| harn_vm::process_sandbox::is_process_sandbox_signal(status.signal));
     let (exit_code, signal_name) = match status {
         Some(status) => decode_exit_status(status),
-        // wait() itself failed — treat as killed (extremely unusual).
-        None => (-1, Some("SIGKILL".to_string())),
+        // No observed exit is neither a successful run nor proof of a signal.
+        None => (-1, None),
     };
     let command_status = if timed_out {
         CommandStatus::TimedOut
     } else if cancelled {
         CommandStatus::Killed
+    } else if waited.is_err() {
+        CommandStatus::Blocked
     } else {
         CommandStatus::Completed
     };
@@ -753,9 +761,26 @@ fn waiter_thread(context: WaiterContext, cancel_state: Arc<CancelState>, capture
     );
     payload.insert(
         "exit_code".into(),
-        serde_json::Value::Number(exit_code.into()),
+        if waited.is_err() {
+            serde_json::Value::Null
+        } else {
+            serde_json::Value::Number(exit_code.into())
+        },
     );
     payload.insert("timed_out".into(), serde_json::Value::Bool(timed_out));
+    if !cancelled && waited.is_ok() {
+        if let Some(receipt) = handle.verifier_execution_receipt() {
+            payload.insert(
+                "verifier_receipt".into(),
+                serde_json::to_value(receipt).expect("typed verifier receipt"),
+            );
+        }
+    }
+    if exit_code == 127 && signal_name.is_none() && !cancelled {
+        if let Some(program) = missing_program {
+            payload.insert("missing_program".into(), serde_json::Value::String(program));
+        }
+    }
     payload.insert("stdout".into(), serde_json::Value::String(inline.stdout));
     payload.insert(
         "stdout_truncated".into(),
@@ -863,7 +888,7 @@ fn spawn_output_drain(
     combined_file: Option<Arc<Mutex<std::fs::File>>>,
     stdout: bool,
 ) -> std::thread::JoinHandle<()> {
-    std::thread::spawn(move || {
+    harn_parser::runtime_stack::spawn(move || {
         let mut file = std::fs::File::create(path).ok();
         let mut buf = [0_u8; 8192];
         loop {
@@ -902,7 +927,7 @@ fn next_progress_interval(current: Duration, max: Duration) -> Duration {
 }
 
 fn spawn_progress_thread(context: ProgressThreadContext) -> std::thread::JoinHandle<()> {
-    std::thread::spawn(move || {
+    harn_parser::runtime_stack::spawn(move || {
         // Exponential backoff: wait `interval`, emit a snapshot, then double the
         // wait after each snapshot up to `max_interval`. Progress is frequent
         // while the model most wants to know whether the command is moving, and
@@ -1195,7 +1220,7 @@ pub(crate) fn list_session_handles(session_id: &str) -> VmValue {
     let mut response = harn_vm::value::DictMap::new();
     response.insert(
         harn_vm::value::intern_key("handles"),
-        VmValue::List(Arc::new(handles)),
+        VmValue::list(handles),
     );
     VmValue::dict(response)
 }
@@ -1205,8 +1230,8 @@ pub(crate) fn list_session_handles(session_id: &str) -> VmValue {
 /// make it noisy to inline as an unnamed type.
 type SessionKillEntry = (Arc<dyn ProcessKiller>, Arc<CancelState>);
 
-/// Cancel all in-flight handles for a given session. Called by the
-/// session-end hook to avoid orphaned processes.
+/// Cancel all in-flight handles for a given session. Called when the session
+/// closes, when a stop abandons its run, and when a stop is accepted for it.
 pub fn cancel_session_handles(session_id: &str) {
     let to_kill: Vec<SessionKillEntry> = {
         let mut store = HANDLE_STORE
@@ -1238,13 +1263,21 @@ pub fn cancel_session_handles(session_id: &str) {
 /// Register the session-cleanup hook with harn-vm. Uses a `OnceLock` so the
 /// hook is registered exactly once even if `register_builtins` is called
 /// multiple times (e.g. in tests).
+///
+/// A handle belongs to its session, so it is cancelled when the session
+/// closes or a stop abandons its run, not when the agent-loop run that started
+/// it ends. A host's session runs one loop per turn, and a later turn must
+/// still be able to poll a command an earlier turn backgrounded.
 pub(crate) fn register_cleanup_hook() {
-    static REGISTERED: OnceLock<harn_vm::SessionEndHookRegistration> = OnceLock::new();
+    static REGISTERED: OnceLock<
+        harn_vm::agent_sessions::reclaim_hooks::SessionReclaimHookRegistration,
+    > = OnceLock::new();
     REGISTERED.get_or_init(|| {
-        let hook: Arc<dyn Fn(&str) + Send + Sync> = Arc::new(|session_id: &str| {
-            cancel_session_handles(session_id);
-        });
-        harn_vm::register_session_end_hook(hook)
+        harn_vm::agent_sessions::reclaim_hooks::register_session_reclaim_hook(Arc::new(
+            |session_id: &str| {
+                cancel_session_handles(session_id);
+            },
+        ))
     });
 }
 
@@ -1334,7 +1367,7 @@ mod tests {
         let (started_tx, started_rx) = mpsc::sync_channel(1);
         let (snapshot_tx, snapshot_rx) = mpsc::sync_channel(1);
         let waiter_state = state.clone();
-        let waiter = std::thread::spawn(move || {
+        let waiter = harn_parser::runtime_stack::spawn(move || {
             started_tx.send(()).expect("test waiter start receiver");
             snapshot_tx
                 .send(waiter_state.complete_wait())

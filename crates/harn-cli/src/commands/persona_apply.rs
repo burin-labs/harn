@@ -357,7 +357,7 @@ fn verify_apply(
     let extensions =
         package::try_load_runtime_extensions(manifest_path).map_err(|error| error.to_string())?;
     let resolved_persona = extensions
-        .runtime_personas
+        .runtime_personas()
         .iter()
         .find(|persona| persona.id == discovered.id)
         .ok_or_else(|| format!("runtime did not load activated persona {persona_id}"))?;
@@ -549,7 +549,6 @@ fn materialized_persona_name(package_root: &Path) -> Result<String, String> {
 mod tests {
     use std::fs;
     use std::sync::{mpsc, Arc, Mutex};
-    use std::thread;
 
     use harn_modules::package_snapshot::PackageSnapshot;
 
@@ -659,9 +658,8 @@ mod tests {
                 Some(&manifest),
                 &first_args,
                 move |_, _, _| {
-                    let handle = thread::Builder::new()
+                    let handle = harn_parser::runtime_stack::builder()
                         .name("concurrent-persona-apply-test".into())
-                        .stack_size(crate::CLI_RUNTIME_STACK_SIZE)
                         .spawn(move || {
                             package::project_mutation_lock_test_probe::install(move || {
                                 attempted_tx.send(()).unwrap();
@@ -962,7 +960,7 @@ mod tests {
                 &[installed],
                 &handler,
                 &extensions
-                    .runtime_personas
+                    .runtime_personas()
                     .iter()
                     .find(|persona| persona.id == verification.persona_id)
                     .unwrap()

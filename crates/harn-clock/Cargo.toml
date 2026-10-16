@@ -8,6 +8,11 @@ repository.workspace = true
 homepage.workspace = true
 description = "Unified time + sleep abstraction for the Harn runtime, CLI, triggers, cron, and harn-cloud."
 
+[features]
+# Test-only helpers (`harn_clock::test_support`). Enable from
+# `[dev-dependencies]` only, never from a normal dependency.
+test-support = []
+
 [dependencies]
 async-trait = "0.1"
 parking_lot = "0.12"

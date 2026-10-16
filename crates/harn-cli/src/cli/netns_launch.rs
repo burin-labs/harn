@@ -1,8 +1,9 @@
-/// Build a private network namespace, enter a confinement handed over as
-/// data, and exec the payload.
+/// Build a private network namespace and enter confinement, or finalize an
+/// already-confined device mount handover, then exec the payload.
 ///
 /// Hidden because no operator invokes this: the sandbox backend does, and only
-/// when a policy asks for loopback-only child networking. It exists as a
+/// when a policy asks for loopback-only child networking or device mount
+/// finalization. It exists as a
 /// separate entry point rather than as work the backend does inline because
 /// the permission to create an unprivileged namespace is granted per
 /// executable path by host policy on the distributions that restrict it, and
@@ -10,19 +11,20 @@
 /// build of the runtime happens to be running.
 #[derive(clap::Args, Debug)]
 pub(crate) struct NetnsLaunchArgs {
-    /// Inherited Landlock ruleset descriptor. Absent on a host with no
-    /// Landlock, where the resolved fallback lets the run proceed on the
-    /// syscall filter alone.
-    #[arg(long = harn_vm::process_sandbox::NETNS_RULESET_FD_FLAG.trim_start_matches('-'))]
+    /// Inherited Landlock ruleset descriptor. The Landlock handover refuses
+    /// unavailable enforcement before launching this helper.
+    #[arg(long = harn_vm::process_sandbox::NETNS_RULESET_FD_FLAG.trim_start_matches('-'), conflicts_with = "close_fd")]
     pub ruleset_fd: Option<i32>,
     /// The compiled seccomp program, hex-encoded.
     ///
-    /// Required even when the ruleset is absent. A launch that installed no
-    /// filter would run the payload unconfined while every layer above still
-    /// reported the profile as enforced, which is the exact failure the
-    /// transferable confinement was built to end.
-    #[arg(long = harn_vm::process_sandbox::NETNS_SECCOMP_FLAG.trim_start_matches('-'))]
-    pub seccomp_hex: String,
+    /// Required when constructing a namespace. Mutually exclusive with the
+    /// device finalization mode, whose wrapper already installed the filter.
+    #[arg(long = harn_vm::process_sandbox::NETNS_SECCOMP_FLAG.trim_start_matches('-'), required_unless_present = "close_fd", conflicts_with = "close_fd")]
+    pub seccomp_hex: Option<String>,
+    /// Verify and close one pinned device setup descriptor, as FD:absolute-path.
+    /// Bubblewrap has already installed confinement in this mode.
+    #[arg(long = harn_vm::process_sandbox::NETNS_CLOSE_FD_FLAG.trim_start_matches('-'))]
+    pub close_fd: Vec<harn_vm::process_sandbox::DeviceMountFinalization>,
     /// The payload: program first, then its arguments.
     #[arg(trailing_var_arg = true, required = true)]
     pub payload: Vec<String>,

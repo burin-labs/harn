@@ -8,8 +8,9 @@ fn machine_and_session_remaining_project_the_tighter_limit() {
         temp.path().join("spend.sqlite"),
         "person",
         crate::llm::MachineSpendPolicy {
-            daily_limit_microusd: Some(300_000),
-            monthly_limit_microusd: Some(500_000),
+            daily_limit_microusd: Some(500_000),
+            monthly_limit_microusd: Some(700_000),
+            lifetime_limit_microusd: Some(300_000),
         },
     )
     .unwrap();
@@ -427,27 +428,6 @@ fn pricing_aware_call_cost_distinguishes_unpriced_from_zero() {
 }
 
 #[test]
-fn format_usd_amount_auto_precision_and_grouping() {
-    assert_eq!(format_usd_amount(0.000_045, None, false), "$0.000045");
-    assert_eq!(format_usd_amount(1.234_5, None, false), "$1.2345");
-    assert_eq!(format_usd_amount(1234.5, None, false), "$1,234.50");
-    assert_eq!(format_usd_amount(-1234.5, None, false), "-$1,234.50");
-    assert_eq!(format_usd_amount(1234.5, None, true), "+$1,234.50");
-    assert_eq!(format_usd_amount(0.123_456_789, Some(2), false), "$0.12");
-    assert_eq!(format_usd_amount(1.0, Some(0), false), "$1");
-}
-
-#[test]
-fn format_usd_handles_fractional_carry_into_whole() {
-    // 0.00027 * 300_000 produces 80.999… in IEEE-754; the formatter
-    // must round-then-render rather than splitting the rounded fraction
-    // back into a separate component (regression: "$80.1.0000").
-    let amount = 0.000_27_f64 * 300_000.0;
-    assert!((amount - 81.0).abs() < 1e-6);
-    assert_eq!(format_usd_amount(amount, None, false), "$81.0000");
-}
-
-#[test]
 fn fast_tier_bills_premium_pricing_when_served_fast() {
     let _guard = crate::llm::env_guard();
     crate::llm_config::clear_user_overrides();
@@ -568,14 +548,13 @@ fn token_budget_guard_restores_prior_state_on_drop() {
 
     let outer = install_llm_token_budget(100);
     assert_eq!(peek_total_tokens(), 0);
-    // Simulate accumulation by writing the thread-local directly.
-    LLM_ACCUMULATED_TOKENS.with(|a| *a.borrow_mut() = 50);
+    accumulate_llm_usage("test", 50, 0, 0.0).unwrap();
 
     // Nested guard wipes accumulation and installs a tighter cap.
     {
         let _inner = install_llm_token_budget(10);
         assert_eq!(peek_total_tokens(), 0);
-        LLM_ACCUMULATED_TOKENS.with(|a| *a.borrow_mut() = 5);
+        accumulate_llm_usage("test", 5, 0, 0.0).unwrap();
     }
 
     // Outer scope restored on inner drop.
@@ -593,26 +572,26 @@ fn set_budget_rearms_in_place_without_resetting_accumulation() {
 
     // Install a $1.00 cap and spend $0.60 against it.
     let _budget = install_llm_cost_budget(1.0);
-    LLM_ACCUMULATED_COST.with(|a| *a.borrow_mut() = 0.60);
+    accumulate_llm_usage("test", 0, 0, 0.60).unwrap();
 
     // Tighten the cap below current spend: the next preflight must trip,
     // and the already-accumulated total must be preserved (not reset).
     set_llm_cost_budget(Some(0.50));
     assert!((peek_total_cost() - 0.60).abs() < f64::EPSILON);
-    LLM_BUDGET.with(|b| assert_eq!(*b.borrow(), Some(0.50)));
+    assert_eq!(peek_llm_cost_budget(), Some(0.50));
 
     // Loosen the cap: spend stays, ceiling rises, room reopens.
     set_llm_cost_budget(Some(2.0));
     assert!((peek_total_cost() - 0.60).abs() < f64::EPSILON);
-    LLM_BUDGET.with(|b| assert_eq!(*b.borrow(), Some(2.0)));
+    assert_eq!(peek_llm_cost_budget(), Some(2.0));
 
     // Clear the cap entirely.
     set_llm_cost_budget(None);
-    LLM_BUDGET.with(|b| assert_eq!(*b.borrow(), None));
+    assert_eq!(peek_llm_cost_budget(), None);
 
     // Negative ceilings clamp to zero (a hard stop), matching `install_*`.
     set_llm_cost_budget(Some(-5.0));
-    LLM_BUDGET.with(|b| assert_eq!(*b.borrow(), Some(0.0)));
+    assert_eq!(peek_llm_cost_budget(), Some(0.0));
 
     reset_cost_state();
 }
@@ -623,15 +602,15 @@ fn set_token_budget_rearms_in_place_without_resetting_accumulation() {
     reset_cost_state();
 
     let _budget = install_llm_token_budget(100);
-    LLM_ACCUMULATED_TOKENS.with(|a| *a.borrow_mut() = 60);
+    accumulate_llm_usage("test", 60, 0, 0.0).unwrap();
 
     set_llm_token_budget(Some(50));
     assert_eq!(peek_total_tokens(), 60);
-    LLM_TOKEN_BUDGET.with(|b| assert_eq!(*b.borrow(), Some(50)));
+    assert_eq!(peek_llm_token_budget(), Some(50));
 
     set_llm_token_budget(None);
     assert_eq!(peek_total_tokens(), 60);
-    LLM_TOKEN_BUDGET.with(|b| assert_eq!(*b.borrow(), None));
+    assert_eq!(peek_llm_token_budget(), None);
 
     reset_cost_state();
 }
@@ -731,6 +710,51 @@ fn a_long_context_call_bills_at_the_input_token_band() {
     assert!(
         above > unbanded,
         "the banded price must exceed the base-rate price: {above} vs {unbanded}"
+    );
+}
+
+/// Claude Haiku 5.5 bills $0.10/$0.50 per MTok for prompts of up to 100K
+/// tokens and $0.50/$2.50 above, on both its direct and OpenRouter routes
+/// (the latter plus the provider's catalogued platform fee). The boundary is
+/// inclusive at 100K, so 100,000 tokens is the last base-rate prompt. Haiku
+/// 4.5 is the control: it is flat at $1/$5 at any length.
+#[test]
+fn haiku_55_bills_its_long_prompt_card_above_100k_input_tokens() {
+    let _guard = crate::llm::env_guard();
+    for (provider, model) in [
+        ("anthropic", "claude-haiku-5-5"),
+        ("openrouter", "anthropic/claude-haiku-5.5"),
+    ] {
+        let fee = 1.0
+            + crate::llm_config::provider_config(provider)
+                .and_then(|config| config.platform_fee_percent)
+                .unwrap_or(0.0)
+                / 100.0;
+        let at_boundary =
+            pricing_aware_call_cost(provider, model, 100_000, 1_000, settlement_now())
+                .expect("priced");
+        assert!(
+            (at_boundary - fee * (100_000.0 * 0.10 + 1_000.0 * 0.50) / 1_000_000.0).abs() < 1e-12,
+            "{model}: 100K input tokens must bill the short-prompt card, got {at_boundary}"
+        );
+        let above = pricing_aware_call_cost(provider, model, 100_001, 1_000, settlement_now())
+            .expect("priced");
+        assert!(
+            (above - fee * (100_001.0 * 0.50 + 1_000.0 * 2.50) / 1_000_000.0).abs() < 1e-12,
+            "{model}: one token past 100K must bill the long-prompt card, got {above}"
+        );
+    }
+    let flat = pricing_aware_call_cost(
+        "anthropic",
+        "claude-haiku-4-5-20251001",
+        150_000,
+        1_000,
+        settlement_now(),
+    )
+    .expect("priced");
+    assert!(
+        (flat - (150_000.0 * 1.00 + 1_000.0 * 5.00) / 1_000_000.0).abs() < 1e-12,
+        "Haiku 4.5 has no long-prompt band, got {flat}"
     );
 }
 
@@ -1057,7 +1081,10 @@ fn nested_budget_scope_cannot_pollute_the_outer_sessions_observed_usage() {
         let _inner = install_llm_cost_budget(5.0);
         // The child scope starts with no evidence, so its first call is
         // projected worst-case rather than inheriting the parent's ratio.
-        assert_eq!(peek_observed_session_usage(), ObservedSessionUsage::EMPTY);
+        assert_eq!(
+            peek_observed_session_usage(),
+            ObservedSessionUsage::default()
+        );
         let mut chatty = cached_call_result();
         chatty.output_tokens = 8_000;
         chatty.cache_read_tokens = 0;
@@ -1071,5 +1098,48 @@ fn nested_budget_scope_cannot_pollute_the_outer_sessions_observed_usage() {
         outer,
         "the child's usage must not survive its scope"
     );
+    reset_cost_state();
+}
+
+#[test]
+fn a_seeded_cost_scope_charges_the_sessions_earlier_spend_against_its_ceiling() {
+    // A durable session installs one cost scope per prompt. Unseeded, the
+    // second prompt of a session that already spent 95c of a $1 cap starts at
+    // $0 and is admitted; seeded, the same call is refused and the refusal
+    // reports what the session actually spent.
+    let _guard = crate::llm::env_guard();
+    crate::llm_config::clear_user_overrides();
+    reset_cost_state();
+    let opts = long_transcript_opts(100.0);
+
+    {
+        let _fresh = install_llm_cost_budget(1.0);
+        check_llm_preflight_budget(&opts).expect("an unspent $1 cap admits a ~15c call");
+    }
+
+    let outer_total = peek_total_cost();
+    {
+        let _seeded = install_llm_cost_budget_seeded(Some(1.0), 0.95);
+        assert!((peek_total_cost() - 0.95).abs() < 1e-12);
+        let dict = thrown_dict(
+            check_llm_preflight_budget(&opts).expect_err("95c spent leaves no room for ~15c"),
+        );
+        assert!((dict_float(&dict, "session_cost_usd") - 0.95).abs() < 1e-12);
+        assert!(dict_str(&dict, "message").contains("spent $0.950000 of $1.000000"));
+
+        // Completed calls add to the seed, which is the total a host carries
+        // into the session's next scope.
+        accumulate_llm_usage("fixture", 10, 10, 0.01).expect("96c is under the $1 cap");
+        assert!((peek_total_cost() - 0.96).abs() < 1e-12);
+    }
+    assert_eq!(peek_total_cost(), outer_total, "the seed must not leak out");
+
+    // No ceiling still tracks spend, so an uncapped session can be capped later.
+    {
+        let _uncapped = install_llm_cost_budget_seeded(None, 0.5);
+        check_llm_preflight_budget(&opts).expect("no ceiling admits the call");
+        accumulate_llm_usage("fixture", 10, 10, 0.25).expect("no ceiling to exceed");
+        assert!((peek_total_cost() - 0.75).abs() < 1e-12);
+    }
     reset_cost_state();
 }

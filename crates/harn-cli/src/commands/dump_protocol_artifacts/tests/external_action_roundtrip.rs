@@ -35,7 +35,23 @@ fn generated_rust_external_action_activity_round_trips() {
             "layer": "managed_policy",
             "outcome": "allowed",
             "reason_code": "test_mode_allowed",
-            "policy_id": "managed-default"
+            "policy_id": "managed-default",
+            "review": {
+                "receipt": "evaluation-reference",
+                "outcome": "low_confidence",
+                "rule": "confidence_floor",
+                "applied": false,
+                "minimum_confidence": 0.995,
+                "answers": [{
+                    "question_id": "safe",
+                    "kind": "boolean",
+                    "confidence": 0.6,
+                    "confidence_kind": "model_rationale",
+                    "verdict": true,
+                    "probability": 0.6,
+                    "probabilities": []
+                }]
+            }
         }],
         "decision": {
             "outcome": "approved",

@@ -338,18 +338,18 @@ impl HostlibRegistry {
                                         &[rewritten],
                                     )
                                     .map_err(VmError::from)?;
-                                    let (parent_cancel, deadline) = ctx.interrupt_sources();
-                                    let cancel = parent_cancel.unwrap_or_else(|| {
+                                    // Keep the scope deadline and the handler window
+                                    // apart so the worker reports the same interrupt
+                                    // kind the VM would.
+                                    let mut sources = ctx.interrupt_sources();
+                                    let cancel = Arc::clone(sources.cancel.get_or_insert_with(|| {
                                         Arc::new(AtomicBool::new(false))
-                                    });
-                                    let mut cancel_on_drop = CancelOnDrop(Some(Arc::clone(&cancel)));
+                                    }));
+                                    let mut cancel_on_drop = CancelOnDrop(Some(cancel));
                                     let handler_for_blocking = handler.clone();
                                     let completed = harn_vm::orchestration::run_blocking_with_ambient(
                                         move || {
-                                            let _interrupt = harn_vm::op_interrupt::install(
-                                                Some(cancel),
-                                                deadline,
-                                            );
+                                            let _interrupt = sources.install();
                                             handler_for_blocking(&[validated]).map_err(VmError::from)
                                         },
                                     )
@@ -505,7 +505,7 @@ mod tests {
             std::env::remove_var(harn_parser::HARN_LEGACY_AMBIENT_CAPABILITIES_ENV);
         }
         harn_parser::refresh_legacy_ambient_capabilities();
-        let mut strict_vm = Vm::new();
+        let mut strict_vm = harn_vm::new_vm();
         crate::install_default(&mut strict_vm);
         assert!(
             strict_vm
@@ -518,7 +518,7 @@ mod tests {
             std::env::set_var(harn_parser::HARN_LEGACY_AMBIENT_CAPABILITIES_ENV, "1");
         }
         harn_parser::refresh_legacy_ambient_capabilities();
-        let mut ambient_vm = Vm::new();
+        let mut ambient_vm = harn_vm::new_vm();
         crate::install_default(&mut ambient_vm);
         assert!(
             ambient_vm

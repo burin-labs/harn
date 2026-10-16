@@ -302,7 +302,7 @@ async fn files_upload_builtin(
     let path = upload.string(0, "path")?.to_string();
     let provider = upload.string(1, "provider")?.to_string();
     let file_id = upload_file(path, provider).await?;
-    Ok(VmValue::String(arcstr::ArcStr::from(file_id)))
+    Ok(VmValue::string(file_id))
 }
 
 #[cfg(test)]

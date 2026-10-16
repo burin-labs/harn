@@ -1,0 +1,73 @@
+import { agent_loop } from "std/agent/loop"
+import { llm_text, with_llm_script } from "std/testing"
+
+/**
+ * A step judge may not withhold a step it cannot explain, and never judges a
+ * read. Falsifier (Kenneth's GPT-6 Sol session, 2026-09-27): a Haiku judge
+ * answered a bare `revise` six times, the agent read only "The previous
+ * response should be revised.", and four file reads it had asked for never ran.
+ */
+pipeline default(harness: Harness) {
+  // A revise with no critique and no reasoning stands as no objection.
+  with_llm_script(
+    harness.llm,
+    [
+      llm_text("<user_response>2 + 2 = 4</user_response>\n<done>##DONE##</done>"),
+      llm_text("{\"verdict\":\"revise\"}"),
+    ],
+    { ->
+      const result = agent_loop(
+        harness,
+        "What is 2 + 2?",
+        nil,
+        {
+          provider: "mock",
+          loop_until_done: true,
+          max_iterations: 4,
+          step_judge: {provider: "mock", on_veto: "retain"},
+        },
+      )
+      harness.stdio.println(result.status)
+      harness.stdio.println(result.visible_text)
+      harness.stdio.println(len(harness.llm.mock_calls()))
+    },
+  )
+  // A step whose every call is a declared read is never sent to the judge.
+  const tools = tool_define(
+    tool_registry(),
+    "look",
+    "Read a file.",
+    {
+      parameters: {path: {type: "string"}},
+      handler: { _args -> "fn main() {}" },
+      annotations: {kind: "read", side_effect_level: "read_only"},
+    },
+  )
+  with_llm_script(
+    harness.llm,
+    [
+      {tool_calls: [{id: "look-1", name: "look", arguments: {path: "src/main.rs"}}]},
+      llm_text("<user_response>It has an empty main.</user_response>\n<done>##DONE##</done>"),
+      llm_text("{\"verdict\":\"pass\",\"reasoning\":\"answers the question\"}"),
+    ],
+    { ->
+      const result = agent_loop(
+        harness,
+        "What does src/main.rs contain?",
+        nil,
+        {
+          provider: "mock",
+          tools: tools,
+          tool_format: "native",
+          loop_until_done: true,
+          max_iterations: 4,
+          step_judge: {provider: "mock", on_veto: "retain"},
+        },
+      )
+      harness.stdio.println(result.status)
+      // Two agent turns plus one judge call on the final answer: the read was
+      // not judged.
+      harness.stdio.println(len(harness.llm.mock_calls()))
+    },
+  )
+}

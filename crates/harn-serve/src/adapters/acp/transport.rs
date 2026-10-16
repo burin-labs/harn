@@ -15,6 +15,12 @@ use axum::Router;
 use crate::ws::{WsConfig, WsMessage, WsSession};
 use crate::{AuthRequest, HttpTlsConfig};
 
+/// Internal transport ownership, never wire metadata or inferred turn IDs.
+struct RoutedRequest {
+    message: serde_json::Value,
+    preparation: PreparedSessionRequest,
+}
+
 #[derive(Clone, Debug)]
 pub struct AcpWebSocketServeOptions {
     pub bind: SocketAddr,
@@ -126,19 +132,21 @@ async fn acp_websocket_session(config: AcpServerConfig, session: WsSession) {
     let (request_tx, request_rx) = mpsc::unbounded_channel::<serde_json::Value>();
     let (response_tx, mut response_rx) = mpsc::unbounded_channel::<String>();
 
-    let worker_thread = crate::vm_thread::spawn("harn-acp-ws", move || {
-        let runtime = match tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-        {
-            Ok(runtime) => runtime,
-            Err(error) => {
-                eprintln!("[harn] failed to start ACP WebSocket runtime: {error}");
-                return;
-            }
-        };
-        runtime.block_on(run_acp_channel_server(config, request_rx, response_tx));
-    });
+    let worker_thread = harn_parser::runtime_stack::builder()
+        .name("harn-acp-ws".to_owned())
+        .spawn(move || {
+            let runtime = match tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+            {
+                Ok(runtime) => runtime,
+                Err(error) => {
+                    eprintln!("[harn] failed to start ACP WebSocket runtime: {error}");
+                    return;
+                }
+            };
+            runtime.block_on(run_acp_channel_server(config, request_rx, response_tx));
+        });
     let worker_thread = match worker_thread {
         Ok(worker_thread) => worker_thread,
         Err(error) => {
@@ -422,7 +430,7 @@ async fn run_acp_channel_server_inner(
             let concurrent_controls = server.concurrent_controls.clone();
             let routed_output = server.output.clone();
             let (routed_tx, mut routed_rx) =
-                tokio::sync::mpsc::unbounded_channel::<serde_json::Value>();
+                tokio::sync::mpsc::unbounded_channel::<RoutedRequest>();
 
             // Shutdown signalling for the request-routing task. The router
             // task is itself `spawn_local`, so it shares this thread with the
@@ -467,8 +475,15 @@ async fn run_acp_channel_server_inner(
                         continue;
                     }
 
-                    prepare_session_prompt(&cancellations, &msg);
-                    if preempt_session_interruption(&cancellations, &msg) {
+                    let preparation =
+                        prepare_session_request(&cancellations, &concurrent_controls, &msg);
+                    if preempt_session_interruption(&cancellations, &concurrent_controls, &msg) {
+                        continue;
+                    }
+                    if concurrent_controls
+                        .preempt_active_hitl_response(&msg, &routed_output)
+                        .await
+                    {
                         continue;
                     }
                     if concurrent_controls
@@ -485,11 +500,14 @@ async fn run_acp_channel_server_inner(
                     {
                         continue;
                     }
-                    if apply_session_budget_rearm(&msg) {
+                    if concurrent_controls.apply_budget_rearm_with_output(&msg, &routed_output) {
                         continue;
                     }
 
-                    let _ = routed_tx.send(msg);
+                    let _ = routed_tx.send(RoutedRequest {
+                        message: msg,
+                        preparation,
+                    });
                 }
 
                 let mut pending = pending_clone.lock().await;
@@ -575,7 +593,7 @@ pub async fn run_acp_server(config: AcpServerConfig) {
             let concurrent_controls = server.concurrent_controls.clone();
             let routed_output = server.output.clone();
             let (request_tx, mut request_rx) =
-                tokio::sync::mpsc::unbounded_channel::<serde_json::Value>();
+                tokio::sync::mpsc::unbounded_channel::<RoutedRequest>();
 
             eprintln!("[harn] ACP workflow server ready on stdio");
 
@@ -605,8 +623,15 @@ pub async fn run_acp_server(config: AcpServerConfig) {
                         continue;
                     }
 
-                    prepare_session_prompt(&cancellations, &msg);
-                    if preempt_session_interruption(&cancellations, &msg) {
+                    let preparation =
+                        prepare_session_request(&cancellations, &concurrent_controls, &msg);
+                    if preempt_session_interruption(&cancellations, &concurrent_controls, &msg) {
+                        continue;
+                    }
+                    if concurrent_controls
+                        .preempt_active_hitl_response(&msg, &routed_output)
+                        .await
+                    {
                         continue;
                     }
                     if concurrent_controls
@@ -623,11 +648,14 @@ pub async fn run_acp_server(config: AcpServerConfig) {
                     {
                         continue;
                     }
-                    if apply_session_budget_rearm(&msg) {
+                    if concurrent_controls.apply_budget_rearm_with_output(&msg, &routed_output) {
                         continue;
                     }
 
-                    let _ = request_tx.send(msg);
+                    let _ = request_tx.send(RoutedRequest {
+                        message: msg,
+                        preparation,
+                    });
                 }
 
                 // stdin closed — clean up pending.
@@ -649,8 +677,8 @@ pub async fn run_acp_server(config: AcpServerConfig) {
 ///
 /// This boundary is shared by stdio and channel transports so adding a large
 /// handler cannot silently reintroduce platform-dependent stack exhaustion.
-async fn dispatch_incoming(server: &mut AcpServer, message: serde_json::Value) {
-    Box::pin(server.handle_incoming_message(message)).await;
+async fn dispatch_incoming(server: &mut AcpServer, request: RoutedRequest) {
+    Box::pin(server.handle_prepared_message(request.message, request.preparation)).await;
 }
 
 #[cfg(test)]

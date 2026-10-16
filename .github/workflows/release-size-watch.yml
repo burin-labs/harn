@@ -32,7 +32,7 @@ jobs:
     # A fork's schedule would dispatch against its own release workflow and
     # burn its runner minutes measuring a binary nobody releases.
     if: github.repository == 'burin-labs/harn'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - name: Measure the release binary size from current main
@@ -45,7 +45,7 @@ jobs:
           SIZE_GATED_TARGET: x86_64-unknown-linux-gnu
           # Benchmark mode rejects the `policy` profile outright — policy
           # runners are reserved for builds whose artifacts ship. `standard`
-          # and `fast` resolve this target to the same `ubuntu-latest` runner
+          # and `fast` resolve this target to the same `ubuntu-24.04` runner
           # (.github/release-runner-policy.json), so `standard` measures the
           # release binary on release hardware at no cost.
           RUNNER_PROFILE: standard

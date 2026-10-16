@@ -1,0 +1,222 @@
+# Paths Harn knows by name, grouped by what a confined child may do with them.
+#
+# Data, not code: adding a path is a reviewable one-line diff, and every
+# consumer derives its matcher from this file. `known_paths/mod.rs` parses it
+# once, rejects an empty credential list, a credential without a reason, a
+# duplicate, and any grant that names a credential or sits inside one.
+#
+# Entries under `home` are relative to `$HOME`. Class decides authority:
+#
+# - credential: never readable by a confined child, whatever grants its
+#   parent. The taint gate, the command risk scan, and the approval rules
+#   match these anywhere in a path, not only under `$HOME`.
+# - package_config: read-only, granted by the PackageManagerConfig preset.
+# - toolchain_read: read-only, granted by the DeveloperToolchains preset.
+# - toolchain_cache: read+write, granted by the DeveloperToolchains preset.
+
+[credential]
+home = [
+  ".ssh",
+  ".aws",
+  ".gnupg",
+  ".netrc",
+  ".pgpass",
+  ".git-credentials",
+  ".docker/config.json",
+  ".config/gh/hosts.yml",
+  ".config/gcloud",
+  ".kube/config",
+  ".npmrc",
+  ".pypirc",
+  ".cargo/credentials",
+  ".cargo/credentials.toml",
+  ".composer/auth.json",
+  ".config/composer/auth.json",
+  ".config/git/credentials",
+  ".config/glab-cli",
+  ".config/hub",
+  ".config/github-copilot",
+  ".config/rclone/rclone.conf",
+  ".config/doctl",
+  ".config/hcloud",
+  ".config/containers/auth.json",
+  ".config/.wrangler",
+  ".config/stripe",
+  ".config/sops/age",
+  ".config/configstore/firebase-tools.json",
+  ".cache/huggingface/token",
+  ".cache/huggingface/stored_tokens",
+]
+
+# File names that hold credential material wherever they live. Matched against
+# the last path component, case-insensitively. These cannot be sandbox-denied
+# (the sandbox denies paths, not names), so they reach the path matchers only.
+basename_globs = [
+  ".env",
+  ".env.*",
+  ".envrc",
+  "id_rsa",
+  "id_ed25519",
+  "id_ecdsa",
+  "id_dsa",
+  "*.pem",
+  # Private keys conventionally end in `.key`. A Keynote document does too;
+  # a confirmation prompt on one is the cheaper mistake.
+  "*.key",
+  "credentials.json",
+  "secrets.*",
+  "*.secrets.*",
+]
+
+[credential.reason]
+".ssh" = "private keys and known_hosts"
+".aws" = "long-lived access keys and session tokens"
+".gnupg" = "private keyring"
+".netrc" = "plaintext machine credentials"
+".pgpass" = "PostgreSQL passwords"
+".git-credentials" = "git credential-store tokens in the default layout"
+".docker/config.json" = "registry auth tokens"
+".config/gh/hosts.yml" = "GitHub OAuth token"
+".config/gcloud" = "Google Cloud credentials"
+".kube/config" = "cluster credentials and client certs"
+".npmrc" = "registry auth tokens; children get a sanitized stand-in"
+".pypirc" = "package index upload credentials"
+".cargo/credentials" = "crates.io API token, under preset-granted ~/.cargo"
+".cargo/credentials.toml" = "crates.io API token, under preset-granted ~/.cargo"
+".composer/auth.json" = "Packagist and GitHub OAuth tokens; under preset-granted ~/.composer"
+".config/composer/auth.json" = "the same tokens in Composer's XDG layout; under preset-granted ~/.config/composer"
+".config/git/credentials" = "git credential-store tokens in the XDG layout; under preset-granted ~/.config/git"
+".config/glab-cli" = "GitLab CLI tokens (config.yml)"
+".config/hub" = "hub CLI OAuth token"
+".config/github-copilot" = "Copilot OAuth tokens (hosts.json, apps.json)"
+".config/rclone/rclone.conf" = "remote storage credentials"
+".config/doctl" = "DigitalOcean API token"
+".config/hcloud" = "Hetzner Cloud API tokens"
+".config/containers/auth.json" = "Podman and Buildah registry auth"
+".config/.wrangler" = "Cloudflare Wrangler OAuth tokens"
+".config/stripe" = "Stripe CLI API keys"
+".config/sops/age" = "age private keys for sops"
+".config/configstore/firebase-tools.json" = "Firebase CLI refresh token"
+".cache/huggingface/token" = "Hugging Face access token (HF_HOME default)"
+".cache/huggingface/stored_tokens" = "Hugging Face saved access tokens"
+
+[package_config]
+# Measured by scripts/sandbox_config_census.harn. Unknown XDG siblings stay
+# closed, and a credential inside any of these is still denied.
+home = [
+  ".gitconfig",
+  ".yarnrc.yml",
+  ".config/git",
+  ".config/pip",
+  ".config/go",
+  ".config/uv",
+  ".config/pnpm",
+  ".config/yarn",
+  ".config/composer",
+  ".config/rustfmt",
+  ".config/cmake",
+  ".config/gem",
+  ".config/mise",
+  ".config/ruff",
+  ".config/black",
+  ".config/sbt",
+  ".config/coursier/mirror.properties",
+  ".config/swiftpm/configuration",
+  ".npm",
+  ".cache/pip",
+  ".cache/uv",
+  ".cache/node/corepack",
+  ".cache/yarn",
+  ".cache/composer",
+  ".cache/mise",
+  ".cache/black",
+  ".cache/sbt",
+  ".cache/coursier",
+  ".cache/JNA",
+  ".cache/clang",
+  ".cache/org.swift.swiftpm",
+  ".cache/org.swift.foundation.URLCache",
+  # .cache/go-build and .cache/harn are owned by the writable toolchain_cache
+  # roots. Repeating them here cancels that grant on macOS, where the
+  # read-only rules follow the write allows.
+  ".pip",
+  # Composer's macOS home (`COMPOSER_HOME` default). `config.json` and the
+  # global `composer.json` are configuration; `auth.json` is a credential.
+  ".composer",
+  # pnpm's global rc on macOS (`env-paths` config dir). A registry or
+  # store-dir setting, never a token: those live in `.npmrc`.
+  "Library/Preferences/pnpm",
+  ".cargo/config",
+  ".cargo/config.toml",
+  # `.cargo/registry` and `.cargo/git` are deliberately NOT here. They are
+  # build caches Cargo must WRITE, so they are toolchain_cache entries.
+  # Listing them here too would re-deny their writes: the macOS backend emits
+  # a `(deny file-write*)` for every package-config root AFTER the write-allow
+  # block, and last-match-wins would cancel the cache grant. `.cargo` itself
+  # stays readable as a toolchain_read root.
+]
+
+[toolchain_read]
+home = [
+  ".asdf",
+  ".bun",
+  ".cargo",
+  ".fnm",
+  ".juliaup",
+  ".local/bin",
+  ".local/share/mise",
+  ".local/share/pnpm",
+  ".local/share/uv",
+  ".nvm",
+  ".pyenv",
+  ".rbenv",
+  ".rustup",
+  ".sdkman",
+  ".swiftly",
+  ".volta",
+  "Library/pnpm",
+  "go",
+]
+# Added on Windows only.
+windows_home = [
+  "AppData/Local/Programs/Python",
+  "AppData/Local/uv",
+  "AppData/Roaming/uv",
+  "scoop",
+]
+
+# Per-user JVM/iOS/Go/Cargo/Harn caches. Shared across platforms so the macOS
+# seatbelt and Linux Landlock backends render the same set; an OS-foreign
+# entry is simply absent on disk, and each backend skips a missing root.
+[toolchain_cache]
+home = [
+  ".gradle",                             # Gradle (JVM/Android/Kotlin)
+  ".m2",                                 # Maven (JVM)
+  ".konan",                              # Kotlin/Native
+  "Library/Caches/CocoaPods",            # CocoaPods (iOS/macOS)
+  "Library/Developer/Xcode/DerivedData", # Xcode build products
+  # Go build + module caches. `go build`/`go test` write compiled package
+  # objects to GOCACHE and downloaded modules to GOMODCACHE; without them go
+  # reports the write miss as the misleading "package X is not in std".
+  # GOCACHE differs by OS; GOMODCACHE defaults to `~/go/pkg/mod`, while `~/go`
+  # itself stays read-only as a toolchain_read root.
+  "Library/Caches/go-build", # GOCACHE, macOS default
+  ".cache/go-build",         # GOCACHE, Linux default
+  "go/pkg/mod",              # GOMODCACHE default
+  # Harn's package cache needs write: an entry is claimed through a lock file
+  # under `locks/` before it is read. `HARN_CACHE_DIR` overrides it, and the
+  # workspace env hands the child the resolved root so the two agree.
+  "Library/Caches/harn", # macOS default
+  ".cache/harn",         # Linux default
+  # Go env config (GOENV). `go` rewrites `go/env` on first use and fails with
+  # `writing go env config` when its parent is read-only. The Linux default
+  # `~/.config/go/env` sits under the read-only `.config/go` package-config
+  # root, so granting it needs a nested carve-out tracked separately.
+  "Library/Application Support/go", # GOENV, macOS default
+  # Cargo registry + git caches: crate sources, tarballs, the index, and git
+  # dependency checkouts. Build artifacts only; Cargo credentials and config
+  # live at the CARGO_HOME root, outside these, and stay read-only.
+  ".cargo/registry",       # crate cache/index/src
+  ".cargo/git",            # git dependency db + checkouts
+  ".cargo/.package-cache", # Cargo's advisory build lock file
+]

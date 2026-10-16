@@ -77,7 +77,7 @@ pub(in crate::llm::tool_conformance) fn validate_probe_request_body_for_format(
     }
     match dialect.as_str() {
         "anthropic" => {
-            validate_anthropic_probe_request(body, probe_case, request_profile, &mut issues);
+            validate_anthropic_probe_request(body, probe_case, request_profile, &caps, &mut issues);
         }
         "bedrock" => validate_bedrock_probe_request(body, probe_case, &mut issues),
         "gemini" | "vertex" => {
@@ -302,6 +302,7 @@ fn validate_anthropic_probe_request(
     body: &Value,
     probe_case: ToolProbeCase,
     request_profile: ToolProbeRequestProfile,
+    caps: &crate::llm::capabilities::Capabilities,
     issues: &mut Vec<String>,
 ) {
     require_array(body, "/messages", issues);
@@ -341,6 +342,18 @@ fn validate_anthropic_probe_request(
         return;
     }
     if probe_case.requires_probe_tool() {
+        // A route that rejects forced tool choice is probed with `auto`; see
+        // `probe_request_payload_for_format`.
+        if !crate::llm::providers::anthropic::forced_tool_choice_allowed(caps) {
+            require_string_eq(
+                body,
+                "/tool_choice/type",
+                "auto",
+                "Anthropic unforced tool_choice.type",
+                issues,
+            );
+            return;
+        }
         match request_profile {
             ToolProbeRequestProfile::CatalogDefault => {
                 require_string_eq(

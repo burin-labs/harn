@@ -3,13 +3,13 @@ name: macOS workspace tests
 # Runs the full workspace nextest surface on macOS once per night, plus
 # on-demand from the Actions tab. This is the macOS analogue of
 # `windows-nightly.yml`: the per-PR Linux lanes in `ci.yml` build and test on
-# `ubuntu-latest`, but the macOS-only code paths — most notably the Seatbelt
+# `ubuntu-24.04`, but the macOS-only code paths — most notably the Seatbelt
 # sandbox profile generation in `crates/harn-vm/src/stdlib/sandbox/macos.rs`
 # and its `#[cfg(target_os = "macos")]` unit tests — compile and run nowhere
 # in CI today (only on a contributor's local Mac). This nightly closes that
 # gap. Scheduled cache-warming runs use GitHub's Apple Silicon runner; exact
-# source dispatches use the proven Blacksmith M4 class. Both give arm64
-# coverage through this one workflow and job identity.
+# source dispatches use the organization's Apple Silicon runners. Both give
+# arm64 coverage through this one workflow and job identity.
 #
 # Scheduled failures are informational and do not gate `ci-status`.
 # Release-certification dispatches are blocking exact-source proof. When a
@@ -37,6 +37,7 @@ on:
       # it under, so a change to it changes what the run proves. Without this
       # the lane skips the very pull request that retimes it.
       - ".config/nextest.toml"
+      - ".config/native-qualification.json"
       - ".github/workflows/windows-nightly.yml"
       - ".github/workflows/macos-nightly.yml"
 
@@ -70,18 +71,13 @@ jobs:
     name: Workspace nextest (macos-latest)
     # A pull-request run is cache-warming class, not exact-source proof, so it
     # takes the same hosted runner and the same generous budget as the nightly.
-    # The paid M4 class requires an explicit release-incident opt-in. The 30
-    # minute budget would have timed out the hosted lane's p90 of 47 minutes,
-    # which the evidence reader would then have read as red rather than slow.
     # Exact-source dispatches (release certification) run on the organization's
     # own Apple Silicon runners (label `macos-arm64`), which keep a persistent
     # workspace target between runs so the lane pays a warm build instead of
-    # the hosted runner's cold one. The paid M4 class stays available as an
-    # explicit opt-in for when those runners are offline. Scheduled and
-    # pull-request runs stay on the hosted runner, which is also the sole
-    # writer of the hosted warm cache.
-    runs-on: ${{ github.event_name == 'workflow_dispatch' && (vars.HARN_CI_ENABLE_BLACKSMITH_MACOS == 'true' && 'blacksmith-12vcpu-macos-15' || 'macos-arm64') || 'macos-latest' }}
-    timeout-minutes: ${{ github.event_name == 'workflow_dispatch' && (vars.HARN_CI_ENABLE_BLACKSMITH_MACOS == 'true' && 30 || 45) || 75 }}
+    # the hosted runner's cold one. Scheduled and pull-request runs stay on the
+    # hosted runner, which is also the sole writer of the hosted warm cache.
+    runs-on: ${{ github.event_name == 'workflow_dispatch' && 'macos-arm64' || 'macos-latest' }}
+    timeout-minutes: ${{ github.event_name == 'workflow_dispatch' && 45 || 75 }}
     # Don't run forks of the repo on a fork's own schedule.
     if: github.repository == 'burin-labs/harn'
     steps:
@@ -157,16 +153,40 @@ jobs:
             echo "No compatible macOS warm target; this lane builds cold."
           fi
       - name: Install Go formatter
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        uses: actions/setup-go@44694675825211faa026b3c33043df3e48a5fa00 # v6.0.0
         with:
           go-version: "1.26.6"
           cache: false
       - name: Install cargo-nextest
-        uses: taiki-e/install-action@3f74d7c16a4242f1c95561e98edc25d36adb4375 # v2.87.12
+        uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2.87.22
         with:
           tool: nextest@0.9.132
+      # The hosted runner is two machines under one label. Most runs land on a
+      # 3-core, 7 GiB M1; a few land on a 14 GiB host. Cargo's default of one
+      # compiler per core runs two or three at once on the small one, which
+      # swaps: the workspace compile took a median of 50 minutes across 111
+      # such runs against 8 on the larger host. One compiler at a time on the
+      # same 7 GiB host swapped 47 times less and built in 27 minutes instead
+      # of 58 (harn#8599). The shared budget derives that from the box's cores
+      # and memory rather than from a literal.
+      #
+      # Hosted only. Exact-source dispatches run on owned hosts whose warm
+      # persistent target builds in minutes, and nothing measured there says
+      # memory binds, so they keep Cargo's default.
+      - name: Measure the hosted build budget
+        id: resource-budget
+        if: ${{ runner.environment == 'github-hosted' }}
+        run: bash scripts/ci/rust_resource_budget.sh
+        env:
+          RUNNER_ENVIRONMENT: ${{ runner.environment }}
+          HARN_BUDGET_PROFILE: producer
       - name: Run workspace nextest
         shell: bash
+        env:
+          # A skipped budget step yields an empty output, which Cargo rejects,
+          # so non-hosted runs name Cargo's own default explicitly.
+          CARGO_BUILD_JOBS: ${{ runner.environment == 'github-hosted' && steps.resource-budget.outputs.build_jobs || 'default' }}
+          RUST_TEST_JOB_LIMIT_MINUTES: ${{ github.event_name == 'workflow_dispatch' && 45 || 75 }}
         # The whole workspace runs, less one member that contributes nothing to
         # it. `harn-wasm` carries no `#[test]` and produces no test binary here;
         # its declared test framework is `wasm-bindgen-test`, which a native
@@ -184,7 +204,7 @@ jobs:
         # Tests gated to `#![cfg(unix)]` still run here (macOS is Unix); the
         # macOS-specific surface is exactly what this nightly exists to
         # exercise.
-        run: scripts/ci/run_rust_test_lane.sh cargo nextest run --locked --workspace --exclude harn-wasm --profile ci
+        run: scripts/ci/run_rust_test_lane.sh cargo-nextest nextest run --locked --workspace --exclude harn-wasm --profile ${{ github.event_name == 'workflow_dispatch' && 'native-qualification' || 'ci' }}
       - name: Smoke test harn run
         shell: bash
         run: |
@@ -206,6 +226,15 @@ jobs:
         run: |
           export HARN_BIN="${CARGO_TARGET_DIR:-./target}/debug/harn"
           make check-test-case-performance
+      - name: Upload failed test-case performance evidence
+        if: ${{ failure() && steps.release-test-case-performance.outcome == 'failure' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: test-case-performance-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .harn-runs/test-case-performance/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
       # Artifact name and retention are owned by .github/cache-policy.json
       # macos_workspace_warm; keep these literals byte-compatible with that
       # document or check-ci-cache-policy fails.

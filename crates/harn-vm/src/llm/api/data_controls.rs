@@ -36,15 +36,15 @@ pub(crate) fn dialect_of(protocol: StreamProtocol) -> DataControlDialect {
 }
 
 /// What Harn did about data controls on one request.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum DataControlsOutcome {
     /// The caller left the posture at `default`. Harn set nothing and the
     /// provider's server-side default applies. This is not a claim about what
     /// that default is.
     NotRequested,
-    /// The caller asked for the strictest available posture and at least one
-    /// declared control was written onto this request.
+    /// At least one declared control was written onto this request, either
+    /// explicitly requested or required by a governing inference boundary.
     Applied,
     /// The caller asked, the provider is researched, and it exposes no
     /// per-request control on this dialect. The posture was NOT achieved.
@@ -118,6 +118,12 @@ pub struct DataControlsReceipt {
     /// train would read as safe if this reported the provider's line.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
+    /// Governing rule when an embedder supplied an inference boundary.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inference_boundary_rule: Option<String>,
+    /// Catalog locality and model-weight declarations used by that rule.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inference_catalog_evidence: Option<super::inference_boundary::InferenceCatalogEvidence>,
 }
 
 impl DataControlsReceipt {
@@ -171,12 +177,20 @@ pub(crate) fn training_refusal(
     provider: &str,
     model: &str,
     posture: DataPosture,
+    receipt: &DataControlsReceipt,
 ) -> Option<String> {
     if posture != DataPosture::StrictestAvailable {
         return None;
     }
     if crate::llm_config::effective_training_default(provider, model)
         != Some(crate::llm_config::TrainingDefault::Trains)
+    {
+        return None;
+    }
+    if receipt
+        .applied
+        .iter()
+        .any(|control| control.effect == "training")
     {
         return None;
     }
@@ -212,6 +226,18 @@ pub(crate) fn resolve(
     dialect: DataControlDialect,
     posture: DataPosture,
 ) -> DataControlsPlan {
+    resolve_for_boundary(provider, model, dialect, posture, None)
+}
+
+/// Apply only the training controls required by the host ceiling in addition
+/// to the caller's requested posture. Default without a ceiling stays empty.
+pub(crate) fn resolve_for_boundary(
+    provider: &str,
+    model: &str,
+    dialect: DataControlDialect,
+    posture: DataPosture,
+    boundary: Option<super::inference_boundary::InferenceBoundary>,
+) -> DataControlsPlan {
     let requested_posture = match posture {
         DataPosture::Default => "default",
         DataPosture::StrictestAvailable => "strictest_available",
@@ -224,12 +250,16 @@ pub(crate) fn resolve(
     // reported posture and the note a host may surface verbatim.
     let route_controls = crate::llm_config::model_data_controls(model);
     let training_default = crate::llm_config::effective_training_default(provider, model);
+    let require_training_control = boundary.is_some_and(|boundary| {
+        !boundary.allow_training_discounts
+            && training_default != Some(TrainingDefault::DoesNotTrain)
+    });
     let route_note = |provider_note: Option<String>| match &route_controls {
         Some(controls) => controls.note.clone(),
         None => provider_note,
     };
 
-    if posture == DataPosture::Default {
+    if posture == DataPosture::Default && !require_training_control {
         return DataControlsPlan {
             body_writes: Vec::new(),
             headers: Vec::new(),
@@ -242,6 +272,8 @@ pub(crate) fn resolve(
                 control_scope: declaration.as_ref().map(|entry| entry.control_scope),
                 applied: Vec::new(),
                 note: route_note(declaration.and_then(|entry| entry.note)),
+                inference_boundary_rule: None,
+                inference_catalog_evidence: None,
             },
         };
     }
@@ -259,6 +291,8 @@ pub(crate) fn resolve(
                 control_scope: None,
                 applied: Vec::new(),
                 note: route_note(None),
+                inference_boundary_rule: None,
+                inference_catalog_evidence: None,
             },
         };
     };
@@ -267,6 +301,9 @@ pub(crate) fn resolve(
     let mut headers = Vec::new();
     let mut applied = Vec::new();
     for control in declaration.controls_for_dialect(dialect) {
+        if posture == DataPosture::Default && control.effect != DataControlEffect::Training {
+            continue;
+        }
         match control.location {
             DataControlLocation::Body => {
                 body_writes.push((control.name.clone(), control.value.as_json()));
@@ -301,6 +338,8 @@ pub(crate) fn resolve(
             control_scope: Some(declaration.control_scope),
             applied,
             note: route_note(declaration.note),
+            inference_boundary_rule: None,
+            inference_catalog_evidence: None,
         },
     }
 }

@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::timing::DurationSummary;
 
@@ -30,6 +30,10 @@ pub struct TestResult {
     /// errors have no execution timeline and leave this absent.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub phases: Option<PhaseTimings>,
+    /// Counted VM work through case teardown, or null if no VM was constructed.
+    /// A measured zero is distinct from unavailable work.
+    /// Boxed so the new measurement keeps the existing progress event compact.
+    pub work: Option<Box<harn_vm::VmWork>>,
     /// Script-owned `std/timing` spans closed while this case executed.
     /// These are the receipt-level attribution boundary for sub-operations
     /// inside an otherwise monolithic test case.
@@ -85,6 +89,36 @@ pub struct ShardPlan {
     pub unknown_cases: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub dominant_case: Option<DominantCase>,
+    /// Complete pre-selection inventory. A matrix verifier must compare this
+    /// with observed cases; adding per-shard pass counts cannot prove coverage.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub matrix: Option<ShardMatrixPlan>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TestSourceIdentity {
+    pub commit: String,
+    pub tree: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PlannedShardCase {
+    pub file: String,
+    pub name: String,
+    pub shard: usize,
+    pub declared_weight: usize,
+    pub estimated_ms: u64,
+    pub known_timing: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ShardMatrixPlan {
+    pub schema_version: u32,
+    /// Absent for dirty, untracked, non-Git, or mixed-repository inputs.
+    pub source: Option<TestSourceIdentity>,
+    /// The same clean source was observed again after execution.
+    pub source_confirmed: bool,
+    pub cases: Vec<PlannedShardCase>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -207,6 +241,41 @@ impl AggregateTimings {
 }
 
 impl TestResult {
+    /// Construct a result without an execution timeline or measured VM work.
+    ///
+    /// Use this constructor instead of a struct literal when producing results
+    /// outside the runner. Set diagnostics on the returned result as needed.
+    /// Instrumented producers must set `work` from the stopped VM recorder;
+    /// leaving it absent means unavailable, not measured zero.
+    ///
+    /// ```
+    /// use harn_test_runner::TestResult;
+    ///
+    /// let mut result = TestResult::unmeasured("case", "test_example.harn", false, 0);
+    /// result.error = Some("Discovery failed".into());
+    /// assert!(result.work.is_none());
+    /// ```
+    pub fn unmeasured(
+        name: impl Into<String>,
+        file: impl Into<String>,
+        passed: bool,
+        duration_ms: u64,
+    ) -> Self {
+        Self {
+            name: name.into(),
+            file: file.into(),
+            passed,
+            skip_reason: None,
+            error: None,
+            captured_output: None,
+            timeout: None,
+            duration_ms,
+            phases: None,
+            work: None,
+            timing_spans: Vec::new(),
+        }
+    }
+
     /// Emit a one-line phase breakdown to stderr. Driven by `--diagnose`
     /// / `HARN_TEST_DIAGNOSE=1`. The format is intentionally
     /// machine-readable so downstream eval pipelines can grep it.

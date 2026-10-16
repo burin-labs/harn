@@ -4,7 +4,11 @@
 // duplicates / usage.cache_creation_input_tokens) against regrowing.
 // Rust twin: `envelope_top_level_keys_are_canonical` in
 // crates/harn-vm/src/llm/api/result.rs; types in std/llm/envelope.
-import { llm_response_is_billed_empty, llm_response_is_empty } from "std/llm/envelope"
+import {
+  EffectiveReasoningEffort,
+  llm_response_is_billed_empty,
+  llm_response_is_empty,
+} from "std/llm/envelope"
 
 pipeline default(harness: Harness) {
   const r = harness.llm.call("Hello world", nil, {provider: "mock"})
@@ -32,4 +36,8 @@ pipeline default(harness: Harness) {
   // Dynamic lookup preserves the runtime absence assertion without asking the
   // closed usage type to expose this dead provider-wire alias.
   harness.stdio.println(r.usage["cache_creation_input_tokens"] == nil)
+  const observed: EffectiveReasoningEffort = r.effective_reasoning_effort
+  harness.stdio.println(observed.status)
+  const selected = harness.llm.call("Hello world", nil, {provider: "mock", effort: "high"})
+  harness.stdio.println(selected.effective_reasoning_effort.status)
 }

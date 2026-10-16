@@ -21,6 +21,7 @@ const SLICE_REF_PREFIX: &str = "refs/flow/slices";
 
 /// Errors produced by Flow VCS backends.
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum VcsBackendError {
     /// Backend configuration or caller input is invalid.
     Invalid(String),
@@ -482,7 +483,8 @@ fn git_output_at_owned(
     args: &[String],
     stdin: Option<&[u8]>,
 ) -> Result<String, VcsBackendError> {
-    let mut command = Command::new("git");
+    let mut command = crate::process_sandbox::session_std_command("git")
+        .map_err(|error| VcsBackendError::Invalid(format!("git session environment: {error}")))?;
     command.args(args).current_dir(repo_root);
     clear_git_env(&mut command);
     command

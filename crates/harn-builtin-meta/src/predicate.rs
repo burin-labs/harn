@@ -41,9 +41,13 @@ const EVIDENCE_KIND: Ty = Ty::Union(&[
 
 // -- Questions ---------------------------------------------------------------
 
+pub const BOOLEAN_CRITERIA: Ty =
+    Ty::Shape(&[Field::new("true", STRING), Field::new("false", STRING)]);
+
 pub const BOOLEAN_QUESTION: Ty = Ty::Shape(&[
     Field::new("kind", Ty::LitString("boolean")),
     Field::new("instructions", STRING),
+    Field::optional("criteria", BOOLEAN_CRITERIA),
 ]);
 
 pub const CHOICE_QUESTION: Ty = Ty::Shape(&[
@@ -162,6 +166,7 @@ const UNAVAILABLE: Ty = Ty::Shape(&[
             Ty::LitString("unsupported_options"),
             Ty::LitString("transport_failed"),
             Ty::LitString("authority_denied"),
+            Ty::LitString("admission_refused"),
             Ty::LitString("producer_cancelled"),
             Ty::LitString("cache_miss"),
         ]),
@@ -299,6 +304,10 @@ pub const POLICY: Ty = Ty::Shape(&[
     Field::new("model", STRING),
     Field::optional("effort", STRING),
     Field::optional("temperature", FLOAT),
+    Field::optional("max_tokens", INT),
+    Field::optional("top_p", FLOAT),
+    Field::optional("seed", INT),
+    Field::optional("timeout_ms", INT),
     Field::new("threshold", FLOAT),
     Field::optional("evaluation_cost_limit", FLOAT),
     Field::optional("run_cost_limit", FLOAT),

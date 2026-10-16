@@ -1,6 +1,6 @@
 //! Checkpoint system for resilient pipeline execution.
 //!
-//! Provides `checkpoint`, `checkpoint_get`, and `checkpoint_clear` builtins.
+//! Provides durable checkpoint reads, serialized mutations, and atomic insertion.
 //! Checkpoints are persisted to `<state-root>/checkpoints/<pipeline>.json`
 //! and survive pipeline crashes/timeouts. On resume, a pipeline can skip
 //! already-processed items by checking `checkpoint_get`.
@@ -18,14 +18,13 @@ use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
+use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
 struct CheckpointState {
     data: BTreeMap<String, serde_json::Value>,
     path: PathBuf,
-    loaded: bool,
 }
 
 impl CheckpointState {
@@ -39,75 +38,153 @@ impl CheckpointState {
             path: state_root
                 .join("checkpoints")
                 .join(format!("{pipeline_name}.json")),
-            loaded: false,
         }
     }
 
-    fn ensure_loaded(&mut self) {
-        if self.loaded {
-            return;
-        }
-        self.loaded = true;
-        if let Ok(contents) = std::fs::read_to_string(&self.path) {
-            if let Ok(serde_json::Value::Object(map)) =
-                serde_json::from_str::<serde_json::Value>(&contents)
-            {
-                for (k, v) in map {
-                    self.data.insert(k, v);
+    fn load(&mut self) -> Result<(), String> {
+        self.data = match std::fs::read_to_string(&self.path) {
+            // serde's own message can quote stored values, so report only
+            // the failure class and position.
+            Ok(contents) => serde_json::from_str(&contents).map_err(|e| {
+                let reason = match e.classify() {
+                    serde_json::error::Category::Data => "not a JSON object",
+                    _ => "malformed JSON",
+                };
+                format!(
+                    "checkpoint decode error in {}: {reason} at line {}, column {}",
+                    self.path.display(),
+                    e.line(),
+                    e.column()
+                )
+            })?,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                self.confirm_absent()?;
+                BTreeMap::new()
+            }
+            Err(e) => return Err(format!("checkpoint read error: {e}")),
+        };
+        Ok(())
+    }
+
+    /// Accept "not found" as an empty store only when the path is genuinely
+    /// absent beneath a directory.
+    ///
+    /// Unix reports a non-directory ancestor as `ENOTDIR`, but Windows reports
+    /// it as `ERROR_PATH_NOT_FOUND`, which std maps to `NotFound` — the same
+    /// kind a missing `checkpoints/` directory produces. Without this check a
+    /// store that cannot be reached reads as empty on Windows, and a resumed
+    /// pipeline would redo work its checkpoint had recorded as spent.
+    fn confirm_absent(&self) -> Result<(), String> {
+        for ancestor in self.path.ancestors().skip(1) {
+            match std::fs::metadata(ancestor) {
+                Ok(metadata) if metadata.is_dir() => return Ok(()),
+                Ok(_) => {
+                    return Err(format!(
+                        "checkpoint read error: {} is not a directory",
+                        ancestor.display()
+                    ))
                 }
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(e) => return Err(format!("checkpoint read error: {e}")),
             }
         }
+        Ok(())
+    }
+
+    fn lock(&self) -> Result<std::fs::File, String> {
+        let path = self.path.with_extension("lock");
+        std::fs::create_dir_all(path.parent().expect("checkpoint path has a parent"))
+            .map_err(|error| format!("checkpoint lock directory error: {error}"))?;
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .read(true)
+            .write(true)
+            .open(&path)
+            .map_err(|error| format!("checkpoint lock open error: {error}"))?;
+        harn_flock::lock_with_deadline(
+            &file,
+            &path,
+            harn_flock::LockMode::Exclusive,
+            std::time::Duration::from_secs(5),
+        )
+        .map_err(|error| format!("checkpoint lock error: {error}"))?;
+        Ok(file)
     }
 
     fn save(&self) -> Result<(), String> {
-        let obj: serde_json::Map<String, serde_json::Value> = self
-            .data
-            .iter()
-            .map(|(k, v)| (k.clone(), v.clone()))
-            .collect();
-        let json = serde_json::to_string_pretty(&serde_json::Value::Object(obj))
+        let json = serde_json::to_string_pretty(&self.data)
             .map_err(|e| format!("checkpoint save error: {e}"))?;
         crate::atomic_io::atomic_write(&self.path, json.as_bytes())
             .map_err(|e| format!("checkpoint write error: {e}"))?;
         Ok(())
     }
 
-    fn get(&mut self, key: &str) -> VmValue {
-        self.ensure_loaded();
-        match self.data.get(key) {
-            Some(v) => json_to_vm(v),
+    fn get(&mut self, key: &str) -> Result<VmValue, String> {
+        self.load()?;
+        Ok(match self.data.get(key) {
+            Some(v) => json_to_vm_value(v),
             None => VmValue::Nil,
-        }
+        })
     }
 
     fn set(&mut self, key: String, value: serde_json::Value) -> Result<(), String> {
-        self.ensure_loaded();
+        let _lock = self.lock()?;
+        self.load()?;
         self.data.insert(key, value);
-        self.save()
+        self.persist()
+    }
+
+    fn insert(&mut self, key: String, value: serde_json::Value) -> Result<VmValue, String> {
+        let _lock = self.lock()?;
+        self.load()?;
+        let inserted = !self.data.contains_key(&key);
+        if inserted {
+            self.data.insert(key.clone(), value);
+            self.persist()?;
+        }
+        Ok(VmValue::dict([
+            ("inserted", VmValue::Bool(inserted)),
+            ("value", json_to_vm_value(&self.data[&key])),
+        ]))
     }
 
     fn clear(&mut self) -> Result<(), String> {
-        self.data.clear();
-        if self.path.exists() {
-            std::fs::remove_file(&self.path).map_err(|e| format!("checkpoint clear error: {e}"))?;
+        let _lock = self.lock()?;
+        match std::fs::remove_file(&self.path) {
+            Ok(()) => (),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => (),
+            Err(e) => return Err(format!("checkpoint clear error: {e}")),
         }
+        self.data.clear();
         Ok(())
     }
 
-    fn list(&mut self) -> Vec<String> {
-        self.ensure_loaded();
-        self.data.keys().cloned().collect()
+    fn list(&mut self) -> Result<Vec<String>, String> {
+        self.load()?;
+        Ok(self.data.keys().cloned().collect())
     }
 
-    fn exists(&mut self, key: &str) -> bool {
-        self.ensure_loaded();
-        self.data.contains_key(key)
+    fn exists(&mut self, key: &str) -> Result<bool, String> {
+        self.load()?;
+        Ok(self.data.contains_key(key))
     }
 
     fn delete(&mut self, key: &str) -> Result<(), String> {
-        self.ensure_loaded();
+        let _lock = self.lock()?;
+        self.load()?;
         self.data.remove(key);
-        self.save()
+        self.persist()
+    }
+
+    fn persist(&mut self) -> Result<(), String> {
+        let result = self.save();
+        if result.is_err() {
+            // A failed write is not a successful in-memory checkpoint.
+            // Reload the durable owner before accepting another operation.
+            self.data.clear();
+        }
+        result
     }
 }
 
@@ -136,32 +213,8 @@ fn with_state<R>(
     })
 }
 
+use crate::json_to_vm_value;
 use crate::value::vm_to_storage_json as vm_to_json;
-
-fn json_to_vm(jv: &serde_json::Value) -> VmValue {
-    match jv {
-        serde_json::Value::Null => VmValue::Nil,
-        serde_json::Value::Bool(b) => VmValue::Bool(*b),
-        serde_json::Value::Number(n) => {
-            if let Some(i) = n.as_i64() {
-                VmValue::Int(i)
-            } else {
-                VmValue::Float(n.as_f64().unwrap_or(0.0))
-            }
-        }
-        serde_json::Value::String(s) => VmValue::String(arcstr::ArcStr::from(s.as_str())),
-        serde_json::Value::Array(arr) => {
-            VmValue::List(std::sync::Arc::new(arr.iter().map(json_to_vm).collect()))
-        }
-        serde_json::Value::Object(map) => {
-            let mut m = BTreeMap::new();
-            for (k, v) in map {
-                m.insert(k.clone(), json_to_vm(v));
-            }
-            VmValue::dict(m)
-        }
-    }
-}
 
 /// Sanitize a pipeline name for use as a filename.
 /// Rejects path traversal attempts and invalid characters.
@@ -201,19 +254,8 @@ fn register_checkpoint_state(vm: &mut Vm, state: CheckpointState) {
     CHECKPOINT_STATE.with(|cell| {
         *cell.borrow_mut() = Some(state);
     });
-    for def in MODULE_BUILTINS {
-        vm.register_builtin_def(def);
-    }
+    crate::stdlib::macros::register_module_builtins(vm, module_path!());
 }
-
-pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
-    &CHECKPOINT_IMPL_DEF,
-    &CHECKPOINT_GET_IMPL_DEF,
-    &CHECKPOINT_CLEAR_IMPL_DEF,
-    &CHECKPOINT_LIST_IMPL_DEF,
-    &CHECKPOINT_EXISTS_IMPL_DEF,
-    &CHECKPOINT_DELETE_IMPL_DEF,
-];
 
 #[harn_builtin(
     exposure = "harness.runtime.checkpoint",
@@ -233,6 +275,24 @@ fn checkpoint_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
 }
 
 #[harn_builtin(
+    exposure = "harness.runtime.checkpoint_insert",
+    effects = ["state.mutate@arg0"],
+    sig = "checkpoint_insert(key: string, value: unknown) -> {inserted: bool, value: unknown}",
+    category = "checkpoint",
+    doc = "Atomically retain the first checkpoint value and report whether this call inserted it."
+)]
+fn checkpoint_insert_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let key = args
+        .first()
+        .map(|value| value.display())
+        .unwrap_or_default();
+    let value = vm_to_json(args.get(1).unwrap_or(&VmValue::Nil))?;
+    with_state("checkpoint_insert", |state| {
+        state.insert(key, value).map_err(VmError::Runtime)
+    })
+}
+
+#[harn_builtin(
     exposure = "harness.runtime.checkpoint_get",
     effects = ["state.read@arg0"],
     sig = "checkpoint_get(key: string) -> any",
@@ -241,7 +301,9 @@ fn checkpoint_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
 )]
 fn checkpoint_get_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let key = args.first().map(|a| a.display()).unwrap_or_default();
-    with_state("checkpoint_get", |state| Ok(state.get(&key)))
+    with_state("checkpoint_get", |state| {
+        state.get(&key).map_err(VmError::Runtime)
+    })
 }
 
 #[harn_builtin(
@@ -267,12 +329,10 @@ fn checkpoint_clear_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue
 )]
 fn checkpoint_list_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     with_state("checkpoint_list", |state| {
-        let keys = state.list();
-        Ok(VmValue::List(std::sync::Arc::new(
-            keys.into_iter()
-                .map(|k| VmValue::String(arcstr::ArcStr::from(k)))
-                .collect(),
-        )))
+        let keys = state.list().map_err(VmError::Runtime)?;
+        Ok(VmValue::list(
+            keys.into_iter().map(VmValue::string).collect(),
+        ))
     })
 }
 
@@ -286,7 +346,10 @@ fn checkpoint_list_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue,
 fn checkpoint_exists_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let key = args.first().map(|a| a.display()).unwrap_or_default();
     with_state("checkpoint_exists", |state| {
-        Ok(VmValue::Bool(state.exists(&key)))
+        state
+            .exists(&key)
+            .map(VmValue::Bool)
+            .map_err(VmError::Runtime)
     })
 }
 
@@ -304,3 +367,6 @@ fn checkpoint_delete_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue
     })?;
     Ok(VmValue::Nil)
 }
+
+#[cfg(test)]
+mod tests;

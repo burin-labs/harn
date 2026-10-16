@@ -1,8 +1,8 @@
 //! Canonical transcript lifecycle for a live Harn agent session.
 
-use crate::stdlib::macros::{harn_builtin, register_builtin_defs, VmBuiltinDef};
 use crate::value::{DictMap, VmError, VmValue};
 use crate::vm::Vm;
+use harn_builtin_macros::harn_builtin;
 
 const HOST_SESSION_FLUSH: &str = "__host_agent_session_flush";
 const HOST_AGENT_EMIT_EVENT: &str = "__host_agent_emit_event";
@@ -56,6 +56,7 @@ pub(super) async fn initialize(
     system_prompt: Option<String>,
     execution_id: String,
     task_id: String,
+    ctx: &crate::vm::AsyncBuiltinCtx,
 ) -> Result<InitializedSession, VmError> {
     let has_live_session = crate::agent_sessions::exists(session_id);
     let run_id = options
@@ -113,9 +114,14 @@ pub(super) async fn initialize(
         // This is an ordinary returned error, so complete the terminal write
         // here. If that write also fails, preserve the claimed journal and
         // lease for an explicit cancellation/shutdown retry.
-        if flush_init_terminal(&session_id, "failed", "session_initialization_failed")
-            .await
-            .is_ok()
+        if flush_init_terminal(
+            &session_id,
+            "failed",
+            "session_initialization_failed",
+            Some(ctx),
+        )
+        .await
+        .is_ok()
         {
             rollback.disarm();
             if owns_session {
@@ -150,6 +156,7 @@ async fn stamp_run_started(session_id: &str) -> Result<(), VmError> {
         "Agent loop started",
         Some(serde_json::json!({
             "execution_id": execution_id,
+            "reasoning_receipts_reported": true,
             "lifecycle_state": crate::agent_events::AgentLifecycleState::Running.wire_name(),
         })),
     );
@@ -161,6 +168,7 @@ pub(super) async fn flush_init_terminal(
     session_id: &str,
     final_status: &str,
     stop_reason: &str,
+    ctx: Option<&crate::vm::AsyncBuiltinCtx>,
 ) -> Result<(), VmError> {
     let terminal = crate::agent_events::AgentTerminalOutcome::new(
         crate::agent_events::classify_agent_terminal(final_status, stop_reason, false, None),
@@ -175,12 +183,22 @@ pub(super) async fn flush_init_terminal(
             "final_status": final_status,
             "stop_reason": stop_reason,
             "terminal": terminal,
+            "visible_reply": "",
             "provider_call_count": 0,
         })),
     );
-    crate::agent_sessions::append_terminal_event_once(session_id, event)
-        .map_err(VmError::Runtime)?;
+    let phase = append_terminal_phase(session_id, event)?;
     crate::agent_session_journal::flush(session_id).await?;
+    // Subscriber delivery can re-enter the VM. Keep its future off the
+    // initialization caller's stack.
+    Box::pin(crate::llm::agent_runtime::emit_agent_event_with_ctx(
+        ctx,
+        &crate::agent_events::AgentEvent::TurnPhaseChanged {
+            session_id: session_id.to_string(),
+            phase,
+        },
+    ))
+    .await;
     crate::agent_sessions::clear_journal(session_id);
     Ok(())
 }
@@ -199,13 +217,18 @@ pub(super) async fn flush_terminal(
     terminal_error: Option<&serde_json::Value>,
     terminal: &crate::agent_events::AgentTerminalOutcome,
     accounting: TerminalAccounting<'_>,
-) -> Result<(), VmError> {
+) -> Result<crate::agent_events::AgentTurnPhase, VmError> {
+    let visible_reply = crate::agent_sessions::transcript(session_id)
+        .as_ref()
+        .and_then(crate::llm::agent_result_projection::last_assistant_text)
+        .unwrap_or_default();
     let mut metadata = serde_json::json!({
         "final_status": final_status,
         "stop_reason": stop_reason,
         "terminal_class": terminal_class,
         "error": terminal_error,
         "terminal": terminal,
+        "visible_reply": visible_reply,
         "provider_call_count": accounting.provider_call_count,
     });
     if let Some(budget) = accounting.adaptive_budget {
@@ -218,10 +241,24 @@ pub(super) async fn flush_terminal(
         "Agent loop reached a terminal state",
         Some(metadata),
     );
-    crate::agent_sessions::append_terminal_event_once(session_id, event)
-        .map_err(VmError::Runtime)?;
+    let phase = append_terminal_phase(session_id, event)?;
     crate::agent_session_journal::flush(session_id).await?;
-    Ok(())
+    Ok(phase)
+}
+
+fn append_terminal_phase(
+    session_id: &str,
+    event: VmValue,
+) -> Result<crate::agent_events::AgentTurnPhase, VmError> {
+    let record = crate::agent_sessions::append_terminal_event_once(session_id, event)
+        .map_err(VmError::Runtime)?;
+    let record = crate::llm::helpers::vm_value_to_json(&record);
+    record
+        .get("metadata")
+        .and_then(crate::agent_events::AgentTurnPhase::from_terminal_record)
+        .ok_or_else(|| {
+            VmError::Runtime("agent terminal record lacks its typed reply or outcome".into())
+        })
 }
 
 /// Flush the live transcript journal at the common pre-provider boundary.
@@ -298,26 +335,79 @@ async fn host_agent_emit_event(
     else {
         return Ok(VmValue::Nil);
     };
-    if let Some(role) = crate::agent_events::AgentEvent::host_transcript_role(event_type.as_str()) {
-        let transcript_event = super::super::helpers::transcript_event(
-            &event_type,
-            role.as_str(),
-            "internal",
-            "",
-            Some(payload),
-        );
-        if crate::agent_sessions::exists(&session_id) {
-            crate::agent_sessions::append_event(&session_id, transcript_event)
-                .map_err(VmError::Runtime)?;
-        }
-    }
-    crate::llm::agent_runtime::emit_agent_event_with_ctx(Some(&ctx), &event).await;
+    event
+        .publish_host_event(&ctx, &session_id, &event_type, payload)
+        .await?;
     Ok(VmValue::Nil)
 }
 
-const LIVE_TRANSCRIPT_JOURNAL_BUILTINS: &[&VmBuiltinDef] =
-    &[&HOST_AGENT_SESSION_FLUSH_DEF, &HOST_AGENT_EMIT_EVENT_DEF];
+/// Observe a tool outcome through the existing stdlib verification owner.
+/// Generic event ingress cannot supply its own normalized health measurement.
+#[harn_builtin(
+    exposure = "harness.agent.emit_tool_outcome",
+    effects = [],
+    sig = "__host_agent_emit_tool_outcome(session_id: string, payload: dict, envelope: dict, result: dict) -> nil",
+    kind = "async",
+    category = "agent.host"
+)]
+async fn host_agent_emit_tool_outcome(
+    ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
+    let session_id = match args.first() {
+        Some(VmValue::String(value)) if !value.is_empty() => value.to_string(),
+        _ => {
+            return Err(VmError::Runtime(
+                "tool outcome requires a session_id".into(),
+            ))
+        }
+    };
+    let mut payload = super::vm_to_json(args.get(1).unwrap_or(&VmValue::Nil));
+    let Some(mut event) = crate::agent_events::AgentEvent::from_host_payload(
+        &session_id,
+        "tool_call_update",
+        &payload,
+    )?
+    else {
+        return Err(VmError::Runtime(
+            "tool outcome event was not decoded".into(),
+        ));
+    };
+    let mut vm = ctx.child_vm();
+    let agent = vm
+        .harness()
+        .and_then(|root| root.sub_handle("agent"))
+        .map(VmValue::harness)
+        .ok_or_else(|| {
+            VmError::Runtime("tool outcome requires the execution's agent capability".into())
+        })?;
+    let exports = vm
+        .load_module_exports_from_import("std/agent/session_health")
+        .await?;
+    let normalizer = exports
+        .get("__agent_tool_health_telemetry")
+        .ok_or_else(|| VmError::Runtime("stdlib tool outcome normalizer is not exported".into()))?;
+    let normalized = vm
+        .call_closure_pub(
+            normalizer,
+            &[
+                agent,
+                args.get(2).cloned().unwrap_or(VmValue::Nil),
+                args.get(3).cloned().unwrap_or(VmValue::Nil),
+            ],
+        )
+        .await?;
+    let measurement = super::vm_to_json(&normalized);
+    event.attach_normalized_tool_health(measurement.clone())?;
+    // The canonical journal keeps the same normalized measurement as the live
+    // event. It is added only after rejecting generic payload-supplied health.
+    payload["health"] = measurement;
+    event
+        .publish_host_event(&ctx, &session_id, "tool_call_update", payload)
+        .await?;
+    Ok(VmValue::Nil)
+}
 
 pub(super) fn register_live_transcript_journal_primitives(vm: &mut Vm) {
-    register_builtin_defs(vm, LIVE_TRANSCRIPT_JOURNAL_BUILTINS);
+    harn_vm_core::builtin_support::register_module_builtins(vm, module_path!());
 }

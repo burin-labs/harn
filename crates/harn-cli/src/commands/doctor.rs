@@ -7,10 +7,6 @@ use std::process::Command;
 use harn_vm::llm_config;
 use harn_vm::orchestration::SandboxProfile;
 use harn_vm::runtime_paths;
-use harn_vm::secrets::{
-    configured_default_chain, configured_secret_namespace, EnvSecretProvider,
-    KeyringSecretProvider, SecretId, DEFAULT_SECRET_PROVIDER_CHAIN, SECRET_PROVIDER_CHAIN_ENV,
-};
 use serde::Serialize;
 
 use super::command_probe::{self, PROBE_TIMEOUT};
@@ -20,12 +16,15 @@ use crate::env_guard::ScopedEnvVar;
 use crate::json_envelope::{to_string_pretty, JsonEnvelope, JsonOutput};
 use crate::package;
 
+mod credentials;
 mod next_step;
 mod process_sandbox;
 mod repo_checks;
 mod rust_toolchain;
+mod secret_providers;
 mod targets;
 
+use credentials::{check_provider_credentials, check_provider_selection};
 use next_step::next_step_suggestion;
 use process_sandbox::{process_sandbox_info, ProcessSandboxInfo};
 use repo_checks::{check_protocol_artifacts, find_harn_repo_root};
@@ -101,6 +100,8 @@ pub(crate) struct DoctorOptions {
     /// target plus the canonical Linux/macOS/Windows/WASM triples. Off by
     /// default because each probe spawns Cargo and dominates wall-clock.
     pub check_targets: bool,
+    /// When true, the keyring check also writes, reads back, and deletes a probe.
+    pub check_keyring_write: bool,
 }
 
 pub(crate) async fn run_doctor_with_options(opts: DoctorOptions) {
@@ -155,7 +156,9 @@ async fn build_report(opts: &DoctorOptions) -> DoctorReport {
     checks.extend(check_portal());
     checks.extend(check_platform_capabilities());
     checks.extend(check_provider_selection());
-    checks.extend(check_secret_providers());
+    checks.extend(secret_providers::check_secret_providers(
+        opts.check_keyring_write,
+    ));
     checks.extend(check_provider_credentials());
     checks.extend(check_manifest().await);
     checks.extend(check_event_log());
@@ -581,101 +584,6 @@ fn check_harn_version() -> DoctorCheck {
     }
 }
 
-fn check_provider_credentials() -> Vec<DoctorCheck> {
-    let mut providers = llm_config::provider_names();
-    providers.sort();
-
-    let mut checks = Vec::new();
-    let mut any_credential_path = false;
-    for name in &providers {
-        let Some(def) = llm_config::provider_config(name) else {
-            continue;
-        };
-        let auth = harn_vm::llm::provider_auth_status(name);
-        let envs = llm_config::auth_env_names(&def.auth_env);
-        let (status, detail, fix_command) = match auth.credential_status {
-            harn_vm::llm::ProviderCredentialStatus::Ok => {
-                any_credential_path = true;
-                (DoctorStatus::Ok, "credential present".to_string(), None)
-            }
-            harn_vm::llm::ProviderCredentialStatus::Deferred => {
-                any_credential_path = true;
-                (
-                    DoctorStatus::Ok,
-                    "credential resolution deferred to platform provider".to_string(),
-                    None,
-                )
-            }
-            harn_vm::llm::ProviderCredentialStatus::NotRequired => {
-                (DoctorStatus::Skip, "no key required".to_string(), None)
-            }
-            status @ (harn_vm::llm::ProviderCredentialStatus::Missing
-            | harn_vm::llm::ProviderCredentialStatus::NeedsUserApproval) => {
-                let detail = if status == harn_vm::llm::ProviderCredentialStatus::NeedsUserApproval
-                {
-                    "stored; needs a Keychain approval this process cannot show".to_string()
-                } else if envs.is_empty() {
-                    "credential unavailable".to_string()
-                } else {
-                    format!("missing: {}", envs.join(", "))
-                };
-                let fix = envs.first().map(|env| format!("export {env}=…"));
-                (DoctorStatus::Warn, detail, fix)
-            }
-        };
-        checks.push(DoctorCheck {
-            id: format!("creds:{name}"),
-            status,
-            label: format!("creds:{name}"),
-            detail,
-            fix_command,
-            docs_url: Some("https://harnlang.com/llm/providers.html".to_string()),
-            blocks: Vec::new(),
-        });
-    }
-
-    // Add an aggregate row that fails only when no provider has creds AND
-    // ollama appears unreachable. Reachability is best-effort: we only flag
-    // FAIL when the synchronous `ollama --version` probe errors. Otherwise
-    // demote to WARN so users without local models still get a softer signal.
-    let ollama_present = which::which("ollama").is_ok();
-    let aggregate_status = if any_credential_path {
-        DoctorStatus::Ok
-    } else if ollama_present {
-        DoctorStatus::Warn
-    } else {
-        DoctorStatus::Fail
-    };
-    let aggregate_detail = if any_credential_path {
-        "at least one provider credential path is available".to_string()
-    } else if ollama_present {
-        "no cloud credentials; falling back to local Ollama".to_string()
-    } else {
-        "no provider credentials and no local Ollama".to_string()
-    };
-    let aggregate_blocks: Vec<&'static str> = if aggregate_status == DoctorStatus::Fail {
-        vec!["scripting"]
-    } else {
-        Vec::new()
-    };
-    let aggregate_fix = if aggregate_status == DoctorStatus::Fail {
-        Some("harn models recommend && harn quickstart --non-interactive".to_string())
-    } else {
-        None
-    };
-    checks.push(DoctorCheck {
-        id: "creds:any".to_string(),
-        status: aggregate_status,
-        label: "credentials".to_string(),
-        detail: aggregate_detail,
-        fix_command: aggregate_fix,
-        docs_url: Some("https://harnlang.com/llm/providers.html".to_string()),
-        blocks: aggregate_blocks,
-    });
-
-    checks
-}
-
 async fn check_ollama() -> DoctorCheck {
     let binary = which::which("ollama").ok();
     check_ollama_at(binary.as_deref()).await
@@ -999,10 +907,7 @@ fn check_platform_capabilities() -> Vec<DoctorCheck> {
             DoctorStatus::Warn
         },
         label: "process-sandbox".to_string(),
-        detail: format!(
-            "backend={} filesystem_mechanism={} active={}",
-            sandbox.backend, sandbox.filesystem_mechanism, sandbox.active
-        ),
+        detail: sandbox.detail(),
         ..Default::default()
     });
 
@@ -1106,126 +1011,6 @@ fn browser_opener() -> Option<&'static str> {
     None
 }
 
-fn check_provider_selection() -> Vec<DoctorCheck> {
-    let mut checks = Vec::new();
-
-    if let Ok(path) = std::env::var("HARN_PROVIDERS_CONFIG") {
-        let config_path = PathBuf::from(&path);
-        let status = if config_path.is_file() {
-            DoctorStatus::Ok
-        } else {
-            DoctorStatus::Fail
-        };
-        checks.push(DoctorCheck {
-            id: String::new(),
-            status,
-            label: "providers config".to_string(),
-            detail: format!("HARN_PROVIDERS_CONFIG={path}"),
-            ..Default::default()
-        });
-    }
-
-    if let Ok(provider) = std::env::var("HARN_LLM_PROVIDER") {
-        let status = if llm_config::provider_config(&provider).is_some() {
-            DoctorStatus::Ok
-        } else {
-            DoctorStatus::Fail
-        };
-        checks.push(DoctorCheck {
-            id: String::new(),
-            status,
-            label: "selected provider".to_string(),
-            detail: format!("HARN_LLM_PROVIDER={provider}"),
-            ..Default::default()
-        });
-    }
-
-    checks
-}
-
-fn check_secret_providers() -> Vec<DoctorCheck> {
-    let namespace = configured_secret_namespace();
-    let configured = std::env::var(SECRET_PROVIDER_CHAIN_ENV)
-        .unwrap_or_else(|_| DEFAULT_SECRET_PROVIDER_CHAIN.to_string());
-    let mut checks = Vec::new();
-
-    match configured_default_chain(namespace.clone()) {
-        Ok(chain) => checks.push(DoctorCheck {
-            id: String::new(),
-            status: if chain.providers().is_empty() {
-                DoctorStatus::Fail
-            } else {
-                DoctorStatus::Ok
-            },
-            label: "secret providers".to_string(),
-            detail: format!(
-                "{} (namespace {})",
-                configured.replace(',', " -> "),
-                namespace
-            ),
-            ..Default::default()
-        }),
-        Err(error) => {
-            checks.push(DoctorCheck {
-                id: String::new(),
-                status: DoctorStatus::Fail,
-                label: "secret providers".to_string(),
-                detail: error.to_string(),
-                ..Default::default()
-            });
-            return checks;
-        }
-    }
-
-    for provider in configured
-        .split(',')
-        .map(str::trim)
-        .filter(|provider| !provider.is_empty())
-    {
-        match provider {
-            "env" => {
-                let env_provider = EnvSecretProvider::new(namespace.clone());
-                let sample = env_provider.env_var_name(&SecretId::new("sample", "token"));
-                checks.push(DoctorCheck {
-                    id: String::new(),
-                    status: DoctorStatus::Ok,
-                    label: "secret:env".to_string(),
-                    detail: format!("reads process env via {sample}"),
-                    ..Default::default()
-                });
-            }
-            "keyring" => {
-                let keyring_provider = KeyringSecretProvider::new(namespace.clone());
-                match keyring_provider.healthcheck() {
-                    Ok(detail) => checks.push(DoctorCheck {
-                        id: String::new(),
-                        status: DoctorStatus::Ok,
-                        label: "secret:keyring".to_string(),
-                        detail,
-                        ..Default::default()
-                    }),
-                    Err(error) => checks.push(DoctorCheck {
-                        id: String::new(),
-                        status: DoctorStatus::Fail,
-                        label: "secret:keyring".to_string(),
-                        detail: error.to_string(),
-                        ..Default::default()
-                    }),
-                }
-            }
-            other => checks.push(DoctorCheck {
-                id: String::new(),
-                status: DoctorStatus::Fail,
-                label: format!("secret:{other}"),
-                detail: format!("unsupported provider '{other}'"),
-                ..Default::default()
-            }),
-        }
-    }
-
-    checks
-}
-
 async fn check_manifest() -> Vec<DoctorCheck> {
     let cwd = std::env::current_dir().unwrap_or_default();
     check_manifest_from(&cwd).await
@@ -1308,7 +1093,7 @@ async fn check_manifest_from(anchor: &Path) -> Vec<DoctorCheck> {
 
     let extensions = package::load_runtime_extensions(&path);
     if !extensions.triggers.is_empty() {
-        let mut vm = harn_vm::Vm::new();
+        let mut vm = harn_vm::new_vm();
         harn_vm::register_vm_stdlib(&mut vm);
         crate::install_default_hostlib(&mut vm);
         harn_vm::clear_trigger_registry();
@@ -1564,372 +1349,4 @@ fn read_manifest(path: &Path) -> Result<package::Manifest, String> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::{
-        build_host_info, build_summary, check_event_log, check_hardware, check_manifest_from,
-        check_ollama_at, check_platform_capabilities, find_nearest_manifest,
-        format_trigger_metrics, read_manifest, stdlib_capability_matrix, target_doctor_checks,
-        DoctorCheck, DoctorReport, DoctorStatus, HardwareSnapshot, SandboxProfile, TargetInfo,
-        DOCTOR_SCHEMA_VERSION,
-    };
-    use crate::json_envelope::JsonOutput;
-    use harn_vm::llm_config::{HealthcheckDef, ProviderDef};
-
-    #[test]
-    fn build_healthcheck_url_uses_base_and_path() {
-        let def = ProviderDef {
-            base_url: "https://example.com/api".to_string(),
-            ..Default::default()
-        };
-        let healthcheck = HealthcheckDef {
-            method: "GET".to_string(),
-            path: Some("/health".to_string()),
-            url: None,
-            body: None,
-        };
-
-        assert_eq!(
-            harn_vm::llm::build_healthcheck_url(&def, &healthcheck),
-            "https://example.com/api/health"
-        );
-    }
-
-    #[test]
-    fn find_nearest_manifest_walks_up() {
-        let root = tempfile::tempdir().expect("tempdir");
-        let nested = root.path().join("a/b/c");
-        std::fs::create_dir_all(&nested).expect("create nested dirs");
-        std::fs::write(
-            root.path().join("harn.toml"),
-            "[package]\nname = \"demo\"\n",
-        )
-        .expect("write manifest");
-
-        let found = find_nearest_manifest(&nested).expect("manifest");
-        assert_eq!(found, root.path().join("harn.toml"));
-    }
-
-    #[test]
-    fn read_manifest_accepts_basic_package() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let path = dir.path().join("harn.toml");
-        std::fs::write(&path, "[package]\nname = \"demo\"\n").expect("write manifest");
-
-        let manifest = read_manifest(&path).expect("manifest parses");
-        assert_eq!(
-            manifest.package.and_then(|pkg| pkg.name),
-            Some("demo".to_string())
-        );
-    }
-
-    #[test]
-    fn event_log_check_reports_backend_and_location() {
-        let _state_guard = crate::tests::common::harn_state_lock::lock_harn_state();
-        let dir = tempfile::tempdir().expect("tempdir");
-        let sqlite_path = dir.path().join(".harn/events.sqlite");
-        std::env::set_var(harn_vm::event_log::HARN_EVENT_LOG_BACKEND_ENV, "sqlite");
-        std::env::set_var(
-            harn_vm::event_log::HARN_EVENT_LOG_SQLITE_PATH_ENV,
-            &sqlite_path,
-        );
-        let checks = check_event_log();
-        std::env::remove_var(harn_vm::event_log::HARN_EVENT_LOG_BACKEND_ENV);
-        std::env::remove_var(harn_vm::event_log::HARN_EVENT_LOG_SQLITE_PATH_ENV);
-        assert_eq!(checks.len(), 1);
-        assert_eq!(checks[0].status, super::DoctorStatus::Ok);
-        assert!(checks[0].detail.contains("sqlite"));
-        assert!(checks[0]
-            .detail
-            .contains(&sqlite_path.display().to_string()));
-    }
-
-    #[test]
-    fn format_trigger_metrics_renders_snapshot() {
-        let rendered = format_trigger_metrics(&harn_vm::TriggerMetricsSnapshot {
-            received: 1,
-            dispatched: 2,
-            failed: 3,
-            dlq: 4,
-            in_flight: 5,
-            last_received_ms: None,
-            cost_total_usd_micros: 0,
-            cost_today_usd_micros: 0,
-            cost_hour_usd_micros: 0,
-            autonomous_decisions_total: 0,
-            autonomous_decisions_today: 0,
-            autonomous_decisions_hour: 0,
-        });
-        assert_eq!(
-            rendered,
-            "received=1 dispatched=2 failed=3 dlq=4 in_flight=5"
-        );
-    }
-
-    #[tokio::test(flavor = "current_thread")]
-    async fn check_manifest_reports_loaded_triggers() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        std::fs::create_dir_all(dir.path().join(".git")).expect("git dir");
-        std::fs::write(
-            dir.path().join("harn.toml"),
-            r#"
-[package]
-name = "workspace"
-
-[exports]
-handlers = "lib.harn"
-
-[[triggers]]
-id = "github-new-issue"
-kind = "webhook"
-provider = "webhook"
-match = { events = ["issues.opened"] }
-handler = "handlers::on_new_issue"
-budget = { daily_cost_usd = 5.0, max_concurrent = 10 }
-secrets = { signing_secret = "webhook/signing-secret" }
-"#,
-        )
-        .expect("write manifest");
-        std::fs::write(
-            dir.path().join("lib.harn"),
-            r#"
-import "std/triggers"
-
-pub fn on_new_issue(harness: Harness, event: TriggerEvent) {
-  harness.stdio.log(event.kind)
-}
-"#,
-        )
-        .expect("write lib");
-
-        let checks = check_manifest_from(dir.path()).await;
-
-        let trigger = checks
-            .iter()
-            .find(|check| check.label == "trigger:github-new-issue")
-            .expect("trigger check");
-        assert_eq!(trigger.status, DoctorStatus::Ok);
-        assert!(trigger.detail.contains("webhook via webhook"));
-        assert!(trigger.detail.contains("handler=local"));
-        assert!(trigger.detail.contains("state=active"));
-        assert!(trigger.detail.contains("version=1"));
-        assert!(trigger.detail.contains("metrics=received=0"));
-
-        let dispatcher = checks
-            .iter()
-            .find(|check| check.label == "dispatcher")
-            .expect("dispatcher check");
-        assert_eq!(dispatcher.status, DoctorStatus::Ok);
-        assert_eq!(
-            dispatcher.detail,
-            "in_flight=0 retry_queue_depth=0 dlq_depth=0"
-        );
-    }
-
-    fn check(id: &str, status: DoctorStatus) -> DoctorCheck {
-        DoctorCheck {
-            id: id.to_string(),
-            status,
-            label: id.to_string(),
-            detail: String::new(),
-            ..Default::default()
-        }
-    }
-
-    #[test]
-    fn report_envelope_carries_capability_matrix_and_stable_ids() {
-        let checks = vec![
-            check("harn_version", DoctorStatus::Ok),
-            check("creds:openai", DoctorStatus::Warn),
-        ];
-        let report = DoctorReport {
-            host: build_host_info(&[]),
-            providers_config_path: String::new(),
-            model_defaults: serde_json::Value::Null,
-            targets: vec![TargetInfo {
-                triple: "x86_64-unknown-linux-gnu".to_string(),
-                installed: true,
-                buildable: Some(true),
-                reasons: Vec::new(),
-                checked: true,
-            }],
-            providers: vec![super::ProviderInfo {
-                name: "anthropic".to_string(),
-                configured: true,
-                reachable: Some(true),
-                latency_ms: Some(120),
-                errors: Vec::new(),
-                probed: true,
-            }],
-            capabilities: stdlib_capability_matrix(),
-            checks: checks.iter().map(super::DoctorCheckJson::from).collect(),
-            hardware: HardwareSnapshot {
-                ram_gb: Some(16),
-                gpu: "mps".to_string(),
-                free_disk_gb: Some(100),
-            },
-            summary: build_summary(&checks),
-            next_step: "test next step".to_string(),
-        };
-        let envelope = report.into_envelope();
-        let value = serde_json::to_value(&envelope).unwrap();
-        assert_eq!(value["schemaVersion"], DOCTOR_SCHEMA_VERSION);
-        assert_eq!(value["ok"], true);
-        let data = &value["data"];
-        assert!(data["host"]["os"].is_string());
-        assert!(data["host"]["arch"].is_string());
-        assert_eq!(data["targets"][0]["triple"], "x86_64-unknown-linux-gnu");
-        assert_eq!(data["targets"][0]["buildable"], true);
-        assert_eq!(data["providers"][0]["name"], "anthropic");
-        assert_eq!(data["providers"][0]["reachable"], true);
-        assert_eq!(data["providers"][0]["latency_ms"], 120);
-        assert!(!data["capabilities"].as_array().unwrap().is_empty());
-        let checks_arr = data["checks"].as_array().expect("checks array");
-        assert_eq!(checks_arr[0]["id"], "harn_version");
-        assert_eq!(checks_arr[0]["status"], "ok");
-        assert_eq!(checks_arr[1]["id"], "creds:openai");
-        assert_eq!(checks_arr[1]["status"], "warn");
-        assert_eq!(data["hardware"]["ram_gb"], 16);
-        assert_eq!(data["hardware"]["gpu"], "mps");
-        assert_eq!(data["next_step"], "test next step");
-    }
-
-    #[test]
-    fn hardware_check_does_not_fail_on_unknown_platform() {
-        let (check, _snapshot) = check_hardware();
-        assert_ne!(
-            check.status,
-            DoctorStatus::Fail,
-            "hardware check returned Fail unexpectedly: {}",
-            check.detail
-        );
-    }
-
-    #[tokio::test(flavor = "current_thread")]
-    async fn ollama_check_skips_when_binary_missing() {
-        let result = check_ollama_at(None).await;
-        assert_eq!(result.status, DoctorStatus::Skip);
-        assert!(
-            result.detail.contains("not installed") || result.detail.contains("not callable"),
-            "unexpected ollama detail: {}",
-            result.detail
-        );
-    }
-
-    #[test]
-    fn summary_aggregates_status_counts_and_blocked_flows() {
-        let checks = vec![
-            DoctorCheck {
-                id: "rustc".to_string(),
-                status: DoctorStatus::Fail,
-                blocks: vec!["build", "test"],
-                ..Default::default()
-            },
-            DoctorCheck {
-                id: "node".to_string(),
-                status: DoctorStatus::Fail,
-                blocks: vec!["portal"],
-                ..Default::default()
-            },
-            DoctorCheck {
-                id: "creds:openai".to_string(),
-                status: DoctorStatus::Warn,
-                blocks: vec!["scripting"], // not blocking — only Fail counts
-                ..Default::default()
-            },
-            DoctorCheck {
-                id: "harn_version".to_string(),
-                status: DoctorStatus::Ok,
-                ..Default::default()
-            },
-            DoctorCheck {
-                id: "metadata".to_string(),
-                status: DoctorStatus::Skip,
-                ..Default::default()
-            },
-        ];
-        let summary = build_summary(&checks);
-        assert_eq!(summary.ok, 1);
-        assert_eq!(summary.warning, 1);
-        assert_eq!(summary.blocking, 2);
-        assert_eq!(summary.skip, 1);
-        // Sorted, deduplicated, alphabetical.
-        assert_eq!(summary.blocked_flows, vec!["build", "portal", "test"]);
-    }
-
-    #[test]
-    fn capability_matrix_lists_known_capabilities() {
-        let entries = stdlib_capability_matrix();
-        let names: std::collections::BTreeSet<&str> =
-            entries.iter().map(|e| e.name.as_str()).collect();
-        assert!(names.contains("workspace.read_text"), "names: {names:?}");
-        assert!(names.contains("network"), "names: {names:?}");
-        assert!(names.contains("process.exec"), "names: {names:?}");
-        for entry in &entries {
-            assert!(
-                !entry.available_in_sandbox_profile.is_empty(),
-                "{} should list at least one sandbox profile",
-                entry.name
-            );
-            for profile in &entry.available_in_sandbox_profile {
-                assert!(
-                    SandboxProfile::parse(profile).is_some(),
-                    "unknown sandbox profile '{profile}'"
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn host_info_reports_os_arch_and_harn_version() {
-        let info = build_host_info(&[]);
-        assert_eq!(info.os, std::env::consts::OS);
-        assert_eq!(info.arch, std::env::consts::ARCH);
-        assert_eq!(info.harn_version, env!("CARGO_PKG_VERSION"));
-        assert!(!info.process_sandbox.backend.is_empty());
-        assert!(!info.process_sandbox.filesystem_mechanism.is_empty());
-    }
-
-    #[test]
-    fn target_checks_skipped_when_not_probed() {
-        let targets = vec![
-            TargetInfo {
-                triple: "x86_64-apple-darwin".to_string(),
-                installed: true,
-                buildable: None,
-                reasons: Vec::new(),
-                checked: false,
-            },
-            TargetInfo {
-                triple: "wasm32-unknown-unknown".to_string(),
-                installed: false,
-                buildable: Some(false),
-                reasons: vec!["target not installed".to_string()],
-                checked: true,
-            },
-        ];
-        let checks = target_doctor_checks(&targets);
-        // Only the probed target emits a check entry.
-        assert_eq!(checks.len(), 1);
-        assert_eq!(checks[0].id, "target:wasm32-unknown-unknown");
-        assert_eq!(checks[0].status, DoctorStatus::Warn);
-        assert!(checks[0]
-            .fix_command
-            .as_deref()
-            .map(|s| s.contains("rustup target add"))
-            .unwrap_or(false));
-    }
-
-    #[test]
-    fn platform_capability_check_emits_known_ids() {
-        let checks = check_platform_capabilities();
-        let ids: std::collections::BTreeSet<&str> = checks.iter().map(|c| c.id.as_str()).collect();
-        assert!(ids.contains("platform:file-watcher"), "ids: {ids:?}");
-        assert!(ids.contains("platform:browser-opener"), "ids: {ids:?}");
-        assert!(ids.contains("platform:process-sandbox"), "ids: {ids:?}");
-        // None of the platform checks should ever be FAIL — they're
-        // best-effort capability probes with documented fallbacks.
-        for check in &checks {
-            assert_ne!(check.status, DoctorStatus::Fail, "{}", check.detail);
-        }
-    }
-}
+mod tests;

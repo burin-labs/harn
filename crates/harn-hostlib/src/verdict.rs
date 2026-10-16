@@ -6,7 +6,7 @@
 //! record, and returns a PLAIN dict
 //! `{outcome, passed, total, artifact_id, artifact_hash, subject?, detail}`
 //! built from the disposition the host FROZE at execution time. The VM harness
-//! method (`crate::vm::methods::harness`) mints the opaque, non-serializable
+//! method (`harn_vm::harness_methods`) mints the opaque, non-serializable
 //! `VerdictReceipt` from this dict on a `"pass"` outcome — the receipt is never
 //! constructed here, so it never crosses the hostlib response-schema boundary.
 //!
@@ -342,7 +342,7 @@ test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out\n";
     }
 
     fn overlap_vm(barrier: Arc<tokio::sync::Barrier>) -> Vm {
-        let mut vm = Vm::new();
+        let mut vm = harn_vm::new_vm();
         register_vm_stdlib(&mut vm);
         let _ = crate::install_default(&mut vm);
         vm.register_async_builtin("__test_overlap", move |_ctx, _args| {

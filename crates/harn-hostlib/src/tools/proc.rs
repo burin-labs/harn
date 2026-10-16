@@ -63,6 +63,7 @@ pub(crate) struct SpawnRequest {
 /// Result of running a subprocess to completion (or to the deadline).
 #[derive(Debug, Clone)]
 pub(crate) struct SpawnOutcome {
+    pub(crate) verifier_receipt: Option<harn_vm::verifier_provenance::VerifierExecutionReceipt>,
     pub(crate) command_id: String,
     pub(crate) cwd: PathBuf,
     pub(crate) status: CommandStatus,
@@ -71,6 +72,7 @@ pub(crate) struct SpawnOutcome {
     pub(crate) started_at: String,
     pub(crate) ended_at: Option<String>,
     pub(crate) exit_code: i32,
+    pub(crate) missing_program: Option<String>,
     pub(crate) signal: Option<String>,
     pub(crate) stdout: String,
     pub(crate) stdout_truncated: bool,
@@ -123,6 +125,7 @@ pub(crate) enum CommandStatus {
     Running,
     TimedOut,
     Killed,
+    Blocked,
 }
 
 impl CommandStatus {
@@ -132,6 +135,7 @@ impl CommandStatus {
             CommandStatus::Running => "running",
             CommandStatus::TimedOut => "timed_out",
             CommandStatus::Killed => "killed",
+            CommandStatus::Blocked => "blocked",
         }
     }
 }
@@ -181,6 +185,7 @@ pub(crate) fn run(req: SpawnRequest) -> Result<SpawnOutcome, HostlibError> {
     })?;
 
     let pid = handle.pid();
+    let missing_program = handle.missing_program().map(str::to_string);
     let process_group_id = handle.process_group_id();
     let killer = handle.killer();
 
@@ -312,14 +317,22 @@ pub(crate) fn run(req: SpawnRequest) -> Result<SpawnOutcome, HostlibError> {
         if let Some(error) =
             harn_vm::process_sandbox::wrapped_spawn_io_error(exit_code, &stderr_bytes)
         {
+            let error = match missing_program.as_ref() {
+                Some(program) if error.kind() == std::io::ErrorKind::NotFound => {
+                    ProcessError::ProgramNotFound {
+                        program: program.clone(),
+                    }
+                }
+                _ => ProcessError::SpawnIo {
+                    kind: harn_vm::value::io_error_kind_str(&error),
+                    message: error.to_string(),
+                },
+            };
             return Err(process_error_to_hostlib(
                 req.builtin,
                 requested_cwd.as_deref(),
                 &effective_cwd,
-                ProcessError::SpawnIo {
-                    kind: harn_vm::value::io_error_kind_str(&error),
-                    message: error.to_string(),
-                },
+                error,
             ));
         }
     }
@@ -338,6 +351,9 @@ pub(crate) fn run(req: SpawnRequest) -> Result<SpawnOutcome, HostlibError> {
     let inline = inline_output(&stdout_bytes, &stderr_bytes, req.capture);
 
     Ok(SpawnOutcome {
+        verifier_receipt: (!timed_out && !drain_interrupted)
+            .then(|| handle.verifier_execution_receipt())
+            .flatten(),
         command_id,
         cwd: effective_cwd,
         status: command_status,
@@ -346,6 +362,7 @@ pub(crate) fn run(req: SpawnRequest) -> Result<SpawnOutcome, HostlibError> {
         started_at,
         ended_at,
         exit_code,
+        missing_program: missing_program.filter(|_| exit_code == 127 && signal.is_none()),
         signal,
         stdout: inline.stdout,
         stdout_truncated: inline.stdout_truncated,
@@ -435,7 +452,7 @@ fn spawn_reader_thread(
         drop(tx);
         return (rx, None);
     };
-    let handle = thread::spawn(move || {
+    let handle = harn_parser::runtime_stack::spawn(move || {
         let mut buf = Vec::new();
         let _ = reader.read_to_end(&mut buf);
         let _ = tx.send(buf);
@@ -555,6 +572,9 @@ pub(crate) fn process_error_to_hostlib(
             builtin,
             message: format!("sandbox setup failed: {message}"),
         },
+        ProcessError::SandboxMechanismUnavailable(refusal) => {
+            HostlibError::SandboxMechanismUnavailable { builtin, refusal }
+        }
         ProcessError::SandboxCwd(message) => HostlibError::Backend {
             builtin,
             message: format!("sandbox cwd rejected: {message}"),
@@ -570,7 +590,16 @@ pub(crate) fn process_error_to_hostlib(
         ProcessError::SpawnIo { kind, message } => HostlibError::ProcessSpawn {
             builtin,
             kind,
+            missing_program: None,
             message,
+            requested_cwd: requested_cwd.map(str::to_string),
+            cwd: to_agent_path(effective_cwd),
+        },
+        ProcessError::ProgramNotFound { program } => HostlibError::ProcessSpawn {
+            builtin,
+            kind: "not_found",
+            message: format!("program not found: {program}"),
+            missing_program: Some(program.into_boxed_str()),
             requested_cwd: requested_cwd.map(str::to_string),
             cwd: to_agent_path(effective_cwd),
         },
@@ -613,6 +642,17 @@ pub(crate) fn build_response(
         .str("output_sha256", outcome.output_sha256)
         .str("started_at", outcome.started_at)
         .str("audit_id", format!("audit_{}", outcome.command_id));
+    if let Some(program) = outcome.missing_program {
+        builder = builder.str("missing_program", program);
+    }
+    if let Some(receipt) = outcome.verifier_receipt {
+        builder = builder.value(
+            "verifier_receipt",
+            harn_vm::value::json::json_to_vm_value(
+                &serde_json::to_value(receipt).expect("typed verifier receipt"),
+            ),
+        );
+    }
     builder = match outcome.ended_at {
         Some(ended_at) => builder.str("ended_at", ended_at),
         None => builder.nil("ended_at"),
@@ -676,28 +716,28 @@ pub(crate) fn process_cleanup_to_dict(
     }
     dict.insert(
         harn_vm::value::intern_key("attempted_signals"),
-        VmValue::List(Arc::new(
+        VmValue::list(
             report
                 .attempted_signals
                 .iter()
-                .map(|signal| VmValue::String(arcstr::ArcStr::from(format_signal(*signal))))
+                .map(|signal| VmValue::string(format_signal(*signal)))
                 .collect(),
-        )),
+        ),
     );
     dict.put_int("observed_child_count", report.children.len() as i64);
     dict.put_int("reaped_child_count", reaped_children.len() as i64);
     dict.put_int("survivor_count", surviving_children.len() as i64);
     dict.insert(
         harn_vm::value::intern_key("observed_children"),
-        VmValue::List(Arc::new(observed_children)),
+        VmValue::list(observed_children),
     );
     dict.insert(
         harn_vm::value::intern_key("reaped_children"),
-        VmValue::List(Arc::new(reaped_children)),
+        VmValue::list(reaped_children),
     );
     dict.insert(
         harn_vm::value::intern_key("surviving_children"),
-        VmValue::List(Arc::new(surviving_children)),
+        VmValue::list(surviving_children),
     );
     dict
 }
@@ -727,13 +767,13 @@ fn process_cleanup_child_to_value(child: &process_handle::ProcessCleanupChild) -
     }
     dict.insert(
         harn_vm::value::intern_key("signals"),
-        VmValue::List(Arc::new(
+        VmValue::list(
             child
                 .signals
                 .iter()
-                .map(|signal| VmValue::String(arcstr::ArcStr::from(format_signal(*signal))))
+                .map(|signal| VmValue::string(format_signal(*signal)))
                 .collect(),
-        )),
+        ),
     );
     match child.alive_after_cleanup {
         Some(alive) => dict.insert(
@@ -892,15 +932,7 @@ fn lossy_prefix(bytes: &[u8], max_inline_bytes: usize) -> (String, bool) {
 }
 
 pub(crate) fn sandbox_kind() -> &'static str {
-    if cfg!(target_os = "linux") {
-        "landlock"
-    } else if cfg!(target_os = "macos") {
-        "sandbox-exec"
-    } else if cfg!(target_os = "windows") {
-        "appcontainer"
-    } else {
-        "none"
-    }
+    harn_vm::process_sandbox::active_backend_mechanism().process_kind()
 }
 
 pub(crate) fn sandbox_response(
@@ -1214,5 +1246,32 @@ mod tests {
         assert!(!result.interrupted);
         assert!(result.process_cleanup.is_none());
         assert_eq!(killer.calls(), 0);
+    }
+
+    /// A missing platform mechanism must reach the script as the VM's typed
+    /// refusal. Falsifier: before `ProcessError::SandboxMechanismUnavailable`,
+    /// the spawner stringified the refusal into `SandboxSetup`, and the script
+    /// caught `backend_error` text.
+    #[test]
+    fn a_missing_sandbox_mechanism_stays_typed_through_hostlib() {
+        let refusal: harn_vm::process_sandbox::SandboxMechanismUnavailable =
+            serde_json::from_value(serde_json::json!({
+                "schema": "harn.process.sandbox_mechanism_unavailable.v1",
+                "mechanism": "linux_landlock",
+                "availability": "absent_on_host",
+                "profile": "os_hardened",
+                "requirement": "profile",
+            }))
+            .expect("refusal fixture");
+        let spawn_error = ProcessError::sandbox_setup(
+            harn_vm::VmError::SandboxMechanismUnavailable(Box::new(refusal.clone())),
+        );
+        let vm_error = harn_vm::VmError::from(process_error_to_hostlib(
+            "hostlib_tools_run_command",
+            None,
+            std::path::Path::new("/workspace"),
+            spawn_error,
+        ));
+        assert_eq!(vm_error.sandbox_mechanism_unavailable(), Some(&refusal));
     }
 }

@@ -6,8 +6,10 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use crate::llm_config::{self, ProviderDef};
+use crate::llm_config;
 
+#[path = "tool_conformance_evidence.rs"]
+mod evidence;
 #[path = "tool_conformance_helpers.rs"]
 mod helpers;
 #[path = "tool_conformance_request.rs"]
@@ -22,6 +24,8 @@ mod text_parse;
 mod types;
 use super::usage::extract_probe_usage;
 pub use super::usage::ToolProbeUsage;
+pub use evidence::ToolProbeEvidenceSource;
+use helpers::chat_url;
 pub(super) use helpers::{aggregate_stream_text, probe_tool_registry};
 #[cfg(test)]
 use request::validate_probe_request_body;
@@ -41,7 +45,7 @@ pub use types::{
     ToolConformanceRequestWarning, ToolProbeFormat, ToolProbeMode, ToolProbeRequestProfile,
 };
 
-pub const TOOL_CONFORMANCE_SCHEMA_VERSION: u32 = 1;
+pub const TOOL_CONFORMANCE_SCHEMA_VERSION: u32 = 2;
 pub const TOOL_CONFORMANCE_REQUEST_SCHEMA_VERSION: u32 = 4;
 pub const TOOL_CONFORMANCE_REQUEST_AUDIT_SCHEMA_VERSION: u32 = 5;
 pub const TOOL_PROBE_TOOL_NAME: &str = "echo_marker";
@@ -229,6 +233,8 @@ impl ToolProbeFallbackMode {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolConformanceReport {
     pub schema_version: u32,
+    #[serde(default)]
+    pub evidence_source: ToolProbeEvidenceSource,
     pub provider: String,
     pub model: String,
     #[serde(default)]
@@ -371,13 +377,27 @@ fn classify_http_failure(status: u16, body: &str) -> ToolProbeClassification {
 pub async fn run_tool_conformance_probe(
     options: ToolConformanceProbeOptions,
 ) -> ToolConformanceReport {
-    let model = llm_config::resolve_model_info(&options.model);
-    let provider = if options.provider.trim().is_empty() {
-        model.provider.clone()
-    } else {
-        options.provider.clone()
+    // Preserve the requested identity until the active-route owner validates it.
+    // Wire overlays may otherwise erase a retired catalog selector.
+    let resolution = llm_config::resolve_model_request_for_active_call(
+        &options.model,
+        (!options.provider.trim().is_empty()).then_some(options.provider.as_str()),
+    );
+    let (provider, model_id) = match &resolution {
+        Ok(route) => (
+            route.resolved_provider.clone(),
+            llm_config::wire_model_id(&route.resolved_model),
+        ),
+        Err(_) => {
+            let model = llm_config::resolve_model_info(&options.model);
+            let provider = if options.provider.trim().is_empty() {
+                model.provider
+            } else {
+                options.provider.clone()
+            };
+            (provider, options.model.clone())
+        }
     };
-    let model_id = resolved_probe_model_id(&model.id);
     let base_url = options.base_url.clone().or_else(|| {
         llm_config::provider_config(&provider).map(|def| llm_config::resolve_base_url(&def))
     });
@@ -386,6 +406,14 @@ pub async fn run_tool_conformance_probe(
     let expected_value = options.probe_case.expected_value(&options.marker);
     for _ in 0..options.repeat.max(1) {
         for mode in &modes {
+            if let Err(error) = &resolution {
+                cases.push(ToolConformanceCase::transport_error(
+                    *mode,
+                    error.to_string(),
+                    None,
+                ));
+                continue;
+            }
             cases.push(
                 execute_live_probe_case(
                     &provider,
@@ -408,16 +436,12 @@ pub async fn run_tool_conformance_probe(
         provider,
         model_id,
         base_url,
+        evidence::observed_source(&cases, options.base_url.is_some()),
         options.tool_format,
         options.probe_case,
         options.marker,
-        expected_value,
         cases,
     )
-}
-
-fn resolved_probe_model_id(selector: &str) -> String {
-    llm_config::wire_model_id(selector)
 }
 
 pub fn classify_tool_conformance_fixture(
@@ -511,10 +535,10 @@ fn classify_tool_conformance_fixture_with_policy(
         provider,
         model,
         None,
+        ToolProbeEvidenceSource::SavedResponse,
         tool_format,
         probe_case,
         marker,
-        expected_value,
         vec![case],
     )
 }
@@ -812,6 +836,9 @@ pub fn tool_conformance_request_catalog_audit(
 }
 
 pub fn report_satisfies_required_probe(report: &ToolConformanceReport, requirement: &str) -> bool {
+    if report.require_live_evidence().is_err() {
+        return false;
+    }
     match requirement {
         "tool_probe" | "tool_call_probe" => {
             report.tool_calling.fallback_mode != ToolProbeFallbackMode::Disabled
@@ -855,15 +882,17 @@ fn report_from_cases(
     provider: String,
     model: String,
     base_url: Option<String>,
+    evidence_source: ToolProbeEvidenceSource,
     tool_format: ToolProbeFormat,
     probe_case: ToolProbeCase,
     marker: String,
-    expected_value: String,
     cases: Vec<ToolConformanceCase>,
 ) -> ToolConformanceReport {
     let summary = summarize_cases(&cases, tool_format);
+    let expected_value = probe_case.expected_value(&marker);
     ToolConformanceReport {
         schema_version: TOOL_CONFORMANCE_SCHEMA_VERSION,
+        evidence_source,
         provider,
         model,
         tool_format,
@@ -1413,30 +1442,15 @@ fn classify_no_tool_probe_response(
     }
 }
 
-fn chat_url(def: &ProviderDef, base_url: &str) -> Result<String, String> {
-    let endpoint = if def.chat_endpoint.trim().is_empty() {
-        "/v1/chat/completions"
-    } else {
-        def.chat_endpoint.as_str()
-    };
-    let url = if endpoint.starts_with("http://") || endpoint.starts_with("https://") {
-        endpoint.to_string()
-    } else if endpoint.starts_with('/') {
-        format!("{}{}", base_url.trim_end_matches('/'), endpoint)
-    } else {
-        format!("{}/{}", base_url.trim_end_matches('/'), endpoint)
-    };
-    reqwest::Url::parse(&url)
-        .map(|_| url.clone())
-        .map_err(|error| format!("invalid provider chat URL '{url}': {error}"))
-}
-
 fn elapsed_ms(clock: &dyn harn_clock::Clock, started_ms: i64) -> u64 {
     clock.monotonic_ms().saturating_sub(started_ms).max(0) as u64
 }
 #[cfg(test)]
 #[path = "tool_conformance_request_tests.rs"]
 mod request_tests;
+#[cfg(test)]
+#[path = "tool_conformance_retirement_tests.rs"]
+mod retirement_tests;
 #[cfg(test)]
 #[path = "tool_conformance_summary_tests.rs"]
 mod summary_tests;

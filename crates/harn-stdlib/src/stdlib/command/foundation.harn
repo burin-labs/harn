@@ -64,7 +64,7 @@ fn __command_apply_option_defaults(req: any, options: dict?) {
       out = out + {[key]: opts[key]}
     }
   }
-  if out.mode == "shell" {
+  if out.mode == "shell" || out.mode == "auto" {
     for key in ["shell", "shell_id", "login", "interactive"] {
       if out?.[key] == nil && opts[key] != nil {
         out = out + {[key]: opts[key]}
@@ -99,11 +99,11 @@ fn __command_request(spec: CommandSpec, options: dict?) {
       throw "command_run: shell mode requires mode: \"shell\""
     }
     req = {mode: "argv", argv: __command_require_argv(spec?.argv)}
-  } else if mode == "shell" {
+  } else if mode == "shell" || mode == "auto" {
     if type_of(spec?.command) != "string" || trim(spec.command) == "" {
       throw "command_run: shell mode requires a non-empty command"
     }
-    req = {mode: "shell", command: spec.command}
+    req = {mode: mode, command: spec.command}
     for key in ["shell", "shell_id", "login", "interactive"] {
       if spec?.[key] != nil {
         req = req + {[key]: spec[key]}

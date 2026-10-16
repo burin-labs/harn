@@ -1,4 +1,4 @@
-import { read_yaml } from "std/fs"
+import { read_json_result, read_yaml } from "std/fs"
 import {
   CiCachePolicy,
   NATIVE_CACHE_INPUTS,
@@ -7,28 +7,237 @@ import {
   actions_cache_capacity_errors,
   ci_cache_policy_errors,
   ci_cache_policy_parse,
+  ci_linux_lane_policy_errors,
   ci_workflow_concurrency_errors,
   e2e_workflow_concurrency_errors,
   event_skip_propagation_errors,
+  linux_cache_consumers_restore_only_errors,
+  linux_cache_environment_errors,
+  linux_confinement_errors,
+  macos_shared_cache_errors,
   macos_warm_errors,
   minimal_pr_capacity_errors,
   nextest_version_errors,
+  public_repository_runner_errors,
   release_aot_runner_errors,
+  release_runner_policy_landlock_errors,
   release_warm_cache_concurrency_errors,
   release_warm_cache_path_matches,
   release_warm_cache_path_policy_errors,
   release_warm_cache_path_policy_parse,
   release_warm_cache_prune_errors,
+  rust_cache_generation_admission_errors,
+  rust_cache_generation_projection_errors,
   rust_cache_refresh_concurrency_errors,
   rust_cache_refresh_miss_only_errors,
+  rust_cache_refresh_prerequisite_errors,
   save_requested,
   sccache_action_cache_size_errors,
-  windows_pr_native_feedback_errors,
+  windows_native_admission_errors,
   windows_release_certify_warm_errors,
   windows_shared_cache_errors,
 } from "../check_ci_cache_policy"
+import { RUST_LINT_LEGS } from "../ci_cache_policy/linux_checks.harn"
 import "./ci_cache_policy/fixtures.harn"
 import "./ci_cache_policy/policy_integration_test.harn"
+
+@test
+pipeline test_package_and_release_tools_require_a_successful_shared_producer(harness: Harness) {
+  const ci = read_yaml(harness.fs, "../../.github/workflows/ci.yml")
+  assert_eq(ci_linux_lane_policy_errors(ci), [])
+  for consumer in ["package-audit", "release-residual-audit"] {
+    const refusal =
+      "ci.yml:${consumer} must need rust-cli, require its success under !cancelled(), and not wait on the workspace producer"
+    let missing_producer = ci
+    missing_producer.jobs[consumer].needs = ["changes"]
+    assert(ci_linux_lane_policy_errors(missing_producer).contains(refusal))
+    const condition = ci.jobs[consumer].if
+    const required = " && needs.rust-cli.result == 'success'"
+    assert(condition.contains(required))
+    let unproved_producer = ci
+    unproved_producer.jobs[consumer].if = condition.replace(required, "")
+    assert(ci_linux_lane_policy_errors(unproved_producer).contains(refusal))
+  }
+}
+
+@test
+pipeline test_linux_build_cache_environments_match_the_actual_writer(harness: Harness) {
+  const ci = read_yaml(harness.fs, "../../.github/workflows/ci.yml")
+  const refresh = read_yaml(harness.fs, "../../.github/workflows/rust-cache-refresh.yml")
+  const documents = {"ci.yml": ci, "rust-cache-refresh.yml": refresh}
+  assert_eq(linux_cache_environment_errors(documents), [])
+  for key in ["CARGO_PROFILE_DEV_DEBUG", "RUST_CACHE_NEW_INPUT", "CC"] {
+    const mismatched = {...ci, env: {...ci.env, [key]: "different"}}
+    const errors = linux_cache_environment_errors({...documents, "ci.yml": mismatched})
+    assert_eq(len(errors), 3)
+    for job in ["rust-cli", "rust-check-inputs", "package-audit"] {
+      assert(errors.any({ error -> error.starts_with("ci.yml:${job}:") && error.contains(key) }))
+    }
+  }
+  assert_eq(len(linux_cache_environment_errors({"ci.yml": ci})), 3)
+}
+
+@test
+pipeline test_release_order_is_checked_before_expensive_ci_admission(harness: Harness) {
+  const ci = read_yaml(harness.fs, "../../.github/workflows/ci.yml")
+  const steps = ci.jobs.changes.steps
+  assert_eq(steps[0].with["fetch-depth"], 0)
+  assert_eq(steps[1].name, "Keep a release commit last in its merge group")
+  assert_eq(steps[1].if, "github.event_name == 'merge_group'")
+  assert(steps[1].run.contains("release_range_release_commits"))
+  assert_eq(steps[2].id, "filter")
+  // Every compile, artifact consumer, and product proof depends directly on
+  // admission. Capacity measurement and inexpensive hygiene can stay parallel.
+  for name in [
+    "fmt",
+    "package-audit",
+    "public-api",
+    "release-contract",
+    "release-residual-audit",
+    "rust-checks",
+    "rust-cli",
+    "rust-check-inputs",
+    "rust-test-partitions",
+    "security-tests-ready",
+    "rust-test",
+    "rust-security",
+    "harn-audit",
+    "source-length-ratchet",
+    "windows-cross-check",
+    "macos-lint",
+    "portal",
+    "vscode",
+    "docs-site",
+    "docs-checks",
+    "setup-harn-action",
+  ] {
+    const needs = ci.jobs[name].needs
+    assert(needs == "changes" || (type_of(needs) == "list" && needs.contains("changes")))
+  }
+  assert_eq(ci.jobs["ci-status"].if, "always()")
+  assert(ci.jobs["ci-status"].needs.contains("changes"))
+  const aggregate = ci.jobs["ci-status"].steps[0].run
+  assert(aggregate.contains("CI tier was not measured."))
+  assert(aggregate.contains("[\"Detect changes\"]=\"$" + "{{ needs.changes.result }}\""))
+  assert_eq(
+    len(
+      ci.jobs["release-contract"].steps.filter(
+        { step -> step?.name == "Keep a release commit last in its merge group" },
+      )
+        .to_list(),
+    ),
+    0,
+  )
+}
+
+@test
+pipeline test_macos_lint_matrix_preserves_every_typed_graph_and_fail_closed_aggregate(
+  harness: Harness,
+) {
+  const ci = read_yaml(harness.fs, "../../.github/workflows/ci.yml")
+  const nightly = read_yaml(harness.fs, "../../.github/workflows/macos-nightly.yml")
+  assert_eq(macos_shared_cache_errors(ci, nightly), [])
+  const dispatched = harness.process.run(
+    {
+      program: "bash",
+      args: ["scripts/ci/run_rust_lint_lane.sh", "--list-legs"],
+      cwd: path_normalize(path_join(harness.fs.cwd(), "../..")),
+    },
+  )
+  assert_eq(dispatched.exit_code, 0)
+  assert_eq(trim(dispatched.stdout).split("\n"), RUST_LINT_LEGS)
+  const lint = ci.jobs["macos-lint"]
+  const timing_error =
+    "ci.yml:macos-lint must retain bounded source-bound workspace compile timings"
+  for field in ["HARN_LINT_TIMINGS_DIR", "HARN_LINT_SOURCE_SHA"] {
+    const steps = lint.steps.map(
+      { step ->
+        if step?.env?.HARN_LINT_SOURCE_SHA == "$" + "{{ github.sha }}" {
+          return {...step, env: {...step.env, [field]: ""}}
+        }
+        return step
+      },
+    )
+      .to_list()
+    assert(
+      macos_shared_cache_errors(
+        {...ci, jobs: {...ci.jobs, "macos-lint": {...lint, steps: steps}}},
+        nightly,
+      )
+        .contains(timing_error),
+    )
+  }
+  const timing_removed = lint.steps.filter(
+    { step -> step?.name != "Upload actual workspace compile timings" },
+  )
+    .to_list()
+  assert(
+    macos_shared_cache_errors(
+      {...ci, jobs: {...ci.jobs, "macos-lint": {...lint, steps: timing_removed}}},
+      nightly,
+    )
+      .contains(timing_error),
+  )
+  const timing_uploads = lint.steps.filter(
+    { step -> step?.name == "Upload actual workspace compile timings" },
+  )
+    .to_list()
+  assert_eq(len(timing_uploads), 1)
+  const artifact_name = timing_uploads[0].with.name
+  const run_id = "$" + "{{ github.run_id }}"
+  const attempt = "$" + "{{ github.run_attempt }}"
+  const first_upload = artifact_name.replace(run_id, "100").replace(attempt, "1")
+  const rerun_upload = artifact_name.replace(run_id, "100").replace(attempt, "2")
+  const separate_upload = artifact_name.replace(run_id, "101").replace(attempt, "1")
+  assert_eq(first_upload, "macos-workspace-compile-timings-100-1")
+  assert_eq(rerun_upload, "macos-workspace-compile-timings-100-2")
+  assert_eq(separate_upload, "macos-workspace-compile-timings-101-1")
+  assert(
+    first_upload != rerun_upload && first_upload != separate_upload
+      && rerun_upload != separate_upload,
+  )
+  for name in [
+    "macos-workspace-compile-timings",
+    "macos-workspace-compile-timings-" + run_id,
+    "macos-workspace-compile-timings-" + attempt,
+  ] {
+    const steps = lint.steps.map(
+      { step ->
+        if step?.name == "Upload actual workspace compile timings" {
+          return {...step, with: {...step.with, name: name}}
+        }
+        return step
+      },
+    )
+      .to_list()
+    assert(
+      macos_shared_cache_errors(
+        {...ci, jobs: {...ci.jobs, "macos-lint": {...lint, steps: steps}}},
+        nightly,
+      )
+        .contains(timing_error),
+    )
+  }
+  for mutation in [
+    {...lint, strategy: {...lint.strategy, matrix: {include: [{kind: "workspace"}]}}},
+    {...lint, strategy: {...lint.strategy, "fail-fast": true}},
+    {...lint, env: {RUSTFLAGS: ""}},
+    {...lint, name: "unreported leg"},
+  ] {
+    const invalid = {...ci, jobs: {...ci.jobs, "macos-lint": mutation}}
+    assert(
+      macos_shared_cache_errors(invalid, nightly).contains(
+        "ci.yml:macos-lint must run all three named strict lint graphs on independent hosted runners",
+      ),
+    )
+  }
+  const invalid = {...ci, jobs: {...ci.jobs, macos: {...ci.jobs.macos, steps: []}}}
+  assert(
+    macos_shared_cache_errors(invalid, nightly).contains(
+      "ci.yml:macos must retain the required aggregate and verify the complete current-attempt lint census",
+    ),
+  )
+}
 
 fn sccache_action(
   default_size: string = "",
@@ -191,10 +400,10 @@ pipeline test_minimal_pr_capacity_policy_and_negative_controls(harness: Harness,
   const ci = read_yaml(harness.fs, "../../.github/workflows/ci.yml")
   assert_eq(minimal_pr_capacity_errors(ci, publish), [])
   let self_hosted_waiter = ci
-  self_hosted_waiter.jobs["rust-artifacts-ready"]["runs-on"] = "self-hosted"
+  self_hosted_waiter.jobs["security-tests-ready"]["runs-on"] = "self-hosted"
   assert(
     minimal_pr_capacity_errors(self_hosted_waiter, publish).contains(
-      "ci.yml:rust-artifacts-ready must use GitHub-hosted ubuntu-latest",
+      "ci.yml:security-tests-ready must use GitHub-hosted ubuntu-24.04",
     ),
   )
   let pr_policy = ci
@@ -204,6 +413,99 @@ pipeline test_minimal_pr_capacity_policy_and_negative_controls(harness: Harness,
       "ci.yml:audit-scripts must run on Rust-changing main pushes only",
     ),
   )
+  // A main push the merge group already proved sets `rust` false. Main-only
+  // lanes gated on it would never run again, so each one reads `rust_paths`.
+  let heavy_gated_policy = ci
+  heavy_gated_policy.jobs["audit-scripts"].if = "github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.outputs.rust == 'true' && needs.rust-cli.result == 'success'"
+  assert(
+    minimal_pr_capacity_errors(heavy_gated_policy, publish).contains(
+      "ci.yml:audit-scripts must run on Rust-changing main pushes only",
+    ),
+  )
+  // Without a status function the producer's skipped capacity ancestors
+  // skip the main-only lane on every push.
+  let skipped_policy = ci
+  skipped_policy.jobs["audit-scripts"].if = "github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.outputs.rust_paths == 'true' && needs.rust-cli.result == 'success'"
+  assert(
+    minimal_pr_capacity_errors(skipped_policy, publish).contains(
+      "ci.yml:audit-scripts must run on Rust-changing main pushes only",
+    ),
+  )
+  let heavy_gated_size = ci
+  heavy_gated_size.jobs["binary-size-signal"].if = "needs.changes.outputs.rust == 'true' && github.event_name == 'push'"
+  assert(
+    minimal_pr_capacity_errors(heavy_gated_size, publish).contains(
+      "ci.yml:binary-size-signal must record main's baseline on every Rust-changing main push",
+    ),
+  )
+  let heavy_gated_status = ci
+  heavy_gated_status.jobs["ci-status"].steps[0].env.RUST_PATHS_SELECTED = "$"
+    + "{{ needs.changes.outputs.rust }}"
+  assert(
+    minimal_pr_capacity_errors(heavy_gated_status, publish).contains(
+      "ci.yml:ci-status must require repository policies on every Rust-changing main push, proven or not",
+    ),
+  )
+  // Every run builds its own CLI: a download naming another run measures a
+  // binary this commit did not build.
+  for consumer in ["audit-scripts", "binary-size-signal"] {
+    let foreign_download = ci
+    foreign_download.jobs[consumer].steps = foreign_download.jobs[consumer].steps.map(
+      { step ->
+        if contains(to_string(step?.uses ?? ""), "download-artifact-with-retry") {
+          return {...step, with: {...step.with, "run-id": "4242"}}
+        }
+        return step
+      },
+    )
+      .to_list()
+    assert(
+      minimal_pr_capacity_errors(foreign_download, publish).contains(
+        "ci.yml:${consumer} must download the shared CLI this run built",
+      ),
+    )
+  }
+  // The hermetic shell gates must refuse before the merge. Scoping them back
+  // to main pushes is the shape that let a fixture defect turn main red.
+  let main_only_shell = ci
+  main_only_shell.jobs["shell-gates"].if = "github.event_name == 'push' && needs.changes.outputs.rust == 'true'"
+  const shell_refusal = "ci.yml:shell-gates is a cheap refusal and must carry no event condition"
+  const shell_errors = minimal_pr_capacity_errors(main_only_shell, publish)
+  assert(shell_errors.any(fn(error) { contains(error, shell_refusal) }))
+  // The Windows cross-compile check is required on every full-suite pull
+  // request and merge-group candidate: a main-only job, a job queued behind the Linux lanes, or an
+  // aggregate that tolerates a merge-group skip each reopen the gap.
+  let main_only_cross = ci
+  main_only_cross.jobs["windows-cross-check"].if = "github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.outputs.rust == 'true'"
+  assert(
+    minimal_pr_capacity_errors(main_only_cross, publish).contains(
+      "ci.yml:windows-cross-check must run on every full-suite pull request and merge-group candidate and on Rust-changing main pushes",
+    ),
+  )
+  // A merge group cannot read `CI-Scope: full`, so a merge-group-only check
+  // lets a declared full-suite pull request land without it.
+  let merge_group_only_cross = ci
+  merge_group_only_cross.jobs["windows-cross-check"].if = "(github.event_name == 'merge_group' && needs.changes.outputs.post_merge_tier != 'true') || (github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.outputs.rust == 'true')"
+  assert(
+    minimal_pr_capacity_errors(merge_group_only_cross, publish).contains(
+      "ci.yml:windows-cross-check must run on every full-suite pull request and merge-group candidate and on Rust-changing main pushes",
+    ),
+  )
+  let queued_cross = ci
+  queued_cross.jobs["windows-cross-check"].needs = ["changes", "rust-cli"]
+  assert(
+    minimal_pr_capacity_errors(queued_cross, publish).contains(
+      "ci.yml:windows-cross-check must need only changes",
+    ),
+  )
+  let skip_tolerant = ci
+  skip_tolerant.jobs["ci-status"].steps[0].env.WINDOWS_CROSS_REQUIRED = "$"
+    + "{{ github.event_name == 'push' }}"
+  assert(
+    minimal_pr_capacity_errors(skip_tolerant, publish).contains(
+      "ci.yml:ci-status must require the Windows cross-compile check wherever the job itself must run",
+    ),
+  )
   let main_publish = publish
   main_publish["on"].push.branches = ["main"]
   assert(
@@ -211,11 +513,18 @@ pipeline test_minimal_pr_capacity_policy_and_negative_controls(harness: Harness,
       "publish-release.yml must not trigger on branch pushes",
     ),
   )
-  let unrouted_source_checks = ci
-  unrouted_source_checks.jobs["harn-audit"]["runs-on"] = "ubuntu-latest"
+  // The Harn proof lanes spawn Harn children, which refuse to start on a Linux
+  // runner with neither Landlock nor bubblewrap. Routing them back through the
+  // Blacksmith Linux switch is refused twice: off the hosted runner, and onto
+  // a runner the Landlock contract names.
+  let confinement_blind = ci
+  confinement_blind.jobs["harn-audit"]["runs-on"] = "$"
+    + "{{ vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true' && 'blacksmith-8vcpu-ubuntu-2404' || 'ubuntu-24.04' }}"
+  const blind_errors = minimal_pr_capacity_errors(confinement_blind, publish)
+  assert(blind_errors.contains("ci.yml:harn-audit must use GitHub-hosted ubuntu-24.04"))
   assert(
-    minimal_pr_capacity_errors(unrouted_source_checks, publish).contains(
-      "ci.yml:harn-audit must use the shared elastic Linux runner switch",
+    linux_confinement_errors({"ci.yml": confinement_blind}, {targets: []}).any(
+      fn(error) { contains(error, "ci.yml:harn-audit can resolve to blacksmith-8vcpu-ubuntu-2404") },
     ),
   )
 }
@@ -227,6 +536,330 @@ pipeline test_cache_refresh_serializes_mutation_without_cancelling_active_save(
 ) {
   const job = {concurrency: {group: "harn-ci-rust-cache-refresh", "cancel-in-progress": false}}
   assert_eq(rust_cache_refresh_concurrency_errors(job), [])
+}
+
+pipeline test_public_runner_policy_reads_literal_matrix_input_and_release_paths(
+  harness: Harness,
+  task: unknown,
+) {
+  const workflows = {
+    "literal.yml": {jobs: {build: {"runs-on": "blacksmith-8vcpu-ubuntu-2404"}}},
+    "matrix.yml": {
+      jobs: {
+        build: {
+          "runs-on": gha_expression("matrix.host"),
+          strategy: {
+            matrix: {
+              host: ["ubuntu-24.04", "ubicloud-standard-8"],
+              include: [{host: "blacksmith-4vcpu-ubuntu-2404"}],
+            },
+          },
+        },
+      },
+    },
+    "input.yml": {
+      on: {
+        workflow_dispatch: {
+          inputs: {
+            runner: {
+              default: "windows-latest",
+              options: ["windows-latest", "blacksmith-8vcpu-windows-2025"],
+            },
+          },
+        },
+      },
+      jobs: {build: {"runs-on": gha_expression("inputs.runner")}},
+    },
+    "macos.yml": {
+      jobs: {
+        build: {
+          "runs-on": gha_expression("matrix.runner"),
+          strategy: {
+            matrix: {
+              runner: [
+                "macos-latest",
+                "xcode-27",
+                "macos-latest-large",
+                "macOS-latest-xlarge",
+                "xcode-27-xlarge",
+              ],
+            },
+          },
+        },
+      },
+    },
+    "capacity.yml": {
+      jobs: {
+        route: {
+          steps: [
+            {run: "bash scripts/ci/runner_capacity.sh", env: {PAID_LINUX_PROVIDER: "blacksmith"}},
+          ],
+        },
+      },
+    },
+  }
+  const release_policy = {
+    runner_registry: {
+      "ubuntu-24.04": {provider: "github", usd_per_minute: nil},
+      "ubuntu-16core-release": {provider: "github", usd_per_minute: 0.042},
+    },
+    jobs: {cli_aot: {standard: "ubuntu-16core-release"}},
+    targets: [],
+  }
+  assert_eq(
+    public_repository_runner_errors(workflows, release_policy),
+    [
+      "capacity.yml:route runner capacity decision must not accept paid route input PAID_LINUX_PROVIDER",
+      "input.yml:build runner selection can resolve through paid token blacksmith-8vcpu-windows-2025",
+      "literal.yml:build runner selection can resolve through paid token blacksmith-8vcpu-ubuntu-2404",
+      "macos.yml:build runner selection can resolve through paid token macOS-latest-xlarge",
+      "macos.yml:build runner selection can resolve through paid token macos-latest-large",
+      "macos.yml:build runner selection can resolve through paid token xcode-27-xlarge",
+      "matrix.yml:build runner selection can resolve through paid token blacksmith-4vcpu-ubuntu-2404",
+      "matrix.yml:build runner selection can resolve through paid token ubicloud-standard-8",
+      "release-runner-policy.json:cli_aot standard runner ubuntu-16core-release is paid public-repository capacity",
+    ],
+  )
+}
+
+pipeline test_public_runner_policy_keeps_historical_registry_rows_inert(
+  harness: Harness,
+  task: unknown,
+) {
+  const release_policy = {
+    runner_registry: {
+      "ubuntu-24.04": {provider: "github", usd_per_minute: nil},
+      "blacksmith-16vcpu-ubuntu-2204": {provider: "blacksmith", usd_per_minute: 0.032},
+    },
+    jobs: {cli_aot: {standard: "ubuntu-24.04"}},
+    targets: [{target: "x86_64-unknown-linux-gnu", runners: {standard: "ubuntu-24.04"}}],
+  }
+  assert_eq(
+    public_repository_runner_errors(
+      {"ci.yml": {jobs: {build: {"runs-on": "ubuntu-24.04"}}}},
+      release_policy,
+    ),
+    [],
+  )
+}
+
+@test
+pipeline test_cache_generation_projection_binds_actual_inputs_and_post_order(
+  harness: Harness,
+  task: unknown,
+) {
+  const action = read_yaml(harness.fs, "../../.github/actions/rust-cache/action.yml", nil)
+  const companion = read_yaml(
+    harness.fs,
+    "../../.github/actions/rust-cache-generation/action.yml",
+    nil,
+  )
+  const pin = unwrap(
+    read_json_result(harness.fs, "../../.github/actions/rust-cache/pinned-config.json"),
+  )
+  assert_eq(rust_cache_generation_projection_errors(action, companion, pin), [])
+  const bad_inputs = {
+    ...action,
+    runs: {
+      ...action.runs,
+      steps: action.runs.steps.map(
+        { step ->
+          if step?.id == "generation" {
+            return {...step, with: {...step.with, "shared-key": "different"}}
+          }
+          return step
+        },
+      )
+        .to_list(),
+    },
+  }
+  assert_eq(len(rust_cache_generation_projection_errors(bad_inputs, companion, pin)), 1)
+  const reversed = {...action, runs: {...action.runs, steps: action.runs.steps.reversed()}}
+  assert_eq(len(rust_cache_generation_projection_errors(reversed, companion, pin)), 1)
+  assert_eq(
+    len(
+      rust_cache_generation_projection_errors(
+        action,
+        {...companion, runs: {...companion.runs, "post-if": "always()"}},
+        pin,
+      ),
+    ),
+    1,
+  )
+  assert_eq(
+    len(rust_cache_generation_projection_errors(action, companion, {...pin, bundle_sha256: ""})),
+    1,
+  )
+}
+
+@test
+pipeline test_linux_ci_cannot_add_unadmitted_parallel_cache_saves(harness: Harness, task: unknown) {
+  const workflow = read_yaml(harness.fs, "../../.github/workflows/ci.yml", nil)
+  assert_eq(linux_cache_consumers_restore_only_errors(workflow), [])
+  for job_name in ["rust-cli", "rust-check-inputs", "package-audit"] {
+    const job = workflow.jobs[job_name]
+    const steps = job.steps.map(
+      { step ->
+        if step?.uses == "./.github/actions/rust-cache" {
+          return {...step, with: {...step.with, save: "true"}}
+        }
+        return step
+      },
+    )
+      .to_list()
+    let jobs = {...workflow.jobs}
+    jobs[job_name] = {...job, steps: steps}
+    assert_eq(len(linux_cache_consumers_restore_only_errors({...workflow, jobs: jobs})), 1)
+  }
+}
+
+@test
+pipeline test_cache_refresh_requires_a_successful_cli_post_lifecycle_before_other_families(
+  harness: Harness,
+  task: unknown,
+) {
+  const workflow = read_yaml(harness.fs, "../../.github/workflows/rust-cache-refresh.yml", nil)
+  const job = workflow.jobs["rust-cache-refresh"]
+  const cli = workflow.jobs["rust-cache-refresh-cli"]
+  assert_eq(rust_cache_refresh_prerequisite_errors(workflow), [])
+  assert_eq(
+    len(
+      rust_cache_refresh_prerequisite_errors(
+        {...workflow, jobs: {...workflow.jobs, "rust-cache-refresh": {...job, needs: nil}}},
+      ),
+    ),
+    1,
+  )
+  assert_eq(
+    len(
+      rust_cache_refresh_prerequisite_errors(
+        {...workflow, jobs: {...workflow.jobs, "rust-cache-refresh": {...job, if: "always()"}}},
+      ),
+    ),
+    1,
+  )
+  const steps = cli.steps.map(
+    { step ->
+      if step?.id == "rust-cache" {
+        return {...step, "continue-on-error": true}
+      }
+      return step
+    },
+  )
+    .to_list()
+  assert_eq(
+    len(
+      rust_cache_refresh_prerequisite_errors(
+        {
+          ...workflow,
+          jobs: {
+            ...workflow.jobs,
+            "rust-cache-refresh": {...job, steps: steps},
+            "rust-cache-refresh-cli": {...cli, steps: steps},
+          },
+        },
+      ),
+    ),
+    1,
+  )
+  assert_eq(
+    len(
+      rust_cache_refresh_prerequisite_errors(
+        {...workflow, jobs: {...workflow.jobs, "rust-cache-refresh-cli": {...cli, env: {}}}},
+      ),
+    ),
+    1,
+  )
+}
+
+@test
+pipeline test_cache_refresh_whole_workflow_prevents_interleaved_pending_job_replacement(
+  harness: Harness,
+  task: unknown,
+) {
+  const workflow = read_yaml(harness.fs, "../../.github/workflows/rust-cache-refresh.yml", nil)
+  assert_eq(rust_cache_refresh_concurrency_errors(workflow), [])
+  let jobs = {...workflow.jobs}
+  for job_name in ["rust-cache-refresh-cli", "rust-cache-refresh"] {
+    jobs[job_name] = {...jobs[job_name], concurrency: workflow.concurrency}
+  }
+  // An overlapping run's CLI can replace this run's pending dependent job.
+  assert_eq(
+    len(rust_cache_refresh_concurrency_errors({...workflow, concurrency: nil, jobs: jobs})),
+    4,
+  )
+  for job_name in ["rust-cache-refresh-cli", "rust-cache-refresh"] {
+    const job = workflow.jobs[job_name]
+    assert_eq(
+      len(
+        rust_cache_refresh_concurrency_errors(
+          {
+            ...workflow,
+            jobs: {...workflow.jobs, [job_name]: {...job, concurrency: workflow.concurrency}},
+          },
+        ),
+      ),
+      1,
+    )
+    assert_eq(
+      len(
+        rust_cache_refresh_concurrency_errors(
+          {
+            ...workflow,
+            jobs: {
+              ...workflow.jobs,
+              [job_name]: {...job, strategy: {...job.strategy, "max-parallel": 2}},
+            },
+          },
+        ),
+      ),
+      1,
+    )
+  }
+  assert_eq(
+    len(
+      rust_cache_refresh_concurrency_errors(
+        {...workflow, concurrency: {...workflow.concurrency, group: "per-source"}},
+      ),
+    ),
+    1,
+  )
+  assert_eq(
+    len(
+      rust_cache_refresh_concurrency_errors(
+        {...workflow, concurrency: {...workflow.concurrency, "cancel-in-progress": true}},
+      ),
+    ),
+    1,
+  )
+}
+
+@test
+pipeline test_cache_refresh_admits_capacity_without_clearing_current_generation(
+  harness: Harness,
+  task: unknown,
+) {
+  const command =
+    "./scripts/prune_ci_cache_generations.sh --ensure-headroom \"$HARN_CACHE_SAVE_HEADROOM_BYTES\" --replacing \"$HARN_CACHE_FAMILY_PREFIX\""
+  const job = {steps: [{name: "Prepare Linux cache generation save", run: command}]}
+  assert_eq(rust_cache_generation_admission_errors(job), [])
+  assert_eq(len(rust_cache_generation_admission_errors({steps: []})), 1)
+  assert_eq(
+    len(
+      rust_cache_generation_admission_errors(
+        {
+          steps: [
+            {
+              name: "Prepare Linux cache generation save",
+              run: "./scripts/prune_ci_cache_generations.sh --clear-family-prefix \"$HARN_CACHE_FAMILY_PREFIX\"\n"
+                + command,
+            },
+          ],
+        },
+      ),
+    ),
+    1,
+  )
 }
 
 @test
@@ -488,7 +1121,7 @@ pipeline test_release_warm_cache_concurrency_rejects_setup_only_preemption(
     release_warm_cache_concurrency_errors(invalid),
     [
       "build-release-binaries.yml must give branch pushes run-qualified workflow lanes",
-      "build-release-binaries.yml must reserve workflow cancellation for full scheduled/manual warms",
+      "build-release-binaries.yml must reserve workflow cancellation for manual warms",
       "build-release-binaries.yml:build must instantiate only after setup selects a real build",
       "build-release-binaries.yml:build must share one warm lane per target and qualify every other run",
       "build-release-binaries.yml:build must let only real main-branch warms supersede a target warm",
@@ -496,7 +1129,33 @@ pipeline test_release_warm_cache_concurrency_rejects_setup_only_preemption(
   )
 }
 
-pipeline test_release_aot_runner_requires_hosted_fallback_switch(harness: Harness, task: unknown) {
+pipeline test_release_concurrency_rejects_pre_fix_dispatch_groups() {
+  const workflow = release_binary_workflow()
+  const invalid = {
+    ...workflow,
+    concurrency: {
+      group: "build-release-binaries-"
+        + gha_expression(
+          "(github.event_name == 'workflow_dispatch' && inputs.benchmark_source_sha != '' && format('benchmark-{0}-{1}', inputs.benchmark_source_sha, github.sha)) || (github.event_name == 'schedule' && 'source-main') || (github.event_name == 'workflow_dispatch' && inputs.warm_cache_only && 'warm-main') || (github.event_name == 'push' && format('branch-{0}', github.run_id)) || github.ref_name",
+        ),
+      "cancel-in-progress": gha_expression(
+        "github.event_name == 'workflow_dispatch' && inputs.warm_cache_only",
+      ),
+    },
+  }
+  assert_eq(
+    release_warm_cache_concurrency_errors(invalid),
+    [
+      "build-release-binaries.yml must give branch pushes run-qualified workflow lanes",
+      "build-release-binaries.yml must reserve workflow cancellation for manual warms",
+    ],
+  )
+}
+
+pipeline test_release_aot_runner_requires_only_the_free_standard_runner(
+  harness: Harness,
+  task: unknown,
+) {
   const workflow = release_binary_workflow()
   const invalid = {
     ...workflow,
@@ -504,16 +1163,14 @@ pipeline test_release_aot_runner_requires_hosted_fallback_switch(harness: Harnes
       ...workflow.jobs,
       prepare_cli_aot: {
         ...workflow.jobs.prepare_cli_aot,
-        "runs-on": gha_expression(
-          "needs.setup.outputs.cli_aot_primary_runner || needs.setup.outputs.cli_aot_standard_runner",
-        ),
+        "runs-on": gha_expression("needs.setup.outputs.cli_aot_primary_runner"),
       },
     },
   }
   assert_eq(
     release_aot_runner_errors(invalid),
     [
-      "build-release-binaries.yml:prepare_cli_aot runner selection must include vars.HARN_RELEASE_ENABLE_BLACKSMITH_LINUX == 'true'",
+      "build-release-binaries.yml:prepare_cli_aot must use only the free standard runner needs.setup.outputs.cli_aot_standard_runner",
     ],
   )
 }
@@ -587,8 +1244,8 @@ pipeline test_ci_cache_policy_accepts_declared_main_guarded_writers(
   const declared = workflows()
   assert_eq(
     ci_cache_policy_errors(policy(), action(), node_action(), declared)
-      + windows_shared_cache_errors(declared["ci.yml"], declared["windows-nightly.yml"])
-      + windows_pr_native_feedback_errors(
+      + windows_shared_cache_errors(declared["windows-nightly.yml"])
+      + windows_native_admission_errors(
         policy(),
         declared["ci.yml"],
         declared["windows-nightly.yml"],
@@ -605,13 +1262,9 @@ pipeline test_windows_shared_cache_targets_dev_drive_with_one_stable_restore_own
   task: unknown,
 ) {
   const declared = workflows()
-  assert_eq(windows_shared_cache_errors(declared["ci.yml"], declared["windows-nightly.yml"]), [])
+  assert_eq(windows_shared_cache_errors(declared["windows-nightly.yml"]), [])
   assert_eq(
-    windows_pr_native_feedback_errors(
-      policy(),
-      declared["ci.yml"],
-      declared["windows-nightly.yml"],
-    ),
+    windows_native_admission_errors(policy(), declared["ci.yml"], declared["windows-nightly.yml"]),
     [],
   )
   assert_eq(windows_release_certify_warm_errors(policy(), declared["windows-nightly.yml"]), [])
@@ -619,437 +1272,151 @@ pipeline test_windows_shared_cache_targets_dev_drive_with_one_stable_restore_own
   assert_eq(actions_cache_capacity_errors(policy()), [])
 }
 
-pipeline test_windows_native_runner_requires_blacksmith_with_safe_fallback(
-  harness: Harness,
-  task: unknown,
-) {
-  const declared = workflows()
-  const windows = declared["ci.yml"].jobs.windows
-  const hosted_only = {
-    ...declared["ci.yml"],
-    jobs: {...declared["ci.yml"].jobs, windows: {...windows, "runs-on": "windows-latest"}},
-  }
-  assert(
-    windows_pr_native_feedback_errors(policy(), hosted_only, declared["windows-nightly.yml"])
-      .contains(
-        "ci.yml:windows must default to windows-latest, with HARN_CI_ENABLE_BLACKSMITH_WINDOWS=true opting into blacksmith-8vcpu-windows-2025",
-      ),
-  )
-  const fixed_timeout = {
-    ...declared["ci.yml"],
-    jobs: {...declared["ci.yml"].jobs, windows: {...windows, "timeout-minutes": 60}},
-  }
-  assert(
-    windows_pr_native_feedback_errors(policy(), fixed_timeout, declared["windows-nightly.yml"])
-      .contains(
-        "ci.yml:windows must cap paid Windows runs at 60 minutes and allow the hosted fallback 90 minutes",
-      ),
-  )
-  const wrong_tier = {
-    ...declared["ci.yml"],
-    jobs: {
-      ...declared["ci.yml"].jobs,
-      windows: {...windows, env: {...windows.env, HARN_RUNNER_TIER: "blacksmith"}},
-    },
-  }
-  assert(
-    windows_pr_native_feedback_errors(policy(), wrong_tier, declared["windows-nightly.yml"])
-      .contains("ci.yml:windows must mirror its Blacksmith/hosted runner tier"),
-  )
-  const no_artifact_authority = {
-    ...declared["ci.yml"],
-    jobs: {...declared["ci.yml"].jobs, windows: {...windows, permissions: {contents: "read"}}},
-  }
-  assert(
-    windows_pr_native_feedback_errors(
-      policy(),
-      no_artifact_authority,
-      declared["windows-nightly.yml"],
-    )
-      .contains(
-        "ci.yml:windows must grant only contents: read and actions: read for artifact discovery",
-      ),
-  )
-  const dev_drive_on_blacksmith = {
-    ...declared["ci.yml"],
-    jobs: {
-      ...declared["ci.yml"].jobs,
-      windows: {
-        ...windows,
-        steps: windows.steps.map(
-          { step ->
-            if trim(step?.name ?? "") != "Set up Dev Drive" {
-              return step
-            }
-            return {...step, if: gha_expression("vars.HARN_WINDOWS_DEVDRIVE == 'on'")}
-          },
-        )
-          .to_list(),
-      },
-    },
-  }
-  assert(
-    windows_pr_native_feedback_errors(
-      policy(),
-      dev_drive_on_blacksmith,
-      declared["windows-nightly.yml"],
-    )
-      .contains(
-        "ci.yml:windows must skip Hyper-V Dev Drive setup on Blacksmith and retain it for the github-hosted fallback",
-      ),
-  )
-}
-
-pipeline test_windows_storage_budget_rejects_small_full_drive_duplicate_profile_and_silent_tail(
-  harness: Harness,
-  task: unknown,
-) {
-  const declared = workflows()
-  const windows = declared["ci.yml"].jobs.windows
-  const small_drive = {
-    ...declared["ci.yml"],
-    jobs: {
-      ...declared["ci.yml"].jobs,
-      windows: {
-        ...windows,
-        steps: windows.steps.map(
-          { step ->
-            if trim(step?.name ?? "") != "Set up Dev Drive" {
-              return step
-            }
-            return {...step, with: {...step.with, "drive-size": "25GB"}}
-          },
-        )
-          .to_list(),
-      },
-    },
-  }
-  assert(
-    windows_pr_native_feedback_errors(policy(), small_drive, declared["windows-nightly.yml"])
-      .contains(
-        "ci.yml:windows Dev Drive must reserve the full-workspace ceiling outside pull requests",
-      ),
-  )
-  const duplicate_profile = {
-    ...declared["ci.yml"],
-    jobs: {
-      ...declared["ci.yml"].jobs,
-      windows: {
-        ...windows,
-        steps: windows.steps.map(
-          { step ->
-            if trim(step?.name ?? "") != "Produce exact Windows Harn binary" {
-              return step
-            }
-            return {...step, run: "cargo build --locked -p harn-cli"}
-          },
-        )
-          .to_list(),
-      },
-    },
-  }
-  assert(
-    windows_pr_native_feedback_errors(policy(), duplicate_profile, declared["windows-nightly.yml"])
-      .contains(
-        "ci.yml:windows must publish its test-profile freshness receipt after native Cargo and before smoke",
-      ),
-  )
-  const early_producer = {
-    ...declared["ci.yml"],
-    jobs: {
-      ...declared["ci.yml"].jobs,
-      windows: {
-        ...windows,
-        steps: windows.steps.filter(
-          { step -> trim(step?.name ?? "") == "Produce exact Windows Harn binary" },
-        )
-          .to_list()
-          + windows.steps.filter(
-            { step -> trim(step?.name ?? "") != "Produce exact Windows Harn binary" },
-          )
-            .to_list(),
-      },
-    },
-  }
-  assert(
-    windows_pr_native_feedback_errors(policy(), early_producer, declared["windows-nightly.yml"])
-      .contains(
-        "ci.yml:windows must publish its test-profile freshness receipt after native Cargo and before smoke",
-      ),
-  )
-  const rebuilding_tail = {
-    ...declared["ci.yml"],
-    jobs: {
-      ...declared["ci.yml"].jobs,
-      windows: {
-        ...windows,
-        steps: windows.steps.map(
-          { step ->
-            if trim(step?.name ?? "") != "Compile Windows tests and run unit slice" {
-              return step
-            }
-            return {...step, run: step.run + "\nHARN_BIN_NO_BUILD=0 ./scripts/harn_bin.sh --print"}
-          },
-        )
-          .to_list(),
-      },
-    },
-  }
-  assert(
-    windows_pr_native_feedback_errors(policy(), rebuilding_tail, declared["windows-nightly.yml"])
-      .contains(
-        "ci.yml:windows native tests must keep the producer feature graph aligned without resolving Harn",
-      ),
-  )
-  const feature_drift = {
-    ...declared["ci.yml"],
-    jobs: {
-      ...declared["ci.yml"].jobs,
-      windows: {
-        ...windows,
-        steps: windows.steps.map(
-          { step ->
-            if trim(step?.name ?? "") != "Compile Windows tests and run unit slice" {
-              return step
-            }
-            return {...step, run: "cargo nextest run"}
-          },
-        )
-          .to_list(),
-      },
-    },
-  }
-  assert(
-    windows_pr_native_feedback_errors(policy(), feature_drift, declared["windows-nightly.yml"])
-      .contains(
-        "ci.yml:windows native tests must keep the producer feature graph aligned without resolving Harn",
-      ),
-  )
-  const ambient_harn_telemetry = {
-    ...declared["ci.yml"],
-    jobs: {
-      ...declared["ci.yml"].jobs,
-      windows: {
-        ...windows,
-        steps: windows.steps.map(
-          { step ->
-            if trim(step?.name ?? "") == "Compile Windows tests and run unit slice" {
-              return {
-                ...step,
-                run: step.run
-                  + "\nprintf 'HARN_NATIVE_TEST_COMPLETED_EPOCH=%s\\n' 0 >> \"$GITHUB_ENV\"",
-              }
-            }
-            if trim(step?.name ?? "") == "Smoke test harn run" {
-              return {...step, env: {...step.env, HARN_NATIVE_TEST_COMPLETED_EPOCH: "0"}}
-            }
-            return step
-          },
-        )
-          .to_list(),
-      },
-    },
-  }
-  const ambient_harn_errors = windows_pr_native_feedback_errors(
-    policy(),
-    ambient_harn_telemetry,
-    declared["windows-nightly.yml"],
-  )
-  assert(
-    ambient_harn_errors.contains(
-      "ci.yml:windows native completion telemetry must use its typed step output, not Harn's reserved environment namespace",
-    ),
-  )
-  assert(
-    ambient_harn_errors.contains(
-      "ci.yml:windows smoke must consume native completion telemetry through the typed step output without ambient Harn variables",
-    ),
-  )
-  const direct_smoke = {
-    ...declared["ci.yml"],
-    jobs: {
-      ...declared["ci.yml"].jobs,
-      windows: {
-        ...windows,
-        steps: windows.steps.map(
-          { step ->
-            if trim(step?.name ?? "") != "Smoke test harn run" {
-              return step
-            }
-            return {...step, run: "target/debug/harn.exe\" run smoke.harn"}
-          },
-        )
-          .to_list(),
-      },
-    },
-  }
-  assert(
-    windows_pr_native_feedback_errors(policy(), direct_smoke, declared["windows-nightly.yml"])
-      .contains(
-        "ci.yml:windows smoke must fail closed through receipt-validated no-build Harn resolution and filesystem identity",
-      ),
-  )
-  const textual_path_identity = {
-    ...declared["ci.yml"],
-    jobs: {
-      ...declared["ci.yml"].jobs,
-      windows: {
-        ...windows,
-        steps: windows.steps.map(
-          { step ->
-            if trim(step?.name ?? "") != "Smoke test harn run" {
-              return step
-            }
-            return {...step, run: step.run.replace(" -ef ", " == ")}
-          },
-        )
-          .to_list(),
-      },
-    },
-  }
-  assert(
-    windows_pr_native_feedback_errors(
-      policy(),
-      textual_path_identity,
-      declared["windows-nightly.yml"],
-    )
-      .contains(
-        "ci.yml:windows smoke must fail closed through receipt-validated no-build Harn resolution and filesystem identity",
-      ),
-  )
-  const silent_tail = {
-    ...declared["ci.yml"],
-    jobs: {
-      ...declared["ci.yml"].jobs,
-      windows: {
-        ...windows,
-        steps: windows.steps.filter(
-          { step -> return trim(step?.name ?? "") != "Report Windows storage (terminal)" },
-        )
-          .to_list(),
-      },
-    },
-  }
-  assert(
-    windows_pr_native_feedback_errors(policy(), silent_tail, declared["windows-nightly.yml"])
-      .contains(
-        "ci.yml:windows must always emit the terminal storage receipt through the shared budget owner",
-      ),
-  )
-}
-
-pipeline test_windows_pr_warm_artifact_is_primary_fail_open_and_provenanced(
-  harness: Harness,
-  task: unknown,
-) {
-  const declared = workflows()
-  const windows = declared["ci.yml"].jobs.windows
-  const cache = windows.steps.filter(
-    { step -> return step?.uses == "./.github/actions/rust-cache" },
-  )
-    .first()
-  // GitHub evaluates this exact guard after the receipt-producing restore:
-  // hit skips the provider cache; miss or absent output runs the fallback.
-  assert_eq(
-    cache.if,
-    "steps.windows-warm-restore.outputs.windows_warm_restore != 'hit' && steps.windows-warm-restore.outputs.windows_warm_restore_reason != 'insufficient_space'",
-  )
-  assert_eq(windows.permissions, {contents: "read", actions: "read"})
-  const reversed = {
-    ...declared["ci.yml"],
-    jobs: {
-      ...declared["ci.yml"].jobs,
-      windows: {
-        ...windows,
-        steps: windows.steps.slice(0, 4)
-          + [windows.steps[5], windows.steps[4]]
-          + windows.steps.slice(6),
-      },
-    },
-  }
-  assert(
-    windows_pr_native_feedback_errors(policy(), reversed, declared["windows-nightly.yml"])
-      .contains(
-        "ci.yml:windows must try the main warm artifact before its provider-local rust-cache fallback",
-      ),
-  )
-  const layered = {
-    ...declared["ci.yml"],
-    jobs: {
-      ...declared["ci.yml"].jobs,
-      windows: {
-        ...windows,
-        steps: windows.steps.map(
-          { step ->
-            if step?.uses == "./.github/actions/rust-cache" {
-              return {...step, if: nil}
-            }
-            return step
-          },
-        )
-          .to_list(),
-      },
-    },
-  }
-  assert(
-    windows_pr_native_feedback_errors(policy(), layered, declared["windows-nightly.yml"]).contains(
-      "ci.yml:windows must use rust-cache only when the provider-neutral warm artifact misses",
-    ),
-  )
-  const restore = windows.steps[4]
-  const closed = {
-    ...declared["ci.yml"],
-    jobs: {
-      ...declared["ci.yml"].jobs,
-      windows: {
-        ...windows,
-        steps: windows.steps.slice(0, 4)
-          + [{...restore, "continue-on-error": false, run: restore.run.split("\n")[0]}]
-          + windows.steps.slice(5),
-      },
-    },
-  }
-  assert(
-    windows_pr_native_feedback_errors(policy(), closed, declared["windows-nightly.yml"]).contains(
-      "ci.yml:windows must fail-open through one output-producing workspace-windows-warm restore",
-    ),
-  )
-  const silent = {
-    ...declared["ci.yml"],
-    jobs: {
-      ...declared["ci.yml"].jobs,
-      windows: {
-        ...windows,
-        steps: windows.steps.filter(
-          { step -> return trim(step?.name ?? "") != "Report Windows warm restore outcome" },
-        )
-          .to_list(),
-      },
-    },
-  }
-  assert(
-    windows_pr_native_feedback_errors(policy(), silent, declared["windows-nightly.yml"]).contains(
-      "ci.yml:windows must always report warm-artifact outcome, producer commit, and source run",
-    ),
-  )
-}
-
-pipeline test_windows_test_stack_is_runtime_only_and_exact_on_both_jobs(
+/**
+ * Native Windows is advisory. Each rule below is exercised by the regression
+ * it exists to refuse, so none of them can be deleted without a red test.
+ */
+pipeline test_windows_native_admission_refuses_a_native_windows_ci_job(
   harness: Harness,
   task: unknown,
 ) {
   const declared = workflows()
   const nightly = declared["windows-nightly.yml"]
+  const restored = {
+    ...declared["ci.yml"],
+    jobs: {
+      ...declared["ci.yml"].jobs,
+      windows: {"runs-on": windows_runner_expression(), steps: []},
+    },
+  }
+  assert_eq(
+    windows_native_admission_errors(policy(), restored, nightly),
+    [
+      "ci.yml:windows runs on a native Windows runner; native Windows belongs to windows-nightly.yml (nightly, dispatch, and release pull requests), not pull-request or merge-group admission",
+    ],
+  )
+  // An unreadable ci.yml has no jobs, which would otherwise read as "no
+  // Windows job" and pass.
+  assert_eq(
+    windows_native_admission_errors(policy(), {}, nightly),
+    ["ci.yml must declare jobs for the native Windows admission check to read"],
+  )
+}
+
+pipeline test_windows_native_admission_pins_release_pull_request_routing(
+  harness: Harness,
+  task: unknown,
+) {
+  const declared = workflows()
+  const ci = declared["ci.yml"]
+  const nightly = declared["windows-nightly.yml"]
+  const path_gated = {...nightly, on: {...nightly.on, pull_request: {paths: ["crates/**"]}}}
+  assert_eq(
+    windows_native_admission_errors(policy(), ci, path_gated),
+    [
+      "windows-nightly.yml pull_request trigger must carry no path filter; the release route alone decides which pull requests run",
+    ],
+  )
+  const queued = {...nightly, on: {...nightly.on, merge_group: nil}}
+  assert_eq(
+    windows_native_admission_errors(policy(), ci, queued),
+    ["windows-nightly.yml must not run on merge_group"],
+  )
+  const no_release_prs = {...nightly, on: {schedule: nightly.on.schedule, workflow_dispatch: nil}}
+  assert_eq(
+    windows_native_admission_errors(policy(), ci, no_release_prs),
+    ["windows-nightly.yml must run on release pull requests"],
+  )
+  const route = nightly.jobs.route
+  const inline_matcher = {
+    ...nightly,
+    jobs: {
+      ...nightly.jobs,
+      route: {
+        ...route,
+        steps: route.steps.map(
+          { step ->
+            if trim(step?.id ?? "") == "decide" {
+              return {...step, run: "[[ \"$PR_HEAD_REF\" == release/v* ]] && echo run=true"}
+            }
+            return step
+          },
+        )
+          .to_list(),
+      },
+    },
+  }
+  assert_eq(
+    windows_native_admission_errors(policy(), ci, inline_matcher),
+    [
+      "windows-nightly.yml:route must decide pull-request runs through .github/scripts/release-ref.sh release_pr_only_lane_run and publish it as outputs.run",
+    ],
+  )
+  const unrouted = {
+    ...nightly,
+    jobs: {
+      ...nightly.jobs,
+      nextest: {...nightly.jobs.nextest, needs: nil, if: "github.repository == 'burin-labs/harn'"},
+    },
+  }
+  assert_eq(
+    windows_native_admission_errors(policy(), ci, unrouted),
+    [
+      "windows-nightly.yml:nextest must need route and run only when it says `needs.route.outputs.run == 'true'`",
+    ],
+  )
+}
+
+pipeline test_windows_nightly_producer_keeps_its_runner_tier_contract(
+  harness: Harness,
+  task: unknown,
+) {
+  const declared = workflows()
+  const ci = declared["ci.yml"]
+  const nightly = declared["windows-nightly.yml"]
+  const producer = nightly.jobs.nextest
+  const with_producer = { job -> return {...nightly, jobs: {...nightly.jobs, nextest: job}} }
+  assert_eq(
+    windows_native_admission_errors(
+      policy(),
+      ci,
+      with_producer({...producer, "runs-on": windows_runner_expression()}),
+    ),
+    ["windows-nightly.yml:nextest must use free standard windows-latest"],
+  )
+  const variable_only_drive = {
+    ...producer,
+    steps: producer.steps.map(
+      { step ->
+        if trim(step?.name ?? "") == "Set up Dev Drive" {
+          return {...step, if: gha_expression("vars.HARN_WINDOWS_DEVDRIVE == 'on' && false")}
+        }
+        return step
+      },
+    )
+      .to_list(),
+  }
+  assert_eq(
+    windows_native_admission_errors(policy(), ci, with_producer(variable_only_drive)),
+    ["windows-nightly.yml:nextest must gate Hyper-V Dev Drive setup on HARN_WINDOWS_DEVDRIVE"],
+  )
+}
+
+pipeline test_windows_test_stack_is_runtime_only_and_exact(harness: Harness, task: unknown) {
+  const declared = workflows()
+  const ci = declared["ci.yml"]
+  const nightly = declared["windows-nightly.yml"]
   const cache_polluted = {...nightly, env: {RUST_MIN_STACK: "16777216"}}
   assert(
-    windows_pr_native_feedback_errors(policy(), declared["ci.yml"], cache_polluted).contains(
-      "Windows RUST_MIN_STACK is test-runtime-only and must not enter producer or consumer cache-action environments",
+    windows_native_admission_errors(policy(), ci, cache_polluted).contains(
+      "Windows RUST_MIN_STACK is test-runtime-only and must not enter the producer's cache-action environment",
     ),
   )
   const producer = nightly.jobs.nextest
   const wrong_stack = {
     ...nightly,
     jobs: {
+      ...nightly.jobs,
       nextest: {
         ...producer,
         steps: producer.steps.map(
@@ -1064,28 +1431,9 @@ pipeline test_windows_test_stack_is_runtime_only_and_exact_on_both_jobs(
       },
     },
   }
-  assert(
-    windows_pr_native_feedback_errors(policy(), declared["ci.yml"], wrong_stack).contains(
-      "Windows test steps must set identical RUST_MIN_STACK=16777216 runtime stacks",
-    ),
-  )
-  // The producer and its pull-request consumer ride the same Blacksmith ladder
-  // through one fallback variable, but they are pinned to different sizes: the
-  // nightly compiles and runs the whole workspace, so it holds the 16 vCPU rung.
-  // A producer wearing the consumer's own 8 vCPU expression keeps every other
-  // property this checker reads -- the runner family, the tier, and the single
-  // HARN_CI_ENABLE_BLACKSMITH_WINDOWS opt-in -- so it is the case that decides
-  // whether the size is genuinely pinned or merely implied by the family.
-  const consumer_sized_writer = {
-    ...nightly,
-    jobs: {nextest: {...producer, "runs-on": windows_runner_expression()}},
-  }
-  assert(
-    windows_pr_native_feedback_errors(policy(), declared["ci.yml"], consumer_sized_writer)
-      .contains(
-        "windows-nightly.yml:nextest must default to windows-latest, with "
-          + "HARN_CI_ENABLE_BLACKSMITH_WINDOWS=true opting into blacksmith-16vcpu-windows-2025",
-      ),
+  assert_eq(
+    windows_native_admission_errors(policy(), ci, wrong_stack),
+    ["windows-nightly.yml:nextest must set RUST_MIN_STACK=16777216 on its test step"],
   )
 }
 
@@ -1113,7 +1461,7 @@ pipeline test_windows_shared_cache_requires_release_certification_bypass(
     },
   }
   assert(
-    windows_shared_cache_errors(declared["ci.yml"], invalid).contains(
+    windows_shared_cache_errors(invalid).contains(
       "windows-nightly.yml:nextest must skip the shared target cache for release-certify refs",
     ),
   )
@@ -1184,9 +1532,9 @@ pipeline test_macos_warm_requires_a_main_producer_and_a_pull_request_consumer(
     ...ci,
     jobs: {
       ...ci.jobs,
-      macos: {
-        ...ci.jobs.macos,
-        steps: ci.jobs.macos.steps.filter(
+      "macos-lint": {
+        ...ci.jobs["macos-lint"],
+        steps: ci.jobs["macos-lint"].steps.filter(
           { step ->
             return !contains(
               trim(step?.run ?? ""),
@@ -1200,7 +1548,7 @@ pipeline test_macos_warm_requires_a_main_producer_and_a_pull_request_consumer(
   }
   assert(
     macos_warm_errors(declared_policy, producer, ci_without_consumer).contains(
-      "ci.yml:macos must restore workspace-macos-warm through one macos-warm-restore step with cold fallback",
+      "ci.yml:macos-lint must restore workspace-macos-warm through one macos-warm-restore step with cold fallback",
     ),
   )
 }
@@ -1213,6 +1561,17 @@ pipeline test_windows_release_certify_warm_requires_artifact_path_and_larger_dri
   const producer = declared["windows-nightly.yml"]
   const declared_policy = policy()
   assert_eq(windows_release_certify_warm_errors(declared_policy, producer), [])
+  // The job's own block replaces the workflow's, so a workflow-level grant
+  // does not reach a job that declares `contents: read` alone.
+  const read_only_job = {
+    ...producer,
+    permissions: {contents: "read", actions: "write"},
+    jobs: {...producer.jobs, nextest: {...producer.jobs.nextest, permissions: {contents: "read"}}},
+  }
+  assert_eq(
+    windows_release_certify_warm_errors(declared_policy, read_only_job),
+    ["windows-nightly.yml:nextest must grant actions: write for warm artifact upload/download"],
+  )
   const without_restore = {
     ...producer,
     jobs: {
@@ -1352,6 +1711,7 @@ pipeline test_actions_cache_capacity_keeps_warm_artifact_below_pool(
     windows_workspace_warm: {...base.windows_workspace_warm, max_bytes: base.storage_limit_bytes},
     macos_workspace_warm: base.macos_workspace_warm,
     writers: base.writers,
+    harn_check_cache_writers: base.harn_check_cache_writers,
   }
   assert(
     actions_cache_capacity_errors(oversized_warm).contains(
@@ -1372,6 +1732,7 @@ pipeline test_actions_cache_capacity_keeps_warm_artifact_below_pool(
     },
     macos_workspace_warm: base.macos_workspace_warm,
     writers: base.writers,
+    harn_check_cache_writers: base.harn_check_cache_writers,
   }
   assert(
     actions_cache_capacity_errors(flat_drive).contains(
@@ -1391,6 +1752,7 @@ pipeline test_actions_cache_capacity_keeps_warm_artifact_below_pool(
     windows_workspace_warm: base.windows_workspace_warm,
     macos_workspace_warm: {...base.macos_workspace_warm, max_bytes: base.storage_limit_bytes},
     writers: base.writers,
+    harn_check_cache_writers: base.harn_check_cache_writers,
   }
   assert(
     actions_cache_capacity_errors(oversized_macos_warm).contains(
@@ -1425,18 +1787,13 @@ pipeline test_windows_shared_cache_rejects_source_partitioning_and_missing_targe
       },
     },
   }
-  const errors = windows_shared_cache_errors(declared["ci.yml"], invalid)
-  assert(
-    errors.contains(
-      "workspace-windows producer and consumer must cache CARGO_TARGET_DIR explicitly",
-    ),
+  assert_eq(
+    windows_shared_cache_errors(invalid),
+    [
+      "workspace-windows producer must cache CARGO_TARGET_DIR explicitly",
+      "workspace-windows producer must use one stable native restore namespace",
+    ],
   )
-  assert(
-    errors.contains(
-      "workspace-windows producer and consumer must use one stable native restore namespace",
-    ),
-  )
-  assert(errors.any({ error -> error.starts_with("workspace-windows cache-key inputs drift:") }))
 }
 
 pipeline test_ci_cache_policy_rejects_bypasses_remote_sccache_and_rogue_writers(
@@ -1559,5 +1916,25 @@ pipeline test_a_skipped_capacity_job_must_not_skip_the_barrier(harness: Harness,
       push_shaped_chain("!cancelled() && needs.producer.result == 'success'"),
     ),
     [],
+  )
+}
+
+@test
+pipeline test_release_runners_can_confine_a_harn_child(harness: Harness, task: unknown) {
+  // The shipped policy: every Linux runner a release can pick confines Harn
+  // children, in every mode and for the CLI AOT job.
+  const policy = json_parse(harness.fs.read_text("../../.github/release-runner-policy.json"))
+  assert_eq(release_runner_policy_landlock_errors(policy), [])
+  // Negative control: the Blacksmith Linux primary this policy used until
+  // 2026-10-02 is refused on a target and on the AOT job.
+  let blacksmith = policy
+  blacksmith.targets[2].runners.primary = "blacksmith-16vcpu-ubuntu-2204"
+  blacksmith.jobs.cli_aot.primary = "blacksmith-16vcpu-ubuntu-2204"
+  const errors = release_runner_policy_landlock_errors(blacksmith)
+  assert_eq(len(errors), 2)
+  assert(
+    errors.any(
+      fn(error) { contains(error, "cli_aot primary runner blacksmith-16vcpu-ubuntu-2204") },
+    ),
   )
 }

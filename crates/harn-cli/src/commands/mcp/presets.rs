@@ -123,8 +123,8 @@ mod tests {
         assert!(
             presets
                 .iter()
-                .any(|preset| preset["id"] == serde_json::json!("notion")),
-            "notion preset should be present"
+                .any(|preset| preset["id"] == serde_json::json!("linear")),
+            "linear preset should be present"
         );
     }
 

@@ -245,6 +245,7 @@ pub(super) fn parse_trigger_config(
     Ok(TriggerBindingSpec {
         id,
         source: TriggerBindingSource::Dynamic,
+        ingress_subscription: false,
         kind,
         provider,
         autonomy_tier,
@@ -275,9 +276,7 @@ pub(crate) fn validate_resume_trigger_spec(config: &crate::value::DictMap) -> Re
     let mut normalized = config.clone();
     normalized
         .entry(crate::value::intern_key("handler"))
-        .or_insert_with(|| {
-            VmValue::String(arcstr::ArcStr::from("worker://__resume_auto_resume__"))
-        });
+        .or_insert_with(|| VmValue::string("worker://__resume_auto_resume__"));
     parse_trigger_config(&normalized).map(|_| ())
 }
 

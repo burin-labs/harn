@@ -14,10 +14,14 @@
 //! such as `harness.env` and model providers:
 //!
 //! ```text
-//! inherited = launcher_snapshot
+//! inherited = launcher_snapshot - provider_credentials
 //! isolated  = allowlist(launcher_snapshot)
 //! granted   = allowlist(launcher_snapshot) + grants
 //! ```
+//!
+//! Under `inherited`, [`lookup_env`] still reads the provider credentials, so
+//! Harn's own model calls authenticate; only children lose them. A spawn that
+//! genuinely needs one names it in its own explicit `env`, which layers on top.
 //!
 //! Every spawn seam routes through [`crate::stdlib::process::session_env`].
 //!
@@ -30,10 +34,97 @@
 //! addition fails `cargo test`.
 
 use std::collections::BTreeMap;
+use std::ffi::{OsStr, OsString};
 
 use super::session_environment::{
     EnvironmentPolicyError, EnvironmentPolicyKind, SessionEnvironment,
 };
+
+/// A payload may configure its loader after confinement. A trusted setup
+/// executable must reach its confinement code before loader controls fire.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ProcessEnvironmentBoundary {
+    Payload,
+    TrustedSetup,
+}
+
+// The ELF loader namespace and GNU libc's tunable frontends. Glibc reads
+// GLIBC_TUNABLES and the legacy MALLOC_* aliases in elf/dl-tunables.c during
+// loader initialization, before a trusted executable reaches its entry point.
+const TRUSTED_SETUP_CONTROL_PREFIXES: &[&[u8]] = &[b"LD_", b"MALLOC_"];
+const TRUSTED_SETUP_CONTROL_NAMES: &[&[u8]] = &[b"GLIBC_TUNABLES"];
+
+/// glibc allocator tuning that only sizes arenas, thresholds, and padding.
+///
+/// Like every `MALLOC_*` name these are read during loader initialization, so a
+/// trusted setup executable still never sees them. Unlike the rest, they can't
+/// change what is loaded or how it runs, and production environments commonly
+/// set them (Heroku and many container images export `MALLOC_ARENA_MAX`). A
+/// launcher that can configure its payload's environment after setup therefore
+/// keeps them out of setup and re-applies them to the payload instead of
+/// refusing the launch. `MALLOC_CHECK_` and `MALLOC_PERTURB_` stay refused: they
+/// change allocator behavior, not just its sizing.
+pub const REAPPLIED_ALLOCATOR_TUNING: &[&str] = &[
+    "MALLOC_ARENA_MAX",
+    "MALLOC_ARENA_TEST",
+    "MALLOC_MMAP_MAX_",
+    "MALLOC_MMAP_THRESHOLD_",
+    "MALLOC_TOP_PAD_",
+    "MALLOC_TRIM_THRESHOLD_",
+];
+
+/// Whether `name` is allocator tuning a launcher may re-apply after setup.
+pub fn is_reapplied_allocator_tuning(name: &OsStr) -> bool {
+    REAPPLIED_ALLOCATOR_TUNING
+        .iter()
+        .any(|tuning| tuning.as_bytes() == name.as_encoded_bytes())
+}
+
+/// Loader and runtime-library controls that precede trusted setup.
+pub fn is_trusted_setup_control(name: &OsStr) -> bool {
+    let name = name.as_encoded_bytes();
+    TRUSTED_SETUP_CONTROL_PREFIXES
+        .iter()
+        .any(|prefix| name.starts_with(prefix))
+        || TRUSTED_SETUP_CONTROL_NAMES.contains(&name)
+}
+
+/// Validate the effective launch environment without changing payload grants.
+/// The caller supplies no inherited entries after `env_clear`; explicit
+/// removals and replacements are composed last, exactly as at exec.
+pub fn validate_process_environment(
+    boundary: ProcessEnvironmentBoundary,
+    inherited: impl IntoIterator<Item = (OsString, OsString)>,
+    explicit: impl IntoIterator<Item = (OsString, Option<OsString>)>,
+) -> Result<(), EnvironmentPolicyError> {
+    if boundary == ProcessEnvironmentBoundary::Payload {
+        return Ok(());
+    }
+    // Only loader controls need inspection; ordinary grant values are never
+    // retained by this validator or included in a diagnostic.
+    let mut controls: BTreeMap<_, _> = inherited
+        .into_iter()
+        .filter(|(name, _)| is_trusted_setup_control(name))
+        .collect();
+    for (name, value) in explicit {
+        if !is_trusted_setup_control(&name) {
+            continue;
+        }
+        if let Some(value) = value {
+            controls.insert(name, value);
+        } else {
+            controls.remove(&name);
+        }
+    }
+    for (name, value) in controls {
+        if !value.is_empty() {
+            return Err(EnvironmentPolicyError::UnsafeTrustedSetupVariable {
+                variable: name.to_string_lossy().into_owned(),
+            });
+        }
+    }
+    Ok(())
+}
 
 /// POSIX/shell/locale essentials any build or test process needs to run at all.
 /// These are workspace/user facts, never credentials.
@@ -234,13 +325,18 @@ const ALLOWLIST_LEN: usize =
 /// snapshot itself so a later exact-cased lookup (e.g. `"PATH"`) still finds
 /// a value stored under the launcher's own casing (e.g. `"Path"`).
 pub(crate) fn allowlist_admits(name: &str) -> bool {
-    if ENV_ALLOWLIST.contains(&name) {
-        return true;
-    }
-    cfg!(windows)
-        && ENV_ALLOWLIST
-            .iter()
-            .any(|allowed| allowed.eq_ignore_ascii_case(name))
+    ENV_ALLOWLIST
+        .iter()
+        .any(|allowed| environment_names_equal(allowed, name))
+}
+
+/// Environment names follow the host platform's matching semantics.
+pub(crate) fn environment_names_equal(left: &str, right: &str) -> bool {
+    environment_names_equal_for_platform(left, right, cfg!(windows))
+}
+
+pub(crate) fn environment_names_equal_for_platform(left: &str, right: &str, windows: bool) -> bool {
+    left == right || windows && left.eq_ignore_ascii_case(right)
 }
 
 /// Concatenate the base, toolchain, and Windows lists at compile time so
@@ -275,6 +371,39 @@ const fn const_concat() -> [&'static str; ALLOWLIST_LEN] {
     out
 }
 
+/// Every variable name a catalogued provider declares as its credential.
+///
+/// The catalog, including user overlays, is the single owner of that mapping,
+/// so a provider added with a novel key name is covered without a list here.
+pub fn provider_credential_env_names() -> std::collections::BTreeSet<String> {
+    let mut names = std::collections::BTreeSet::new();
+    for provider in crate::llm_config::provider_names() {
+        if let Some(definition) = crate::llm_config::provider_config(&provider) {
+            names.extend(crate::llm_config::auth_env_names(&definition.auth_env));
+            names.extend(definition.credential_env.iter().cloned());
+        }
+    }
+    names
+}
+
+/// What an inherited policy hands a child: the launcher snapshot without any
+/// provider credential. The key exists for Harn's own provider calls, which
+/// read it in-process through [`lookup_env`]; a command the agent runs, an MCP
+/// server, or an ACP child has no claim on it merely by being spawned.
+fn inherited_child_env(environment: &SessionEnvironment) -> BTreeMap<String, String> {
+    let withheld = provider_credential_env_names();
+    environment
+        .launcher_snapshot()
+        .iter()
+        .filter(|(name, _)| {
+            !withheld
+                .iter()
+                .any(|credential| environment_names_equal(credential, name))
+        })
+        .map(|(name, value)| (name.clone(), value.clone()))
+        .collect()
+}
+
 /// Build the environment for a policy-governed child process, closed by
 /// construction: the allowlisted subset of the parent environment plus the
 /// environment's granted exposure. The one resolver both policies flow through —
@@ -290,7 +419,7 @@ pub fn resolve_env(
     resolve_secret: &dyn Fn(&str, &str) -> Option<String>,
 ) -> Result<BTreeMap<String, String>, EnvironmentPolicyError> {
     if matches!(environment.kind(), EnvironmentPolicyKind::Inherited) {
-        return Ok(environment.launcher_snapshot().clone());
+        return Ok(inherited_child_env(environment));
     }
     let mut env = BTreeMap::new();
     for name in ENV_ALLOWLIST {
@@ -318,7 +447,7 @@ pub fn resolve_env_for_command(
     resolve_secret: &dyn Fn(&str, &str) -> Option<String>,
 ) -> Result<BTreeMap<String, String>, EnvironmentPolicyError> {
     if matches!(environment.kind(), EnvironmentPolicyKind::Inherited) {
-        return Ok(environment.launcher_snapshot().clone());
+        return Ok(inherited_child_env(environment));
     }
     let mut env = BTreeMap::new();
     for name in ENV_ALLOWLIST {
@@ -332,9 +461,10 @@ pub fn resolve_env_for_command(
     Ok(env)
 }
 
-/// The policy-governed value of a single environment variable — the same
-/// answer [`resolve_env`] would put in the map under `name`, without building
-/// the map.
+/// The policy-governed value of a single environment variable as Harn's own
+/// process reads it — the same answer [`resolve_env`] would put in the map
+/// under `name`, without building the map, except for an `in_process` grant,
+/// which this reader sees and no child environment ever contains.
 ///
 /// Grants win over the allowlist (matching `resolve_env`'s overlay order), so a
 /// granted policy that grants `FIREWORKS_API_KEY` sees the granted value here even though
@@ -352,23 +482,125 @@ pub fn lookup_env(
     _env_lookup: &dyn Fn(&str) -> Option<String>,
     resolve_secret: &dyn Fn(&str, &str) -> Option<String>,
 ) -> Result<Option<String>, EnvironmentPolicyError> {
+    lookup_env_read(environment, name, resolve_secret).map(EnvironmentRead::into_value)
+}
+
+/// A permitted read can be unset; a refused read says nothing about its value.
+/// This value-bearing outcome must not be serialized into diagnostics.
+pub enum EnvironmentRead {
+    Permitted(Option<String>),
+    Refused(EnvironmentPolicyKind),
+}
+
+impl EnvironmentRead {
+    pub(crate) fn into_value(self) -> Option<String> {
+        match self {
+            Self::Permitted(value) => value,
+            Self::Refused(_) => None,
+        }
+    }
+}
+
+/// Resolve one in-process read while preserving the policy decision.
+pub fn lookup_env_read(
+    environment: &SessionEnvironment,
+    name: &str,
+    resolve_secret: &dyn Fn(&str, &str) -> Option<String>,
+) -> Result<EnvironmentRead, EnvironmentPolicyError> {
     // Only the grant targeting `name` is resolved: probing an unrelated
     // variable must not reach the secret store, and one unresolvable grant must
     // not mask an unrelated credential.
     if let Some(value) = environment.env_exposure_for(name, resolve_secret)? {
-        return Ok(Some(value));
+        return Ok(EnvironmentRead::Permitted(Some(value)));
     }
-    if matches!(environment.kind(), EnvironmentPolicyKind::Inherited)
-        || ENV_ALLOWLIST.contains(&name)
-    {
-        return Ok(environment.launcher_value(name).map(str::to_string));
+    if matches!(environment.kind(), EnvironmentPolicyKind::Inherited) || allowlist_admits(name) {
+        return Ok(EnvironmentRead::Permitted(
+            environment.launcher_value(name).map(str::to_string),
+        ));
     }
-    Ok(None)
+    Ok(EnvironmentRead::Refused(environment.kind()))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn trusted_setup_validates_inherited_and_explicit_loader_controls() {
+        for name in [
+            "LD_BIND_NOW",
+            "LD_TRACE_LOADED_OBJECTS",
+            "GLIBC_TUNABLES",
+            "MALLOC_CHECK_",
+            "MALLOC_TOP_PAD_",
+            "MALLOC_PERTURB_",
+            "MALLOC_MMAP_THRESHOLD_",
+            "MALLOC_TRIM_THRESHOLD_",
+            "MALLOC_MMAP_MAX_",
+            "MALLOC_ARENA_MAX",
+            "MALLOC_ARENA_TEST",
+        ] {
+            let inherited = vec![(OsString::from(name), OsString::from("1"))];
+            let explicit = vec![(OsString::from(name), Some(OsString::from("1")))];
+            for (parent, overlay) in [(inherited.clone(), vec![]), (vec![], explicit.clone())] {
+                assert_eq!(
+                    validate_process_environment(
+                        ProcessEnvironmentBoundary::TrustedSetup,
+                        parent,
+                        overlay
+                    ),
+                    Err(EnvironmentPolicyError::UnsafeTrustedSetupVariable {
+                        variable: name.into()
+                    })
+                );
+            }
+            // Payload grants retain their meaning when confinement precedes exec.
+            assert_eq!(
+                validate_process_environment(
+                    ProcessEnvironmentBoundary::Payload,
+                    inherited,
+                    explicit
+                ),
+                Ok(())
+            );
+        }
+    }
+
+    #[test]
+    fn trusted_setup_honors_clear_removal_and_empty_override() {
+        for name in ["LD_BIND_NOW", "GLIBC_TUNABLES", "MALLOC_TRIM_THRESHOLD_"] {
+            let inherited = vec![(OsString::from(name), OsString::from("1"))];
+            for replacement in [None, Some(OsString::new())] {
+                assert_eq!(
+                    validate_process_environment(
+                        ProcessEnvironmentBoundary::TrustedSetup,
+                        inherited.clone(),
+                        [(OsString::from(name), replacement)]
+                    ),
+                    Ok(())
+                );
+            }
+        }
+        // env_clear supplies no inherited entries. Ordinary grants survive.
+        assert_eq!(
+            validate_process_environment(
+                ProcessEnvironmentBoundary::TrustedSetup,
+                [],
+                [
+                    (
+                        OsString::from("ORDINARY_PROBE"),
+                        Some(OsString::from("admitted"))
+                    ),
+                    (OsString::from("LD"), Some(OsString::from("ld"))),
+                    (
+                        OsString::from("GLIBC_TUNABLES_ORDINARY"),
+                        Some(OsString::from("admitted"))
+                    )
+                ]
+            ),
+            Ok(())
+        );
+    }
 
     #[test]
     fn allowlist_admits_the_windows_names_a_child_cannot_start_a_program_without() {
@@ -408,30 +640,47 @@ mod tests {
         }
     }
 
-    #[cfg(windows)]
     #[test]
     fn windows_launcher_value_folds_case_so_the_parents_path_is_found() {
         // Windows reports the search path as `Path`. Matched exactly against
         // the allowlist's `PATH`, it missed, and the child inherited no search
         // path while the allowlist still read as though it admitted one. This
-        // half of the fix is provable only on a Windows host.
+        // lookup uses the same platform matcher on every test host.
         let parent = env_from(&[]);
         let environment = SessionEnvironment::launch_from_snapshot(
-            EnvironmentPolicyKind::Isolated,
+            EnvironmentPolicyKind::Inherited,
             Vec::new(),
             BTreeMap::from([("Path".to_string(), "C:\\Windows\\System32".to_string())]),
             &parent,
         )
         .unwrap();
-        let never_secret = |_: &str, _: &str| None;
-        let env = resolve_env(&environment, &parent, &never_secret).unwrap();
         assert_eq!(
-            env.get("PATH").map(String::as_str),
+            environment.launcher_value_for_platform("PATH", true),
             Some("C:\\Windows\\System32")
         );
+        assert_eq!(environment.launcher_value_for_platform("PATH", false), None);
         // The control: folding case must not invent a value for a name the
         // parent never set.
-        assert_eq!(environment.launcher_value("ABSENT_NAME"), None);
+        assert_eq!(
+            environment.launcher_value_for_platform("ABSENT_NAME", true),
+            None
+        );
+        #[cfg(windows)]
+        {
+            let isolated = SessionEnvironment::launch_from_snapshot(
+                EnvironmentPolicyKind::Isolated,
+                Vec::new(),
+                BTreeMap::from([("Path".to_string(), "C:\\Windows\\System32".to_string())]),
+                &parent,
+            )
+            .unwrap();
+            let never_secret = |_: &str, _: &str| None;
+            let env = resolve_env(&isolated, &parent, &never_secret).unwrap();
+            assert_eq!(
+                env.get("PATH").map(String::as_str),
+                Some("C:\\Windows\\System32")
+            );
+        }
     }
 
     use crate::security::session_environment::{EnvironmentPolicyKind, GrantSourceSpec, GrantSpec};
@@ -513,17 +762,12 @@ mod tests {
         // The catalog is the single owner of that mapping, so adding a provider
         // with a novel key name — one the prefix list above would not
         // recognize — cannot silently open the door.
-        for provider in crate::llm_config::provider_names() {
-            let Some(definition) = crate::llm_config::provider_config(&provider) else {
-                continue;
-            };
-            for auth_env in crate::llm_config::auth_env_names(&definition.auth_env) {
-                assert!(
-                    !ENV_ALLOWLIST.contains(&auth_env.as_str()),
-                    "allowlist admits '{auth_env}', the credential variable provider \
-                     '{provider}' declares — a credential must cross via a grant"
-                );
-            }
+        for credential in provider_credential_env_names() {
+            assert!(
+                !ENV_ALLOWLIST.contains(&credential.as_str()),
+                "allowlist admits '{credential}', a credential variable the provider \
+                 catalog declares — a credential must cross via a grant"
+            );
         }
         // Base essentials present: without these a child cannot resolve tools or
         // its home/temp, so an isolated build would fail for a trivial reason.
@@ -601,6 +845,7 @@ mod tests {
                 },
                 expose_as_env: Some("FIREWORKS_API_KEY".to_string()),
                 for_command: None,
+                expose_to: Default::default(),
             },
             GrantSpec {
                 name: "gh".to_string(),
@@ -610,6 +855,7 @@ mod tests {
                 },
                 expose_as_env: Some("GH_TOKEN".to_string()),
                 for_command: None,
+                expose_to: Default::default(),
             },
         ];
         let environment =
@@ -653,6 +899,7 @@ mod tests {
                 },
                 expose_as_env: Some("FIREWORKS_API_KEY".to_string()),
                 for_command: None,
+                expose_to: Default::default(),
             },
             GrantSpec {
                 name: "log".to_string(),
@@ -661,6 +908,7 @@ mod tests {
                 },
                 expose_as_env: Some("RUST_LOG".to_string()),
                 for_command: None,
+                expose_to: Default::default(),
             },
             GrantSpec {
                 name: "gh".to_string(),
@@ -670,6 +918,7 @@ mod tests {
                 },
                 expose_as_env: Some("GH_TOKEN".to_string()),
                 for_command: None,
+                expose_to: Default::default(),
             },
         ];
         let resolve_secret = |account: &str, key: &str| {
@@ -702,6 +951,42 @@ mod tests {
     }
 
     #[test]
+    fn an_in_process_grant_is_the_one_name_the_two_readers_disagree_on() {
+        // The equivalence above holds for every grant a child may see. An
+        // in-process grant is the deliberate exception: Harn's own reader
+        // resolves it and the child resolvers leave it out, both the one that
+        // knows the program and the one that does not.
+        let parent = env_from(&[("PATH", "/usr/bin"), ("LAUNCHER_KEY", "provider-value")]);
+        let environment = SessionEnvironment::launch(
+            EnvironmentPolicyKind::Granted,
+            vec![GrantSpec {
+                name: "provider".to_string(),
+                source: GrantSourceSpec::Env {
+                    var: "LAUNCHER_KEY".to_string(),
+                },
+                expose_as_env: Some("PROVIDER_API_KEY".to_string()),
+                for_command: None,
+                expose_to: crate::security::GrantAudience::InProcess,
+            }],
+            &parent,
+        )
+        .unwrap();
+        let never_secret = |_: &str, _: &str| None;
+        assert_eq!(
+            lookup_env(&environment, "PROVIDER_API_KEY", &parent, &never_secret).unwrap(),
+            Some("provider-value".to_string())
+        );
+        let spawn = resolve_env(&environment, &parent, &never_secret).unwrap();
+        let for_program =
+            resolve_env_for_command(&environment, "/usr/bin/env", &parent, &never_secret).unwrap();
+        for child in [&spawn, &for_program] {
+            assert!(!child.contains_key("PROVIDER_API_KEY"));
+            // Direction control: the child environment is not simply empty.
+            assert_eq!(child.get("PATH").map(String::as_str), Some("/usr/bin"));
+        }
+    }
+
+    #[test]
     fn a_single_name_lookup_touches_only_its_own_grant() {
         // Resolving one variable must not drag every other secret_store grant
         // through the secret store: probing an unrelated name would otherwise
@@ -716,6 +1001,7 @@ mod tests {
                 },
                 expose_as_env: Some("FIREWORKS_API_KEY".to_string()),
                 for_command: None,
+                expose_to: Default::default(),
             },
             GrantSpec {
                 name: "broken".to_string(),
@@ -725,6 +1011,7 @@ mod tests {
                 },
                 expose_as_env: Some("OTHER_TOKEN".to_string()),
                 for_command: None,
+                expose_to: Default::default(),
             },
         ];
         let environment =
@@ -802,6 +1089,7 @@ mod tests {
             },
             expose_as_env: Some("RUST_LOG".to_string()),
             for_command: None,
+            expose_to: Default::default(),
         }];
         let environment =
             SessionEnvironment::launch(EnvironmentPolicyKind::Granted, specs, &parent).unwrap();
@@ -810,5 +1098,48 @@ mod tests {
         // Same value here, but it flows through the grant, not the allowlist
         // pull — proving the overlay order without a second source of truth.
         assert_eq!(env.get("RUST_LOG").map(String::as_str), Some("from_parent"));
+    }
+
+    /// An inherited child keeps the launcher's environment except a catalogued
+    /// provider credential, which Harn's own process still reads.
+    #[test]
+    fn inherited_children_never_receive_a_provider_credential() {
+        let withheld = provider_credential_env_names();
+        for name in [
+            "OPENAI_API_KEY",
+            "ANTHROPIC_API_KEY",
+            "GOOGLE_APPLICATION_CREDENTIALS",
+        ] {
+            assert!(withheld.contains(name), "catalog no longer declares {name}");
+        }
+        let snapshot = BTreeMap::from([
+            ("OPENAI_API_KEY".to_string(), "sk-dummy-canary".to_string()),
+            (
+                "ANTHROPIC_API_KEY".to_string(),
+                "harn-secret://probe/anthropic".to_string(),
+            ),
+            ("UNRELATED_VAR".to_string(), "kept".to_string()),
+        ]);
+        let lookup = |name: &str| snapshot.get(name).cloned();
+        let environment = SessionEnvironment::launch_from_snapshot(
+            EnvironmentPolicyKind::Inherited,
+            Vec::new(),
+            snapshot.clone(),
+            &lookup,
+        )
+        .unwrap();
+        let never_secret = |_: &str, _: &str| None;
+        for child in [
+            resolve_env(&environment, &lookup, &never_secret).unwrap(),
+            resolve_env_for_command(&environment, "sh", &lookup, &never_secret).unwrap(),
+        ] {
+            assert_eq!(child.get("UNRELATED_VAR").map(String::as_str), Some("kept"));
+            assert!(!child.contains_key("OPENAI_API_KEY"), "{child:?}");
+            assert!(!child.contains_key("ANTHROPIC_API_KEY"), "{child:?}");
+        }
+        assert_eq!(
+            lookup_env(&environment, "OPENAI_API_KEY", &lookup, &never_secret).unwrap(),
+            Some("sk-dummy-canary".to_string())
+        );
     }
 }

@@ -15,9 +15,9 @@ cat >"$tmpdir/inventory.json" <<'JSON'
       "binary-name": "tests",
       "status": "listed",
       "testcases": {
-        "passes": {"filter-match": {"status": "matches"}},
-        "omitted": {"filter-match": {"status": "matches"}},
-        "ignored": {"filter-match": {"status": "mismatch", "reason": "ignored"}}
+        "passes": {"ignored": false, "filter-match": {"status": "matches"}},
+        "omitted": {"ignored": false, "filter-match": {"status": "matches"}},
+        "ignored": {"ignored": true, "filter-match": {"status": "matches"}}
       }
     }
   }

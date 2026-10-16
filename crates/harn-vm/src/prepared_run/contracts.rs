@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
@@ -22,6 +23,8 @@ pub type AuthorityDecider = crate::orchestration::ToolPermissionDecider;
 
 #[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub struct RunBudget {
+    /// An absent interactive dimension is unbounded. Unattended preparation
+    /// requires every dimension; no host may substitute an invented limit.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub spend_microusd: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -61,7 +64,11 @@ impl RunBudget {
 }
 
 fn exceeds(requested: Option<u64>, ceiling: Option<u64>) -> bool {
-    matches!((requested, ceiling), (Some(requested), Some(ceiling)) if requested > ceiling)
+    match (requested, ceiling) {
+        (Some(requested), Some(ceiling)) => requested > ceiling,
+        (None, Some(_)) => true,
+        (_, None) => false,
+    }
 }
 
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
@@ -374,6 +381,8 @@ pub enum AuthorityRequirement {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct RunIntent {
     pub intent_id: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub verifier_loaders: Vec<crate::verifier_provenance::VerifierLoaderSpec>,
     pub capability_policy: CapabilityPolicy,
     #[serde(default)]
     pub network: Vec<NetworkRequirement>,
@@ -399,6 +408,7 @@ pub struct RunIntent {
 #[derive(Clone, Debug)]
 pub struct HostFacts {
     pub capability_ceiling: CapabilityPolicy,
+    pub admitted_verifier_loaders: BTreeSet<crate::verifier_provenance::VerifierLoaderSpec>,
     pub approval_policy: RunApprovalPolicy,
     pub approved_batches: BTreeMap<String, AuthorityDecider>,
     pub net_policy: crate::harness_net::NetPolicy,
@@ -417,6 +427,8 @@ pub struct HostFacts {
 pub struct RunAuthorityPlanV1 {
     pub schema: String,
     pub intent_id: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub verifier_loaders: Vec<crate::verifier_provenance::VerifierLoaderSpec>,
     pub capability_policy: CapabilityPolicy,
     pub requirements: Vec<AuthorityRequirement>,
     pub budget: RunBudget,
@@ -445,6 +457,8 @@ pub struct ApprovalGroup {
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ApprovalBatch {
+    /// Identity of this request, independent of its stable semantic fingerprint.
+    pub request_id: uuid::Uuid,
     pub batch_fingerprint: String,
     pub plan_fingerprint: String,
     pub groups: Vec<ApprovalGroup>,
@@ -517,6 +531,8 @@ pub enum ToolchainDiscoveryOutcome {
 
 #[derive(Debug)]
 pub struct AuthorityLease {
+    pub(crate) source_verifiers:
+        BTreeMap<String, Arc<crate::verifier_provenance::PreparedVerifier>>,
     pub(crate) lease_fingerprint: String,
     pub(crate) plan_fingerprint: String,
     pub(crate) plan: RunAuthorityPlanV1,
@@ -533,6 +549,27 @@ pub struct AuthorityLease {
 }
 
 impl AuthorityLease {
+    pub fn verifier_baselines(&self) -> BTreeMap<String, String> {
+        self.source_verifiers
+            .iter()
+            .map(|(id, verifier)| (id.clone(), verifier.baseline_sha256().to_string()))
+            .collect()
+    }
+
+    pub(crate) fn verifier_observations(
+        &self,
+    ) -> BTreeMap<String, crate::verifier_provenance::VerifierLoaderObservation> {
+        self.source_verifiers
+            .keys()
+            .map(|id| {
+                (
+                    id.clone(),
+                    crate::verifier_provenance::VerifierLoaderObservation::Unchanged,
+                )
+            })
+            .collect()
+    }
+
     pub fn fingerprint(&self) -> &str {
         &self.lease_fingerprint
     }

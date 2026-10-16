@@ -19,8 +19,11 @@
 //! a file of its own is what makes that gap findable rather than implicit.
 
 /// Declare this surface's default environment for the life of one dispatch.
-pub(crate) fn declare() -> harn_vm::stdlib::process::SessionEnvironmentGuard {
+pub(crate) fn declare(
+    boundary: Option<harn_vm::llm::api::InferenceBoundary>,
+) -> harn_vm::stdlib::process::SessionEnvironmentGuard {
     harn_vm::stdlib::process::declare_session_environment_if_absent(
         harn_vm::security::SessionEnvironment::inherited(),
     )
+    .with_host_inference_boundary(boundary)
 }

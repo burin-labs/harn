@@ -1,5 +1,22 @@
 [
   {
+    "default": "absent; required only by the explicit classify strategy",
+    "evidence": "autocompact.__compact_options forwards this typed classification configuration to the shared compaction owner unless auto_compact already supplies it. compaction_classify.harn reaches this exact wrapper and asserts applied decisions and preserved source.",
+    "expiry": "2026-10-22",
+    "kind": "classification policy",
+    "layer": "runner",
+    "name": "AgentSpec.compaction.classify",
+    "reachability": "yes",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/autocompact.harn",
+        "reader": "__compact_options"
+      }
+    ],
+    "reason": "Keep explicit evaluator and confidence-floor authority; fixture evidence establishes application semantics, not model quality or default promotion.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
     "default": "true within an explicitly supplied auto_compact object",
     "evidence": "autocompact.__compaction_enabled disables an object configuration only for explicit enabled=false; absent compaction configuration does not enable compaction.",
     "expiry": "2026-09-13",

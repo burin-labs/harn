@@ -1,0 +1,196 @@
+// Regression for harn#9189: a caller's `finally` and `defer` cleanup must run
+// exactly once when the error comes from a callee or a failing operation, not
+// only from an inline `throw` in the try body.
+import { imported_defer, imported_fail } from "finally_callee_error_lib"
+
+fn fail(message: string) {
+  throw message
+}
+
+fn identity(value: any) {
+  return value
+}
+
+fn caught(stdio: HarnessStdio, label: string, run: fn() -> any) {
+  const outcome = try {
+    run()
+  } catch (error) {
+    "caught:${error}"
+  }
+  stdio.println("${label} -> ${outcome}")
+}
+
+fn same_file(stdio: HarnessStdio) {
+  try {
+    fail("same-file")
+  } finally {
+    stdio.println("cleanup:same-file")
+  }
+}
+
+/**
+ * The shape that exposed the bug: install a temporary adapter, run an
+ * imported evaluation that fails, and restore the original in `finally`.
+ */
+fn imported(stdio: HarnessStdio) {
+  let adapter = "original"
+  const outcome = try {
+    try {
+      adapter = "temporary"
+      imported_fail("imported")
+    } finally {
+      adapter = "original"
+      stdio.println("cleanup:imported")
+    }
+  } catch (error) {
+    "caught:${error}"
+  }
+  stdio.println("imported -> ${outcome} adapter=${adapter}")
+}
+
+fn runtime_error(stdio: HarnessStdio) {
+  try {
+    const zero = 0
+    const result = 1 / zero
+    stdio.println("unreachable:${result}")
+  } finally {
+    stdio.println("cleanup:runtime")
+  }
+}
+
+fn nested_calls(stdio: HarnessStdio) {
+  try {
+    try {
+      identity(fail("nested"))
+    } finally {
+      stdio.println("cleanup:inner")
+    }
+  } catch (error) {
+    stdio.println("catch:outer:${error}")
+  } finally {
+    stdio.println("cleanup:outer")
+  }
+}
+
+fn catch_body_call_throws(stdio: HarnessStdio) {
+  try {
+    fail("first")
+  } catch (error) {
+    stdio.println("catch:${error}")
+    fail("from-catch")
+  } finally {
+    stdio.println("cleanup:catch-rethrow")
+  }
+}
+
+enum Fault {
+  Mine(string)
+}
+
+fn typed_catch_miss(stdio: HarnessStdio) {
+  try {
+    fail("untyped")
+  } catch (error: Fault) {
+    stdio.println("unreachable:typed")
+  } finally {
+    stdio.println("cleanup:typed-miss")
+  }
+}
+
+fn cleanup_throw_replaces(stdio: HarnessStdio) {
+  try {
+    fail("original")
+  } finally {
+    stdio.println("cleanup:replacing")
+    throw "replacement"
+  }
+}
+
+fn cleanup_return_overrides(stdio: HarnessStdio) {
+  try {
+    fail("discarded")
+  } finally {
+    stdio.println("cleanup:returning")
+    return "returned-from-cleanup"
+  }
+}
+
+fn deferred(stdio: HarnessStdio, nested: bool) {
+  defer {
+    stdio.println("defer:outer")
+  }
+  if nested {
+    defer {
+      stdio.println("defer:inner")
+    }
+    fail("deferred")
+  }
+}
+
+fn transfers_after_caught_call_errors(stdio: HarnessStdio) {
+  let cleanups = 0
+  let caught_errors = 0
+  for i in [1, 2, 3, 4] {
+    try {
+      try {
+        if i == 2 {
+          continue
+        }
+        if i == 4 {
+          break
+        }
+        fail("loop:${i}")
+      } finally {
+        cleanups = cleanups + 1
+      }
+    } catch (error) {
+      caught_errors = caught_errors + 1
+    }
+  }
+  stdio.println("loop cleanups=${cleanups} caught=${caught_errors}")
+}
+
+fn return_through_cleanup_after_call(stdio: HarnessStdio) {
+  try {
+    return identity("value")
+  } finally {
+    stdio.println("cleanup:return")
+  }
+}
+
+fn spawned(runtime: HarnessRuntime) {
+  // Spawned-task stdio is not part of the parent's output, so the task
+  // reports its cleanup through a shared counter.
+  const cleanups = runtime.atomic(0)
+  const task = spawn {
+    try {
+      fail("spawned")
+    } finally {
+      runtime.atomic_add(cleanups, 1)
+    }
+  }
+  const outcome = try {
+    await(task)
+  } catch (error) {
+    "caught:${error}"
+  }
+  return "${outcome} cleanups=${runtime.atomic_get(cleanups)}"
+}
+
+pipeline default(harness: Harness) {
+  const stdio = harness.stdio
+  caught(stdio, "same-file", { -> same_file(stdio) })
+  imported(stdio)
+  caught(stdio, "runtime", { -> runtime_error(stdio) })
+  nested_calls(stdio)
+  caught(stdio, "catch-rethrow", { -> catch_body_call_throws(stdio) })
+  caught(stdio, "typed-miss", { -> typed_catch_miss(stdio) })
+  caught(stdio, "cleanup-throw", { -> cleanup_throw_replaces(stdio) })
+  stdio.println("cleanup-return -> ${cleanup_return_overrides(stdio)}")
+  caught(stdio, "defer", { -> deferred(stdio, true) })
+  imported_defer(stdio, false)
+  caught(stdio, "imported-defer", { -> imported_defer(stdio, true) })
+  transfers_after_caught_call_errors(stdio)
+  stdio.println("return -> ${return_through_cleanup_after_call(stdio)}")
+  stdio.println("spawned -> ${spawned(harness.runtime)}")
+}

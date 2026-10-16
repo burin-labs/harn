@@ -1,12 +1,40 @@
 use super::*;
 
+#[tokio::test]
+async fn default_test_policy_does_not_inherit_ambient_replay_authority() {
+    let _state = crate::tests::common::harn_state_lock::lock_harn_state_async().await;
+    let temp = TempTestDir::new();
+    let _outer = harn_vm::llm::scope_replay_mode(
+        harn_vm::llm::LlmReplayMode::Replay,
+        temp.path().to_str().unwrap(),
+    );
+    let _disabled = ScopedEnvVar::set(harn_vm::llm::LLM_CALLS_DISABLED_ENV, "1");
+    let result = run_single_case(
+        &temp,
+        "test_real_provider",
+        r#"
+pipeline test_real_provider(harness: Harness) {
+  harness.llm.call("ambient replay must not authorize this test", nil,
+    {provider: "ollama", model: "llama3.2"})
+}
+"#,
+    )
+    .await;
+    assert!(!result.passed);
+    assert!(result.error.as_deref().unwrap().contains("LLM_CALLS_DISABLED"),
+        "default admission must select Off, rather than the ambient missing-fixture replay path: {:?}", result.error);
+}
+
 use std::sync::Arc;
 
 use harn_vm::VmValue;
 
 mod compile_once_tests;
 mod egress_isolation;
+mod manifest_hooks;
+mod prepared_graph;
 mod sharding;
+mod work;
 
 struct TempTestDir {
     inner: tempfile::TempDir,
@@ -138,7 +166,7 @@ async fn execution_budget_starts_after_setup_and_stops_cpu_bound_code() {
         program: Arc::new(parse_program(&source).unwrap()),
         source,
         file: file.clone(),
-        imported_enum_candidates: Arc::new(Vec::new()),
+        compilation_context: Arc::new(Default::default()),
         args: vec![VmValue::Nil],
         fixture: None,
         file_fixture_value: None,
@@ -152,11 +180,11 @@ async fn execution_budget_starts_after_setup_and_stops_cpu_bound_code() {
     let result = execute_case(
         &case,
         temp.path(),
-        0,
+        &RunOptions::new(0),
         &loaded_skills_for(&file),
         &harn_vm::PreparedModuleCache::default(),
         true,
-        None,
+        &execution::TestExecutionContext::capture(None),
     )
     .await;
 
@@ -164,6 +192,14 @@ async fn execution_budget_starts_after_setup_and_stops_cpu_bound_code() {
     let timeout = result.timeout.expect("expected typed timeout metadata");
     assert_eq!(timeout.phase, TestPhase::Execute);
     assert_eq!(timeout.limit_ms, 0);
+    assert_eq!(
+        result
+            .work
+            .as_ref()
+            .expect("timeout constructed a measured VM")
+            .vm_steps,
+        0
+    );
     assert_eq!(
         result.phases.expect("measured phases").modules,
         harn_vm::ModulePhaseStats::default()
@@ -185,7 +221,7 @@ async fn run_single_case(temp: &TempTestDir, name: &str, source_body: &str) -> T
         program: Arc::new(parse_program(&source).unwrap()),
         source,
         file: file.clone(),
-        imported_enum_candidates: Arc::new(Vec::new()),
+        compilation_context: Arc::new(Default::default()),
         args: vec![VmValue::Nil],
         fixture: None,
         file_fixture_value: None,
@@ -198,11 +234,11 @@ async fn run_single_case(temp: &TempTestDir, name: &str, source_body: &str) -> T
     execute_case(
         &case,
         temp.path(),
-        30_000,
+        &RunOptions::new(30_000),
         &loaded_skills_for(&file),
         &harn_vm::PreparedModuleCache::default(),
         true,
-        None,
+        &execution::TestExecutionContext::capture(None),
     )
     .await
 }
@@ -220,6 +256,15 @@ async fn imported_testing_skip_is_typed_and_stops_the_case() {
          }\n",
     )
     .await;
+
+    assert!(
+        result
+            .work
+            .as_ref()
+            .expect("skip retains measured work")
+            .vm_steps
+            > 0
+    );
     assert!(!result.passed);
     assert_eq!(
         result.skip_reason.as_deref(),
@@ -336,7 +381,7 @@ async fn execution_timeout_captures_lazy_module_load_attribution() {
         program: Arc::new(parse_program(&source).unwrap()),
         source,
         file,
-        imported_enum_candidates: Arc::new(Vec::new()),
+        compilation_context: Arc::new(Default::default()),
         args: vec![VmValue::Nil],
         fixture: None,
         file_fixture_value: None,
@@ -350,11 +395,11 @@ async fn execution_timeout_captures_lazy_module_load_attribution() {
     let result = execute_case(
         &case,
         temp.path(),
-        100,
+        &RunOptions::new(100),
         &loaded_skills_for(&temp.path().join("test_timeout_import.harn")),
         &harn_vm::PreparedModuleCache::default(),
         true,
-        None,
+        &execution::TestExecutionContext::capture(None),
     )
     .await;
 
@@ -382,7 +427,7 @@ handlers = "hooks.harn"
 
 [[hooks]]
 event = "PostTurn"
-handler = "handlers::missing"
+handler = "invalid-handler-path"
 "#,
     );
     temp.write("suite/hooks.harn", "pub fn valid(_event) {}\n");
@@ -838,6 +883,7 @@ fn passing_result_with_timings(total_ms: u64, execute_ms: u64) -> TestResult {
         captured_output: None,
         timeout: None,
         duration_ms: total_ms,
+        work: None,
         phases: Some(PhaseTimings {
             setup_ms: 7,
             compile_ms: 3,
@@ -906,7 +952,7 @@ fn sort_cases_longest_first_uses_historical_durations() {
         pipeline_name: name.to_string(),
         source: Arc::clone(&source),
         program: Arc::clone(&program),
-        imported_enum_candidates: Arc::new(Vec::new()),
+        compilation_context: Arc::new(Default::default()),
         serial_group: None,
         weight: 1,
         args: Vec::new(),

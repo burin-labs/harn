@@ -99,7 +99,7 @@ fn run_pipeline_here(source: &str) -> Result<String, String> {
                     1,
                 ));
                 harn_vm::llm::install_current_host_bridge(bridge.clone());
-                let mut vm = harn_vm::Vm::new();
+                let mut vm = harn_vm::new_vm();
                 harn_vm::register_vm_stdlib(&mut vm);
                 let result = vm
                     .execute(&chunk)

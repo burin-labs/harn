@@ -21,6 +21,7 @@ impl FixLintContext {
 
     pub(super) fn options<'a>(&'a self, path: &'a Path) -> LintOptions<'a> {
         LintOptions {
+            binding_types: None,
             file_path: Some(path),
             require_file_header: self.lint.require_file_header,
             require_docstrings: self.lint.require_docstrings,

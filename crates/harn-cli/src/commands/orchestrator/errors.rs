@@ -9,6 +9,7 @@ use std::result::Result as StdResult;
 use crate::package::errors::PackageError;
 
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum OrchestratorError {
     #[error("{0}")]
     Common(String),

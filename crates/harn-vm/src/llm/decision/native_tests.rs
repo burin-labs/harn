@@ -2,8 +2,59 @@ use super::*;
 use crate::llm::decision::{
     answer::Answer,
     contract::decision_contract_for_route,
-    question::{Question, QuestionSet},
+    question::{BooleanCriteria, Question, QuestionSet},
 };
+
+#[test]
+fn gateway_decisions_pin_the_serving_provider_and_refuse_an_absent_pin() {
+    let questions = QuestionSet {
+        questions: vec![Question {
+            id: "safe".into(),
+            instructions: "Is the command read only?".into(),
+            body: QuestionBody::Boolean,
+        }],
+    };
+    let state = json!("Read README.md");
+    for (model, upstream) in [
+        ("vercel/typesafe-ai/jev", "typesafe-ai"),
+        ("vercel/convaiinnovations/laya", "boundless"),
+        ("vercel/liquid/d1-ultra", "liquid"),
+        ("vercel/perplexity/pplx-decider-v1.1-27b", "perplexity"),
+    ] {
+        let contract = decision_contract_for_route("vercel_ai_gateway", model).unwrap();
+        let request = DecisionRequest {
+            provider: "vercel_ai_gateway",
+            model,
+            state: &state,
+            questions: &questions,
+            contract: &contract,
+            effort: None,
+            temperature: None,
+            max_tokens: None,
+            top_p: None,
+            seed: None,
+            timeout_ms: None,
+            evaluation_cost_limit: None,
+            run_cost_limit: None,
+        };
+        let body = request_body(&request).unwrap();
+        assert_eq!(
+            body["providerOptions"]["gateway"]["only"],
+            json!([upstream])
+        );
+        assert_eq!(body["model"], contract.served_model_id);
+        let mut unpinned_contract = contract.clone();
+        unpinned_contract.upstream_provider = None;
+        let unpinned = DecisionRequest {
+            contract: &unpinned_contract,
+            ..request
+        };
+        assert!(matches!(
+            request_body(&unpinned),
+            Err(DecisionTransportError::UnsupportedOptions { .. })
+        ));
+    }
+}
 
 #[test]
 fn native_routes_project_wire_answers_and_refuse_partial_tapes() {
@@ -55,8 +106,12 @@ fn native_routes_project_wire_answers_and_refuse_partial_tapes() {
             state: &state,
             questions: &questions,
             contract: &contract,
-            effort: "none",
-            temperature: 0.0,
+            effort: Some("none"),
+            temperature: Some(0.0),
+            max_tokens: None,
+            top_p: None,
+            seed: None,
+            timeout_ms: None,
             evaluation_cost_limit: None,
             run_cost_limit: None,
         };
@@ -135,7 +190,21 @@ fn native_routes_project_wire_answers_and_refuse_partial_tapes() {
             );
             tape = recorded["response"].clone();
         }
-        let response = read_response(&request, &tape).unwrap();
+        let mut rubric_questions = questions.clone();
+        rubric_questions.questions[0].body = QuestionBody::BooleanWithCriteria(BooleanCriteria {
+            yes: "Only reads".into(),
+            no: "Mutates files".into(),
+        });
+        let rubric_request = DecisionRequest {
+            questions: &rubric_questions,
+            ..request
+        };
+        let rubric_body = request_body(&rubric_request).unwrap();
+        assert_eq!(
+            rubric_body["questions"]["safe"]["criteria"],
+            json!({"true":"Only reads", "false":"Mutates files"})
+        );
+        let response = read_response(&request, &tape, None).unwrap();
         assert_eq!(
             response.input_tokens,
             Some(if recorded.is_some() { 356 } else { 100 })
@@ -156,7 +225,7 @@ fn native_routes_project_wire_answers_and_refuse_partial_tapes() {
         let mut contradictory = tape.clone();
         contradictory["answers"]["action"]["choice"] = json!("write");
         contradictory["answers"]["action"]["probabilities"] = json!({"read": 0.9, "write": 0.1});
-        let contradiction = read_response(&request, &contradictory).unwrap();
+        let contradiction = read_response(&request, &contradictory, None).unwrap();
         let refusal = Answer::project(
             &questions.questions[1],
             &contradiction.answers["action"],
@@ -166,14 +235,14 @@ fn native_routes_project_wire_answers_and_refuse_partial_tapes() {
         assert!(refusal.diagnostic.contains("contradicts"));
         tape["answers"].as_object_mut().unwrap().remove("risk");
         assert!(matches!(
-            read_response(&request, &tape),
+            read_response(&request, &tape, None),
             Err(DecisionTransportError::Refused {
                 reason: RefusalReason::SchemaInvalid,
                 ..
             })
         ));
         let unsupported_request = DecisionRequest {
-            temperature: 0.5,
+            temperature: Some(0.5),
             ..request
         };
         assert!(matches!(

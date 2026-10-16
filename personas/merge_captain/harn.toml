@@ -24,10 +24,10 @@ capabilities = [
 autonomy_tier = "act_with_approval"
 receipt_policy = "required"
 triggers = [
-  "github.pr_opened",
-  "github.pr_synchronized",
-  "github.check_failed",
-  "github.merge_group_completed",
+  "github.pull_request.opened",
+  "github.pull_request.synchronize",
+  "github.check_suite.completed",
+  "github.merge_group.checks_requested",
 ]
 schedules = ["*/10 * * * *"]
 handoffs = []

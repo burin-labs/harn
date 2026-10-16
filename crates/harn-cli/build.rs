@@ -24,6 +24,7 @@ const CLI_BYTECODE_MAGIC: &[u8; 8] = b"HARNBC\0\0";
 const CLI_AOT_REQUIRED_ENV: &str = "HARN_REQUIRE_CLI_AOT";
 
 fn main() {
+    emit_windows_main_stack();
     build_revision::emit();
     ensure_git_hooks_installed();
     emit_cli_script_bytecode();
@@ -62,75 +63,22 @@ fn main() {
                 fs::write(&path, b"").expect("write placeholder portal asset");
             }
         }
+        backdate_placeholder(&portal_dist);
     }
 
     embedded_assets::emit_watches(&manifest_dir);
 }
 
-/// Fingerprint the check pipeline's own sources — `harn-lint`, this crate's
-/// `commands/check` (typecheck driver, lint bridge, preflight scans, the
-/// result cache itself), and `package` (CheckConfig parsing) — and bake the
-/// digest in as `HARN_CHECK_FINGERPRINT`. The check-result cache folds it
-/// into every key, so a within-version edit to lint or preflight logic
-/// invalidates stale cached diagnostics automatically, exactly like
-/// `HARN_CODEGEN_FINGERPRINT` does for compiled bytecode (#2621). The
-/// lexer/parser/typechecker/compiler are covered separately: the cache key's
-/// import-graph hash already folds in the codegen fingerprint.
-fn emit_check_fingerprint() {
-    use sha2::{Digest, Sha256};
-    let manifest_dir =
-        PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
-    let crates_dir = manifest_dir
-        .parent()
-        .expect("harn-cli sits under crates/")
-        .to_path_buf();
-    let roots = [
-        crates_dir.join("harn-lint").join("src"),
-        manifest_dir.join("src").join("commands").join("check"),
-        manifest_dir.join("src").join("package"),
-    ];
-    let mut files: Vec<PathBuf> = Vec::new();
-    for root in &roots {
-        println!("cargo:rerun-if-changed={}", root.display());
-        collect_rs_files(root, &mut files);
-    }
-    files.sort();
-    let mut hasher = Sha256::new();
-    for file in &files {
-        println!("cargo:rerun-if-changed={}", file.display());
-        let content = fs::read(file).unwrap_or_default();
-        // Fold the path relative to crates/ so a rename changes the digest
-        // but a different checkout location does not.
-        let logical = file
-            .strip_prefix(&crates_dir)
-            .unwrap_or(file)
-            .to_string_lossy()
-            .replace('\\', "/");
-        hasher.update(logical.as_bytes());
-        hasher.update([0u8]);
-        hasher.update(&content);
-        hasher.update([0u8]);
-    }
-    let digest = hasher.finalize();
-    let mut hex = String::with_capacity(64);
-    for byte in digest {
-        hex.push_str(&format!("{byte:02x}"));
-    }
-    println!("cargo:rustc-env=HARN_CHECK_FINGERPRINT={hex}");
-}
+#[path = "build_support/check_sources.rs"]
+mod check_sources;
 
-fn collect_rs_files(dir: &Path, out: &mut Vec<PathBuf>) {
-    let Ok(entries) = fs::read_dir(dir) else {
-        return;
-    };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.is_dir() {
-            collect_rs_files(&path, out);
-        } else if path.extension().is_some_and(|ext| ext == "rs") {
-            out.push(path);
-        }
-    }
+/// Emit this crate's check-source contribution. The linked check driver
+/// composes it with the linter and package resolver's own contributions.
+fn emit_check_fingerprint() {
+    harn_source_fingerprint_build::emit(
+        "HARN_LOCAL_CHECK_SOURCE_FINGERPRINT",
+        check_sources::CHECK_SOURCE_PATHS,
+    );
 }
 
 fn emit_rerun_if_changed_recursive(path: &Path) {
@@ -208,6 +156,38 @@ fn ensure_git_hooks_installed() {
         .status();
 }
 
+/// Date a placeholder tree this build script just wrote before any build.
+///
+/// `portal-dist` is watched, and Cargo records a build script's start time as
+/// the reference for its watched paths. Files the script itself writes are
+/// newer than that, so the next Cargo command saw them as changed and
+/// recompiled `harn-cli`: once per fresh checkout, about a minute before every
+/// CI workspace test run. A real portal build writes newer files and still
+/// triggers the rerun that embeds it. Best effort: a platform that cannot set
+/// a directory's time keeps the old behavior.
+fn backdate_placeholder(root: &Path) {
+    let long_ago = std::time::UNIX_EPOCH + std::time::Duration::from_hours(24);
+    let mut pending = vec![root.to_path_buf()];
+    let mut dirs = Vec::new();
+    while let Some(path) = pending.pop() {
+        if path.is_dir() {
+            if let Ok(entries) = fs::read_dir(&path) {
+                pending.extend(entries.filter_map(|entry| entry.ok().map(|entry| entry.path())));
+            }
+            dirs.push(path);
+        } else if let Ok(file) = fs::File::options().write(true).open(&path) {
+            let _ = file.set_modified(long_ago);
+        }
+    }
+    // Children first: writing an entry's time does not touch its parent, but
+    // creating the entries did, so parents are dated after their contents.
+    for dir in dirs.into_iter().rev() {
+        if let Ok(handle) = fs::File::open(&dir) {
+            let _ = handle.set_modified(long_ago);
+        }
+    }
+}
+
 /// Watch the CLI AOT manifest in a way that survives its absence.
 ///
 /// A source checkout normally has no release/package payload — the manifest is
@@ -225,9 +205,11 @@ fn ensure_git_hooks_installed() {
 /// payload is the exact failure this watch exists to prevent.
 fn emit_cli_aot_manifest_watches(manifest_path: &Path) {
     if let Some(generated_dir) = manifest_path.parent() {
-        // Git-ignored, and absent in a fresh checkout. Creating it is what
-        // makes it watchable; the build script already materializes
-        // `portal-dist` the same way.
+        // A tracked README keeps the directory present in every checkout, so
+        // this only creates it for a source tree that lacks it. Creating a
+        // watched path during the run makes it newer than the build script's
+        // recorded start, and Cargo then recompiled `harn-cli` on the next
+        // invocation: about 83s before every workspace test run in CI.
         if fs::create_dir_all(generated_dir).is_ok() {
             println!("cargo:rerun-if-changed={}", generated_dir.display());
         }
@@ -509,4 +491,15 @@ fn escape_str(s: &str) -> String {
         }
     }
     out
+}
+
+/// Give the MSVC `harn.exe` main thread the 8 MiB stack Unix main threads get.
+///
+/// `lib::run` moves the command surface onto its sized thread, but `main`
+/// still initializes the runtime and answers pre-runtime commands on the
+/// process's main thread, which MSVC links at 1 MiB by default.
+fn emit_windows_main_stack() {
+    if std::env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc") {
+        println!("cargo:rustc-link-arg-bins=/STACK:8388608");
+    }
 }

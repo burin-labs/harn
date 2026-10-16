@@ -7,6 +7,7 @@ use super::*;
     exposure = "runtime_internal",
     effects = [],
     sig = "__host_agent_session_messages(session_id: string) -> list",
+    read_only_preparation = true,
     category = "agent.host",
     runtime_only = true
 )]
@@ -20,7 +21,7 @@ fn host_agent_session_messages_builtin(
         .as_ref()
         .and_then(|v| dict_get(v, "messages"))
         .cloned()
-        .unwrap_or_else(|| VmValue::List(std::sync::Arc::new(Vec::new())));
+        .unwrap_or_else(|| VmValue::list(Vec::new()));
     Ok(messages)
 }
 
@@ -161,15 +162,17 @@ pub(super) fn host_agent_session_record_assistant_builtin(
         .iter()
         .map(vm_to_json)
         .collect::<Vec<_>>();
-    let assistant_message = assistant_message_from_llm_result(&llm_result);
+    let mut assistant_message = assistant_message_from_llm_result(&llm_result);
+    super::super::assistant_publication::defer(&mut assistant_message, &llm_result);
     let visible_text =
         crate::llm::agent_result_projection::visible_assistant_text(&assistant_message);
-    crate::agent_sessions::inject_message(&session_id, assistant_message)
+    let receipt = crate::agent_sessions::inject_message_with_source(&session_id, assistant_message)
         .map_err(VmError::Runtime)?;
     if let Some(content) = visible_text {
         emit_event(&AgentEvent::AgentMessageChunk {
             session_id: session_id.clone(),
             content,
+            history_source_event_id: Some(receipt.source_event_id),
         });
     }
     assistant_messages::record_dispatch_receipt(
@@ -290,15 +293,21 @@ pub(super) fn pair_orphaned_tool_use(session_id: &str, feedback: &str) -> usize 
             .cloned()
             .unwrap_or(VmValue::Nil),
     );
-    let Some(last) = messages.last() else {
+    // The assistant turn whose calls are open is the last one, with only its
+    // own tool results after it. A cancel between parallel calls leaves some
+    // answered and some not, so results may already trail it (harn#8951).
+    let Some(last) = messages
+        .iter()
+        .rposition(|message| message_role(message) == "assistant")
+        .filter(|index| {
+            messages[index + 1..]
+                .iter()
+                .all(|message| is_tool_result_role(&message_role(message)))
+        })
+        .map(|index| &messages[index])
+    else {
         return 0;
     };
-    let role = dict_get(last, "role")
-        .map(|v| v.display())
-        .unwrap_or_default();
-    if role != "assistant" {
-        return 0;
-    }
     let already_paired = paired_tool_result_ids(&messages);
     let synthetic = synthesize_orphan_tool_results(last, feedback, &already_paired);
     let mut repaired = 0;
@@ -308,6 +317,16 @@ pub(super) fn pair_orphaned_tool_use(session_id: &str, feedback: &str) -> usize 
         }
     }
     repaired
+}
+
+fn message_role(message: &VmValue) -> String {
+    dict_get(message, "role")
+        .map(|v| v.display())
+        .unwrap_or_default()
+}
+
+fn is_tool_result_role(role: &str) -> bool {
+    role == "tool_result" || role == "tool"
 }
 
 /// Synthesize a matching tool-result for each orphaned `tool_use`/`tool_call`
@@ -332,13 +351,6 @@ fn host_agent_session_pair_orphaned_tool_use_builtin(
     Ok(VmValue::Int(repaired as i64))
 }
 
-const MESSAGE_HISTORY_BUILTINS: &[&VmBuiltinDef] = &[
-    &HOST_AGENT_SESSION_MESSAGES_BUILTIN_DEF,
-    &HOST_AGENT_SESSION_RECORD_ASSISTANT_BUILTIN_DEF,
-    &HOST_AGENT_SESSION_POP_LAST_ASSISTANT_BUILTIN_DEF,
-    &HOST_AGENT_SESSION_PAIR_ORPHANED_TOOL_USE_BUILTIN_DEF,
-];
-
 pub(super) fn register_message_history_primitives(vm: &mut Vm) {
-    register_builtin_defs(vm, MESSAGE_HISTORY_BUILTINS);
+    harn_vm_core::builtin_support::register_module_builtins(vm, module_path!());
 }

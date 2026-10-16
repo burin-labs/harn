@@ -1,3 +1,4 @@
+use crate::native_vm::NativeVmState;
 use crate::value::VmDictExt;
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -232,13 +233,13 @@ async fn execute_worker_config(
                     &serde_json::to_value(&execution_record).unwrap_or_default(),
                 ),
             );
-            options.insert(crate::value::intern_key("delegated"), VmValue::Bool(true));
+            options.put_bool("delegated", true);
             let result = call_worker_harn_export(
                 ctx,
                 "std/workflow/execute",
                 "workflow_execute",
                 &[
-                    VmValue::String(arcstr::ArcStr::from(task)),
+                    VmValue::string(task),
                     super::super::workflow::workflow_graph_to_vm(&graph)?,
                     crate::stdlib::json_to_vm_value(
                         &serde_json::to_value(&artifacts).unwrap_or_default(),
@@ -357,8 +358,8 @@ pub(in super::super) fn spawn_worker_task(
     // Long-lived workers inherit policy but own an independent session. Route
     // them through the same placement seam as inline child interpreters so a
     // resume issued by a worker-thread subtask never requires a LocalSet.
-    let pool_registry = worker_ctx.child_vm().pool_registry.clone();
-    let handle = crate::vm::subtask::spawn_inherited_child(pool_registry, async move {
+    let pool_registry = worker_ctx.child_vm().native().pool_registry.clone();
+    let handle = crate::native_vm::subtask::spawn_inherited_child(pool_registry, async move {
         if cancel_token.load(Ordering::SeqCst) {
             return Err(VmError::CategorizedError {
                 message: "worker cancelled before start".to_string(),

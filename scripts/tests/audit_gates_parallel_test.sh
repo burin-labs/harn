@@ -90,7 +90,7 @@ case "$*" in
     exit 0
     ;;
   check-test-case-performance)
-    if [[ "$(wc -l < "$FAKE_CONFORMANCE_RECORD" | tr -d ' ')" != "1" ]]; then
+    if [[ "$(wc -l < "$FAKE_CONFORMANCE_RECORD" | tr -d ' ')" != "${FAKE_EXPECTED_CONFORMANCE_RUNS-1}" ]]; then
       echo "performance gate started before conformance completed" >&2
       exit 45
     fi
@@ -101,7 +101,7 @@ case "$*" in
     printf 'fake performance gate ok\n'
     exit 0
     ;;
-  -j2\ -k\ -Otarget\ *|-j1\ -k\ -Otarget\ *)
+  -j[0-9]\ -k\ -Otarget\ *)
     if [[ "${FAKE_AUDIT_FAIL_BEFORE_BARRIER-0}" == "1" ]]; then
       exec 4< "$FAKE_CONFORMANCE_READY_FIFO"
       IFS= read -r <&4
@@ -472,6 +472,102 @@ if ! grep -Fxq "terminated" "$early_failure_termination"; then
   cat "$tmp_root/early-failure.out" >&2
   exit 1
 fi
+
+# CI gives each audit group and conformance slice its own runner. A slice must
+# run exactly its share, and the groups must partition the fanout.
+run_split() {
+  local record_file=$1 conformance_file=$2 out=$3
+  shift 3
+  : > "$record_file"
+  : > "$conformance_file"
+  FAKE_SPLIT_PHASE=1 \
+    AUDIT_GATES_CONCURRENCY=4 \
+    HARN_CONFORMANCE_JOBS=2 \
+    HARN_BIN="$fake_harn" \
+    FAKE_AUDIT_RECORD="$record_file" \
+    FAKE_CONFORMANCE_RECORD="$conformance_file" \
+    FAKE_AUDIT_ROOT="$tmp_root" \
+    FAKE_CONFORMANCE_START_FIFO_DIR="$conformance_start_fifo_dir" \
+    PATH="$fake_bin:$PATH" \
+    "$repo_root/scripts/audit_gates.sh" "$@" > "$out"
+}
+
+slice_record="$tmp_root/slice-make-record.txt"
+slice_conformance="$tmp_root/slice-conformance-record.txt"
+run_split "$slice_record" "$slice_conformance" "$tmp_root/slice-2.out" \
+  --phase conformance --shard=2/3
+if [[ "$(grep -c -- '--shard-index 3 --shard-total 6' "$slice_conformance")" != "1" ]] \
+  || [[ "$(grep -c -- '--shard-index 4 --shard-total 6' "$slice_conformance")" != "1" ]] \
+  || [[ "$(wc -l < "$slice_conformance" | tr -d ' ')" != "2" ]]; then
+  echo "conformance slice 2/3 did not run exactly shards 3 and 4 of 6" >&2
+  cat "$slice_conformance" >&2
+  exit 1
+fi
+if [[ "$(cut -f3 "$slice_conformance" | sort -u | wc -l | tr -d ' ')" != "2" ]]; then
+  echo "conformance shard processes shared a session store" >&2
+  exit 1
+fi
+if grep -Fq $'invocation\tcheck-test-case-performance' "$slice_record"; then
+  echo "a later conformance slice repeated the performance ratchet" >&2
+  exit 1
+fi
+if ! grep -Fxq "=== conformance slice 2/3 passed ===" "$tmp_root/slice-2.out"; then
+  echo "conformance slice omitted its terminal marker" >&2
+  exit 1
+fi
+FAKE_EXPECTED_CONFORMANCE_RUNS=2 run_split "$slice_record" "$slice_conformance" \
+  "$tmp_root/slice-1.out" --phase conformance --shard 1/3
+if ! grep -Fq -- '--shard-index 1 --shard-total 6' "$slice_conformance" \
+  || ! grep -Fq $'invocation\tcheck-test-case-performance' "$slice_record"; then
+  echo "conformance slice 1/3 omitted its shards or the performance ratchet" >&2
+  exit 1
+fi
+
+group_conformance="$tmp_root/group-conformance-record.txt"
+declare -A group_records=()
+for group in sources docs scripts; do
+  group_records[$group]="$tmp_root/group-$group-record.txt"
+  run_split "${group_records[$group]}" "$group_conformance" "$tmp_root/group-$group.out" \
+    --phase audit "--group=$group"
+  if [[ -s "$group_conformance" ]]; then
+    echo "audit group $group ran conformance" >&2
+    exit 1
+  fi
+  if ! grep -Fxq "=== audit gates ($group) passed ===" "$tmp_root/group-$group.out"; then
+    echo "audit group $group omitted its terminal marker" >&2
+    exit 1
+  fi
+done
+if ! grep -Fq $'invocation\t-j4 -k -Otarget check-docs\t' "${group_records[docs]}" \
+  || grep -Fq "test-harn-scripts" "${group_records[docs]}"; then
+  echo "docs group did not run exactly check-docs on the whole runner" >&2
+  cat "${group_records[docs]}" >&2
+  exit 1
+fi
+if ! grep -Fq $'invocation\t-j2 -k -Otarget test-agent-scripts\tHARN_BIN=' "${group_records[scripts]}" \
+  || ! grep -Fq $'HARN_TEST_JOBS=2' "${group_records[scripts]}" \
+  || ! grep -Fq $'invocation\ttest-harn-scripts\t' "${group_records[scripts]}"; then
+  echo "scripts group did not split the runner between both Harn suites" >&2
+  cat "${group_records[scripts]}" >&2
+  exit 1
+fi
+if grep -Eq 'check-docs|test-agent-scripts|test-harn-scripts' "${group_records[sources]}" \
+  || ! grep -Fq $'invocation\t-j4 -k -Otarget ' "${group_records[sources]}" \
+  || ! grep -Fq ' lint-harn ' "${group_records[sources]}"; then
+  echo "sources group did not run the remaining gates on the whole runner" >&2
+  cat "${group_records[sources]}" >&2
+  exit 1
+fi
+
+for bad in "--phase conformance --group docs" "--phase audit --shard 1/2" \
+  "--phase conformance --shard 4/3" "--phase audit --group nope"; do
+  # shellcheck disable=SC2086 # Each case is a deliberate argument list.
+  if HARN_BIN="$fake_harn" PATH="$fake_bin:$PATH" \
+    "$repo_root/scripts/audit_gates.sh" $bad > /dev/null 2>&1; then
+    echo "audit_gates accepted invalid arguments: $bad" >&2
+    exit 1
+  fi
+done
 
 # A PASSING run must not print a failure summary — a warning that fires on green
 # is noise, and noise is how a real warning stops being read.

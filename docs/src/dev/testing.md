@@ -57,6 +57,33 @@ Release and audit gates that call `make test` must have nextest installed
 (they do after `make setup`); failing loudly is preferred to silently changing
 what "the tests pass" means (#6145).
 
+## Read macOS test duration warnings
+
+Read `Rust workspace test step` in the macOS test job's log or summary.
+It reports elapsed seconds, the job limit, and measured runner memory.
+The job warns when test execution exceeds 80% of its limit:
+75 minutes for hosted runs or 45 minutes for owned-runner dispatches.
+Compare runs with the same memory size when investigating slower execution.
+
+`RUST_TEST_DURATION_UNMEASURED` means duration, limit, or memory could not be
+measured. Check the reported fields before treating the run as within budget.
+The warning preserves the test command's exit status.
+
+## Parser stack budget
+
+Run the expression parser's stack regression in unoptimized and release builds:
+
+```bash
+make check-parser-stack
+```
+
+The test parses expressions at the 64-level limit, checks the resulting tree,
+and verifies that the next level returns a nesting error.
+Test-only probes record native stack addresses during recursive descent.
+Accepted expressions must reach the declared depth and use less than 4 MiB.
+The dedicated thread uses the runtime's stack allocation so a regression can
+fail the budget assertion without aborting other tests.
+
 ## Source gate receipts
 
 Run the combined conformance and audit gate from a clean commit:
@@ -75,9 +102,12 @@ runtime placement, worker counts, command, finish time, and result. The gate
 refuses a dirty tree, a changed PR head, or an explicit binary without source
 proof. An edit, amend, or rebase makes the old receipt invalid.
 
-Hosted CI uploads the same JSON shape as `harn-source-gate-audit` and
-`harn-source-gate-conformance` artifacts. Its downloaded binary is bound by
-the existing Rust artifact manifest before the gate runs.
+Hosted CI splits the gate across workers and uploads one receipt of the same
+JSON shape per worker, named `harn-source-gate-<kind>`: `audit`, `audit-docs`,
+and `audit-scripts` for the `--phase audit --group` slices, and
+`conformance-1` through `conformance-4` for the `--phase conformance --shard`
+slices. Each worker's downloaded binary is bound by the existing Rust artifact
+manifest before the gate runs.
 
 For a native nextest filter expression, use the shell-opaque focused target:
 
@@ -93,6 +123,35 @@ optional; setting a binary requires a package. The wrapper constructs argv
 directly, so parentheses, spaces, and other expression syntax do not need an
 extra shell-escaping layer. Keep using `ARGS` with `make test` for general Cargo
 selection that is already safe to express at the Make command line.
+
+## Live Postgres tests
+
+Supply a disposable database and run the Postgres integration suite:
+
+```bash
+HARN_TEST_POSTGRES_URL=postgres://localhost/harn_tests make test-postgres-live
+```
+
+The ordinary suite reports live database cases as ignored. The live target
+refuses a missing or empty URL, and a database connection failure fails the
+suite. It exercises transactions, rollback, settings, migrations, and NULL
+parameter binding without calling an LLM provider.
+
+The test-pattern gate permits `#[ignore]` in the two Postgres fixture files because
+these tests require an external database. Keep deterministic Postgres tests
+enabled in the ordinary suite; only database-dependent cases use this exception.
+
+The two tests that consume Harn Cloud's migration history have a separate
+target because that source directory is not included in this repository:
+
+```bash
+HARN_TEST_POSTGRES_URL=postgres://localhost/harn_tests \
+  HARN_TEST_CLOUD_MIGRATIONS_DIR=../harn-cloud/migrations \
+  make test-postgres-cloud
+```
+
+This target also refuses a missing migrations directory. The optional NULL
+latency benchmark remains outside both integration targets.
 
 ## One exact test
 
@@ -228,28 +287,50 @@ async fn timeout_fires_after_deadline() {
 ### `EventLog::subscribe()`
 
 For tests that wait for something to happen inside a running component,
-subscribe to its `EventLog` and block on the channel with a `tokio::time::timeout`
+subscribe to its `EventLog` and wait on the channel under the shared hang
 ceiling.
 
 ```rust
+use harn_clock::test_support::within;
+
 let (log, handle) = EventLog::new();
 let mut sub = log.subscribe("trigger.outbox").await;
 
 // Trigger the action under test.
 component.do_thing().await;
 
-// Wait for the expected event — hard fail-fast after 5 s.
-let event = tokio::time::timeout(Duration::from_secs(5), sub.recv())
+// Wait for the expected event. A hang fails with this label.
+let event = within("trigger.outbox dispatch event", sub.recv())
     .await
-    .expect("timed out waiting for trigger.outbox event")
     .expect("channel closed");
 
 assert_eq!(event.kind, "dispatch");
 ```
 
-The `tokio::time::timeout` here is the right pattern: it is a hard ceiling that
-turns a hang into a fast failure. Pair it with a meaningful error message so the
-failure is obvious.
+**The hang-ceiling rule.** A wait on an event the code under test produces by
+construction is bounded only to turn a hang into a named failure. Every such
+wait uses `harn_clock::test_support::within(label, future)`, or
+`recv_within(label, &rx)` for a blocking `std::sync::mpsc` channel. Both apply
+one ceiling, `HANG_CEILING` (45 s, below nextest's 60 s kill), and panic with
+the label and elapsed time. Never pick a tighter literal: a
+`timeout(Duration::from_secs(2), …)` around compile-and-run work asserts that
+it finishes in two seconds on whatever machine runs the suite, and fails under
+load while the code is correct. A claim about how long something takes belongs
+in a paused-clock test. When a timeout's expiry is itself the behavior under
+test, keep it explicit and prefer paused time.
+
+The deadline is wall-clock time kept off the tokio timer, so it does not fire
+early under `start_paused` and needs no time driver. Enable it from
+`[dev-dependencies]` only:
+
+```toml
+harn-clock = { path = "../harn-clock", version = "=X.Y.Z", features = ["test-support"] }
+```
+
+A "nothing else arrives" assertion needs a positive barrier, not a quiet
+period: wait until the producer has provably processed the input (for example
+the session WAL watcher's test-only `flush_watcher`), then assert the channel
+is empty with `try_recv`.
 
 ### `OrchestratorHarness`
 
@@ -314,6 +395,9 @@ Conformance fixtures can opt into these handles with an adjacent
 `<name>.harness.json` sidecar. Keep the sidecar small: choose `"mode": "null"`
 or `"mode": "mock"`, provide only the canned responses needed by that fixture,
 and assert the recorded calls or deny events there.
+A `net_gets` entry is the response body: `harness.net.get` returns the same
+`{status, headers, body, final_url, ok}` record as a live request, with status
+200 and that `body`.
 
 ```json
 {
@@ -407,16 +491,19 @@ child of the same root when a case needs its own staging directory.
 
 The following patterns are banned in test files by `make lint-test-patterns`.
 The script searches files under `crates/**/tests/**/*.rs`,
-`crates/**/src/**/tests.rs`, `crates/**/src/**/tests_*.rs`, and
+`crates/**/src/**/tests.rs`, `crates/**/src/**/tests_*.rs`, the inline
+`#[cfg(test)] mod` block of any other `crates/**/*.rs` file, and
 `conformance/tests/**/*.harn`.
+Sibling declarations such as `#[cfg(test)] mod tests;` don't contain inline
+tests and don't remove subsequent runtime code from the runtime scan.
 
 | Pattern | Why it is banned | Approved alternative |
 |---|---|---|
 | `std::thread::harness.clock.sleep_ms(` | Blocks the thread, races against scheduler | `tokio::time::pause()` + `advance()` |
 | `tokio::time::harness.clock.sleep_ms(` (outside `start_paused`) | Non-deterministic; races against system load | `start_paused = true` + `advance()` |
-| `while … Instant::now()` | Wall-clock polling loop; flaky under load | `EventLog::subscribe()` + `timeout` |
+| `while … Instant::now()` | Wall-clock polling loop; flaky under load | `EventLog::subscribe()` + `within` |
 | `SystemTime::now()` in tests | Real wall-clock timestamp; non-reproducible | `MockClock` or injected timestamp |
-| `recv_timeout(Duration::from_millis(…))` | Busy-wait with a short literal timeout | `tokio::time::timeout` with event channel |
+| `timeout(Duration::…)` / `recv_timeout(Duration::…)` with a literal duration | A hand-picked hang bound becomes a latency assertion that fails under load | `harn_clock::test_support::within` / `recv_within` (the hang-ceiling rule above); a deliberate expiry is pinned in `LITERAL_TIMEOUT_BASELINE` with its reason |
 | `#[ignore]` outside slow harn-cli integration tests | Hides regressions behind default-suite skips | run the test by default, or move subprocess coverage to the harn-cli E2E profile |
 | copied conformance subprocess wait helpers | Drifts retry ceilings and diagnostics between fixtures | import `conformance/tests/_common.harn` |
 | `harness.random.range(20000, 45000)` for server ports | Races with other tests and local services | bind port `0` and read the readiness log |
@@ -438,6 +525,12 @@ has no deterministic equivalent — you have two options:
    explaining why the opt-out is justified, and gets a second reviewer sign-off.
    The allowlist is public and tracked as technical debt; entries are expected to
    shrink, not grow, as the codebase matures.
+
+Live provider quality measurements are pinned in `LIVE_PROVIDER_TEST_BASELINE`.
+Each row fixes one file's ignored-test count and records why it needs external
+inputs. The behavioral baseline requires `FIREWORKS_API_KEY`; stance rejudging
+requires `STANCE_DUMP` and `STANCE_JUDGE_API_KEY`. Explicit runs fail when these
+inputs are missing. Their deterministic logic remains in the default suite.
 
 ## Writing subprocess tests in the slow E2E suite
 
@@ -524,7 +617,7 @@ async fn broken() {
 ```
 
 If your test needs both time control and real I/O, use the multi-thread runtime
-and a `tokio::time::timeout` ceiling instead of `start_paused`.
+and the `within` hang ceiling instead of `start_paused`.
 
 ### `advance()` semantics
 

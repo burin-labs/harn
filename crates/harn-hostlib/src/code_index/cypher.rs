@@ -72,6 +72,7 @@ const VAR_LENGTH_MAX_DEPTH: u32 = 4;
 /// variant carries a free-text message identifying the offending token
 /// or position.
 #[derive(Debug, Clone, Eq, PartialEq)]
+#[non_exhaustive]
 pub enum CypherError {
     /// Tokenizer reached an unexpected character.
     LexError(String),
@@ -112,7 +113,7 @@ impl CypherValue {
     pub fn to_vm(&self) -> VmValue {
         match self {
             CypherValue::Null => VmValue::Nil,
-            CypherValue::String(s) => VmValue::String(arcstr::ArcStr::from(s.as_str())),
+            CypherValue::String(s) => VmValue::string(s.as_str()),
             CypherValue::Int(n) => VmValue::Int(*n),
             CypherValue::Bool(b) => VmValue::Bool(*b),
         }
@@ -1078,8 +1079,8 @@ fn node_matches(graph: &SymbolGraph, id: NodeId, pat: &NodePat) -> bool {
 fn property_value(node: &super::symbol_graph::Node, key: &str) -> Literal {
     match key {
         "name" => Literal::Str(node.name.clone()),
-        "path" => Literal::Str(node.path.clone()),
-        "language" => Literal::Str(node.language.clone()),
+        "path" => Literal::Str(node.path.to_string()),
+        "language" => Literal::Str(node.language.to_string()),
         "kind" => Literal::Str(node.kind.as_str().to_string()),
         "container" => Literal::Str(node.container.clone().unwrap_or_default()),
         "access_level" => Literal::Str(node.access_level.clone().unwrap_or_default()),

@@ -15,11 +15,13 @@ mod bridge;
 mod builtins;
 mod checkpoints;
 mod commands;
+mod confinement;
 mod core;
 mod dispatch;
 mod event_projection;
 mod events;
 mod execute;
+mod hitl_response;
 mod host_ownership;
 mod inject;
 mod integrations;
@@ -29,6 +31,7 @@ mod modes;
 mod module_progress;
 mod plan_documents;
 mod prompt;
+mod prompt_owner;
 mod schema;
 mod session;
 mod session_state;
@@ -36,6 +39,7 @@ mod session_watch;
 mod sessions;
 mod setup;
 mod staged_writes;
+mod task_admission;
 #[cfg(test)]
 mod tests;
 mod transport;
@@ -47,6 +51,8 @@ pub fn is_supported_session_mode(mode_id: &str) -> bool {
 }
 use bridge::AcpBridge;
 pub use bridge::AcpOutput;
+pub use confinement::{confine_acp_server_process, AcpServerConfinement};
+pub use execute::PromptExecutionError as AcpPromptExecutionError;
 use live_clients::{
     apply_live_client_operation, is_live_client_method, write_live_client_operation,
 };
@@ -67,10 +73,16 @@ pub use sessions::{
     acp_persisted_session_item, resolve_acp_session_project_root, AcpSessionProjectRootError,
 };
 use sessions::{
-    apply_session_budget_rearm, cancel_session_command_handles, lookup_session_cancellation,
-    preempt_session_interruption, prepare_session_prompt, session_project_root_for_cwd,
-    ConcurrentSessionControl, ConcurrentSessionControls, Session, SessionBudget,
-    SessionCancellation, SessionInfo,
+    cancel_session_command_handles, lookup_session_cancellation, preempt_session_interruption,
+    prepare_session_request, resolve_acp_session_cwd, session_project_root_for_cwd,
+    ConcurrentSessionControl, ConcurrentSessionControls, PreparedSessionRequest,
+    PromptCancellation, Session, SessionBudget, SessionCancellation, SessionInfo,
+    SessionSpendRecorder,
+};
+use task_admission::InjectionCommand;
+pub use task_admission::{
+    SessionTaskAdmission, TaskAdmissionError, TaskInjectionTarget, TaskPromptTarget,
+    TASK_ADMISSION_STORAGE_UNAVAILABLE_RPC_CODE,
 };
 pub(crate) use transport::run_acp_channel_server_with_existing_handle;
 pub use transport::{
@@ -80,18 +92,18 @@ pub use transport::{
 pub use types::{
     AcpContentBlock, AcpEmbeddedResource, AcpHarnMeta, AcpJsonRpcError, AcpJsonRpcErrorResponse,
     AcpJsonRpcId, AcpJsonRpcRequest, AcpJsonRpcResponse, AcpMeta, AcpPlanDocumentMutation,
-    AcpPlanDocumentMutationParams, AcpPlanDocumentMutationResult, AcpPromptErrorData,
-    AcpPromptErrorSchema, AcpPromptFailureFacts, AcpRoutingAttempt, AcpSessionCancelToolCallParams,
-    AcpSessionEnvironmentConfig, AcpSessionIdParams, AcpSessionInjectContent,
-    AcpSessionInjectHostEventParams, AcpSessionInjectMode, AcpSessionInjectParams,
-    AcpSessionMessageIdParams, AcpSessionNewParams, AcpSessionPromptParams, AcpSessionPromptResult,
-    AcpSessionReplaceInjectParams, AcpSessionRestoreResult, ACP_METHOD_INITIALIZE,
-    ACP_METHOD_SESSION_CANCEL, ACP_METHOD_SESSION_CANCEL_TOOL_CALL, ACP_METHOD_SESSION_CLOSE,
-    ACP_METHOD_SESSION_INJECT, ACP_METHOD_SESSION_INJECT_HOST_EVENT, ACP_METHOD_SESSION_LOAD,
-    ACP_METHOD_SESSION_NEW, ACP_METHOD_SESSION_PENDING_INJECTIONS,
-    ACP_METHOD_SESSION_PLAN_DOCUMENT_MUTATE, ACP_METHOD_SESSION_PROMPT,
-    ACP_METHOD_SESSION_REPLACE_INJECT, ACP_METHOD_SESSION_RESUME, ACP_METHOD_SESSION_REVOKE_INJECT,
-    ACP_PLAN_MUTATION_BUSY_CODE, ACP_PLAN_REVISION_CONFLICT_CODE,
+    AcpPlanDocumentMutationParams, AcpPlanDocumentMutationResult, AcpPromptCorrelation,
+    AcpPromptErrorData, AcpPromptErrorSchema, AcpPromptFailureFacts, AcpRoutingAttempt,
+    AcpSessionCancelToolCallParams, AcpSessionEnvironmentConfig, AcpSessionIdParams,
+    AcpSessionInjectContent, AcpSessionInjectHostEventParams, AcpSessionInjectMode,
+    AcpSessionInjectParams, AcpSessionLoadParams, AcpSessionMessageIdParams, AcpSessionNewParams,
+    AcpSessionPromptParams, AcpSessionPromptResult, AcpSessionReplaceInjectParams,
+    AcpSessionRestoreResult, ACP_METHOD_INITIALIZE, ACP_METHOD_SESSION_CANCEL,
+    ACP_METHOD_SESSION_CANCEL_TOOL_CALL, ACP_METHOD_SESSION_CLOSE, ACP_METHOD_SESSION_INJECT,
+    ACP_METHOD_SESSION_INJECT_HOST_EVENT, ACP_METHOD_SESSION_LOAD, ACP_METHOD_SESSION_NEW,
+    ACP_METHOD_SESSION_PENDING_INJECTIONS, ACP_METHOD_SESSION_PLAN_DOCUMENT_MUTATE,
+    ACP_METHOD_SESSION_PROMPT, ACP_METHOD_SESSION_REPLACE_INJECT, ACP_METHOD_SESSION_RESUME,
+    ACP_METHOD_SESSION_REVOKE_INJECT, ACP_PLAN_MUTATION_BUSY_CODE, ACP_PLAN_REVISION_CONFLICT_CODE,
     ACP_PLAN_REVISION_CONFLICT_SCHEMA, ACP_PROMPT_ERROR_DATA_SCHEMA,
 };
 
@@ -106,8 +118,7 @@ use std::time::{Instant, SystemTime};
 use async_trait::async_trait;
 use futures::StreamExt;
 use harn_vm::agent_events::{
-    clear_session_sinks, flush_and_clear_session_sinks, flush_session_sinks, register_sink,
-    AgentEventSink,
+    clear_session_sinks, flush_and_clear_session_sinks, flush_session_sinks, AgentEventSink,
 };
 use harn_vm::visible_text::VisibleTextState;
 use serde::Deserialize;
@@ -669,8 +680,45 @@ fn append_profile_json_line(
         .map_err(|error| format!("failed to append {}: {error}", path.display()))
 }
 
+/// The actual engine future, polled on the ACP server's local executor.
+pub type AcpPromptExecution<'a> = std::pin::Pin<
+    Box<dyn std::future::Future<Output = Result<String, AcpPromptExecutionError>> + 'a>,
+>;
+
+/// Product facts for binding an engine turn to its prepared authority.
+pub struct AcpPromptExecutionContext<'a> {
+    pub session_id: &'a str,
+    pub cwd: &'a Path,
+    pub project_root: &'a Path,
+    /// Harn's resolved mode and confinement policy, without a host re-derivation.
+    pub capability_policy: Option<&'a harn_vm::orchestration::CapabilityPolicy>,
+    /// The resolved budget installed for this turn, including live session
+    /// updates. Hosts must not reconstruct it from startup configuration.
+    pub budget: &'a BudgetSpec,
+    /// The existing prompt bridge, including its cancellation-aware host calls.
+    pub host_bridge: &'a harn_vm::bridge::HostBridge,
+    cancelled: &'a std::sync::atomic::AtomicBool,
+}
+
+impl AcpPromptExecutionContext<'_> {
+    pub fn is_cancelled(&self) -> bool {
+        self.cancelled.load(Ordering::SeqCst)
+    }
+}
+
 #[async_trait(?Send)]
 pub trait AcpRuntimeConfigurator: Send + Sync {
+    /// Bind authority and credentials around the actual VM execution, including
+    /// host capabilities and model calls. UI enqueue scopes cannot reach this
+    /// executor. Refusing here leaves the execution future unpolled.
+    async fn run_prompt(
+        &self,
+        _context: AcpPromptExecutionContext<'_>,
+        execution: AcpPromptExecution<'_>,
+    ) -> Result<String, AcpPromptExecutionError> {
+        execution.await
+    }
+
     async fn configure(
         &self,
         _vm: &mut harn_vm::Vm,
@@ -711,6 +759,14 @@ struct EndpointOverrideRuntimeConfigurator {
 
 #[async_trait(?Send)]
 impl AcpRuntimeConfigurator for EndpointOverrideRuntimeConfigurator {
+    async fn run_prompt(
+        &self,
+        context: AcpPromptExecutionContext<'_>,
+        execution: AcpPromptExecution<'_>,
+    ) -> Result<String, AcpPromptExecutionError> {
+        self.inner.run_prompt(context, execution).await
+    }
+
     async fn configure(
         &self,
         vm: &mut harn_vm::Vm,
@@ -744,10 +800,18 @@ impl AcpProfileConfig {
 
 #[derive(Clone)]
 pub struct AcpServerConfig {
+    /// Trusted host inputs captured before engine startup, never ACP JSON.
+    pub launcher_environment: harn_vm::security::LauncherEnvironment,
+    /// Trusted launch authority, independent of client environment grants.
+    pub host_inference_boundary: Option<harn_vm::llm::api::InferenceBoundary>,
+    /// Trusted machine/user billing authority, retained across transport threads.
+    pub machine_spend_quota: Option<harn_vm::llm::MachineSpendQuota>,
     pub pipeline: Option<String>,
     pub auth_policy: AuthPolicy,
     pub authenticated_principal: Option<AuthenticatedPrincipal>,
     pub runtime_configurator: Arc<dyn AcpRuntimeConfigurator>,
+    /// Trusted host admission policy; RPC metadata cannot enable or disable it.
+    pub task_admission: Option<Arc<dyn SessionTaskAdmission>>,
     pub llm_config_overrides: Option<harn_vm::llm_config::ProvidersConfig>,
     pub llm_capability_overrides: Option<harn_vm::llm::capabilities::CapabilitiesFile>,
     pub profile: AcpProfileConfig,
@@ -778,10 +842,14 @@ pub struct AcpSandboxConfig {
 impl AcpServerConfig {
     pub fn new(pipeline: Option<String>) -> Self {
         Self {
+            launcher_environment: harn_vm::security::LauncherEnvironment::capture(),
+            host_inference_boundary: None,
+            machine_spend_quota: harn_vm::llm::MachineSpendQuota::current(),
             pipeline,
             auth_policy: AuthPolicy::allow_all(),
             authenticated_principal: None,
             runtime_configurator: Arc::new(NoopAcpRuntimeConfigurator),
+            task_admission: None,
             llm_config_overrides: None,
             llm_capability_overrides: None,
             profile: AcpProfileConfig::default(),
@@ -792,6 +860,15 @@ impl AcpServerConfig {
 
     pub fn for_pipeline(path: impl Into<String>) -> Self {
         Self::new(Some(path.into()))
+    }
+
+    /// Supply one host-resolved launch context without process-global mutation.
+    pub fn with_launcher_environment(
+        mut self,
+        environment: harn_vm::security::LauncherEnvironment,
+    ) -> Self {
+        self.launcher_environment = environment;
+        self
     }
 
     pub fn with_runtime_configurator(
@@ -861,6 +938,13 @@ impl AcpServerConfig {
         self
     }
 
+    /// Share one durable allowance with CLI and other embedded sessions.
+    /// Client RPC metadata cannot replace this host-owned authority.
+    pub fn with_machine_spend_quota(mut self, quota: harn_vm::llm::MachineSpendQuota) -> Self {
+        self.machine_spend_quota = Some(quota);
+        self
+    }
+
     pub fn with_llm_cost_budget(mut self, max_cost_usd: f64) -> Self {
         let mut budget = self.budget.unwrap_or_default();
         budget.llm_cost_usd = Some(max_cost_usd);
@@ -902,6 +986,7 @@ impl AcpSandboxConfig {
             || !self.process.write_roots.is_empty()
             || self.process.allow_tcp_loopback
             || !self.process.unix_socket_roots.is_empty()
+            || self.process.allow_child_workspace_write
     }
 
     pub fn with_read_only_roots(roots: Vec<String>) -> Self {
@@ -950,13 +1035,13 @@ fn canonicalize_sandbox_roots(roots: Vec<String>) -> Vec<String> {
 /// Cached compiled pipeline. The ACP server re-uses the same pipeline file
 /// across every `session/prompt`; recompiling on each turn was the dominant
 /// per-turn overhead inside the VM (~80ms on auto.harn) before this cache.
-/// Keyed by (path, mtime, target_pipeline_name) — when the file's mtime moves
-/// forward we discard the cache and re-read/re-compile.
+/// The bytecode-cache key admits the complete imported source graph; path,
+/// mtime, and pipeline selection keep their existing invalidation behavior.
 struct CompileCacheEntry {
     path: PathBuf,
     mtime: SystemTime,
     target_pipeline: Option<String>,
-    source: String,
+    source_key: harn_vm::bytecode_cache::CacheKey,
     chunk: harn_vm::Chunk,
 }
 
@@ -968,9 +1053,10 @@ struct VmBaselineCacheEntry {
     path: PathBuf,
     mtime: SystemTime,
     target_pipeline: Option<String>,
-    source: String,
+    source_key: harn_vm::bytecode_cache::CacheKey,
     cwd: PathBuf,
     project_root: Option<PathBuf>,
+    store_scope: harn_vm::SessionStoreScope,
     mode_id: String,
     baseline: harn_vm::VmBaseline,
 }
@@ -978,6 +1064,9 @@ struct VmBaselineCacheEntry {
 /// ACP server that reads JSON-RPC requests from a transport and writes
 /// responses / notifications back to that same transport.
 pub struct AcpServer {
+    launcher_environment: harn_vm::security::LauncherEnvironment,
+    host_inference_boundary: Option<harn_vm::llm::api::InferenceBoundary>,
+    machine_spend_quota: Option<harn_vm::llm::MachineSpendQuota>,
     descriptor: AdapterDescriptor,
     /// Optional pipeline file to execute on each `session/prompt`.
     pipeline: Option<String>,

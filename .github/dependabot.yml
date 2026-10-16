@@ -1,12 +1,34 @@
 version: 2
 
+# This file is the source projected into repositories that use GitHub Actions.
+# Cooldown gives a compromised release time to be yanked or flagged before an
+# automated PR proposes it. Version updates run monthly so routine bumps arrive
+# as one grouped pull request a month; security updates ignore the schedule and
+# still arrive immediately.
 updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+      time: "09:00"
+      timezone: "America/Los_Angeles"
+    cooldown:
+      default-days: 7
+    groups:
+      actions:
+        patterns:
+          - "*"
+    # harn-bump-fleet updates this reference together with orchestration-sha.
+    # Dependabot changes only the reference and breaks their exact pairing.
+    # Keep this list last so projections can append repository-owned ignores.
+    ignore:
+      - dependency-name: "burin-labs/harn/.github/workflows/bump-harn.yml"
+
   - package-ecosystem: "cargo"
     directories:
       - "/"
     schedule:
-      interval: "weekly"
-      day: "monday"
+      interval: "monthly"
       time: "09:00"
       timezone: "America/Los_Angeles"
     groups:
@@ -24,7 +46,7 @@ updates:
       tree-sitter:
         patterns:
           - "tree-sitter*"
-      # Everything else, majors included, in one weekly pull request. A group
+      # Everything else, majors included, in one monthly pull request. A group
       # holding a single package still opens its own pull request, so carving
       # families out of this one buys nothing but repetition: the cranelift,
       # wasmtime and opentelemetry groups are gone for that reason. Only the
@@ -39,17 +61,7 @@ updates:
           - "*"
         exclude-patterns:
           - "tree-sitter*"
-    # A grammar we hold back on purpose. The `=` pin in
-    # `crates/harn-hostlib/Cargo.toml` records the decision for a reader; this
-    # records it for the bot, which cannot see a comment. Without it the same
-    # known-bad version is re-proposed every week, and it has been merged that
-    # way once already (#5127, reverted by #5470).
-    #
-    # Scoped to the one bad version rather than the package, so a future
-    # 0.7.4 that fixes the regression still arrives as a normal update.
-    # Removing this entry is step 2 of #6227.
-    #
-    # `rmcp` is held at exactly 3.1.4 for the same kind of reason. The MCP
+    # `rmcp` is held at exactly 3.1.4. The MCP
     # elicitation adapter reads an ordered-schema extension that exists in
     # 3.1.4 and not in 3.2.0, so the `=` pin in `crates/harn-vm/Cargo.toml` is
     # the constraint rather than a preference. A proposal that rewrites it
@@ -61,9 +73,6 @@ updates:
     # Scoped to the one release that dropped the field, so a 3.1.5 or a later
     # version that restores it still arrives as a normal update for review.
     ignore:
-      - dependency-name: "tree-sitter-swift"
-        versions:
-          - "0.7.3"
       - dependency-name: "rmcp"
         versions:
           - "3.2.0"
@@ -78,8 +87,7 @@ updates:
       - "/tree-sitter-harn"
       - "/website"
     schedule:
-      interval: "weekly"
-      day: "monday"
+      interval: "monthly"
       time: "09:00"
       timezone: "America/Los_Angeles"
     groups:
@@ -94,19 +102,15 @@ updates:
     # Move this type package only with a deliberate engines review.
     ignore:
       - dependency-name: "@types/vscode"
+      # react-intl 12 types each message's placeholder values from a type
+      # argument to `defineMessages`. The portal's descriptors do not declare
+      # them yet, so every `formatMessage(message, values)` call fails to
+      # type-check (TS2769 across seven portal files in #8910), and holding
+      # the one package keeps the other npm bumps from waiting on it. Remove
+      # this entry in the pull request that declares the portal's message
+      # value types.
+      - dependency-name: "react-intl"
+        update-types: ["version-update:semver-major"]
     cooldown:
       default-days: 7
 
-  - package-ecosystem: "github-actions"
-    directory: "/"
-    schedule:
-      interval: "weekly"
-      day: "monday"
-      time: "09:00"
-      timezone: "America/Los_Angeles"
-    cooldown:
-      default-days: 7
-    groups:
-      actions:
-        patterns:
-          - "*"

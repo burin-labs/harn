@@ -91,7 +91,10 @@ test file also lowers its imports and top-level declarations once, then emits
 one immutable callable entry per selected test pipeline; parameterized rows
 share that entry. This work completes before any per-test clock starts. Every
 test still instantiates fresh module state and runs module initialization in
-its own VM. Use `--max-test-ms` when total wall time is a performance
+its own VM. Project hooks initialize on their first matching event, as in
+normal execution. An unused hook does no work; a reached hook's initialization
+and dispatch belong to that test's execution phase and deadline.
+Use `--max-test-ms` when total wall time is a performance
 requirement, or `--max-execute-ms` to ratchet execution cost. Either
 measurement budget makes the runner use one worker even when `--parallel` or
 `--jobs` is present, so co-scheduled test VMs cannot change the verdict. Use
@@ -99,6 +102,12 @@ the ordinary `--timeout` safety rail for bounded parallel correctness suites,
 and measure performance in a host-isolated job.
 Conformance and other non-user targets continue to apply `--timeout` to their
 whole test case or subprocess.
+
+User tests use the configured secret provider, with the default chain restricted
+to environment variables. An explicit parent-secret handoff stays closed to the
+names the parent supplied, including in parallel workers and imported helpers.
+Each case retains a fresh harness; handed-off values are not added to subprocess
+environments.
 
 Per-case top-level phases are disjoint: `compile` is zero for suite-prepared
 test entries (and covers fallback compilation for direct embedders); `setup`
@@ -115,12 +124,26 @@ The aggregate receipt exposes `test_file_compile_ms`, `test_files_compiled`,
 and `test_entries_compiled` so compile-once behavior is mechanically visible.
 Cold module compilation overlaps the suite compile phase; module instantiation
 and initialization remain attributed to the test that executes them. User JSON
-report schema v4 carries the same distribution, typed timeout metadata,
-per-case phases, and named `std/timing` spans. Conformance JSON schema v3 uses the same typed distribution
-owner. Module compile/load values overlap compile, setup, and execution and
+report schema v5 carries the same distribution, typed timeout metadata,
+per-case phases, and named `std/timing` spans. Conformance JSON schema v3 uses
+the same typed distribution owner. Module compile/load values overlap compile, setup, and execution and
 must not be added to total wall time.
 
-Timing-aware shards consume a complete, passing schema-v4 user-test receipt
+Each case also reports `work: {"vm_steps": N}` alongside `phases`.
+The VM counts each decoded bytecode instruction dispatched, including failing
+instructions, imported code, case fixtures, and child VMs. Recording starts
+at VM construction and ends after case teardown. Shared suite compilation and
+successful file-scoped fixture execution aren't charged to individual cases.
+Cases that never construct a VM report `work: null`; a measured zero remains
+`{"vm_steps": 0}`. Native work inside builtins isn't counted.
+
+Identical instruction sequences produce identical counts regardless of host
+load or compilation-cache state. Compare counts using the same Harn build;
+compiler changes can alter the instruction sequence. Timeouts, racing detached
+tasks, and nondeterministic inputs can change how many instructions run.
+The counter doesn't replace wall-clock budgets for blocked I/O or native work.
+
+Timing-aware shards consume a complete, passing schema-v5 user-test receipt
 from an unsharded run. `--timing-environment` stamps the environment that owns
 the measurement; a later `--timing-baseline` run refuses a different stamp,
 an older report schema, a partial shard receipt, or a deleted or renamed case.
@@ -130,6 +153,11 @@ environment produces another baseline. A single case heavier than the rest of
 the suite is assigned alone and named in the shard plan. The same baseline
 also enforces the absolute per-case regression threshold, so moving a slower
 case into a less-loaded shard cannot turn the regression green.
+
+Shard ownership depends on the selected source, shard count, and timing baseline,
+including declared heavy weights for unmeasured cases. Local worker capacity does
+not change that partition. Scheduling bounds each selected case's permits to the
+host's worker count, so the same matrix can use runners with different capacities.
 
 Aggregate phase totals are cumulative worker-time. They reconcile with serial
 case work, but parallel cases overlap, so aggregate setup/compile/execute/
@@ -146,6 +174,40 @@ select the zero-based index `floor(sample_count * percentile / 100)`, and clamp
 to the final sample. Thus p50 selects the upper middle value for an even-sized
 population. An empty population serializes every statistic as `null` with
 `sample_count: 0`, distinguishing no measurement from a measured zero.
+
+### Verify a complete shard matrix
+
+Start from a clean Git checkout with tracked test files. Ignore the report
+directory in Git before committing the source. Run every shard with the same
+selection and timing baseline; worker counts may differ:
+
+```sh
+TEST_SOURCE=$(git rev-parse HEAD)
+mkdir -p reports
+harn test suite --parallel --jobs 1 --shard-index 1 --shard-total 3 --json-out reports/1.json
+harn test suite --parallel --jobs 2 --shard-index 2 --shard-total 3 --json-out reports/2.json
+harn test suite --parallel --jobs 3 --shard-index 3 --shard-total 3 --json-out reports/3.json
+harn test --verify-shards "$TEST_SOURCE" --shard-total 3 reports/1.json reports/2.json reports/3.json
+```
+
+The final command emits a structured coverage verdict and exits nonzero unless
+every planned case passed exactly once in its assigned shard. Its source and
+shard count come from the CI plan, independently of downloaded reports. Missing
+or truncated reports, duplicated or omitted cases, changed partition plans,
+skips, failures and unconfirmed source all refuse complete coverage. The verdict
+retains the measured inventory size, observed and unique counts, missing shards
+and cases, duplicates, failing names and plan identity. `--json-out` saves it.
+
+Each user-test shard report retains its complete pre-selection inventory and
+assignments. The runner records clean Git commit and tree identity before
+execution and confirms the source again afterward. Dirty, untracked, non-Git or
+mixed-repository test collections still run, but carry no qualified matrix source. A
+checkout left changed after execution cannot confirm its original source. Reports from
+older runtimes without this inventory cannot establish complete coverage.
+
+The verifier accepts at most 128 MiB of reports and 1,024 shards. Its verdict
+establishes coverage of the measured case inventory; CI must authenticate the
+producer, runtime artifact, required test selection and complete execution inputs separately.
 
 ### Writing a conformance test
 
@@ -452,6 +514,46 @@ Consumption receipts record `requested_scope`, `resolved_scope`, and
 Application-owned roles should use a dotted namespace such as
 `app.classifier`; dotted scopes are open vocabulary and do not produce an
 unknown-Harn-purpose advisory.
+
+### Replay a prefix, then go live
+
+To measure what a model does at one exact point in a recorded run, replay the
+recording up to that point and let the real provider answer from there. Add
+`liveAfterCalls` to a versioned header:
+
+```jsonl
+{"schemaVersion":1,"strictScopes":false,"liveAfterCalls":2}
+{"id":"record-0","scope":"agent.main","consume":"once","tool_calls":[{"id":"call_1","name":"read_file","arguments":{"path":"a.txt"}}]}
+{"id":"record-1","scope":"agent.main","consume":"once","text":"Done."}
+{"id":"record-2","scope":"agent.main","consume":"once","text":"never served"}
+```
+
+- Only the first `liveAfterCalls` entries are installed. A full recording can
+  carry a shorter prefix, so you do not need to truncate the file. The value
+  must be at least 1 and no more than the number of entries.
+- A call is one model request that reaches the mock dispatcher, whatever its
+  scope. That includes retries and auxiliary calls such as a completion judge.
+  An entry that scripts an `error` still counts as a served call.
+- Each of the first K calls must be served by a prefix entry under the ordinary
+  scope and `match` rules. If one cannot be served, the run has diverged from
+  the recording. It fails with `LLM mock replay prefix diverged at call N of K`
+  and does not go live early, even in a non-strict fixture.
+- Once K calls have been served, the fixture stops intercepting. Every later
+  call goes to the provider and model the call names, with normal credential
+  resolution, option validation, routing, and cost accounting. The live part
+  of the run therefore needs real credentials.
+- Every call carries `provider_telemetry.llm_mock_prefix`, for example
+  `{"served_by": "fixture", "call": 2, "live_after_calls": 2}`. `served_by` is
+  `fixture` or `live`, and the handoff is the first `live` call. Live calls are
+  counted when they return a response. The marker appears on the
+  `provider_call_response` transcript event and on `usage.provider_telemetry`
+  in a call result. Runs without `liveAfterCalls` carry no marker.
+
+To make a prefix fixture, record once with `harn run --llm-mock-record`, count
+the calls up to the decision point, and set `liveAfterCalls` in the recorded
+header. `harness.llm.mock_load_jsonl` honors the same header and reports
+`live_after_calls` in its receipt, so a host that installs fixtures from its own
+pipeline needs no new flag.
 
 To import an external eval trace into the same fixture format:
 

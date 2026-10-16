@@ -8,12 +8,16 @@
 # Inputs (from caller):
 #   BASE_SHA          merge-base or PR base commit (default: origin/main)
 #   HEAD_SHA          PR head commit (default: HEAD)
-#   BYPASS_REASON     non-empty string makes the gate pass with a notice
+#   BYPASS_REASON     non-empty string makes the gate pass with a notice,
+#                     except for the breaking-change rules below
+#   BREAKING_LABELLED `true` when the PR carries the `breaking` label
 #   GATE_ENABLE_TRACE non-empty enables verbose diagnostics on stderr
 #
 # Exit codes:
 #   0 — fragment / changelog present, bypassed, or only ignored paths touched.
-#   1 — user-visible change without an accompanying fragment or CHANGELOG edit.
+#   1 — user-visible change without an accompanying fragment or CHANGELOG edit,
+#       a breaking fragment without a Migration section, or a PR labelled
+#       `breaking` without such a fragment.
 #   2 — usage error.
 
 set -euo pipefail
@@ -21,12 +25,8 @@ set -euo pipefail
 BASE_SHA="${BASE_SHA:-origin/main}"
 HEAD_SHA="${HEAD_SHA:-HEAD}"
 BYPASS_REASON="${BYPASS_REASON:-}"
+BREAKING_LABELLED="${BREAKING_LABELLED:-}"
 GATE_ENABLE_TRACE="${GATE_ENABLE_TRACE:-}"
-
-if [ -n "$BYPASS_REASON" ]; then
-  echo "::notice title=Changelog fragment gate bypassed::$BYPASS_REASON"
-  exit 0
-fi
 
 if ! merge_base=$(git merge-base "$BASE_SHA" "$HEAD_SHA" 2>/dev/null); then
   merge_base="$BASE_SHA"
@@ -34,6 +34,25 @@ fi
 [ -n "$GATE_ENABLE_TRACE" ] && echo "[changelog-gate] base=$BASE_SHA head=$HEAD_SHA merge_base=$merge_base" >&2
 
 changed_files=$(git diff --name-only --no-renames "$merge_base" "$HEAD_SHA")
+
+# Breaking changes carry their migration. Downstream consumers read the
+# folded Breaking section to learn what they must change, so a breaking
+# fragment has to say it (see lib/breaking-fragments.sh, which owns the rule).
+# No bypass label waives this, and a PR labelled `breaking` must carry such a
+# fragment.
+# shellcheck source=.github/scripts/lib/breaking-fragments.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/breaking-fragments.sh"
+declared=$(BREAKING_FRAGMENT_GATE_TITLE="Changelog fragment gate" \
+  declared_breaking_fragments "$merge_base" "$HEAD_SHA")
+if [ "$BREAKING_LABELLED" = "true" ] && [ -z "$declared" ]; then
+  echo "::error title=Changelog fragment gate::This PR is labelled \`breaking\` but adds no \`changelog.d/<id>.breaking.md\` fragment with a \`Migration:\` section." >&2
+  exit 1
+fi
+
+if [ -n "$BYPASS_REASON" ]; then
+  echo "::notice title=Changelog fragment gate bypassed::$BYPASS_REASON"
+  exit 0
+fi
 if [ -z "$changed_files" ]; then
   echo "::notice title=Changelog fragment gate::no file changes; pass."
   exit 0

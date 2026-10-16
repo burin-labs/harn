@@ -23,6 +23,21 @@ pub struct ProviderCatalogArtifact {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub routing_routes: Vec<CatalogRoutingRoute>,
     pub qc_defaults: BTreeMap<String, String>,
+    /// Each provider's setup-UI default (`provider_defaults.<p>.portal`), the
+    /// route a host offers when a person picks that provider. Distinct from
+    /// `qc_defaults`, the cheap quality-check route.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub portal_defaults: BTreeMap<String, CatalogPortalDefault>,
+}
+
+/// One provider's setup-UI default route.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CatalogPortalDefault {
+    pub model_id: String,
+    /// One of the model's `effort_levels`; absent leaves the model's default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_effort: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -189,6 +204,20 @@ pub enum ProviderClassification {
     Local,
 }
 
+/// Complete request/response contract for a provider's alternate chat API.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ChatApiAdapter {
+    /// Explicitly restore the model's ordinary contract over an inherited adapter.
+    ModelDefault,
+    #[serde(rename = "ollama_openai_compat")]
+    OllamaOpenAiCompat,
+}
+
+impl ChatApiAdapter {
+    pub const ALL: [Self; 2] = [Self::ModelDefault, Self::OllamaOpenAiCompat];
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProviderEndpoint {
     pub base_url: String,
@@ -199,6 +228,8 @@ pub struct ProviderEndpoint {
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub regions: BTreeMap<String, ProviderEndpointRegion>,
     pub chat_endpoint: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chat_api_adapter: Option<ChatApiAdapter>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub completion_endpoint: Option<String>,
     /// Provider embeddings route, when one exists. Absent means this
@@ -227,6 +258,10 @@ pub struct ProviderAuth {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub header: Option<String>,
     pub env: Vec<String>,
+    /// Further credential-bearing environment names a platform credential
+    /// chain reads, such as Bedrock's AWS variables. Not read as the key.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub credential_env: Vec<String>,
     pub required: bool,
 }
 

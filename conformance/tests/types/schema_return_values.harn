@@ -26,7 +26,7 @@ pipeline test(harness: Harness, task: unknown) {
   harness.stdio.println(parsed.name + ":" + parsed.role)
   const typed: Payload = unwrap(schema_check({x: "typed"}, schema_of(Payload)))
   harness.stdio.println(typed.x)
-  const typed_checked: Result<Payload, string> = try {
+  const typed_checked: Result<Payload, dict> = try {
     schema_check({x: "trytyped"}, schema_of(Payload))
   }
   harness.stdio.println(unwrap(typed_checked).x)

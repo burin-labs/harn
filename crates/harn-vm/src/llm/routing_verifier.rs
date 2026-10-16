@@ -258,9 +258,16 @@ async fn run_test_command(
         );
     }
     use tokio::io::AsyncWriteExt;
-    use tokio::process::Command;
 
-    let mut cmd = Command::new(&command[0]);
+    let mut cmd = match crate::process_sandbox::session_tokio_command(&command[0]) {
+        Ok(cmd) => cmd,
+        Err(err) => {
+            return signal_for(
+                on_fail,
+                format!("test_run: session environment for {command:?}: {err}"),
+            );
+        }
+    };
     cmd.args(&command[1..]);
     cmd.stdout(std::process::Stdio::piped());
     cmd.stderr(std::process::Stdio::piped());
@@ -431,7 +438,7 @@ pub(crate) fn build_refine_nudge(reasons: &[String]) -> String {
 // ---------------------------------------------------------------------------
 
 fn runtime_error(message: String) -> VmError {
-    VmError::Thrown(VmValue::String(arcstr::ArcStr::from(message)))
+    VmError::Thrown(VmValue::string(message))
 }
 
 fn parse_string(dict: &crate::value::DictMap, key: &str) -> Result<Option<String>, VmError> {
@@ -717,7 +724,7 @@ pub(crate) fn verifiers_summary(verifiers: &[Verifier]) -> VmValue {
             VmValue::dict(dict)
         })
         .collect();
-    VmValue::List(std::sync::Arc::new(items))
+    VmValue::list(items)
 }
 
 #[cfg(test)]

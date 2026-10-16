@@ -27,6 +27,40 @@ prefers_role_developer = false
 prefers_xml_tools = false
 thinking_block_style = "inline"
 
+# Qwen3.8 Max is Alibaba's hosted flagship resold by DeepInfra, not the
+# open-weight 2.4T build matched by `*qwen3.8*` below, and its structured
+# output differs. Live probe 2026-10-01 on /v1/openai/chat/completions:
+#   response_format json_schema (strict or not) -> HTTP 500 wrapping
+#     Alibaba's "'response_format.json_schema.schema' None is not of type
+#     'object'"; json_object -> 200 with valid JSON. The 2.4T build answered
+#     all three formats with 200, and Qwen3.7 Max fails the same way as Max.
+#   tool_choice auto and required -> one native tool call each
+#   reasoning_effort none..max -> 200, but `none` still produced reasoning
+#     tokens, so it is not honored
+#   image input -> 405 "does not accept image input"
+#   a repeated 3.2K-token prefix reported 3072 cached tokens on the second call
+# `delimited` keeps structured output on Harn's prompt validation instead of
+# sending a schema the route rejects.
+[[provider.deepinfra]]
+model_match = "*qwen3.8-max*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "delimited"
+thinking_modes = ["effort"]
+reasoning_effort_supported = true
+reasoning_effort_levels = ["low", "medium", "high", "xhigh", "max"]
+reasoning_none_supported = false
+reasoning_disable_supported = false
+prompt_caching = true
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "delimited"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+
 [[provider.deepinfra]]
 model_match = "*qwen3.8*"
 native_tools = true
@@ -121,17 +155,21 @@ prefers_role_developer = false
 prefers_xml_tools = false
 thinking_block_style = "inline"
 
+# Qwen3.7 Max is the only DeepInfra Qwen3.7 route. Its structured output was
+# declared native until a 2026-10-01 probe: json_schema (strict or not) ->
+# HTTP 500 from the Alibaba upstream, json_object -> 200. See the Qwen3.8 Max
+# rule above for the error text.
 [[provider.deepinfra]]
 model_match = "*qwen3.7*"
 native_tools = true
 preferred_tool_format = "native"
-structured_output = "native"
+structured_output = "delimited"
 thinking_modes = ["enabled"]
 prompt_caching = true
 text_tool_wire_format_supported = true
 prefers_xml_scaffolding = false
 prefers_markdown_scaffolding = true
-structured_output_mode = "native_json"
+structured_output_mode = "delimited"
 supports_assistant_prefill = false
 prefers_role_developer = false
 prefers_xml_tools = false
@@ -225,6 +263,33 @@ supports_assistant_prefill = false
 prefers_role_developer = false
 prefers_xml_tools = false
 thinking_block_style = "reasoning_summary"
+
+# MiniMax M3. Live probe 2026-10-01 on /v1/openai/chat/completions:
+# tool_choice auto and required -> one native tool call each; strict
+# json_schema -> 200 schema-valid; reasoning arrives in `reasoning_content`
+# and effort `none` returned none of it; the request validator enumerates
+# none/minimal/low/medium/high/xhigh/max and each returned 200; repeated
+# prompts reported cached input tokens. A solid red PNG was answered
+# "Brown", so vision stays undeclared.
+[[provider.deepinfra]]
+model_match = "*minimax-m3*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+thinking_modes = ["effort"]
+reasoning_effort_supported = true
+reasoning_effort_levels = ["none", "low", "medium", "high", "xhigh", "max"]
+reasoning_none_supported = true
+reasoning_disable_supported = true
+prompt_caching = true
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
 
 [[provider.deepinfra]]
 model_match = "*"

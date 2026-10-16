@@ -5,20 +5,20 @@ import { agent_parse_tool_calls } from "std/agent/primitives"
 // The taught grammar must be the parsed grammar — on the exact shape that
 // dropped six edit calls in a downstream regression.
 //
-// That run pinned `tool_format: "json"` on fireworks/gpt-oss-120b, a route the
-// capability matrix pins to heredoc `text`. Both channel gates classify `json`
-// and `text` as one channel, so the pin passed untouched: the system prompt
-// taught the fenced-JSON contract 24 times, the wire ran the heredoc grammar,
-// and every call the model made was discarded with no result, no parse error
-// and no nudge.
+// That run pinned `tool_format: "json"` on a gpt-oss route the capability
+// matrix pins to heredoc `text` (then Fireworks; DeepInfra keeps that pin).
+// Both channel gates classify `json` and `text` as one channel, so the pin
+// passed untouched: the system prompt taught the fenced-JSON contract 24
+// times, the wire ran the heredoc grammar, and every call the model made was
+// discarded with no result, no parse error and no nudge.
 //
 // This case walks the whole chain for that shape rather than one link of it —
 // what the resolver decides, what the model is TAUGHT, and what the parser
 // ACCEPTS — because the defect was invisible in each link alone and only
 // visible in their disagreement.
-const PROVIDER: string = "fireworks"
+const PROVIDER: string = "deepinfra"
 
-const MODEL: string = "accounts/fireworks/models/gpt-oss-120b"
+const MODEL: string = "openai/gpt-oss-120b"
 
 const REGISTRY = {
   _type: "tool_registry",

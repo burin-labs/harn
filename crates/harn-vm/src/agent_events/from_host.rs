@@ -142,8 +142,9 @@ const TOOL: Option<HostTranscriptRole> = Some(HostTranscriptRole::Tool);
 const HOST_EVENT_POLICIES: &[HostEventPolicy] = &[
     host_event("tool_call", ASSISTANT),
     host_event("tool_call_update", ASSISTANT),
-    host_event("iteration_start", None),
-    host_event("iteration_end", None),
+    host_event("iteration_start", ASSISTANT),
+    host_event("iteration_end", ASSISTANT),
+    host_event("turn_phase_changed", ASSISTANT),
     host_event("judge_started", None),
     host_event("judge_decision", None),
     host_event("step_judge_decision", None),
@@ -498,6 +499,11 @@ impl AgentEvent {
                 {
                     dropped.push("audit".to_string());
                 }
+                if event_type == "tool_call_update"
+                    && payload.get("health").is_some_and(|value| !value.is_null())
+                {
+                    dropped.push("health".to_string());
+                }
                 (event, dropped)
             }
         };
@@ -507,6 +513,42 @@ impl AgentEvent {
 
     pub(crate) fn host_transcript_role(event_type: &str) -> Option<HostTranscriptRole> {
         host_event_policy(event_type).and_then(|policy| policy.transcript_role)
+    }
+
+    /// Journal and publish a decoded host event through one typed owner.
+    pub(crate) async fn publish_host_event(
+        &self,
+        ctx: &crate::vm::AsyncBuiltinCtx,
+        session_id: &str,
+        event_type: &str,
+        payload: Value,
+    ) -> Result<(), VmError> {
+        if let Some(role) = Self::host_transcript_role(event_type) {
+            let transcript_event = crate::llm::helpers::transcript_event(
+                event_type,
+                role.as_str(),
+                "internal",
+                "",
+                Some(payload),
+            );
+            if crate::agent_sessions::exists(session_id) {
+                crate::agent_sessions::append_event(session_id, transcript_event)
+                    .map_err(VmError::Runtime)?;
+            }
+        }
+        // A call about to run must be on disk first. Otherwise a process
+        // killed mid-call restores a session with no trace of it (harn#9061).
+        if matches!(
+            self,
+            Self::ToolCallUpdate {
+                status: super::ToolCallStatus::InProgress,
+                ..
+            }
+        ) {
+            crate::agent_session_journal::flush(session_id).await?;
+        }
+        crate::llm::emit_live_agent_event_with_ctx(Some(ctx), self).await;
+        Ok(())
     }
 }
 
@@ -859,6 +901,15 @@ fn apply_host_payload_defaults(
             obj.remove("audit"); // sourced from the ambient mutation session
             set_default(obj, "status", Value::String("pending".to_string()));
             set_default(obj, "raw_input", Value::Null);
+            // One normalization for every surface the intent reaches; a blank
+            // or whitespace-only label leaves no key. A non-string is left for
+            // the typed payload decode to refuse.
+            if let Some(normalized) = obj.get("intent").and_then(Value::as_str) {
+                match crate::llm::tool_call_intent::normalize(normalized) {
+                    Some(intent) => obj.insert("intent".to_string(), Value::String(intent)),
+                    None => obj.remove("intent"),
+                };
+            }
         }
         "tool_call_update" => {
             obj.remove("audit"); // sourced from the ambient mutation session

@@ -1,6 +1,20 @@
 [
   {
     "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop_finalize.harn",
+    "expression": "agent_required_tools_missing_from_session(opts, state.successful_tools_seen)",
+    "owner": "agent_required_tools_missing_from_session",
+    "evidence": "Publication admission forwards accumulated successful tool names to the existing required-tools owner; its opts reads remain independently audited.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "agent_required_tools_missing_from_session",
+        "parameter": "opts"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/loop_denial_cutoff.harn",
     "expression": "agent_session_record_usage(\n    harness.agent,\n    session_id,\n    llm_result,\n    turn_llm_opts,\n    iteration,\n  )",
     "owner": "agent_session_record_usage",
@@ -226,7 +240,7 @@
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/loop_foundation.harn",
-    "expression": "__invoke_llm_with_autocontinue(\n    harness,\n    message,\n    turn_system,\n    llm_opts,\n    turn_opts,\n    session_id,\n    iteration_index,\n  )",
+    "expression": "__invoke_llm_with_autocontinue(\n    harness,\n    message,\n    turn_system,\n    llm_opts + {_user_visible: false, _on_delta: nil},\n    turn_opts,\n    session_id,\n    iteration_index,\n  )",
     "owner": "__invoke_llm_with_autocontinue",
     "evidence": "Consumer __invoke_llm_with_autocontinue.turn_opts in crates/harn-stdlib/src/stdlib/agent/loop_foundation.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
     "consumers": [
@@ -489,7 +503,7 @@
   },
   {
     "scope": "AgentSpec",
-    "file": "crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop_dispatch_options.harn",
     "expression": "__resolve_intra_turn_failure_fanout_cap(turn_opts)",
     "owner": "__resolve_intra_turn_failure_fanout_cap",
     "evidence": "Configuration passed at argument 1. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary.",
@@ -503,7 +517,7 @@
   },
   {
     "scope": "AgentSpec",
-    "file": "crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop_dispatch_options.harn",
     "expression": "__resolve_intra_turn_resource_fail_fast(turn_opts)",
     "owner": "__resolve_intra_turn_resource_fail_fast",
     "evidence": "Configuration passed at argument 1. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary.",
@@ -511,6 +525,20 @@
       {
         "scope": "AgentSpec",
         "function": "__resolve_intra_turn_resource_fail_fast",
+        "parameter": "turn_opts"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn",
+    "expression": "__loop_dispatch_options(turn_opts, session_id, cap)",
+    "owner": "__loop_dispatch_options",
+    "evidence": "Configuration passed at argument 1. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__loop_dispatch_options",
         "parameter": "turn_opts"
       }
     ]
@@ -696,7 +724,7 @@
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/loop_run.harn",
-    "expression": "__dispatch_tool_calls(\n          harness,\n          session.session_id,\n          tool_calls,\n          turn_opts\n            + {\n              _iteration: iteration_index + 1,\n              _tool_caller: opts?._tool_caller,\n              _stop_reason: llm_result?.stop_reason ?? \"\",\n            },\n        )",
+    "expression": "__dispatch_tool_calls(\n          harness,\n          session.session_id,\n          tool_calls,\n          turn_opts\n            + {\n              _iteration: iteration_index + 1,\n              _tool_caller: opts?._tool_caller,\n              _stop_reason: llm_result?.stop_reason ?? \"\",\n              _purpose_label: projected.purpose_label,\n            },\n        )",
     "owner": "__dispatch_tool_calls",
     "evidence": "Consumer __dispatch_tool_calls.turn_opts in crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
     "consumers": [
@@ -869,7 +897,7 @@
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/loop_run.harn",
-    "expression": "agent_step_judge(\n            harness,\n            session,\n            llm_result,\n            turn_opts,\n            iteration_index + 1,\n            stall_warning,\n            step_judge_attempts,\n            remaining_iterations,\n          )",
+    "expression": "agent_step_judge(\n            harness,\n            session,\n            llm_result,\n            turn_opts,\n            iteration_index + 1,\n            stall_warning,\n            step_judge_attempts,\n            remaining_iterations,\n            step_judge_unavailable_count,\n          )",
     "owner": "agent_step_judge",
     "evidence": "Consumer agent_step_judge.opts in crates/harn-stdlib/src/stdlib/agent/step_judge.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
     "consumers": [
@@ -925,7 +953,7 @@
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/loop_support.harn",
-    "expression": "__agent_loop_with_llm_render_context(\n    harness,\n    opts,\n    { render_harness, effective ->\n      const fragments = agent_build_turn_system_fragments(\n        render_harness,\n        session,\n        effective,\n        iteration,\n      )\n      let parts = []\n      for fragment in fragments {\n        parts = parts.appending(fragment.body)\n      }\n      return {\n        fragments: fragments,\n        system: join(parts, \"\\n\\n\"),\n        messages: agent_build_turn_messages(\n          render_harness.agent,\n          render_harness.clock,\n          session,\n          effective,\n          iteration,\n        ),\n      }\n    },\n  )",
+    "expression": "__agent_loop_with_llm_render_context(\n    harness,\n    opts,\n    { render_harness, effective ->\n      const fragments = agent_build_turn_system_fragments(\n        render_harness,\n        session,\n        effective,\n        iteration,\n      )\n      let parts = []\n      for fragment in fragments {\n        parts.push(fragment.body)\n      }\n      return {\n        fragments: fragments,\n        system: join(parts, \"\\n\\n\"),\n        messages: agent_build_turn_messages(\n          render_harness.agent,\n          render_harness.clock,\n          session,\n          effective,\n          iteration,\n        ),\n      }\n    },\n  )",
     "owner": "__agent_loop_with_llm_render_context",
     "evidence": "Configuration passed at argument 2. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary.",
     "consumers": [

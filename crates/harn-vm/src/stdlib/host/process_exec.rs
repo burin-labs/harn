@@ -24,7 +24,7 @@ use super::{
 pub(super) fn async_builtin_cancel_token(
     ctx: Option<&AsyncBuiltinCtx>,
 ) -> Option<std::sync::Arc<std::sync::atomic::AtomicBool>> {
-    ctx.and_then(|ctx| ctx.child_vm().cancel_token.clone())
+    ctx.and_then(|ctx| ctx.child_vm().cancellation_token())
 }
 
 /// Apply the command-policy preflight (deny-patterns, approval gating,
@@ -85,14 +85,14 @@ pub(super) async fn dispatch_process_exec_after_policy(
         &tape_args,
         tape_cwd.as_deref(),
     ) {
-        let output = intercepted
-            .map_err(|message| VmError::Thrown(VmValue::String(arcstr::ArcStr::from(message))))?;
+        let output = intercepted.map_err(|message| VmError::Thrown(VmValue::string(message)))?;
         let exit_code = output.status.code().unwrap_or(-1);
         let stdout_utf8_valid = std::str::from_utf8(&output.stdout).is_ok();
         let stderr_utf8_valid = std::str::from_utf8(&output.stderr).is_ok();
         let stdout = String::from_utf8_lossy(&output.stdout);
         let stderr = String::from_utf8_lossy(&output.stderr);
         let response = process_exec_response(ProcessExecResponse {
+            verifier_receipt: None,
             pid: None,
             started_at,
             started,
@@ -123,64 +123,10 @@ pub(super) async fn dispatch_process_exec_after_policy(
         .or_else(|| optional_i64(params, "timeout_ms"))
         .filter(|value| *value > 0)
         .map(|value| value as u64);
-    // Optional per-call profile override. Pipelines that want to
-    // promote a single spawn to `os_hardened` (e.g. running
-    // attacker-controlled code) pass `sandbox_profile: "os_hardened"`
-    // without having to rewrite the surrounding policy. The override
-    // is scoped to this call and pops with the guard at end-of-scope.
-    let profile_guard = match optional_string(params, "sandbox_profile") {
-        Some(value) => Some(crate::process_sandbox::push_sandbox_profile_override(
-            &value,
-        )?),
-        None => None,
-    };
-    #[cfg(target_os = "windows")]
-    if let Some((policy, profile)) = crate::stdlib::sandbox::active_sandbox_policy() {
-        let launch = ProcessExecLaunch::from_params(params, "process.exec")?;
-        // The resolved policy/profile are owned snapshots. Drop the thread-
-        // local, non-Send override guard before the blocking worker await; the
-        // Windows backend receives the snapshot explicitly.
-        drop(profile_guard);
-        let output = crate::stdlib::sandbox::windows_command_output(
-            tape_program,
-            tape_args,
-            launch.into_process_config(stdin.clone()),
-            policy,
-            profile,
-        )
-        .await
-        .map_err(|error| contextualize_process_error("process.exec", "sandbox", error))?;
-        let exit_code = output.status.code().unwrap_or(-1);
-        if let Some(recording) = tape_recording {
-            recording.finish(&output);
-        }
-        let stdout_utf8_valid = std::str::from_utf8(&output.stdout).is_ok();
-        let stderr_utf8_valid = std::str::from_utf8(&output.stderr).is_ok();
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        let response = process_exec_response(ProcessExecResponse {
-            pid: None,
-            started_at,
-            started,
-            stdout: &stdout,
-            stderr: &stderr,
-            exit_code,
-            status: "completed",
-            success: output.status.success(),
-            timed_out: false,
-            stdout_utf8_valid,
-            stderr_utf8_valid,
-        });
-        return crate::orchestration::run_command_policy_postflight_with_ctx(
-            ctx,
-            params,
-            response,
-            command_policy_context,
-            command_policy_decisions,
-        )
-        .await;
-    }
-    let mut cmd = build_sandboxed_command(params, "process.exec")?;
+    let PreparedProcessCommand {
+        command: mut cmd,
+        witness,
+    } = build_sandboxed_command(params, "process.exec")?;
     crate::op_interrupt::configure_tokio_kill_group(&mut cmd);
     let cleanup_token = crate::op_interrupt::new_process_cleanup_token();
     cmd.env(
@@ -222,7 +168,6 @@ pub(super) async fn dispatch_process_exec_after_policy(
         }
         crate::stdlib::sandbox::ProcessStdin::Null => None,
     };
-    drop(profile_guard);
     let pid = child.id();
     crate::op_interrupt::record_tokio_process_owner_group(&mut child, &cleanup_token)
         .await
@@ -364,7 +309,18 @@ pub(super) async fn dispatch_process_exec_after_policy(
     let stderr_utf8_valid = std::str::from_utf8(&stderr).is_ok();
     let stdout = String::from_utf8_lossy(&stdout).to_string();
     let stderr = String::from_utf8_lossy(&stderr).to_string();
+    let verifier_receipt = if !timed_out {
+        witness
+            .map(|witness| witness.receipt())
+            .transpose()
+            .map_err(|error| {
+                VmError::Runtime(format!("process.exec verifier completion refused: {error}"))
+            })?
+    } else {
+        None
+    };
     let response = process_exec_response(ProcessExecResponse {
+        verifier_receipt,
         pid,
         started_at,
         started,
@@ -441,22 +397,59 @@ async fn terminate_process_exec_child(
 /// env/env_mode/env_remove handling.
 ///
 /// The platform-independent normalization lives in [`ProcessExecLaunch`].
-/// This function projects it onto Tokio for `process.spawn` and for
-/// `process.exec` on platforms whose sandbox can decorate a Tokio command.
-/// Windows exec projects the same launch onto `ProcessCommandConfig` because
-/// AppContainer requires the custom output backend.
+/// This function projects it onto Tokio for `process.spawn` and
+/// `process.exec`.
+pub(crate) struct PreparedProcessCommand {
+    pub(crate) command: tokio::process::Command,
+    pub(crate) witness: Option<crate::verifier_provenance::VerifierExecutionWitness>,
+}
+
+impl std::fmt::Debug for PreparedProcessCommand {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("PreparedProcessCommand")
+            .finish_non_exhaustive()
+    }
+}
+
 pub(crate) fn build_sandboxed_command(
     params: &crate::value::DictMap,
     label: &str,
-) -> Result<tokio::process::Command, VmError> {
-    let mut launch = ProcessExecLaunch::from_params(params, label)?;
-    crate::process_sandbox::apply_active_rustc_wrapper_policy(
-        &mut launch.env,
-        &mut launch.env_remove,
-        launch.cwd.as_deref(),
-    );
-    let mut cmd = crate::process_sandbox::tokio_command_for(&launch.program, &launch.args)
-        .map_err(|error| contextualize_process_error(label, "sandbox setup", error))?;
+) -> Result<PreparedProcessCommand, VmError> {
+    let _profile_guard = optional_string(params, "sandbox_profile")
+        .as_deref()
+        .map(crate::process_sandbox::push_sandbox_profile_override)
+        .transpose()?;
+    let _scope_guard = crate::process_sandbox::push_process_sandbox_scope(
+        crate::process_sandbox::ProcessSandboxScope::from_value(params.get("sandbox"))?,
+    )?;
+    let launch = ProcessExecLaunch::from_params(params, label)?;
+    let verifier = crate::prepared_run::prepared_verifier(
+        &launch.program,
+        &launch.args,
+        launch.cwd.as_deref().expect("normalized process cwd"),
+    )
+    .map_err(VmError::Runtime)?;
+    #[cfg(target_os = "linux")]
+    let pinned = verifier
+        .as_ref()
+        .map(|verifier| verifier.launch())
+        .transpose()
+        .map_err(VmError::Runtime)?;
+    #[cfg(target_os = "linux")]
+    let (program, args) = pinned
+        .as_ref()
+        .map_or((&launch.program, launch.args.as_slice()), |pinned| {
+            (&pinned.program, pinned.args.as_slice())
+        });
+    #[cfg(not(target_os = "linux"))]
+    let (program, args) = {
+        let _ = verifier;
+        (&launch.program, launch.args.as_slice())
+    };
+    let (mut cmd, session_closed) =
+        crate::process_sandbox::tokio_command_for_with_env_state(program, args)
+            .map_err(|error| contextualize_process_error(label, "sandbox setup", error))?;
     if let Some(cwd) = launch.cwd {
         cmd.current_dir(cwd);
     }
@@ -469,15 +462,33 @@ pub(crate) fn build_sandboxed_command(
     for key in launch.env_remove {
         cmd.env_remove(key);
     }
-    Ok(cmd)
+    let closed = launch.closed_env || session_closed;
+    crate::process_sandbox::apply_active_rustc_wrapper_policy_for_command(
+        &launch.program,
+        &launch.args,
+        cmd.as_std_mut(),
+        closed,
+    );
+    crate::process_sandbox::validate_command_environment(cmd.as_std_mut(), closed)?;
+    #[cfg(target_os = "linux")]
+    let witness = pinned
+        .map(|pinned| pinned.bind_to_command(cmd.as_std_mut(), closed))
+        .transpose()
+        .map_err(VmError::Runtime)?;
+    #[cfg(not(target_os = "linux"))]
+    let witness = None;
+    Ok(PreparedProcessCommand {
+        command: cmd,
+        witness,
+    })
 }
 
 /// Normalized process authority at the host boundary.
 ///
 /// Parsing, cwd confinement, execution-context overlays, caller overrides,
 /// removals, workspace-local paths, and deterministic locale policy happen
-/// once here. Platform launchers are deliberately boring projections of this
-/// value so Windows AppContainer and Tokio-backed hosts cannot drift.
+/// once here, and the Tokio launcher is a deliberately boring projection of
+/// this value.
 struct ProcessExecLaunch {
     program: String,
     args: Vec<String>,
@@ -555,20 +566,6 @@ impl ProcessExecLaunch {
             closed_env,
         })
     }
-
-    #[cfg(target_os = "windows")]
-    fn into_process_config(
-        self,
-        stdin: crate::stdlib::sandbox::ProcessStdin,
-    ) -> crate::stdlib::sandbox::ProcessCommandConfig {
-        crate::stdlib::sandbox::ProcessCommandConfig {
-            cwd: self.cwd,
-            env: self.env,
-            env_remove: self.env_remove,
-            stdin,
-            closed_env: self.closed_env,
-        }
-    }
 }
 
 pub(super) fn process_exec_stdin(
@@ -589,6 +586,9 @@ pub(super) fn process_exec_stdin(
 
 fn contextualize_process_error(label: &str, stage: &str, error: VmError) -> VmError {
     match error {
+        // Typed: a `catch` branches on its fields, so prefixing a stage label
+        // would turn it back into text only a substring match could read.
+        refusal @ VmError::SandboxMechanismUnavailable(_) => refusal,
         VmError::CategorizedError { message, category } => VmError::CategorizedError {
             message: format!("host_call {label} {stage}: {message}"),
             category,
@@ -598,6 +598,7 @@ fn contextualize_process_error(label: &str, stage: &str, error: VmError) -> VmEr
 }
 
 struct ProcessExecResponse<'a> {
+    verifier_receipt: Option<crate::verifier_provenance::VerifierExecutionReceipt>,
     pid: Option<u32>,
     started_at: String,
     started: Instant,
@@ -614,6 +615,14 @@ struct ProcessExecResponse<'a> {
 fn process_exec_response(response: ProcessExecResponse<'_>) -> VmValue {
     let combined = format!("{}{}", response.stdout, response.stderr);
     let mut result = crate::value::DictMap::new();
+    result.put_nullable(
+        "verifier_receipt",
+        response.verifier_receipt.map(|receipt| {
+            crate::stdlib::json_to_vm_value(
+                &serde_json::to_value(receipt).expect("typed verifier receipt"),
+            )
+        }),
+    );
     result.put_str(
         "command_id",
         format!(
@@ -623,19 +632,10 @@ fn process_exec_response(response: ProcessExecResponse<'_>) -> VmValue {
         ),
     );
     result.put_str("status", response.status);
-    result.insert(
-        crate::value::intern_key("pid"),
-        response
-            .pid
-            .map(|pid| VmValue::Int(pid as i64))
-            .unwrap_or(VmValue::Nil),
-    );
-    result.insert(
-        crate::value::intern_key("process_group_id"),
-        response
-            .pid
-            .map(|pid| VmValue::Int(pid as i64))
-            .unwrap_or(VmValue::Nil),
+    result.put_nullable("pid", response.pid.map(|pid| VmValue::Int(pid as i64)));
+    result.put_nullable(
+        "process_group_id",
+        response.pid.map(|pid| VmValue::Int(pid as i64)),
     );
     result.insert(crate::value::intern_key("handle_id"), VmValue::Nil);
     result.put_str("started_at", response.started_at);
@@ -643,34 +643,16 @@ fn process_exec_response(response: ProcessExecResponse<'_>) -> VmValue {
         "ended_at",
         audited_utc_now_rfc3339("host_call/process.exec.ended_at"),
     );
-    result.insert(
-        crate::value::intern_key("duration_ms"),
-        VmValue::Int(response.started.elapsed().as_millis() as i64),
-    );
-    result.insert(
-        crate::value::intern_key("exit_code"),
-        VmValue::Int(response.exit_code as i64),
-    );
+    result.put_int("duration_ms", response.started.elapsed().as_millis() as i64);
+    result.put_int("exit_code", response.exit_code as i64);
     result.insert(crate::value::intern_key("signal"), VmValue::Nil);
-    result.insert(
-        crate::value::intern_key("timed_out"),
-        VmValue::Bool(response.timed_out),
-    );
+    result.put_bool("timed_out", response.timed_out);
     result.put_str("stdout", response.stdout);
     result.put_str("stderr", response.stderr);
-    result.insert(
-        crate::value::intern_key("stdout_utf8_valid"),
-        VmValue::Bool(response.stdout_utf8_valid),
-    );
-    result.insert(
-        crate::value::intern_key("stderr_utf8_valid"),
-        VmValue::Bool(response.stderr_utf8_valid),
-    );
+    result.put_bool("stdout_utf8_valid", response.stdout_utf8_valid);
+    result.put_bool("stderr_utf8_valid", response.stderr_utf8_valid);
     result.put_str("combined", combined);
-    result.insert(
-        crate::value::intern_key("success"),
-        VmValue::Bool(response.success),
-    );
+    result.put_bool("success", response.success);
     VmValue::dict(result)
 }
 

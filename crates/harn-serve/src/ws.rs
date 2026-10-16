@@ -169,6 +169,7 @@ pub enum WsMessage {
 }
 
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum WsError {
     /// The peer or transport returned an error mid-stream. Also used
     /// when a send fails because the socket already closed — axum

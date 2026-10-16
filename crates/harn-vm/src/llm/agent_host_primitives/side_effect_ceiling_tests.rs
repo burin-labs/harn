@@ -1,3 +1,4 @@
+use crate::NativeBuiltinCtxExt;
 use std::collections::HashMap;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex as StdMutex};
@@ -5,11 +6,20 @@ use std::sync::{Arc, Mutex as StdMutex};
 use tokio::sync::Mutex;
 
 use super::host_agent_dispatch_tool_call;
-use super::side_effect_ceiling::{request_side_effect_permission, SideEffectPermissionOutcome};
+use super::side_effect_ceiling::{
+    request_side_effect_permission, SideEffectPermissionOutcome, SideEffectPermissionRequest,
+};
 use crate::agent_events::{DenialGate, SideEffectCeilingRemedy};
 use crate::bridge::HostBridge;
-use crate::orchestration::SideEffectCeilingViolation;
+use crate::orchestration::{
+    clear_all_approval_policy_repeat_counts, clear_execution_policy_stacks, pop_approval_policy,
+    push_approval_policy, DecisionReview, SideEffectCeilingViolation, ToolApprovalPolicy,
+};
+use crate::schema::json_to_vm_value;
 use crate::tool_annotations::SideEffectLevel;
+
+mod malformed_paths;
+mod tool_call_intent;
 
 struct HostBridgeGuard {
     previous: Option<Arc<HostBridge>>,
@@ -33,11 +43,11 @@ fn policy_options(session_id: &str) -> crate::value::DictMap {
     let mut options = crate::value::DictMap::new();
     options.insert(
         crate::value::intern_key("session_id"),
-        crate::stdlib::json_to_vm_value(&serde_json::json!(session_id)),
+        json_to_vm_value(&serde_json::json!(session_id)),
     );
     options.insert(
         crate::value::intern_key("policy"),
-        crate::stdlib::json_to_vm_value(&serde_json::json!({
+        json_to_vm_value(&serde_json::json!({
             "tools": ["read_file"],
             "side_effect_level": "read_only",
             "tool_annotations": {
@@ -55,11 +65,11 @@ fn policy_options_without_annotations(session_id: &str) -> crate::value::DictMap
     let mut options = crate::value::DictMap::new();
     options.insert(
         crate::value::intern_key("session_id"),
-        crate::stdlib::json_to_vm_value(&serde_json::json!(session_id)),
+        json_to_vm_value(&serde_json::json!(session_id)),
     );
     options.insert(
         crate::value::intern_key("policy"),
-        crate::stdlib::json_to_vm_value(&serde_json::json!({
+        json_to_vm_value(&serde_json::json!({
             "tools": ["read_file"],
             "side_effect_level": "read_only"
         })),
@@ -79,13 +89,13 @@ async fn dispatch_read_file_with_catalog(
     catalog: Option<&crate::value::VmValue>,
     options: &crate::value::DictMap,
 ) -> serde_json::Value {
-    let call = crate::stdlib::json_to_vm_value(&serde_json::json!({
+    let call = json_to_vm_value(&serde_json::json!({
         "id": "side-effect-ceiling-call",
         "name": "read_file",
         "arguments": {"path": path},
     }));
     let result = host_agent_dispatch_tool_call(
-        crate::vm::AsyncBuiltinCtx::for_test(crate::vm::Vm::new()),
+        crate::vm::AsyncBuiltinCtx::for_test(crate::new_vm()),
         call,
         catalog,
         options,
@@ -96,7 +106,7 @@ async fn dispatch_read_file_with_catalog(
 }
 
 fn read_file_catalog_with_process_exec_annotation() -> crate::value::VmValue {
-    crate::stdlib::json_to_vm_value(&serde_json::json!({
+    json_to_vm_value(&serde_json::json!({
         "_type": "tool_registry",
         "tools": [{
             "name": "read_file",
@@ -158,7 +168,7 @@ fn responding_bridge(
 
 #[tokio::test]
 async fn side_effect_ceiling_without_host_is_terminal_and_actionable() {
-    crate::orchestration::clear_execution_policy_stacks();
+    clear_execution_policy_stacks();
     let _bridge_guard = HostBridgeGuard::replace(None);
     let directory = tempfile::tempdir().expect("tempdir");
     let path = directory.path().join("proof.txt");
@@ -195,7 +205,7 @@ async fn side_effect_ceiling_without_host_is_terminal_and_actionable() {
 
 #[tokio::test]
 async fn side_effect_ceiling_allow_runs_exactly_the_approved_dispatch() {
-    crate::orchestration::clear_execution_policy_stacks();
+    clear_execution_policy_stacks();
     let captured = Arc::new(StdMutex::new(Vec::new()));
     let bridge = responding_bridge(
         crate::llm::acp_permission::allow_response(),
@@ -234,19 +244,41 @@ async fn side_effect_ceiling_rejection_stays_terminal() {
     let captured = Arc::new(StdMutex::new(Vec::new()));
     let bridge = responding_bridge(
         crate::llm::acp_permission::reject_response(Some("user declined".to_string())),
-        captured,
+        captured.clone(),
     );
+    let review = DecisionReview::parse(&json_to_vm_value(&serde_json::json!({
+        "disposition": "needs_review",
+        "rule": "low_confidence",
+        "outcome": {
+            "kind": "low_confidence", "receipt": "side-effect-review",
+            "candidates": {}, "threshold": 0.99, "question_ids": [],
+        },
+    })))
+    .expect("typed review evidence");
     let outcome = request_side_effect_permission(
         Some(&bridge),
-        "side-effect-reject",
-        "call-reject",
-        "read_file",
-        &serde_json::json!({"path": "proof.txt"}),
-        side_effect_violation(),
-        "side effect blocked".to_string(),
-        (None, None),
+        SideEffectPermissionRequest {
+            session_id: "side-effect-reject",
+            tool_call_id: "call-reject",
+            tool_name: "read_file",
+            tool_args: &serde_json::json!({"path": "proof.txt"}),
+            violation: side_effect_violation(),
+            reason: "side effect blocked".to_string(),
+            tool_context: (None, None),
+            intent: None,
+        },
+        Some(Box::new(review)),
     )
     .await;
+
+    let requests = captured.lock().expect("captured requests");
+    let review =
+        &requests[0]["params"]["toolCall"]["_meta"]["harn"]["policyDecision"]["auto_review"];
+    assert_eq!(review["reviewer_answered"], false);
+    assert_eq!(
+        review["evaluation_review"]["outcome"]["kind"],
+        "low_confidence"
+    );
 
     match outcome {
         SideEffectPermissionOutcome::Denied {
@@ -266,7 +298,7 @@ async fn side_effect_ceiling_rejection_stays_terminal() {
 
 #[tokio::test]
 async fn dispatch_catalog_side_effect_annotation_triggers_acp_approval() {
-    crate::orchestration::clear_execution_policy_stacks();
+    clear_execution_policy_stacks();
     let captured = Arc::new(StdMutex::new(Vec::new()));
     let bridge = responding_bridge(
         crate::llm::acp_permission::reject_response(Some("fixture rejection".to_string())),
@@ -302,13 +334,17 @@ async fn side_effect_ceiling_transport_failure_stays_terminal() {
     ));
     let outcome = request_side_effect_permission(
         Some(&bridge),
-        "side-effect-transport",
-        "call-transport",
-        "read_file",
-        &serde_json::json!({"path": "proof.txt"}),
-        side_effect_violation(),
-        "side effect blocked".to_string(),
-        (None, None),
+        SideEffectPermissionRequest {
+            session_id: "side-effect-transport",
+            tool_call_id: "call-transport",
+            tool_name: "read_file",
+            tool_args: &serde_json::json!({"path": "proof.txt"}),
+            violation: side_effect_violation(),
+            reason: "side effect blocked".to_string(),
+            tool_context: (None, None),
+            intent: None,
+        },
+        None,
     )
     .await;
 

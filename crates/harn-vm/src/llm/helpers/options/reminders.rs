@@ -1,14 +1,139 @@
 use super::*;
+use crate::llm::helpers::message_view::{displays_as, MessageView};
+use crate::value::VmDictExt;
 
 pub(super) const DIRECTIVE_ENVELOPE_INSTRUCTIONS_ASSET: &str =
     "llm/prompts/directive_envelope_instructions.harn.prompt";
+pub(super) const DIRECTIVE_NONCE_AUTHORITY_ASSET: &str =
+    "llm/prompts/directive_nonce_authority.harn.prompt";
 pub(crate) const DIRECTIVE_IDS_KEY: &str = "_harn_directive_ids";
+pub(crate) const DIRECTIVE_NONCE_KEY: &str = "_harn_directive_nonce";
+
+fn recorded_directive_nonce<M: MessageView>(messages: &[M]) -> Option<String> {
+    messages.iter().find_map(|message| {
+        has_directive_commit_metadata(message)
+            .then(|| message.str_field(DIRECTIVE_NONCE_KEY))
+            .flatten()
+            .filter(|nonce| !nonce.is_empty())
+            .map(str::to_string)
+    })
+}
+
+/// Return the stable authority nonce for one agent session.
+///
+/// The session transcript owns the nonce even before a directive is committed.
+/// Legacy directive receipts can recover it during replay. Neither path trusts
+/// message text or tool output, and a new session gets a fresh marker.
+pub(crate) fn directive_nonce_for_session(session_id: &str) -> String {
+    static NONCES: std::sync::OnceLock<
+        std::sync::Mutex<std::collections::HashMap<String, String>>,
+    > = std::sync::OnceLock::new();
+
+    let recorded = crate::agent_sessions::directive_nonce(session_id).or_else(|| {
+        crate::agent_sessions::transcript(session_id)
+            .as_ref()
+            .and_then(|transcript| transcript.as_dict())
+            .and_then(|transcript| transcript.get("messages"))
+            .and_then(|messages| match messages {
+                VmValue::List(messages) => recorded_directive_nonce(messages.as_slice()),
+                _ => None,
+            })
+    });
+
+    if let Some(recorded) = recorded {
+        let _ = crate::agent_sessions::record_directive_nonce(session_id, &recorded);
+        return recorded;
+    }
+    if crate::agent_sessions::exists(session_id) {
+        let generated = uuid::Uuid::now_v7().to_string();
+        return crate::agent_sessions::record_directive_nonce(session_id, &generated)
+            .ok()
+            .flatten()
+            .unwrap_or(generated);
+    }
+
+    // Standalone reminder rendering has no session transcript. Keep its marker
+    // stable until that direct rendering caller exits.
+    let mut nonces = NONCES
+        .get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    nonces
+        .entry(session_id.to_string())
+        .or_insert_with(|| uuid::Uuid::now_v7().to_string())
+        .clone()
+}
+
+/// The session's directive contract for the system prompt: which nonce is
+/// authoritative, then how to read an envelope. A request whose system prompt
+/// states it sends its envelopes without restating it
+/// ([`elide_envelope_contract_stated_in_system`]).
+pub(super) fn directive_nonce_instructions(nonce: &str) -> String {
+    let mut bindings = crate::value::DictMap::new();
+    bindings.put_str("nonce", nonce);
+    let authority = crate::llm::helpers::render_stdlib_prompt_asset(
+        DIRECTIVE_NONCE_AUTHORITY_ASSET,
+        Some(&bindings),
+    )
+    .expect("directive nonce authority prompt asset is embedded and must render");
+    format!(
+        "{}\n{}",
+        authority.trim_end(),
+        directive_envelope_instructions()
+    )
+}
+
+/// Drop the envelope contract from each directive envelope in a request whose
+/// system prompt already states the session's complete directive contract.
+///
+/// Envelopes are rendered and persisted with the contract inline, so a
+/// transcript read anywhere stays self-describing. Every envelope a session
+/// accumulates used to restate it to the provider on every call; when this
+/// request's system prompt carries the contract, the copies are redundant.
+/// Decided per request from the two texts actually being sent, so a preview,
+/// a re-entered session, or a prompt that predates the contract can never
+/// leave an envelope without it.
+///
+/// The system prompt must carry the whole [`directive_nonce_instructions`]
+/// for `nonce`, not just the envelope text: a caller system string that quotes
+/// the envelope instructions without naming the authoritative nonce would
+/// otherwise strip the only contract the model sees. Only envelopes stamped
+/// with that same nonce are elided; an envelope under any other nonce keeps
+/// its inline contract.
+pub(crate) fn elide_envelope_contract_stated_in_system(
+    messages: &mut [serde_json::Value],
+    system: Option<&str>,
+    nonce: &str,
+) {
+    if !system.is_some_and(|system| system.contains(&directive_nonce_instructions(nonce))) {
+        return;
+    }
+    let inline = format!("\n{}\n", directive_envelope_instructions());
+    let nonce_attr = format!(" nonce=\"{nonce}\"");
+    for message in messages.iter_mut() {
+        let Some(content) = message.get("content").and_then(serde_json::Value::as_str) else {
+            continue;
+        };
+        if !content.starts_with("<context-directives ") {
+            continue;
+        }
+        let Some((open_tag, rest)) = content.split_once('>') else {
+            continue;
+        };
+        if !open_tag.ends_with(nonce_attr.as_str()) {
+            continue;
+        }
+        if let Some(directives) = rest.strip_prefix(inline.as_str()) {
+            message["content"] = serde_json::Value::String(format!("{open_tag}>\n{directives}"));
+        }
+    }
+}
 
 pub(super) fn directive_envelope_instructions() -> &'static str {
     static RENDERED: std::sync::OnceLock<String> = std::sync::OnceLock::new();
     RENDERED
         .get_or_init(|| {
-            crate::stdlib::template::render_stdlib_prompt_asset(
+            crate::llm::helpers::render_stdlib_prompt_asset(
                 DIRECTIVE_ENVELOPE_INSTRUCTIONS_ASSET,
                 None,
             )
@@ -133,7 +258,7 @@ impl RenderedReminder {
 /// Wrap rendered directive blocks in the one model-facing envelope. Both the
 /// legacy per-request projection and append-only placement render through
 /// here, so the model-visible text is identical under either placement.
-pub(crate) fn directive_envelope(rendered: &[RenderedReminder]) -> Option<String> {
+pub(crate) fn directive_envelope(rendered: &[RenderedReminder], nonce: &str) -> Option<String> {
     let blocks: Vec<&str> = rendered.iter().map(RenderedReminder::text).collect();
     if blocks.is_empty() {
         return None;
@@ -141,7 +266,7 @@ pub(crate) fn directive_envelope(rendered: &[RenderedReminder]) -> Option<String
     let instructions = directive_envelope_instructions();
     let speaker = envelope_speaker(rendered).as_str();
     Some(format!(
-        "<context-directives speaker=\"{speaker}\">\n{instructions}\n{}\n</context-directives>",
+        "<context-directives speaker=\"{speaker}\" nonce=\"{nonce}\">\n{instructions}\n{}\n</context-directives>",
         blocks.join("\n")
     ))
 }
@@ -150,9 +275,10 @@ pub(crate) fn directive_envelope(rendered: &[RenderedReminder]) -> Option<String
 /// role its speaker projects onto.
 pub(crate) fn directive_envelope_message(
     rendered: &[RenderedReminder],
+    nonce: &str,
 ) -> Option<serde_json::Value> {
     let role = envelope_speaker(rendered).transport_role();
-    directive_envelope(rendered).map(|envelope| {
+    directive_envelope(rendered, nonce).map(|envelope| {
         let mut message = serde_json::json!({"role": role, "content": envelope});
         let reminder_ids: Vec<&str> = rendered
             .iter()
@@ -161,6 +287,7 @@ pub(crate) fn directive_envelope_message(
         if !reminder_ids.is_empty() {
             message[DIRECTIVE_IDS_KEY] = serde_json::json!(reminder_ids);
         }
+        message[DIRECTIVE_NONCE_KEY] = serde_json::json!(nonce);
         message
     })
 }
@@ -170,30 +297,34 @@ pub(crate) fn tracked_directive_envelope_message(
     reminder_id: &str,
     text: &str,
 ) -> serde_json::Value {
-    directive_envelope_message(&[RenderedReminder::tracked(
-        reminder_id,
-        text,
-        DirectiveSpeaker::Harness,
-    )])
+    directive_envelope_message(
+        &[RenderedReminder::tracked(
+            reminder_id,
+            text,
+            DirectiveSpeaker::Harness,
+        )],
+        "test-directive-nonce",
+    )
     .expect("tracked directive is non-empty")
 }
 
-/// Remove durable placement receipts before a message array reaches any
-/// provider. The receipts distinguish reminder instances inside Harn; the
-/// model-facing directive text carries authority and lifetime, not IDs.
-pub(crate) fn strip_directive_commit_metadata(messages: &mut [serde_json::Value]) {
+/// Remove transcript-only metadata before admission and provider dispatch.
+/// The model-facing text retains the correction and directive authority;
+/// placement IDs and withdrawn-report markers remain in the durable transcript.
+pub(crate) fn strip_internal_message_metadata(messages: &mut [serde_json::Value]) {
     for message in messages {
         if let Some(object) = message.as_object_mut() {
             object.remove(DIRECTIVE_IDS_KEY);
+            object.remove(crate::llm::agent_result_projection::BOOKKEEPING_TURN_KEY);
+            object.remove(DIRECTIVE_NONCE_KEY);
         }
     }
 }
 
-pub(crate) fn has_directive_commit_metadata(message: &serde_json::Value) -> bool {
+pub(crate) fn has_directive_commit_metadata<M: MessageView>(message: &M) -> bool {
     message
-        .get(DIRECTIVE_IDS_KEY)
-        .and_then(serde_json::Value::as_array)
-        .is_some_and(|ids| !ids.is_empty())
+        .list_len_field(DIRECTIVE_IDS_KEY)
+        .is_some_and(|len| len > 0)
 }
 
 pub(super) fn reminder_directive_text(reminder: &SystemReminder) -> String {
@@ -202,10 +333,17 @@ pub(super) fn reminder_directive_text(reminder: &SystemReminder) -> String {
         .map(|turns| format!(" ttl_turns=\"{turns}\""))
         .unwrap_or_default();
     format!(
-        "<directive authority=\"{}\"{}>\n{}\n</directive>",
+        "<directive authority=\"{}\"{}><![CDATA[\n{}\n]]></directive>",
         reminder.authority.as_str(),
         lifetime,
-        escape_xml_text(&reminder.body)
+        // CDATA keeps commands verbatim. Only the envelope's own tags are
+        // escaped, so quoted text inside a body cannot close the real
+        // envelope early or open a second one.
+        reminder
+            .body
+            .replace("]]>", "]]]]><![CDATA[>")
+            .replace("<context-directives", "&lt;context-directives")
+            .replace("</context-directives", "&lt;/context-directives")
     )
 }
 
@@ -297,7 +435,10 @@ pub(crate) fn pending_reminders_from_session(session_id: Option<&str>) -> Vec<Sy
         let Some(dict) = event.as_dict() else {
             continue;
         };
-        if dict.get("kind").map(VmValue::display).as_deref() != Some(SYSTEM_REMINDER_EVENT_KIND) {
+        if !dict
+            .get("kind")
+            .is_some_and(|kind| displays_as(kind, SYSTEM_REMINDER_EVENT_KIND))
+        {
             continue;
         }
         invalid_count += 1;
@@ -406,10 +547,11 @@ fn dedupe_and_order_directives(reminders: Vec<SystemReminder>) -> Vec<SystemRemi
 pub(crate) fn apply_rendered_reminder_messages(
     messages: Vec<serde_json::Value>,
     rendered: &[RenderedReminder],
+    nonce: &str,
 ) -> Vec<serde_json::Value> {
     let mut messages = messages;
     let pending = super::directive_placement::uncommitted_directives(&messages, rendered);
-    if let Some(message) = directive_envelope_message(&pending) {
+    if let Some(message) = directive_envelope_message(&pending, nonce) {
         messages.push(message);
     }
     messages

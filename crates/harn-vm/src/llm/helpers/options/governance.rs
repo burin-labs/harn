@@ -68,6 +68,9 @@ mod tests {
         options.put_str("provider", "mock");
         options.put_str("model", "no-cache-model");
         options.insert("tools".into(), VmValue::dict(registry));
+        // Tool guidance projection is under test, not the tool channel: model
+        // the agent loop's call, which renders the text-channel contract.
+        options.insert("_tool_contract_rendered".into(), VmValue::Bool(true));
         let opts = extract_llm_options(&[
             VmValue::String("hello".into()),
             VmValue::Nil,

@@ -1,11 +1,27 @@
 //! OpenRouter upstream-routing directives on the assembled body.
 
 use super::fixtures::base_request_payload;
-use crate::llm::providers::openai_compat::{
-    apply_openrouter_provider_order, apply_openrouter_route_denylist,
-    ensure_openrouter_require_parameters, OpenAiCompatibleProvider,
-};
+use crate::llm::providers::openai_compat::OpenAiCompatibleProvider;
 use serde_json::json;
+
+#[test]
+fn option_probes_require_parameter_support_on_openrouter_only() {
+    let mut payload = base_request_payload();
+    payload.model = "openai/gpt-6-luna".to_string();
+    payload.provider_contract_probe = Some(crate::llm::capabilities::PortableOption::Temperature);
+    let body = OpenAiCompatibleProvider::build_request_body(&payload);
+    assert_eq!(body["temperature"], 0.0);
+    assert_eq!(body["provider"]["require_parameters"], true);
+
+    payload.provider_contract_probe = None;
+    let body = OpenAiCompatibleProvider::build_request_body(&payload);
+    assert!(body.get("provider").is_none());
+
+    payload.provider = "fireworks".to_string();
+    payload.provider_contract_probe = Some(crate::llm::capabilities::PortableOption::Temperature);
+    let body = OpenAiCompatibleProvider::build_request_body(&payload);
+    assert!(body.get("provider").is_none());
+}
 
 #[test]
 fn openrouter_structured_output_requires_supported_parameters() {
@@ -25,22 +41,6 @@ fn openrouter_structured_output_requires_supported_parameters() {
 }
 
 #[test]
-fn openrouter_require_parameters_preserves_provider_preferences() {
-    let mut body = serde_json::json!({
-        "model": "google/gemma-4-26b-a4b-it",
-        "messages": [],
-        "response_format": {"type": "json_schema"},
-        "provider": {"order": ["Fireworks"], "sort": "throughput"},
-    });
-
-    ensure_openrouter_require_parameters(&mut body);
-
-    assert_eq!(body["provider"]["order"][0], "Fireworks");
-    assert_eq!(body["provider"]["sort"], "throughput");
-    assert_eq!(body["provider"]["require_parameters"], true);
-}
-
-#[test]
 fn openrouter_builder_projects_top_k_after_admission() {
     let mut payload = base_request_payload();
     payload.model = "google/gemma-4-26b-a4b-it".to_string();
@@ -53,33 +53,6 @@ fn openrouter_builder_projects_top_k_after_admission() {
     let body = OpenAiCompatibleProvider::build_request_body(&payload);
     assert_eq!(body["top_k"].as_i64(), Some(64));
     assert_eq!(body["provider"]["require_parameters"], true);
-}
-
-#[test]
-fn route_denylist_seeds_provider_ignore_on_empty_body() {
-    let mut body = json!({"model": "qwen/qwen3.6-35b-a3b"});
-    apply_openrouter_route_denylist(&mut body, &["Ambient".to_string()]);
-    assert_eq!(body["provider"]["ignore"], json!(["Ambient"]));
-}
-
-#[test]
-fn route_denylist_merges_and_dedupes_existing_ignore() {
-    let mut body = json!({
-        "model": "qwen/qwen3.6-35b-a3b",
-        "provider": { "ignore": ["X"], "require_parameters": true }
-    });
-    apply_openrouter_route_denylist(&mut body, &["Ambient".to_string(), "X".to_string()]);
-    // Existing entry preserved, new entry appended, duplicate not re-added.
-    assert_eq!(body["provider"]["ignore"], json!(["X", "Ambient"]));
-    // Unrelated provider keys are left untouched.
-    assert_eq!(body["provider"]["require_parameters"], json!(true));
-}
-
-#[test]
-fn route_denylist_noop_for_empty_deny() {
-    let mut body = json!({"model": "qwen/qwen3.6-35b-a3b"});
-    apply_openrouter_route_denylist(&mut body, &[]);
-    assert!(body.get("provider").is_none());
 }
 
 #[test]
@@ -112,34 +85,6 @@ fn build_request_body_applies_qwen36_ambient_denylist_for_openrouter_only() {
 }
 
 #[test]
-fn provider_order_pins_closed_allowlist() {
-    let mut body = json!({"model": "openai/gpt-oss-120b"});
-    apply_openrouter_provider_order(&mut body, &["Cerebras".to_string(), "Groq".to_string()]);
-    assert_eq!(body["provider"]["order"], json!(["Cerebras", "Groq"]));
-    assert_eq!(body["provider"]["allow_fallbacks"], json!(false));
-}
-
-#[test]
-fn provider_order_respects_caller_order_but_forces_closed() {
-    // A caller-supplied order is preserved; allow_fallbacks is still forced
-    // false so the pin is genuinely closed.
-    let mut body = json!({
-        "model": "openai/gpt-oss-120b",
-        "provider": { "order": ["Groq"], "allow_fallbacks": true }
-    });
-    apply_openrouter_provider_order(&mut body, &["Cerebras".to_string(), "Groq".to_string()]);
-    assert_eq!(body["provider"]["order"], json!(["Groq"]));
-    assert_eq!(body["provider"]["allow_fallbacks"], json!(false));
-}
-
-#[test]
-fn provider_order_noop_for_empty() {
-    let mut body = json!({"model": "openai/gpt-oss-120b"});
-    apply_openrouter_provider_order(&mut body, &[]);
-    assert!(body.get("provider").is_none());
-}
-
-#[test]
 fn build_request_body_pins_gpt_oss_openrouter_to_clean_subproviders() {
     // The openrouter openai/gpt-oss-* capability row carries
     // openrouter_provider_order = ["Cerebras", "Groq"]; build_request_body
@@ -149,6 +94,7 @@ fn build_request_body_pins_gpt_oss_openrouter_to_clean_subproviders() {
     payload.provider = "openrouter".to_string();
     payload.model = "openai/gpt-oss-120b".to_string();
     let body = OpenAiCompatibleProvider::build_request_body(&payload);
+    assert_eq!(body["provider"]["only"], json!(["Cerebras", "Groq"]));
     assert_eq!(
         body["provider"]["order"],
         json!(["Cerebras", "Groq"]),

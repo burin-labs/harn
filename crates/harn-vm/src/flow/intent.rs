@@ -72,6 +72,7 @@ impl<'de> Deserialize<'de> for IntentId {
 
 /// Errors produced when parsing or validating intent inputs.
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum IntentError {
     /// Invalid field shape or value.
     Invalid(String),

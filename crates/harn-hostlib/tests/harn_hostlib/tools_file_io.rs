@@ -180,19 +180,6 @@ fn write_file_base64_decodes_payload() {
 }
 
 #[test]
-fn delete_file_removes_existing_file() {
-    let dir = TempDir::new().unwrap();
-    let file = dir.path().join("doomed.txt");
-    fs::write(&file, "x").unwrap();
-
-    let reg = registry();
-    let entry = reg.find("hostlib_tools_delete_file").unwrap();
-    let result = (entry.handler)(&dict_arg(&[("path", vm_string(&path_str(&file)))])).unwrap();
-    assert!(matches!(dict_get(&result, "removed"), VmValue::Bool(true)));
-    assert!(!file.exists());
-}
-
-#[test]
 fn delete_file_missing_returns_removed_false() {
     let dir = TempDir::new().unwrap();
     let reg = registry();

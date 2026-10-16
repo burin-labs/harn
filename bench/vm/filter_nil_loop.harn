@@ -2,7 +2,7 @@ import { filter_nil, pick_keys } from "std/collections"
 
 /**
  * Mirrors the `filter_nil(merge(config, {...}))` and `pick_keys` pipelines
- * every connector helper (notion/linear/github/slack) runs on each call to
+ * every connector helper (linear/github/slack) runs on each call to
  * build option dicts. The fixture exercises both helpers to keep changes
  * honest about the path they share.
  */

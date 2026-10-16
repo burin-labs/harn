@@ -1,4 +1,6 @@
-//! Source-extension and excluded-directory tables for deterministic scans.
+//! Source-file and excluded-directory rules for deterministic scans.
+
+use harn_languages::Language;
 
 /// Directory names that the scanner refuses to traverse, regardless of
 /// `.gitignore` state.
@@ -32,60 +34,6 @@ pub const EXCLUDED_DIRS: &[&str] = &[
     ".parcel-cache",
 ];
 
-/// File extensions the scanner indexes.
-pub const SOURCE_EXTENSIONS: &[&str] = &[
-    "swift",
-    "ts",
-    "tsx",
-    "js",
-    "jsx",
-    "mjs",
-    "cjs",
-    "py",
-    "go",
-    "rs",
-    "rb",
-    "java",
-    "kt",
-    "cpp",
-    "c",
-    "h",
-    "hpp",
-    "cs",
-    "php",
-    "vue",
-    "svelte",
-    "html",
-    "css",
-    "scss",
-    "less",
-    "sql",
-    "graphql",
-    "proto",
-    "md",
-    "json",
-    "yaml",
-    "yml",
-    "toml",
-    "xml",
-    "sh",
-    "bash",
-    "zsh",
-    "dart",
-    "scala",
-    "sc",
-    "dockerfile",
-    "zig",
-    "zon",
-    "ex",
-    "exs",
-    "lua",
-    "hs",
-    "lhs",
-    "r",
-    "rmd",
-];
-
 /// Returns true when the `name` segment of a path is in [`EXCLUDED_DIRS`].
 pub fn is_excluded_dir(name: &str) -> bool {
     EXCLUDED_DIRS.contains(&name)
@@ -98,23 +46,15 @@ pub fn should_traverse(relative_path: &str) -> bool {
         .all(|segment| !is_excluded_dir(segment))
 }
 
-/// True when [`should_traverse`] holds *and* the file extension is in
-/// [`SOURCE_EXTENSIONS`].
+/// True when [`should_traverse`] holds *and* the language registry
+/// recognizes the file by name or extension.
 pub fn should_include(relative_path: &str) -> bool {
-    if !should_traverse(relative_path) {
-        return false;
-    }
-    let ext = file_extension(relative_path);
-    SOURCE_EXTENSIONS.contains(&ext.as_str())
+    should_traverse(relative_path) && file_language(relative_path).is_some()
 }
 
-/// Lowercase extension, no leading dot. Returns `""` for paths without one.
-pub fn file_extension(relative_path: &str) -> String {
-    let last = relative_path.rsplit('/').next().unwrap_or(relative_path);
-    match last.rsplit_once('.') {
-        Some((_, ext)) if !ext.is_empty() => ext.to_ascii_lowercase(),
-        _ => String::new(),
-    }
+/// The registry language of a posix-style relative path.
+pub fn file_language(relative_path: &str) -> Option<Language> {
+    Language::from_path(relative_path)
 }
 
 /// Last path component (file name) for a posix-style relative path.
@@ -153,8 +93,10 @@ mod tests {
     }
 
     #[test]
-    fn include_requires_source_extension() {
+    fn include_requires_a_registry_language() {
         assert!(should_include("src/main.rs"));
+        assert!(should_include("app/Dockerfile"));
+        assert!(should_include("src/build.gradle.kts"));
         assert!(!should_include("src/main.txt"));
         assert!(!should_include("README"));
     }

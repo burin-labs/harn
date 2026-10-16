@@ -38,7 +38,7 @@ env:
 jobs:
   flake-rerun:
     name: Budget-aware flake rerun (touched tests)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 180
     steps:
       # Anchor the wall-clock budget as early as possible so it covers every
@@ -116,7 +116,7 @@ jobs:
 
       - name: Install cargo-nextest
         if: steps.touched.outputs.has_tests == 'true'
-        uses: taiki-e/install-action@3f74d7c16a4242f1c95561e98edc25d36adb4375 # v2.87.12
+        uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2.87.22
         continue-on-error: true
         with:
           tool: nextest@0.9.132
@@ -211,7 +211,7 @@ jobs:
             iter=$(( completed + 1 ))
             printf -- '--- Iteration %d/%d (%ds budget left) ---\n' "$iter" "$ceiling" "$remaining"
             start=$(date +%s)
-            if ! cargo nextest run --locked \
+            if ! cargo-nextest nextest run --locked \
               --workspace \
               --profile flake-detection \
               --test-threads 8 \

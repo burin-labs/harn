@@ -17,6 +17,7 @@ async fn lazy_dispatcher(
     install_manifest_triggers(vec![TriggerBindingSpec {
         id: "lazy-github-issue".to_string(),
         source: TriggerBindingSource::Manifest,
+        ingress_subscription: false,
         kind: "webhook".to_string(),
         provider: ProviderId::from("github"),
         autonomy_tier,
@@ -50,7 +51,7 @@ async fn lazy_dispatcher(
     .await
     .expect("install lazy trigger");
 
-    let mut vm = Vm::new();
+    let mut vm = crate::new_vm();
     register_vm_stdlib(&mut vm);
     vm.register_builtin("__test_current_policy", |_args, _out| {
         let level = crate::orchestration::current_execution_policy()

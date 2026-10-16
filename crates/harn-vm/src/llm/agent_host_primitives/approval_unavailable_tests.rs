@@ -1,4 +1,5 @@
 use super::{agent_primitive_denied_tool, host_agent_dispatch_tool_call};
+use crate::NativeBuiltinCtxExt;
 
 #[test]
 fn approval_unavailable_names_terminal_risk_class() {
@@ -70,7 +71,7 @@ async fn approval_unavailable_denials_share_terminal_risk_class_across_arg_varia
     let mut options = crate::value::DictMap::new();
     options.insert(
         crate::value::intern_key("session_id"),
-        crate::stdlib::json_to_vm_value(&serde_json::json!(
+        crate::schema::json_to_vm_value(&serde_json::json!(
             "approval-unavailable-terminal-class-test"
         )),
     );
@@ -111,13 +112,13 @@ async fn approval_unavailable_denials_share_terminal_risk_class_across_arg_varia
 }
 
 async fn dispatch_exec(command: &str, options: &crate::value::DictMap) -> serde_json::Value {
-    let call = crate::stdlib::json_to_vm_value(&serde_json::json!({
+    let call = crate::schema::json_to_vm_value(&serde_json::json!({
         "id": format!("exec-{command}"),
         "name": "exec",
         "arguments": {"command": command},
     }));
     let result = host_agent_dispatch_tool_call(
-        crate::vm::AsyncBuiltinCtx::for_test(crate::vm::Vm::new()),
+        crate::vm::AsyncBuiltinCtx::for_test(crate::new_vm()),
         call,
         None,
         options,
@@ -125,4 +126,62 @@ async fn dispatch_exec(command: &str, options: &crate::value::DictMap) -> serde_
     .await
     .expect("approval-unavailable denial is a normal dispatch result");
     crate::llm::helpers::vm_value_to_json(&result)
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn live_dispatch_uses_typed_run_approval_in_both_directions() {
+    use crate::orchestration::*;
+    use std::sync::{Arc, Mutex};
+
+    clear_execution_policy_stacks();
+    clear_approval_reviewers();
+    crate::llm::clear_current_host_bridge();
+    let policy = ToolApprovalPolicy {
+        require_approval: vec!["exec".to_string()],
+        ..ToolApprovalPolicy::default()
+    };
+    push_approval_policy(policy.clone());
+    let options = crate::value::DictMap::new();
+    let typed = current_run_approval_policy().expect("live typed policy");
+    assert_eq!(
+        typed.posture().approval_availability,
+        ApprovalAvailability::Unavailable
+    );
+    let denied = typed.evaluate_detailed_with_repeat("exec", &serde_json::json!({}), 0);
+    assert!(denied.is_deny());
+    let dispatched = dispatch_exec("printf hello", &options).await;
+    assert_eq!(
+        dispatched["result"]["denial"]["gate"],
+        "approval_unavailable"
+    );
+    assert_eq!(
+        denied.matched_rule.as_ref().unwrap().source,
+        "approval_unavailable"
+    );
+    // Transport preserves the declaration; a host installed after the policy
+    // must still receive the ask rather than inherit an irreversible denial.
+    assert_eq!(current_approval_policy(), Some(policy));
+
+    let seen = Arc::new(Mutex::new(0));
+    crate::llm::install_current_host_bridge(super::auto_review_decider_tests::rejecting_bridge(
+        seen.clone(),
+    ));
+    let typed = current_run_approval_policy().expect("live typed policy with host");
+    assert_eq!(
+        typed.posture().approval_availability,
+        ApprovalAvailability::Available
+    );
+    assert!(typed
+        .evaluate_detailed_with_repeat("exec", &serde_json::json!({}), 0)
+        .is_ask());
+    let dispatched = dispatch_exec("printf hello", &options).await;
+    assert_eq!(dispatched["result"]["denial"]["gate"], "host_rejected");
+    assert_eq!(
+        *seen.lock().unwrap(),
+        1,
+        "the available host was actually asked"
+    );
+    crate::llm::clear_current_host_bridge();
+    pop_approval_policy();
+    clear_all_approval_policy_repeat_counts();
 }

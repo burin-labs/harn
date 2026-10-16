@@ -15,8 +15,10 @@ The default chain is:
 env -> keyring
 ```
 
-Use `harn doctor` to inspect the active chain and to verify that the keyring
-backend is reachable on the current machine.
+Use `harn doctor` to inspect the active chain and to see whether the keyring
+backend is available, locked, or unavailable on the current machine.
+`harn doctor --check-keyring-write` also writes, reads, and deletes a probe
+credential.
 
 ## Secret model
 
@@ -75,6 +77,7 @@ Methods:
 
 - `read(name, scope?) -> string`
 - `read_bytes(name, scope?) -> bytes`
+- `read_cli(provider, options?) -> string`
 - `write(name, value, scope?, ttl_ms?) -> dict`
 - `rotate(name, generator_or_value, scope?, options?) -> dict`
 - `lease(name, duration_ms, scope?) -> dict`
@@ -86,6 +89,25 @@ Omitted tenant scope uses the ambient `harness.tenant` id when the host bound
 one. The VM passes the ambient request id and authenticated principal facts to
 the provider for audit, but the provider owns policy, encryption, rotation,
 lease persistence, and any external KMS or vault adapter.
+
+`read_cli("github", {hostname: "github.com", user: "octo-bot"})` reads the
+GitHub CLI's stored token for that host and login. Omitting `user` selects the
+CLI's active account. It clears ambient token variables, preserves only the
+CLI configuration and executable lookup environment, and captures at most
+8 KiB in private memory with a ten-second deadline. It writes no command
+output artifacts. Unknown providers, malformed host or login values, failed
+commands, empty output, whitespace, and oversized output refuse the read.
+The secret-read ceiling still applies; this method does not create or rotate
+a credential. Authenticated, tenant-bound, and connector-dispatch contexts
+cannot read the host's CLI credential. They use their configured secret store.
+Closed memory and environment-only stores also deny this source. The bound
+provider must explicitly allow local CLI reads; local keyring and file stores
+do so. A parent-supplied closed store never expands its credential authority.
+The reader uses the existing process sandbox and cleanup owner, selects an
+installed GitHub CLI without searching `PATH`, and emits the existing sanitized
+secret-access audit event. Unix installs under `/usr/bin`, `/usr/local`, or
+Homebrew and Windows' GitHub CLI installer directories are supported. Other
+installation locations refuse the read.
 
 Secret names in `namespace/name` or `harn-secret://namespace/name[@version]`
 form are treated as canonical secret ids and are not rewritten into the
@@ -106,6 +128,13 @@ credential `harn connect` can store is one the runtime can read. `harn run`,
 name the same backend, and package scripts read canonical connector ids such as
 `google_workspace/access-token` without knowing the host keyring namespace.
 
+`harn connect` resolves through the same `HARN_SECRET_PROVIDERS` chain as
+scripts. Under `HARN_SECRET_PROVIDERS=file`, it stores credentials in the file
+that later runs read. It refuses to store into a chain with no persistent
+provider, such as `env` alone, because the value would vanish when the process
+exits. Unset the variable, or include `keyring` or `file`, before running
+`harn connect`.
+
 Automated tests and CI should not touch the OS credential store. Use
 `HARN_SECRET_PROVIDERS=env` plus test-only `HARN_SECRET_*` variables for
 secret-dependent smokes, or inject a mock `Harness`. `harn test`, `make test`,
@@ -116,14 +145,17 @@ worktrees can still prompt again. Long-running automation should use a stable
 signed helper, broker, or external vault instead of relying on per-build
 Keychain prompts.
 
-### Keychain dialogs
+### Keychain dialogs and unlock prompts
 
-On macOS, reading a stored value can raise a Keychain access dialog. Harn
-raises one only when a person can answer it:
+On macOS, reading a stored value can raise a Keychain access dialog. On Linux,
+any operation that meets a locked Secret Service collection raises an unlock
+prompt. Harn raises either one only when a person can answer it:
 
 - Status and availability questions (`harness.llm.providers()`,
   `harn doctor`, `harn models recommend`, routing) check whether a credential
   exists without reading it, so they never raise a dialog.
+- `harn doctor` reads a Linux collection's lock state instead of unlocking
+  it, and reports a locked store as locked rather than unavailable.
 - A process with no terminal on stdin, or one running under `CI`, never
   raises a dialog. A read that would need one fails with a typed
   needs-approval error naming the credential, and provider status reports
@@ -140,6 +172,20 @@ The provider order is controlled with `HARN_SECRET_PROVIDERS`:
 ```bash
 export HARN_SECRET_PROVIDERS=env,keyring
 ```
+
+A chain that leaves out a default provider cannot see secrets stored there.
+Under `HARN_SECRET_PROVIDERS=env`, a credential that `harn connect` saved in
+the keyring reads as missing. A missing secret therefore names the providers
+that were consulted and the defaults that were left out:
+
+```text
+secret 'google_workspace/oauth-token' not found in providers: env (HARN_SECRET_GOOGLE_WORKSPACE_OAUTH_TOKEN); keyring disabled by HARN_SECRET_PROVIDERS=env
+```
+
+Scripts see this as a `not_found` error from `harness.secrets.read`. The
+`std/oauth` client adds the same detail to its "no token in storage"
+diagnostic. `harn doctor` warns about each default provider the chain leaves
+out.
 
 The doctor output also reports the namespace used for backend grouping. It is
 `harn.provider_auth` for every surface. Override it — for an isolated workspace
@@ -200,6 +246,16 @@ export HARN_SECRET_HARN_ORCHESTRATOR_GITHUB_INSTALLATION_12345_PRIVATE_KEY="$(ca
 
 Non-alphanumeric characters are normalized to underscores and multiple
 separators collapse.
+
+The environment provider is a read-only override within a chain. A write
+through the chain (`harness.secrets.write`, `std/oauth` secrets storage) goes
+to the persistent providers, such as `keyring` or `file`, in chain order. The
+first one that accepts the value stores it. If every persistent provider
+refuses, the write fails. It never falls back to a variable that disappears
+when the process exits. The write receipt's `provider` field names
+the backend that stored the value. Only a chain with no persistent provider,
+such as `HARN_SECRET_PROVIDERS=env`, writes to the process environment, and
+its receipt says `env`.
 
 ## Keyring provider
 

@@ -1,0 +1,114 @@
+import { read_yaml } from "std/fs"
+
+fn workflow(fs: HarnessFs, name: string) -> dict {
+  return read_yaml(fs, path_join(fs.source_dir(), "../../../.github/workflows/" + name))
+}
+
+fn step(job: dict, name: string) -> dict {
+  return (job?.steps ?? []).find({ item -> item?.name == name }) ?? {}
+}
+
+@complexity(allow)
+fn policy_errors(build: dict, promotion: dict) -> list<string> {
+  let errors: list<string> = []
+  const candidate = build?.jobs?.candidate ?? {}
+  const plan = promotion?.jobs?.plan ?? {}
+  const publish = promotion?.jobs?.promote ?? {}
+  const expression = "$" + "{{ github.sha }}"
+  if build?.on?.workflow_dispatch?.inputs?.expected_source_sha?.required != true
+    || promotion?.on?.workflow_dispatch?.inputs?.candidate_run_id?.required != true
+    || promotion?.on?.workflow_dispatch?.inputs?.candidate_source_sha?.required != true
+    || promotion?.on?.workflow_dispatch?.inputs?.version != nil {
+    errors = errors + ["immutable manual source/run inputs"]
+  }
+  if candidate?.get("if") != "github.ref == 'refs/heads/main'"
+    || plan?.get("if") != "github.ref == 'refs/heads/main'" {
+    errors = errors + ["main-only policy"]
+  }
+  const checkout = step(candidate, "Check out the workflow's exact source")
+  const policy = step(plan, "Check out trusted current promotion policy")
+  if checkout?.with?.ref != expression || policy?.with?.ref != expression
+    || checkout?.with?.get("persist-credentials") != false
+    || policy?.with?.get("persist-credentials") != false {
+    errors = errors + ["exact checkout without persisted credentials"]
+  }
+  if step(candidate, "Install the qualified runtime")?.with?.version != "0.10.166"
+    || step(plan, "Install the qualified runtime")?.with?.version != "0.10.166"
+    || step(plan, "Install locked evidence readers")?.run != "harn install --frozen" {
+    errors = errors + ["published runtime and frozen readers"]
+  }
+  const metadata = step(candidate, "Upload byte-identical metadata for bounded selection")
+  if metadata?.with?.name != "harn-smart-ship-package-metadata"
+    || metadata?.with?.path != ".harn/smart-ship-candidate/package-release.json"
+    || metadata?.with?.get("if-no-files-found") != "error" {
+    errors = errors + ["single-member metadata projection"]
+  }
+  const manifest = step(candidate, "Upload the candidate manifest")
+  if manifest?.with?.name != "candidate-manifest-" + expression
+    || manifest?.with?.get("if-no-files-found") != "error" {
+    errors = errors + ["source-bound candidate manifest"]
+  }
+  const selection = step(plan, "Select the verified package identity")
+  const command = to_string(selection?.run ?? "")
+  if !command.contains("--environment-policy granted")
+    || !command.contains("github=env:GITHUB_TOKEN,expose=GITHUB_TOKEN,to=in_process")
+    || !command.contains("output=env:GITHUB_OUTPUT,expose=GITHUB_OUTPUT,to=in_process")
+    || command.contains("--no-sandbox")
+    || command.contains("gh release") {
+    errors = errors + ["read-only in-process provider grant"]
+  }
+  if publish?.uses
+    != "burin-labs/.github/.github/workflows/promote-release.yml@7ad0bd4ea627af9a18f4d633d40e3e30975917c6"
+    || publish?.needs != "plan"
+    || publish?.with?.tag != "$" + "{{ needs.plan.outputs.tag }}"
+    || publish?.with?.sha != "$" + "{{ needs.plan.outputs.source }}"
+    || publish?.with?.get("run-id") != "$" + "{{ needs.plan.outputs.run }}"
+    || plan?.permissions?.contents != "read"
+    || plan?.permissions?.actions != "read" {
+    errors = errors + ["single existing publisher using selected identity"]
+  }
+  return errors
+}
+
+pipeline test_package_workflow_policy_and_negative_controls(harness: Harness) {
+  const build = workflow(harness.fs, "build-smart-ship-package.yml")
+  const promotion = workflow(harness.fs, "promote-smart-ship-package.yml")
+  assert_eq(policy_errors(build, promotion), [])
+  const wrong_publisher = promotion
+    + {jobs: promotion.jobs + {promote: promotion.jobs.promote + {uses: "another/writer@main"}}}
+  assert(
+    policy_errors(build, wrong_publisher).contains(
+      "single existing publisher using selected identity",
+    ),
+  )
+  const missing_metadata = build
+    + {
+      jobs: build.jobs
+        + {
+          candidate: build.jobs.candidate
+            + {
+              steps: build.jobs.candidate.steps.filter(
+                { item -> item?.name != "Upload byte-identical metadata for bounded selection" },
+              )
+                .to_list(),
+            },
+        },
+    }
+  assert(policy_errors(missing_metadata, promotion).contains("single-member metadata projection"))
+}
+
+pipeline test_native_release_asset_writers_are_scoped_to_runtime_tags(harness: Harness) {
+  const sdk = workflow(harness.fs, "sdk-codegen.yml")
+  const runtime_release = "startsWith(github.event.release.tag_name, 'v')"
+  assert_eq(sdk.jobs.generate.get("if"), "github.event_name != 'release' || " + runtime_release)
+  assert_eq(
+    sdk.jobs.get("require-both").get("if"),
+    "always() && !cancelled() && (github.event_name != 'release' || " + runtime_release + ")",
+  )
+  assert_eq(
+    sdk.jobs.get("publish-release-assets").get("if"),
+    "github.event_name == 'release' && " + runtime_release,
+  )
+  const native = workflow(harness.fs, "publish-release.yml")
+  assert_eq(native.on.push.tags, ["v*"])
+}

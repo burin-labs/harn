@@ -60,8 +60,10 @@ keyring. If that write fails, Harn names any environment variables declared for
 the same secret. It never prints their values.
 
 Run `harn doctor` when keyring storage should work. The `secret:keyring` check
-writes, reads, and deletes a unique scratch entry. A locked or read-only store
-therefore fails the check instead of appearing healthy.
+reports the store as available, locked, or unavailable with a reason. It writes
+nothing and never raises an unlock prompt. Add `--check-keyring-write` to also
+write, read, and delete a unique scratch entry, so a read-only store fails the
+check instead of appearing healthy.
 
 ### GitHub App and user OAuth
 
@@ -207,7 +209,6 @@ fixtures declared by that package.
 harn package verify . --provider github
 harn package verify . --provider slack
 harn package verify . --provider linear
-harn package verify . --provider notion --run-poll-tick
 harn package verify . --provider circleci
 harn package verify . --provider buildkite
 harn package verify . --provider bitbucket
@@ -246,7 +247,7 @@ duplicate delivery. The required observations are:
 
 Slack URL verification is the one immediate-response route: it must return the
 challenge only after Slack request authentication succeeds and must not enqueue
-an event. Notion polling must additionally prove that a restarted poll resumes
+an event. Polling connectors must additionally prove that a restarted poll resumes
 from the committed cursor without re-emitting the same dedupe key.
 
 ## Action and OAuth gate

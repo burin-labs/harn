@@ -33,7 +33,7 @@ concurrency:
 jobs:
   guard:
     name: Run the guard's tests on the runtime its consumers pin
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
       contents: read

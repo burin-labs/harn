@@ -402,7 +402,7 @@ fn strip_connector_prefix(record_name: &str) -> &str {
     record_name
 }
 
-const CONNECTOR_PREFIXES: &[&str] = &["GitHub", "Slack", "Linear", "Notion"];
+const CONNECTOR_PREFIXES: &[&str] = &["GitHub", "Slack", "Linear"];
 
 /// The wire `event` discriminator a payload record dispatches on, derived from
 /// the variant stem by snake-casing it. The common-record fallback has no

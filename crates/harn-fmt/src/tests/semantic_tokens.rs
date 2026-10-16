@@ -19,9 +19,8 @@ fn current_harn_corpus_preserves_tokens_idempotence_and_width() {
     // A few real stdlib modules contain deeply nested expressions. Match the
     // CLI's practical stack headroom instead of making the invariant depend on
     // libtest's comparatively small worker stack.
-    std::thread::Builder::new()
+    harn_parser::runtime_stack::builder()
         .name("harn-fmt-corpus-audit".into())
-        .stack_size(16 * 1024 * 1024)
         .spawn(audit_current_harn_corpus)
         .expect("failed to spawn corpus audit thread")
         .join()

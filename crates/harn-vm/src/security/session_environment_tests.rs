@@ -6,6 +6,283 @@
 
 use super::*;
 
+#[test]
+fn host_inference_ceiling_survives_isolation_and_withholds_child_exposure() {
+    use crate::llm::api::inference_boundary::HOST_BOUNDARY_ENV;
+    use crate::llm::api::{InferenceBoundary, InferenceReach};
+    let host = InferenceBoundary {
+        reach: InferenceReach::LocalOnly,
+        allow_training_discounts: false,
+    };
+    let snapshot = BTreeMap::from([
+        (HOST_BOUNDARY_ENV.into(), "untrusted ambient value".into()),
+        ("UNCHANGED_SENTINEL".into(), "retained".into()),
+    ]);
+    let parent = SessionEnvironment::launch_from_snapshot(
+        EnvironmentPolicyKind::Inherited,
+        vec![],
+        snapshot,
+        &no_env,
+    )
+    .unwrap()
+    .with_host_inference_boundary(Some(host));
+    let child_env = super::super::resolve_env(&parent, &no_env, &|_, _| None).unwrap();
+    assert_eq!(
+        child_env.get("UNCHANGED_SENTINEL").map(String::as_str),
+        Some("retained")
+    );
+    assert!(!child_env.contains_key(HOST_BOUNDARY_ENV));
+    let isolated = parent
+        .narrow(EnvironmentPolicyKind::Isolated, vec![])
+        .unwrap();
+    let raw = isolated
+        .env_exposure_for(HOST_BOUNDARY_ENV, &|_, _| None)
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        serde_json::from_str::<InferenceBoundary>(&raw).unwrap(),
+        host
+    );
+    assert!(isolated.grants().is_empty());
+    let fork = isolated
+        .narrow(EnvironmentPolicyKind::Isolated, vec![])
+        .unwrap();
+    assert_eq!(
+        fork.env_exposure_for(HOST_BOUNDARY_ENV, &|_, _| None)
+            .unwrap(),
+        Some(raw)
+    );
+    assert!(isolated
+        .narrow(
+            EnvironmentPolicyKind::Isolated,
+            vec![GrantSpec {
+                name: "additional-authority".into(),
+                source: GrantSourceSpec::Literal {
+                    value: "refused".into()
+                },
+                expose_as_env: Some("EXTRA".into()),
+                for_command: None,
+                expose_to: GrantAudience::Session,
+            }]
+        )
+        .is_err());
+    assert_eq!(
+        isolated.receipts().last().unwrap().exposed_to,
+        GrantAudience::InProcess
+    );
+    assert!(!isolated
+        .admitted_environment_names()
+        .iter()
+        .any(|name| name == HOST_BOUNDARY_ENV));
+}
+
+#[test]
+fn session_grant_cannot_widen_or_expose_host_inference_ceiling() {
+    use crate::llm::api::inference_boundary::HOST_BOUNDARY_ENV;
+    use crate::llm::api::{InferenceBoundary, InferenceReach};
+    let host = InferenceBoundary {
+        reach: InferenceReach::HostedOpenWeight,
+        allow_training_discounts: false,
+    };
+    for requested in [InferenceReach::AnyHosted, InferenceReach::LocalOnly] {
+        let grant = GrantSpec {
+            name: "client-boundary".into(),
+            source: GrantSourceSpec::Literal {
+                value: serde_json::to_string(&InferenceBoundary {
+                    reach: requested,
+                    allow_training_discounts: true,
+                })
+                .unwrap(),
+            },
+            expose_as_env: Some(HOST_BOUNDARY_ENV.into()),
+            for_command: None,
+            expose_to: GrantAudience::Session,
+        };
+        let environment = SessionEnvironment::launch_from_snapshot(
+            EnvironmentPolicyKind::Granted,
+            vec![grant],
+            BTreeMap::new(),
+            &no_env,
+        )
+        .unwrap()
+        .with_host_inference_boundary(Some(host));
+        let value = environment
+            .env_exposure_for(HOST_BOUNDARY_ENV, &|_, _| None)
+            .unwrap()
+            .unwrap();
+        let effective: InferenceBoundary = serde_json::from_str(&value).unwrap();
+        assert_eq!(
+            effective.reach,
+            if requested == InferenceReach::AnyHosted {
+                host.reach
+            } else {
+                requested
+            }
+        );
+        assert!(!effective.allow_training_discounts);
+        assert!(environment.env_exposure(&|_, _| None).unwrap().is_empty());
+        let child = environment
+            .narrow(EnvironmentPolicyKind::Isolated, vec![])
+            .unwrap();
+        let child_value = child
+            .env_exposure_for(HOST_BOUNDARY_ENV, &|_, _| None)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            serde_json::from_str::<InferenceBoundary>(&child_value).unwrap(),
+            effective
+        );
+        assert_eq!(
+            environment.receipts().len(),
+            1,
+            "only effective host authority is receipted"
+        );
+    }
+}
+
+#[test]
+fn host_inference_reserved_name_obeys_platform_case_semantics() {
+    use super::super::environment_policy::{
+        environment_names_equal, environment_names_equal_for_platform,
+    };
+    use crate::llm::api::inference_boundary::HOST_BOUNDARY_ENV;
+    use crate::llm::api::{InferenceBoundary, InferenceReach};
+    let lowercase = HOST_BOUNDARY_ENV.to_ascii_lowercase();
+    assert!(environment_names_equal_for_platform(
+        HOST_BOUNDARY_ENV,
+        &lowercase,
+        true
+    ));
+    assert!(!environment_names_equal_for_platform(
+        HOST_BOUNDARY_ENV,
+        &lowercase,
+        false
+    ));
+    assert_eq!(
+        environment_names_equal(HOST_BOUNDARY_ENV, &lowercase),
+        cfg!(windows)
+    );
+    let host = InferenceBoundary {
+        reach: InferenceReach::LocalOnly,
+        allow_training_discounts: false,
+    };
+    let snapshot = BTreeMap::from([(lowercase.clone(), "case control".into())]);
+    let environment = SessionEnvironment::launch_from_snapshot(
+        EnvironmentPolicyKind::Inherited,
+        vec![],
+        snapshot,
+        &no_env,
+    )
+    .unwrap()
+    .with_host_inference_boundary(Some(host));
+    let child = super::super::resolve_env(&environment, &no_env, &|_, _| None).unwrap();
+    assert_eq!(child.contains_key(&lowercase), !cfg!(windows));
+    let grant = GrantSpec {
+        name: "client-case-control".into(),
+        source: GrantSourceSpec::Literal {
+            value: serde_json::to_string(&host).unwrap(),
+        },
+        expose_as_env: Some(lowercase),
+        for_command: None,
+        expose_to: GrantAudience::Session,
+    };
+    let granted = SessionEnvironment::launch_from_snapshot(
+        EnvironmentPolicyKind::Granted,
+        vec![grant],
+        BTreeMap::new(),
+        &no_env,
+    )
+    .unwrap()
+    .with_host_inference_boundary(Some(host));
+    assert_eq!(
+        granted.env_exposure(&|_, _| None).unwrap().is_empty(),
+        cfg!(windows)
+    );
+    assert_eq!(granted.receipts().len(), if cfg!(windows) { 1 } else { 2 });
+}
+
+#[test]
+fn malformed_session_boundary_cannot_replace_host_floor() {
+    use crate::llm::api::inference_boundary::HOST_BOUNDARY_ENV;
+    use crate::llm::api::{InferenceBoundary, InferenceReach};
+    let grant = GrantSpec {
+        name: "malformed-boundary".into(),
+        source: GrantSourceSpec::Literal {
+            value: "invalid private value".into(),
+        },
+        expose_as_env: Some(HOST_BOUNDARY_ENV.into()),
+        for_command: None,
+        expose_to: GrantAudience::InProcess,
+    };
+    let environment = SessionEnvironment::launch_from_snapshot(
+        EnvironmentPolicyKind::Granted,
+        vec![grant],
+        BTreeMap::new(),
+        &no_env,
+    )
+    .unwrap()
+    .with_host_inference_boundary(Some(InferenceBoundary {
+        reach: InferenceReach::LocalOnly,
+        allow_training_discounts: false,
+    }));
+    let error = environment
+        .env_exposure_for(HOST_BOUNDARY_ENV, &|_, _| None)
+        .unwrap_err();
+    assert_eq!(error.code(), "inference_boundary.host_boundary_malformed");
+    assert!(!error
+        .to_json()
+        .to_string()
+        .contains("invalid private value"));
+    assert_eq!(
+        environment
+            .narrow(EnvironmentPolicyKind::Isolated, vec![])
+            .unwrap_err(),
+        error
+    );
+}
+
+#[test]
+fn dispatch_scope_keeps_stricter_session_and_restores_previous_authority() {
+    use crate::llm::api::inference_boundary::HOST_BOUNDARY_ENV;
+    use crate::llm::api::{InferenceBoundary, InferenceReach};
+    use crate::stdlib::process::{
+        current_session_environment, declare_session_environment_if_absent,
+    };
+    crate::reset_thread_local_state();
+    let strict = InferenceBoundary {
+        reach: InferenceReach::LocalOnly,
+        allow_training_discounts: false,
+    };
+    let parent = SessionEnvironment::launch_from_snapshot(
+        EnvironmentPolicyKind::Isolated,
+        vec![],
+        BTreeMap::new(),
+        &no_env,
+    )
+    .unwrap()
+    .with_host_inference_boundary(Some(strict));
+    let outer = declare_session_environment_if_absent(parent.clone());
+    let inner = declare_session_environment_if_absent(SessionEnvironment::inherited())
+        .with_host_inference_boundary(Some(InferenceBoundary {
+            reach: InferenceReach::AnyHosted,
+            allow_training_discounts: true,
+        }));
+    let active = current_session_environment().unwrap();
+    assert!(active.is_isolated());
+    let value = active
+        .env_exposure_for(HOST_BOUNDARY_ENV, &|_, _| None)
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        serde_json::from_str::<InferenceBoundary>(&value).unwrap(),
+        strict
+    );
+    drop(inner);
+    assert_eq!(current_session_environment(), Some(parent));
+    drop(outer);
+    assert!(current_session_environment().is_none());
+}
+
 fn no_env(_: &str) -> Option<String> {
     None
 }
@@ -27,6 +304,7 @@ fn env_grant(name: &str, var: &str, expose: Option<&str>) -> GrantSpec {
         },
         expose_as_env: expose.map(str::to_string),
         for_command: None,
+        expose_to: Default::default(),
     }
 }
 
@@ -39,6 +317,7 @@ fn secret_grant(name: &str, account: &str, key: &str, expose: Option<&str>) -> G
         },
         expose_as_env: expose.map(str::to_string),
         for_command: None,
+        expose_to: Default::default(),
     }
 }
 
@@ -57,6 +336,7 @@ fn command_grant(
         },
         expose_as_env: Some(expose.to_string()),
         for_command: Some(for_command.to_string()),
+        expose_to: Default::default(),
     }
 }
 
@@ -68,6 +348,7 @@ fn literal_grant(name: &str, value: &str, expose: Option<&str>) -> GrantSpec {
         },
         expose_as_env: expose.map(str::to_string),
         for_command: None,
+        expose_to: Default::default(),
     }
 }
 
@@ -387,12 +668,14 @@ fn receipts_record_shape_and_never_the_value() {
                 source_kind: "env".to_string(),
                 exposed_as_env: Some("FIREWORKS_API_KEY".to_string()),
                 for_command: None,
+                exposed_to: GrantAudience::Session,
             },
             GrantReceipt {
                 name: "gh_token".to_string(),
                 source_kind: "secret_store".to_string(),
                 exposed_as_env: None,
                 for_command: None,
+                exposed_to: GrantAudience::Session,
             },
         ]
     );
@@ -647,6 +930,7 @@ fn for_command_requires_expose_and_rejects_paths() {
             },
             expose_as_env: None,
             for_command: Some("gh".to_string()),
+            expose_to: Default::default(),
         }],
         &no_env,
     )
@@ -663,6 +947,7 @@ fn for_command_requires_expose_and_rejects_paths() {
             },
             expose_as_env: Some("GH_TOKEN".to_string()),
             for_command: Some("/usr/bin/gh".to_string()),
+            expose_to: Default::default(),
         }],
         &no_env,
     )
@@ -705,4 +990,157 @@ fn a_case_insensitive_insert_adds_a_new_key_when_none_matches() {
     let mut map = BTreeMap::new();
     insert_env_value_case_insensitive(&mut map, "HOME", "/root".to_string());
     assert_eq!(map.get("HOME").map(String::as_str), Some("/root"));
+}
+
+fn in_process_grant(name: &str, var: &str, expose: &str) -> GrantSpec {
+    GrantSpec {
+        expose_to: GrantAudience::InProcess,
+        ..env_grant(name, var, Some(expose))
+    }
+}
+
+/// The in-process audience is visible to Harn's own reader and to nothing a
+/// child receives. The session-scoped grant beside it is the control: the
+/// same builders must still hand that one to children, or the exclusion
+/// below would pass on builders that hand children nothing at all.
+#[test]
+fn an_in_process_grant_reaches_the_in_process_reader_and_no_child() {
+    let env = env_from(&[
+        ("LAUNCHER_PROVIDER_KEY", "provider-value"),
+        ("LAUNCHER_SESSION_KEY", "session-value"),
+    ]);
+    let environment = SessionEnvironment::launch(
+        EnvironmentPolicyKind::Granted,
+        vec![
+            in_process_grant("provider", "LAUNCHER_PROVIDER_KEY", "PROVIDER_KEY"),
+            env_grant("session", "LAUNCHER_SESSION_KEY", Some("SESSION_KEY")),
+        ],
+        &env,
+    )
+    .unwrap();
+    let never = |_: &str, _: &str| None;
+
+    assert_eq!(
+        environment
+            .env_exposure_for("PROVIDER_KEY", &never)
+            .unwrap(),
+        Some("provider-value".to_string()),
+        "Harn's own reader must see the in-process grant",
+    );
+    for overlay in [
+        environment.env_exposure(&never).unwrap(),
+        environment
+            .env_exposure_for_command("/usr/bin/env", &never)
+            .unwrap(),
+    ] {
+        let names: Vec<&str> = overlay.iter().map(|(name, _)| name.as_str()).collect();
+        assert_eq!(
+            names,
+            vec!["SESSION_KEY"],
+            "a child overlay must carry the session grant and never the in-process one",
+        );
+    }
+    let names = environment.admitted_environment_names();
+    assert!(names.contains(&"SESSION_KEY".to_string()));
+    assert!(
+        !names.contains(&"PROVIDER_KEY".to_string()),
+        "admitted names describe what a child could see; the in-process name is not one",
+    );
+}
+
+#[test]
+fn an_in_process_grant_is_receipted_with_its_audience() {
+    let env = env_from(&[("LAUNCHER_PROVIDER_KEY", "provider-value")]);
+    let environment = SessionEnvironment::launch(
+        EnvironmentPolicyKind::Granted,
+        vec![in_process_grant(
+            "provider",
+            "LAUNCHER_PROVIDER_KEY",
+            "PROVIDER_KEY",
+        )],
+        &env,
+    )
+    .unwrap();
+    let receipts = environment.receipts();
+    assert_eq!(receipts[0].exposed_to, GrantAudience::InProcess);
+    assert_eq!(receipts[0].child_visible_env(), None);
+    let json = serde_json::to_string(&receipts).unwrap();
+    assert!(json.contains("\"exposed_to\":\"in_process\""), "{json}");
+    assert!(!json.contains("provider-value"), "receipt leaked the value");
+
+    // The default audience stays off the wire, so a record written before
+    // audiences existed and one written now read back identically.
+    let session = SessionEnvironment::launch(
+        EnvironmentPolicyKind::Granted,
+        vec![env_grant(
+            "provider",
+            "LAUNCHER_PROVIDER_KEY",
+            Some("PROVIDER_KEY"),
+        )],
+        &env,
+    )
+    .unwrap();
+    let json = serde_json::to_string(&session.receipts()).unwrap();
+    assert!(!json.contains("exposed_to"), "{json}");
+    assert_eq!(
+        session.receipts()[0].child_visible_env(),
+        Some("PROVIDER_KEY")
+    );
+}
+
+#[test]
+fn an_in_process_grant_needs_a_name_and_no_command() {
+    let env = env_from(&[("LAUNCHER_PROVIDER_KEY", "provider-value")]);
+    let without_expose = GrantSpec {
+        expose_to: GrantAudience::InProcess,
+        ..env_grant("provider", "LAUNCHER_PROVIDER_KEY", None)
+    };
+    assert_eq!(
+        SessionEnvironment::launch(EnvironmentPolicyKind::Granted, vec![without_expose], &env),
+        Err(EnvironmentPolicyError::InProcessWithoutExpose {
+            name: "provider".to_string()
+        })
+    );
+    let with_command = GrantSpec {
+        for_command: Some("gh".to_string()),
+        ..in_process_grant("provider", "LAUNCHER_PROVIDER_KEY", "PROVIDER_KEY")
+    };
+    let refusal =
+        SessionEnvironment::launch(EnvironmentPolicyKind::Granted, vec![with_command], &env)
+            .unwrap_err();
+    assert_eq!(
+        refusal,
+        EnvironmentPolicyError::InProcessWithCommand {
+            name: "provider".to_string()
+        }
+    );
+    assert_eq!(refusal.code(), "environment_policy.in_process_with_command");
+}
+
+#[test]
+fn an_in_process_grant_spec_round_trips_and_narrows_unchanged() {
+    let spec = in_process_grant("provider", "LAUNCHER_PROVIDER_KEY", "PROVIDER_KEY");
+    let json = serde_json::to_value(&spec).unwrap();
+    assert_eq!(json["expose_to"], "in_process");
+    let parsed: GrantSpec = serde_json::from_value(json).unwrap();
+    assert_eq!(parsed, spec);
+
+    let env = env_from(&[("LAUNCHER_PROVIDER_KEY", "provider-value")]);
+    let parent =
+        SessionEnvironment::launch(EnvironmentPolicyKind::Granted, vec![spec.clone()], &env)
+            .unwrap();
+    // A child may keep the grant as declared...
+    let child = parent
+        .narrow(EnvironmentPolicyKind::Granted, vec![spec.clone()])
+        .unwrap();
+    assert_eq!(child.grants()[0].audience(), GrantAudience::InProcess);
+    // ...but may not widen it to the session audience.
+    let widened = GrantSpec {
+        expose_to: GrantAudience::Session,
+        ..spec
+    };
+    assert!(matches!(
+        parent.narrow(EnvironmentPolicyKind::Granted, vec![widened]),
+        Err(EnvironmentPolicyError::ChildPolicyExceedsParent { .. })
+    ));
 }

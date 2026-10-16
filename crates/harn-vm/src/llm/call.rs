@@ -398,13 +398,13 @@ pub(crate) fn build_llm_error_dict(err: &VmError, provider: &str, model: &str) -
     if let VmError::Thrown(VmValue::Dict(existing)) = err {
         let mut dict = existing.as_ref().clone();
         dict.entry(crate::value::intern_key("category"))
-            .or_insert_with(|| VmValue::String(arcstr::ArcStr::from(category.as_str())));
+            .or_insert_with(|| VmValue::string(category.as_str()));
         dict.entry(crate::value::intern_key("kind"))
-            .or_insert_with(|| VmValue::String(arcstr::ArcStr::from(llm_error.kind.as_str())));
+            .or_insert_with(|| VmValue::string(llm_error.kind.as_str()));
         dict.entry(crate::value::intern_key("reason"))
-            .or_insert_with(|| VmValue::String(arcstr::ArcStr::from(llm_error.reason.as_str())));
+            .or_insert_with(|| VmValue::string(llm_error.reason.as_str()));
         dict.entry(crate::value::intern_key("message"))
-            .or_insert_with(|| VmValue::String(arcstr::ArcStr::from(message.as_str())));
+            .or_insert_with(|| VmValue::string(message.as_str()));
         // `origin` answers a question the rest of the taxonomy cannot: did this
         // request ever leave the process? A route that refuses `effort` and a
         // Harn option check that refuses to send `effort` are both
@@ -412,7 +412,7 @@ pub(crate) fn build_llm_error_dict(err: &VmError, provider: &str, model: &str) -
         // provider's verdict from Harn's own. Anything reaching here that did
         // not already claim `local` came back from the provider.
         dict.entry(crate::value::intern_key("origin"))
-            .or_insert_with(|| VmValue::String(arcstr::ArcStr::from("provider")));
+            .or_insert_with(|| VmValue::string("provider"));
         // Fill provider/model only when the routing failure did not already
         // record the route that actually failed. A fallback/ladder that failed
         // on a different provider/model owns its own route here; overwriting it
@@ -430,9 +430,9 @@ pub(crate) fn build_llm_error_dict(err: &VmError, provider: &str, model: &str) -
         );
         if !no_single_route {
             dict.entry(crate::value::intern_key("provider"))
-                .or_insert_with(|| VmValue::String(arcstr::ArcStr::from(provider)));
+                .or_insert_with(|| VmValue::string(provider));
             dict.entry(crate::value::intern_key("model"))
-                .or_insert_with(|| VmValue::String(arcstr::ArcStr::from(model)));
+                .or_insert_with(|| VmValue::string(model));
         }
         return VmValue::dict(dict);
     }
@@ -442,19 +442,18 @@ pub(crate) fn build_llm_error_dict(err: &VmError, provider: &str, model: &str) -
     dict.put_str("reason", llm_error.reason.as_str());
     dict.put_str("message", message);
     if let Some(ms) = agent_observe::extract_retry_after_ms(err) {
-        dict.insert("retry_after_ms".to_string(), VmValue::Int(ms as i64));
+        dict.put_int("retry_after_ms", ms as i64);
     }
     if let Some(failure) = err.provider_stream_failure() {
         dict.put_str("source", "provider_stream");
         dict.put_str("phase", failure.phase.as_str());
-        dict.insert(
-            "deadline".to_string(),
+        dict.put_nullable(
+            "deadline",
             failure
                 .deadline
-                .map(|deadline| VmValue::String(arcstr::ArcStr::from(deadline.as_str())))
-                .unwrap_or(VmValue::Nil),
+                .map(|deadline| VmValue::string(deadline.as_str())),
         );
-        dict.insert("partial".to_string(), VmValue::Bool(failure.partial));
+        dict.put_bool("partial", failure.partial);
     }
     dict.put_str("origin", "provider");
     dict.put_str("provider", provider);
@@ -466,8 +465,8 @@ pub(crate) fn build_llm_error_dict(err: &VmError, provider: &str, model: &str) -
 /// initial call; `status` distinguishes disabled from exhausted.
 pub(crate) fn schema_retry_failure_facts(attempts: usize, budget: usize) -> VmValue {
     let mut facts = std::collections::BTreeMap::new();
-    facts.insert("attempts".to_string(), VmValue::Int(attempts as i64));
-    facts.insert("budget".to_string(), VmValue::Int(budget as i64));
+    facts.put_int("attempts", attempts as i64);
+    facts.put_int("budget", budget as i64);
     facts.put_str("status", if budget == 0 { "disabled" } else { "exhausted" });
     VmValue::dict(facts)
 }
@@ -487,7 +486,7 @@ pub(crate) fn invalid_request_error(
     );
     fields.put_str("kind", "terminal");
     fields.put_str("reason", "invalid_request");
-    fields.put_str("message", message);
+    fields.put_str("message", message.as_ref());
     // Set before the envelope fills defaults, so this survives as `local`.
     fields.put_str("origin", "local");
     fields.put_str("provider", provider);
@@ -541,11 +540,96 @@ pub(crate) async fn execute_llm_call_outcome(
     // `llm_call_with_bridge`, structured variants, and the plain
     // `llm_call_impl` — so recording here is the single DRY point.
     super::introspection::record_resolved_llm_call(&opts.provider, &opts.model);
+    let call_role = opts.context_manifest.call_role().to_owned();
+    let call_stage = opts.call_stage.clone();
+    let mut outcome = pin_schema_retry_dispatch(ctx, opts, options, bridge, delta_sink).await?;
+    outcome.vm_result = super::pairing_receipts::attach_call_provenance(
+        outcome.vm_result,
+        &call_role,
+        call_stage.as_deref(),
+    );
+    Ok(outcome)
+}
+
+/// Allocate the selected retry future on a frame that returns before polling.
+/// Pin each branch before selecting it so the selection holds only pointers,
+/// rather than another copy of the largest retry future. Keep allocation at
+/// this owner without changing retry or settlement behavior.
+fn pin_schema_retry_dispatch<'a>(
+    ctx: Option<&'a crate::vm::AsyncBuiltinCtx>,
+    opts: api::LlmCallOptions,
+    options: Option<crate::value::DictMap>,
+    bridge: Option<&'a Arc<crate::bridge::HostBridge>>,
+    delta_sink: Option<api::DeltaSender>,
+) -> impl std::future::Future<Output = Result<SchemaLoopOutcome, VmError>> + 'a {
     if let Some(policy) = opts.routing_policy.clone() {
-        execute_routing_schema_retry_loop(ctx, policy, opts, options, bridge, delta_sink).await
+        futures::future::Either::Left(Box::pin(execute_routing_schema_retry_loop(
+            ctx, policy, opts, options, bridge, delta_sink,
+        )))
     } else {
-        execute_schema_retry_loop(ctx, opts, options, bridge, delta_sink).await
+        futures::future::Either::Right(Box::pin(execute_schema_retry_loop(
+            ctx, opts, options, bridge, delta_sink,
+        )))
     }
+}
+
+/// Make one observed call and project its visible text to `bridge` as
+/// `call_progress` deltas while it streams.
+///
+/// The deltas are forwarded inline, in the same task that awaits the call, so
+/// this needs no `spawn_local` forwarder and works on whatever runtime the call
+/// runs on: an ACP prompt's local set, or a daemon or sub-agent worker that
+/// carried the ambient bridge onto a multi-thread runtime.
+async fn observed_call_streaming_to(
+    bridge: &Arc<crate::bridge::HostBridge>,
+    opts: &api::LlmCallOptions,
+    tool_format: Option<&str>,
+    delta_sink: Option<api::DeltaSender>,
+) -> Result<api::LlmResult, VmError> {
+    let (delta_tx, mut delta_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+    let call_id = uuid::Uuid::now_v7().to_string();
+    let mut call = Box::pin(agent_observe::observed_llm_call(
+        opts,
+        tool_format,
+        None,
+        None,
+        false,
+        false,
+        None,
+        Some(delta_tx),
+    ));
+    let mut forwarded: u64 = 0;
+    let mut forward = |delta: String| {
+        forwarded += 1;
+        bridge.send_call_progress(&call_id, &delta, forwarded, true);
+        if let Some(sink) = delta_sink.as_ref() {
+            let _ = sink.send(delta);
+        }
+    };
+    let mut deltas_open = true;
+    let result = loop {
+        tokio::select! {
+            delta = delta_rx.recv(), if deltas_open => match delta {
+                Some(delta) => forward(delta),
+                None => deltas_open = false,
+            },
+            result = &mut call => break result,
+        }
+    };
+    while let Ok(delta) = delta_rx.try_recv() {
+        forward(delta);
+    }
+    bridge.finish_call_progress(&call_id);
+    result
+}
+
+/// Whether a call asked for its visible text to stream to the host.
+///
+/// `_user_visible` is the host-plumbing spelling `llm_call_options` keeps, and
+/// the agent loop sets it on the turn request a person is waiting to read.
+/// `user_visible` is the direct `llm_call` option the bridge builtin reads.
+fn requests_user_visible_stream(options: &Option<crate::value::DictMap>) -> bool {
+    helpers::opt_bool(options, "user_visible") || helpers::opt_bool(options, "_user_visible")
 }
 
 fn finish_llm_call(outcome: SchemaLoopOutcome) -> Result<VmValue, VmError> {
@@ -717,16 +801,10 @@ fn attach_routing_block(
     routing_dict.put_str("policy", label);
     routing_dict.insert("attempts".to_string(), routing::trace_to_vm_attempts(trace));
     if let Some(selected) = trace.selected {
-        routing_dict.insert("selected".to_string(), VmValue::Int(selected as i64));
+        routing_dict.put_int("selected", selected as i64);
     }
-    routing_dict.insert(
-        "session_cost_usd".to_string(),
-        VmValue::Float(trace.session_cost_usd),
-    );
-    dict.insert(
-        crate::value::intern_key("routing"),
-        VmValue::dict(routing_dict),
-    );
+    routing_dict.put("session_cost_usd", VmValue::Float(trace.session_cost_usd));
+    dict.put("routing", VmValue::dict(routing_dict));
     VmValue::dict(dict)
 }
 
@@ -774,8 +852,20 @@ pub(crate) async fn execute_schema_retry_loop(
     let nudge_mode = parse_schema_nudge(&options);
 
     let tool_format = helpers::opt_str(&options, "tool_format");
+    // A call that reached `llm_call` without the bridge-registered builtin (a
+    // `harness.llm.call` on a VM an ACP server set up, for example) still
+    // projects its progress through the host bridge that server installed.
     let bridged = bridge.is_some();
-    let user_visible = bridged && helpers::opt_bool(&options, "user_visible");
+    let user_visible = bridged && requests_user_visible_stream(&options);
+    // A user-visible request that reached `llm_call` without the bridge-
+    // registered builtin (a `harness.llm.call` on a VM an ACP server set up,
+    // for example) still streams its visible text through the host bridge that
+    // server installed. Side calls never take this path.
+    let ambient_stream_bridge = if !bridged && requests_user_visible_stream(&options) {
+        super::agent_runtime::current_host_bridge()
+    } else {
+        None
+    };
     let output_validation_mode = output_validation_mode(&opts).to_string();
     let expects_structured = helpers::expects_structured_output(&opts);
     // Snapshot the caller's original messages once. Each schema retry
@@ -790,21 +880,34 @@ pub(crate) async fn execute_schema_retry_loop(
         // state machine. Keep that large future behind one pointer so the
         // schema loop composes with Harness dispatch on ordinary 2 MiB
         // embedder and test-worker stacks.
-        let call_result = Box::pin(agent_observe::observed_llm_call(
-            &opts,
-            tool_format.as_deref(),
-            bridge,
-            None,
-            user_visible,
-            bridged, // offthread=true on the bridge path, local set otherwise
-            // Top-level `llm_call` host calls don't have a session in the
-            // sense the streaming detector needs (no agent loop, no
-            // session_id), so skip candidate detection here. The agent
-            // loop's `run_llm_call` is the integration point that owns it.
-            None,
-            delta_sink.clone(),
-        ))
-        .await;
+        let call_result = match ambient_stream_bridge.as_ref() {
+            Some(ambient) => {
+                Box::pin(observed_call_streaming_to(
+                    ambient,
+                    &opts,
+                    tool_format.as_deref(),
+                    delta_sink.clone(),
+                ))
+                .await
+            }
+            None => {
+                Box::pin(agent_observe::observed_llm_call(
+                    &opts,
+                    tool_format.as_deref(),
+                    bridge,
+                    None,
+                    user_visible,
+                    bridged, // offthread=true on the bridge path, local set otherwise
+                    // Top-level `llm_call` host calls don't have a session in the
+                    // sense the streaming detector needs (no agent loop, no
+                    // session_id), so skip candidate detection here. The agent
+                    // loop's `run_llm_call` is the integration point that owns it.
+                    None,
+                    delta_sink.clone(),
+                ))
+                .await
+            }
+        };
 
         // A mid-stream schema abort short-circuits the provider call but
         // is otherwise equivalent to a normal schema-validation failure:
@@ -973,7 +1076,7 @@ fn schema_stream_abort_message(abort: &SchemaStreamAbort) -> String {
 
 pub(super) fn llm_safe_envelope_ok(response: VmValue) -> VmValue {
     let mut dict = std::collections::BTreeMap::new();
-    dict.insert("ok".to_string(), VmValue::Bool(true));
+    dict.put_bool("ok", true);
     dict.insert("response".to_string(), response);
     dict.insert("error".to_string(), VmValue::Nil);
     VmValue::dict(dict)
@@ -987,9 +1090,9 @@ pub(super) fn llm_safe_envelope_err(err: &VmError) -> VmValue {
     // users — with `category` / `message` always populated.
     if let VmError::Thrown(VmValue::Dict(d)) = err {
         let mut dict = std::collections::BTreeMap::new();
-        dict.insert("ok".to_string(), VmValue::Bool(false));
+        dict.put_bool("ok", false);
         dict.insert("response".to_string(), VmValue::Nil);
-        dict.insert("error".to_string(), VmValue::Dict(d.clone()));
+        dict.put("error", VmValue::Dict(d.clone()));
         return VmValue::dict(dict);
     }
     let category = crate::value::error_to_category(err);
@@ -1001,9 +1104,9 @@ pub(super) fn llm_safe_envelope_err(err: &VmError) -> VmValue {
     err_dict.put_str("reason", llm_error.reason.as_str());
     err_dict.put_str("message", message);
     let mut dict = std::collections::BTreeMap::new();
-    dict.insert("ok".to_string(), VmValue::Bool(false));
+    dict.put_bool("ok", false);
     dict.insert("response".to_string(), VmValue::Nil);
-    dict.insert("error".to_string(), VmValue::dict(err_dict));
+    dict.put("error", VmValue::dict(err_dict));
     VmValue::dict(dict)
 }
 
@@ -1059,9 +1162,9 @@ pub(crate) fn rewrite_structured_args(args: Vec<VmValue>) -> Result<Vec<VmValue>
 
     let mut output = crate::value::DictMap::new();
     output.insert(crate::value::intern_key("schema"), schema);
-    output.insert(crate::value::intern_key("strict"), VmValue::Bool(true));
+    output.put_bool("strict", true);
     output.put_str("validation", "error");
-    options.insert(crate::value::intern_key("output"), VmValue::dict(output));
+    options.put("output", VmValue::dict(output));
 
     Ok(vec![
         prompt,
@@ -1085,7 +1188,7 @@ pub(crate) fn extract_structured_data(response: VmValue) -> VmValue {
 /// of `response` (the full result dict), matching the issue shape.
 pub(crate) fn structured_safe_envelope_ok(data: VmValue) -> VmValue {
     let mut dict = std::collections::BTreeMap::new();
-    dict.insert("ok".to_string(), VmValue::Bool(true));
+    dict.put_bool("ok", true);
     dict.insert("data".to_string(), data);
     dict.insert("error".to_string(), VmValue::Nil);
     VmValue::dict(dict)
@@ -1094,9 +1197,9 @@ pub(crate) fn structured_safe_envelope_ok(data: VmValue) -> VmValue {
 pub(crate) fn structured_safe_envelope_err(err: &VmError) -> VmValue {
     if let VmError::Thrown(VmValue::Dict(d)) = err {
         let mut dict = std::collections::BTreeMap::new();
-        dict.insert("ok".to_string(), VmValue::Bool(false));
+        dict.put_bool("ok", false);
         dict.insert("data".to_string(), VmValue::Nil);
-        dict.insert("error".to_string(), VmValue::Dict(d.clone()));
+        dict.put("error", VmValue::Dict(d.clone()));
         return VmValue::dict(dict);
     }
     let category = crate::value::error_to_category(err);
@@ -1108,11 +1211,13 @@ pub(crate) fn structured_safe_envelope_err(err: &VmError) -> VmValue {
     err_dict.put_str("reason", llm_error.reason.as_str());
     err_dict.put_str("message", message);
     let mut dict = std::collections::BTreeMap::new();
-    dict.insert("ok".to_string(), VmValue::Bool(false));
+    dict.put_bool("ok", false);
     dict.insert("data".to_string(), VmValue::Nil);
-    dict.insert("error".to_string(), VmValue::dict(err_dict));
+    dict.put("error", VmValue::dict(err_dict));
     VmValue::dict(dict)
 }
 
 #[cfg(test)]
 mod schema_stream_abort_retry_tests;
+#[cfg(test)]
+mod stream_visibility_tests;

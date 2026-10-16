@@ -121,18 +121,26 @@ impl SessionUpdatePayloads {
     }
 
     fn append_rust_union(&self, out: &mut String) {
+        out.push_str(super::session_update_rust_validation::SUPPORT);
         out.push_str("fn deserialize_present_session_update_value<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Option<Value>, D::Error> {\n    Value::deserialize(deserializer).map(Some)\n}\n\n");
         out.push_str("#[derive(Clone, Debug, PartialEq, Eq, Serialize)]\n#[serde(untagged)]\npub enum ACPTypedSessionUpdate {\n");
         for (_, name) in &self.variants {
             out.push_str(&format!("    {}({name}),\n", rust_variant(name)));
         }
-        out.push_str("}\n\nimpl<'de> Deserialize<'de> for ACPTypedSessionUpdate {\n    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {\n        let value = Value::deserialize(deserializer)?;\n        match value.get(\"sessionUpdate\").and_then(Value::as_str) {\n");
-        for ((kind, name), schema) in self.variants.iter().zip(&self.schemas) {
-            out.push_str(&format!("            Some({kind:?}) => {{\n"));
-            super::session_update_validation::append_checks(out, schema, Target::Rust);
-            out.push_str(&format!("                serde_json::from_value(value).map(Self::{}).map_err(serde::de::Error::custom)\n            }},\n", rust_variant(name)));
+        out.push_str("}\n\ntype SessionUpdateDecoder = fn(Value) -> Result<ACPTypedSessionUpdate, serde_json::Error>;\n\n");
+        for ((kind, _), schema) in self.variants.iter().zip(&self.schemas) {
+            out.push_str(&format!(
+                "#[rustfmt::skip]\nconst {}_RULES: &[(&str, SessionUpdateRule)] = ",
+                kind.to_uppercase()
+            ));
+            super::session_update_rust_validation::append_rules(out, schema);
+            out.push_str(";\n\n");
         }
-        out.push_str("            _ => Err(serde::de::Error::custom(\"unknown typed session update\")),\n        }\n    }\n}\n\n");
+        out.push_str("impl<'de> Deserialize<'de> for ACPTypedSessionUpdate {\n    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {\n        let value = Value::deserialize(deserializer)?;\n        let (rules, decode): (&[(&str, SessionUpdateRule)], SessionUpdateDecoder) = match value.get(\"sessionUpdate\").and_then(Value::as_str) {\n");
+        for (kind, name) in &self.variants {
+            out.push_str(&format!("            Some({kind:?}) => ({}_RULES, |value| serde_json::from_value(value).map(Self::{})),\n", kind.to_uppercase(), rust_variant(name)));
+        }
+        out.push_str("            _ => return Err(serde::de::Error::custom(\"unknown typed session update\")),\n        };\n        validate_session_update(&value, rules).map_err(serde::de::Error::custom)?;\n        decode(value).map_err(serde::de::Error::custom)\n    }\n}\n\n");
     }
 
     fn append_swift_union(&self, out: &mut String) {

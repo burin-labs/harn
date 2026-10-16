@@ -1,4 +1,5 @@
 import { agent_loop } from "std/agent/loop"
+import { agent_tool_handler_result } from "std/agent/tool_lifecycle"
 import { sub_agent_run } from "std/agent/workers"
 import { llm_text, with_llm_script } from "std/testing"
 
@@ -10,7 +11,7 @@ fn child_tools(harness: Harness, grandchild_session: string) {
     "Run a grandchild sub-agent",
     {
       handler: { _args ->
-        sub_agent_run(
+        const result = sub_agent_run(
           harness,
           "Grandchild task.",
           {
@@ -20,6 +21,7 @@ fn child_tools(harness: Harness, grandchild_session: string) {
             turn_end_condition: nil,
           },
         )
+        agent_tool_handler_result(to_string(result), result)
       },
       parameters: {},
       returns: {type: "object"},
@@ -36,7 +38,7 @@ fn parent_tools(harness: Harness, child_session: string, grandchild_session: str
     "Run a child sub-agent",
     {
       handler: { _args ->
-        sub_agent_run(
+        const result = sub_agent_run(
           harness,
           "Child task.",
           {
@@ -48,6 +50,7 @@ fn parent_tools(harness: Harness, child_session: string, grandchild_session: str
             turn_end_condition: nil,
           },
         )
+        agent_tool_handler_result(to_string(result), result)
       },
       parameters: {},
       returns: {type: "object"},

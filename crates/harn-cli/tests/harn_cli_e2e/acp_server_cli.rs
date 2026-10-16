@@ -35,12 +35,14 @@ fn write_fixture(temp: &TempDir) {
         temp.path(),
         "acp_fixture.harn",
         r#"
+import { agent_session_init, agent_session_flush } from "std/agent/state"
 pub pipeline main(harness: Harness) {
   const sid = harness.agent.current_id()
   guard sid != nil else { throw "ACP prompt installs the current session id" }
   if prompt != "snapshot" {
-    harness.agent.inject(sid, {role: "user", content: prompt})
+    agent_session_init(harness.agent, prompt, nil, {root: ".", session_id: sid})
   }
+  agent_session_flush(harness.agent, sid)
   const snap = harness.agent.snapshot(sid)
   harness.stdio.println(
     json_stringify({
@@ -67,6 +69,226 @@ fn spawn_acp(temp: &TempDir, fixture: &str) -> StdioJsonRpcClient {
         .arg("acp")
         .arg(fixture);
     StdioJsonRpcClient::spawn("harn serve acp", command)
+}
+
+#[test]
+#[cfg(unix)]
+fn acp_cli_explicit_root_alias_preserves_history_after_cold_restart() {
+    let _guard = lock_acp_cli_tests();
+    for use_alias in [false, true] {
+        let temp = TempDir::new().unwrap();
+        let workspace = temp.path().canonicalize().unwrap();
+        let alias = temp.path().join("alias");
+        std::os::unix::fs::symlink(&workspace, &alias).unwrap();
+        let root = if use_alias { &alias } else { &workspace };
+        write_file(temp.path(), "root.harn", &format!(
+            "pipeline default(harness: Harness) {{\n\
+             const frame = harness.agent.session_init(prompt, nil, {{root: {}}})\n\
+             return harness.agent.session_finalize(frame.session_id, {{final_status: \"completed\"}})\n\
+             }}\n", serde_json::to_string(root).unwrap(),
+        ));
+        let mut client = spawn_acp(&temp, "root.harn");
+        let (_, initialized) = send_request(
+            &mut client,
+            json!({
+                "jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}
+            }),
+        );
+        assert!(initialized["error"].is_null(), "{initialized}");
+        let policy = json!({"kind": "isolated", "grants": []});
+        let (_, created) = send_request(
+            &mut client,
+            json!({
+                "jsonrpc": "2.0", "id": 2, "method": "session/new",
+                "params": {"cwd": workspace, "environmentPolicy": policy}
+            }),
+        );
+        let session = created["result"]["sessionId"]
+            .as_str()
+            .expect("session created");
+        let (_, turn) = send_request(
+            &mut client,
+            json!({
+                "jsonrpc": "2.0", "id": 3, "method": "session/prompt",
+                "params": {"sessionId": session, "messageId": "9d45dd0c-a118-4e4a-8778-642695b4d325",
+                    "prompt": [{"type": "text", "text": "root identity probe"}]}
+            }),
+        );
+        assert_eq!(turn["result"]["stopReason"], "end_turn", "{turn}");
+        let (_, history) = send_request(
+            &mut client,
+            json!({
+                "jsonrpc": "2.0", "id": 4, "method": "harn.session_history.boundaries",
+                "params": {"sessionId": session}
+            }),
+        );
+        let positions = history["result"]["positions"]
+            .as_array()
+            .expect("history measured");
+        assert!(
+            positions
+                .iter()
+                .any(|position| position["source_event_id"].as_str().is_some()),
+            "the controlled turn must have a canonical source event: {history}"
+        );
+        client.shutdown_expect_success();
+
+        let mut cold = spawn_acp(&temp, "root.harn");
+        let (_, initialized) = send_request(
+            &mut cold,
+            json!({
+                "jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}
+            }),
+        );
+        assert!(initialized["error"].is_null(), "{initialized}");
+        let (_, loaded) = send_request(
+            &mut cold,
+            json!({
+                "jsonrpc": "2.0", "id": 2, "method": "session/load",
+                "params": {"sessionId": session, "cwd": workspace, "environmentPolicy": policy}
+            }),
+        );
+        assert!(
+            loaded["error"].is_null(),
+            "cold reload (alias={use_alias}): {loaded}"
+        );
+        assert!(
+            loaded["result"].is_object(),
+            "cold load must acknowledge the session: {loaded}"
+        );
+        let (_, reloaded) = send_request(
+            &mut cold,
+            json!({
+                "jsonrpc": "2.0", "id": 3, "method": "harn.session_history.boundaries",
+                "params": {"sessionId": session}
+            }),
+        );
+        assert_eq!(
+            reloaded["result"]["positions"], history["result"]["positions"],
+            "cold reload must retain the acknowledged history"
+        );
+        cold.shutdown_expect_success();
+
+        // Loading an already live session retains its original workspace.
+        // A fresh server must instead resolve this requested workspace.
+        let mut foreign_client = spawn_acp(&temp, "root.harn");
+        let (_, initialized) = send_request(
+            &mut foreign_client,
+            json!({
+                "jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}
+            }),
+        );
+        assert!(initialized["error"].is_null(), "{initialized}");
+        let foreign = TempDir::new().unwrap();
+        let (_, denied) = send_request(
+            &mut foreign_client,
+            json!({
+                "jsonrpc": "2.0", "id": 4, "method": "session/load",
+                "params": {"sessionId": session, "cwd": foreign.path(), "environmentPolicy": policy}
+            }),
+        );
+        assert_eq!(
+            denied["error"]["code"], -32602,
+            "a cold load must not find the session in another workspace: {denied}"
+        );
+        foreign_client.shutdown_expect_success();
+    }
+}
+
+#[test]
+fn acp_cli_host_requests_attribute_imported_callers_without_argument_values() {
+    let _guard = lock_acp_cli_tests();
+    let temp = TempDir::new().unwrap();
+    write_file(
+        temp.path(),
+        "helpers.harn",
+        r#"
+pub fn repeated(workspace: HarnessWorkspace) {
+    for item in [1, 2] {
+        workspace.search({query: "private-query-sentinel", paths: ["private-path-sentinel"]})
+    }
+}
+pub fn distinct(workspace: HarnessWorkspace) {
+    workspace.search({query: "other-private-query", paths: []})
+}
+"#,
+    );
+    write_file(
+        temp.path(),
+        "trace.harn",
+        r#"
+import { repeated, distinct } from "./helpers"
+pub pipeline main(harness: Harness) {
+    repeated(harness.workspace)
+    distinct(harness.workspace)
+}
+"#,
+    );
+    let mut client = spawn_acp(&temp, "trace.harn");
+    let (_, created) = send_request(
+        &mut client,
+        json!({"jsonrpc": "2.0", "id": 1, "method": "session/new",
+            "params": {"cwd": temp.path(), "environmentPolicy": {"kind": "isolated", "grants": []}}}),
+    );
+    let session_id = created["result"]["sessionId"]
+        .as_str()
+        .expect("session created");
+    select_code_mode(&mut client, session_id);
+    client.send(
+        &json!({"jsonrpc": "2.0", "id": "trace-prompt", "method": "session/prompt",
+        "params": {"sessionId": session_id, "prompt": [{"type": "text", "text": "trace"}]}}),
+    );
+    let mut traces = Vec::new();
+    loop {
+        let frame = client.recv();
+        match frame["method"].as_str() {
+            Some("host/capabilities") => client.send(&json!({"jsonrpc": "2.0", "id": frame["id"],
+                "result": {"workspace": ["search"]}})),
+            Some("host/call") => {
+                assert_eq!(frame["params"]["name"], "workspace.search");
+                traces.push(frame["params"]["_meta"]["harn"]["requestTrace"].clone());
+                client.send(&json!({"jsonrpc": "2.0", "id": frame["id"], "result": {}}));
+            }
+            _ if frame["id"] == "trace-prompt" => {
+                assert!(frame["error"].is_null(), "prompt failed: {frame}");
+                assert_eq!(frame["result"]["stopReason"], "end_turn");
+                break;
+            }
+            _ => {}
+        }
+    }
+    assert_eq!(
+        traces.len(),
+        3,
+        "the repeated call must reach the host twice"
+    );
+    assert_eq!(traces[0], traces[1]);
+    for (trace, function, length) in [(&traces[0], "repeated", 1), (&traces[2], "distinct", 0)] {
+        assert_eq!(trace["caller"]["function"], function);
+        assert!(trace["caller"]["module"]
+            .as_str()
+            .unwrap()
+            .ends_with("helpers.harn"));
+        assert_eq!(
+            trace["arguments"],
+            json!({
+                "query": {"value_type": "string"},
+                "paths": {"value_type": "list", "list_length": length},
+            })
+        );
+    }
+    let serialized = serde_json::to_string(&traces).unwrap();
+    for secret in [
+        "private-query-sentinel",
+        "private-path-sentinel",
+        "other-private-query",
+    ] {
+        assert!(
+            !serialized.contains(secret),
+            "argument values must not enter requestTrace"
+        );
+    }
+    client.shutdown_expect_success();
 }
 
 fn prompt_once(client: &mut StdioJsonRpcClient, workspace: &Path) -> (Vec<JsonValue>, JsonValue) {
@@ -239,6 +461,11 @@ fn acp_reconciles_declared_operations_with_one_host_handshake() {
         "agent.harn",
         "pub pipeline main(harness: Harness) { harness.stdio.println(\"complete\") }\n",
     );
+    write_file(
+        temp.path(),
+        "declared.json",
+        r#"{"synthetic":{"operations":{"optional":{"optional":true}}}}"#,
+    );
     let write_manifest = |fail_closed: bool| {
         write_file(
             temp.path(),
@@ -247,6 +474,7 @@ fn acp_reconciles_declared_operations_with_one_host_handshake() {
                 r#"
 [check]
 host_capabilities.synthetic = ["served", "missing", "runtime_only"]
+host_capabilities_path = "declared.json"
 runtime_installed_host_operations = ["synthetic.runtime_only"]
 require_declared_operations_served = {fail_closed}
 "#,
@@ -297,6 +525,7 @@ require_declared_operations_served = {fail_closed}
         .unwrap();
     assert!(message.contains("synthetic.missing"));
     assert!(!message.contains("synthetic.runtime_only"));
+    assert!(!message.contains("synthetic.optional"));
 
     write_manifest(true);
     let (_, response, capability_requests) = send_request_with_host_capabilities(
@@ -318,6 +547,25 @@ require_declared_operations_served = {fail_closed}
         .is_some_and(|message| {
             message.contains("HARN-CAP-008") && message.contains("synthetic.missing")
         }));
+
+    write_file(
+        temp.path(),
+        "harn.toml",
+        "[check]\nhost_capabilities_path = \"declared.json\"\nrequire_declared_operations_served = true\n",
+    );
+    let (notifications, response, capability_requests) = send_request_with_host_capabilities(
+        &mut client,
+        json!({
+            "jsonrpc":"2.0", "id":5, "method":"session/prompt",
+            "params":{"sessionId":session_id,"prompt":[{"type":"text","text":"optional only"}]}
+        }),
+        json!({"synthetic":["served"]}),
+    );
+    assert_eq!(capability_requests, 1);
+    assert_eq!(response["result"]["stopReason"], "end_turn");
+    assert!(notifications.iter().all(|notification| {
+        notification["params"]["update"]["_meta"]["harn"]["fields"]["code"] != "HARN-CAP-008"
+    }));
 }
 
 #[ignore = "binary surface — moves to slow E2E/smoke job (issue #1069)"]
@@ -417,6 +665,34 @@ fn acp_session_fork_branches_runtime_state_and_dispatches_independently() {
     let session_id = created["result"]["sessionId"].as_str().unwrap().to_string();
     select_code_mode(&mut client, &session_id);
 
+    let (_, unknown_history) = send_request(
+        &mut client,
+        json!({
+            "jsonrpc": "2.0", "id": "unknown-boundary",
+            "method": "harn.session_history.boundaries",
+            "params": {"sessionId": "unknown-canonical-parent"}
+        }),
+    );
+    assert!(
+        unknown_history.get("error").is_some(),
+        "unknown history must return an error without ending the server"
+    );
+    let (_, empty_history) = send_request(
+        &mut client,
+        json!({
+            "jsonrpc": "2.0", "id": "empty-boundary",
+            "method": "harn.session_history.boundaries",
+            "params": {"sessionId": session_id}
+        }),
+    );
+    assert_eq!(empty_history["result"]["tip"]["session_id"], session_id);
+    assert_eq!(
+        empty_history["result"]["tip"]["schema"],
+        "harn.canonical_session_boundary.v1"
+    );
+    assert!(empty_history["result"]["tip"]["event_id"].is_null());
+    assert_eq!(empty_history["result"]["positions"], json!([]));
+
     let (alpha_notifications, alpha_response) = send_request(
         &mut client,
         json!({
@@ -435,6 +711,19 @@ fn acp_session_fork_branches_runtime_state_and_dispatches_independently() {
     );
     let alpha_summary = latest_prompt_summary(&alpha_notifications, &session_id);
     assert_eq!(alpha_summary["len"], 1);
+
+    let (_, acknowledged) = send_request(
+        &mut client,
+        json!({
+            "jsonrpc": "2.0", "id": "alpha-boundary",
+            "method": "harn.session_history.boundaries",
+            "params": {"sessionId": session_id}
+        }),
+    );
+    let alpha_boundary = acknowledged["result"]["tip"].clone();
+    assert_eq!(alpha_boundary["session_id"], session_id);
+    assert!(alpha_boundary["event_id"].is_u64());
+    assert!(alpha_boundary["record_hash"].is_string());
 
     let (beta_notifications, beta_response) = send_request(
         &mut client,
@@ -463,7 +752,7 @@ fn acp_session_fork_branches_runtime_state_and_dispatches_independently() {
             "method": "session/fork",
             "params": {
                 "session_id": session_id,
-                "keep_first": 1,
+                "canonicalBoundary": alpha_boundary,
                 "id": branch_id,
                 "branch_name": "left"
             }
@@ -472,7 +761,7 @@ fn acp_session_fork_branches_runtime_state_and_dispatches_independently() {
     assert_eq!(fork_response["result"]["sessionId"], branch_id);
     assert_eq!(fork_response["result"]["state"], "forked");
     assert_eq!(fork_response["result"]["parent_id"], session_id);
-    assert_eq!(fork_response["result"]["branched_at"], 1);
+    assert_eq!(fork_response["result"]["canonicalBoundary"], alpha_boundary);
     let session_info_update = fork_notifications
         .iter()
         .find(|message| {
@@ -490,8 +779,8 @@ fn acp_session_fork_branches_runtime_state_and_dispatches_independently() {
         session_id
     );
     assert_eq!(
-        session_info_update["params"]["update"]["_meta"]["branched_at"],
-        1
+        session_info_update["params"]["update"]["_meta"]["canonical_boundary"],
+        alpha_boundary
     );
     assert_eq!(
         session_info_update["params"]["update"]["_meta"]["branch_name"],
@@ -537,7 +826,6 @@ fn acp_session_fork_branches_runtime_state_and_dispatches_independently() {
     let child_summary = latest_prompt_summary(&child_notifications, branch_id);
     assert_eq!(child_summary["len"], 2);
     assert_eq!(child_summary["parent_id"], session_id);
-    assert_eq!(child_summary["branched_at"], 1);
     assert_eq!(child_summary["messages"][0]["content"], "alpha");
     assert_eq!(child_summary["messages"][1]["content"], "child");
 
@@ -825,7 +1113,7 @@ default_provider = "openai"
         init["result"]["agentCapabilities"]["promptCapabilities"],
         json!({
             "image": true,
-            "audio": true,
+            "audio": false,
             "embeddedContext": false,
         })
     );

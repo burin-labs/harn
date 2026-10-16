@@ -23,7 +23,7 @@ pub use execution::{
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::{mpsc, Arc};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 use notify::{RecursiveMode, Watcher};
 use rusqlite::{params, ErrorCode, OptionalExtension, Transaction, TransactionBehavior};
@@ -59,6 +59,7 @@ pub const DEFAULT_HOST_LEASE_DOMAIN: &str = "default";
 
 /// Failures produced while validating or mutating host lease state.
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum HostLeaseError {
     /// The caller supplied an invalid or unsafe contract value.
     #[error("invalid host lease request: {0}")]
@@ -495,6 +496,9 @@ pub struct HostLeaseStore {
     db_path: PathBuf,
     wake_path: PathBuf,
     process_inspector: Arc<dyn ProcessInspector>,
+    /// Every lease timestamp and wait deadline is read through this clock so
+    /// tests can decide expiry on virtual time instead of scheduler latency.
+    clock: Arc<dyn harn_clock::Clock>,
     #[cfg(test)]
     busy_handler: Option<fn(i32) -> bool>,
 }
@@ -527,6 +531,22 @@ impl HostLeaseStore {
         root: impl Into<PathBuf>,
         process_inspector: Arc<dyn ProcessInspector>,
     ) -> Result<Self, HostLeaseError> {
+        Self::for_root_with_parts(root, process_inspector, harn_clock::RealClock::arc())
+    }
+
+    #[cfg(test)]
+    fn for_root_with_clock(
+        root: impl Into<PathBuf>,
+        clock: Arc<dyn harn_clock::Clock>,
+    ) -> Result<Self, HostLeaseError> {
+        Self::for_root_with_parts(root, Arc::new(SystemProcessInspector), clock)
+    }
+
+    fn for_root_with_parts(
+        root: impl Into<PathBuf>,
+        process_inspector: Arc<dyn ProcessInspector>,
+        clock: Arc<dyn harn_clock::Clock>,
+    ) -> Result<Self, HostLeaseError> {
         let root = root.into();
         std::fs::create_dir_all(&root)?;
         let store = Self {
@@ -534,6 +554,7 @@ impl HostLeaseStore {
             wake_path: root.join(LEASE_WAKE_FILE),
             root,
             process_inspector,
+            clock,
             #[cfg(test)]
             busy_handler: None,
         };
@@ -564,7 +585,7 @@ impl HostLeaseStore {
             resource.resource_class,
             &resource.domain,
         )?;
-        let requested_at_ms = unix_now_ms()?;
+        let requested_at_ms = self.now_ms()?;
         let run_id = Uuid::now_v7().to_string();
         let queue = if wait_limit_ms == 0 {
             None
@@ -651,7 +672,7 @@ impl HostLeaseStore {
         &self,
         request: HostLeaseRequest,
     ) -> Result<HostLeaseAcquireReceipt, HostLeaseError> {
-        let requested_at_ms = unix_now_ms()?;
+        let requested_at_ms = self.now_ms()?;
         let identity = WaiterIdentity {
             waiter_id: Uuid::now_v7().to_string(),
             requested_at_ms,
@@ -681,7 +702,7 @@ impl HostLeaseStore {
         if wait_timeout.is_zero() {
             return self.try_acquire(request);
         }
-        let started_at_ms = unix_now_ms()?;
+        let started_at_ms = self.now_ms()?;
         let identity = WaiterIdentity {
             waiter_id: Uuid::now_v7().to_string(),
             requested_at_ms: started_at_ms,
@@ -724,7 +745,7 @@ impl HostLeaseStore {
                 "only a pending run can acquire its host lease".to_string(),
             ));
         };
-        let elapsed_ms = unix_now_ms()?.saturating_sub(requested_at_ms) as u64;
+        let elapsed_ms = self.now_ms()?.saturating_sub(requested_at_ms) as u64;
         let remaining_ms = run.wait_limit_ms.saturating_sub(elapsed_ms);
         let request = HostLeaseRequest {
             host: run.resource.machine,
@@ -761,12 +782,20 @@ impl HostLeaseStore {
         identity: WaiterIdentity,
         mut on_progress: Option<&mut dyn FnMut(&HostLeaseAcquireReceipt)>,
     ) -> Result<HostLeaseAcquireReceipt, HostLeaseError> {
-        let started_at_ms = unix_now_ms()?;
-        let started_at = Instant::now();
-        let deadline = started_at.checked_add(wait_timeout).ok_or_else(|| {
-            HostLeaseError::InvalidRequest("wait timeout exceeds the monotonic clock".to_string())
-        })?;
-        let deadline_at_ms = started_at_ms.saturating_add(duration_ms_i64(wait_timeout));
+        // The deadline is decided on the injected clock's monotonic counter.
+        // The watcher's `recv_timeout` below only bounds how long one blocking
+        // wait lasts; a wake that arrives late or never merely re-attempts.
+        let started_at_ms = self.now_ms()?;
+        let started_monotonic_ms = self.clock.monotonic_ms();
+        let wait_timeout_ms = duration_ms_i64(wait_timeout);
+        let deadline_monotonic_ms = started_monotonic_ms
+            .checked_add(wait_timeout_ms)
+            .ok_or_else(|| {
+                HostLeaseError::InvalidRequest(
+                    "wait timeout exceeds the monotonic clock".to_string(),
+                )
+            })?;
+        let deadline_at_ms = started_at_ms.saturating_add(wait_timeout_ms);
         let (tx, rx) = mpsc::channel();
         let mut watcher = notify::recommended_watcher(move |event| {
             let _ = tx.send(event);
@@ -780,11 +809,11 @@ impl HostLeaseStore {
         loop {
             let receipt = self.try_acquire_once(
                 request.clone(),
-                Some(started_at),
+                Some(started_monotonic_ms),
                 Some(deadline_at_ms),
                 &identity,
             )?;
-            let elapsed = started_at.elapsed();
+            let elapsed = self.monotonic_elapsed(started_monotonic_ms);
             if receipt.status == HostLeaseAcquireStatus::Deferred
                 && progress_schedule
                     .as_mut()
@@ -794,7 +823,11 @@ impl HostLeaseStore {
                     observer(&receipt);
                 }
             }
-            if receipt.status == HostLeaseAcquireStatus::Acquired || Instant::now() >= deadline {
+            // A progress callback can outlive this admission snapshot. Decide
+            // expiry from the receipt, so a later clock read cannot return it stale.
+            if receipt.status == HostLeaseAcquireStatus::Acquired
+                || receipt.waited_ms >= wait_timeout_ms.unsigned_abs()
+            {
                 if receipt.status == HostLeaseAcquireStatus::Deferred {
                     self.remove_waiter(&identity.waiter_id)?;
                 }
@@ -808,13 +841,19 @@ impl HostLeaseStore {
                 .unwrap_or(deadline_at_ms);
             let wake_duration =
                 Duration::from_millis(wake_at.saturating_sub(receipt.observed_at_ms).max(1) as u64);
-            let remaining = deadline.saturating_duration_since(Instant::now());
+            let remaining = Duration::from_millis(
+                deadline_monotonic_ms
+                    .saturating_sub(self.clock.monotonic_ms())
+                    .max(0) as u64,
+            );
             if remaining.is_zero() {
-                return Ok(receipt);
+                // Re-observe expiry and remove the waiter through the terminal path.
+                continue;
             }
             let mut wait_duration = wake_duration.min(remaining);
             if let Some(schedule) = progress_schedule {
-                wait_duration = wait_duration.min(schedule.until_next(started_at.elapsed()));
+                wait_duration = wait_duration
+                    .min(schedule.until_next(self.monotonic_elapsed(started_monotonic_ms)));
             }
             match rx.recv_timeout(wait_duration) {
                 Ok(Ok(_)) | Err(mpsc::RecvTimeoutError::Timeout) => {}
@@ -852,7 +891,7 @@ impl HostLeaseStore {
         let resource = HostLeaseResourceKey::normalize(host, resource_class, domain)?;
         let mut conn = self.connection(SQLITE_MUTATION_BUSY_TIMEOUT)?;
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let now = unix_now_ms()?;
+        let now = self.now_ms()?;
         self.status_in_transaction(
             tx,
             &resource.machine,
@@ -903,7 +942,7 @@ impl HostLeaseStore {
         validate_ttl(Some(ttl_ms))?;
         let mut conn = self.connection(SQLITE_MUTATION_BUSY_TIMEOUT)?;
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let now = unix_now_ms()?;
+        let now = self.now_ms()?;
         let (active, _) = active_handle(
             &tx,
             &resource.machine,
@@ -953,7 +992,7 @@ impl HostLeaseStore {
             domain,
             lease_id,
             metadata,
-            unix_now_ms()?,
+            self.now_ms()?,
         )
     }
 
@@ -1039,7 +1078,7 @@ impl HostLeaseStore {
                 &lease_id,
             ],
         )? == 1;
-        let now = unix_now_ms()?;
+        let now = self.now_ms()?;
         if released {
             self.signal_waiters();
         }
@@ -1082,6 +1121,20 @@ impl HostLeaseStore {
     /// is unavailable after the database commit.
     fn signal_waiters(&self) {
         let _ = std::fs::write(&self.wake_path, Uuid::now_v7().to_string());
+    }
+
+    /// Wall-clock Unix milliseconds read through the injected clock.
+    fn now_ms(&self) -> Result<i64, HostLeaseError> {
+        let millis = harn_clock::now_wall_ms(&*self.clock);
+        if millis < 0 {
+            return Err(HostLeaseError::Clock);
+        }
+        Ok(millis)
+    }
+
+    /// Monotonic milliseconds elapsed since a prior clock reading.
+    fn monotonic_elapsed(&self, started_ms: i64) -> Duration {
+        Duration::from_millis(self.clock.monotonic_ms().saturating_sub(started_ms).max(0) as u64)
     }
 
     #[cfg(test)]
@@ -1418,14 +1471,6 @@ fn write_handle(tx: &Transaction<'_>, handle: &HostLeaseHandle) -> Result<(), Ho
         ],
     )?;
     Ok(())
-}
-
-fn unix_now_ms() -> Result<i64, HostLeaseError> {
-    let millis = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_err(|_| HostLeaseError::Clock)?
-        .as_millis();
-    Ok(millis.min(i64::MAX as u128) as i64)
 }
 
 fn duration_ms_i64(duration: Duration) -> i64 {

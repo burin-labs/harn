@@ -745,7 +745,7 @@ pub(super) fn verify_manifest(path: &Path) -> Result<Verification, String> {
         .min(16)
         .min(entries.len());
     let chunk_size = entries.len().div_ceil(worker_count);
-    std::thread::scope(|scope| {
+    harn_parser::runtime_stack::scope(|scope| {
         let handles = entries
             .chunks(chunk_size)
             .map(|chunk| {

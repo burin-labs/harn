@@ -18,6 +18,8 @@ on:
       - "rust-toolchain.toml"
       - "scripts/check_wasm_imports.mjs"
       - "scripts/package_app_runtime.mjs"
+      - "scripts/app_host_runtime_conformance.mjs"
+      - "scripts/test_app_host_runtime_conformance.mjs"
       - "scripts/generated_artifacts.toml"
       - "scripts/resolve_chromedriver.sh"
   push:
@@ -38,6 +40,8 @@ on:
       - "rust-toolchain.toml"
       - "scripts/check_wasm_imports.mjs"
       - "scripts/package_app_runtime.mjs"
+      - "scripts/app_host_runtime_conformance.mjs"
+      - "scripts/test_app_host_runtime_conformance.mjs"
       - "scripts/generated_artifacts.toml"
       - "scripts/resolve_chromedriver.sh"
   merge_group:
@@ -59,7 +63,7 @@ env:
 jobs:
   browser-wasm:
     name: WIT, authority audit, and Chrome worker
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -80,7 +84,7 @@ jobs:
           cache-bin: false
           save: false
       - name: Install pinned browser build tool
-        uses: taiki-e/install-action@3f74d7c16a4242f1c95561e98edc25d36adb4375 # v2.87.12
+        uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2.87.22
         with:
           tool: wasm-pack@0.15.0
           fallback: none

@@ -23,6 +23,21 @@ if [[ "$1" == "api" && "$2" == "graphql" ]]; then
   printf '%s\n' "$FAKE_QUEUE_JSON"
   exit 0
 fi
+if [[ "$1" == "api" && "$2" == "repos/burin-labs/harn" ]]; then
+  printf 'main\n'
+  exit 0
+fi
+if [[ "$1" == "api" && "$2" == repos/burin-labs/harn/compare/* ]]; then
+  [[ "${FAKE_COMPARE_FAILURE:-0}" != "1" ]] || exit 1
+  sha="${2#repos/burin-labs/harn/compare/}"
+  sha="${sha%%...*}"
+  if [[ " ${FAKE_MERGED_SHAS:-} " == *" $sha "* ]]; then
+    printf 'ahead\n'
+  else
+    printf 'diverged\n'
+  fi
+  exit 0
+fi
 if [[ "$1" == "api" && "$2" == "--paginate" ]]; then
   created_epoch="$(date +%s)"
   case "$*" in
@@ -93,6 +108,36 @@ grep -Fq 'repos/burin-labs/harn/actions/runs?event=merge_group&status=in_progres
 grep -Fq 'api --method POST repos/burin-labs/harn/actions/runs/102/cancel' "$calls"
 if grep -Eq 'runs/(101|103)/cancel' "$calls"; then
   echo "current exact queue heads were canceled" >&2
+  exit 1
+fi
+
+# A head that left the queue by merging keeps its run: it may still be
+# finishing package verification, and it is the commit's merge-group proof.
+: > "$calls"
+merged_output="$(
+  PATH="$fixture_root/bin:$PATH" \
+  FAKE_GH_CALLS="$calls" \
+  FAKE_QUEUE_JSON="$queue_json" \
+  FAKE_MERGED_SHAS="$stale" \
+    "$script" --repo burin-labs/harn --apply
+)"
+grep -Fq "preserve run=102 sha=$stale status=in_progress workflow=CI reason=merged_or_unknown" <<< "$merged_output"
+if grep -Fq 'runs/102/cancel' "$calls"; then
+  echo "a merged merge-group run was canceled" >&2
+  exit 1
+fi
+# An unreadable comparison preserves rather than cancels.
+: > "$calls"
+unknown_output="$(
+  PATH="$fixture_root/bin:$PATH" \
+  FAKE_GH_CALLS="$calls" \
+  FAKE_QUEUE_JSON="$queue_json" \
+  FAKE_COMPARE_FAILURE=1 \
+    "$script" --repo burin-labs/harn --apply
+)"
+grep -Fq "preserve run=102 sha=$stale status=in_progress workflow=CI reason=merged_or_unknown" <<< "$unknown_output"
+if grep -Fq 'runs/102/cancel' "$calls"; then
+  echo "an unknown merge state reached cancellation" >&2
   exit 1
 fi
 

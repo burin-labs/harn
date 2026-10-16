@@ -76,6 +76,7 @@ define_portable_builtins! {
         AssertList => "__assert_list",
         AssertSchema => "__assert_schema",
         DictFilterNil => "__dict_filter_nil",
+        MethodMutate => "__method_mutate",
     }
 }
 

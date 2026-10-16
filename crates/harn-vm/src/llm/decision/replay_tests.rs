@@ -1,5 +1,7 @@
 use super::*;
 use crate::llm::decision::replay::{EvaluationFixture, EvaluationReplayScope, FixtureAnswer};
+use crate::NativeBuiltinCtxExt;
+use crate::NativeVmExt;
 
 fn args(state: &str) -> Vec<VmValue> {
     vec![
@@ -23,7 +25,7 @@ fn replay_and_cache_inherit_into_children_and_keep_occurrences_and_cost_separate
         .build()
         .unwrap()
         .block_on(async {
-            let mut vm = crate::Vm::new();
+            let mut vm = crate::new_vm();
             let recording = EvaluationReplayScope::record();
             vm.set_evaluation_replay(recording.clone());
             let ctx = crate::vm::AsyncBuiltinCtx::for_test(vm.child_vm());
@@ -46,15 +48,19 @@ fn replay_and_cache_inherit_into_children_and_keep_occurrences_and_cost_separate
 
             let cache = EvaluationReplayScope::cache();
             vm.set_evaluation_replay(cache.clone());
+            let mut cached_arguments = args("cached");
+            let mut policy = cached_arguments[3].as_dict().unwrap().clone();
+            policy.remove("effort");
+            cached_arguments[3] = VmValue::dict(policy.clone());
             let first = evaluate_internal(
                 &crate::vm::AsyncBuiltinCtx::for_test(vm.child_vm()),
-                &args("cached"),
+                &cached_arguments,
             )
             .await
             .unwrap();
             let second = evaluate_internal(
                 &crate::vm::AsyncBuiltinCtx::for_test(vm.child_vm()),
-                &args("cached"),
+                &cached_arguments,
             )
             .await
             .unwrap();
@@ -66,6 +72,22 @@ fn replay_and_cache_inherit_into_children_and_keep_occurrences_and_cost_separate
             assert_ne!(first.3.invocation_id, second.3.invocation_id);
             assert_eq!(second.3.source, EvaluationSource::Cache);
             assert_eq!(second.3.physical_attempts, 0);
+            policy.insert(crate::value::intern_key("effort"), VmValue::string("unset"));
+            cached_arguments[3] = VmValue::dict(policy);
+            assert!(
+                evaluate_internal(
+                    &crate::vm::AsyncBuiltinCtx::for_test(vm.child_vm()),
+                    &cached_arguments,
+                )
+                .await
+                .is_err(),
+                "invalid explicit effort cannot reuse the omitted-effort answer"
+            );
+            assert_eq!(
+                backend.request_count(),
+                2,
+                "invalid effort never dispatched"
+            );
             cache.finish().unwrap();
         });
 }
@@ -80,7 +102,7 @@ fn missing_changed_extra_and_caught_mismatches_cannot_succeed_or_dispatch() {
         .build()
         .unwrap()
         .block_on(async {
-            let mut vm = crate::Vm::new();
+            let mut vm = crate::new_vm();
             let recording = EvaluationReplayScope::record();
             vm.set_evaluation_replay(recording.clone());
             evaluate_internal(
@@ -130,28 +152,55 @@ fn typed_fixture_receipt_reports_no_dispatch_or_invented_live_source() {
     let backend = Arc::new(MockDecisionBackend::scripted(vec![]));
     let _backend = install_backend(backend.clone());
     let _route = install_route("mock", "fixture", contract(4096, None));
-    let arguments = args("state");
-    let fixture = EvaluationFixture {
+    let mut arguments = args("state");
+    arguments[2] = VmValue::dict(
+        (0..13)
+            .map(|index| {
+                (
+                    format!("m{index}"),
+                    VmValue::dict(vec![
+                        ("kind", VmValue::string("boolean")),
+                        (
+                            "instructions",
+                            VmValue::string(format!("Keep message {index}?")),
+                        ),
+                    ]),
+                )
+            })
+            .collect::<Vec<_>>(),
+    );
+    let fixture = || EvaluationFixture {
         site_id: "replay.site".into(),
         state: crate::llm::helpers::vm_value_to_json(&arguments[1]),
         questions: crate::llm::helpers::vm_value_to_json(&arguments[2]),
         policy: crate::llm::helpers::vm_value_to_json(&arguments[3]),
-        answers: BTreeMap::from([(
-            "safe".into(),
-            FixtureAnswer::Boolean {
-                verdict: true,
-                confidence: 0.95,
-                evidence: "declared by the test".into(),
-            },
-        )]),
+        answers: (0..13)
+            .map(|index| {
+                (
+                    format!("m{index}"),
+                    FixtureAnswer::Boolean {
+                        verdict: true,
+                        confidence: 0.95,
+                        evidence: "declared by the test".into(),
+                    },
+                )
+            })
+            .collect(),
     };
-    let scope = EvaluationReplayScope::fixtures(vec![fixture]).unwrap();
+    let mut incomplete = fixture();
+    incomplete.answers.remove("m12");
+    let mismatch = EvaluationReplayScope::fixtures(vec![incomplete])
+        .err()
+        .expect("12 answers cannot serve 13 declared questions");
+    assert!(mismatch.to_string().contains("evaluation replay mismatch"));
+    assert!(mismatch.to_string().contains("12 answers for 13 questions"));
+    let scope = EvaluationReplayScope::fixtures(vec![fixture()]).unwrap();
     tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .unwrap()
         .block_on(async {
-            let mut vm = crate::Vm::new();
+            let mut vm = crate::new_vm();
             vm.set_evaluation_replay(scope.clone());
             let result = evaluate_internal(
                 &crate::vm::AsyncBuiltinCtx::for_test(vm.child_vm()),
@@ -161,6 +210,7 @@ fn typed_fixture_receipt_reports_no_dispatch_or_invented_live_source() {
             .unwrap();
             scope.finish().unwrap();
             assert_eq!(result.0.kind, "answered");
+            assert_eq!(result.3.questions.len(), 13);
             assert_eq!(result.3.source, EvaluationSource::Fixture);
             assert!(result.3.reused_from.is_none());
             assert_eq!(result.3.physical_attempts, 0);
@@ -170,4 +220,43 @@ fn typed_fixture_receipt_reports_no_dispatch_or_invented_live_source() {
             assert_eq!(evidence.evaluation_receipts.unwrap().len(), 1);
             assert_eq!(backend.request_count(), 0);
         });
+}
+
+#[test]
+fn every_checked_in_evaluation_tape_decodes_with_the_current_decoder() {
+    // A change to how recordings serialize must fail here, where it is made,
+    // rather than in the slow end-to-end suite that replays one example.
+    use crate::testbench::tape::{EventTape, TapeRecordKind};
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let listed = std::process::Command::new("git")
+        .current_dir(&root)
+        .args(["ls-files", "-z", "--", "*.tape"])
+        .output()
+        .expect("git lists the checked-in tapes");
+    assert!(listed.status.success(), "git ls-files failed: {listed:?}");
+    let tapes: Vec<_> = listed
+        .stdout
+        .split(|byte| *byte == 0)
+        .filter(|path| !path.is_empty())
+        .map(|path| root.join(String::from_utf8_lossy(path).as_ref()))
+        .collect();
+    let mut evaluation_tapes = 0;
+    for path in &tapes {
+        let tape = EventTape::load(path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+        if tape
+            .records
+            .iter()
+            .any(|record| matches!(record.kind, TapeRecordKind::DecisionEvaluation { .. }))
+        {
+            EvaluationReplayScope::replay(&tape)
+                .unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+            evaluation_tapes += 1;
+        }
+    }
+    // An empty listing must not read as every tape decoding.
+    assert!(
+        evaluation_tapes > 0,
+        "no checked-in evaluation tape was found among {} tapes",
+        tapes.len()
+    );
 }

@@ -1,7 +1,8 @@
 //! Ollama provider — local Ollama server with NDJSON streaming.
 
 use crate::llm::api::{
-    elapsed_ms, telemetry_source, DeltaSender, LlmRequestPayload, LlmResult, ProviderTelemetry,
+    elapsed_ms, telemetry_source, DeltaSender, LlmRequestPayload, LlmRequestPayloadExt, LlmResult,
+    ProviderTelemetry,
 };
 use crate::llm::provider::{LlmProvider, LlmProviderChat};
 use crate::value::{VmError, VmValue};
@@ -25,7 +26,7 @@ impl LlmProviderChat for OllamaProvider {
         &'a self,
         request: &'a LlmRequestPayload,
         delta_tx: Option<DeltaSender>,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<LlmResult, VmError>> + 'a>> {
+    ) -> crate::llm::provider::ProviderChatFuture<'a> {
         Box::pin(self.chat_impl(request, delta_tx))
     }
 }
@@ -117,8 +118,8 @@ impl OllamaProvider {
         }
         // Ollama templates (qwen3:30b-a3b etc.) gate `<think>` emission
         // on the top-level `think` field, NOT
-        // `chat_template_kwargs.enable_thinking`. The OpenAI-compat shim
-        // passes `think` through to the same template context. Default
+        // `chat_template_kwargs.enable_thinking`. The OpenAI-compatible
+        // adapter maps reasoning separately through `reasoning_effort`. Default
         // false for fast tool-call-shaped turns; callers who want
         // reasoning set `thinking` explicitly.
         body["think"] = serde_json::json!(opts.thinking.is_enabled());
@@ -242,7 +243,7 @@ impl OllamaProvider {
             let msg = crate::llm::api::DialectContract::for_request(request)
                 .classify_http_error(&request.provider, status, retry_after.as_deref(), &body)
                 .message;
-            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(msg))));
+            return Err(VmError::Thrown(VmValue::string(msg)));
         }
         let mut result = if request.stream {
             let tx = delta_tx.unwrap_or_else(|| {
@@ -369,13 +370,13 @@ async fn parse_raw_generate_response(
     request: &LlmRequestPayload,
 ) -> Result<LlmResult, VmError> {
     let json: serde_json::Value = response.json().await.map_err(|error| {
-        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
+        VmError::Thrown(VmValue::string(format!(
             "ollama raw generate response parse error: {error}"
-        ))))
+        )))
     })?;
     if let Some(error) = json.get("error").and_then(|value| value.as_str()) {
-        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-            format!("ollama raw generate API error: {error}"),
+        return Err(VmError::Thrown(VmValue::string(format!(
+            "ollama raw generate API error: {error}"
         ))));
     }
     parse_raw_generate_json(json, request)
@@ -399,10 +400,10 @@ fn parse_raw_generate_json(
         .and_then(|value| value.as_i64())
         .unwrap_or(0);
     if text.is_empty() && output_tokens > 0 {
-        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
+        return Err(VmError::Thrown(VmValue::string(format!(
             "ollama raw-generate model {} reported eval_count={output_tokens} but delivered no visible content",
             request.model
-        )))));
+        ))));
     }
     let telemetry = ProviderTelemetry::from_ollama_done(&json, telemetry_source::OLLAMA_GENERATE);
     Ok(LlmResult {
@@ -469,8 +470,8 @@ async fn parse_raw_generate_stream(
             Err(_) => continue,
         };
         if let Some(error) = json.get("error").and_then(|value| value.as_str()) {
-            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-                format!("ollama raw generate API error: {error}"),
+            return Err(VmError::Thrown(VmValue::string(format!(
+                "ollama raw generate API error: {error}"
             ))));
         }
         if let Some(chunk) = json.get("response").and_then(|value| value.as_str()) {
@@ -508,9 +509,9 @@ async fn parse_raw_generate_stream(
     }
     let thinking = splitter.thinking.trim().to_string();
     if text.is_empty() && output_tokens > 0 {
-        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
+        return Err(VmError::Thrown(VmValue::string(format!(
             "ollama raw-generate model {model} reported eval_count={output_tokens} but delivered no visible content"
-        )))));
+        ))));
     }
     Ok(LlmResult {
         attempts: Default::default(),
@@ -557,7 +558,9 @@ mod tests {
 
     fn base_payload() -> LlmRequestPayload {
         LlmRequestPayload {
+            reasoning_effort_source: crate::llm::ReasoningEffortSource::Request,
             data_controls: crate::llm_config::DataPosture::Default,
+            inference_boundary: None,
             provider: "ollama".to_string(),
             model: "qwen3.5:35b-a3b-coding-nvfp4".to_string(),
             region: None,
@@ -583,6 +586,7 @@ mod tests {
             presence_penalty: None,
             parallel_tool_calls: None,
             provider_contract_probe: None,
+            portable_option_intent: Default::default(),
             fast: false,
             reasoning_mode: None,
             output_format: crate::llm::api::OutputFormat::JsonSchema {

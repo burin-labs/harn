@@ -12,13 +12,16 @@ table for that system.
 | OpenAI term | Harn equivalent | Notes |
 |---|---|---|
 | `Agent` (class) | `agent_loop(harness, ...)` invocation, or a `persona` | OpenAI's `Agent` bundles instructions, tools, and output type; the closest Harn shape is a configured `agent_loop` call site. |
-| `Runner.run(...)` | one `agent_loop(harness, ...)` invocation | One OpenAI "turn" wraps many model round-trips. One Harn agent loop invocation does the same. |
-| **"turn"** | Harn **prompt turn** / `agent_loop` | OpenAI's "turn" is the outer cycle (one user request → final answer), not Harn's per-iteration counter. |
-| "model roundtrip" (unnamed) | Harn **`iteration`** | The inner unit. |
-| `max_turns` | `max_iterations` | Both bound a budget, but the nouns are off-by-one — OpenAI counts outer SDK invocations, Harn counts inner LLM calls. |
+| `Runner.run(...)` | one `agent_loop(harness, ...)` invocation | Both run a loop that can make several model calls before returning a final response. |
+| "turn" | `iteration` | One model invocation, including its tool calls. |
+| `max_turns` | `max_iterations` | Both limit model iterations within one loop invocation. |
 | `Session` (`SQLiteSession("id")`) | `session_id` + `harness.agent.open(id)` | Direct match. |
 | `handoff` | persona handoff or `spawn_agent` | Direct match in shape. |
 | `input_guardrails` / `output_guardrails` | `agent_input_guardrail` + tool middleware + completion gates | Harn exposes input guardrails as a named pre-loop bookend; output checks use completion gates, judges, validators, and tool middleware. |
+
+The SDK's [Runner reference](https://openai.github.io/openai-agents-python/ref/run/#agents.run.Runner.run)
+defines a turn as one model invocation. Harn calls the outer user-message cycle
+a [prompt turn](./glossary.md#conversation-units).
 
 ## Anthropic Claude Agent SDK
 

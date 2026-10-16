@@ -65,9 +65,7 @@ fn __scope_classifier_recent_context(
   let i = start
   while i < total {
     const msg = messages[i]
-    out = out.appending(
-      {role: to_string(msg?.role ?? ""), content: msg?.content ?? msg?.text ?? ""},
-    )
+    out.push({role: to_string(msg?.role ?? ""), content: msg?.content ?? msg?.text ?? ""})
     i = i + 1
   }
   return out
@@ -77,7 +75,11 @@ fn __scope_classifier_schema() {
   return {
     type: "object",
     properties: {
-      label: {type: "string", description: "One of: in_scope, out_of_scope, escalate."},
+      label: {
+        type: "string",
+        enum: ["in_scope", "out_of_scope", "escalate"],
+        description: "One of: in_scope, out_of_scope, escalate.",
+      },
       confidence: {type: "number", description: "Confidence from 0.0 to 1.0."},
       evidence: {type: "string", description: "Concrete reason for the classification."},
     },

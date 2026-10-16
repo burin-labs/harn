@@ -38,6 +38,19 @@ pub(super) fn generate_python_with_payloads(payloads: &SessionUpdatePayloads) ->
     out.push_str("from typing import Any, Dict, List, Mapping, Optional, Type, TypeVar, Union\n\n");
     out.push_str("__all__ = [\n");
     let mut public_names = python_public_names();
+    public_names.extend(
+        [
+            "HarnInferenceAdmissionStatus",
+            "HarnInferenceAdmissionReach",
+            "HarnInferenceAdmissionDataPosture",
+            "HarnInferenceAdmissionBoundary",
+            "HarnInferenceAdmissionRequest",
+            "HarnInferenceAdmissionSnapshot",
+            "HarnMachineSpendExhaustion",
+            "HarnMachineSpendPeriod",
+        ]
+        .map(str::to_owned),
+    );
     public_names.extend(payloads.records.iter().map(|record| record.name.clone()));
     for name in &public_names {
         out.push_str("    ");
@@ -261,6 +274,9 @@ pub(super) fn generate_python_with_payloads(payloads: &SessionUpdatePayloads) ->
     append_python_prepared_session_types(&mut out);
     append_python_session_recap_types(&mut out);
     super::plan_records::append(&mut out, super::records::Target::Python);
+    super::inference_admission::append(&mut out, super::records::Target::Python);
+    super::canonical_history::append(&mut out, super::records::Target::Python);
+    super::prompt_correlation::append(&mut out, super::records::Target::Python);
     out
 }
 
@@ -412,9 +428,12 @@ class HarnACPPromptErrorData(_HarnDataclass):
     category: Optional[str] = None
     kind: Optional[str] = None
     reason: Optional[str] = None
+    origin: Optional[str] = None
+    rule: Optional[str] = None
     code: Optional[str] = None
     retryable: Optional[bool] = None
     retryAfterMs: Optional[int] = None
+    machineSpend: Optional[HarnMachineSpendExhaustion] = None
     provider: Optional[str] = None
     model: Optional[str] = None
 
@@ -527,6 +546,7 @@ class HarnToolLifecycleMeta(_HarnDataclass):
     errorCategory: Optional[str] = None
     executionDurationMs: Optional[float] = None
     executor: Optional[JsonValue] = None
+    intent: Optional[str] = None
     mutationStatus: Optional[HarnToolMutationStatus] = None
     parsing: Optional[bool] = None
     rawInputPartial: Optional[str] = None
@@ -592,6 +612,7 @@ class ACPSessionUpdateEnvelope(_HarnDataclass):
     sessionUpdate: str
     content: Optional[JsonValue] = None
     messageId: Optional[str] = None
+    historySourceEventId: Optional[str] = None
     entries: Optional[List[JsonValue]] = None
     keptTurnCount: Optional[int] = None
     removedTurnCount: Optional[int] = None

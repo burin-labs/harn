@@ -349,7 +349,7 @@ mod tests {
         // if a test panics before sending, the leaked thread is
         // captured by nextest's `leak-timeout = "fail"` rather than
         // hidden behind a synthetic panic.
-        let handle = std::thread::spawn(move || {
+        let handle = crate::runtime_stack::spawn(move || {
             let (mut stream, _) = listener
                 .accept()
                 .unwrap_or_else(|e| panic!("healthcheck stub accept failed: {e}"));

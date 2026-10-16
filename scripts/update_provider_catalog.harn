@@ -36,6 +36,26 @@ const FIXED_OBSERVED_AT = "2026-05-11T00:00:00Z"
 
 const FIXED_FETCHED_AT = "fixture-time"
 
+pub type ModelIndexSource = {
+  id: string,
+  provider: string,
+  source_url: string,
+  mapper: "generic" | "gemini" | "xai" | "together" | "cerebras" | "fireworks" | "openrouter",
+  terms_notes: string,
+  source_owner?: "provider" | "aggregator",
+  requires_key?: bool,
+  confidence?: "high" | "medium" | "low",
+  extra_headers?: dict<string, string>,
+}
+
+pub type ModelIndexSources = {
+  schema: "harn.provider_catalog_refresh_sources.v1",
+  egress_hosts: list<string>,
+  sources: list<ModelIndexSource>,
+}
+
+pub type PreparedModelSources = {specs: list<dict>, egress_hosts: list<string>}
+
 fn __install_fixture_mocks(harness: Harness) -> Harness {
   harness.testing.http_mock_clear()
   harness.testing.http_mock(
@@ -83,49 +103,8 @@ fn __install_fixture_mocks(harness: Harness) -> Harness {
   return harness
 }
 
-fn __install_live_egress_policy(harness: Harness) -> Harness {
-  harness.net.egress_policy(
-    {
-      allow: [
-        "www.anthropic.com",
-        "anthropic.com",
-        "claude.com",
-        "platform.openai.com",
-        "developers.openai.com",
-        "openai.com",
-        "openrouter.ai",
-        "api.anthropic.com",
-        "api.openai.com",
-        "router.huggingface.co",
-        "generativelanguage.googleapis.com",
-        "api.mistral.ai",
-        "api.cohere.ai",
-        "api.x.ai",
-        "api.together.xyz",
-        "api.groq.com",
-        "api.cerebras.ai",
-        "api.deepseek.com",
-        "api.fireworks.ai",
-        "dashscope-intl.aliyuncs.com",
-        "api.minimax.io",
-        "api.z.ai",
-        "api.moonshot.ai",
-        "inference.baseten.co",
-        "api.deepinfra.com",
-        "api.sambanova.ai",
-        "integrate.api.nvidia.com",
-        "api.tokenfactory.nebius.com",
-        "tokens.flex.ai",
-        "api.hyperbolic.xyz",
-        "api.siliconflow.com",
-        "api.siliconflow.cn",
-        "api.parasail.io",
-        "api.atlascloud.ai",
-        "ai-gateway.vercel.sh",
-      ],
-      default: "deny",
-    },
-  )
+fn __install_live_egress_policy(harness: Harness, hosts: list<string>) -> Harness {
+  harness.net.egress_policy({allow: hosts, default: "deny"})
   return harness
 }
 
@@ -409,7 +388,7 @@ fn __fireworks_adapter(harness: Harness, env: dict) {
   return json_api_adapter(harness, env, config)
 }
 
-fn __keyed_models_spec(
+fn __models_spec(
   id: string,
   provider: string,
   source_url: string,
@@ -420,7 +399,7 @@ fn __keyed_models_spec(
     id: id,
     kind: "json",
     provider: provider,
-    source_owner: "provider",
+    source_owner: options?.source_owner ?? "provider",
     source_url: source_url,
     key_envs: key_envs,
     confidence: options?.confidence ?? "high",
@@ -430,35 +409,22 @@ fn __keyed_models_spec(
     extra_headers: options?.extra_headers,
     mapper: options?.mapper ?? __generic_models_mapper,
   }
+  const adapter = { harness, env ->
+    json_api_adapter(
+      harness,
+      env,
+      pick(
+        config,
+        ["id", "provider", "source_url", "source_owner", "confidence", "terms_notes", "mapper"],
+      ),
+    )
+  }
+  if options?.requires_key == false {
+    return {key_envs: [], run_fn: adapter}
+  }
   return {
     key_envs: config.key_envs,
-    run_fn: { harness, env ->
-      key_required_adapter(
-        harness,
-        env,
-        config
-          + {
-            adapter: { adapter_harness, adapter_env ->
-              json_api_adapter(
-                adapter_harness,
-                adapter_env,
-                pick(
-                  config,
-                  [
-                    "id",
-                    "provider",
-                    "source_url",
-                    "source_owner",
-                    "confidence",
-                    "terms_notes",
-                    "mapper",
-                  ],
-                ),
-              )
-            },
-          },
-      )
-    },
+    run_fn: { harness, env -> key_required_adapter(harness, env, config + {adapter: adapter}) },
   }
 }
 
@@ -527,233 +493,65 @@ fn __fireworks_spec() {
   }
 }
 
-fn __adapter_specs(live: any) {
-  if live {
-    return [__openrouter_spec(), __fireworks_spec()]
-  }
+fn __fixture_adapter_specs() {
   return [__anthropic_spec(), __openai_spec(), __openrouter_spec(), __fireworks_spec()]
 }
 
-fn __live_adapter_specs() {
-  return [
-    __keyed_models_spec(
-      "anthropic-models-api",
-      "anthropic",
-      "https://api.anthropic.com/v1/models",
-      ["ANTHROPIC_API_KEY"],
-      {
-        auth_header: "x-api-key",
-        auth_prefix: "",
-        extra_headers: {"anthropic-version": "2023-06-01"},
-        terms_notes: "Provider-owned /v1/models endpoint.",
-      },
-    ),
-    __keyed_models_spec(
-      "openai-models-api",
-      "openai",
-      "https://api.openai.com/v1/models",
-      ["OPENAI_API_KEY"],
-      {terms_notes: "Provider-owned /v1/models endpoint."},
-    ),
-    __keyed_models_spec(
-      "huggingface-router-models-api",
-      "huggingface",
-      "https://router.huggingface.co/v1/models",
-      ["HF_TOKEN", "HUGGINGFACE_API_KEY"],
-      {terms_notes: "Hugging Face Router /v1/models endpoint."},
-    ),
-    __keyed_models_spec(
-      "gemini-models-api",
-      "gemini",
-      "https://generativelanguage.googleapis.com/v1beta/models",
-      ["GEMINI_API_KEY", "GOOGLE_API_KEY"],
-      {
-        auth_header: "x-goog-api-key",
-        auth_prefix: "",
-        mapper: __gemini_models_mapper,
-        terms_notes: "Gemini API model index.",
-      },
-    ),
-    __keyed_models_spec(
-      "mistral-models-api",
-      "mistral",
-      "https://api.mistral.ai/v1/models",
-      ["MISTRAL_API_KEY"],
-      {terms_notes: "Provider-owned /v1/models endpoint."},
-    ),
-    __keyed_models_spec(
-      "cohere-models-api",
-      "cohere",
-      "https://api.cohere.ai/compatibility/v1/models",
-      ["COHERE_API_KEY"],
-      {terms_notes: "Cohere OpenAI-compatible /models endpoint."},
-    ),
-    __keyed_models_spec(
-      "xai-models-api",
-      "xai",
-      "https://api.x.ai/v1/models",
-      ["XAI_API_KEY"],
-      {
-        mapper: __xai_models_mapper,
-        terms_notes: "Provider-owned /v1/models endpoint; rates are 1e-4 USD per MTok.",
-      },
-    ),
-    __keyed_models_spec(
-      "together-models-api",
-      "together",
-      "https://api.together.xyz/v1/models",
-      ["TOGETHER_AI_API_KEY"],
-      {
-        mapper: __together_models_mapper,
-        terms_notes: "Provider-owned /v1/models endpoint; prices are already per million tokens.",
-      },
-    ),
-    __keyed_models_spec(
-      "groq-models-api",
-      "groq",
-      "https://api.groq.com/openai/v1/models",
-      ["GROQ_API_KEY"],
-      {terms_notes: "Groq OpenAI-compatible /models endpoint."},
-    ),
-    __keyed_models_spec(
-      "cerebras-models-api",
-      "cerebras",
-      "https://api.cerebras.ai/public/v1/models",
-      ["CEREBRAS_API_KEY"],
-      {
-        mapper: __cerebras_models_mapper,
-        terms_notes:
-          "Provider-owned public model index. `/v1/models` returns bare ids; `/public/v1/models` adds pricing, limits and a deprecated flag.",
-      },
-    ),
-    __keyed_models_spec(
-      "deepseek-models-api",
-      "deepseek",
-      "https://api.deepseek.com/v1/models",
-      ["DEEPSEEK_API_KEY"],
-      {terms_notes: "Provider-owned /v1/models endpoint."},
-    ),
-    __keyed_models_spec(
-      "dashscope-models-api",
-      "dashscope",
-      "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models",
-      ["DASHSCOPE_API_KEY"],
-      {terms_notes: "DashScope OpenAI-compatible /models endpoint."},
-    ),
-    __keyed_models_spec(
-      "minimax-models-api",
-      "minimax",
-      "https://api.minimax.io/v1/models",
-      ["MINIMAX_API_KEY"],
-      {terms_notes: "Provider-owned /v1/models endpoint."},
-    ),
-    __keyed_models_spec(
-      "zai-models-api",
-      "zai",
-      "https://api.z.ai/api/paas/v4/models",
-      ["ZAI_API_KEY", "ZHIPU_API_KEY"],
-      {terms_notes: "Z.AI OpenAI-compatible /models endpoint."},
-    ),
-    __keyed_models_spec(
-      "moonshot-models-api",
-      "moonshot",
-      "https://api.moonshot.ai/v1/models",
-      ["MOONSHOT_API_KEY", "MOONSHOT_AI_API_KEY", "KIMI_API_KEY"],
-      {terms_notes: "Provider-owned /v1/models endpoint."},
-    ),
-    __keyed_models_spec(
-      "deepinfra-models-api",
-      "deepinfra",
-      "https://api.deepinfra.com/v1/openai/models",
-      ["DEEPINFRA_API_KEY", "DEEPINFRA_TOKEN"],
-      {terms_notes: "DeepInfra OpenAI-compatible /models endpoint."},
-    ),
-    __keyed_models_spec(
-      "sambanova-models-api",
-      "sambanova",
-      "https://api.sambanova.ai/v1/models",
-      ["SAMBANOVA_API_KEY"],
-      {terms_notes: "Provider-owned /v1/models endpoint."},
-    ),
-    __keyed_models_spec(
-      "nvidia-nim-models-api",
-      "nvidia",
-      "https://integrate.api.nvidia.com/v1/models",
-      ["NVIDIA_API_KEY", "NIM_API_KEY"],
-      {terms_notes: "NVIDIA NIM API Catalog OpenAI-compatible /models endpoint."},
-    ),
-    __keyed_models_spec(
-      "baseten-models-api",
-      "baseten",
-      "https://inference.baseten.co/v1/models",
-      ["BASETEN_API_KEY"],
-      {terms_notes: "Baseten Model APIs OpenAI-compatible /models endpoint."},
-    ),
-    __keyed_models_spec(
-      "nebius-token-factory-models-api",
-      "nebius",
-      "https://api.tokenfactory.nebius.com/v1/models",
-      ["NEBIUS_API_KEY"],
-      {terms_notes: "Nebius Token Factory OpenAI-compatible /models endpoint."},
-    ),
-    __keyed_models_spec(
-      "flexai-model-discovery-api",
-      "flexai",
-      "https://tokens.flex.ai/api/models",
-      ["FLEXAI_API_KEY"],
-      {
-        terms_notes:
-          "FlexAI detailed model-discovery endpoint with context, pricing, support, and health metadata.",
-      },
-    ),
-    __keyed_models_spec(
-      "hyperbolic-models-api",
-      "hyperbolic",
-      "https://api.hyperbolic.xyz/v1/models",
-      ["HYPERBOLIC_API_KEY"],
-      {terms_notes: "Hyperbolic OpenAI-compatible /models endpoint."},
-    ),
-    __keyed_models_spec(
-      "siliconflow-models-api",
-      "siliconflow",
-      "https://api.siliconflow.com/v1/models",
-      ["SILICONFLOW_API_KEY"],
-      {
-        terms_notes:
-          "SiliconFlow OpenAI-compatible /models endpoint; override SILICONFLOW_BASE_URL for regional endpoints.",
-      },
-    ),
-    __keyed_models_spec(
-      "parasail-models-api",
-      "parasail",
-      "https://api.parasail.io/v1/models",
-      ["PARASAIL_API_KEY"],
-      {terms_notes: "Parasail OpenAI-compatible /models endpoint."},
-    ),
-    __keyed_models_spec(
-      "atlas-models-api",
-      "atlas",
-      "https://api.atlascloud.ai/v1/models",
-      ["ATLAS_API_KEY", "ATLASCLOUD_API_KEY"],
-      {terms_notes: "Atlas Cloud OpenAI-compatible /models endpoint."},
-    ),
-    // The catalog carries curated `vercel_ai_gateway` rows but had no adapter,
-    // so a Vercel-only price or route change could not be observed by a refresh
-    // run at all. The gateway index is a plain OpenAI-shaped `/v1/models` with
-    // top-level `context_window` and per-token `pricing.input` / `.output`,
-    // which the generic mapper already reads. It is an aggregator, so its
-    // confidence matches OpenRouter's rather than a first-party endpoint's.
-    __keyed_models_spec(
-      "vercel-ai-gateway-models-api",
-      "vercel_ai_gateway",
-      "https://ai-gateway.vercel.sh/v1/models",
-      ["AI_GATEWAY_API_KEY", "VERCEL_AI_GATEWAY_API_KEY"],
-      {
-        confidence: "medium",
-        terms_notes: "Vercel AI Gateway public /v1/models index; aggregator source.",
-      },
-    ),
-  ]
+pub fn prepare_model_index_sources(configuration: unknown, catalog: dict) -> PreparedModelSources {
+  const configured = schema_expect(configuration, schema_of(ModelIndexSources))
+  if configured.sources.count == 0 {
+    throw "provider model-index source registry is empty"
+  }
+  const mappers = {
+    generic: __generic_models_mapper,
+    gemini: __gemini_models_mapper,
+    xai: __xai_models_mapper,
+    together: __together_models_mapper,
+    cerebras: __cerebras_models_mapper,
+    fireworks: __fireworks_mapper,
+    openrouter: __openrouter_mapper,
+  }
+  let specs = []
+  let seen = []
+  for source in configured.sources {
+    if seen.contains(source.id) {
+      throw "duplicate provider source id: " + source.id
+    }
+    seen = seen + [source.id]
+    const provider = catalog.providers.find({ row -> row.id == source.provider })
+    if provider == nil {
+      throw "provider source names an unknown catalog provider: " + source.provider
+    }
+    const header_auth = provider.auth.style == "header"
+    specs = specs
+      + [
+        __models_spec(
+          source.id,
+          source.provider,
+          source.source_url,
+          provider.auth.env,
+          {
+            confidence: source.confidence,
+            terms_notes: source.terms_notes,
+            source_owner: source.source_owner,
+            requires_key: source.requires_key,
+            extra_headers: source.extra_headers,
+            auth_header: if header_auth {
+              provider.auth.header
+            } else {
+              nil
+            },
+            auth_prefix: if header_auth {
+              ""
+            } else {
+              nil
+            },
+            mapper: mappers[source.mapper],
+          },
+        ),
+      ]
+  }
+  return {specs: specs, egress_hosts: configured.egress_hosts}
 }
 
 fn __load_secrets(env: HarnessEnv, live: bool, specs: list<dict>) -> dict {
@@ -897,10 +695,15 @@ pipeline main(harness: Harness, task: unknown) {
   const check = argv.contains("--check")
   const update = argv.contains("--update")
   const json = argv.contains("--json")
+  const provider_catalog = harness.llm.provider_catalog()
+  const model_sources = prepare_model_index_sources(
+    json_parse(harness.fs.read_text("spec/provider-catalog-refresh-sources.json")),
+    provider_catalog,
+  )
   const specs = if live {
-    __adapter_specs(live) + __live_adapter_specs()
+    model_sources.specs
   } else {
-    __adapter_specs(live)
+    __fixture_adapter_specs()
   }
   const observed_at = if live {
     harness.clock.date_iso()
@@ -910,7 +713,7 @@ pipeline main(harness: Harness, task: unknown) {
   const scoped_harness = if !live {
     __install_fixture_mocks(harness)
   } else {
-    __install_live_egress_policy(harness)
+    __install_live_egress_policy(harness, model_sources.egress_hosts)
   }
   const env_data = {
     observed_at: observed_at,
@@ -927,7 +730,7 @@ pipeline main(harness: Harness, task: unknown) {
     "fixtures"
   }
   const catalog = if live {
-    scoped_harness.llm.provider_catalog()
+    provider_catalog
   } else {
     json_parse(scoped_harness.fs.read_text(BASELINE_CATALOG_PATH))
   }

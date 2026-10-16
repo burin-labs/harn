@@ -9,12 +9,9 @@
   "extraction": {
     "classification": "candidate",
     "candidate": {
-      "kind": "price",
+      "kind": "addition",
       "provider": "anthropic",
       "model_id": "claude-haiku-next",
-      "effective_date": "2026-08-15",
-      "field": "input_per_mtok",
-      "new_value": 1.2,
       "evidence": "Claude Haiku Next launches at $1.20 per million input tokens."
     }
   }

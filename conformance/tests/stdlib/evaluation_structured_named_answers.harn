@@ -16,7 +16,7 @@ pipeline test(harness: Harness) {
           },
         ),
       )
-        + {provider: "openai", model: "gpt-5.4-nano", input_tokens: 100, output_tokens: 30},
+        + {provider: "openai", model: "gpt-5.4-mini", input_tokens: 100, output_tokens: 30},
     ],
     { ->
       const result = harness.llm.evaluate(
@@ -30,7 +30,7 @@ pipeline test(harness: Harness) {
         {
           backend: "structured_llm",
           provider: "openai",
-          model: "gpt-5.4-nano",
+          model: "gpt-5.4-mini",
           effort: "none",
           temperature: 0.0,
           threshold: 0.0,
@@ -52,6 +52,14 @@ pipeline test(harness: Harness) {
         }
       }
       assert_eq(len(harness.llm.mock_calls()), 1)
+      const request = harness.llm.mock_calls()[0]
+      const prompt = request.messages[0].content
+      assert(prompt.contains("safe: Safe?"), "boolean instructions reach the actual prompt")
+      assert(prompt.contains("tool: Which?"), "choice instructions reach the actual prompt")
+      assert(prompt.contains("left = Left"), "choice meanings share the schema's owner")
+      assert(prompt.contains("risk: Risk?"), "score instructions reach the actual prompt")
+      assert(prompt.contains("Levels, lowest to highest: low, high"))
+      assert(prompt.contains("State:"))
     },
   )
   with_llm_script(
@@ -60,7 +68,7 @@ pipeline test(harness: Harness) {
       llm_text("malformed response")
         + {
           provider: "openai",
-          model: "gpt-5.4-nano",
+          model: "gpt-5.4-mini",
           input_tokens: 100,
           output_tokens: 30,
           simulated_cost_usd: 0.00017,
@@ -75,7 +83,7 @@ pipeline test(harness: Harness) {
         {
           backend: "structured_llm",
           provider: "openai",
-          model: "gpt-5.4-nano",
+          model: "gpt-5.4-mini",
           effort: "none",
           temperature: 0.0,
           threshold: 0.0,

@@ -136,14 +136,14 @@ pipeline with `@persona`, `@step`, `@trigger`, `@handoff`, and `@budget`:
 
 ```harn,ignore
 @persona(
-  triggers: [github.pr_opened, schedule("*/30 * * * *")],
+  triggers: [github.pull_request.opened, schedule("*/30 * * * *")],
   tools: [github, ci, linear],
   autonomy: act_with_approval,
   budget: {daily_usd: 20, frontier_escalations: 3},
   handoffs: [review_captain, human_maintainer],
   receipts: required,
 )
-@trigger(github.check_failed)
+@trigger(github.check_suite.completed)
 @handoff(target: review_captain, reason: "risky diff")
 @budget(daily_usd: 20, max_tokens: 100000)
 fn merge_captain(ctx: HandlerCtx) { ... }
@@ -169,7 +169,7 @@ not rewritten by this syntax.
 |---|---|
 | `@persona` | Named metadata: `triggers`, `schedules`, `tools`, `autonomy`, `budget`, `handoffs`, `context_packs`, `evals`, `receipts`, `model`, `owner`, `name`, `description` |
 | `@step` | Named metadata: `name`, `model`, `approval` (`required`/`optional`), `receipt` (`audit`/`none`), `error_boundary` (`fail`/`continue`/`escalate`), `retry` (`{max_attempts: N}`) |
-| `@trigger` | Positional trigger specs (`github.pr_opened`, `"github.pr_opened"`, `schedule("cron")`) or named `id`, `provider`, `kind`, `event`, `when`, `schedule`, `budget` |
+| `@trigger` | Positional trigger specs (`github.pull_request.opened`, `"github.pull_request.opened"`, `schedule("cron")`) or named `id`, `provider`, `kind`, `event`, `when`, `schedule`, `budget` |
 | `@handoff` | Named `target`/`to`, `reason`, `schema`, `artifact` |
 | `@budget` | Named numeric fields: `daily_usd`, `hourly_usd`, `run_usd`, `max_tokens`, `frontier_escalations`, `max_autonomous_decisions_per_hour`, `max_autonomous_decisions_per_day`; string/symbol exhaustion policy via `on_exhausted` or `on_budget_exhausted` |
 

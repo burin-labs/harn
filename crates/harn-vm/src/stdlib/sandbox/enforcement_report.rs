@@ -97,8 +97,22 @@ fn process_filesystem_sandbox_report_matches_live_escape() {
             .and_then(|value| value.as_str().map(str::to_string))
             .unwrap_or_else(|| "unknown".to_string()),
     );
-    println!("{marker}");
+    // Each read-and-execute grant this host's PATH earns a confined child, named
+    // with the entry that produced it (harn#8998). A grant is authority, so the
+    // receipt says which directory and why rather than leaving it implied.
+    let mut receipt = format!("{marker}\n");
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    for grant in super::read_roots::path_grants::process_sandbox_path_entry_grants(
+        &current_execution_policy().expect("probe policy is pushed"),
+    ) {
+        receipt.push_str(&format!(
+            "harn.sandbox_path_grant entry={} root={}\n",
+            grant.entry.display(),
+            grant.root.display()
+        ));
+    }
+    print!("{receipt}");
     if let Ok(path) = std::env::var("HARN_SANDBOX_ENFORCEMENT_RECEIPT") {
-        std::fs::write(path, format!("{marker}\n")).expect("write sandbox enforcement receipt");
+        std::fs::write(path, receipt).expect("write sandbox enforcement receipt");
     }
 }

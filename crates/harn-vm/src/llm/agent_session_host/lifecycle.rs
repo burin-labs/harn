@@ -1,6 +1,7 @@
 //! Session initialization, terminal projection, and autonomy admission.
 
 use super::*;
+use crate::value::VmDictExt;
 
 /// Holds the pushed transcript-directory frame until the session takes it.
 ///
@@ -47,11 +48,26 @@ async fn host_agent_session_init(
         Some(VmValue::String(s)) => Some(s.to_string()),
         _ => None,
     };
-    let opts_map = opts_dict(args.get(2));
+    let mut opts_map = opts_dict(args.get(2));
     let host_bridge = crate::llm::agent_runtime::current_host_bridge();
     let session_id = opt_str(&opts_map, "session_id")
         .or_else(crate::agent_sessions::current_session_id)
         .unwrap_or_else(|| format!("agent_session_{}", now_id()));
+
+    // Bind the default opening turn before durable context assembly. The
+    // bridge carries a validated caller fact, scoped to its ACP session;
+    // delegated children cannot inherit the parent's message identity.
+    if opt_str(&opts_map, "initial_user_message_id").is_none() {
+        if let Some(message_id) = host_bridge
+            .as_ref()
+            .and_then(|bridge| bridge.caller_message_id_for_session(&session_id))
+        {
+            opts_map.put(
+                "initial_user_message_id",
+                VmValue::String(message_id.into()),
+            );
+        }
+    }
 
     let initialized = live_transcript_journal::initialize(
         &session_id,
@@ -59,6 +75,7 @@ async fn host_agent_session_init(
         system.clone(),
         ctx.execution_id(),
         ctx.task_id(),
+        &ctx,
     )
     .await?;
     let has_canonical_history = initialized.has_canonical_history;
@@ -93,6 +110,7 @@ async fn host_agent_session_init(
                 &prompt_session_id,
                 "blocked",
                 "user_prompt_submit_blocked",
+                Some(&ctx),
             )
             .await?;
             let blocked = build_user_prompt_block_result(&prompt_session_id, &message, &reason);
@@ -113,6 +131,7 @@ async fn host_agent_session_init(
                     &prompt_session_id,
                     "blocked",
                     "autonomy_budget_denied",
+                    Some(&ctx),
                 )
                 .await?;
                 return Ok(SessionInitOutcome::Admission(agent_init_control_done(
@@ -126,8 +145,27 @@ async fn host_agent_session_init(
         };
 
         let resolved = prompt_session_id.clone();
-        let session_system_prompt =
-            crate::llm::helpers::compose_system_prompt(system.clone(), Some(&opts_map))?;
+        // Reentry with no new system shape keeps the previously assembled
+        // prompt. Otherwise adding the runtime directive nonce below would
+        // replace the saved primary prompt with the nonce alone.
+        let no_option_system = match opts_map.get("system") {
+            None | Some(VmValue::Nil) => true,
+            Some(VmValue::String(value)) => value.trim().is_empty(),
+            _ => false,
+        };
+        let no_new_system = system
+            .as_deref()
+            .is_none_or(|value| value.trim().is_empty())
+            && no_option_system;
+        let retained_system = if no_new_system {
+            crate::agent_sessions::system_prompt(&resolved)
+        } else {
+            None
+        };
+        let session_system_prompt = match retained_system {
+            Some(saved) => Some(saved),
+            None => crate::llm::helpers::compose_system_prompt(system.clone(), Some(&opts_map))?,
+        };
         if let Some(system_prompt) = session_system_prompt.as_deref() {
             crate::agent_sessions::record_system_prompt(&resolved, system_prompt)
                 .map_err(VmError::Runtime)?;
@@ -181,10 +219,13 @@ async fn host_agent_session_init(
             _ => false,
         };
         if !has_history || !message.trim().is_empty() || has_user_content {
-            let user_msg = serde_json::json!({
+            let mut user_msg = serde_json::json!({
                 "role": "user",
                 "content": user_content,
             });
+            if let Some(message_id) = opt_str(&opts_map, "initial_user_message_id") {
+                user_msg["messageId"] = serde_json::json!(message_id);
+            }
             crate::agent_sessions::inject_message(&resolved, json_to_vm(&user_msg))
                 .map_err(VmError::Runtime)?;
         } else {
@@ -209,6 +250,7 @@ async fn host_agent_session_init(
                     &resolved,
                     "blocked",
                     "nested_policy_denied",
+                    Some(&ctx),
                 )
                 .await?;
                 return Ok(SessionInitOutcome::Admission(agent_init_control_done(
@@ -326,7 +368,7 @@ async fn host_agent_session_init(
             Ok(result)
         }
         Err(error) => {
-            init_rollback.fail().await;
+            init_rollback.fail(Some(&ctx)).await;
             Err(error)
         }
     }
@@ -397,7 +439,7 @@ fn build_user_prompt_block_result(session_id: &str, prompt: &str, reason: &str) 
         "daemon_state": serde_json::Value::Null,
         "daemon_snapshot_path": serde_json::Value::Null,
     });
-    crate::stdlib::json_to_vm_value(&result)
+    crate::schema::json_to_vm_value(&result)
 }
 
 /// Tear down a Harn-driven agent session and emit the final result dict.
@@ -516,6 +558,15 @@ pub(super) async fn host_agent_session_finalize(
     } else {
         final_status.clone()
     };
+    let publication_admitted = canonical_status == "done"
+        && terminal_error.is_none()
+        && !matches!(
+            status_dict.get("publication_admitted"),
+            Some(VmValue::Bool(false))
+        );
+    let published =
+        crate::agent_sessions::settle_assistant_publication(&session_id, publication_admitted)
+            .map_err(VmError::Runtime)?;
     if finalization_stage < super::AgentFinalizationStage::TranscriptMarkerWritten {
         if let Some(dir) = session.transcript_dir.as_deref() {
             crate::llm::agent_session_transcript::append_finalized_marker(
@@ -616,7 +667,7 @@ pub(super) async fn host_agent_session_finalize(
     }
     let recap_store = crate::agent_sessions::journal_store(&session_id);
     let recap_from_event_id = crate::agent_sessions::journal_first_event_id(&session_id);
-    live_transcript_journal::flush_terminal(
+    let phase = live_transcript_journal::flush_terminal(
         &session_id,
         &canonical_status,
         &stop_reason,
@@ -629,6 +680,14 @@ pub(super) async fn host_agent_session_finalize(
         },
     )
     .await?;
+    let visible_text = match &phase {
+        crate::agent_events::AgentTurnPhase::Terminal { reply, .. } => reply.clone(),
+        _ => unreachable!("terminal persistence returns a terminal phase"),
+    };
+    let terminal_phase = crate::agent_events::AgentEvent::TurnPhaseChanged {
+        session_id: session_id.clone(),
+        phase,
+    };
     let recap = if let Some(store) = recap_store {
         match crate::session_recap::query_session_recap(
             &store,
@@ -661,6 +720,14 @@ pub(super) async fn host_agent_session_finalize(
             crate::session_recap::SessionRecapUnavailableReason::JournalUnavailable,
         )
     };
+    crate::llm::agent_runtime::emit_agent_event_with_ctx(Some(&ctx), &terminal_phase).await;
+    if let Some(reply) = published {
+        emit_event(&AgentEvent::AgentMessageChunk {
+            session_id: session_id.clone(),
+            content: reply.content,
+            history_source_event_id: Some(reply.source_event_id),
+        });
+    }
     let mut session = finalization.commit();
     permissions::clear_session_grants(&session_id);
     crate::orchestration::clear_approval_policy_repeat_counts(&session_id);
@@ -681,10 +748,6 @@ pub(super) async fn host_agent_session_finalize(
         .as_ref()
         .map(vm_to_json)
         .unwrap_or(serde_json::Value::Null);
-    let visible_text = snapshot
-        .as_ref()
-        .and_then(crate::llm::agent_result_projection::last_assistant_text)
-        .unwrap_or_default();
 
     emit_event(&terminal_outcome.checkpoint(&session_id, &canonical_status, &stop_reason));
     // The trace event log never carried tool or loop-lifecycle facts (#5997),
@@ -920,24 +983,18 @@ async fn host_autonomy_budget_check(
     match check_autonomy_budget(&opts, &session_id).await? {
         AutonomyCheck::Denied(result) => {
             let mut out = crate::value::DictMap::new();
-            out.insert(crate::value::intern_key("approved"), VmValue::Bool(false));
+            out.put_bool("approved", false);
             out.insert(crate::value::intern_key("denial_result"), result);
             Ok(VmValue::dict(out))
         }
         AutonomyCheck::Approved(_) | AutonomyCheck::NoBudget => {
             let mut out = crate::value::DictMap::new();
-            out.insert(crate::value::intern_key("approved"), VmValue::Bool(true));
+            out.put_bool("approved", true);
             Ok(VmValue::dict(out))
         }
     }
 }
 
-const LIFECYCLE_BUILTINS: &[&VmBuiltinDef] = &[
-    &HOST_AGENT_SESSION_INIT_DEF,
-    &HOST_AGENT_SESSION_FINALIZE_DEF,
-    &HOST_AUTONOMY_BUDGET_CHECK_DEF,
-];
-
 pub(super) fn register_lifecycle_primitives(vm: &mut Vm) {
-    register_builtin_defs(vm, LIFECYCLE_BUILTINS);
+    harn_vm_core::builtin_support::register_module_builtins(vm, module_path!());
 }

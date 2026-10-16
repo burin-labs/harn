@@ -1,4 +1,6 @@
-use harn_parser::{substitute_type_expr, Node, SNode, ShapeField, TypeExpr, TypedParam};
+use harn_parser::{
+    substitute_type_expr, BinaryOperator, Node, SNode, ShapeField, TypeExpr, TypedParam,
+};
 use std::collections::BTreeMap;
 
 use crate::chunk::{Chunk, Constant, Op};
@@ -153,6 +155,7 @@ impl Compiler {
             interface_methods: std::collections::HashMap::new(),
             loop_stack: Vec::new(),
             handler_depth: 0,
+            declared_throw: false,
             finally_bodies: Vec::new(),
             temp_counter: 0,
             scope_depth: 0,
@@ -178,6 +181,7 @@ impl Compiler {
 
     pub(super) fn nested_body(&self) -> Self {
         let mut nested = Self::for_nested_body(self.options);
+        nested.declared_throw = self.declared_throw;
         nested.source_callable_names = self.source_callable_names.clone();
         nested
     }
@@ -247,6 +251,24 @@ impl Compiler {
                 _ => {}
             }
         }
+    }
+
+    /// Seed type names from the resolved import contract, including wildcard
+    /// and facade exports. Bodies stay in their declaring module's schema
+    /// factories; this catalog only identifies lexical schema bindings.
+    pub fn with_imported_type_alias_names(
+        mut self,
+        names: impl IntoIterator<Item = String>,
+    ) -> Self {
+        for name in names {
+            self.type_aliases
+                .entry(name)
+                .or_insert(super::TypeAliasDefinition {
+                    type_params: Vec::new(),
+                    body: None,
+                });
+        }
+        self
     }
 
     /// Fully expand alias references, inlining every `Named(T)` whose `T` is a
@@ -395,58 +417,6 @@ impl Compiler {
         }
     }
 
-    /// Compile each exported type schema into an independently addressable
-    /// module initializer. Running these after imports makes referenced
-    /// imported schemas ordinary lexical inputs while keeping the cached
-    /// artifact immutable and relocatable. A module may export more schema
-    /// bytecode than one u16-addressed chunk can hold; declaration-sized
-    /// chunks remove that package-wide limit without weakening any schema.
-    pub fn compile_public_type_schema_initializers(
-        program: &[SNode],
-        source_file: Option<String>,
-    ) -> Result<Vec<Chunk>, CompileError> {
-        Self::compile_selected_public_type_schema_initializers(program, source_file, None)
-    }
-
-    /// Compile the selected exported type schemas. `None` preserves the
-    /// caller-independent full-module behavior; a closed-program linker passes
-    /// the exact runtime type names its consumers can observe.
-    pub fn compile_selected_public_type_schema_initializers(
-        program: &[SNode],
-        source_file: Option<String>,
-        selected_names: Option<&std::collections::BTreeSet<String>>,
-    ) -> Result<Vec<Chunk>, CompileError> {
-        let mut compiler = Compiler::new();
-        compiler.collect_type_aliases(program);
-        let mut chunks = Vec::new();
-        for sn in program {
-            let Node::TypeDecl {
-                name, is_pub: true, ..
-            } = peel_node(sn)
-            else {
-                continue;
-            };
-            if selected_names.is_some_and(|selected| !selected.contains(name)) {
-                continue;
-            }
-            compiler.chunk = Chunk::new();
-            compiler.string_constants.clear();
-            compiler.chunk.source_file.clone_from(&source_file);
-            if compiler.emit_schema_for_alias(name) {
-                compiler.emit_define_binding(name, false);
-                compiler.chunk.emit(Op::Nil, compiler.line);
-                compiler.chunk.emit(Op::Return, compiler.line);
-                super::ensure_chunk_addressable(
-                    &compiler.chunk,
-                    &format!("the public type-schema initializer for `{name}`"),
-                    compiler.line,
-                )?;
-                chunks.push(std::mem::take(&mut compiler.chunk));
-            }
-        }
-        Ok(chunks)
-    }
-
     /// Schema-guard builtins that accept a schema as their second argument.
     /// When callers pass a type-alias identifier here, the compiler lowers
     /// it to the alias's JSON-Schema dict constant.
@@ -456,6 +426,7 @@ impl Compiler {
             "schema_is"
                 | "schema_expect"
                 | "schema_parse"
+                | "json_decode"
                 | "schema_check"
                 | "schema_report"
                 | "is_type"
@@ -509,6 +480,7 @@ impl Compiler {
                 params,
                 body,
                 extends,
+                throws,
                 ..
             } = peel_node(sn)
             {
@@ -518,6 +490,8 @@ impl Compiler {
                     extends.as_deref(),
                     |compiler| {
                         let saved = std::mem::replace(&mut compiler.module_level, false);
+                        let saved_throw =
+                            std::mem::replace(&mut compiler.declared_throw, throws.is_some());
                         if let Some(harness) = params.first().filter(|param| {
                             matches!(
                                 param.type_expr.as_ref(),
@@ -532,6 +506,7 @@ impl Compiler {
                         }
                         let result = compiler.compile_block(body);
                         compiler.module_level = saved;
+                        compiler.declared_throw = saved_throw;
                         result
                     },
                 )?;
@@ -618,6 +593,7 @@ impl Compiler {
                 body,
                 extends,
                 params,
+                throws,
                 ..
             } = peel_node(sn)
             {
@@ -627,6 +603,8 @@ impl Compiler {
                     extends.as_deref(),
                     |compiler| {
                         let saved = std::mem::replace(&mut compiler.module_level, false);
+                        let saved_throw =
+                            std::mem::replace(&mut compiler.declared_throw, throws.is_some());
                         if let Some(harness) = params.first().filter(|param| {
                             matches!(
                                 param.type_expr.as_ref(),
@@ -641,6 +619,7 @@ impl Compiler {
                         }
                         let result = compiler.compile_block(body);
                         compiler.module_level = saved;
+                        compiler.declared_throw = saved_throw;
                         result
                     },
                 )?;
@@ -1022,55 +1001,51 @@ impl Compiler {
         Ok(())
     }
 
-    /// Compile finally body inline, discarding its result value.
-    /// `compile_scoped_block` always leaves exactly one value on the stack
-    /// (Nil for non-value tail statements), so the trailing Pop is
-    /// unconditional — otherwise a finally ending in e.g. `x = x + 1`
-    /// would leave a stray Nil that corrupts the surrounding expression
-    /// when the enclosing try/finally is used in expression position.
-    pub(super) fn compile_finally_inline(
-        &mut self,
-        finally_body: &[SNode],
-    ) -> Result<(), CompileError> {
-        if !finally_body.is_empty() {
-            self.compile_scoped_block(finally_body)?;
-            self.chunk.emit(Op::Pop, self.line);
-        }
-        Ok(())
-    }
-
-    /// Whether a pending finally lies above the innermost `CatchBarrier`.
-    /// A locally caught throw stops at the barrier, so cleanup entries below
-    /// it are not part of that throw's exit path.
-    pub(super) fn has_pending_finally_until_barrier(&self) -> bool {
-        self.finally_bodies
-            .iter()
-            .rev()
-            .take_while(|entry| !matches!(entry, FinallyEntry::CatchBarrier))
-            .any(|entry| matches!(entry, FinallyEntry::Finally(_)))
-    }
-
-    /// True if there are any pending finally bodies (not just barriers).
+    /// True if there are any pending cleanup bodies.
     pub(super) fn has_pending_finally(&self) -> bool {
-        self.finally_bodies
-            .iter()
-            .any(|e| matches!(e, FinallyEntry::Finally(_)))
+        !self.finally_bodies.is_empty()
     }
 
-    /// Save a thrown value to a temp and rethrow without running finally.
+    /// Register a cleanup body for the region that follows and install the
+    /// exception handler that runs it when an error leaves that region.
+    pub(super) fn push_cleanup(&mut self, body: Vec<SNode>) {
+        let handler_depth = self.handler_depth;
+        self.handler_depth += 1;
+        let error_jump = self.chunk.emit_jump(Op::TryCatchPreserve, self.line);
+        let empty_type = self.string_constant("");
+        self.emit_type_name_extra(empty_type);
+        self.finally_bodies.push(FinallyEntry {
+            body,
+            handler_depth,
+            declared_throw: self.declared_throw,
+            error_jump,
+        });
+    }
+
+    /// Close the innermost cleanup region: on the normal path pop its handler
+    /// and run the body; on the exception path run the body and rethrow.
     ///
-    /// Historically this helper also invoked `compile_finally_inline` on the
-    /// thrown path, but that produced observable double-runs: the
-    /// `Node::ThrowStmt` lowering (below) already iterates `finally_bodies`
-    /// and runs each pending finally inline *before* emitting `Op::Throw`, so
-    /// a second run here fired the same side effects twice. Finally now runs
-    /// exactly once — via the throw-emit path during unwinding.
-    pub(super) fn compile_plain_rethrow(&mut self) -> Result<(), CompileError> {
+    /// The entry is removed before either copy of the body is compiled, so a
+    /// `return`/`break`/`continue` inside the body runs only the cleanups
+    /// outside it. The runtime pops the handler before delivering an error,
+    /// so a throw from the body replaces the original error and escapes.
+    fn pop_cleanup(&mut self) -> Result<(), CompileError> {
+        let entry = self.finally_bodies.pop().expect("pending cleanup");
+        debug_assert_eq!(self.handler_depth, entry.handler_depth + 1);
+        self.handler_depth = entry.handler_depth;
+        self.chunk.emit(Op::PopHandler, self.line);
+        self.compile_finally_inline(&entry.body, entry.declared_throw)?;
+        let end_jump = self.chunk.emit_jump(Op::Jump, self.line);
+
+        self.chunk.patch_jump(entry.error_jump);
         self.temp_counter += 1;
         let temp_name = format!("__finally_err_{}__", self.temp_counter);
         self.emit_define_binding(&temp_name, true);
+        self.compile_finally_inline(&entry.body, entry.declared_throw)?;
         self.emit_get_binding(&temp_name);
-        self.chunk.emit(Op::Throw, self.line);
+        self.chunk.emit(Op::Rethrow, self.line);
+
+        self.chunk.patch_jump(end_jump);
         Ok(())
     }
 
@@ -1196,57 +1171,66 @@ impl Compiler {
         Ok(())
     }
 
-    /// Drain pending `defer` bodies down to a saved floor and run each inline
-    /// in LIFO order. Each defer body is popped *before* its code is emitted so
-    /// any `return` / `break` lowering inside the body sees the remaining
-    /// pending defers (not itself).
+    /// Close pending cleanup regions down to a saved floor in LIFO order.
+    /// See [`Self::pop_cleanup`].
     pub(super) fn drain_finallys_to_floor(&mut self, floor: usize) -> Result<(), CompileError> {
         while self.finally_bodies.len() > floor {
-            let entry = self.finally_bodies.pop().expect("non-empty by guard");
-            if let FinallyEntry::Finally(body) = entry {
-                self.compile_finally_inline(&body)?;
-            }
+            self.pop_cleanup()?;
         }
         Ok(())
     }
 
-    /// Run the pending finally/defer bodies a non-local transfer (`return`,
+    /// Run the pending cleanup bodies a non-local transfer (`return`,
     /// `break`, `continue`) crosses on its way down to `floor`, innermost
     /// first, then restore the pending stack.
     ///
-    /// Like [`Self::drain_finallys_to_floor`] each body is removed from the
-    /// stack *before* it is inlined, so a `return`/`break`/`continue` inside a
-    /// finally body runs only the finallys *outside* it instead of re-running
-    /// the one it is in — which otherwise recursed forever at compile time and
-    /// aborted the process with a stack overflow. Unlike that helper (used at
-    /// scope exit), the stack is restored afterward because a transfer is a
-    /// branch: the code the compiler emits after it still needs the pending
-    /// finallys for the fall-through and sibling paths.
+    /// Before each body runs, the handlers above it, including its own, are
+    /// popped, so a throw from the body reaches only the handlers outside it.
+    /// `handler_floor` is the handler depth the transfer lands at; `None`
+    /// leaves the remaining handlers to the frame teardown of a `return`.
+    ///
+    /// Each body is removed from the stack *before* it is inlined, so a
+    /// `return`/`break`/`continue` inside a finally body runs only the
+    /// finallys *outside* it instead of re-running the one it is in — which
+    /// otherwise recursed forever at compile time and aborted the process
+    /// with a stack overflow. The stack is restored afterward because a
+    /// transfer is a branch: the code the compiler emits after it still needs
+    /// the pending cleanups for the fall-through and sibling paths.
     pub(super) fn run_pending_finallys_for_transfer(
         &mut self,
         floor: usize,
+        handler_floor: Option<usize>,
     ) -> Result<(), CompileError> {
-        if self.finally_bodies.len() <= floor {
-            return Ok(());
-        }
-        let saved = self.finally_bodies[floor..].to_vec();
-        let result = self.drain_finallys_to_floor(floor);
-        self.finally_bodies.extend(saved);
+        let saved_entries = self.finally_bodies[floor..].to_vec();
+        let saved_handler_depth = self.handler_depth;
+        let result = self.unwind_for_transfer(floor, handler_floor);
+        self.finally_bodies.truncate(floor);
+        self.finally_bodies.extend(saved_entries);
+        self.handler_depth = saved_handler_depth;
         result
     }
 
-    /// Like [`Self::run_pending_finallys_for_transfer`] but for a `throw`: run
-    /// only the finallys between here and the innermost `CatchBarrier` (the
-    /// ones the unwind actually crosses before a local `catch` halts it),
-    /// masking each while it is inlined and restoring the stack afterward.
-    pub(super) fn run_pending_finallys_until_barrier(&mut self) -> Result<(), CompileError> {
-        let floor = self
-            .finally_bodies
-            .iter()
-            .rposition(|e| matches!(e, FinallyEntry::CatchBarrier))
-            .map(|i| i + 1)
-            .unwrap_or(0);
-        self.run_pending_finallys_for_transfer(floor)
+    fn unwind_for_transfer(
+        &mut self,
+        floor: usize,
+        handler_floor: Option<usize>,
+    ) -> Result<(), CompileError> {
+        while self.finally_bodies.len() > floor {
+            let entry = self.finally_bodies.pop().expect("non-empty by guard");
+            self.emit_pop_handlers_to(entry.handler_depth);
+            self.compile_finally_inline(&entry.body, entry.declared_throw)?;
+        }
+        if let Some(handler_floor) = handler_floor {
+            self.emit_pop_handlers_to(handler_floor);
+        }
+        Ok(())
+    }
+
+    fn emit_pop_handlers_to(&mut self, depth: usize) {
+        while self.handler_depth > depth {
+            self.chunk.emit(Op::PopHandler, self.line);
+            self.handler_depth -= 1;
+        }
     }
 
     /// Register an auto-drop defer for an `owned<T>` binding. The drop runs
@@ -1284,7 +1268,7 @@ impl Compiler {
             },
             span,
         );
-        self.finally_bodies.push(FinallyEntry::Finally(vec![call]));
+        self.push_cleanup(vec![call]);
     }
 
     /// Compile a statement that appears in a value-discarding sequence —
@@ -1440,13 +1424,13 @@ impl Compiler {
     }
 
     /// Emit the binary op instruction for a compound assignment operator.
-    pub(super) fn emit_compound_op(&mut self, op: &str) -> Result<(), CompileError> {
+    pub(super) fn emit_compound_op(&mut self, op: BinaryOperator) -> Result<(), CompileError> {
         match op {
-            "+" => self.chunk.emit(Op::Add, self.line),
-            "-" => self.chunk.emit(Op::Sub, self.line),
-            "*" => self.chunk.emit(Op::Mul, self.line),
-            "/" => self.chunk.emit(Op::Div, self.line),
-            "%" => self.chunk.emit(Op::Mod, self.line),
+            BinaryOperator::Add => self.chunk.emit(Op::Add, self.line),
+            BinaryOperator::Sub => self.chunk.emit(Op::Sub, self.line),
+            BinaryOperator::Mul => self.chunk.emit(Op::Mul, self.line),
+            BinaryOperator::Div => self.chunk.emit(Op::Div, self.line),
+            BinaryOperator::Mod => self.chunk.emit(Op::Mod, self.line),
             _ => {
                 return Err(CompileError {
                     message: format!("Unknown compound operator: {op}"),

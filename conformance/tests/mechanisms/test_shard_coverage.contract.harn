@@ -1,0 +1,73 @@
+import { contract_effect, contract_negative } from "./lib/mechanism_contract"
+
+type Verdict = {
+  schema_version: int,
+  kind: string,
+  status: "complete" | "incomplete",
+  planned_cases: int,
+  observed_cases: int,
+  missing_cases: list<unknown>,
+}
+
+/** Synthetic report control for the CLI guard, not a claim that CI executed it. */
+pipeline default(harness: Harness) {
+  const root = harness.fs.mkdtemp_in_workspace("shard-coverage-contract-")
+  defer {
+    harness.fs.delete(root)
+  }
+  const path = path_join(root, "report.json")
+  const source = "a".repeat(40)
+  const report = {
+    schemaVersion: 5,
+    suite: "user",
+    summary: {total: 1, passed: 1, failed: 0, timed_out: 0, skipped: 0},
+    cases: [{file: "test_case.harn", name: "test_case", outcome: "passed"}],
+    shard_plan: {
+      index: 1,
+      total: 1,
+      matrix: {
+        schema_version: 1,
+        source: {commit: source, tree: "b".repeat(40)},
+        source_confirmed: true,
+        cases: [
+          {
+            file: "test_case.harn",
+            name: "test_case",
+            shard: 1,
+            declared_weight: 1,
+            estimated_ms: 1,
+            known_timing: false,
+          },
+        ],
+      },
+    },
+  }
+  const binary = harness.env.get("HARN_BIN") ?? "harn"
+  const args = ["test", "--verify-shards", source, "--shard-total", "1", path]
+  harness.fs.write_text(path, json_stringify(report))
+  const complete = harness.process.run({program: binary, args: args, timeout_ms: 30000})
+  const positive: Verdict = schema_expect(json_parse(complete.stdout), schema_of(Verdict))
+  contract_effect(
+    harness.stdio,
+    "complete-nonempty-matrix",
+    complete.success && complete.exit_code == 0 && positive.status == "complete"
+      && positive.planned_cases == 1
+      && positive.observed_cases == 1,
+  )
+  harness.fs.write_text(
+    path,
+    json_stringify(
+      report + {cases: [], summary: {total: 0, passed: 0, failed: 0, timed_out: 0, skipped: 0}},
+    ),
+  )
+  const missing = harness.process.run({program: binary, args: args, timeout_ms: 30000})
+  const negative: Verdict = schema_expect(json_parse(missing.stdout), schema_of(Verdict))
+  contract_negative(
+    harness.stdio,
+    "green-counts-with-missing-case",
+    !(missing.exit_code == 1 && negative.status == "incomplete"
+      && negative.planned_cases == 1
+      && negative.observed_cases == 0
+      && len(negative.missing_cases) == 1),
+  )
+}

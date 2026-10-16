@@ -46,7 +46,7 @@ mod tests {
         let _guard = crate::llm::env_guard();
         let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind SSE stub");
         let addr = listener.local_addr().expect("SSE stub address");
-        let server = std::thread::spawn(move || {
+        let server = crate::runtime_stack::spawn(move || {
             let (mut stream, _) = listener.accept().expect("accept SSE request");
             let mut request = [0_u8; 8192];
             let _ = stream.read(&mut request).expect("read SSE request");
@@ -123,7 +123,7 @@ mod tests {
         let _guard = crate::llm::env_guard();
         let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind SSE stub");
         let addr = listener.local_addr().expect("SSE stub address");
-        let server = std::thread::spawn(move || {
+        let server = crate::runtime_stack::spawn(move || {
             let (mut stream, _) = listener.accept().expect("accept SSE request");
             let mut request = [0_u8; 8192];
             let _ = stream.read(&mut request).expect("read SSE request");

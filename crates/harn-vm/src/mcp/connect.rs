@@ -7,7 +7,9 @@ pub(crate) async fn mcp_connect_stdio_impl(
     cwd: Option<&str>,
     requested_protocol_version: String,
 ) -> Result<VmMcpClientHandle, VmError> {
-    let mut cmd = tokio::process::Command::new(command);
+    // The server is a child of this session: its base environment is the
+    // session policy's, and the server config's own `env` entries layer on top.
+    let mut cmd = crate::process_sandbox::session_tokio_command(command)?;
     cmd.args(args)
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
@@ -19,9 +21,9 @@ pub(crate) async fn mcp_connect_stdio_impl(
     cmd.kill_on_drop(true);
 
     let mut child = cmd.spawn().map_err(|e| {
-        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
+        VmError::Thrown(VmValue::string(format!(
             "mcp_connect: failed to spawn '{command}': {e}"
-        ))))
+        )))
     })?;
     let stdout = child.stdout.take().ok_or_else(|| {
         VmError::Runtime(format!("mcp_connect: '{command}' stdout was not piped"))

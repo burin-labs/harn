@@ -33,12 +33,48 @@ use crate::value::VmValue;
 use serde::Serialize;
 
 const SESSION_MESSAGE_FACTS_KEY: &str = "_harn";
+const CALL_ROLE_KEY: &str = "_harn_call_role";
+const CALL_STAGE_KEY: &str = "_harn_call_stage";
+
+/// Dispatch observation is distinct from a legacy record with no observation.
+/// Both unit variants serialize as null; the containing field omits Absent.
+#[derive(Serialize)]
+#[serde(untagged)]
+enum CallStageObservation {
+    Absent,
+    Unset,
+    Named(String),
+}
+
+impl CallStageObservation {
+    fn is_absent(&self) -> bool {
+        matches!(self, Self::Absent)
+    }
+
+    fn from_result(result: &VmValue) -> Self {
+        match result
+            .as_dict()
+            .and_then(|result| result.get(CALL_STAGE_KEY))
+        {
+            None => Self::Absent,
+            Some(VmValue::String(stage)) => Self::Named(stage.to_string()),
+            Some(_) => Self::Unset,
+        }
+    }
+}
 
 #[derive(Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 enum SessionMessageFacts {
     Assistant {
         tool_calls: Vec<serde_json::Value>,
+        effective_reasoning_effort: crate::llm::EffectiveReasoningEffort,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        call_role: Option<String>,
+        /// Explicit null is a dispatch-observed unset stage; absent metadata
+        /// in an older record remains distinguishable from that observation.
+        #[serde(skip_serializing_if = "CallStageObservation::is_absent")]
+        call_stage: CallStageObservation,
     },
     ToolResult {
         tool_call_id: String,
@@ -52,6 +88,27 @@ enum SessionMessageFacts {
         #[serde(skip_serializing_if = "Option::is_none")]
         data: Option<serde_json::Value>,
     },
+}
+
+/// The normalized dispatch contract supplies provenance, never response prose.
+pub(crate) fn attach_call_provenance(
+    result: VmValue,
+    call_role: &str,
+    call_stage: Option<&str>,
+) -> VmValue {
+    let Some(dict) = result.as_dict() else {
+        return result;
+    };
+    let mut dict = dict.clone();
+    dict.insert(
+        crate::value::intern_key(CALL_ROLE_KEY),
+        VmValue::string(call_role),
+    );
+    dict.insert(
+        crate::value::intern_key(CALL_STAGE_KEY),
+        call_stage.map(VmValue::string).unwrap_or(VmValue::Nil),
+    );
+    VmValue::dict(dict)
 }
 
 #[derive(Serialize)]
@@ -93,7 +150,7 @@ fn attach_session_message_facts(message: VmValue, facts: &SessionMessageFacts) -
     let encoded = serde_json::to_value(facts).expect("session message facts must serialize");
     enriched.insert(
         crate::value::intern_key(SESSION_MESSAGE_FACTS_KEY),
-        crate::stdlib::json_to_vm_value(&encoded),
+        crate::schema::json_to_vm_value(&encoded),
     );
     VmValue::dict(enriched)
 }
@@ -121,7 +178,26 @@ pub(crate) fn attach_assistant_facts(message: VmValue, llm_result: &VmValue) -> 
                 })
         })
         .unwrap_or_default();
-    attach_session_message_facts(message, &SessionMessageFacts::Assistant { tool_calls })
+    let effective_reasoning_effort = llm_result
+        .as_dict()
+        .and_then(|result| result.get("effective_reasoning_effort"))
+        .and_then(|value| serde_json::from_value(crate::llm::helpers::vm_value_to_json(value)).ok())
+        .unwrap_or_default();
+    attach_session_message_facts(
+        message,
+        &SessionMessageFacts::Assistant {
+            tool_calls,
+            effective_reasoning_effort,
+            call_role: llm_result
+                .as_dict()
+                .and_then(|result| result.get(CALL_ROLE_KEY))
+                .and_then(|value| match value {
+                    VmValue::String(role) => Some(role.to_string()),
+                    _ => None,
+                }),
+            call_stage: CallStageObservation::from_result(llm_result),
+        },
+    )
 }
 
 /// Attach the dispatch-owned result identity and outcome to a durable result

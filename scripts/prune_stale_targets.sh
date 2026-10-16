@@ -50,13 +50,25 @@
 #
 # Usage:
 #   scripts/prune_stale_targets.sh [--dry-run] [--measure-bytes]
+#   scripts/prune_stale_targets.sh [--dry-run] --host-maintenance
 #   scripts/prune_stale_targets.sh [--dry-run] --remove-entry NAME [--remove-entry NAME]...
+#   scripts/prune_stale_targets.sh [--protect-entry NAME]... [other options]
 #
 # `--measure-bytes` makes the summary account for allocated bytes removed and
 # retained. It walks target trees, so periodic host maintenance should use it;
 # ordinary worktree setup leaves it off and explicitly reports unmeasured
 # bytes. The summary names the running policy checksum and the last successful
 # policy from a receipt beside the shared target cache.
+#
+# `--host-maintenance` is the policy for the scheduled and disk-pressure
+# sweeps. It implies `--measure-bytes`, keeps only the 3 most recent warm trees
+# on rank alone, and sets the size ceiling to an eighth of the filesystem that
+# holds the cache (64 GiB when that size cannot be read). The setup defaults
+# below are for a developer's own worktree setup, where a cap of 10 is the
+# working set. On a host with 10 or fewer entries that cap protected every one
+# of them, so the idle bound never fired: a 460 GiB build host held 133 GB of
+# trees nobody had built in up to 42 hours and ran out of disk. Explicit
+# HARN_TARGET_GC_* values still win over both policies.
 #
 # `--remove-entry` names entries to retire regardless of their rank or age. It
 # exists because rank and age answer "was this touched recently", not "is this
@@ -65,19 +77,24 @@
 # entry is finished had no way to say so through this tool, and the alternative
 # was removing paths around it, which skips the liveness probe and the
 # read-back. Named entries still go through both: a live process always wins.
+# `--protect-entry` keeps each named entry ahead of removal, rank, age, and size
+# rules. Repeat it to reserve several lanes; each NAME is one exact basename,
+# including spaces, and protects that name in both managed cache families.
 # Env:
 #   HARN_TARGET_GC_ROOTS        space-separated repo search roots
 #                               (default: "$HOME/projects $HOME/.codex/worktrees /private/tmp")
 #   HARN_TARGET_GC_FIND_DEPTH   max depth for nested worktree discovery (default 3)
-#   HARN_TARGET_GC_MIN_AGE_SECS minimum idle age before removal (default 10800)
+#   HARN_TARGET_GC_MIN_AGE_SECS minimum idle age before any automatic removal,
+#                               including size enforcement (default 10800)
 #   HARN_TARGET_GC_KEEP_RECENT  warm trees per root kept whatever their age
 #                               (default 10; a negative value disables the cap)
 #   HARN_TARGET_GC_MAX_IDLE_SECS idle age past which a warm tree outside the
 #                               most-recent set is retired (default 259200)
 #   HARN_TARGET_GC_MAX_BYTES    per-root size ceiling; once the entries this
-#                               run kept exceed it, the coldest are retired
-#                               until the root fits. 0 (the default) disables
-#                               it. Off by default because enforcing it costs
+#                               run kept exceed it, the coldest entries past
+#                               the minimum idle age are retired until the root
+#                               fits. 0 (the default) disables it. Off by
+#                               default because enforcing it costs
 #                               a full `du` of every kept entry, which is
 #                               seconds to minutes on a large root and is not
 #                               a price every dev-setup should pay; enable it
@@ -127,19 +144,47 @@ target_entry_activity_epoch() {
 
 dry_run=0
 measure_bytes=0
+host_maintenance=0
 requested_entries=()
+protected_entries=()
+usage() {
+  cat <<'EOF'
+Usage: scripts/prune_stale_targets.sh [options]
+
+  --dry-run            Report candidates without removing entries.
+  --measure-bytes      Measure reclaimed and retained allocated bytes.
+  --host-maintenance   Apply the host retention and size policy; measure bytes.
+  --remove-entry NAME  Retire this exact basename regardless of rank or age.
+  --protect-entry NAME Keep this exact basename ahead of every removal rule.
+  --help               Show this help without scanning or changing caches.
+
+Repeat --remove-entry and --protect-entry to name several entries. Names cannot
+contain slashes; names with spaces must be quoted. Protection and live processes
+outrank named removal. Both managed cache families use the same protections.
+HARN_TARGET_GC_PROTECT adds the caller's own target path or basename to the set.
+Protected bytes still count toward the ceiling; an oversized retained root is
+reported as partial. See the script's Env reference for the remaining bounds.
+EOF
+}
 while [ "$#" -gt 0 ]; do
   case "$1" in
+    --help|-h) usage; exit 0 ;;
     --dry-run) dry_run=1; shift ;;
     --measure-bytes) measure_bytes=1; shift ;;
-    --remove-entry)
-      [ "$#" -ge 2 ] || { echo "--remove-entry needs a NAME" >&2; exit 2; }
+    --host-maintenance) host_maintenance=1; measure_bytes=1; shift ;;
+    --remove-entry|--protect-entry)
+      [ "$#" -ge 2 ] || { echo "$1 needs a NAME" >&2; exit 2; }
       # One path segment only. A name carrying a separator could otherwise
       # address a directory outside the managed root.
       case "$2" in
-        ""|.|..|*/*) echo "invalid --remove-entry name: $2" >&2; exit 2 ;;
+        ""|.|..|*/*) echo "invalid $1 name: $2" >&2; exit 2 ;;
       esac
-      requested_entries+=("$2"); shift 2 ;;
+      if [ "$1" = --remove-entry ]; then
+        requested_entries+=("$2")
+      else
+        protected_entries+=("$2")
+      fi
+      shift 2 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
 done
@@ -154,12 +199,30 @@ entry_requested() {
   return 1
 }
 
+entry_protected() {
+  local name="$1" want
+  [ "${#protected_entries[@]}" -gt 0 ] || return 1
+  for want in "${protected_entries[@]}"; do
+    [ "$want" = "$name" ] && return 0
+  done
+  return 1
+}
+
+report_pending_named_entry() {
+  local name="$1"
+  if entry_requested "$name"; then
+    blocked_named_entries=$((blocked_named_entries + 1))
+    echo "pending named removal: $name"
+  fi
+  return 0
+}
+
 # Names the caller asked for that no root turned out to hold. Reported at the
 # end: a removal request that silently matched nothing would read as success.
 matched_entries=()
 
 gc_policy_version="harn-target-gc/v2-$(cksum "$SCRIPT_DIR/prune_stale_targets.sh" | awk '{print $1 "-" $2}')"
-scanned=0; removed=0; kept=0; pending_candidates=0; ceiling_unproven_roots=0; summary_printed=0
+scanned=0; removed=0; kept=0; pending_candidates=0; blocked_named_entries=0; ceiling_unproven_roots=0; summary_printed=0
 reclaimed_bytes=0; retained_bytes=0; unmeasured_entries=0
 completed=0
 receipt_root="${HARN_DEV_SETUP_STORAGE_ROOT:-${XDG_CACHE_HOME:-$HOME/.cache}/harn/dev-setup}"
@@ -216,7 +279,7 @@ print_summary() {
     status="complete"
     if [ "$dry_run" -eq 1 ]; then
       status="dry-run"
-    elif [ "$ceiling_unproven_roots" -gt 0 ]; then
+    elif [ "$ceiling_unproven_roots" -gt 0 ] || [ "$blocked_named_entries" -gt 0 ]; then
       status="partial"
     fi
   fi
@@ -225,17 +288,21 @@ print_summary() {
     reported_retained="unmeasured"
     unmeasured_entries="$scanned"
   fi
+  local reported_pending=$((pending_candidates + blocked_named_entries))
   if [ "$dry_run" -eq 1 ]; then
-    pending_candidates=$((pending_candidates + removed))
+    reported_pending=$((reported_pending + removed))
   fi
   # scanned is reported alongside the verdict so a zero here is readable as
   # "walked these roots and found nothing" rather than "walked nothing".
-  echo "harn-target GC: policy=$gc_policy_version status=$status last_success=$last_success last_success_policy=$last_success_policy scanned=$scanned kept=$kept removed=$removed reclaimed_bytes=$reported_reclaimed retained_bytes=$reported_retained pending_candidates=$pending_candidates unmeasured_entries=$unmeasured_entries ceiling_unproven_roots=$ceiling_unproven_roots (roots=$roots)$suffix"
+  echo "harn-target GC: policy=$gc_policy_version status=$status last_success=$last_success last_success_policy=$last_success_policy scanned=$scanned kept=$kept removed=$removed reclaimed_bytes=$reported_reclaimed retained_bytes=$reported_retained pending_candidates=$reported_pending unmeasured_entries=$unmeasured_entries ceiling_unproven_roots=$ceiling_unproven_roots blocked_named_entries=$blocked_named_entries (roots=$roots)$suffix"
 }
 
 record_success() {
   [ "$dry_run" -eq 0 ] || return 0
   [ "$pending_candidates" -eq 0 ] || return 1
+  # A protected/live name is a measured policy refusal, not a failed deletion.
+  # Report a partial pass without advancing the last-success receipt.
+  [ "$blocked_named_entries" -eq 0 ] || return 0
   mkdir -p "$receipt_root"
   local receipt_tmp="${receipt_file}.$$" new_success
   new_success="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -257,6 +324,58 @@ storage_roots() {
   printf '%s\n' "${TMPDIR:-/tmp}"
   printf '%s/harn/dev-setup\n' "${XDG_CACHE_HOME:-$HOME/.cache}"
 }
+
+# One run at a time per host. The daily job and a disk-pressure trigger can
+# start minutes apart, and two sweeps over one root each read back the other's
+# removals as failures. The lock is a directory beside the success receipt
+# (mkdir is atomic), holding the owner's pid and start time. A run that finds a
+# live holder reports `status=skipped` and exits 0: nothing went wrong, another
+# run is doing this work. A holder whose pid is gone, or that has held the lock
+# past HARN_TARGET_GC_LOCK_STALE_SECS (default 6h), is stale and is replaced.
+run_lock="${receipt_root}/prune-stale-targets.lock"
+run_lock_held=0
+release_run_lock() {
+  [ "$run_lock_held" -eq 1 ] || return 0
+  rm -f "$run_lock/owner"
+  rmdir "$run_lock" 2>/dev/null || true
+  run_lock_held=0
+}
+acquire_run_lock() {
+  local stale_secs="${HARN_TARGET_GC_LOCK_STALE_SECS:-21600}" holder_pid holder_epoch now attempt
+  case "$stale_secs" in
+    ''|*[!0-9]*) echo "HARN_TARGET_GC_LOCK_STALE_SECS must be a non-negative integer: $stale_secs" >&2; exit 2 ;;
+  esac
+  mkdir -p "$receipt_root"
+  for attempt in 1 2; do
+    if mkdir "$run_lock" 2>/dev/null; then
+      printf '%s %s\n' "$$" "$(date +%s)" > "$run_lock/owner"
+      run_lock_held=1
+      trap release_run_lock EXIT
+      return 0
+    fi
+    holder_pid=""; holder_epoch=""
+    if [ -f "$run_lock/owner" ]; then
+      read -r holder_pid holder_epoch < "$run_lock/owner" || true
+    fi
+    # A lock whose owner file is not written yet belongs to a run that is
+    # starting this instant; age it by the directory itself.
+    case "$holder_epoch" in
+      ''|*[!0-9]*) holder_epoch="$(file_mtime_epoch "$run_lock" 2>/dev/null || date +%s)" ;;
+    esac
+    now="$(date +%s)"
+    if [ "$attempt" -eq 1 ] && {
+      { [ -n "$holder_pid" ] && ! kill -0 "$holder_pid" 2>/dev/null; } \
+        || [ $((now - holder_epoch)) -gt "$stale_secs" ]; }; then
+      echo "harn-target GC: replacing stale run lock (holder_pid=${holder_pid:-unknown} age_secs=$((now - holder_epoch)))"
+      rm -f "$run_lock/owner"
+      rmdir "$run_lock" 2>/dev/null || true
+      continue
+    fi
+    echo "harn-target GC: policy=$gc_policy_version status=skipped reason=another-run-active holder_pid=${holder_pid:-unknown} age_secs=$((now - holder_epoch)) scanned=0 kept=0 removed=0 reclaimed_bytes=0 (lock=$run_lock)"
+    exit 0
+  done
+}
+acquire_run_lock
 
 target_roots=()
 while IFS= read -r storage_root; do
@@ -314,13 +433,34 @@ cutoff=$(( $(date +%s) - min_age ))
 # enough". Without a size rule a root stays healthy-looking at any size: a
 # fleet that touches every entry inside the idle bound keeps all of them, and
 # the count cap alone protects the newest ten however large they are.
-max_bytes="${HARN_TARGET_GC_MAX_BYTES:-0}"
+default_max_bytes=0
+default_keep_recent=10
+max_bytes_source=default
+if [ "$host_maintenance" -eq 1 ]; then
+  default_keep_recent=3
+  # An eighth of the filesystem holding the cache, so a small build host and a
+  # large workstation each keep a share they can afford. A size that cannot be
+  # read falls back to 64 GiB, about an eighth of the fleet's 460 GiB hosts.
+  default_max_bytes=68719476736
+  max_bytes_source=fallback
+  policy_root="${target_roots[0]:-${release_target_roots[0]:-}}"
+  fs_kib="$(df -Pk "$policy_root" 2>/dev/null | awk 'NR == 2 { print $2 }' || true)"
+  case "$fs_kib" in
+    ''|*[!0-9]*|0) ;;
+    *) default_max_bytes=$((fs_kib * 1024 / 8)); max_bytes_source=disk ;;
+  esac
+fi
+[ -n "${HARN_TARGET_GC_MAX_BYTES:-}" ] && max_bytes_source="env"
+max_bytes="${HARN_TARGET_GC_MAX_BYTES:-$default_max_bytes}"
 case "$max_bytes" in
   ''|*[!0-9]*) echo "HARN_TARGET_GC_MAX_BYTES must be a non-negative integer: $max_bytes" >&2; exit 2 ;;
 esac
-keep_recent="${HARN_TARGET_GC_KEEP_RECENT:-10}"
+keep_recent="${HARN_TARGET_GC_KEEP_RECENT:-$default_keep_recent}"
 max_idle="${HARN_TARGET_GC_MAX_IDLE_SECS:-259200}"
 idle_cutoff=$(( $(date +%s) - max_idle ))
+if [ "$host_maintenance" -eq 1 ]; then
+  echo "harn-target GC host policy: keep_recent=$keep_recent max_idle_secs=$max_idle max_bytes=$max_bytes max_bytes_source=$max_bytes_source"
+fi
 
 # The entry belonging to whoever launched this sweep, which must survive it
 # whatever the ranking says. Setup restores a Cargo target seed and then sweeps,
@@ -332,9 +472,8 @@ idle_cutoff=$(( $(date +%s) - max_idle ))
 # still protects the right entry, and a name shared across the two managed roots
 # protects both. Over-protecting keeps a tree that a later sweep will collect;
 # under-protecting deletes a tree that is in use.
-protect_name=""
 if [ -n "${HARN_TARGET_GC_PROTECT:-}" ]; then
-  protect_name="$(basename "${HARN_TARGET_GC_PROTECT}")"
+  protected_entries+=("$(basename "${HARN_TARGET_GC_PROTECT}")")
 fi
 
 # The pids this GC must never mistake for a build: its own process and every
@@ -430,12 +569,14 @@ release_keep_file="$(mktemp)"
 # root, so the retention cap below can rank them by recency.
 warm_file="$(mktemp)"
 # Entries this run kept whose ONLY protection is rank or age. The size pass may
-# evict from here and nowhere else: a live process or the caller's own entry is
-# never a candidate no matter how far over the ceiling the root sits.
+# consider entries from here and nowhere else, then applies the same minimum
+# idle age as the orphan pass before evicting one. A live process, recent
+# activity, or the caller's own entry wins no matter how far over the ceiling
+# the root sits.
 evictable_file="$(mktemp)"
 # Print the summary from the EXIT trap so no stray failure can ever make the
 # GC die silently again.
-trap 'rm -f "$keep_file" "$release_keep_file" "$warm_file" "$evictable_file"; print_summary' EXIT
+trap 'rm -f "$keep_file" "$release_keep_file" "$warm_file" "$evictable_file"; print_summary; release_run_lock' EXIT
 
 live_worktrees() {
   discover_repo_roots | while read -r repo; do
@@ -509,12 +650,16 @@ prune_root() {
     scanned=$((scanned + 1))
     name="$(basename "$d")"
     warm_entry=0
+    if entry_requested "$name"; then
+      matched_entries+=("$name")
+    fi
 
     # The caller's own entry outranks every other rule, including the process
     # probe: a setup run that has restored a seed but not yet started Cargo owns
     # its tree without holding a lock or naming it on any command line.
-    if [ -n "$protect_name" ] && [ "$name" = "$protect_name" ]; then
-      echo "keep (caller's own entry): $name"
+    if entry_protected "$name"; then
+      echo "keep (caller protected entry): $name"
+      report_pending_named_entry "$name"
       kept=$((kept + 1)); kept_paths+=("$d"); continue
     fi
 
@@ -532,6 +677,7 @@ prune_root() {
       pids="${pids% }"
       if [ -n "$pids" ]; then
         echo "keep (live process: $pids): $name"
+        report_pending_named_entry "$name"
         kept=$((kept + 1)); kept_paths+=("$d"); continue
       fi
     fi
@@ -541,7 +687,6 @@ prune_root() {
     # a lane being finished but cannot be wrong about a compiler holding the
     # tree open. Rank and age are exactly what the caller is overriding.
     if entry_requested "$name"; then
-      matched_entries+=("$name")
       remove_entry "$target_root" "$d" "named by caller"
       continue
     fi
@@ -610,7 +755,7 @@ prune_root() {
 # trip that check and report a correct run as an error.
 forget_kept_path() {
   local drop="$1" keptp rebuilt=()
-  for keptp in "${kept_paths[@]}"; do
+  for keptp in ${kept_paths[@]+"${kept_paths[@]}"}; do
     [ "$keptp" = "$drop" ] && continue
     rebuilt+=("$keptp")
   done
@@ -621,7 +766,9 @@ forget_kept_path() {
 
 remember_kept_path() {
   local path="$1" keptp
-  for keptp in "${kept_paths[@]}"; do
+  # Bash 3.2 treats an empty "${array[@]}" as unbound under `set -u`, and the
+  # first kept path of a run arrives here with the array still empty.
+  for keptp in ${kept_paths[@]+"${kept_paths[@]}"}; do
     [ "$keptp" = "$path" ] && return 0
   done
   kept=$((kept + 1))
@@ -642,7 +789,9 @@ entry_kib() {
 # age alone. Count and age cannot answer "is this root too big": a fleet that
 # touches every entry inside the idle bound keeps all of them, so a root can
 # sit at any size and every rule still reports a pass. This runs last so that
-# liveness, the caller's own entry, and an explicit name all outrank it.
+# liveness, recent activity, the caller's own entry, and an explicit name all
+# outrank it. An old oversized tree remains reclaimable; a fresh one makes the
+# ceiling explicitly unproven until it crosses the shared idle-age boundary.
 enforce_size_ceiling() {
   local target_root="$1"
   [ "$max_bytes" -gt 0 ] || return 0
@@ -675,6 +824,10 @@ enforce_size_ceiling() {
     [ "$total_kib" -gt "$ceiling_kib" ] || break
     case "$path" in "$target_root"/*) ;; *) continue ;; esac
     [ -d "$path" ] || continue
+    if [ "$mtime" -ge "$cutoff" ]; then
+      echo "keep (recently active within ${min_age}s; size grace): $(basename "$path")"
+      continue
+    fi
     kib="$(entry_kib "$path")" || continue
     remove_entry "$target_root" "$path" "over the size ceiling"
     # Only count the space back when the entry is really gone. Under --dry-run
@@ -693,6 +846,15 @@ enforce_size_ceiling() {
   fi
 }
 
+entry_holds_git_repository() {
+  local hit status
+  hit="$(find "$1" \( -name .git -o \( -type d -path '*/objects/pack' \) \) -print -quit 2>/dev/null)"
+  status=$?
+  [ -n "$hit" ] && return 0
+  [ "$status" -eq 0 ] || return 0
+  return 1
+}
+
 # Remove one entry, or report what would happen under --dry-run. Both passes
 # route through here so the path validation and the read-back are written once
 # and cannot drift apart.
@@ -706,6 +868,18 @@ remove_entry() {
       unmeasured_entries=$((unmeasured_entries + 1))
       kib=""
     fi
+  fi
+  # Entries are Cargo build output, which never holds a git repository. A clone
+  # other clones borrow objects from (`git clone --reference`) breaks all of
+  # them when it is deleted, which happened on a fleet host on 2026-09-27, so
+  # an entry holding a `.git` or a bare object store is refused whatever rule
+  # selected it. An entry the census cannot fully read is refused too: the
+  # absence of a repository is then unproven.
+  if entry_holds_git_repository "$d"; then
+    echo "refusing to remove $reason: $name holds a git repository or could not be fully read" >&2
+    remember_kept_path "$d"
+    pending_candidates=$((pending_candidates + 1))
+    return 0
   fi
   if [ "$dry_run" -eq 1 ]; then
     echo "would remove $reason: $name (${sz:-?})"

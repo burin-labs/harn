@@ -5,15 +5,14 @@
 //! surface free of shell injection and preserves the contract documented in
 //! `schemas/tools/git.{request,response}.json`.
 
-use std::path::PathBuf;
-use std::process::Command;
-use std::sync::Arc;
+use std::path::{Path, PathBuf};
 
 use harn_vm::VmValue;
 
 use crate::error::HostlibError;
 use crate::tools::args::{
-    build_dict, dict_arg, optional_int, optional_string, require_string, str_value, to_agent_path,
+    build_dict, dict_arg, optional_int, optional_string, require_string, resolve_host_path,
+    str_value, to_agent_path,
 };
 
 const BUILTIN: &str = "hostlib_tools_git";
@@ -112,6 +111,60 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     ]))
 }
 
+/// Observe the checkout and repository identity without accepting caller argv.
+/// A linked worktree has its own worktree root but shares the common directory
+/// with its parent repository. Errors remain errors, never a fallback identity.
+pub(super) fn repository_identity(args: &[VmValue]) -> Result<VmValue, HostlibError> {
+    let raw = dict_arg("hostlib_tools_git_repository_identity", args)?;
+    let repo = resolve_host_path(&require_string(
+        "hostlib_tools_git_repository_identity",
+        &raw,
+        "repo",
+    )?);
+    let scope_error =
+        |violation: harn_vm::process_sandbox::SandboxViolation| HostlibError::SandboxViolation {
+            builtin: "hostlib_tools_git_repository_identity",
+            path: violation.attempted.display().to_string(),
+            message: violation.message("hostlib_tools_git_repository_identity"),
+        };
+    harn_vm::process_sandbox::check_git_metadata_path_scope(&repo).map_err(scope_error)?;
+    harn_vm::process_sandbox::check_repository_metadata_scope(&repo).map_err(scope_error)?;
+    let stdout = String::from_utf8(run_git_identity_bytes(
+        &repo,
+        &[
+            "rev-parse",
+            "--path-format=absolute",
+            "--show-toplevel",
+            "--git-common-dir",
+        ],
+    )?)
+    .map_err(|_| HostlibError::Backend {
+        builtin: "hostlib_tools_git_repository_identity",
+        message: "git repository identity contains a non-UTF-8 path".to_string(),
+    })?;
+    let paths: Vec<_> = stdout.lines().collect();
+    if paths.len() != 2 || paths.iter().any(|path| !PathBuf::from(path).is_absolute()) {
+        return Err(HostlibError::Backend {
+            builtin: BUILTIN,
+            message: "git returned an incomplete repository identity".to_string(),
+        });
+    }
+    for path in &paths {
+        harn_vm::process_sandbox::check_git_metadata_path_scope(PathBuf::from(path).as_path())
+            .map_err(scope_error)?;
+    }
+    Ok(build_dict([
+        (
+            "worktree_root",
+            str_value(to_agent_path(PathBuf::from(paths[0]))),
+        ),
+        (
+            "common_directory",
+            str_value(to_agent_path(PathBuf::from(paths[1]))),
+        ),
+    ]))
+}
+
 fn run_status(repo: &PathBuf) -> Result<VmValue, HostlibError> {
     let stdout = run_git(repo, &["status", "--porcelain=v1", "-z"])?;
     let mut entries: Vec<VmValue> = Vec::new();
@@ -145,7 +198,7 @@ fn run_status(repo: &PathBuf) -> Result<VmValue, HostlibError> {
         }
         entries.push(build_dict(entry));
     }
-    Ok(VmValue::List(Arc::new(entries)))
+    Ok(VmValue::list(entries))
 }
 
 fn run_diff(
@@ -212,7 +265,7 @@ fn run_log(
             ("subject", str_value(parts[4])),
         ]));
     }
-    Ok(VmValue::List(Arc::new(commits)))
+    Ok(VmValue::list(commits))
 }
 
 fn run_blame(
@@ -258,7 +311,7 @@ fn run_blame(
             ]));
         }
     }
-    Ok(VmValue::List(Arc::new(blame_entries)))
+    Ok(VmValue::list(blame_entries))
 }
 
 fn run_show(repo: &PathBuf, rev: Option<&str>) -> Result<VmValue, HostlibError> {
@@ -297,7 +350,7 @@ fn run_branch_list(repo: &PathBuf) -> Result<VmValue, HostlibError> {
             ("sha", str_value(parts[1])),
         ]));
     }
-    Ok(VmValue::List(Arc::new(branches)))
+    Ok(VmValue::list(branches))
 }
 
 fn run_current_branch(repo: &PathBuf) -> Result<VmValue, HostlibError> {
@@ -326,7 +379,7 @@ fn run_remote_list(repo: &PathBuf) -> Result<VmValue, HostlibError> {
             ("url", str_value(url)),
         ]));
     }
-    Ok(VmValue::List(Arc::new(remotes)))
+    Ok(VmValue::list(remotes))
 }
 
 /// Validate a user-supplied revision/refspec/range. We forward the value
@@ -361,7 +414,16 @@ fn validate_rev(rev: &str) -> Result<(), HostlibError> {
 }
 
 fn run_git(repo: &PathBuf, args: &[&str]) -> Result<String, HostlibError> {
-    let mut cmd = Command::new("git");
+    Ok(String::from_utf8_lossy(&run_git_bytes(repo, args)?).into_owned())
+}
+
+fn run_git_bytes(repo: &PathBuf, args: &[&str]) -> Result<Vec<u8>, HostlibError> {
+    let mut cmd = harn_vm::process_sandbox::session_std_command("git").map_err(|err| {
+        HostlibError::Backend {
+            builtin: BUILTIN,
+            message: format!("git session environment: {err:?}"),
+        }
+    })?;
     // Strip ambient `GIT_*` environment variables so that being invoked
     // from inside a parent `git` process (e.g. a pre-push hook running
     // tests, or a git alias) doesn't leak `GIT_DIR` / `GIT_INDEX_FILE` /
@@ -382,6 +444,50 @@ fn run_git(repo: &PathBuf, args: &[&str]) -> Result<String, HostlibError> {
             args.first().copied().unwrap_or("?")
         ),
     })?;
+    git_output_bytes(output, args)
+}
+
+fn run_git_identity_bytes(repo: &Path, args: &[&str]) -> Result<Vec<u8>, HostlibError> {
+    let backend_error = |error: harn_vm::VmError| HostlibError::Backend {
+        builtin: "hostlib_tools_git_repository_identity",
+        message: error.to_string(),
+    };
+    let session = harn_vm::process_sandbox::session_std_command("git").map_err(backend_error)?;
+    // Remove keys from the actual composed session environment as well as
+    // ambient inheritance. A session-only GIT_DIR must not redirect identity.
+    let env_remove = std::env::vars_os()
+        .map(|(key, _)| key)
+        .chain(session.get_envs().map(|(key, _)| key.to_os_string()))
+        .filter(|key| {
+            key.to_string_lossy()
+                .to_ascii_uppercase()
+                .starts_with("GIT_")
+        })
+        .map(|key| key.to_string_lossy().into_owned())
+        .collect();
+    let root = repo.to_str().ok_or_else(|| HostlibError::Backend {
+        builtin: "hostlib_tools_git_repository_identity",
+        message: "git repository identity requires a UTF-8 root".into(),
+    })?;
+    let argv = std::iter::once("-C")
+        .chain(std::iter::once(root))
+        .chain(args.iter().copied())
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    let output = harn_vm::process_sandbox::command_output_with_declared_roots(
+        "git",
+        &argv,
+        &harn_vm::process_sandbox::ProcessCommandConfig {
+            cwd: Some(repo.to_path_buf()),
+            env_remove,
+            ..Default::default()
+        },
+    )
+    .map_err(backend_error)?;
+    git_output_bytes(output, args)
+}
+
+fn git_output_bytes(output: std::process::Output, args: &[&str]) -> Result<Vec<u8>, HostlibError> {
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         return Err(HostlibError::Backend {
@@ -394,12 +500,13 @@ fn run_git(repo: &PathBuf, args: &[&str]) -> Result<String, HostlibError> {
             ),
         });
     }
-    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+    Ok(output.stdout)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::process::Command;
 
     #[test]
     fn validate_rev_rejects_flag_lookalikes() {

@@ -210,6 +210,10 @@ fn open_private(path: &Path, create: bool) -> Result<File, OpenError> {
 
 #[async_trait]
 impl SecretProvider for FileSecretProvider {
+    fn allows_local_cli_reads(&self) -> bool {
+        true
+    }
+
     async fn get(&self, id: &SecretId) -> Result<SecretBytes, SecretError> {
         let value = self.transaction(false, |all| {
             let value = all
@@ -278,6 +282,10 @@ impl SecretProvider for FileSecretProvider {
     }
     fn supports_versions(&self) -> bool {
         false
+    }
+
+    fn locator(&self, _id: &SecretId) -> Option<String> {
+        Some(self.path.display().to_string())
     }
 }
 

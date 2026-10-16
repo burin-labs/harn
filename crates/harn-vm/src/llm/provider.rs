@@ -148,16 +148,18 @@ pub(crate) trait LlmProvider {
     }
 }
 
+/// Boxed chat futures retain the thread handoff required by the LLM API.
+pub(crate) type ProviderChatFuture<'a> = futures::future::BoxFuture<'a, Result<LlmResult, VmError>>;
+
 /// Async chat operation. Uses explicit lifetime parameters because providers
 /// are constructed on-the-fly, to avoid RefCell-across-await issues.
-#[allow(dead_code)]
 pub(crate) trait LlmProviderChat: LlmProvider {
     /// Execute an LLM chat call, optionally streaming text deltas.
     fn chat<'a>(
         &'a self,
         request: &'a LlmRequestPayload,
         delta_tx: Option<DeltaSender>,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<LlmResult, VmError>> + 'a>>;
+    ) -> ProviderChatFuture<'a>;
 }
 
 thread_local! {
@@ -415,7 +417,7 @@ mod registration_tests {
     /// that condition.
     #[test]
     fn builtin_providers_resolve_on_a_thread_that_never_ran_vm_startup() {
-        let unresolved: Vec<&str> = std::thread::spawn(|| {
+        let unresolved: Vec<&str> = crate::runtime_stack::spawn(|| {
             [
                 "gemini",
                 "vertex",
@@ -442,7 +444,7 @@ mod registration_tests {
     /// unregistered for its whole life.
     #[test]
     fn a_custom_provider_registered_first_does_not_suppress_the_builtins() {
-        let (custom, builtin) = std::thread::spawn(|| {
+        let (custom, builtin) = crate::runtime_stack::spawn(|| {
             register_provider_name("acme-proxy");
             (
                 is_provider_registered("acme-proxy"),

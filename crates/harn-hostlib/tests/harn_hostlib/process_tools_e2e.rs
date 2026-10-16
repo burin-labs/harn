@@ -15,9 +15,7 @@
 
 #![cfg(unix)]
 
-use std::io::{BufRead, Read, Write};
-use std::os::fd::{FromRawFd, RawFd};
-use std::os::unix::process::CommandExt;
+use std::io::{Read, Write};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use harn_hostlib::tools::ToolsCapability;
@@ -54,7 +52,7 @@ fn registry() -> BuiltinRegistry {
 /// environment says so. Saying it here keeps each test asserting what it is
 /// about, and keeps the refusal meaningful — `process_session_environment`
 /// owns the case where nothing is declared.
-fn declare_inherited() -> harn_vm::stdlib::process::SessionEnvironmentGuard {
+pub(super) fn declare_inherited() -> harn_vm::stdlib::process::SessionEnvironmentGuard {
     harn_vm::stdlib::process::declare_session_environment_if_absent(
         harn_vm::security::SessionEnvironment::inherited(),
     )
@@ -146,8 +144,6 @@ fn require_list(map: &harn_vm::value::DictMap, key: &str) -> Vec<VmValue> {
     }
 }
 
-const OWNER_DEATH_SUPERVISOR_ENV: &str = "HARN_TEST_OWNER_DEATH_SUPERVISOR";
-const OWNER_DEATH_REPORT_FD_ENV: &str = "HARN_TEST_OWNER_DEATH_REPORT_FD";
 const SESSION_REPORT_ENV: &str = "HARN_TEST_SESSION_REPORT";
 
 #[test]
@@ -164,308 +160,6 @@ fn owner_death_guardian_fixture() {
         return;
     }
     harn_hostlib::process::owner_death::run_guardian_from_pipe().expect("run owner-death guardian");
-}
-
-#[test]
-fn owner_death_grandchild_fixture() {
-    if std::env::var_os(OWNER_DEATH_REPORT_FD_ENV).is_none() {
-        return;
-    }
-    loop {
-        unsafe {
-            libc::pause();
-        }
-    }
-}
-
-#[test]
-fn owner_death_payload_fixture() {
-    let Some(report_fd) = std::env::var(OWNER_DEATH_REPORT_FD_ENV)
-        .ok()
-        .and_then(|value| value.parse::<RawFd>().ok())
-    else {
-        return;
-    };
-    let grandchild = std::process::Command::new(
-        std::env::current_exe().expect("resolve process-tools test executable"),
-    )
-    .args([
-        "--exact",
-        "process_tools_e2e::owner_death_grandchild_fixture",
-        "--nocapture",
-    ])
-    .process_group(0)
-    .spawn()
-    .expect("spawn native grandchild fixture");
-    let report = format!(
-        "payload={} pgid={} grandchild={} grandchild_pgid={}\n",
-        std::process::id(),
-        unsafe { libc::getpgrp() },
-        grandchild.id(),
-        grandchild.id(),
-    );
-    let written = unsafe { libc::write(report_fd, report.as_ptr().cast(), report.len()) };
-    assert_eq!(written, report.len() as isize, "write payload handshake");
-    std::mem::forget(grandchild);
-    loop {
-        unsafe {
-            libc::pause();
-        }
-    }
-}
-
-#[test]
-fn owner_death_supervisor_fixture() {
-    if std::env::var_os(OWNER_DEATH_SUPERVISOR_ENV).is_none() {
-        return;
-    }
-    // A separate process, so it does not go through this module's `call`
-    // helper and declares its own inheriting environment (harn#8477).
-    let _environment = declare_inherited();
-    let _guardian_args = harn_hostlib::process::owner_death::install_guardian_reexec_args([
-        "--exact",
-        "process_tools_e2e::owner_death_guardian_fixture",
-        "--nocapture",
-    ]);
-    let info = harn_hostlib::tools::long_running::spawn_long_running(
-        "owner_death_supervisor_fixture",
-        std::env::current_exe()
-            .expect("resolve process-tools test executable")
-            .to_string_lossy()
-            .into_owned(),
-        vec![
-            "--exact".to_string(),
-            "process_tools_e2e::owner_death_payload_fixture".to_string(),
-            "--nocapture".to_string(),
-        ],
-        None,
-        std::collections::BTreeMap::new(),
-        format!("owner-death-supervisor-{}", std::process::id()),
-    )
-    .expect("spawn managed background payload");
-    println!(
-        "supervisor={} supervisor_pgid={} worker={} worker_pgid={}",
-        std::process::id(),
-        unsafe { libc::getpgrp() },
-        info.pid,
-        info.process_group_id.expect("worker process group")
-    );
-    std::io::stdout().flush().expect("flush supervisor report");
-    loop {
-        unsafe {
-            libc::pause();
-        }
-    }
-}
-
-struct ProcessGroupCleanup {
-    groups: Vec<i32>,
-}
-
-impl Drop for ProcessGroupCleanup {
-    fn drop(&mut self) {
-        for pgid in &self.groups {
-            if *pgid > 0 {
-                unsafe {
-                    libc::kill(-*pgid, libc::SIGKILL);
-                }
-            }
-        }
-    }
-}
-
-#[cfg(any(target_os = "macos", target_os = "linux"))]
-#[test]
-fn managed_background_group_dies_when_its_supervisor_is_sigkilled() {
-    let mut report_pipe = [0_i32; 2];
-    assert_eq!(unsafe { libc::pipe(report_pipe.as_mut_ptr()) }, 0);
-    let read_fd = report_pipe[0];
-    let write_fd = report_pipe[1];
-    let read_flags = unsafe { libc::fcntl(read_fd, libc::F_GETFD) };
-    assert!(read_flags >= 0);
-    assert_eq!(
-        unsafe { libc::fcntl(read_fd, libc::F_SETFD, read_flags | libc::FD_CLOEXEC) },
-        0
-    );
-
-    let mut supervisor = std::process::Command::new(
-        std::env::current_exe().expect("resolve process-tools test executable"),
-    );
-    supervisor
-        .args([
-            "--exact",
-            "process_tools_e2e::owner_death_supervisor_fixture",
-            "--nocapture",
-        ])
-        .env(OWNER_DEATH_SUPERVISOR_ENV, "1")
-        .env(OWNER_DEATH_REPORT_FD_ENV, write_fd.to_string())
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::piped())
-        .process_group(0);
-    let mut supervisor = supervisor.spawn().expect("spawn isolated supervisor");
-    unsafe {
-        libc::close(write_fd);
-    }
-    let mut cleanup = ProcessGroupCleanup {
-        groups: vec![supervisor.id() as i32],
-    };
-
-    let supervisor_stdout = supervisor.stdout.take().expect("supervisor stdout");
-    let mut supervisor_lines = std::io::BufReader::new(supervisor_stdout).lines();
-    let supervisor_report = supervisor_lines
-        .find_map(|line| {
-            let line = line.expect("read supervisor report");
-            line.starts_with("supervisor=").then_some(line)
-        })
-        .expect("supervisor report line");
-    let fields = parse_pid_fields(&supervisor_report);
-    let supervisor_pid = fields["supervisor"];
-    let supervisor_pgid = fields["supervisor_pgid"];
-    let worker_pid = fields["worker"];
-    let worker_pgid = fields["worker_pgid"];
-    assert_eq!(supervisor_pid, supervisor_pgid);
-    assert_eq!(worker_pid, worker_pgid);
-    assert_ne!(worker_pgid, supervisor_pgid);
-    cleanup.groups.push(worker_pgid);
-
-    let mut report_file = unsafe { std::fs::File::from_raw_fd(read_fd) };
-    let mut payload_report = String::new();
-    std::io::BufReader::new(&mut report_file)
-        .read_line(&mut payload_report)
-        .expect("read payload report");
-    let payload_fields = parse_pid_fields(&payload_report);
-    assert_eq!(payload_fields["pgid"], worker_pgid);
-    assert_ne!(payload_fields["payload"], payload_fields["grandchild"]);
-    assert_eq!(
-        payload_fields["grandchild"],
-        payload_fields["grandchild_pgid"]
-    );
-    assert_ne!(payload_fields["grandchild_pgid"], worker_pgid);
-    cleanup.groups.push(payload_fields["grandchild_pgid"]);
-
-    assert_eq!(
-        unsafe { libc::kill(-supervisor_pgid, libc::SIGKILL) },
-        0,
-        "SIGKILL isolated supervisor group"
-    );
-    supervisor.wait().expect("reap supervisor");
-
-    let mut poll_fd = libc::pollfd {
-        fd: read_fd,
-        events: libc::POLLIN | libc::POLLHUP,
-        revents: 0,
-    };
-    assert_eq!(
-        unsafe { libc::poll(&raw mut poll_fd, 1, 10_000) },
-        1,
-        "worker descriptors did not close after owner death"
-    );
-    let mut eof = [0_u8; 1];
-    assert_eq!(
-        report_file.read(&mut eof).expect("read owner-death EOF"),
-        0,
-        "worker report descriptor remained open"
-    );
-    wait_for_native_exit(worker_pid);
-    if unsafe { libc::kill(-worker_pgid, 0) } != -1
-        || std::io::Error::last_os_error().raw_os_error() != Some(libc::ESRCH)
-    {
-        // Darwin can report the just-exited group as EAGAIN between NOTE_EXIT
-        // delivery and launchd reaping its orphaned leader. A second native
-        // process-exit barrier closes that kernel transition without sleeping
-        // or polling.
-        wait_for_native_exit(worker_pid);
-    }
-    assert_eq!(unsafe { libc::kill(-worker_pgid, 0) }, -1);
-    assert_eq!(
-        std::io::Error::last_os_error().raw_os_error(),
-        Some(libc::ESRCH)
-    );
-    wait_for_native_exit(payload_fields["grandchild"]);
-    assert_eq!(
-        unsafe { libc::kill(-payload_fields["grandchild_pgid"], 0) },
-        -1
-    );
-    assert_eq!(
-        std::io::Error::last_os_error().raw_os_error(),
-        Some(libc::ESRCH)
-    );
-    cleanup.groups.clear();
-}
-
-fn parse_pid_fields(line: &str) -> std::collections::BTreeMap<&str, i32> {
-    line.split_whitespace()
-        .filter_map(|field| field.split_once('='))
-        .map(|(key, value)| {
-            (
-                key,
-                value
-                    .parse::<i32>()
-                    .unwrap_or_else(|_| panic!("invalid pid field {key}={value}")),
-            )
-        })
-        .collect()
-}
-
-#[cfg(target_os = "linux")]
-fn wait_for_native_exit(pid: i32) {
-    let pid_fd = unsafe { libc::syscall(libc::SYS_pidfd_open, pid, 0) as i32 };
-    if pid_fd < 0 {
-        assert_eq!(
-            std::io::Error::last_os_error().raw_os_error(),
-            Some(libc::ESRCH)
-        );
-        return;
-    }
-    let mut poll_fd = libc::pollfd {
-        fd: pid_fd,
-        events: libc::POLLIN,
-        revents: 0,
-    };
-    assert_eq!(unsafe { libc::poll(&raw mut poll_fd, 1, 10_000) }, 1);
-    unsafe {
-        libc::close(pid_fd);
-    }
-}
-
-#[cfg(target_os = "macos")]
-fn wait_for_native_exit(pid: i32) {
-    let queue = unsafe { libc::kqueue() };
-    assert!(queue >= 0, "create process kqueue");
-    let change = libc::kevent {
-        ident: pid as usize,
-        filter: libc::EVFILT_PROC,
-        flags: libc::EV_ADD | libc::EV_ONESHOT,
-        fflags: libc::NOTE_EXIT,
-        data: 0,
-        udata: std::ptr::null_mut(),
-    };
-    let timeout = libc::timespec {
-        tv_sec: 10,
-        tv_nsec: 0,
-    };
-    let mut event = change;
-    let result = unsafe {
-        libc::kevent(
-            queue,
-            &raw const change,
-            1,
-            &raw mut event,
-            1,
-            &raw const timeout,
-        )
-    };
-    unsafe {
-        libc::close(queue);
-    }
-    if result < 0 {
-        assert_eq!(
-            std::io::Error::last_os_error().raw_os_error(),
-            Some(libc::ESRCH)
-        );
-    } else {
-        assert_eq!(result, 1, "worker did not exit before kernel deadline");
-    }
 }
 
 fn as_dict(value: &VmValue) -> harn_vm::value::DictMap {
@@ -513,6 +207,245 @@ fn real_run_command_reports_missing_program_as_typed_not_found() {
     );
     let error = call("hostlib_tools_run_command", req).expect_err("missing program must fail");
     assert_missing_process_error(error, None);
+}
+
+#[test]
+fn real_run_command_classifies_missing_program_without_stderr_matching() {
+    let workspace = tempfile::tempdir().unwrap();
+    let missing = "harn-absent-program-8932";
+    for command in [
+        missing.to_string(),
+        format!("{missing} && true"),
+        format!("env VAR=1 {missing}"),
+        format!("VAR=1 {missing} > missing.out"),
+        "./relative/absent-8932".to_string(),
+    ] {
+        let mut req = dict();
+        req.insert("mode".into(), vstr("shell"));
+        req.insert("shell_id".into(), vstr("sh"));
+        req.insert("command".into(), vstr(&command));
+        req.insert("cwd".into(), vstr(workspace.path().to_str().unwrap()));
+        let response = require_dict(call("hostlib_tools_run_command", req).unwrap());
+        assert_eq!(require_int(&response, "exit_code"), 127, "{command}");
+        let expected = if command.starts_with("./") {
+            command.as_str()
+        } else {
+            missing
+        };
+        assert_eq!(
+            require_str(&response, "missing_program"),
+            expected,
+            "{command}"
+        );
+    }
+}
+
+#[test]
+fn real_run_command_present_program_exit_127_is_not_missing() {
+    use std::os::unix::fs::PermissionsExt;
+    let workspace = tempfile::tempdir().unwrap();
+    let program = workspace.path().join("present-8932");
+    std::fs::write(&program, "#!/bin/sh\nexit 127\n").unwrap();
+    std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
+    for (mode, command) in [
+        ("argv", ""),
+        ("shell", "env VAR=1 present-8932"),
+        ("shell", "PATH=~ present-8932"),
+        ("auto", "env VAR=1 present-8932"),
+        ("auto", "present-8932"),
+    ] {
+        let mut req = dict();
+        req.insert("mode".into(), vstr(mode));
+        req.insert("cwd".into(), vstr(workspace.path().to_str().unwrap()));
+        let mut env = dict();
+        env.insert("PATH".into(), vstr(workspace.path().to_str().unwrap()));
+        req.insert("env".into(), VmValue::dict(env));
+        if mode == "argv" {
+            req.insert("argv".into(), vlist_str(&[program.to_str().unwrap()]));
+        } else {
+            req.insert("shell_id".into(), vstr("sh"));
+            req.insert("command".into(), vstr(command));
+            // env itself must remain available in the child PATH.
+            let mut env = dict();
+            env.insert(
+                "PATH".into(),
+                vstr(&format!("{}:/usr/bin:/bin", workspace.path().display())),
+            );
+            env.insert("HOME".into(), vstr(workspace.path().to_str().unwrap()));
+            req.insert("env".into(), VmValue::dict(env));
+        }
+        let response = require_dict(call("hostlib_tools_run_command", req).unwrap());
+        assert_eq!(require_int(&response, "exit_code"), 127, "{mode}");
+        assert!(!response.contains_key("missing_program"), "{mode}");
+    }
+}
+
+#[test]
+fn real_run_command_startup_function_exit_127_is_not_missing() {
+    let workspace = tempfile::tempdir().unwrap();
+    let startup = workspace.path().join("startup.sh");
+    std::fs::write(
+        &startup,
+        "present_startup_8932() { printf 'called\\n' > called; return 127; }\n",
+    )
+    .unwrap();
+    let mut req = dict();
+    req.insert("mode".into(), vstr("shell"));
+    req.insert("shell_id".into(), vstr("bash"));
+    req.insert("command".into(), vstr("present_startup_8932"));
+    req.insert("cwd".into(), vstr(workspace.path().to_str().unwrap()));
+    let mut env = dict();
+    env.insert("BASH_ENV".into(), vstr(startup.to_str().unwrap()));
+    req.insert("env".into(), VmValue::dict(env));
+    let response = require_dict(call("hostlib_tools_run_command", req).unwrap());
+    assert_eq!(
+        std::fs::read_to_string(workspace.path().join("called")).unwrap(),
+        "called\n"
+    );
+    assert_eq!(require_int(&response, "exit_code"), 127);
+    assert!(!response.contains_key("missing_program"));
+}
+
+#[test]
+fn real_run_command_auto_bare_env_bypasses_shell_startup() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let workspace = tempfile::tempdir().unwrap();
+    let program = workspace.path().join("env");
+    std::fs::write(&program, "#!/bin/sh\nprintf argv\n").unwrap();
+    std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let startup = workspace.path().join("startup.sh");
+    std::fs::write(
+        &startup,
+        "printf startup > called\nenv() { printf shell; }\n",
+    )
+    .unwrap();
+    for (mode, command, expected, startup_ran) in [
+        ("shell", "env", Some("shell"), true),
+        ("auto", "env", None, false),
+        ("auto", program.to_str().unwrap(), Some("argv"), false),
+    ] {
+        let mut req = dict();
+        req.insert("mode".into(), vstr(mode));
+        req.insert("shell_id".into(), vstr("bash"));
+        req.insert("command".into(), vstr(command));
+        req.insert("cwd".into(), vstr(workspace.path().to_str().unwrap()));
+        let mut env = dict();
+        env.insert("PATH".into(), vstr(workspace.path().to_str().unwrap()));
+        env.insert("BASH_ENV".into(), vstr(startup.to_str().unwrap()));
+        req.insert("env".into(), VmValue::dict(env));
+        let response = require_dict(call("hostlib_tools_run_command", req).unwrap());
+        assert_eq!(require_int(&response, "exit_code"), 0);
+        let stdout = require_str(&response, "stdout");
+        if let Some(expected) = expected {
+            assert_eq!(stdout, expected);
+        } else {
+            // The argv resolver selects the system env before child overrides
+            // apply. Read only the fixture's explicit marker, never dump the
+            // child's complete environment in an assertion failure.
+            assert!(stdout
+                .lines()
+                .any(|line| { line == format!("BASH_ENV={}", startup.display()) }));
+        }
+        assert_eq!(workspace.path().join("called").exists(), startup_ran);
+        if startup_ran {
+            std::fs::remove_file(workspace.path().join("called")).unwrap();
+        }
+    }
+}
+
+#[test]
+fn real_run_command_auto_uses_argv_for_a_plain_command() {
+    let mut req = dict();
+    req.insert("mode".into(), vstr("auto"));
+    req.insert("shell_id".into(), vstr("sh"));
+    req.insert(
+        "command".into(),
+        vstr("harn-absent-program-8932 'one argument'"),
+    );
+    let error = call("hostlib_tools_run_command", req).unwrap_err();
+    match error {
+        HostlibError::ProcessSpawn {
+            kind,
+            missing_program,
+            ..
+        } => {
+            assert_eq!(kind, "not_found");
+            assert_eq!(missing_program.as_deref(), Some("harn-absent-program-8932"));
+        }
+        other => panic!("auto did not reach argv spawn: {other:?}"),
+    }
+}
+
+#[test]
+fn real_run_command_auto_preserves_shell_redirection() {
+    let workspace = tempfile::tempdir().unwrap();
+    for command in [
+        "/usr/bin/printf content > out",
+        "> out /usr/bin/printf content",
+    ] {
+        let mut req = dict();
+        req.insert("mode".into(), vstr("auto"));
+        req.insert("shell_id".into(), vstr("sh"));
+        req.insert("command".into(), vstr(command));
+        req.insert("cwd".into(), vstr(workspace.path().to_str().unwrap()));
+        let response = require_dict(call("hostlib_tools_run_command", req).unwrap());
+        assert_eq!(
+            require_int(&response, "exit_code"),
+            0,
+            "{command}: {response:?}"
+        );
+        assert_eq!(require_str(&response, "stdout"), "");
+        assert_eq!(
+            std::fs::read_to_string(workspace.path().join("out")).unwrap(),
+            "content"
+        );
+        std::fs::remove_file(workspace.path().join("out")).unwrap();
+    }
+}
+
+#[test]
+fn real_run_command_argv_env_and_relative_missing_programs_are_named() {
+    let mut req = dict();
+    req.insert(
+        "argv".into(),
+        vlist_str(&["env", "VAR=1", "harn-absent-program-8932"]),
+    );
+    let response = require_dict(call("hostlib_tools_run_command", req).unwrap());
+    assert_eq!(require_int(&response, "exit_code"), 127);
+    assert_eq!(
+        require_str(&response, "missing_program"),
+        "harn-absent-program-8932"
+    );
+
+    let workspace = tempfile::tempdir().unwrap();
+    let mut req = dict();
+    req.insert("argv".into(), vlist_str(&["./relative/absent-8932"]));
+    req.insert("cwd".into(), vstr(workspace.path().to_str().unwrap()));
+    match call("hostlib_tools_run_command", req).unwrap_err() {
+        HostlibError::ProcessSpawn {
+            missing_program, ..
+        } => {
+            assert_eq!(missing_program.as_deref(), Some("./relative/absent-8932"));
+        }
+        other => panic!("expected a typed missing-program error: {other:?}"),
+    }
+}
+
+#[test]
+fn real_run_command_background_preserves_missing_program_evidence() {
+    let mut req = dict();
+    req.insert("mode".into(), vstr("shell"));
+    req.insert("shell_id".into(), vstr("sh"));
+    req.insert("command".into(), vstr("harn-absent-program-8932"));
+    req.insert("background_after_ms".into(), VmValue::Int(30_000));
+    let response = require_dict(call("hostlib_tools_run_command", req).unwrap());
+    assert_eq!(require_str(&response, "status"), "completed");
+    assert_eq!(require_int(&response, "exit_code"), 127);
+    assert_eq!(
+        require_str(&response, "missing_program"),
+        "harn-absent-program-8932"
+    );
 }
 
 #[test]

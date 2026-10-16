@@ -2,6 +2,22 @@
 
 use crate::value::VmError;
 
+pub(crate) fn journal_audit_writer(
+    id: &str,
+) -> Result<Option<crate::agent_session_journal::JournalAuditWriter>, String> {
+    super::SESSIONS.with(|sessions| {
+        let sessions = sessions.borrow();
+        let state = sessions
+            .get(id)
+            .ok_or_else(|| format!("agent transcript audit writer: unknown session `{id}`"))?;
+        state.ensure_run_accepts_mutation("journal_audit_writer")?;
+        Ok(state
+            .transcript_journal
+            .as_ref()
+            .map(crate::agent_session_journal::JournalState::audit_writer))
+    })
+}
+
 pub(crate) fn install_journal(
     id: &str,
     journal: crate::agent_session_journal::JournalState,
@@ -21,6 +37,17 @@ pub(crate) fn install_journal(
     })
 }
 
+pub(crate) fn journal_flush_lock(id: &str) -> Option<std::sync::Arc<tokio::sync::Mutex<()>>> {
+    super::SESSIONS.with(|sessions| {
+        sessions
+            .borrow()
+            .get(id)
+            .and_then(|state| state.transcript_journal.as_ref())
+            .map(crate::agent_session_journal::JournalState::flush_lock)
+    })
+}
+
+#[cfg(test)]
 pub(crate) fn next_journal_event(
     id: &str,
 ) -> Result<
@@ -41,14 +68,29 @@ pub(crate) fn next_journal_event(
     })
 }
 
-pub(crate) fn record_persisted_journal_event(id: &str, event_id: u64) {
+/// Every queued journal mutation as the events one flush appends, or `None`
+/// when the session has no journal.
+pub(crate) fn pending_journal_events(
+    id: &str,
+) -> Result<Option<crate::agent_session_journal::PendingJournalBatch>, VmError> {
+    super::SESSIONS.with(|sessions| {
+        sessions
+            .borrow()
+            .get(id)
+            .and_then(|state| state.transcript_journal.as_ref())
+            .map(crate::agent_session_journal::JournalState::pending_events)
+            .transpose()
+    })
+}
+
+pub(crate) fn record_persisted_journal_events(id: &str, event_ids: &[u64]) {
     super::SESSIONS.with(|sessions| {
         if let Some(journal) = sessions
             .borrow_mut()
             .get_mut(id)
             .and_then(|state| state.transcript_journal.as_mut())
         {
-            journal.record_persisted_event(event_id);
+            journal.record_persisted_events(event_ids);
         }
     });
 }

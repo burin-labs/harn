@@ -284,4 +284,66 @@ assert_receipt "$api_receipt" '
   and .planned_action == "none"
 '
 
+lost_dir="$tmp_root/lost-verdict"
+mkdir -p "$lost_dir/bin"
+write_run_json "$lost_dir/base.json" 1 failure "2026-08-28T18:04:00Z"
+jq '.jobs[0].steps = [
+  {name:"Setup", number:1, status:"completed", conclusion:"success",
+   startedAt:"2026-08-28T18:03:30Z", completedAt:"2026-08-28T18:03:35Z"},
+  {name:"Test", number:2, status:"in_progress", conclusion:"",
+   startedAt:"2026-08-28T18:03:35Z", completedAt:"0001-01-01T00:00:00Z"},
+  {name:"Cleanup", number:3, status:"pending", conclusion:"",
+   startedAt:"0001-01-01T00:00:00Z", completedAt:"0001-01-01T00:00:00Z"}
+]' "$lost_dir/base.json" > "$lost_dir/run.json"
+jq '.lost_verdict_routes = [{workflow:"CI", job_names:["Tests"], events:["pull_request"]}]' \
+  "$repo_root/.github/ci-preemption-policy.json" > "$lost_dir/policy.json"
+cat > "$lost_dir/bin/gh" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ "$1 $2" == "run view" ]]; then
+  cat "$LOST_FIXTURE/run.json"
+elif [[ "$1" == "api" && "$2" == */actions/runs/7001 ]]; then
+  printf '.github/workflows/downstream.yml\n'
+elif [[ "$1" == "api" && "$2" == */contents/.github/workflows/downstream.yml ]]; then
+  base64 < "$LOST_WORKFLOW"
+elif [[ "$1 $2" == "run rerun" ]]; then
+  printf '%s\n' "$@" > "$ACTION_RECEIPT"
+else
+  exit 1
+fi
+SH
+chmod +x "$lost_dir/bin/gh"
+lost_receipt=$(
+  PATH="$lost_dir/bin:$PATH" HARN_BIN="$harn_bin" \
+    LOST_FIXTURE="$lost_dir" LOST_WORKFLOW="$workflow" ACTION_RECEIPT="$lost_dir/action" \
+    "$recover_script" --repo burin-labs/downstream --run-id 7001 \
+    --policy "$lost_dir/policy.json" --apply
+)
+assert_receipt "$lost_receipt" '
+  .classification == "lost_job_verdict"
+  and .failed_job_count == 1 and .retry_safe_job_count == 1
+  and .inspected_job_count == 0 and .evidence_complete == true
+  and .planned_action == "rerun_failed_jobs"
+'
+cat > "$lost_dir/expected-action" <<'EOF'
+run
+rerun
+7001
+--repo
+burin-labs/downstream
+--failed
+EOF
+cmp "$lost_dir/expected-action" "$lost_dir/action"
+jq '.attempt = 2' "$lost_dir/run.json" > "$lost_dir/second.json"
+second_lost_receipt=$(
+  PATH="$lost_dir/bin:$PATH" HARN_BIN="$harn_bin" ACTION_RECEIPT="$lost_dir/second-action" \
+    "$recover_script" --repo burin-labs/downstream --run-id 7001 \
+    --run-json "$lost_dir/second.json" --workflow "$workflow" \
+    --logs-dir "$missing_dir/logs" --policy "$lost_dir/policy.json" --apply
+)
+assert_receipt "$second_lost_receipt" '
+  .classification == "lost_job_verdict" and .planned_action == "none_max_attempts_reached"
+'
+[[ ! -e "$lost_dir/second-action" ]]
+
 echo "ci_preemption_recover_test: ok"

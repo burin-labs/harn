@@ -7,7 +7,7 @@ name = "merge_captain"
 version = "0.1.0"
 description = "Dry-run-first captain for pull request readiness, CI triage, release blockers, and receipt-backed merge plans."
 entry_workflow = "workflows/merge_captain.harn#run"
-tools = ["github", "ci", "linear", "notion", "slack", "mcp"]
+tools = ["github", "ci", "linear", "slack", "mcp"]
 capabilities = [
   "git.get_diff",
   "project.scan",
@@ -19,10 +19,10 @@ capabilities = [
 autonomy_tier = "act_with_approval"
 receipt_policy = "required"
 triggers = [
-  "github.pr_opened",
-  "github.check_failed",
-  "github.review_thread_stale",
-  "github.merge_conflict_detected",
+  "github.pull_request.opened",
+  "github.check_suite.completed",
+  "github.merge_group.checks_requested",
+  "github.pull_request.synchronize",
 ]
 schedules = ["*/30 * * * *"]
 handoffs = ["review_captain"]
@@ -35,7 +35,7 @@ rollout_policy = { mode = "approval_only", percentage = 100, cohorts = ["templat
 package_source = { package = "harn-persona-template-pack", path = "examples/personas" }
 stages = [
   { name = "classify", allowed_tools = ["github", "ci"], side_effect_level = "read_only" },
-  { name = "plan_repair", allowed_tools = ["github", "ci", "linear", "notion"], side_effect_level = "read_only" },
+  { name = "plan_repair", allowed_tools = ["github", "ci", "linear"], side_effect_level = "read_only" },
   { name = "apply_repair", allowed_tools = ["github", "ci"], side_effect_level = "process_exec", on_exit = { on_complete = "classify", on_failure = "plan_repair" } },
 ]
 
@@ -44,7 +44,7 @@ name = "review_captain"
 version = "0.1.0"
 description = "Review specialist for regression spotting, missing tests, structured receipts, and human-risk handoff."
 entry_workflow = "workflows/review_captain.harn#run"
-tools = ["github", "notion", "slack", "mcp"]
+tools = ["github", "slack", "mcp"]
 capabilities = [
   "git.get_diff",
   "project.code_patterns",
@@ -54,7 +54,7 @@ capabilities = [
 ]
 autonomy_tier = "suggest"
 receipt_policy = "required"
-triggers = ["github.review_requested", "github.pull_request_synchronized"]
+triggers = ["github.pull_request.review_requested", "github.pull_request.synchronize"]
 schedules = ["0 */2 * * *"]
 handoffs = ["merge_captain"]
 context_packs = ["repo_policy", "review_policy"]
@@ -70,7 +70,7 @@ name = "oncall_captain"
 version = "0.1.0"
 description = "Approval-first incident captain for intake, hypothesis verification, MCP-backed observability checks, and outcome receipts."
 entry_workflow = "workflows/oncall_captain.harn#run"
-tools = ["pagerduty", "slack", "notion", "github", "mcp"]
+tools = ["pagerduty", "slack", "github", "mcp"]
 capabilities = [
   "interaction.ask",
   "project.lessons",
@@ -81,7 +81,7 @@ capabilities = [
 ]
 autonomy_tier = "act_with_approval"
 receipt_policy = "required"
-triggers = ["pagerduty.incident_triggered", "slack.oncall_message"]
+triggers = ["pagerduty.incident.triggered", "slack.message"]
 schedules = ["*/15 * * * *"]
 handoffs = ["review_captain"]
 context_packs = ["oncall_runbook", "service_ownership", "release_policy"]

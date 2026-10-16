@@ -708,6 +708,32 @@ if grep -Eq 'cargo clippy|make (fmt-check|test|conformance)|package-audit HARN_B
   cat "$audit_record" >&2
   exit 1
 fi
+# Without a named generator the AOT drift check builds its own; with one, the
+# check runs that exact executable instead of compiling it again.
+if ! grep -Eq '^make check-cli-aot .*HARN_CLI_AOT_GEN_BIN=__unset__$' "$audit_record"; then
+  echo "residual-only audit handed the AOT drift check a generator nobody named" >&2
+  cat "$audit_record" >&2
+  exit 1
+fi
+prebuilt_aot_generator="$fake_tools/prebuilt-harn-cli-aot-gen"
+printf '#!/usr/bin/env bash\nexit 0\n' > "$prebuilt_aot_generator"
+chmod +x "$prebuilt_aot_generator"
+HARN_RELEASE_CLI_AOT_GEN_BIN="$prebuilt_aot_generator" \
+  run_audit residual-only-prebuilt-aot --residual-only
+if ! grep -Fq "make check-cli-aot HARN_BIN=" "$audit_record" ||
+  ! grep -Eq "^make check-cli-aot .*HARN_CLI_AOT_GEN_BIN=$prebuilt_aot_generator\$" "$audit_record"; then
+  echo "residual-only audit did not run the AOT drift check on the named generator" >&2
+  cat "$audit_record" >&2
+  exit 1
+fi
+# `run_audit` exits on failure, so the expected refusal runs in a subshell.
+if (
+  HARN_RELEASE_CLI_AOT_GEN_BIN="$tmp_root/missing-harn-cli-aot-gen" \
+    run_audit residual-only-missing-aot --residual-only
+) 2>/dev/null; then
+  echo "residual-only audit accepted a named AOT generator that does not exist" >&2
+  exit 1
+fi
 # Without proof, and with proof for different bytes, the residual lanes never
 # start: the refusal names the audited commit.
 : > "$audit_record"

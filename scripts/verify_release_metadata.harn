@@ -18,9 +18,12 @@ import {
   release_withdrawal_for_tag,
 } from "./release_withdrawals.harn"
 import {
+  changelog_entries,
+  changelog_entry_heading,
   extract_section,
   normalize_version,
   previous_version,
+  published_changelog_versions,
   render_notes,
 } from "./render_release_notes.harn"
 
@@ -107,17 +110,7 @@ pub fn check_acp_agent_manifest(manifest_text: string, version: string) {
 
 /** Return every canonical stable or prerelease heading version, in file order. */
 pub fn changelog_versions(text: string) -> list<string> {
-  let out = []
-  for line in text.lines() {
-    if !line.starts_with("## v") {
-      continue
-    }
-    const version = line.substring(4, line.len())
-    if parse_release(version) != nil {
-      out = out + [version]
-    }
-  }
-  return out
+  return changelog_entries(text).map({ entry -> entry.version }).to_list()
 }
 
 /**
@@ -126,7 +119,6 @@ pub fn changelog_versions(text: string) -> list<string> {
  * Returns the empty string when the section is absent.
  */
 pub fn changelog_section_body(text: string, version: string) -> string {
-  const heading = "## v" + version
   const lines = text.lines()
   let collecting = false
   let body = []
@@ -136,7 +128,7 @@ pub fn changelog_section_body(text: string, version: string) -> string {
         break
       }
       body = body + [line]
-    } else if line == heading {
+    } else if changelog_entry_heading(line)?.version == version {
       collecting = true
     }
   }
@@ -159,8 +151,7 @@ pub fn detect_misformatted_headings(text: string) -> list<string> {
     if m.count == 0 {
       continue
     }
-    const candidate = line.substring(4, line.len())
-    if parse_release(candidate) == nil {
+    if changelog_entry_heading(line) == nil {
       suspicious = suspicious + [line]
     }
   }
@@ -279,6 +270,17 @@ pub fn check_metadata(cargo_text: string, changelog_text: string) -> string {
   if !is_descending(versions) {
     throw "error: CHANGELOG.md versions are not in descending semver order"
   }
+  const entry = changelog_entries(changelog_text)[0]
+  if entry?.never_published == true {
+    if !is_development_after_release(version, top) {
+      throw "error: never-published top entry requires its next development identity"
+    }
+    const published = published_changelog_versions(changelog_text)
+    if published.count == 0 {
+      throw "error: never-published entry has no installable predecessor"
+    }
+    effective_version = published[0] ?? ""
+  }
   return effective_version
 }
 
@@ -318,7 +320,7 @@ fn verify_release_notes(fs: HarnessFs, stdio: HarnessStdio, version: string) {
   }
   // render_notes is total given a valid section; exercising it confirms the
   // full render path the Python subprocess covered.
-  const prev = previous_version(changelog_versions(changelog), normalized)
+  const prev = previous_version(published_changelog_versions(changelog), normalized)
   const _ = render_notes(section, nil, prev, normalized)
 }
 
@@ -490,7 +492,8 @@ pipeline main(harness: Harness, task: unknown) {
     const version = current_version(cargo_text)
     const effective_version = check_metadata(cargo_text, changelog_text)
     const withdrawals = load_release_withdrawals(harness.fs, RELEASE_WITHDRAWALS_PATH)
-    const distribution_source = if is_development_after_release(version, effective_version) {
+    const distribution_source = if changelog_entries(changelog_text)[0]?.never_published == true
+      || is_development_after_release(version, effective_version) {
       effective_version
     } else {
       version

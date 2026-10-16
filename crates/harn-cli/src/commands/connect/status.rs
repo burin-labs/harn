@@ -11,7 +11,7 @@ use crate::package::{self, ConnectorRecoveryCopy};
 use harn_vm::secrets::SecretProvider;
 
 use super::store::{
-    connect_secret_reader_provider, current_unix_timestamp, load_connect_index, parse_secret_id,
+    connect_secret_provider, current_unix_timestamp, load_connect_index, parse_secret_id,
     secret_error_is_not_found,
 };
 use super::{
@@ -80,7 +80,7 @@ pub(super) async fn connect_status_report(
 ) -> Result<ConnectStatusReport, String> {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let extensions = package::try_load_runtime_extensions(&cwd)?;
-    let provider = connect_secret_reader_provider()?;
+    let provider = connect_secret_provider()?;
     let (index, credential_backend_error) = match load_connect_index(&provider).await {
         Ok(index) => (index, None),
         Err(error) => (ConnectIndex::default(), Some(error)),

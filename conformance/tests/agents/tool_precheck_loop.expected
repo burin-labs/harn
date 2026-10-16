@@ -1,0 +1,4 @@
+control_output_present=true
+allowed_output_present=true
+denied_output_absent=true
+denied_cue_present=true

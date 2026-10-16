@@ -1,0 +1,131 @@
+// Run: harn test tests/agent/judge_command_evidence_test.harn
+//
+// A command whose output is the work: "run `wc -c README.md` and report the
+// result" is finished by a general-purpose `run` that declares the
+// `observation` role. The completion judge's packet kept only mutations, the
+// verifier, and the latest problem, so it dropped that `run`, the judge
+// answered that the step had no evidence, and the agent re-ran it until its
+// budget ran out.
+import { __judge_evidence_projection } from "std/agent/judge"
+
+const TOOLS = {
+  tools: [
+    {name: "look", annotations: {kind: "read", side_effect_level: "read_only"}},
+    {name: "edit", annotations: {kind: "edit", side_effect_level: "workspace_write"}},
+    {
+      name: "verify",
+      annotations: {
+        kind: "execute",
+        side_effect_level: "process_exec",
+        completion_evidence_role: "verification",
+      },
+    },
+    {
+      name: "run",
+      annotations: {
+        kind: "execute",
+        side_effect_level: "process_exec",
+        completion_evidence_role: "observation",
+      },
+    },
+    // A process tool that declares no role: still guessed at nothing.
+    {name: "dispatch", annotations: {kind: "execute", side_effect_level: "process_exec"}},
+  ],
+}
+
+fn call(tool_name: string, call_id: string, args: dict) -> dict {
+  return {
+    role: "assistant",
+    content: "",
+    _harn: {
+      kind: "assistant",
+      tool_calls: [{id: call_id, function: {name: tool_name, arguments: args}}],
+    },
+  }
+}
+
+fn result(tool_name: string, call_id: string, content: string) -> dict {
+  return {
+    role: "user",
+    content: content,
+    _harn: {
+      kind: "tool_result",
+      tool_call_id: call_id,
+      tool_name: tool_name,
+      outcome: "ok",
+      data: {},
+    },
+  }
+}
+
+fn read_then_count() -> list {
+  return [
+    {role: "user", content: "Step 1: read README.md. Step 2: run wc -c README.md."},
+    call("look", "look-1", {file: "README.md"}),
+    result("look", "look-1", "1\thello"),
+    call("run", "run-1", {command: "wc -c README.md"}),
+    result("run", "run-1", "Command succeeded (exit 0)\n       6 README.md"),
+  ]
+}
+
+fn run_actions(projected: dict) -> list {
+  return projected.packet.actions.filter({ a -> a.name == "run" }).to_list()
+}
+
+pipeline test_a_command_that_is_the_work_reaches_the_judge() {
+  const projected = __judge_evidence_projection(read_then_count(), TOOLS)
+  const runs = run_actions(projected)
+  assert_eq(len(runs), 1, "the instructed command must be in the packet")
+  assert(contains(runs[0].observation, "6 README.md"))
+  assert_eq(projected.packet.omitted_older_action_count, 0)
+}
+
+pipeline test_a_repeated_command_keeps_only_its_latest_result() {
+  const again = read_then_count()
+    + [
+      call("run", "run-2", {command: "wc -c README.md"}),
+      result("run", "run-2", "Command succeeded (exit 0)\n       6 README.md"),
+    ]
+  const projected = __judge_evidence_projection(again, TOOLS)
+  const runs = run_actions(projected)
+  assert_eq(len(runs), 1)
+  assert_eq(runs[0].tool_call_id, "run-2")
+}
+
+pipeline test_the_verifier_slot_is_unchanged_by_command_evidence() {
+  // DIRECTION CONTROL: a trailing `run` joins the packet beside the verifier;
+  // it does not take the verification slot the verifier holds.
+  const messages = [
+    {role: "user", content: "Fix it."},
+    call("edit", "edit-1", {path: "src/a.py"}),
+    result("edit", "edit-1", "applied"),
+    call("verify", "verify-1", {command: "pytest -q"}),
+    result("verify", "verify-1", "3 passed"),
+    call("run", "run-1", {command: "git status"}),
+    result("run", "run-1", "clean"),
+  ]
+  const projected = __judge_evidence_projection(messages, TOOLS)
+  const verifications = projected.packet.actions.filter(
+    { a -> a.semantics.evidence_role == "verification" },
+  )
+    .to_list()
+  assert_eq(len(verifications), 1)
+  assert_eq(verifications[0].name, "verify")
+  assert_eq(len(run_actions(projected)), 1)
+}
+
+pipeline test_a_command_with_no_declared_role_still_fills_no_slot() {
+  // DIRECTION CONTROL: the role is declared, never inferred from the tool
+  // being a process. An undeclared process call stays out of the packet.
+  const messages = [
+    {role: "user", content: "Do it."},
+    call("dispatch", "d-1", {command: "echo hi"}),
+    result("dispatch", "d-1", "hi"),
+  ]
+  const projected = __judge_evidence_projection(messages, TOOLS)
+  const names = projected.packet.actions.map({ a -> a.name }).to_list()
+  assert(
+    !contains(names, "dispatch"),
+    "an undeclared role must not be guessed: ${json_stringify(names)}",
+  )
+}

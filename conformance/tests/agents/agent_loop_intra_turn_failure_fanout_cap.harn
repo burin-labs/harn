@@ -59,7 +59,7 @@ fn identical_edit_batch(n: int) {
   let calls = []
   let i = 0
   while i < n {
-    calls = calls.appending({id: "e" + to_string(i), name: "edit", arguments: {path: "a.swift"}})
+    calls.push({id: "e" + to_string(i), name: "edit", arguments: {path: "a.swift"}})
     i = i + 1
   }
   return calls
@@ -69,12 +69,12 @@ fn two_group_edit_batch(n: int) {
   let calls = []
   let i = 0
   while i < n {
-    calls = calls.appending({id: "a" + to_string(i), name: "edit", arguments: {path: "a.swift"}})
+    calls.push({id: "a" + to_string(i), name: "edit", arguments: {path: "a.swift"}})
     i = i + 1
   }
   i = 0
   while i < n {
-    calls = calls.appending({id: "b" + to_string(i), name: "edit", arguments: {path: "b.swift"}})
+    calls.push({id: "b" + to_string(i), name: "edit", arguments: {path: "b.swift"}})
     i = i + 1
   }
   return calls
@@ -84,7 +84,7 @@ fn distinct_look_batch(n: int) {
   let calls = []
   let i = 0
   while i < n {
-    calls = calls.appending(
+    calls.push(
       {id: "l" + to_string(i), name: "look", arguments: {path: "f" + to_string(i) + ".swift"}},
     )
     i = i + 1
@@ -214,7 +214,7 @@ pipeline main(harness: Harness) {
       const second_turn = json_stringify(calls[1].messages)
       const marker = "collapsed remaining identical failing"
       harness.stdio.println(result.status)
-      harness.stdio.println(to_string(second_turn.split(marker).count() - 1))
+      harness.stdio.println(to_string(second_turn.split(marker).len() - 1))
       harness.stdio.println(contains(second_turn, "a.swift"))
       harness.stdio.println(contains(second_turn, "b.swift"))
     },

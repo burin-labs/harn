@@ -180,6 +180,7 @@ pub(crate) fn build_provider_catalog_payload(available_only: bool) -> serde_json
                 "id": id,
                 "name": model.name,
                 "provider": model.provider,
+                "availability": model.availability.as_str(),
                 "context_window": model.context_window,
                 "runtime_context_window": model.runtime_context_window,
                 "stream_timeout": model.stream_timeout,

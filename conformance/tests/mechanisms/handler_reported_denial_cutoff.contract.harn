@@ -78,6 +78,7 @@ fn refusing_toolset(retryable: bool) {
             sandbox: {denial_reporting: "inferred_only"},
             denial: handler_denial(retryable),
           },
+          "rejected",
         )
       },
       parameters: {command: {type: "string", description: "Command to run"}},
@@ -216,7 +217,7 @@ fn retryable_handler_denial_case(harness: Harness) {
         harness.stdio,
         "negative_retryable_handler_denial_not_cut",
         cutoff_count(captured.events) > 0
-          || captured.result.status != "done"
+          || captured.result.status != "completion_unverified"
           || len(harness.llm.mock_calls()) != 3,
       )
     },

@@ -2,14 +2,14 @@
 //! against that route inherits.
 
 use crate::llm_config;
-use crate::stdlib::json_to_vm_value;
-use crate::stdlib::macros::harn_builtin;
+use crate::schema::json_to_vm_value;
 use crate::value::{VmDictExt, VmError, VmValue};
+use harn_builtin_macros::harn_builtin;
 
 use super::batch_projection::string_list_to_vm_value;
 use super::catalog_projection::toml_value_to_vm_value;
 use super::model_projection::{
-    model_def_to_vm_value, model_info_to_vm_value, resolved_model_to_vm_value,
+    model_def_to_vm_value, model_info_to_vm_value, resolved_model_to_vm_value, PricingView,
 };
 
 /// Infer the configured provider name for a model identifier.
@@ -21,9 +21,7 @@ use super::model_projection::{
 )]
 fn llm_infer_provider_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let model_id = args.first().map(|a| a.display()).unwrap_or_default();
-    Ok(VmValue::String(arcstr::ArcStr::from(
-        llm_config::infer_provider(&model_id),
-    )))
+    Ok(VmValue::string(llm_config::infer_provider(&model_id)))
 }
 
 /// Return the configured capability tier for a model identifier.
@@ -35,9 +33,7 @@ fn llm_infer_provider_builtin(args: &[VmValue], _out: &mut String) -> Result<VmV
 )]
 fn llm_model_tier_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let model_id = args.first().map(|a| a.display()).unwrap_or_default();
-    Ok(VmValue::String(arcstr::ArcStr::from(
-        llm_config::model_tier(&model_id),
-    )))
+    Ok(VmValue::string(llm_config::model_tier(&model_id)))
 }
 
 /// Resolve a model alias or selector to full model metadata.
@@ -92,7 +88,7 @@ fn llm_qc_default_model_builtin(args: &[VmValue], _out: &mut String) -> Result<V
         ));
     }
     Ok(llm_config::qc_default_model(&provider)
-        .map(|model| VmValue::String(arcstr::ArcStr::from(model)))
+        .map(VmValue::string)
         .unwrap_or(VmValue::Nil))
 }
 
@@ -121,7 +117,7 @@ pub(super) fn llm_model_ladder_builtin(
             "llm_model_ladder: failed to project catalog row: {error}"
         ))
     })?;
-    Ok(crate::stdlib::json_to_vm_value(&value))
+    Ok(crate::schema::json_to_vm_value(&value))
 }
 
 /// Return logical- and route-merged model defaults for `model_id`.
@@ -187,7 +183,7 @@ pub(super) fn llm_resolved_options_builtin(
         }
         let options = Some(defaults_options);
         let provider = crate::llm::helpers::vm_resolve_provider(&options);
-        let model = crate::llm::helpers::vm_resolve_model(&options, &provider);
+        let model = crate::llm::helpers::vm_resolve_model(&options, &provider)?;
         (model, provider)
     };
     let defaults = llm_config::model_params_for_route(&final_provider, &resolved_id);
@@ -292,7 +288,7 @@ fn llm_complementary_reviewer_builtin(
     Ok(json_to_vm_value(&json))
 }
 
-fn parse_complementary_reviewer_options(
+pub(super) fn parse_complementary_reviewer_options(
     value: Option<&VmValue>,
 ) -> Result<llm_config::ComplementaryReviewerOptions, VmError> {
     let dict = value.and_then(|value| value.as_dict()).ok_or_else(|| {
@@ -328,11 +324,37 @@ fn parse_complementary_reviewer_options(
         })?;
     let max_price_multiplier = dict
         .get("max_price_multiplier")
-        .map(vm_value_as_f64)
+        .map(|value| vm_value_as_f64(value, "max_price_multiplier"))
         .transpose()?;
     if max_price_multiplier.is_some_and(|value| !value.is_finite() || value <= 0.0) {
         return Err(VmError::Runtime(
             "llm_complementary_reviewer: max_price_multiplier must be positive".to_string(),
+        ));
+    }
+    let min_price_cap_per_mtok = dict
+        .get("min_price_cap_per_mtok")
+        .map(|value| vm_value_as_f64(value, "min_price_cap_per_mtok"))
+        .transpose()?;
+    let max_price_cap_per_mtok = dict
+        .get("max_price_cap_per_mtok")
+        .map(|value| vm_value_as_f64(value, "max_price_cap_per_mtok"))
+        .transpose()?;
+    if min_price_cap_per_mtok.is_some_and(|value| !value.is_finite() || value <= 0.0) {
+        return Err(VmError::Runtime(
+            "llm_complementary_reviewer: min_price_cap_per_mtok must be positive".to_string(),
+        ));
+    }
+    if max_price_cap_per_mtok.is_some_and(|value| !value.is_finite() || value <= 0.0) {
+        return Err(VmError::Runtime(
+            "llm_complementary_reviewer: max_price_cap_per_mtok must be positive".to_string(),
+        ));
+    }
+    if min_price_cap_per_mtok
+        .zip(max_price_cap_per_mtok)
+        .is_some_and(|(floor, ceiling)| floor > ceiling)
+    {
+        return Err(VmError::Runtime(
+            "llm_complementary_reviewer: min_price_cap_per_mtok must not exceed max_price_cap_per_mtok".to_string(),
         ));
     }
     Ok(llm_config::ComplementaryReviewerOptions {
@@ -340,16 +362,18 @@ fn parse_complementary_reviewer_options(
         author_provider,
         intent,
         max_price_multiplier,
+        min_price_cap_per_mtok,
+        max_price_cap_per_mtok,
     })
 }
 
-fn vm_value_as_f64(value: &VmValue) -> Result<f64, VmError> {
+fn vm_value_as_f64(value: &VmValue, field: &str) -> Result<f64, VmError> {
     match value {
         VmValue::Float(value) => Ok(*value),
         VmValue::Int(value) => Ok(*value as f64),
         other => Err(VmError::Runtime(format!(
-            "llm_complementary_reviewer: max_price_multiplier must be numeric, got {}",
-            other.type_name()
+            "llm_complementary_reviewer: {field} must be numeric, got {}",
+            other.type_name(),
         ))),
     }
 }
@@ -376,7 +400,7 @@ fn llm_equivalent_models_builtin(args: &[VmValue], _out: &mut String) -> Result<
     }
     let entries = llm_config::equivalent_model_catalog_entries(selector.trim())
         .into_iter()
-        .map(|(id, model)| model_def_to_vm_value(&id, &model))
+        .map(|(id, model)| model_def_to_vm_value(&id, &model, PricingView::Effective))
         .collect();
-    Ok(VmValue::List(std::sync::Arc::new(entries)))
+    Ok(VmValue::list(entries))
 }

@@ -6,6 +6,7 @@ use std::collections::BTreeMap;
 use super::*;
 
 use harn_glob::match_name as glob_match;
+use harn_provider_catalog::normalize_model_id_with_config;
 use time::OffsetDateTime;
 
 /// The instant a caller with no request of its own settles at.
@@ -19,16 +20,7 @@ pub fn pricing_clock_now() -> OffsetDateTime {
         .unwrap_or(OffsetDateTime::UNIX_EPOCH)
 }
 
-const LOGICAL_MODEL_DEFAULT_PREFIX: &str = "logical:";
 const MODEL_DEFAULT_UNSET_KEY: &str = "_unset";
-
-/// True for `[model_defaults."logical:<model>"]` selectors, which name one
-/// exact publisher-level logical model rather than globbing serving routes.
-/// The two selector kinds resolve through different lookups, so every site
-/// that must tell them apart asks here instead of re-testing the prefix.
-pub(crate) fn is_logical_model_selector(selector: &str) -> bool {
-    selector.starts_with(LOGICAL_MODEL_DEFAULT_PREFIX)
-}
 
 /// Get provider config for resolving base_url, auth, etc.
 pub fn provider_config(name: &str) -> Option<ProviderDef> {
@@ -559,23 +551,6 @@ pub(crate) fn model_catalog_entries_with_config(
         .collect()
 }
 
-pub(crate) fn sorted_model_entries_with_config(
-    config: &ProvidersConfig,
-) -> Vec<(String, ModelDef)> {
-    let mut entries: Vec<_> = config
-        .models
-        .iter()
-        .map(|(id, model)| (id.clone(), model.clone()))
-        .collect();
-    entries.sort_by(|(id_a, model_a), (id_b, model_b)| {
-        model_a
-            .provider
-            .cmp(&model_b.provider)
-            .then_with(|| id_a.cmp(id_b))
-    });
-    entries
-}
-
 pub fn model_catalog_entry(model_id: &str) -> Option<ModelDef> {
     effective_config()
         .models
@@ -594,7 +569,15 @@ pub fn model_catalog_entry(model_id: &str) -> Option<ModelDef> {
 /// without allowing an identically named model from another provider to win.
 pub fn model_catalog_id_for_route(provider: &str, model_id: &str) -> Option<String> {
     let config = effective_config();
-    let normalized_id = normalize_model_id(model_id);
+    model_catalog_id_for_route_with_config(&config, provider, model_id)
+}
+
+pub(super) fn model_catalog_id_for_route_with_config(
+    config: &ProvidersConfig,
+    provider: &str,
+    model_id: &str,
+) -> Option<String> {
+    let normalized_id = normalize_model_id_with_config(model_id, config);
     config
         .models
         .get_key_value(model_id)
@@ -653,26 +636,7 @@ pub(crate) fn capability_model_id(provider: &str, model_id: &str) -> String {
     capability_model_id_for_config(provider, model_id, &effective_config())
 }
 
-pub(crate) fn capability_model_id_for_config(
-    provider: &str,
-    model_id: &str,
-    config: &ProvidersConfig,
-) -> String {
-    if !config.providers.get(provider).is_some_and(|provider| {
-        provider
-            .features
-            .iter()
-            .any(|feature| feature == "wire_model_capabilities")
-    }) {
-        return model_id.to_string();
-    }
-    config
-        .models
-        .get(model_id)
-        .filter(|model| model.provider == provider)
-        .and_then(|model| model.wire_model.clone())
-        .unwrap_or_else(|| model_id.to_string())
-}
+pub(crate) use harn_provider_catalog::capability_model_id_for_config;
 
 pub fn provider_rate_limits(provider: &str) -> Option<RateLimitsDef> {
     provider_config(provider).and_then(|provider| {
@@ -897,23 +861,64 @@ pub fn qc_default_model(provider: &str) -> Option<String> {
         })
 }
 
-pub fn default_model_for_provider(provider: &str) -> String {
+pub fn default_model_for_provider(provider: &str) -> Result<String, ModelResolutionError> {
     if provider_uses_acp(provider) {
-        return "default".to_string();
+        return Ok("default".to_string());
     }
-    match provider {
+    if provider == "mock" {
+        return Ok("mock".to_string());
+    }
+    let config = effective_config();
+    if !config.providers.contains_key(provider) {
+        return Err(ModelResolutionError::UnknownProvider {
+            provider: provider.to_string(),
+            catalog_version: MODEL_CATALOG_VERSION.to_string(),
+            suggestions: Vec::new(),
+        });
+    }
+    // A provider's default model is its own authored `runtime` entry. Which
+    // provider is the default never changes another provider's answer.
+    local_model_env_override(provider)
+        .or_else(|| config.provider_defaults.get(provider)?.runtime.clone())
+        .ok_or_else(|| ModelResolutionError::MissingProviderDefault {
+            provider: provider.to_string(),
+            catalog_version: MODEL_CATALOG_VERSION.to_string(),
+            routes: config
+                .models
+                .iter()
+                .filter(|(_, model)| {
+                    model.provider == provider
+                        && !model.deprecated
+                        && model.supports_operation(ModelOperation::TextGeneration)
+                })
+                .take(4)
+                .map(|(id, _)| format!("{provider}:{id}"))
+                .collect(),
+        })
+}
+
+/// The portal's configured choice uses the same catalog contract as the VM.
+pub fn portal_default_model_for_provider(provider: &str) -> Option<String> {
+    local_model_env_override(provider).or_else(|| {
+        effective_config()
+            .provider_defaults
+            .get(provider)?
+            .portal
+            .clone()
+    })
+}
+
+fn local_model_env_override(provider: &str) -> Option<String> {
+    (match provider {
         "local" => crate::stdlib::process::session_env_value("LOCAL_LLM_MODEL")
-            .or_else(|| crate::stdlib::process::session_env_value("HARN_LLM_MODEL"))
-            .unwrap_or_else(|| "gemma-4-26b-a4b-it".to_string()),
+            .filter(|value| !value.trim().is_empty())
+            .or_else(|| crate::stdlib::process::session_env_value("HARN_LLM_MODEL")),
         "mlx" => crate::stdlib::process::session_env_var("MLX_MODEL_ID")
             .ok()
-            .flatten()
-            .unwrap_or_else(|| "unsloth/Qwen3.6-35B-A3B-UD-MLX-4bit".to_string()),
-        "openai" => "gpt-4o-mini".to_string(),
-        "ollama" => "llama3.2".to_string(),
-        "openrouter" => "anthropic/claude-sonnet-4.6".to_string(),
-        _ => "claude-sonnet-4-6".to_string(),
-    }
+            .flatten(),
+        _ => None,
+    })
+    .filter(|value| !value.trim().is_empty())
 }
 
 pub fn qc_defaults() -> BTreeMap<String, String> {
@@ -1026,14 +1031,6 @@ pub fn pricing_per_1k_for(provider: &str, model_id: &str) -> Option<(f64, f64)> 
                 _ => None,
             }
         })
-}
-
-pub fn auth_env_names(auth_env: &AuthEnv) -> Vec<String> {
-    match auth_env {
-        AuthEnv::None => Vec::new(),
-        AuthEnv::Single(name) => vec![name.clone()],
-        AuthEnv::Multiple(names) => names.clone(),
-    }
 }
 
 /// Check if a provider advertises a legacy provider-level feature.
@@ -1224,57 +1221,6 @@ pub fn effective_batch_api_supported(
     caps.batch_api || provider_has_feature(provider, "batch")
 }
 
-pub(crate) fn capability_tags_from_capabilities(
-    caps: &crate::llm::capabilities::Capabilities,
-) -> Vec<String> {
-    let mut tags = Vec::new();
-    // Today all Harn chat providers expose streaming. Keep this as a
-    // transport baseline rather than a duplicated per-model declaration.
-    tags.push("streaming".to_string());
-    if caps.native_tools || caps.text_tool_wire_format_supported {
-        tags.push("tools".to_string());
-    }
-    if !caps.tool_search.is_empty() {
-        tags.push("tool_search".to_string());
-    }
-    if caps.vision || caps.vision_supported {
-        tags.push("vision".to_string());
-    }
-    if caps.audio {
-        tags.push("audio".to_string());
-    }
-    if caps.pdf {
-        tags.push("pdf".to_string());
-    }
-    if caps.video {
-        tags.push("video".to_string());
-    }
-    if caps.files_api_supported {
-        tags.push("files".to_string());
-    }
-    if caps.batch_api {
-        tags.push("batch".to_string());
-    }
-    if caps.prompt_caching {
-        tags.push("prompt_caching".to_string());
-    }
-    if !caps.thinking_modes.is_empty() {
-        tags.push("thinking".to_string());
-    }
-    if caps.interleaved_thinking_supported
-        || caps
-            .thinking_modes
-            .iter()
-            .any(|mode| mode == "adaptive" || mode == "effort")
-    {
-        tags.push("extended_thinking".to_string());
-    }
-    if caps.structured_output.is_some() || caps.json_schema.is_some() {
-        tags.push("structured_output".to_string());
-    }
-    tags
-}
-
 /// Resolve a tier or alias into a concrete model/provider pair.
 pub fn resolve_tier_model(
     target: &str,
@@ -1349,4 +1295,107 @@ pub fn all_model_candidates() -> Vec<(String, String)> {
             .then_with(|| model_a.cmp(model_b))
     });
     candidates
+}
+
+/// Validate every built-in route chosen without an explicit model selector.
+/// Legacy aliases may name deprecated models, but defaults cannot.
+pub fn provider_route_default_issues(config: &ProvidersConfig) -> Vec<String> {
+    let mut issues = Vec::new();
+    let check = |source: String, provider: &str, model_id: &str| -> Option<String> {
+        match config.models.get(model_id) {
+            None => Some(format!("{source} references unknown model {model_id}")),
+            Some(model) if model.provider != provider => Some(format!(
+                "{source} targets {provider}:{model_id}, but the model belongs to {}",
+                model.provider
+            )),
+            Some(model) if model.deprecated => Some(format!(
+                "{source} targets deprecated model {provider}:{model_id}"
+            )),
+            Some(_) => None,
+        }
+    };
+
+    match &config.default_provider {
+        Some(provider)
+            if config
+                .provider_defaults
+                .get(provider)
+                .and_then(|defaults| defaults.runtime.as_ref())
+                .is_none() =>
+        {
+            issues.push(format!(
+                "default_provider {provider} has no provider_defaults.{provider}.runtime model"
+            ));
+        }
+        Some(_) => {}
+        None => issues.push("default_provider must be set".to_string()),
+    }
+    if config.fallback_model.is_some() {
+        issues.push(
+            "fallback_model is retired; author provider_defaults.<default_provider>.runtime"
+                .to_string(),
+        );
+    }
+    for (provider, defaults) in &config.provider_defaults {
+        if !config.providers.contains_key(provider) {
+            issues.push(format!(
+                "provider_defaults.{provider} names an unknown provider"
+            ));
+        }
+        for (surface, model) in [
+            ("runtime", defaults.runtime.as_deref()),
+            ("portal", defaults.portal.as_deref()),
+        ] {
+            if let Some(model) = model {
+                issues.extend(check(
+                    format!("provider_defaults.{provider}.{surface}"),
+                    provider,
+                    model,
+                ));
+            }
+        }
+    }
+    for (provider, model) in &config.qc_defaults {
+        issues.extend(check(format!("qc_defaults.{provider}"), provider, model));
+    }
+    for alias_name in ["frontier", "mid", "small"] {
+        let alias = config
+            .aliases
+            .get(&format!("tier/{alias_name}"))
+            .or_else(|| config.aliases.get(alias_name));
+        match alias {
+            Some(alias) => issues.extend(check(
+                format!("tier/{alias_name}"),
+                &alias.provider,
+                &alias.id,
+            )),
+            None => issues.push(format!("tier/{alias_name} has no alias")),
+        }
+    }
+    for (ladder_name, ladder) in &config.model_ladders {
+        for step in &ladder.steps {
+            if step.provider.as_deref() == Some("mock") {
+                continue;
+            }
+            let (model_id, provider) = config
+                .aliases
+                .get(&step.model)
+                .map(|alias| (alias.id.as_str(), alias.provider.as_str()))
+                .unwrap_or((step.model.as_str(), step.provider.as_deref().unwrap_or("")));
+            let provider = if provider.is_empty() {
+                config
+                    .models
+                    .get(model_id)
+                    .map_or("", |model| model.provider.as_str())
+            } else {
+                provider
+            };
+            issues.extend(check(
+                format!("model_ladders.{ladder_name}"),
+                provider,
+                model_id,
+            ));
+        }
+    }
+    issues
 }

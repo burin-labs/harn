@@ -1,6 +1,6 @@
 //! HTTP and SSE transport routing for MCP.
 use super::auth::{
-    attach_http_headers, should_stream_post_response, validate_origin,
+    accepts_media, attach_http_headers, should_stream_post_response, validate_origin,
     validate_standard_routing_headers,
 };
 use super::schema::parse_error_response;
@@ -47,6 +47,26 @@ pub(super) async fn http_post_request(
             } else {
                 Json(response).into_response()
             };
+            attach_http_headers(&mut http, response_protocol);
+            http
+        }
+        // A client that cannot read an event stream gets the terminal
+        // response as JSON; progress notifications have nowhere to go.
+        ImmediateResult::Stream(job) if !accepts_media(&headers, "text/event-stream") => {
+            let response = state.server.run_job_to_response(*job).await;
+            let mut http = match response {
+                Some(response) => Json(response).into_response(),
+                None => StatusCode::ACCEPTED.into_response(),
+            };
+            attach_http_headers(&mut http, response_protocol);
+            http
+        }
+        ImmediateResult::TaskStream { immediate, job }
+            if !accepts_media(&headers, "text/event-stream") =>
+        {
+            let server = state.server.clone();
+            tokio::spawn(async move { server.execute_streaming_job(*job, discard()).await });
+            let mut http = Json(immediate).into_response();
             attach_http_headers(&mut http, response_protocol);
             http
         }

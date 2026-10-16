@@ -1,4 +1,5 @@
 use super::*;
+use crate::value::VmDictExt;
 
 /// Append a transcript event to the session without mutating its message list.
 /// Used for orchestration-side lineage events (sub-agent spawn/completion,
@@ -21,8 +22,8 @@ pub fn append_event(id: &str, event: VmValue) -> Result<(), String> {
 ///
 /// Persistence can fail after the mutation has entered the journal. A retry
 /// must flush that exact queued mutation rather than append a second terminal
-/// record for the same run.
-pub(crate) fn append_terminal_event_once(id: &str, event: VmValue) -> Result<(), String> {
+/// record for the same run. Returns that retained record, including on retry.
+pub(crate) fn append_terminal_event_once(id: &str, event: VmValue) -> Result<VmValue, String> {
     validate_session_event(&event, "agent_session_append_terminal_event")?;
     SESSIONS.with(|sessions| {
         let mut sessions = sessions.borrow_mut();
@@ -35,15 +36,20 @@ pub(crate) fn append_terminal_event_once(id: &str, event: VmValue) -> Result<(),
             ));
         };
         if journal.terminal_queued() {
-            return Ok(());
+            return state
+                .transcript
+                .as_dict()
+                .and_then(|transcript| transcript.get("events"))
+                .and_then(|events| match events {
+                    VmValue::List(events) => events.last().cloned(),
+                    _ => None,
+                })
+                .ok_or_else(|| {
+                    format!("agent_session_append_terminal_event: session '{id}' lost its terminal record")
+                });
         }
-        append_event_to_state(state, event, "append_terminal_event")?;
-        state
-            .transcript_journal
-            .as_mut()
-            .expect("terminal append keeps the active journal installed")
-            .mark_terminal_queued();
-        Ok(())
+        append_event_to_state(state, event.clone(), "append_terminal_event")?;
+        Ok(event)
     })
 }
 
@@ -72,6 +78,32 @@ pub(crate) fn append_journal_event(id: &str, event: VmValue) -> Result<(), Strin
     })
 }
 
+/// Persist completed usage independently of transcript capacity. Retain the
+/// existing bounded transcript projection for worker budgets and portable
+/// snapshots when it fits; projection failure never discards the audit fact.
+pub(crate) fn append_usage_event(id: &str, event: VmValue) -> Result<(), String> {
+    validate_session_event(&event, "agent_session_append_usage_event")?;
+    SESSIONS.with(|sessions| {
+        let mut sessions = sessions.borrow_mut();
+        let state = sessions.get_mut(id).ok_or_else(|| {
+            format!("agent_session_append_usage_event: unknown session id '{id}'")
+        })?;
+        state.ensure_run_accepts_mutation("append_usage_event")?;
+        let candidate = transcript_with_appended_event(&state.transcript, event.clone());
+        if crate::agent_transcript_budget::transcript_fits_budget(
+            &candidate,
+            &state.transcript_budget_policy,
+        ) {
+            state.replace_transcript(candidate)?;
+        }
+        crate::agent_session_journal::enqueue_audit_event(
+            &mut state.transcript_journal,
+            crate::llm::helpers::vm_value_to_json(&event),
+        );
+        Ok(())
+    })
+}
+
 pub(super) fn validate_session_event(event: &VmValue, action: &str) -> Result<(), String> {
     let Some(event_dict) = event.as_dict() else {
         return Err(format!("{action}: event must be a dict"));
@@ -88,8 +120,14 @@ pub(crate) fn append_event_to_state(
     action: &str,
 ) -> Result<(), String> {
     let journal_event = crate::llm::helpers::vm_value_to_json(&event);
-    let dict = state
-        .transcript
+    let candidate = transcript_with_appended_event(&state.transcript, event);
+    apply_transcript_with_budget(state, candidate, action)?;
+    crate::agent_session_journal::enqueue_audit_event(&mut state.transcript_journal, journal_event);
+    Ok(())
+}
+
+fn transcript_with_appended_event(transcript: &VmValue, event: VmValue) -> VmValue {
+    let dict = transcript
         .as_dict()
         .cloned()
         .unwrap_or_else(crate::value::DictMap::new);
@@ -106,13 +144,8 @@ pub(crate) fn append_event_to_state(
     };
     events.push(event);
     let mut next = dict;
-    next.insert(
-        crate::value::intern_key("events"),
-        VmValue::List(std::sync::Arc::new(events)),
-    );
-    apply_transcript_with_budget(state, VmValue::dict(next), action)?;
-    crate::agent_session_journal::enqueue_audit_event(&mut state.transcript_journal, journal_event);
-    Ok(())
+    next.put("events", VmValue::list(events));
+    VmValue::dict(next)
 }
 
 pub fn messages_json(id: &str) -> Vec<serde_json::Value> {
@@ -205,6 +238,54 @@ pub fn store_transcript(id: &str, transcript: VmValue) -> Result<(), String> {
         apply_transcript_with_budget(state, transcript, "store_transcript")?;
         state.text_tool_call_seq = state.text_tool_call_seq.max(text_tool_call_seq);
         Ok(())
+    })
+}
+
+pub(crate) struct PublishedReply {
+    pub content: String,
+    pub source_event_id: String,
+}
+
+/// Commit a transcript metadata change and its audit receipt atomically.
+/// Publication must not masquerade as compaction or rewrite provider history.
+pub(crate) fn settle_assistant_publication(
+    id: &str,
+    admitted: bool,
+) -> Result<Option<PublishedReply>, String> {
+    SESSIONS.with(|sessions| {
+        let mut sessions = sessions.borrow_mut();
+        let state = sessions
+            .get_mut(id)
+            .ok_or_else(|| format!("unknown session '{id}'"))?;
+        let settled = crate::llm::assistant_publication::settle(&state.transcript, admitted);
+        let Some((transcript, event)) = settled.mutation else {
+            return Ok(None);
+        };
+        validate_session_event(&event, "assistant_publication")?;
+        let source_event_id = event
+            .as_dict()
+            .and_then(|event| event.get("id"))
+            .map(VmValue::display)
+            .ok_or_else(|| "publication receipt has no source identity".to_string())?;
+        let mut next = transcript_with_session_metadata(transcript, state)
+            .as_dict()
+            .cloned()
+            .ok_or_else(|| "transcript must be a dict".to_string())?;
+        let mut events = match next.get("events") {
+            Some(VmValue::List(events)) => events.as_ref().clone(),
+            _ => Vec::new(),
+        };
+        events.push(event.clone());
+        next.put("events", VmValue::list(events));
+        apply_transcript_with_budget(state, VmValue::dict(next), "assistant_publication")?;
+        crate::agent_session_journal::enqueue_audit_event(
+            &mut state.transcript_journal,
+            crate::llm::helpers::vm_value_to_json(&event),
+        );
+        Ok(settled.reply.map(|content| PublishedReply {
+            content,
+            source_event_id,
+        }))
     })
 }
 
@@ -411,10 +492,7 @@ pub fn prune_invalid_reminder_events(id: &str) -> usize {
         }
         if pruned > 0 {
             let mut next = dict;
-            next.insert(
-                crate::value::intern_key("events"),
-                VmValue::List(std::sync::Arc::new(kept)),
-            );
+            next.put("events", VmValue::list(kept));
             if apply_transcript_with_budget(
                 state,
                 VmValue::dict(next),
@@ -562,10 +640,7 @@ fn inject_reminder_with_policy(
         }
         events.push(crate::llm::helpers::transcript_reminder_event(&reminder));
         let mut next = dict;
-        next.insert(
-            crate::value::intern_key("events"),
-            VmValue::List(std::sync::Arc::new(events)),
-        );
+        next.put("events", VmValue::list(events));
         apply_transcript_with_budget(state, VmValue::dict(next), "inject_reminder")?;
         state.touch();
         Ok(true)
@@ -630,6 +705,7 @@ fn same_provider_reminder(
         && existing.source == candidate.source
         && existing.body == candidate.body
         && existing.originating_agent_id == candidate.originating_agent_id
+        && existing.goal_pin == candidate.goal_pin
 }
 
 /// Stop future projection of a live session reminder.
@@ -666,10 +742,7 @@ pub fn revoke_reminder(id: &str, reminder_id: &str) -> Result<&'static str, Stri
         });
         if events.len() != before {
             let mut next = dict;
-            next.insert(
-                crate::value::intern_key("events"),
-                VmValue::List(std::sync::Arc::new(events)),
-            );
+            next.put("events", VmValue::list(events));
             apply_transcript_with_budget(state, VmValue::dict(next), "revoke_reminder")?;
             state.revoked_reminder_ids.insert(reminder_id.to_string());
             state.touch();
@@ -680,4 +753,32 @@ pub fn revoke_reminder(id: &str, reminder_id: &str) -> Result<&'static str, Stri
         }
         Ok("unknown_reminder_id")
     })
+}
+
+/// Retire the goal pins frozen under the previous objective. The delivered
+/// retarget's contract directive becomes the durable replacement goal pin.
+pub(crate) fn retire_goal_pins(id: &str) -> Result<(), String> {
+    let reminders = super::snapshot(id)
+        .and_then(|snapshot| snapshot.as_dict().cloned())
+        .and_then(|snapshot| snapshot.get("events").cloned())
+        .and_then(|events| match events {
+            VmValue::List(events) => Some(events),
+            _ => None,
+        })
+        .map(|events| {
+            events
+                .iter()
+                .filter_map(crate::llm::helpers::reminder_from_event)
+                .filter(|reminder| {
+                    reminder.goal_pin.is_none()
+                        && reminder.tags.iter().any(|tag| tag == "pin")
+                        && reminder.tags.iter().any(|tag| tag == "goal")
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    for reminder in reminders {
+        revoke_reminder(id, &reminder.id)?;
+    }
+    Ok(())
 }

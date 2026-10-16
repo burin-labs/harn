@@ -19,6 +19,13 @@ while IFS= read -r path || [ -n "$path" ]; do
     continue
   fi
   saw_path=true
+  # A generated output marked `-merge` in .gitattributes conflicts instead of
+  # merging, and its drift is caught only by the generated-file check. It is
+  # not documentation for this decision, wherever it lives.
+  if [ "$(git check-attr merge -- "$path")" = "$path: merge: unset" ]; then
+    echo false
+    exit 0
+  fi
   case "$path" in
     docs/* | website/* | *.md | */*.md)
       ;;

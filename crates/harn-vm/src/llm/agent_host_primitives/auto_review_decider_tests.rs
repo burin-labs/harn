@@ -14,6 +14,7 @@
 //! `host_unavailable`. Asserting only the first would pass on a build that
 //! stamped `auto_reviewer` on everything.
 
+use crate::NativeBuiltinCtxExt;
 use std::sync::Arc;
 
 use super::host_agent_dispatch_tool_call;
@@ -109,7 +110,7 @@ pub(super) async fn dispatch_pip_install(
     let mut options = crate::value::DictMap::new();
     options.insert(
         crate::value::intern_key("session_id"),
-        crate::stdlib::json_to_vm_value(&serde_json::json!(session_id)),
+        crate::schema::json_to_vm_value(&serde_json::json!(session_id)),
     );
     if let Some(reviewer) = reviewer {
         options.insert(
@@ -117,13 +118,13 @@ pub(super) async fn dispatch_pip_install(
             VmValue::Closure(reviewer),
         );
     }
-    let call = crate::stdlib::json_to_vm_value(&serde_json::json!({
+    let call = crate::schema::json_to_vm_value(&serde_json::json!({
         "id": "exec-1",
         "name": "exec",
         "arguments": {"command": "pip install pytest"},
     }));
     let result = host_agent_dispatch_tool_call(
-        crate::vm::AsyncBuiltinCtx::for_test(crate::vm::Vm::new()),
+        crate::vm::AsyncBuiltinCtx::for_test(crate::new_vm()),
         call,
         None,
         &options,
@@ -223,6 +224,14 @@ pub(super) fn rejecting_bridge_with_reason(
     seen: Arc<std::sync::Mutex<usize>>,
     reason: Option<String>,
 ) -> Arc<crate::bridge::HostBridge> {
+    rejecting_bridge_observing_requests(seen, reason, None)
+}
+
+fn rejecting_bridge_observing_requests(
+    seen: Arc<std::sync::Mutex<usize>>,
+    reason: Option<String>,
+    requests: Option<Arc<std::sync::Mutex<Vec<serde_json::Value>>>>,
+) -> Arc<crate::bridge::HostBridge> {
     use std::collections::HashMap;
     use std::sync::atomic::AtomicBool;
     use tokio::sync::Mutex as TokioMutex;
@@ -243,6 +252,12 @@ pub(super) fn rejecting_bridge_with_reason(
             == Some(crate::llm::acp_permission::METHOD_REQUEST_PERMISSION);
         let result = if is_permission {
             *seen.lock().map_err(|_| "seen mutex poisoned".to_string())? += 1;
+            if let Some(requests) = &requests {
+                requests
+                    .lock()
+                    .map_err(|_| "requests mutex poisoned".to_string())?
+                    .push(request);
+            }
             crate::llm::acp_permission::reject_response(reason.clone())
         } else {
             serde_json::json!({"ok": true})
@@ -263,6 +278,8 @@ pub(super) fn rejecting_bridge_with_reason(
         1,
     ))
 }
+
+mod evaluation_receipt_tests;
 
 #[tokio::test(flavor = "current_thread")]
 async fn an_installed_reviewer_answers_before_a_refusing_host_is_asked() {

@@ -57,9 +57,15 @@ pub(super) fn request_body(request: &DecisionRequest<'_>) -> Result<Value, Decis
             "native backend requires a native decision protocol",
         ));
     }
-    if request.temperature != 0.0 || !matches!(request.effort, "" | "none") {
+    if request.temperature.is_some_and(|value| value != 0.0)
+        || !matches!(request.effort, None | Some("" | "none"))
+        || request.max_tokens.is_some()
+        || request.top_p.is_some()
+        || request.seed.is_some()
+        || request.timeout_ms.is_some()
+    {
         return Err(unsupported(
-            "native decision routes do not support temperature or effort",
+            "native decision routes do not support chat options",
         ));
     }
     if !matches!(
@@ -74,7 +80,7 @@ pub(super) fn request_body(request: &DecisionRequest<'_>) -> Result<Value, Decis
     for question in &request.questions.questions {
         let mut value = json!({"instructions": question.instructions});
         match &question.body {
-            QuestionBody::Boolean => {
+            QuestionBody::Boolean | QuestionBody::BooleanWithCriteria(_) => {
                 value["type"] = json!(if request.contract.protocol
                     == DecisionProtocol::VercelEvaluate
                 {
@@ -82,6 +88,9 @@ pub(super) fn request_body(request: &DecisionRequest<'_>) -> Result<Value, Decis
                 } else {
                     "noul"
                 });
+                if let QuestionBody::BooleanWithCriteria(criteria) = &question.body {
+                    value["criteria"] = json!(criteria);
+                }
             }
             QuestionBody::Choice(criteria) => {
                 value["type"] = json!("choice");
@@ -97,7 +106,15 @@ pub(super) fn request_body(request: &DecisionRequest<'_>) -> Result<Value, Decis
     let mut body = json!({"model": request.contract.served_model_id, "state": request.state, "questions": questions});
     match request.contract.protocol {
         DecisionProtocol::VercelEvaluate => {
-            body["providerOptions"] = json!({"gateway": {"only": ["typesafe-ai"]}});
+            let upstream = request
+                .contract
+                .upstream_provider
+                .as_deref()
+                .filter(|id| !id.trim().is_empty())
+                .ok_or_else(|| {
+                    unsupported("gateway decision route requires an upstream provider pin")
+                })?;
+            body["providerOptions"] = json!({"gateway": {"only": [upstream]}});
         }
         DecisionProtocol::OpenrouterDecisions => {
             body["provider"] = json!({"allow_fallbacks": false});
@@ -134,6 +151,15 @@ impl DecisionBackend for NativeDecisionBackend {
     ) -> Result<RawDecisionResponse, DecisionTransportError> {
         crate::llm::ensure_real_llm_allowed(request.provider)
             .map_err(|_| DecisionTransportError::AuthorityDenied)?;
+        let boundary_rule = crate::llm::api::inference_boundary::preflight(
+            None,
+            request.provider,
+            request.model,
+            &privacy_plan(&request).receipt,
+        )
+        .map_err(|error| DecisionTransportError::LocalAdmissionDenied {
+            diagnostic: error.to_string(),
+        })?;
         let body = request_body(&request)?;
         let definition = crate::llm_config::provider_config(request.provider)
             .ok_or_else(|| unsupported("decision provider is not configured"))?;
@@ -193,13 +219,14 @@ impl DecisionBackend for NativeDecisionBackend {
                 diagnostic: format!("native decision provider returned HTTP {status}"),
             });
         }
-        read_response(&request, &data)
+        read_response(&request, &data, boundary_rule)
     }
 }
 
 pub(super) fn read_response(
     request: &DecisionRequest<'_>,
     data: &Value,
+    boundary_rule: Option<&'static str>,
 ) -> Result<RawDecisionResponse, DecisionTransportError> {
     let fields = data
         .get("answers")
@@ -230,7 +257,7 @@ pub(super) fn read_response(
         };
         let kind = value.get("type").and_then(Value::as_str);
         let raw = match &question.body {
-            QuestionBody::Boolean => {
+            QuestionBody::Boolean | QuestionBody::BooleanWithCriteria(_) => {
                 let vercel = request.contract.protocol == DecisionProtocol::VercelEvaluate;
                 if kind != Some(if vercel { "boolean" } else { "noul" }) {
                     return Err(malformed("boolean answer kind mismatch"));
@@ -297,7 +324,24 @@ pub(super) fn read_response(
     Ok(RawDecisionResponse {
         usage: None,
         native_transport: Some(super::receipt::NativeTransportReceipt {
-            data_controls: privacy_plan(request).receipt,
+            data_controls: {
+                let mut receipt = privacy_plan(request).receipt;
+                receipt.inference_boundary_rule = boundary_rule.map(str::to_string);
+                if boundary_rule.is_some() {
+                    receipt.inference_catalog_evidence = Some(
+                        crate::llm::api::inference_boundary::catalog_evidence(
+                            request.provider,
+                            request.model,
+                        )
+                        .map_err(|error| {
+                            DecisionTransportError::LocalAdmissionDenied {
+                                diagnostic: error.to_string(),
+                            }
+                        })?,
+                    );
+                }
+                receipt
+            },
             provider_attempts_reported: data
                 .pointer("/providerMetadata/gateway/routing/totalProviderAttemptCount")
                 .and_then(Value::as_u64),

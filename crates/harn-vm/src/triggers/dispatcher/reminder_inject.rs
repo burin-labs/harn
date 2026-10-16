@@ -198,6 +198,7 @@ impl Dispatcher {
         // so the rendering machinery treats them the same as any other
         // dispatch-side reminder.
         let reminder = crate::llm::helpers::SystemReminder {
+            goal_pin: None,
             id: uuid::Uuid::now_v7().to_string(),
             tags: tags.to_vec(),
             dedupe_key: dedupe_key.map(str::to_string),

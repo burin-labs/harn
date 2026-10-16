@@ -491,6 +491,19 @@ pub fn __unique_string_list(values: list<string>) -> list<string> {
   return out
 }
 
+/**
+ * Whether a catalog model is served only from a dedicated deployment.
+ *
+ * The campaign sends shared serverless requests with the provider's API key.
+ * A provider that lists a model but serves it only from a deployment answers
+ * that request with a not-found error, so probing it measures the account's
+ * deployments rather than the endpoint contract. The catalog owns that fact
+ * as `availability = "dedicated"`; an unknown availability is still probed.
+ */
+pub fn __catalog_model_needs_deployment(model: dict) -> bool {
+  return to_string(model?.availability ?? "") == "dedicated"
+}
+
 pub fn __catalog_model_is_cheap(model: dict, local: bool) -> bool {
   if local {
     return true
@@ -546,6 +559,9 @@ pub fn __catalog_route_from_routing_row(
   }
   const meta = providers[provider] ?? {}
   const model = models[__route_key(provider, model_id)] ?? {}
+  if __catalog_model_needs_deployment(model) {
+    return nil
+  }
   const local = __route_is_local(provider, meta)
   const cheap = __catalog_model_is_cheap(model, local)
   if !include_expensive && !cheap {
@@ -599,6 +615,9 @@ pub fn __catalog_routes_from_models(
     const provider = trim(to_string(model.provider ?? ""))
     const model_id = trim(to_string(model.id ?? ""))
     if provider == "" || model_id == "" {
+      continue
+    }
+    if __catalog_model_needs_deployment(model) {
       continue
     }
     const meta = providers[provider] ?? {}

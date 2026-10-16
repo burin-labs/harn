@@ -5,6 +5,7 @@ description: Alias for the Harn release workflow skill.
 
 # Release Harn
 
-This is a discovery alias. Follow
-[`harn-release`](../harn-release/SKILL.md) as the single workflow source; do
-not duplicate release commands or terminal-proof rules here.
+Read `harn skill get release-harn --full` and follow its linked maintainer
+procedure. If the installed binary predates this guidance, read
+[`release-harn`](../../../crates/harn-skills/src/corpus/release-harn/SKILL.md)
+from this checkout. The embedded skill is the single discovery owner.

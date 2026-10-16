@@ -25,8 +25,14 @@
 //! spec is safe to serialize into a session config. The resolved
 //! [`SessionGrant`] may hold a snapshotted secret value, so it is deliberately
 //! **not** `Serialize` and never lands in a record — only [`GrantReceipt`]
-//! ({name, source_kind, exposed_as_env, for_command}) is persisted, and it
-//! omits even the secret pointer.
+//! ({name, source_kind, exposed_as_env, for_command, exposed_to}) is
+//! persisted, and it omits even the secret pointer.
+//!
+//! An exposed grant reaches one [`GrantAudience`]: the whole session, one
+//! command (`for_command`), or Harn's own process only (`in_process`). The
+//! in-process audience is how a host lets `llm_call` authenticate without
+//! placing the credential, or a secret reference to it, in any child's
+//! environment.
 //!
 //! Two non-leakage properties are enforced by the type system:
 //!
@@ -41,10 +47,139 @@
 //! embedder's `resolve_secret` closure (backed by the `secret_store` facade),
 //! so this crate takes no dependency on the hostlib that registers it.
 
+use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
+use super::environment_policy::environment_names_equal;
 use serde::{Deserialize, Serialize};
+
+thread_local! {
+    /// A task's resolved session policy. The ambient scope swaps this same
+    /// context across awaits; outside a session it remains absent.
+    static SESSION_ENVIRONMENT_CONTEXT: RefCell<Option<SessionEnvironment>> =
+        const { RefCell::new(None) };
+}
+
+/// Install or clear the resolved policy at the session launch boundary.
+pub fn set_session_environment(environment: Option<SessionEnvironment>) {
+    SESSION_ENVIRONMENT_CONTEXT.with(|current| *current.borrow_mut() = environment);
+}
+
+/// Return the active policy, distinguishing no session from an empty grant set.
+pub fn current_session_environment() -> Option<SessionEnvironment> {
+    SESSION_ENVIRONMENT_CONTEXT.with(|current| current.borrow().clone())
+}
+
+/// Declare a default only when no session policy is already installed.
+/// The guard restores the enclosing policy rather than clearing its authority.
+#[must_use = "the declaration lasts only while the guard is held"]
+pub fn declare_session_environment_if_absent(
+    environment: SessionEnvironment,
+) -> SessionEnvironmentGuard {
+    let previous = current_session_environment();
+    if previous.is_none() {
+        set_session_environment(Some(environment));
+    }
+    SessionEnvironmentGuard { previous }
+}
+
+/// Restore the policy preceding a scoped declaration, including on panic.
+pub struct SessionEnvironmentGuard {
+    previous: Option<SessionEnvironment>,
+}
+
+impl Drop for SessionEnvironmentGuard {
+    fn drop(&mut self) {
+        set_session_environment(self.previous.take());
+    }
+}
+
+impl SessionEnvironmentGuard {
+    /// Tighten the active environment without replacing its credential policy.
+    pub fn with_host_inference_boundary(
+        self,
+        boundary: Option<crate::llm::api::InferenceBoundary>,
+    ) -> Self {
+        if let Some(environment) = current_session_environment() {
+            set_session_environment(Some(environment.with_host_inference_boundary(boundary)));
+        }
+        self
+    }
+}
+
+/// Swap the same policy context when an ambient task is polled.
+pub(crate) fn swap_session_environment(
+    next: Option<SessionEnvironment>,
+) -> Option<SessionEnvironment> {
+    SESSION_ENVIRONMENT_CONTEXT.with(|current| std::mem::replace(&mut *current.borrow_mut(), next))
+}
+
+/// Trusted launch inputs captured before an embedded server starts.
+///
+/// This value can hold credentials. It is not serializable, and its debug
+/// representation contains names only. Client policy declarations still
+/// decide which captured inputs reach a session or a spawned command.
+#[derive(Clone, PartialEq, Eq)]
+pub struct LauncherEnvironment {
+    snapshot: BTreeMap<String, String>,
+}
+
+impl fmt::Debug for LauncherEnvironment {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("LauncherEnvironment")
+            .field("names", &self.snapshot.keys().collect::<Vec<_>>())
+            .finish()
+    }
+}
+
+impl LauncherEnvironment {
+    pub(crate) fn captured_value(&self, name: &str) -> Option<&str> {
+        self.snapshot
+            .iter()
+            .find(|(candidate, _)| environment_names_equal(candidate, name))
+            .map(|(_, value)| value.as_str())
+    }
+
+    /// Capture the host once, before moving work to another engine thread.
+    pub fn capture() -> Self {
+        Self::from_snapshot(capture_process_environment())
+    }
+
+    /// Supply authoritative host inputs without writing process environment.
+    pub fn from_snapshot(snapshot: BTreeMap<String, String>) -> Self {
+        let mut normalized = BTreeMap::new();
+        for (name, value) in snapshot {
+            insert_env_value(&mut normalized, &name, value);
+        }
+        Self {
+            snapshot: normalized,
+        }
+    }
+
+    /// Overlay inputs already resolved by the trusted host's precedence owner.
+    pub fn with_overlay(mut self, overlay: BTreeMap<String, String>) -> Self {
+        for (name, value) in overlay {
+            insert_env_value(&mut self.snapshot, &name, value);
+        }
+        self
+    }
+
+    /// Resolve the client's declared policy against this captured launcher.
+    pub fn launch(
+        &self,
+        kind: EnvironmentPolicyKind,
+        specs: Vec<GrantSpec>,
+    ) -> Result<SessionEnvironment, EnvironmentPolicyError> {
+        SessionEnvironment::launch_from_snapshot(kind, specs, self.snapshot.clone(), &|name| {
+            self.snapshot
+                .iter()
+                .find(|(candidate, _)| environment_names_equal(candidate, name))
+                .map(|(_, value)| value.clone())
+        })
+    }
+}
 
 /// Where a granted value originates. Recorded in receipts as a stable
 /// string; never carries the value itself.
@@ -107,6 +242,39 @@ impl GrantSourceSpec {
     }
 }
 
+/// Which readers an exposed grant reaches.
+///
+/// An exposed grant has exactly one of three audiences:
+///
+/// | Declaration | In-process readers | Spawned children |
+/// |---|---|---|
+/// | `expose_to: session` (default), no `for_command` | yes | every spawn |
+/// | `expose_to: session` with `for_command` | no | spawns of that command |
+/// | `expose_to: in_process` | yes | none |
+///
+/// In-process readers are Harn's own process: provider credentials and
+/// provider configuration for `llm_call`, and `harness.env`. The
+/// `in_process` audience exists so a host can let Harn authenticate its own
+/// model calls without handing the credential, or a secret reference that
+/// resolves to it, to every command the session runs.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GrantAudience {
+    /// In-process readers and spawned children (narrowed by `for_command`).
+    #[default]
+    Session,
+    /// In-process readers only. Never part of any child environment.
+    InProcess,
+}
+
+impl GrantAudience {
+    /// Whether this is the default audience; used to keep the default off
+    /// the wire so existing specs and receipts stay byte-identical.
+    pub fn is_session(&self) -> bool {
+        matches!(self, GrantAudience::Session)
+    }
+}
+
 /// A single grant as declared by the launcher in the session config. Typed and
 /// value-free: harn receives this already-structured (the launcher did any
 /// string parsing at its own boundary) and validates/resolves it once, here.
@@ -129,6 +297,11 @@ pub struct GrantSpec {
     /// own `llm_call` is not an exec (harn#5549).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub for_command: Option<String>,
+    /// Which readers the exposure reaches. [`GrantAudience::InProcess`]
+    /// requires [`Self::expose_as_env`] and rejects [`Self::for_command`]; see
+    /// [`GrantAudience`] for the full table.
+    #[serde(default, skip_serializing_if = "GrantAudience::is_session")]
+    pub expose_to: GrantAudience,
 }
 
 impl GrantSpec {
@@ -178,6 +351,23 @@ impl GrantSpec {
                 Some(command.to_string())
             }
         };
+        if self.expose_to == GrantAudience::InProcess {
+            if self
+                .expose_as_env
+                .as_deref()
+                .map(str::trim)
+                .is_none_or(|v| v.is_empty())
+            {
+                return Err(EnvironmentPolicyError::InProcessWithoutExpose {
+                    name: name.to_string(),
+                });
+            }
+            if for_command.is_some() {
+                return Err(EnvironmentPolicyError::InProcessWithCommand {
+                    name: name.to_string(),
+                });
+            }
+        }
         let source_kind = self.source.kind();
         let source_spec = self.source.clone();
         let resolved_ref = match self.source {
@@ -238,6 +428,7 @@ impl GrantSpec {
             source_spec,
             expose_as_env: self.expose_as_env.map(|var| var.trim().to_string()),
             for_command,
+            audience: self.expose_to,
             resolved_ref,
         })
     }
@@ -271,6 +462,7 @@ pub struct SessionGrant {
     source_spec: GrantSourceSpec,
     expose_as_env: Option<String>,
     for_command: Option<String>,
+    audience: GrantAudience,
     resolved_ref: ResolvedRef,
 }
 
@@ -280,6 +472,7 @@ impl SessionGrant {
             && self.source_spec == spec.source
             && self.expose_as_env.as_deref() == spec.expose_as_env.as_deref().map(str::trim)
             && self.for_command.as_deref() == spec.for_command.as_deref().map(str::trim)
+            && self.audience == spec.expose_to
     }
     /// The grant's logical name used in receipts and diagnostics.
     pub fn name(&self) -> &str {
@@ -301,17 +494,32 @@ impl SessionGrant {
         self.for_command.as_deref()
     }
 
-    /// Whether this grant's exposure is ambient to the whole session (no
-    /// `for_command` binding).
-    fn is_session_scoped(&self) -> bool {
+    /// Which readers this grant's exposure reaches.
+    pub fn audience(&self) -> GrantAudience {
+        self.audience
+    }
+
+    /// Whether Harn's own process (provider auth, `harness.env`) reads this
+    /// grant: session-wide grants and in-process grants, never command-bound
+    /// ones.
+    fn reaches_in_process(&self) -> bool {
         self.for_command.is_none()
     }
 
-    /// Whether this grant's exposure applies to a spawn of `program`.
-    fn applies_to_program(&self, program: &str) -> bool {
-        match self.for_command.as_deref() {
-            None => true,
-            Some(expected) => command_basename(program) == expected,
+    /// Whether this grant's exposure belongs in a child environment.
+    ///
+    /// `program` is the spawn's executable, or `None` when the caller builds a
+    /// child environment without knowing it, which admits session-wide grants
+    /// only. This is the single answer to "does a child see this grant";
+    /// every child-environment builder asks it.
+    pub fn reaches_spawn(&self, program: Option<&str>) -> bool {
+        if self.audience == GrantAudience::InProcess {
+            return false;
+        }
+        match (self.for_command.as_deref(), program) {
+            (None, _) => true,
+            (Some(expected), Some(program)) => command_basename(program) == expected,
+            (Some(_), None) => false,
         }
     }
 
@@ -349,6 +557,7 @@ impl SessionGrant {
             source_kind: self.source_kind.as_str().to_string(),
             exposed_as_env: self.expose_as_env.clone(),
             for_command: self.for_command.clone(),
+            exposed_to: self.audience,
         }
     }
 }
@@ -416,6 +625,7 @@ pub struct SessionEnvironment {
     kind: EnvironmentPolicyKind,
     launcher_snapshot: BTreeMap<String, String>,
     grants: Vec<SessionGrant>,
+    host_inference_boundary: Option<crate::llm::api::InferenceBoundary>,
 }
 
 impl SessionEnvironment {
@@ -481,7 +691,27 @@ impl SessionEnvironment {
             kind,
             launcher_snapshot,
             grants,
+            host_inference_boundary: None,
         })
+    }
+
+    /// Bind trusted host authority independently of the client's environment
+    /// choice. It remains in-process even under inherited child environments.
+    pub fn with_host_inference_boundary(
+        mut self,
+        boundary: Option<crate::llm::api::InferenceBoundary>,
+    ) -> Self {
+        self.host_inference_boundary =
+            crate::llm::api::inference_boundary::meet(self.host_inference_boundary, boundary);
+        if self.host_inference_boundary.is_some() {
+            self.launcher_snapshot.retain(|name, _| {
+                !environment_names_equal(
+                    name,
+                    crate::llm::api::inference_boundary::HOST_BOUNDARY_ENV,
+                )
+            });
+        }
+        self
     }
 
     /// An isolated environment with no grants.
@@ -514,7 +744,18 @@ impl SessionEnvironment {
         requested: EnvironmentPolicyKind,
         specs: Vec<GrantSpec>,
     ) -> Result<Self, EnvironmentPolicyError> {
-        match (self.kind, requested) {
+        let inherited_boundary = if self.host_inference_boundary.is_some() {
+            self.env_exposure_for(
+                crate::llm::api::inference_boundary::HOST_BOUNDARY_ENV,
+                &|_, _| None,
+            )?
+            .map(|raw| crate::llm::api::inference_boundary::parse_host_boundary(&raw))
+            .transpose()
+            .map_err(|_| EnvironmentPolicyError::MalformedHostInferenceBoundary)?
+        } else {
+            None
+        };
+        let child = match (self.kind, requested) {
             (EnvironmentPolicyKind::Inherited, EnvironmentPolicyKind::Inherited)
                 if specs.is_empty() =>
             {
@@ -527,6 +768,7 @@ impl SessionEnvironment {
                     kind: requested,
                     launcher_snapshot: self.launcher_snapshot.clone(),
                     grants: Vec::new(),
+                    host_inference_boundary: self.host_inference_boundary,
                 })
             }
             (EnvironmentPolicyKind::Inherited, EnvironmentPolicyKind::Granted) => {
@@ -546,15 +788,15 @@ impl SessionEnvironment {
                     snapshot.get(name).cloned()
                 })
             }
-            (EnvironmentPolicyKind::Granted, EnvironmentPolicyKind::Isolated)
-                if specs.is_empty() =>
-            {
-                Ok(Self {
-                    kind: requested,
-                    launcher_snapshot: self.launcher_snapshot.clone(),
-                    grants: Vec::new(),
-                })
-            }
+            (
+                EnvironmentPolicyKind::Granted | EnvironmentPolicyKind::Isolated,
+                EnvironmentPolicyKind::Isolated,
+            ) if specs.is_empty() => Ok(Self {
+                kind: requested,
+                launcher_snapshot: self.launcher_snapshot.clone(),
+                grants: Vec::new(),
+                host_inference_boundary: self.host_inference_boundary,
+            }),
             (EnvironmentPolicyKind::Granted, EnvironmentPolicyKind::Granted) => {
                 validate_unique_specs(&specs)?;
                 let mut grants = Vec::with_capacity(specs.len());
@@ -577,6 +819,7 @@ impl SessionEnvironment {
                     kind: requested,
                     launcher_snapshot: self.launcher_snapshot.clone(),
                     grants,
+                    host_inference_boundary: self.host_inference_boundary,
                 })
             }
             _ => Err(EnvironmentPolicyError::ChildPolicyExceedsParent {
@@ -587,7 +830,8 @@ impl SessionEnvironment {
                     "a child may keep or reduce its parent's environment access, never widen it"
                         .to_string(),
             }),
-        }
+        }?;
+        Ok(child.with_host_inference_boundary(inherited_boundary))
     }
 
     /// The launcher's value for `name`, matched the way the host platform
@@ -602,14 +846,22 @@ impl SessionEnvironment {
     /// there that it means on POSIX, where names are case-sensitive and the
     /// exact lookup is the correct one.
     pub(crate) fn launcher_value(&self, name: &str) -> Option<&str> {
+        self.launcher_value_for_platform(name, cfg!(windows))
+    }
+
+    pub(crate) fn launcher_value_for_platform(&self, name: &str, windows: bool) -> Option<&str> {
         if let Some(value) = self.launcher_snapshot.get(name) {
             return Some(value.as_str());
         }
-        if cfg!(windows) {
+        if windows {
             return self
                 .launcher_snapshot
                 .iter()
-                .find(|(key, _)| key.eq_ignore_ascii_case(name))
+                .find(|(key, _)| {
+                    super::environment_policy::environment_names_equal_for_platform(
+                        key, name, windows,
+                    )
+                })
                 .map(|(_, value)| value.as_str());
         }
         None
@@ -624,10 +876,35 @@ impl SessionEnvironment {
         &self.grants
     }
 
+    pub(crate) fn is_host_inference_target(&self, name: &str) -> bool {
+        self.host_inference_boundary.is_some()
+            && environment_names_equal(name, crate::llm::api::inference_boundary::HOST_BOUNDARY_ENV)
+    }
+
     /// The non-secret receipts recorded on the session run-record. Empty for an
     /// isolated policy, which makes `grants: []` a checked property.
     pub fn receipts(&self) -> Vec<GrantReceipt> {
-        self.grants.iter().map(SessionGrant::receipt).collect()
+        let mut receipts: Vec<_> = self
+            .grants
+            .iter()
+            .filter(|grant| {
+                !grant
+                    .expose_as_env
+                    .as_deref()
+                    .is_some_and(|name| self.is_host_inference_target(name))
+            })
+            .map(SessionGrant::receipt)
+            .collect();
+        if self.host_inference_boundary.is_some() {
+            receipts.push(GrantReceipt {
+                name: "host-inference-boundary".into(),
+                source_kind: GrantSource::Literal.as_str().into(),
+                exposed_as_env: Some(crate::llm::api::inference_boundary::HOST_BOUNDARY_ENV.into()),
+                for_command: None,
+                exposed_to: GrantAudience::InProcess,
+            });
+        }
+        receipts
     }
 
     /// Every environment variable name a child of this session can see, sorted
@@ -644,10 +921,22 @@ impl SessionEnvironment {
     /// Command-bound grants are included: a name reachable by some child is
     /// exposed by this run, and a receipt that hid it behind the binding
     /// would understate the run's authority.
+    ///
+    /// In-process grants are excluded: no child can see them, and listing
+    /// them here would claim a child authority the run never had. Their
+    /// receipts (`exposed_to: in_process`) record that Harn itself held them.
     pub fn admitted_environment_names(&self) -> Vec<String> {
         let mut names: Vec<String> = self.launcher_snapshot.keys().cloned().collect();
         for grant in &self.grants {
-            if let Some(var) = grant.receipt().exposed_as_env {
+            if grant.audience == GrantAudience::InProcess
+                || grant
+                    .expose_as_env
+                    .as_deref()
+                    .is_some_and(|name| self.is_host_inference_target(name))
+            {
+                continue;
+            }
+            if let Some(var) = grant.expose_as_env.clone() {
                 names.push(var);
             }
         }
@@ -656,64 +945,98 @@ impl SessionEnvironment {
         names
     }
 
-    /// Materialize the session-scoped process environment overlay: the
-    /// `(VAR, value)` pairs for every grant that opted into `expose_as_env`
-    /// without a `for_command` binding. Empty for an isolated policy.
+    /// Materialize the child environment overlay for a spawn whose executable
+    /// is not known: the `(VAR, value)` pairs for every session-wide grant.
+    /// Empty for an isolated policy.
     ///
     /// Callers receive uniform pairs and never see the source kind;
     /// [`SessionGrant::exposure`] owns that branch.
     ///
-    /// This is the ambient mapping consulted by `harness.env`, providers, and
-    /// the base of every spawned command. Command-bound grants
-    /// (`for_command = Some(...)`) are excluded here and added only by
-    /// [`env_exposure_for_command`](Self::env_exposure_for_command) (harn#5549).
+    /// Command-bound grants are added only by
+    /// [`env_exposure_for_command`](Self::env_exposure_for_command)
+    /// (harn#5549). In-process grants are never part of a child overlay.
     pub fn env_exposure(
         &self,
         resolve_secret: &dyn Fn(&str, &str) -> Option<String>,
     ) -> Result<Vec<(String, String)>, EnvironmentPolicyError> {
-        self.grants
-            .iter()
-            .filter(|grant| grant.is_session_scoped())
-            .filter_map(|grant| grant.exposure(resolve_secret))
-            .collect()
+        self.child_exposure(None, resolve_secret)
     }
 
     /// Materialize the environment overlay for one spawn of `program`: every
-    /// session-scoped `expose_as_env` grant, plus every command-bound grant
-    /// whose `for_command` matches [`command_basename`] of `program`.
+    /// session-wide grant, plus every command-bound grant whose `for_command`
+    /// matches [`command_basename`] of `program`. In-process grants are never
+    /// included.
     pub fn env_exposure_for_command(
         &self,
         program: &str,
         resolve_secret: &dyn Fn(&str, &str) -> Option<String>,
     ) -> Result<Vec<(String, String)>, EnvironmentPolicyError> {
+        self.child_exposure(Some(program), resolve_secret)
+    }
+
+    fn child_exposure(
+        &self,
+        program: Option<&str>,
+        resolve_secret: &dyn Fn(&str, &str) -> Option<String>,
+    ) -> Result<Vec<(String, String)>, EnvironmentPolicyError> {
         self.grants
             .iter()
-            .filter(|grant| grant.applies_to_program(program))
+            .filter(|grant| {
+                self.host_inference_boundary.is_none()
+                    || !grant
+                        .expose_as_env
+                        .as_deref()
+                        .is_some_and(|name| self.is_host_inference_target(name))
+            })
+            .filter(|grant| grant.reaches_spawn(program))
             .filter_map(|grant| grant.exposure(resolve_secret))
             .collect()
     }
 
-    /// The value this environment exposes under a single environment variable, or
-    /// `None` if no session-scoped grant targets it.
+    /// The value Harn's own process reads under a single environment
+    /// variable, or `None` if no in-process-visible grant targets it.
     ///
-    /// The narrow counterpart of [`env_exposure`](Self::env_exposure), for a
-    /// consumer resolving one variable — harn's own provider-credential lookup.
-    /// It resolves *only* the grant that targets `var`, which matters for a
-    /// `secret_store` grant: probing an unrelated variable must not reach the
-    /// secret store, and one unresolvable grant must not mask an unrelated
-    /// credential. Launch validation guarantees at most one matching grant.
-    /// Command-bound grants are invisible here — they are not in-process
-    /// credentials.
+    /// This is the in-process reader behind harn's provider-credential lookup
+    /// and `harness.env`. Session-wide and in-process grants are visible here;
+    /// command-bound grants are not, because they are not in-process
+    /// credentials. It resolves *only* the grant that targets `var`, which
+    /// matters for a `secret_store` grant: probing an unrelated variable must
+    /// not reach the secret store, and one unresolvable grant must not mask an
+    /// unrelated credential. Launch validation guarantees at most one matching
+    /// grant.
     pub fn env_exposure_for(
         &self,
         var: &str,
         resolve_secret: &dyn Fn(&str, &str) -> Option<String>,
     ) -> Result<Option<String>, EnvironmentPolicyError> {
-        let Some(grant) = self
-            .grants
-            .iter()
-            .find(|grant| grant.is_session_scoped() && grant.expose_as_env.as_deref() == Some(var))
-        else {
+        if environment_names_equal(var, crate::llm::api::inference_boundary::HOST_BOUNDARY_ENV) {
+            if let Some(host) = self.host_inference_boundary {
+                let requested = self.grants.iter().find(|grant| {
+                    grant.reaches_in_process()
+                        && grant
+                            .expose_as_env
+                            .as_deref()
+                            .is_some_and(|name| environment_names_equal(name, var))
+                });
+                let requested = requested
+                    .and_then(|grant| grant.exposure(resolve_secret))
+                    .transpose()?
+                    .map(|(_, value)| {
+                        crate::llm::api::inference_boundary::parse_host_boundary(&value)
+                    })
+                    .transpose()
+                    .map_err(|_| EnvironmentPolicyError::MalformedHostInferenceBoundary)?;
+                let effective = crate::llm::api::inference_boundary::meet(Some(host), requested)
+                    .expect("the host ceiling is present");
+                return Ok(Some(
+                    serde_json::to_string(&effective)
+                        .expect("the closed inference ceiling is serializable"),
+                ));
+            }
+        }
+        let Some(grant) = self.grants.iter().find(|grant| {
+            grant.reaches_in_process() && grant.expose_as_env.as_deref() == Some(var)
+        }) else {
             return Ok(None);
         };
         grant
@@ -741,14 +1064,16 @@ fn insert_env_value_case_insensitive(
 ) {
     let existing_key = map
         .keys()
-        .find(|key| key.eq_ignore_ascii_case(name))
+        .find(|key| {
+            super::environment_policy::environment_names_equal_for_platform(key, name, true)
+        })
         .cloned();
     map.insert(existing_key.unwrap_or_else(|| name.to_string()), value);
 }
 
 /// Case-insensitive on Windows, plain elsewhere: POSIX treats `PATH` and
 /// `Path` as unrelated variables, so folding them there is the bug.
-fn insert_env_value(map: &mut BTreeMap<String, String>, name: &str, value: String) {
+pub(crate) fn insert_env_value(map: &mut BTreeMap<String, String>, name: &str, value: String) {
     if cfg!(windows) {
         insert_env_value_case_insensitive(map, name, value);
     } else {
@@ -779,8 +1104,8 @@ fn validate_unique_specs(specs: &[GrantSpec]) -> Result<(), EnvironmentPolicyErr
 
 /// A non-secret record of a grant, safe to persist on a session run-record.
 ///
-/// Carries the grant name, source kind, optional environment target, and
-/// optional command binding — never the value or a reversible source
+/// Carries the grant name, source kind, optional environment target, optional
+/// command binding, and audience — never the value or a reversible source
 /// reference. `secret_store` account/key pointers are intentionally omitted.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GrantReceipt {
@@ -790,12 +1115,31 @@ pub struct GrantReceipt {
     pub exposed_as_env: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub for_command: Option<String>,
+    /// `in_process` when no child could see the exposure. Omitted for the
+    /// default session audience, so a record written before audiences
+    /// existed reads back as what it was.
+    #[serde(default, skip_serializing_if = "GrantAudience::is_session")]
+    pub exposed_to: GrantAudience,
+}
+
+impl GrantReceipt {
+    /// The environment name this grant put into some child's environment,
+    /// or `None` when it exposed nothing to children.
+    pub fn child_visible_env(&self) -> Option<&str> {
+        match self.exposed_to {
+            GrantAudience::Session => self.exposed_as_env.as_deref(),
+            GrantAudience::InProcess => None,
+        }
+    }
 }
 
 /// Errors raised while validating, resolving, or enforcing session grants. All
 /// are launch-boundary failures; none carries a secret value.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum EnvironmentPolicyError {
+    /// A host or session inference ceiling was not a closed, valid policy.
+    MalformedHostInferenceBoundary,
     /// A grant spec had an empty name.
     EmptyName,
     /// An `env` source named an empty variable.
@@ -814,6 +1158,12 @@ pub enum EnvironmentPolicyError {
     /// A `for_command` binding contained a path separator; only a basename is
     /// accepted.
     InvalidForCommand { name: String, command: String },
+    /// An `in_process` grant declared no `expose_as_env` name for Harn's own
+    /// readers to find it under.
+    InProcessWithoutExpose { name: String },
+    /// An `in_process` grant also declared `for_command`, which names a child
+    /// audience the in-process scope never reaches.
+    InProcessWithCommand { name: String },
     /// An `env` source referenced a variable absent from the launcher env.
     MissingEnv { name: String, var: String },
     /// A grant was declared on a policy that does not accept grants.
@@ -834,11 +1184,19 @@ pub enum EnvironmentPolicyError {
     },
     /// A `secret_store` grant could not be resolved on exposure.
     MissingSecret { name: String },
+    /// A loader control would fire before trusted sandbox setup executes.
+    UnsafeTrustedSetupVariable { variable: String },
 }
 
 impl fmt::Display for EnvironmentPolicyError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::MalformedHostInferenceBoundary => {
+                write!(f, "[inference_boundary.host_boundary_malformed] invalid host inference ceiling")
+            }
+            EnvironmentPolicyError::UnsafeTrustedSetupVariable { variable } => write!(
+                f, "trusted sandbox setup cannot preserve loader control {variable}; remove it from this launch environment"
+            ),
             EnvironmentPolicyError::EmptyName => write!(
                 f,
                 "[environment_policy.empty_grant_name] grant spec has an empty name"
@@ -885,6 +1243,14 @@ impl fmt::Display for EnvironmentPolicyError {
                     "[environment_policy.invalid_for_command] grant '{name}' for_command '{command}' must be a command basename, not a path"
                 )
             }
+            EnvironmentPolicyError::InProcessWithoutExpose { name } => write!(
+                f,
+                "[environment_policy.in_process_without_expose] grant '{name}' declares expose_to in_process without expose_as_env; name the variable Harn's own readers should find it under"
+            ),
+            EnvironmentPolicyError::InProcessWithCommand { name } => write!(
+                f,
+                "[environment_policy.in_process_with_command] grant '{name}' declares expose_to in_process with for_command; an in-process grant reaches no spawned command, so remove one of the two"
+            ),
             EnvironmentPolicyError::MissingEnv { name, var } => write!(
                 f,
                 "[environment_policy.source_variable_missing] grant '{name}' env source variable '{var}' is not set in the launcher environment; set it before launch or choose another source"
@@ -929,6 +1295,10 @@ impl EnvironmentPolicyError {
     /// Stable machine-readable code for CLI, ACP, and host integrations.
     pub fn code(&self) -> &'static str {
         match self {
+            Self::MalformedHostInferenceBoundary => "inference_boundary.host_boundary_malformed",
+            Self::UnsafeTrustedSetupVariable { .. } => {
+                "environment_policy.unsafe_trusted_setup_variable"
+            }
             Self::EmptyName => "environment_policy.empty_grant_name",
             Self::EmptyEnvVar { .. } => "environment_policy.empty_source_variable",
             Self::LiteralSecretReference { .. } => "environment_policy.literal_secret_reference",
@@ -937,6 +1307,8 @@ impl EnvironmentPolicyError {
             Self::EmptyForCommand { .. } => "environment_policy.empty_for_command",
             Self::ForWithoutExpose { .. } => "environment_policy.for_without_expose",
             Self::InvalidForCommand { .. } => "environment_policy.invalid_for_command",
+            Self::InProcessWithoutExpose { .. } => "environment_policy.in_process_without_expose",
+            Self::InProcessWithCommand { .. } => "environment_policy.in_process_with_command",
             Self::MissingEnv { .. } => "environment_policy.source_variable_missing",
             Self::PolicyForbidsGrants { .. } => "environment_policy.grants_forbidden",
             Self::DuplicateGrant { .. } => "environment_policy.duplicate_grant",
@@ -956,12 +1328,17 @@ impl EnvironmentPolicyError {
             .as_object_mut()
             .expect("environment policy diagnostic is an object");
         match self {
+            Self::UnsafeTrustedSetupVariable { variable } => {
+                object.insert("sourceVariable".to_string(), serde_json::json!(variable));
+            }
             Self::LiteralSecretReference { name }
             | Self::EmptyEnvVar { name }
             | Self::EmptySecretRef { name }
             | Self::EmptyExposeVar { name }
             | Self::EmptyForCommand { name }
             | Self::ForWithoutExpose { name }
+            | Self::InProcessWithoutExpose { name }
+            | Self::InProcessWithCommand { name }
             | Self::MissingSecret { name } => {
                 object.insert("grant".to_string(), serde_json::json!(name));
             }
@@ -1002,7 +1379,7 @@ impl EnvironmentPolicyError {
                     object.insert("grant".to_string(), serde_json::json!(grant));
                 }
             }
-            Self::EmptyName => {}
+            Self::EmptyName | Self::MalformedHostInferenceBoundary => {}
         }
         value
     }

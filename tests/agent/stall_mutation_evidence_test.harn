@@ -27,15 +27,15 @@ fn mutation_sequence(harness: Harness, mutations: list<string>, failed_transport
         if args.mutation == "legacy" {
           return "Applied source change"
         }
-        const result = agent_tool_handler_result(
+        return agent_tool_handler_result(
           "Edit completed with advisory",
           {mutation_status: args.mutation},
+          if failed_transport {
+            "error"
+          } else {
+            "ok"
+          },
         )
-        return if failed_transport {
-          result + {ok: false}
-        } else {
-          result
-        }
       },
     },
   )

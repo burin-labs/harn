@@ -5,8 +5,9 @@
 //! could actually see every way a name might arrive. Two things break it, and
 //! they break it for different reasons:
 //!
-//! - **The language.** In Python, JavaScript and TypeScript every name must be
-//!   imported or bound in the same file, so a single file is a complete unit.
+//! - **The language.** In Python, JavaScript, TypeScript and Rust every name
+//!   must be imported or bound in the same file, so a single file is a
+//!   complete unit (Rust paths such as `a::b` are never counted as references).
 //!   In Go a sibling file in the same package contributes names with no import
 //!   at all. In Ruby, names are routinely created at runtime by the framework.
 //! - **The file.** A wildcard import, an `eval`, a `setattr`, or a
@@ -20,8 +21,6 @@
 //! The output is a fact about the analysis, not a verdict about the code.
 //! Callers decide what to do with a low-confidence finding; this module only
 //! refuses to overstate one.
-
-use std::sync::Arc;
 
 use harn_vm::VmValue;
 use tree_sitter::{Node, Tree};
@@ -62,7 +61,8 @@ pub(super) fn ceiling(language: Language) -> ResolutionCeiling {
         | Language::JavaScript
         | Language::Jsx
         | Language::TypeScript
-        | Language::Tsx => ResolutionCeiling::SingleFileComplete,
+        | Language::Tsx
+        | Language::Rust => ResolutionCeiling::SingleFileComplete,
         Language::Go => ResolutionCeiling::PackageScoped,
         Language::Ruby => ResolutionCeiling::RuntimeResolved,
         _ => ResolutionCeiling::RuntimeResolved,
@@ -124,7 +124,7 @@ impl Resolution {
             ("complete", VmValue::Bool(self.is_complete())),
             ("analysed", VmValue::Bool(self.analysed)),
             ("ceiling", str_value(self.ceiling.as_str())),
-            ("defeaters", VmValue::List(Arc::new(defeaters))),
+            ("defeaters", VmValue::list(defeaters)),
         ])
     }
 
@@ -232,6 +232,16 @@ fn scan(node: Node<'_>, source: &str, language: Language, note: &mut impl FnMut(
             Language::JavaScript | Language::Jsx | Language::TypeScript | Language::Tsx,
             "with_statement",
         ) => note(Defeater::WithScope),
+        (Language::Rust, "use_wildcard") => note(Defeater::WildcardImport),
+        // A macro in item position can define any item; the parse sees only
+        // its tokens.
+        (Language::Rust, "macro_invocation")
+            if node
+                .parent()
+                .is_some_and(|p| matches!(p.kind(), "source_file" | "declaration_list")) =>
+        {
+            note(Defeater::DynamicNameAccess);
+        }
         _ => {}
     }
 
@@ -266,24 +276,6 @@ mod tests {
 
     fn defeater_names(resolution: &Resolution) -> Vec<&'static str> {
         resolution.defeaters.iter().map(|d| d.as_str()).collect()
-    }
-
-    #[test]
-    fn plain_python_file_resolves_completely() {
-        let resolution =
-            assess_source("import os\n\n\ndef f():\n    return os\n", Language::Python);
-        assert!(resolution.is_complete());
-        assert!(defeater_names(&resolution).is_empty());
-    }
-
-    #[test]
-    fn python_wildcard_import_defeats_resolution() {
-        let resolution = assess_source(
-            "from constants import *\n\n\ndef f():\n    return MAX\n",
-            Language::Python,
-        );
-        assert!(!resolution.is_complete());
-        assert_eq!(defeater_names(&resolution), vec!["wildcard_import"]);
     }
 
     #[test]

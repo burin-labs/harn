@@ -8,7 +8,7 @@ on:
       - "scripts/generate_sdk_clients.sh"
       - "scripts/tests/check_sdk_release_artifacts_test.sh"
       - "scripts/tests/generate_sdk_clients_test.sh"
-      - "spec/openapi.yaml"
+      - "crates/harn-serve/openapi.yaml"
       - "spec/openapi.snapshot"
       - "spec/openapi-sdk-surface.md"
   push:
@@ -20,7 +20,7 @@ on:
       - "scripts/generate_sdk_clients.sh"
       - "scripts/tests/check_sdk_release_artifacts_test.sh"
       - "scripts/tests/generate_sdk_clients_test.sh"
-      - "spec/openapi.yaml"
+      - "crates/harn-serve/openapi.yaml"
       - "spec/openapi.snapshot"
       - "spec/openapi-sdk-surface.md"
   release:
@@ -38,7 +38,9 @@ concurrency:
 jobs:
   generate:
     name: Generate ${{ matrix.language }} SDK
-    runs-on: ubuntu-latest
+    # Source packages share this repository but never publish native SDK assets.
+    if: github.event_name != 'release' || startsWith(github.event.release.tag_name, 'v')
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
@@ -78,9 +80,9 @@ jobs:
 
   require-both:
     name: Both SDK language artifacts
-    if: always() && !cancelled()
+    if: always() && !cancelled() && (github.event_name != 'release' || startsWith(github.event.release.tag_name, 'v'))
     needs: generate
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -103,9 +105,9 @@ jobs:
 
   publish-release-assets:
     name: Attach SDK artifacts to the GitHub release
-    if: github.event_name == 'release'
+    if: github.event_name == 'release' && startsWith(github.event.release.tag_name, 'v')
     needs: require-both
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: write
     steps:

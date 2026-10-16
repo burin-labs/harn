@@ -159,20 +159,17 @@ struct BulkAuthConfigFile {
 
 impl BulkAuthConfig {
     /// Resolve the effective config: the `HARN_MCP_BULK_AUTH_CONFIG` path wins,
-    /// else `~/.config/harn/mcp_bulk_auth.toml`, else defaults. Skipped under
-    /// `cfg(test)` so unit tests are deterministic.
+    /// else `mcp_bulk_auth.toml` in the user configuration directory
+    /// ([`crate::user_dirs::config_dir`]), else defaults.
     pub fn load() -> Self {
         if let Ok(path) = std::env::var("HARN_MCP_BULK_AUTH_CONFIG") {
             if let Some(config) = Self::read(&path) {
                 return config;
             }
         }
-        if !cfg!(test) {
-            if let Some(home) = crate::user_dirs::home_dir() {
-                let path = home.join(".config").join("harn").join("mcp_bulk_auth.toml");
-                if let Some(config) = Self::read(&path.to_string_lossy()) {
-                    return config;
-                }
+        if let Some(path) = crate::user_dirs::config_file("mcp_bulk_auth.toml") {
+            if let Some(config) = Self::read(&path.to_string_lossy()) {
+                return config;
             }
         }
         Self::default()
@@ -968,13 +965,13 @@ mod tests {
     #[test]
     fn status_serializes_snake_case() {
         let json = serde_json::to_value(McpAuthStatus {
-            server: "Notion".to_string(),
-            server_url: "https://mcp.notion.com/mcp".to_string(),
+            server: "Wiki".to_string(),
+            server_url: "https://mcp.wiki.example/mcp".to_string(),
             phase: McpAuthPhase::AwaitingConsent,
             detail: None,
         })
         .unwrap();
-        assert_eq!(json["server"], serde_json::json!("Notion"));
+        assert_eq!(json["server"], serde_json::json!("Wiki"));
         assert_eq!(json["phase"], serde_json::json!("awaiting_consent"));
         assert!(json.get("detail").is_none(), "None detail is omitted");
     }

@@ -34,15 +34,13 @@ pub async fn run_model_smoke_test(
 ) -> Result<ModelSmokeTestResult, String> {
     super::provider::register_default_providers();
 
-    let resolved = crate::llm_config::resolve_model_info(&options.model);
-    let model_id = resolved.id;
-    let provider = options
-        .provider
-        .as_deref()
-        .map(str::trim)
-        .filter(|provider| !provider.is_empty())
-        .map(str::to_string)
-        .unwrap_or(resolved.provider);
+    let resolved = crate::llm_config::resolve_model_request_for_active_call(
+        &options.model,
+        options.provider.as_deref(),
+    )
+    .map_err(|error| error.to_string())?;
+    let model_id = resolved.resolved_model;
+    let provider = resolved.resolved_provider;
     let api_key = super::resolve_api_key(&provider).map_err(vm_error_message)?;
 
     if let Some(def) = crate::llm_config::provider_config(&provider) {
@@ -148,6 +146,23 @@ mod tests {
     };
     use crate::llm::readiness::ReadinessStatus;
     use crate::llm::usage::LlmUsage;
+
+    #[tokio::test]
+    async fn smoke_test_refuses_retired_routes_before_credentials_or_readiness() {
+        for model in ["deepinfra/Qwen/Qwen3.8-2.4T-A95B", "Qwen/Qwen3.8-2.4T-A95B"] {
+            let error = run_model_smoke_test(ModelSmokeTestOptions {
+                model: model.to_string(),
+                provider: Some("deepinfra".to_string()),
+                prompt: "ping".to_string(),
+            })
+            .await
+            .expect_err("a retired identity must never reach the live smoke transport");
+            assert!(
+                error.contains("select a different model explicitly"),
+                "{error}"
+            );
+        }
+    }
 
     #[test]
     fn smoke_test_blocks_provider_mismatch_before_generation() {

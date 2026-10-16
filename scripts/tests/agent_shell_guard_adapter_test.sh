@@ -65,6 +65,26 @@ if [[ "$blocked" != *'"permissionDecision":"deny"'* ]] \
   exit 1
 fi
 
+# A fast policy and its cancelled watchdog race over the decision file. Every
+# invocation here must forward a known nonempty denial, unlike a real allow
+# whose intentionally empty output cannot expose premature file cleanup.
+cat >"$fixture_root/fast-deny-harn" <<'STUB'
+#!/usr/bin/env bash
+printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"custody probe"}}'
+STUB
+chmod +x "$fixture_root/fast-deny-harn"
+custody_runs=100
+custody_failures=0
+for ((custody_run = 0; custody_run < custody_runs; custody_run++)); do
+  custody_output="$(printf '%s' "$payload" \
+    | HARN_BIN="$fixture_root/fast-deny-harn" "$fixture_root/scripts/agent-shell-guard.sh")"
+  if [[ "$custody_output" != *'"permissionDecisionReason":"custody probe"'* ]]; then
+    custody_failures=$((custody_failures + 1))
+  fi
+done
+printf 'decision custody: runs=%s missing_or_changed=%s\n' "$custody_runs" "$custody_failures"
+[[ "$custody_failures" == 0 ]] || exit 1
+
 allowed="$(
   printf '%s' '{"tool_name":"Bash","tool_input":{"command":"make check"}}' \
     | HARN_BIN="$HARN_BIN" "$fixture_root/scripts/agent-shell-guard.sh"
@@ -205,11 +225,19 @@ fi
 # hook budget and still yields no verdict. Prove the adapter enforces its own
 # deadline, releases the hook, and denies the command when the policy has not
 # established that it is safe.
+#
+# The stub ignores TERM until the descendant's pid is on disk. Bash runs a TERM
+# trap between commands, so with the trap armed first a deadline that expired
+# right after the fork exited the stub before the write, and the survival check
+# below had no pid to test. A stub that has not reached its first line when the
+# deadline expires can still be stopped before the write; the check below
+# reports that as a fixture race.
 cat >"$fixture_root/hanging-harn" <<'STUB'
 #!/usr/bin/env bash
-trap 'exit 0' TERM
+trap '' TERM
 (trap '' TERM; while :; do sleep 1; done) &
 printf '%s\n' "$!" >"$GUARD_CHILD_PID_FILE"
+trap 'exit 0' TERM
 printf '%s\n' '{"partial":"must-not-escape"}'
 wait
 STUB
@@ -240,7 +268,18 @@ if (( deadline_elapsed >= 10 )); then
   echo "adapter waited ${deadline_elapsed}s on a hanging policy past its bounded deadline" >&2
   exit 1
 fi
+# An absent or empty pid file means the fixture never recorded its descendant.
+# That is a fixture race, not evidence about the adapter, so it gets its own
+# message instead of reading as a survivor or aborting inside `cat`.
+if [[ ! -e "$fixture_root/hanging-child.pid" ]]; then
+  echo "fixture race: the hanging policy stub was stopped before it recorded its descendant's pid, so descendant survival was not checked" >&2
+  exit 1
+fi
 hanging_child_pid="$(cat "$fixture_root/hanging-child.pid")"
+if [[ -z "$hanging_child_pid" ]]; then
+  echo "fixture race: the hanging policy stub left an empty pid file, so descendant survival was not checked" >&2
+  exit 1
+fi
 if kill -0 "$hanging_child_pid" 2>/dev/null; then
   echo "adapter left a TERM-ignoring policy descendant running: $hanging_child_pid" >&2
   exit 1

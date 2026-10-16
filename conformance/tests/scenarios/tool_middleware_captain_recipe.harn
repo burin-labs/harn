@@ -1,30 +1,22 @@
 import { agent_loop } from "std/agent/loop"
 /**
  * Captain-shaped middleware stack: composes audit + telemetry + summary
- * + required-reason + handoff + rate-limit + dry-run over a registry of
+ * + consent + required-reason + redaction + handoff + idempotency
+ * + rate-limit + dry-run over a registry of
  * read/edit/escalate tools. Exercises the steel thread of the persona
  * governance promise — every tool dispatch produces a structured audit
  * record, callers above the budget short-circuit, and handoff payloads
  * surface as typed records on `audit.handoff`.
  */
-import {
-  compose_tool_callers,
-  with_audit_log,
-  with_dry_run,
-  with_handoff_artifact,
-  with_rate_limit,
-  with_required_reason,
-  with_summary,
-  with_telemetry,
-} from "std/llm/tool_middleware"
+// ANCHOR: captain_import
+import * as tool_middleware from "std/llm/tool_middleware"
+// ANCHOR_END: captain_import
 import { llm_text, with_llm_script } from "std/testing"
 
 /**
- * Tool schemas omit `reason` deliberately. with_required_reason adds it
- * to the registry via `schema_transform` and strips it back out before
- * the runtime validates dispatch args, so leaving it out of the natural
- * tool definition is the canonical pattern (echoes the existing
- * `agent_loop_tool_caller_observes` test).
+ * Natural tool schemas omit `reason` and `token`. The reason decorator
+ * advertises an optional reason, its caller requires and strips it, and
+ * redaction removes the token before runtime argument validation.
  */
 fn tools() {
   let r = tool_registry()
@@ -33,7 +25,10 @@ fn tools() {
     "read",
     "Read a file",
     {
-      handler: { args -> "contents of " + to_string(args?.path ?? "") },
+      handler: { args ->
+        assert(args?.token == nil, "redaction must remove the token before dispatch")
+        return "contents of " + to_string(args?.path ?? "")
+      },
       parameters: {path: {type: "string"}},
     },
   )
@@ -78,12 +73,19 @@ pipeline default(harness: Harness) {
   const audit_records = harness.runtime.atomic(0)
   const telemetry_records = harness.runtime.atomic(0)
   const handoff_records = harness.runtime.atomic(0)
+  const consent_records = harness.runtime.atomic(0)
+  const redaction_records = harness.runtime.atomic(0)
+  const idempotency_records = harness.runtime.atomic(0)
   with_llm_script(
     harness.llm,
     [
       {
         tool_calls: [
-          {id: "t1", name: "read", arguments: {path: "/tmp/a", reason: "inspect target file"}},
+          {
+            id: "t1",
+            name: "read",
+            arguments: {path: "/tmp/a", reason: "inspect target file", token: "fixture-secret"},
+          },
           {id: "t2", name: "edit", arguments: {path: "/tmp/a", body: "x", reason: "fix typo"}},
           {id: "t3", name: "escalate", arguments: {task: "Review fix", reason: "needs human eyes"}},
         ],
@@ -91,37 +93,58 @@ pipeline default(harness: Harness) {
       llm_text("Done. ##DONE##"),
     ],
     { ->
-      const reason_mw = with_required_reason()
-      const stack = compose_tool_callers(
+      const audit_sink = { _record ->
+        let _ = harness.runtime.atomic_add(audit_records, 1)
+      }
+      const telemetry_sink = { _record ->
+        let _ = harness.runtime.atomic_add(telemetry_records, 1)
+      }
+      // This deterministic callback stands in for the host's approval UI.
+      const consent_prompt = { _call ->
+        let _ = harness.runtime.atomic_add(consent_records, 1)
+        return {decision: "approved", decided_by: "fixture"}
+      }
+      const redactor = { context ->
+        let _ = harness.runtime.atomic_add(redaction_records, 1)
+        if context.phase == "in" {
+          let safe_args = {}
+          for key in context.args.keys() {
+            if key != "token" {
+              safe_args = safe_args + {[key]: context.args[key]}
+            }
+          }
+          return {args: safe_args, redacted_fields: ["token"]}
+        }
+        return {result: context.result, redacted_fields: []}
+      }
+      const handoff_sink = { _record, _call ->
+        let _ = harness.runtime.atomic_add(handoff_records, 1)
+      }
+      const idempotency_key = { call ->
+        let _ = harness.runtime.atomic_add(idempotency_records, 1)
+        return call.turn.session_id + ":" + call.call_id
+      }
+      const summary_formatter = { call, _result -> call.tool_name + " ran" }
+      // ANCHOR: captain_stack
+      const reason_options = {schema_required: false}
+      const reason_mw = tool_middleware.with_required_reason(reason_options)
+      const stack = tool_middleware.compose_tool_callers(
         harness.clock,
         [
-          with_audit_log(
-            harness.clock,
-            harness.fs,
-            { _record ->
-              let _ = harness.runtime.atomic_add(audit_records, 1)
-            },
-          ),
-          with_telemetry(
-            harness,
-            { _record ->
-              let _ = harness.runtime.atomic_add(telemetry_records, 1)
-            },
-          ),
-          with_summary({ call, _result -> return call.tool_name + " ran" }),
+          tool_middleware.with_audit_log(harness.clock, harness.fs, audit_sink),
+          tool_middleware.with_telemetry(harness, telemetry_sink),
+          tool_middleware.with_summary(summary_formatter),
+          tool_middleware.with_consent(harness.clock, consent_prompt),
           reason_mw.caller,
-          with_handoff_artifact(
-            {
-              sink: { _record, _call ->
-                let _ = harness.runtime.atomic_add(handoff_records, 1)
-              },
-            },
-          ),
-          with_rate_limit(harness.runtime, {max_calls: 10}),
-          with_dry_run({only: ["edit"], message: "preview"}),
+          tool_middleware.with_redaction(redactor),
+          tool_middleware.with_handoff_artifact({sink: handoff_sink}),
+          tool_middleware.with_idempotency(harness.llm, idempotency_key),
+          tool_middleware.with_rate_limit(harness.runtime, {max_calls: 10}),
+          tool_middleware.with_dry_run({only: ["edit"], message: "preview"}),
         ],
       )
-      const registry = tools()
+      // ANCHOR_END: captain_stack
+      const registry = tool_middleware.tools_use_middleware(tools(), reason_mw.schema_transform)
       const result = agent_loop(
         harness,
         "polish + handoff",
@@ -135,6 +158,12 @@ pipeline default(harness: Harness) {
           tool_caller: stack,
         },
       )
+      assert(harness.runtime.atomic_get(consent_records) == 3, "all calls reach consent")
+      assert(
+        harness.runtime.atomic_get(redaction_records) == 6,
+        "each call reaches both redaction phases",
+      )
+      assert(harness.runtime.atomic_get(idempotency_records) == 3, "all calls reach idempotency")
       harness.stdio.println(result.status)
       harness.stdio.println(harness.runtime.atomic_get(audit_records))
       harness.stdio.println(harness.runtime.atomic_get(telemetry_records))

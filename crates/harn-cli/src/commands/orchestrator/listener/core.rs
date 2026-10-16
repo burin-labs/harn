@@ -156,13 +156,31 @@ impl ListenerReadiness {
 }
 
 impl ListenerRuntime {
-    pub(crate) async fn start(config: ListenerConfig) -> Result<Self, OrchestratorError> {
-        Self::start_with_env(config, ListenerRuntimeEnv::from_env()).await
+    pub(crate) async fn start(
+        config: ListenerConfig,
+        host_inference_boundary: Option<harn_vm::llm::api::InferenceBoundary>,
+    ) -> Result<Self, OrchestratorError> {
+        Self::start_with_env_and_boundary(
+            config,
+            ListenerRuntimeEnv::from_env(),
+            host_inference_boundary,
+        )
+        .await
     }
 
+    #[cfg(test)]
     pub(crate) async fn start_with_env(
         config: ListenerConfig,
         runtime_env: ListenerRuntimeEnv,
+    ) -> Result<Self, OrchestratorError> {
+        let host_inference_boundary = harn_vm::llm::api::InferenceBoundary::capture_process()?;
+        Self::start_with_env_and_boundary(config, runtime_env, host_inference_boundary).await
+    }
+
+    async fn start_with_env_and_boundary(
+        config: ListenerConfig,
+        runtime_env: ListenerRuntimeEnv,
+        host_inference_boundary: Option<harn_vm::llm::api::InferenceBoundary>,
     ) -> Result<Self, OrchestratorError> {
         let pending_topic =
             Topic::new(PENDING_TOPIC).map_err(|error| format!("invalid pending topic: {error}"))?;
@@ -193,6 +211,7 @@ impl ListenerRuntime {
         let acp_hub = AcpWebSocketHub::new(
             config.event_log.clone(),
             runtime_env.acp_retained_session_duration,
+            host_inference_boundary,
         );
         let acp_hub_sweeper = acp_hub.clone();
         tokio::spawn(async move {

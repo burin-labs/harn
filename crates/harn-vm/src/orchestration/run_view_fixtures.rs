@@ -32,6 +32,7 @@ pub struct RunViewFixtureSummary {
 }
 
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum RunViewFixtureError {
     #[error("failed to {operation} {path}: {source}")]
     Io {

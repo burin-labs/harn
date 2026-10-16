@@ -66,11 +66,27 @@ pub fn get_pr_details(harness: Harness, adapter: dict, repo: string, number: any
     {path: "/repos/${parts[0]}/${parts[1]}/commits/${pr.head.sha}/check-runs", method: "GET"},
   )
   const runs = checks_envelope?.check_runs ?? []
-  return {pr: normalize_pr(pr), checks: runs}
+  const queue = _gh(
+    harness,
+    "graphql",
+    {
+      query:
+        "query($owner:String!, $name:String!, $number:Int!) { repository(owner:$owner, name:$name) { pullRequest(number:$number) { isInMergeQueue } } }",
+      variables: {owner: parts[0], name: parts[1], number: to_int(number)},
+    },
+  )
+  const in_merge_queue = queue?.data?.repository?.pullRequest?.isInMergeQueue ?? false
+  return {pr: normalize_pr(pr, in_merge_queue), checks: runs}
 }
 
-/** Normalize a raw GitHub PR API payload into our minimal shape. */
-pub fn normalize_pr(api_pr: dict) {
+/**
+ * Normalize a raw GitHub PR API payload into our minimal shape.
+ *
+ * The REST payload cannot say whether a PR is in the merge queue: `auto_merge`
+ * means armed, and GitHub nulls it when the PR enters the queue. Queue
+ * membership comes from GraphQL `isInMergeQueue` and is passed in.
+ */
+pub fn normalize_pr(api_pr: dict, in_merge_queue: bool = false) {
   const labels = (api_pr.labels ?? []).map({ l -> l.name })
   return {
     repo: api_pr.base?.repo?.full_name ?? "",
@@ -88,7 +104,8 @@ pub fn normalize_pr(api_pr: dict) {
     labels: labels,
     review_decision: api_pr.review_decision ?? "REVIEW_REQUIRED",
     approvals: api_pr.approvals ?? 0,
-    in_merge_queue: api_pr.auto_merge != nil,
+    auto_merge_armed: api_pr.auto_merge != nil,
+    in_merge_queue: in_merge_queue,
     merge_group_active: api_pr.merge_group_active ?? false,
   }
 }

@@ -152,8 +152,8 @@ async fn self_review_impl(
             .cloned()
             .ok_or_else(|| VmError::Runtime("self_review: invalid llm options".to_string()))?;
         let extracted = extract_llm_options(&[
-            VmValue::String(arcstr::ArcStr::from(prompt.as_str())),
-            VmValue::String(arcstr::ArcStr::from(system.as_str())),
+            VmValue::string(prompt.as_str()),
+            VmValue::string(system.as_str()),
             options.clone(),
         ])?;
         let response = execute_llm_call(ctx, extracted, Some(options_dict), None, None).await?;
@@ -728,7 +728,7 @@ mod tests {
                     let program = parser.parse().unwrap();
                     let chunk = Compiler::new().compile(&program).unwrap();
 
-                    let mut vm = Vm::new();
+                    let mut vm = crate::new_vm();
                     register_vm_stdlib(&mut vm);
                     let _ = vm.execute(&chunk).await.unwrap();
                     vm.output().trim_end().to_string()

@@ -14,10 +14,16 @@ use super::response::{extract_cache_read_tokens, extract_cache_write_tokens};
 use super::result::{mock_completion_response, LlmResult};
 use super::telemetry::{source as telemetry_source, ProviderTelemetry};
 
-async fn completion_json_response(
-    provider: &str,
-    response: reqwest::Response,
+async fn send_completion_request(
+    opts: &LlmCallOptions,
+    request: reqwest::RequestBuilder,
 ) -> Result<serde_json::Value, VmError> {
+    let _permit = crate::llm::rate_limit::acquire_permit_for_llm_call(opts).await?;
+    let provider = &opts.provider;
+    let response = request
+        .send()
+        .await
+        .map_err(|error| super::reqwest_send_error(provider, "completion", error))?;
     if !response.status().is_success() {
         let status = response.status();
         let headers = response.headers().clone();
@@ -28,9 +34,9 @@ async fn completion_json_response(
     }
 
     response.json().await.map_err(|e| {
-        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
+        VmError::Thrown(VmValue::string(format!(
             "{provider} completion response parse error: {e}"
-        ))))
+        )))
     })
 }
 
@@ -45,12 +51,24 @@ pub(crate) async fn vm_call_completion_full(
         return Ok(mock_completion_response(prefix, suffix));
     }
 
+    let controls = super::data_controls::resolve(
+        &opts.provider,
+        &opts.model,
+        crate::llm_config::DataControlDialect::OpenAiSse,
+        crate::llm_config::DataPosture::Default,
+    );
+    let boundary_rule = super::inference_boundary::preflight(
+        opts.inference_boundary,
+        &opts.provider,
+        &opts.model,
+        &controls.receipt,
+    )?;
     crate::llm::ensure_real_llm_allowed(&opts.provider)?;
 
     let resolved = crate::llm_config::provider_config(&opts.provider);
     let completion_endpoint = resolved.and_then(|p| p.completion_endpoint);
 
-    match completion_endpoint.as_deref() {
+    let mut result = match completion_endpoint.as_deref() {
         Some("/api/generate") => {
             reject_completion_options(
                 opts,
@@ -81,7 +99,9 @@ pub(crate) async fn vm_call_completion_full(
             vm_call_completion_openai_style(opts, prefix, suffix).await
         }
         None => vm_call_completion_fallback(opts, prefix, suffix).await,
-    }
+    }?;
+    result.telemetry.inference_boundary_rule = boundary_rule.map(str::to_string);
+    Ok(result)
 }
 
 fn reject_completion_options(
@@ -170,16 +190,12 @@ async fn vm_call_completion_openai_style(
         .json(&body);
     let req = apply_auth_headers(req, &opts.api_key, pdef.as_ref());
 
-    let response = req
-        .send()
-        .await
-        .map_err(|e| crate::llm::api::reqwest_send_error(&opts.provider, "completion", e))?;
-
-    let json = completion_json_response(&opts.provider, response).await?;
+    let json = send_completion_request(opts, req).await?;
 
     if let Some(err) = json["error"]["message"].as_str() {
-        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-            format!("{} completion API error: {err}", opts.provider),
+        return Err(VmError::Thrown(VmValue::string(format!(
+            "{} completion API error: {err}",
+            opts.provider
         ))));
     }
 
@@ -303,14 +319,11 @@ async fn vm_call_completion_ollama(
         .json(&body);
     let req = apply_auth_headers(req, &opts.api_key, pdef.as_ref());
 
-    let response = req
-        .send()
-        .await
-        .map_err(|e| crate::llm::api::reqwest_send_error(&opts.provider, "completion", e))?;
-    let json = completion_json_response(&opts.provider, response).await?;
+    let json = send_completion_request(opts, req).await?;
     if let Some(err) = json["error"].as_str() {
-        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-            format!("{} completion API error: {err}", opts.provider),
+        return Err(VmError::Thrown(VmValue::string(format!(
+            "{} completion API error: {err}",
+            opts.provider
         ))));
     }
 
@@ -354,16 +367,13 @@ async fn vm_call_completion_fallback(
     let has_suffix = suffix.is_some_and(|s| !s.is_empty());
     let mut bindings = crate::value::DictMap::new();
     bindings.put_str("prefix", prefix);
-    bindings.insert(
-        crate::value::intern_key("has_suffix"),
-        VmValue::Bool(has_suffix),
-    );
+    bindings.put_bool("has_suffix", has_suffix);
     bindings.put_str("suffix", suffix.unwrap_or_default());
-    let instruction = crate::stdlib::template::render_stdlib_prompt_asset(
+    let instruction = crate::llm::helpers::render_stdlib_prompt_asset(
         "llm/prompts/completion_fallback_system.harn.prompt",
         Some(&bindings),
     )?;
-    let user_prompt = crate::stdlib::template::render_stdlib_prompt_asset(
+    let user_prompt = crate::llm::helpers::render_stdlib_prompt_asset(
         "llm/prompts/completion_fallback_user.harn.prompt",
         Some(&bindings),
     )?;
@@ -382,4 +392,34 @@ async fn vm_call_completion_fallback(
         fallback_opts.system.as_deref(),
     );
     super::vm_call_llm_full(&fallback_opts).await
+}
+
+#[cfg(test)]
+mod inference_boundary_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn local_ceiling_refuses_hosted_completion_before_provider_io() {
+        let opts = LlmCallOptions {
+            provider: "openai".into(),
+            model: "gpt-4o".into(),
+            api_key: "invalid-test-key".into(),
+            inference_boundary: Some(super::super::InferenceBoundary {
+                reach: super::super::inference_boundary::InferenceReach::LocalOnly,
+                allow_training_discounts: false,
+            }),
+            ..Default::default()
+        };
+        let refusal = vm_call_completion_full(&opts, "prefix", None)
+            .await
+            .expect_err("a hosted route cannot pass the local ceiling");
+        let VmValue::Dict(fields) = refusal.thrown_value() else {
+            panic!("completion must retain the typed policy denial");
+        };
+        let facts = crate::llm::helpers::vm_value_dict_to_json(&fields);
+        assert_eq!(facts["reason"], "policy_denied");
+        assert_eq!(facts["origin"], "local");
+        assert_eq!(facts["rule"], "inference_boundary.local_only");
+        assert_eq!(facts["retryable"], false);
+    }
 }

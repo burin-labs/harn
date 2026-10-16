@@ -30,6 +30,18 @@ pub(crate) struct FixArgs {
         conflicts_with_all = ["plan", "capability_migrations_only", "codes"]
     )]
     pub preserve_implicit_any: bool,
+    /// Rewrite source written for the pre-0.11 operator grammar: `a to b`
+    /// becomes `a..=b`, `a to b exclusive` becomes `a..b`, and parentheses
+    /// are inserted wherever the current `??` and range precedence would
+    /// regroup an expression. Each file is verified to keep its meaning. Run
+    /// it once per tree: source already written for the current grammar can
+    /// be misread as legacy.
+    #[arg(
+        long,
+        requires = "apply",
+        conflicts_with_all = ["plan", "capability_migrations_only", "codes", "preserve_implicit_any"]
+    )]
+    pub migrate_operator_syntax: bool,
     /// Only plan or apply repairs for this diagnostic code. Repeatable;
     /// omitting it keeps every code.
     #[arg(long = "code", value_parser = parse_diagnostic_code, value_name = "CODE")]

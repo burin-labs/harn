@@ -40,6 +40,10 @@ case "$*" in
 esac
 SH
 chmod +x "$fake_bin/cargo"
+cp "$repo_root/scripts/tests/fixtures/harn_bin/fake_rustc.sh" "$fake_bin/rustc"
+chmod +x "$fake_bin/rustc"
+export FAKE_RUST_TOOLCHAIN_FILE="$repo_root/rust-toolchain.toml"
+export HARN_CARGO_LEASE_MODE=off
 
 PATH="$fake_bin:$PATH" \
   FAKE_CARGO_RECORD="$record" \

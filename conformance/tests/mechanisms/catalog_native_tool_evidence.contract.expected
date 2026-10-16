@@ -1,0 +1,3 @@
+native_tool_missing_evidence_is_incomplete=true
+native_tool_exact_live_evidence_allows_patch=true
+native_tool_receipt_preserves_evidence=true

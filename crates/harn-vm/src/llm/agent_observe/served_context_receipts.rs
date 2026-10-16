@@ -1,35 +1,11 @@
 use super::chrono_now;
+use crate::llm::api::LlmRequestPayloadExt;
 pub(super) use crate::llm::content_hash::{stable_redacted_json_hash, stable_redacted_string_hash};
+use crate::llm::served_lineage::{LineageHead, ServedMessageLineage};
 
-use serde::Serialize;
-
-const MESSAGE_LINEAGE_SCHEMA: &str = "harn.llm.message_lineage.v1";
+const SERVED_CONTEXT_SCHEMA: &str = "harn.llm.served_context.v2";
 const SERVED_MESSAGE_SCHEMA: &str = "harn.llm.served_message.v1";
 const OUTPUT_SCHEMA_SCHEMA: &str = "harn.llm.output_schema.v1";
-
-#[derive(Clone, Debug, Serialize)]
-struct ServedMessageLineage {
-    position: usize,
-    role: String,
-    semantic_kind: crate::llm::message_lineage::MessageSemanticKind,
-    message_content_hash: String,
-    definition_ref: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    source_message_index: Option<usize>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    compaction_receipt_ref: Option<String>,
-}
-
-#[derive(Clone, Debug, Serialize)]
-struct MessageLineageManifest {
-    schema: &'static str,
-    call_id: String,
-    iteration: usize,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    session_id: Option<String>,
-    projection: crate::llm::message_lineage::ProjectionLineage,
-    messages: Vec<ServedMessageLineage>,
-}
 
 fn message_role(message: &serde_json::Value) -> String {
     message
@@ -40,26 +16,29 @@ fn message_role(message: &serde_json::Value) -> String {
         .to_string()
 }
 
-fn message_lineage_manifest(
+/// The full ordered lineage of the served array and the projection it came from.
+fn served_message_lineage(
     messages: &[serde_json::Value],
+    contents: &[std::rc::Rc<crate::llm::content_hash::RedactedContent>],
     lineage: Option<&crate::llm::message_lineage::MessageLineageManifest>,
-    iteration: usize,
-    call_id: &str,
-    session_id: Option<&str>,
-) -> MessageLineageManifest {
+) -> (
+    Vec<ServedMessageLineage>,
+    crate::llm::message_lineage::ProjectionLineage,
+) {
     // Egress may structurally remove conversation contributors (for example,
     // a replacement system root). Never shift surviving positions onto the
     // wrong source entry; an unaligned manifest is less truthful than unknown.
     let lineage = lineage.filter(|lineage| lineage.messages.len() == messages.len());
-    let messages = messages
+    let entries = messages
         .iter()
+        .zip(contents)
         .enumerate()
-        .map(|(position, message)| {
+        .map(|(position, (message, content))| {
             let entry = lineage
                 .and_then(|lineage| lineage.messages.get(position))
                 .cloned()
                 .unwrap_or_default();
-            let message_content_hash = stable_redacted_json_hash(message);
+            let message_content_hash = content.hash().to_string();
             ServedMessageLineage {
                 position,
                 role: message_role(message),
@@ -71,33 +50,25 @@ fn message_lineage_manifest(
             }
         })
         .collect();
-    MessageLineageManifest {
-        schema: MESSAGE_LINEAGE_SCHEMA,
-        call_id: call_id.to_string(),
-        iteration,
-        session_id: session_id.map(str::to_string),
-        projection: lineage
-            .map(|lineage| lineage.projection.clone())
-            .unwrap_or_else(crate::llm::message_lineage::unknown_projection),
-        messages,
-    }
+    let projection = lineage
+        .map(|lineage| lineage.projection.clone())
+        .unwrap_or_else(crate::llm::message_lineage::unknown_projection);
+    (entries, projection)
 }
 
-pub(super) fn served_message_definitions(messages: &[serde_json::Value]) -> Vec<serde_json::Value> {
-    messages
-        .iter()
-        .map(|message| {
-            let content_hash = stable_redacted_json_hash(message);
-            serde_json::json!({
-                "type": "served_message",
-                "timestamp": chrono_now(),
-                "span_id": crate::tracing::current_span_id(),
-                "schema": SERVED_MESSAGE_SCHEMA,
-                "content_hash": content_hash,
-                "message": message,
-            })
-        })
-        .collect()
+/// One content-addressed `served_message` definition.
+pub(super) fn served_message_definition(
+    message: &serde_json::Value,
+    content_hash: &str,
+) -> serde_json::Value {
+    serde_json::json!({
+        "type": "served_message",
+        "timestamp": chrono_now(),
+        "span_id": crate::tracing::current_span_id(),
+        "schema": SERVED_MESSAGE_SCHEMA,
+        "content_hash": content_hash,
+        "message": message,
+    })
 }
 
 /// Names of the tools the model was actually offered, in served order.
@@ -216,17 +187,24 @@ pub(super) fn output_schema_definitions(
         .collect()
 }
 
+/// The `served_context` receipt of one request, and the lineage head to record
+/// for its session once the receipt is persisted.
+///
+/// `lineage_head` is the session's last persisted receipt in the current
+/// sinks; the message lineage continues it when the served messages extend it.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn served_context_receipt(
     payload: &super::super::api::LlmRequestPayload,
+    message_contents: &[std::rc::Rc<crate::llm::content_hash::RedactedContent>],
     manifest: &crate::llm::prompt::ContextAssemblyManifest,
     tool_schemas: &[crate::llm::tools::ToolSchema],
     opts: &super::super::api::LlmCallOptions,
     iteration: usize,
     call_id: &str,
     session_id: Option<&str>,
-) -> serde_json::Value {
+    lineage_head: Option<&LineageHead>,
+) -> (serde_json::Value, LineageHead) {
     let system_prompt = payload.system.as_deref().unwrap_or("");
-    let messages = serde_json::Value::Array(payload.messages.clone());
     let tool_schemas_value = serde_json::to_value(tool_schemas).unwrap_or(serde_json::Value::Null);
     let native_tools = payload
         .native_tools
@@ -234,23 +212,29 @@ pub(super) fn served_context_receipt(
         .map(|tools| serde_json::Value::Array(tools.clone()))
         .unwrap_or(serde_json::Value::Null);
     let manifest_value = manifest.as_json();
-    let message_lineage = message_lineage_manifest(
+    let (entries, projection) = served_message_lineage(
         &payload.messages,
+        message_contents,
         payload.aligned_message_lineage(opts),
+    );
+    let (message_lineage, head) = crate::llm::served_lineage::encode_receipt(
+        entries,
+        lineage_head,
+        projection,
         iteration,
         call_id,
         session_id,
     );
 
-    serde_json::json!({
-        "schema": "harn.llm.served_context.v1",
+    let receipt = serde_json::json!({
+        "schema": SERVED_CONTEXT_SCHEMA,
         "redaction": "current_policy",
         "call_role": manifest.call_role(),
         "actor_chain": manifest.actor_chain(),
         "manifest_content_hash": stable_redacted_json_hash(&manifest_value),
         "system_prompt_content_hash": stable_redacted_string_hash(system_prompt),
         "system_prompt_bytes": system_prompt.len(),
-        "messages_content_hash": stable_redacted_json_hash(&messages),
+        "messages_content_hash": crate::llm::content_hash::redacted_sequence_hash(message_contents),
         "message_count": payload.messages.len(),
         "message_lineage": message_lineage,
         "tool_schemas_content_hash": stable_redacted_json_hash(&tool_schemas_value),
@@ -258,7 +242,8 @@ pub(super) fn served_context_receipt(
         "served_tool_names": served_tool_names(tool_schemas, &native_tools),
         "native_tools_content_hash": stable_redacted_json_hash(&native_tools),
         "native_tool_count": payload.native_tools.as_ref().map(|tools| tools.len()).unwrap_or(0),
-    })
+    });
+    (receipt, head)
 }
 
 #[cfg(test)]
@@ -403,7 +388,7 @@ mod tests {
         );
         assert_eq!(
             served_context["schema"],
-            serde_json::json!("harn.llm.served_context.v1")
+            serde_json::json!("harn.llm.served_context.v2")
         );
         assert_eq!(request["call_role"], serde_json::json!("llm_call"));
         assert_eq!(served_context["call_role"], request["call_role"]);
@@ -470,6 +455,60 @@ mod tests {
             serde_json::json!(expected_native_tools_hash)
         );
 
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The falsifier from #8026, read from the archived request record: a
+    /// caller marker on a message content block names the breakpoint as
+    /// deferred, and the ordinary request beside it names the placement.
+    #[test]
+    fn provider_request_receipts_name_the_prompt_cache_breakpoint() {
+        let _guard = crate::llm::env_guard();
+        let previous_verbose = set_env_for_test("HARN_LLM_TRANSCRIPT_VERBOSE", None);
+        let dir = temp_transcript_dir("harn-prompt-cache-breakpoint");
+        let dir_string = dir.to_string_lossy().to_string();
+        super::super::push_llm_transcript_dir(&dir_string);
+
+        let mut opts = crate::llm::api::options::base_opts("anthropic");
+        opts.model = "claude-opus-4-5-20251101".to_string();
+        opts.cache = true;
+        opts.native_tools = None;
+        opts.messages = vec![serde_json::json!({"role": "user", "content": "hello"})];
+        super::super::dump_llm_request(1, "call-cache-placed", "native", &opts)
+            .expect("valid ordinary request");
+        opts.messages = vec![
+            serde_json::json!({"role": "user", "content": [{
+                "type": "text",
+                "text": "stable prefix",
+                "cache_control": {"type": "ephemeral"},
+            }]}),
+            serde_json::json!({"role": "assistant", "content": "ok"}),
+            serde_json::json!({"role": "user", "content": "hello"}),
+        ];
+        super::super::dump_llm_request(2, "call-cache-deferred", "native", &opts)
+            .expect("valid marked request");
+        super::super::pop_llm_transcript_dir();
+        restore_env_for_test("HARN_LLM_TRANSCRIPT_VERBOSE", previous_verbose);
+
+        let events = read_transcript_events(&dir);
+        let breakpoint = |call_id: &str| {
+            events
+                .iter()
+                .find(|event| {
+                    event["type"] == "provider_call_request" && event["call_id"] == call_id
+                })
+                .unwrap_or_else(|| panic!("no request receipt for {call_id}"))
+                ["prompt_cache_breakpoint"]
+                .clone()
+        };
+        assert_eq!(
+            breakpoint("call-cache-placed"),
+            serde_json::json!({"outcome": "placed", "style": "top_level"})
+        );
+        assert_eq!(
+            breakpoint("call-cache-deferred"),
+            serde_json::json!({"outcome": "deferred_to_existing_marker"})
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -682,6 +721,9 @@ mod tests {
         restore_env_for_test("HARN_LLM_TRANSCRIPT_VERBOSE", previous_verbose);
 
         let events = read_transcript_events(&dir);
+        let lineage_index =
+            crate::llm::served_lineage::LineageIndex::from_transcript_events(&events)
+                .expect("lineage receipts index");
         let mut retained_prompts: std::collections::BTreeSet<String> = Default::default();
         let mut retained_manifests: std::collections::BTreeSet<String> = Default::default();
         let mut retained_schemas: std::collections::BTreeSet<String> = Default::default();
@@ -769,16 +811,16 @@ mod tests {
                         retained_manifests.contains(manifest_hash),
                         "{call_id} served context manifest {manifest_hash} with no retained bytes in the transcript"
                     );
-                    for message in served["message_lineage"]["messages"]
-                        .as_array()
-                        .expect("ordered message lineage")
-                    {
-                        let definition_ref = message["definition_ref"]
-                            .as_str()
-                            .expect("message definition ref");
+                    let lineage = lineage_index
+                        .reconstruct_request(event)
+                        .expect("chained lineage resolves")
+                        .expect("request lineage");
+                    assert_eq!(lineage.len(), 1, "{call_id} served one message");
+                    for message in lineage {
                         assert!(
-                            retained_messages.contains(definition_ref),
-                            "{call_id} served message {definition_ref} with no retained definition"
+                            retained_messages.contains(&message.definition_ref),
+                            "{call_id} served message {} with no retained definition",
+                            message.definition_ref
                         );
                     }
                     checked_calls += 1;
@@ -1005,7 +1047,7 @@ mod tests {
         );
         let lineage = crate::llm::message_lineage::take_from_messages(&mut messages)
             .expect("directive lineage");
-        crate::llm::helpers::strip_directive_commit_metadata(&mut messages);
+        crate::llm::helpers::strip_internal_message_metadata(&mut messages);
 
         assert_eq!(
             lineage.messages[0].semantic_kind,
@@ -1019,14 +1061,16 @@ mod tests {
         opts.messages = messages;
         opts.message_lineage = Some(lineage);
         let payload = crate::llm::api::LlmRequestPayload::from(&opts);
-        let receipt = served_context_receipt(
+        let (receipt, _) = served_context_receipt(
             &payload,
+            &crate::llm::content_hash::redacted_contents(&payload.messages),
             &opts.context_manifest,
             &[],
             &opts,
             3,
             "directive-call",
             Some(&session_id),
+            None,
         );
         assert_eq!(
             receipt["message_lineage"]["messages"][0]["semantic_kind"],
@@ -1069,13 +1113,15 @@ mod tests {
             1,
             "replacement root removes system history"
         );
-        let receipt = served_context_receipt(
+        let (receipt, _) = served_context_receipt(
             &payload,
+            &crate::llm::content_hash::redacted_contents(&payload.messages),
             &opts.context_manifest,
             &[],
             &opts,
             4,
             "replacement-call",
+            None,
             None,
         );
         let manifest = &receipt["message_lineage"];
@@ -1140,13 +1186,15 @@ mod tests {
         assert_eq!(payload.messages[3]["role"], serde_json::json!("system"));
         assert!(payload.aligned_message_lineage(&opts).is_none());
 
-        let receipt = served_context_receipt(
+        let (receipt, _) = served_context_receipt(
             &payload,
+            &crate::llm::content_hash::redacted_contents(&payload.messages),
             &opts.context_manifest,
             &[],
             &opts,
             5,
             "native-reordered-call",
+            None,
             None,
         );
         let manifest = &receipt["message_lineage"];
@@ -1268,7 +1316,7 @@ mod tests {
         let message_lineage =
             crate::llm::message_lineage::take_from_messages(&mut provider_messages)
                 .expect("projection and visible-message owners attach complete lineage");
-        crate::llm::helpers::strip_directive_commit_metadata(&mut provider_messages);
+        crate::llm::helpers::strip_internal_message_metadata(&mut provider_messages);
 
         let mut opts = crate::llm::api::options::base_opts("openai");
         opts.model = "gpt-test".to_string();

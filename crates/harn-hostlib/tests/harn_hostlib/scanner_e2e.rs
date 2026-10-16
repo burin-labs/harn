@@ -21,6 +21,128 @@ use harn_hostlib::scanner::{
 };
 use tempfile::tempdir;
 
+#[cfg(unix)]
+#[test]
+fn package_script_aliases_stay_within_physical_project() {
+    let fixture = tempdir().unwrap();
+    let project = fixture.path().join("project");
+    let outside = fixture.path().join("outside");
+    write(
+        &project,
+        "package.json",
+        r#"{"name":"inside","packageManager":"pnpm@10.0.0","scripts":{"test":"echo KNOWN_INSIDE"}}"#,
+    );
+    write(
+        &project,
+        "owned/package.json",
+        r#"{"name":"owned","packageManager":"npm@10.0.0","scripts":{"test":"echo KNOWN_OWNED"}}"#,
+    );
+    write(
+        &outside,
+        "package.json",
+        r#"{"name":"outside","packageManager":"npm@10.0.0","scripts":{"test":"echo KNOWN_OUTSIDE"}}"#,
+    );
+    fs::create_dir(project.join("packages")).unwrap();
+    std::os::unix::fs::symlink(&outside, project.join("packages/escaped")).unwrap();
+    std::os::unix::fs::symlink(project.join("owned"), project.join("packages/aliased")).unwrap();
+    write(
+        &project,
+        "packages/escaped-manifest/index.js",
+        "// known source",
+    );
+    std::os::unix::fs::symlink(
+        outside.join("package.json"),
+        project.join("packages/escaped-manifest/package.json"),
+    )
+    .unwrap();
+    write(
+        &project,
+        "packages/linked-manifest/index.js",
+        "// known source",
+    );
+    std::os::unix::fs::symlink(
+        project.join("owned/package.json"),
+        project.join("packages/linked-manifest/package.json"),
+    )
+    .unwrap();
+    write(
+        &project,
+        "physical-package/package.json",
+        r#"{"scripts":{"test":"echo KNOWN_PHYSICAL_LOCK"}}"#,
+    );
+    write(&project, "physical-package/yarn.lock", "");
+    write(&project, "packages/linked-lock/index.js", "// known source");
+    std::os::unix::fs::symlink(
+        project.join("physical-package/package.json"),
+        project.join("packages/linked-lock/package.json"),
+    )
+    .unwrap();
+    write(
+        &project,
+        "packages/inherited-lock/package.json",
+        r#"{"scripts":{"test":"echo KNOWN_INHERITED_LOCK"}}"#,
+    );
+    std::os::unix::fs::symlink(
+        project.join("physical-package/package.json"),
+        project.join("packages/package.json"),
+    )
+    .unwrap();
+    let initial_alias = fixture.path().join("initial-alias");
+    std::os::unix::fs::symlink(&project, &initial_alias).unwrap();
+
+    for root in [&project, &initial_alias] {
+        let result = scan_project(
+            root,
+            ScanProjectOptions {
+                include_git_history: false,
+                ..ScanProjectOptions::default()
+            },
+        );
+        let commands = result.project.test_commands;
+        assert!(commands.get("pnpm test").unwrap().contains("KNOWN_INSIDE"));
+        assert!(commands
+            .get("cd packages/aliased && npm test")
+            .unwrap()
+            .contains("KNOWN_OWNED"));
+        assert!(!commands.contains_key("cd packages/escaped && npm test"));
+        assert!(commands
+            .get("cd packages/linked-manifest && npm test")
+            .unwrap()
+            .contains("KNOWN_OWNED"));
+        assert!(commands
+            .get("cd packages/linked-lock && yarn run test")
+            .unwrap()
+            .contains("KNOWN_PHYSICAL_LOCK"));
+        assert!(commands
+            .get("cd packages/inherited-lock && yarn run test")
+            .unwrap()
+            .contains("KNOWN_INHERITED_LOCK"));
+        assert!(!commands
+            .values()
+            .any(|label| label.contains("KNOWN_OUTSIDE")));
+    }
+    write(
+        &project,
+        "packages/inherited/package.json",
+        r#"{"scripts":{"test":"echo KNOWN_INHERITED"}}"#,
+    );
+    fs::remove_file(project.join("packages/package.json")).unwrap();
+    fs::remove_file(project.join("package.json")).unwrap();
+    std::os::unix::fs::symlink(outside.join("package.json"), project.join("package.json")).unwrap();
+    let result = scan_project(
+        &project,
+        ScanProjectOptions {
+            include_git_history: false,
+            ..ScanProjectOptions::default()
+        },
+    );
+    assert!(!result
+        .project
+        .test_commands
+        .values()
+        .any(|body| body.contains("KNOWN_OUTSIDE") || body.contains("KNOWN_INHERITED")));
+}
+
 fn write(root: &Path, rel: &str, content: &str) {
     let path = root.join(rel);
     if let Some(parent) = path.parent() {
@@ -186,7 +308,7 @@ fn scan_project_emits_full_result_shape() {
         .iter()
         .find(|f| f.relative_path == "src/main.rs")
         .expect("main.rs file record");
-    assert_eq!(main.language, "rs");
+    assert_eq!(main.language, "rust");
     assert!(main.line_count > 0);
     assert!(main.size_bytes > 0);
     assert!(main.imports.iter().any(|i| i.contains("routes")));
@@ -222,10 +344,14 @@ fn scan_project_emits_full_result_shape() {
 
     // Project metadata: language stats, test commands, code patterns.
     assert_eq!(result.project.name, project_name(tmp.path()));
-    assert!(result.project.languages.iter().any(|l| l.name == "rs"));
-    assert!(result.project.languages.iter().any(|l| l.name == "ts"));
+    assert!(result.project.languages.iter().any(|l| l.name == "rust"));
+    assert!(result
+        .project
+        .languages
+        .iter()
+        .any(|l| l.name == "typescript"));
     assert!(result.project.test_commands.contains_key("cargo test"));
-    assert!(result.project.test_commands.contains_key("pnpm test"));
+    assert!(result.project.test_commands.contains_key("npm test"));
     let detected = result
         .project
         .detected_test_command

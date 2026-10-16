@@ -2,8 +2,8 @@
 //! catalog, and the runtime overlay that can refresh it.
 
 use crate::llm_config;
-use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmError, VmValue};
+use harn_builtin_macros::harn_builtin;
 
 use super::batch_projection::string_list_to_vm_value;
 use super::capability_projection::capabilities_to_vm_value;

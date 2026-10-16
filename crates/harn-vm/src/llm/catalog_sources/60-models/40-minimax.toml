@@ -106,6 +106,7 @@ name = "MiniMax M2.7 (via OpenRouter)"
 provider = "openrouter"
 context_window = 204800
 capabilities = ["tools", "streaming"]
+# Hosted cards re-read from https://openrouter.ai/api/v1/models, 2026-10-15.
 pricing = { input_per_mtok = 0.30, output_per_mtok = 1.20, cache_read_per_mtok = 0.06 }
 tier = "frontier"
 open_weight = true
@@ -115,7 +116,7 @@ name = "MiniMax M2.5 (via OpenRouter)"
 provider = "openrouter"
 context_window = 204800
 capabilities = ["tools", "streaming"]
-pricing = { input_per_mtok = 0.27, output_per_mtok = 1.08, cache_read_per_mtok = 0.027 }
+pricing = { input_per_mtok = 0.27, output_per_mtok = 0.95, cache_read_per_mtok = 0.03 }
 tier = "frontier"
 open_weight = true
 strengths = ["coding", "agentic", "tool_use", "long_context"]

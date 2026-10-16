@@ -1,7 +1,7 @@
 use clap::Parser as ClapParser;
 use std::{panic, process};
 
-use crate::cli::{Cli, Command};
+use crate::cli::{Cli, Command, ProviderCommand};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum CliRuntimeMode {
@@ -36,6 +36,9 @@ pub(crate) fn cli_runtime_mode(raw_args: &[String]) -> CliRuntimeMode {
             | Command::Parse(_)
             | Command::Tokens(_),
         ) => CliRuntimeMode::StaticAnalysis,
+        Some(Command::Provider(args)) if matches!(args.command, ProviderCommand::Admission(_)) => {
+            CliRuntimeMode::StaticAnalysis
+        }
         _ => CliRuntimeMode::FullIo,
     }
 }
@@ -134,6 +137,7 @@ mod tests {
             argv(&["harn", "parse", "script.harn"]),
             argv(&["harn", "tokens", "script.harn"]),
             argv(&["harn", "--json-schemas"]),
+            argv(&["harn", "provider", "admission", "--request", "{}"]),
         ] {
             assert_eq!(cli_runtime_mode(&args), CliRuntimeMode::StaticAnalysis);
         }

@@ -10,7 +10,38 @@ import {
   fold_release_changelog,
   is_release_changelog_fragment_name,
   release_section_findings,
+  retire_unpublished_section,
 } from "../release_changelog_fold.harn"
+import { extract_section, published_changelog_versions } from "../render_release_notes.harn"
+
+@test
+pipeline test_retired_candidate_carries_notes_without_becoming_an_install_base() {
+  const text =
+    "# Changelog\n\n## v1.2.4\n\n### Fixed\n\n- candidate fix\n\n## v1.2.3\n\n- published fix\n"
+  const retired = retire_unpublished_section(text, "1.2.4", "1.2.3")
+  assert_eq(extract_section(retired, "1.2.4"), "### Fixed\n\n- candidate fix")
+  assert_eq(published_changelog_versions(retired), ["1.2.3"])
+  const folded = fold_release_changelog(retired, [], "1.2.5")
+  assert_eq(folded.success, true)
+  assert_eq(extract_section(folded.text, "1.2.5"), "### Fixed\n\n- candidate fix")
+  assert_eq(extract_section(folded.text, "1.2.4"), "### Fixed\n\n- candidate fix")
+  assert_eq(extract_section(folded.text, "1.2.3"), "- published fix")
+  assert_eq(published_changelog_versions(folded.text), ["1.2.5", "1.2.3"])
+}
+
+@test
+pipeline test_retirement_refuses_wrong_or_missing_published_predecessor() {
+  const text = "## v1.2.4\n\n- candidate\n\n## v1.2.3\n\n- published\n"
+  for base in ["1.2.2", "1.2.4", ""] {
+    const refused = try {
+      retire_unpublished_section(text, "1.2.4", base)
+      false
+    } catch (_) {
+      true
+    }
+    assert_eq(refused, true)
+  }
+}
 
 const BASIC_CHANGELOG =
   "# Changelog\n\nAll notable changes to this project are documented here.\n\n## v1.2.3\n\n### Fixed\n\n- **Older fix (#10).** Kept as published.\n"
@@ -58,6 +89,29 @@ const EXISTING_TOP_FILES: list<ReleaseFragmentFile> = [
 
 const EXISTING_TOP_EXPECTED =
   "# Changelog\n\n## v1.2.4\n\n### Added\n\n- **Late addition (#801).**\n\n- **Earlier addition (#800).**\n\n### Fixed\n\n- **Fragment fix (#802).**\n\n- **Earlier fix (#799).**\n\n## v1.2.3\n\n- old\n"
+
+// Downstream update tooling reads the migration snippet out of the released
+// Breaking section, so the fold must keep it byte for byte, fence and all, and
+// keep Breaking first.
+const MIGRATION_FILES: list<ReleaseFragmentFile> = [
+  {name: "11.added.md", body: "- **New flag (#11).**\n"},
+  {
+    name: "12.breaking.md",
+    body:
+      "- **`--foo` is removed (#12).**\n\n  Migration: rename the flag.\n\n  ```sh\n  harn run --foo x   # before\n  harn run --bar x   # after\n  ```\n",
+  },
+]
+
+const MIGRATION_EXPECTED =
+  "# Changelog\n\nAll notable changes to this project are documented here.\n\n## v1.2.4\n\n### Breaking\n\n- **`--foo` is removed (#12).**\n\n  Migration: rename the flag.\n\n  ```sh\n  harn run --foo x   # before\n  harn run --bar x   # after\n  ```\n\n### Added\n\n- **New flag (#11).**\n\n## v1.2.3\n\n### Fixed\n\n- **Older fix (#10).** Kept as published.\n"
+
+@test
+pipeline test_fold_keeps_a_breaking_migration_snippet_first_and_verbatim() {
+  const fold = fold_release_changelog(BASIC_CHANGELOG, MIGRATION_FILES, "1.2.4")
+  assert_eq(fold.findings, [])
+  assert(fold.success)
+  assert_eq(fold.text, MIGRATION_EXPECTED)
+}
 
 fn write_fixture(fs: HarnessFs, root: string, changelog: string, files: list<ReleaseFragmentFile>) {
   fs.mkdir(path_join(root, "changelog.d"))

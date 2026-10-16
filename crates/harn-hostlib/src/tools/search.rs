@@ -7,7 +7,6 @@
 
 use std::collections::VecDeque;
 use std::path::PathBuf;
-use std::sync::Arc;
 
 use globset::{Glob, GlobSet, GlobSetBuilder};
 use grep_matcher::Matcher;
@@ -188,7 +187,7 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     let matches: Vec<VmValue> = all_rows.into_iter().map(row_to_value).collect();
 
     Ok(build_dict([
-        ("matches", VmValue::List(Arc::new(matches))),
+        ("matches", VmValue::list(matches)),
         ("files_searched", VmValue::Int(files_searched as i64)),
         ("truncated", VmValue::Bool(truncated)),
     ]))
@@ -475,14 +474,14 @@ fn row_to_value(rwp: RowWithPath) -> VmValue {
         ("line", VmValue::Int(line as i64)),
         ("column", VmValue::Int(column as i64)),
         ("text", str_value(text)),
-        ("context_before", VmValue::List(Arc::new(before))),
-        ("context_after", VmValue::List(Arc::new(after))),
+        ("context_before", VmValue::list(before)),
+        ("context_after", VmValue::list(after)),
     ])
 }
 
 #[expect(
     clippy::string_slice,
-    reason = "start/end come from floor/next_char_boundary, so they are char boundaries"
+    reason = "start/end come from floor/ceil_char_boundary, so they are char boundaries"
 )]
 fn clip_text(value: &str, max_bytes: usize, anchor_byte: Option<usize>) -> (String, bool) {
     if value.len() <= max_bytes {
@@ -491,7 +490,7 @@ fn clip_text(value: &str, max_bytes: usize, anchor_byte: Option<usize>) -> (Stri
 
     let Some(anchor_byte) = anchor_byte else {
         let keep = max_bytes.saturating_sub(CLIP_SUFFIX.len()).max(1);
-        let end = floor_char_boundary(value, keep);
+        let end = value.floor_char_boundary(keep);
         return (format!("{}{}", &value[..end], CLIP_SUFFIX), true);
     };
 
@@ -504,11 +503,11 @@ fn clip_text(value: &str, max_bytes: usize, anchor_byte: Option<usize>) -> (Stri
     if start.saturating_add(content_budget) > value.len() {
         start = value.len().saturating_sub(content_budget);
     }
-    start = floor_char_boundary(value, start);
+    start = value.floor_char_boundary(start);
     let mut end = (start + content_budget).min(value.len());
-    end = floor_char_boundary(value, end);
+    end = value.floor_char_boundary(end);
     if end <= start {
-        end = next_char_boundary(value, start);
+        end = value.ceil_char_boundary(start + 1);
     }
 
     let mut out = String::with_capacity(max_bytes);
@@ -520,27 +519,4 @@ fn clip_text(value: &str, max_bytes: usize, anchor_byte: Option<usize>) -> (Stri
         out.push_str(CLIP_SUFFIX);
     }
     (out, true)
-}
-
-fn floor_char_boundary(value: &str, mut index: usize) -> usize {
-    index = index.min(value.len());
-    while index > 0 && !value.is_char_boundary(index) {
-        index -= 1;
-    }
-    index
-}
-
-#[expect(
-    clippy::string_slice,
-    reason = "the only caller passes an index already floored to a char boundary"
-)]
-fn next_char_boundary(value: &str, index: usize) -> usize {
-    if index >= value.len() {
-        return value.len();
-    }
-    value[index..]
-        .chars()
-        .next()
-        .map(|ch| index + ch.len_utf8())
-        .unwrap_or(value.len())
 }

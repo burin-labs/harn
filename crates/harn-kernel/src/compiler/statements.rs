@@ -1,4 +1,4 @@
-use harn_parser::{Node, SNode, TypeExpr};
+use harn_parser::{BinaryOperator, Node, SNode, TypeExpr};
 
 use crate::chunk::Op;
 
@@ -11,16 +11,16 @@ impl Compiler {
         &mut self,
         target: &SNode,
         value: &SNode,
-        op: &Option<String>,
+        op: &Option<BinaryOperator>,
     ) -> Result<(), CompileError> {
         if let Node::Identifier(name) = &target.node {
             if let Some(op) = op {
                 let left_type = self.infer_expr_type(target);
                 let right_type = self.infer_expr_type(value);
                 let result_type =
-                    self.infer_binary_result_type(op, left_type.as_ref(), right_type.as_ref());
+                    self.infer_binary_result_type(*op, left_type.as_ref(), right_type.as_ref());
                 // `x += list` — in-place concat (see try_emit_inplace_concat_assign).
-                if op == "+"
+                if matches!(op, BinaryOperator::Add)
                     && self.try_emit_inplace_concat_assign(name, value, left_type.as_ref())?
                 {
                     self.assign_type_fact(name, result_type);
@@ -32,13 +32,13 @@ impl Compiler {
                     .options
                     .optimizations_enabled()
                     .then(|| {
-                        self.specialized_binary_op(op, left_type.as_ref(), right_type.as_ref())
+                        self.specialized_binary_op(*op, left_type.as_ref(), right_type.as_ref())
                     })
                     .flatten()
                 {
                     self.chunk.emit(typed_op, self.line);
                 } else {
-                    self.emit_compound_op(op)?;
+                    self.emit_compound_op(*op)?;
                 }
                 self.emit_set_binding(name);
                 self.assign_type_fact(name, result_type);
@@ -52,7 +52,7 @@ impl Compiler {
                     right,
                 } = &value.node
                 {
-                    if bop == "+" {
+                    if matches!(bop, BinaryOperator::Add) {
                         if let Node::Identifier(lname) = &left.node {
                             if lname == name {
                                 let left_type = self.infer_expr_type(target);
@@ -60,33 +60,6 @@ impl Compiler {
                                 if self.try_emit_inplace_concat_assign(
                                     name,
                                     right,
-                                    left_type.as_ref(),
-                                )? {
-                                    self.assign_type_fact(name, value_type);
-                                    return Ok(());
-                                }
-                            }
-                        }
-                    }
-                }
-                // `x = x.appending(v)` is the method spelling of the same list
-                // accumulator append. When the receiver is statically known to
-                // be a list and the target is a local slot, lower it through
-                // the same fused concat opcode as `x = x + [v]`.
-                if let Node::MethodCall {
-                    object,
-                    method,
-                    args,
-                } = &value.node
-                {
-                    if method == "appending" && args.len() == 1 {
-                        if let Node::Identifier(oname) = &object.node {
-                            if oname == name {
-                                let left_type = self.infer_expr_type(target);
-                                let value_type = self.infer_expr_type(value);
-                                if self.try_emit_list_append_assign(
-                                    name,
-                                    &args[0],
                                     left_type.as_ref(),
                                 )? {
                                     self.assign_type_fact(name, value_type);
@@ -109,7 +82,7 @@ impl Compiler {
                 if let Some(op) = op {
                     self.compile_node(target)?;
                     self.compile_node(value)?;
-                    self.emit_compound_op(op)?;
+                    self.emit_compound_op(*op)?;
                 } else {
                     self.compile_node(value)?;
                 }
@@ -144,7 +117,7 @@ impl Compiler {
                     if let Some(op) = op {
                         self.compile_node(target)?;
                         self.compile_node(value)?;
-                        self.emit_compound_op(op)?;
+                        self.emit_compound_op(*op)?;
                     } else {
                         self.compile_node(value)?;
                     }
@@ -175,7 +148,7 @@ impl Compiler {
 
     /// True when re-evaluating `index` cannot run user code or change between
     /// the read and write halves of a compound assignment.
-    fn is_effect_free_index(index: &SNode) -> bool {
+    pub(super) fn is_effect_free_index(index: &SNode) -> bool {
         matches!(
             index.node,
             Node::Identifier(_)
@@ -215,7 +188,7 @@ impl Compiler {
         &mut self,
         target: &SNode,
         value: &SNode,
-        op: &Option<String>,
+        op: &Option<BinaryOperator>,
     ) -> Result<(), CompileError> {
         // `Index` carries a full `SNode`; the size gap to `Prop(String)` is
         // inherent to this short-lived path-desugaring helper, not worth an
@@ -410,7 +383,7 @@ impl Compiler {
         Ok(true)
     }
 
-    /// Emit the fused local concat form for `x = x.appending(item)`.
+    /// Emit the fused local concat form for `x.push(item)`.
     ///
     /// This deliberately stays narrower than the runtime method: it only fires
     /// for a local receiver that is statically list-like and for exactly one
@@ -418,17 +391,13 @@ impl Compiler {
     /// original slot is still live, builds `[item]`, then lets
     /// `ConcatAssignLocal` perform the same immutable list append as
     /// `x = x + [item]`, including alias-safe fallback cloning.
-    fn try_emit_list_append_assign(
+    pub(super) fn try_emit_list_append_assign(
         &mut self,
         name: &str,
         item: &SNode,
         left_type: Option<&TypeExpr>,
     ) -> Result<bool, CompileError> {
-        fn is_list(t: Option<&TypeExpr>) -> bool {
-            matches!(t, Some(TypeExpr::List(_)))
-                || matches!(t, Some(TypeExpr::Named(n)) if n == "list")
-        }
-        if !self.options.optimizations_enabled() || !is_list(left_type) {
+        if !self.options.optimizations_enabled() || !Self::is_list_type(left_type) {
             return Ok(false);
         }
         if matches!(item.node, Node::Spread(_)) {
@@ -562,22 +531,14 @@ impl Compiler {
         value: &Option<Box<SNode>>,
     ) -> Result<(), CompileError> {
         if self.has_pending_finally() {
-            // The operand must finish before a return begins. Protect its
-            // evaluation so a dynamic throw still takes the throw-unwind path.
+            // The operand must finish before a return begins. A throw from it
+            // still reaches the pending cleanups' handlers.
             if let Some(val) = value {
-                self.compile_transfer_operand(val)?;
+                self.compile_node(val)?;
             } else {
                 self.chunk.emit(Op::Nil, self.line);
             }
-            self.temp_counter += 1;
-            let temp_name = format!("__return_val_{}__", self.temp_counter);
-            self.emit_define_binding(&temp_name, true);
-            // Innermost finally first; skip catch barriers since
-            // return transfers past local handlers. Each finally is masked
-            // while it runs, so a `return` inside a finally doesn't re-run it.
-            self.run_pending_finallys_for_transfer(0)?;
-            self.emit_get_binding(&temp_name);
-            self.chunk.emit(Op::Return, self.line);
+            self.emit_return_through_cleanups()?;
         } else {
             // No pending finally — use tail-call optimization when possible.
             if let Some(val) = value {
@@ -604,7 +565,7 @@ impl Compiler {
                         self.chunk
                             .emit_u8(Op::TailCall, args.len() as u8, self.line);
                     } else if let Node::BinaryOp { op, left, right } = &val.node {
-                        if op == "|>" && !contains_pipe_placeholder(right) {
+                        if matches!(op, BinaryOperator::Pipe) && !contains_pipe_placeholder(right) {
                             self.compile_node(left)?;
                             self.compile_node(right)?;
                             self.chunk.emit(Op::Swap, self.line);
@@ -626,6 +587,42 @@ impl Compiler {
         Ok(())
     }
 
+    /// Return the value on top of the stack after running every pending
+    /// cleanup, innermost first. Each cleanup is masked while it runs, so a
+    /// `return` inside a finally doesn't re-run it. This is the one lowering
+    /// for return-like exits; `?` reaches it through
+    /// [`Self::compile_try_operator_cleanup`].
+    fn emit_return_through_cleanups(&mut self) -> Result<(), CompileError> {
+        self.temp_counter += 1;
+        let temp_name = format!("__return_val_{}__", self.temp_counter);
+        self.emit_define_binding(&temp_name, true);
+        self.run_pending_finallys_for_transfer(0, None)?;
+        self.emit_get_binding(&temp_name);
+        self.chunk.emit(Op::Return, self.line);
+        Ok(())
+    }
+
+    /// Route the early return of `?` through pending cleanups. `TryUnwrap`
+    /// returns an `Err` from the frame at run time, past the compiler's
+    /// return lowering, so with cleanup pending the `Err` branch is lowered
+    /// here as an ordinary return and `TryUnwrap` only ever sees the rest.
+    /// Expects the operand on the stack and leaves it there on fall-through.
+    pub(super) fn compile_try_operator_cleanup(&mut self) -> Result<(), CompileError> {
+        if !self.has_pending_finally() {
+            return Ok(());
+        }
+        let enum_idx = self.string_constant("Result");
+        let variant_idx = self.string_constant("Err");
+        self.chunk
+            .emit_u16_operands(Op::MatchEnum, &[enum_idx, variant_idx], self.line);
+        let unwrap_jump = self.chunk.emit_jump(Op::JumpIfFalse, self.line);
+        self.chunk.emit(Op::Pop, self.line);
+        self.emit_return_through_cleanups()?;
+        self.chunk.patch_jump(unwrap_jump);
+        self.chunk.emit(Op::Pop, self.line);
+        Ok(())
+    }
+
     pub(super) fn compile_cost_route(
         &mut self,
         options: &[(String, SNode)],
@@ -642,7 +639,7 @@ impl Compiler {
         self.chunk
             .emit_u16(Op::BuildDict, options.len() as u16, self.line);
 
-        self.compile_closure(&[], body)?;
+        self.compile_closure(&[], body, self.declared_throw)?;
         self.chunk.emit_u8(Op::Call, 2, self.line);
         Ok(())
     }
@@ -660,10 +657,7 @@ impl Compiler {
         let handler_depth = ctx.handler_depth;
         let has_iterator = ctx.has_iterator;
         let scope_depth = ctx.scope_depth;
-        for _ in handler_depth..self.handler_depth {
-            self.chunk.emit(Op::PopHandler, self.line);
-        }
-        self.run_pending_finallys_for_transfer(finally_depth)?;
+        self.run_pending_finallys_for_transfer(finally_depth, Some(handler_depth))?;
         self.emit_scope_unwind_to(scope_depth);
         if has_iterator {
             self.chunk.emit(Op::PopIterator, self.line);
@@ -689,10 +683,7 @@ impl Compiler {
         let handler_depth = ctx.handler_depth;
         let loop_start = ctx.start_offset;
         let scope_depth = ctx.scope_depth;
-        for _ in handler_depth..self.handler_depth {
-            self.chunk.emit(Op::PopHandler, self.line);
-        }
-        self.run_pending_finallys_for_transfer(finally_depth)?;
+        self.run_pending_finallys_for_transfer(finally_depth, Some(handler_depth))?;
         self.emit_scope_unwind_to(scope_depth);
         self.chunk.emit_u16(Op::Jump, loop_start as u16, self.line);
         Ok(())

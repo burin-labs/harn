@@ -68,7 +68,7 @@ A star marks the short list Harn names first in setup messages and pickers. The 
 
 | Provider | Endpoint style | Recommended selector | Tool mode | Native tools | Text tools | Structured output | Reasoning knobs | Cache | Batch | Serving tiers | Usage confidence | Empirical |
 |---|---|---|---|---:|---:|---|---|---:|---|---|---|---|
-| `Anthropic` | Anthropic Messages API | `haiku` | `native` | yes | yes | `native` / `native_json` | `enabled` | yes | Yes (50%) | `fast:premium` | `high` | `not_recorded` |
+| `Anthropic` | Anthropic Messages API | `haiku` | `native` | yes | yes | `native` / `native_json` | `adaptive,effort,reasoning_effort` | yes | Yes (50%) | `fast:premium` | `high` | `not_recorded` |
 | `Atlas` | OpenAI-compatible chat completions | `atlas` | `text` | no | yes | `none` / `none` | none | no | No | none | `provider_default` | `not_recorded` |
 | `Azure Openai` | OpenAI-compatible chat completions | `azure_openai:gpt-*` | `native` | yes | yes | `none` / `native_json` | none | no | Yes (50%) | none | `provider_default` | `not_recorded` |
 | `Baseten` | OpenAI-compatible chat completions | `baseten:baseten/deepseek-ai/DeepSeek-V4-Flash-0731` | `native` | yes | yes | `native` / `native_json` | `effort,reasoning_effort` | yes | No | none | `high` | `not_recorded` |
@@ -79,7 +79,7 @@ A star marks the short list Harn names first in setup messages and pickers. The 
 | `Dashscope` | OpenAI-compatible chat completions | `dashscope:dashscope/qwen3-coder-next` | `native` | yes | yes | `native` / `delimited` | `disable_directive:/no_think,enabled` | yes | No | none | `high` | `not_recorded` |
 | `Deepinfra` | OpenAI-compatible chat completions | `deepinfra:deepinfra/openai/gpt-oss-120b` | `text` | no | yes | `native` / `native_json` | `effort,reasoning_effort` | no | No | none | `high` | `not_recorded` |
 | `DeepSeek` | OpenAI-compatible chat completions | `deepseek:deepseek-flash` | `native` | yes | yes | `native` / `native_json` | `effort,enabled,reasoning_effort` | yes | No | none | `medium` | `not_recorded` |
-| `Fireworks` | OpenAI-compatible chat completions | `fireworks:accounts/fireworks/models/gpt-oss-120b` | `text` | no | yes | `none` / `native_json` | `effort,reasoning_effort` | yes | Yes (50%) | none | `high` | `not_recorded` |
+| `Fireworks` | OpenAI-compatible chat completions | `fireworks:accounts/fireworks/models/gpt-oss-120b` | `native` | yes | yes | `none` / `native_json` | `effort,reasoning_effort` | yes | Yes (50%) | none | `high` | `not_recorded` |
 | `Flexai` | OpenAI-compatible chat completions | `flexai` | `text` | no | yes | `none` / `none` | none | no | No | none | `provider_default` | `not_recorded` |
 | `Friendli` | OpenAI-compatible chat completions | `friendli` | `text` | no | yes | `none` / `none` | none | no | No | none | `provider_default` | `not_recorded` |
 | `Gemini API` | Gemini generateContent | `gemini:gemini-3.5-flash-lite` | `native` | yes | yes | `native` / `native_json` | `adaptive,effort,enabled,reasoning_effort` | yes | Yes (50%) | `flex:discounted`, `priority:premium` | `medium` | `not_recorded` |
@@ -97,16 +97,16 @@ A star marks the short list Harn names first in setup messages and pickers. The 
 | `MLX OpenAI-compatible server` | OpenAI-compatible MLX server | `mlx-qwen3.6` | `native` | yes | yes | `native` / `delimited` | `disable_directive:/no_think,enabled` | no | No | none | `medium` | `not_recorded` |
 | `Moonshot` | OpenAI-compatible chat completions | `moonshot:moonshot/kimi-k2.6` | `native` | yes | yes | `native` / `native_json` | `enabled` | yes | No | none | `high` | `not_recorded` |
 | `Nebius` | OpenAI-compatible chat completions | `nebius` | `text` | no | yes | `none` / `none` | none | no | No | none | `provider_default` | `not_recorded` |
-| `Nvidia` | OpenAI-compatible chat completions | `nvidia:nvidia/kimi-k2.6` | `native` | yes | yes | `native` / `native_json` | `enabled` | yes | No | none | `high` | `not_recorded` |
+| `Nvidia` | OpenAI-compatible chat completions | `nvidia:nvidia/kimi-k3` | `native` | yes | yes | `native` / `native_json` | none | no | No | none | `provider_default` | `not_recorded` |
 | `Ollama` | Ollama native chat API | `devstral-small-2` | `text` | no | yes | `format_kw` / `delimited` | none | no | No | none | `high` | `not_recorded` |
 | `OpenAI` | OpenAI chat completions / Responses-compatible routes | `openai:gpt-5.4-mini` | `native` | yes | yes | `native` / `native_json` | `effort,reasoning_effort,reasoning_none` | yes | Yes (50%) | `fast:premium`, `flex:discounted` | `high` | `not_recorded` |
-| `OpenRouter` | OpenAI-compatible chat completions | `openrouter:google/gemini-2.5-flash` | `native` | yes | yes | `native` / `native_json` | `effort,enabled,reasoning_effort` | yes | No | none | `high` | `not_recorded` |
+| `OpenRouter` | OpenAI-compatible chat completions | `openrouter:google/gemini-3.5-flash-lite` | `native` | yes | yes | `native` / `native_json` | `adaptive,effort,enabled,reasoning_effort` | yes | No | none | `high` | `not_recorded` |
 | `Parasail` | OpenAI-compatible chat completions | `parasail` | `text` | no | yes | `none` / `none` | none | no | Yes | none | `provider_default` | `not_recorded` |
 | `Qianfan` | OpenAI-compatible chat completions | `qianfan` | `text` | no | yes | `none` / `none` | none | no | No | none | `provider_default` | `not_recorded` |
 | `Sambanova` | OpenAI-compatible chat completions | `sambanova:sambanova/gpt-oss-120b` | `text` | no | yes | `native` / `native_json` | `effort,reasoning_effort` | no | No | none | `high` | `not_recorded` |
 | `Siliconflow` | OpenAI-compatible chat completions | `siliconflow` | `text` | no | yes | `none` / `none` | none | no | No | none | `provider_default` | `not_recorded` |
 | `Tgi` | OpenAI-compatible chat completions | `tgi` | `text` | no | yes | `none` / `none` | none | no | No | none | `local_zero_cost` | `not_recorded` |
-| `Together` | OpenAI-compatible chat completions | `together:openai/gpt-oss-20b` | `native` | yes | yes | `native` / `native_json` | `effort,reasoning_effort` | no | Yes (50%) | none | `high` | `not_recorded` |
+| `Together` | OpenAI-compatible chat completions | `together:MiniMaxAI/MiniMax-M3` | `text` | yes | yes | `native` / `native_json` | `enabled` | yes | Yes (50%) | none | `high` | `not_recorded` |
 | `TypeSafe` | TypeSafe System One decisions | `typesafe` | `text` | no | yes | `none` / `none` | none | no | No | none | `provider_default` | `not_recorded` |
 | `Vercel AI Gateway` | OpenAI-compatible chat completions | `vercel_ai_gateway:vercel/openai/gpt-5.4-nano` | `native` | yes | yes | `native` / `native_json` | `effort,reasoning_effort,reasoning_none` | yes | No | none | `high` | `not_recorded` |
 | `Vertex` | Gemini generateContent | `vertex:vertex/gemini-2.5-flash` | `native` | yes | yes | `none` / `native_json` | none | no | No | none | `provider_default` | `not_recorded` |
@@ -120,7 +120,7 @@ A star marks the short list Harn names first in setup messages and pickers. The 
 ### Anthropic
 
 - catalog provider: `anthropic`
-- recommended route: `haiku` (`claude-haiku-4-5-20251001`)
+- recommended route: `haiku` (`claude-haiku-5-5`)
 - endpoint style: Anthropic Messages API
 - recommended Harn options:
 
@@ -135,6 +135,7 @@ Notes:
 
 - Native tools, prompt caching, file upload, and XML-oriented scaffolding are first-class in Harn capability data.
 - Claude 4.7 rows use adaptive thinking; older Claude 4 rows use explicit thinking controls where supported.
+- Claude Haiku 5.5 (the `haiku` selector) rejects temperature, top_p, top_k and assistant prefill; pin `haiku45` for workflows that need them.
 
 Caveats:
 
@@ -465,6 +466,24 @@ structured_output_mode = "native_json"
 Caveats:
 
 - 2026-06-24 Harn agent-loop (gpt-oss-120b, zig-feat, tool grounding present): SambaNova native ended with a provider/tool-protocol failure (Harmony empty tool_calls / reasoning-channel-only class). Text/heredoc is the clean pay-per-token channel. See vLLM #22578/#44216, SGLang #8976/#10738, openai/harmony #68.
+
+### Together
+
+- catalog provider: `together`
+- recommended route: `together:MiniMaxAI/MiniMax-M3` (`MiniMaxAI/MiniMax-M3`)
+- endpoint style: OpenAI-compatible chat completions
+- recommended Harn options:
+
+```toml
+provider = "together"
+model = "MiniMaxAI/MiniMax-M3"
+tool_format = "text"
+structured_output_mode = "native_json"
+```
+
+Caveats:
+
+- Family-on-host consistency pin: Together MiniMax-M2.7 native was 1/5 fidelity in the 2026-06-24 sweep; no M3-on-Together probe yet, so inherit text rather than an optimistic native pin.
 
 ### TypeSafe
 

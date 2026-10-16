@@ -27,6 +27,22 @@ use serde::Serialize;
 use crate::tools::ToolsCapability;
 use crate::{BuiltinRegistry, HostlibCapability};
 
+#[path = "conformance/daemon.rs"]
+mod daemon;
+use daemon::DaemonProbe;
+
+#[cfg(test)]
+#[path = "conformance/progress_tests.rs"]
+mod progress_tests;
+
+#[cfg(test)]
+#[path = "conformance/report_tests.rs"]
+mod report_tests;
+
+#[cfg(all(test, unix))]
+#[path = "conformance/probe_tool_tests.rs"]
+mod probe_tool_tests;
+
 /// Written into the outside file so a read is judged by content, not by an
 /// exit code a missing tool would also produce.
 const OUTSIDE_CONTENT: &str = "harn-conformance-outside-content";
@@ -66,6 +82,24 @@ pub struct CaseReport {
 }
 
 impl ConformanceReport {
+    /// Whether the complete contract was measured and holds. Missing or
+    /// duplicated cases and a run with no conforming cases cannot pass.
+    pub fn holds(&self) -> bool {
+        self.cases.len() == ConformanceCase::ALL.len()
+            && self
+                .cases
+                .iter()
+                .zip(ConformanceCase::ALL)
+                .all(|(report, case)| report.case == case.id())
+            && self.conforming() > 0
+            && self.cases.iter().all(|case| {
+                matches!(
+                    case.verdict,
+                    Verdict::Conforms | Verdict::NotApplicable { .. }
+                )
+            })
+    }
+
     /// Cases whose verdict fails the contract.
     pub fn failing(&self) -> Vec<&CaseReport> {
         self.cases
@@ -82,6 +116,15 @@ impl ConformanceReport {
             .collect()
     }
 
+    /// Cases the enforcement table declares unconfined on this backend, with
+    /// the escape observed. Never a pass.
+    pub fn not_enforced(&self) -> Vec<&CaseReport> {
+        self.cases
+            .iter()
+            .filter(|case| matches!(case.verdict, Verdict::NotEnforced { .. }))
+            .collect()
+    }
+
     /// How many cases were measured and hold.
     pub fn conforming(&self) -> usize {
         self.cases
@@ -94,13 +137,15 @@ impl ConformanceReport {
     pub fn summary_line(&self) -> String {
         let failing: Vec<&str> = self.failing().iter().map(|case| case.case).collect();
         let not_measured = self.not_measured().len();
+        let not_enforced = self.not_enforced().len();
         let conforming = self.conforming();
         format!(
             "harn.sandbox_conformance_summary backend={} cases={} conforms={conforming} \
-             not_measured={not_measured} not_applicable={} failed={} failing={failing:?}",
+             not_measured={not_measured} not_enforced={not_enforced} not_applicable={} failed={} \
+             failing={failing:?}",
             self.backend,
             self.cases.len(),
-            self.cases.len() - conforming - not_measured - failing.len(),
+            self.cases.len() - conforming - not_measured - not_enforced - failing.len(),
             failing.len(),
         )
     }
@@ -128,12 +173,56 @@ impl CaseReport {
 /// guardian, which re-executes the current binary; an embedder whose binary
 /// does not own `main` must point the re-exec at its fixture first.
 pub fn run_conformance() -> ConformanceReport {
+    run_conformance_with_progress(|_| {})
+}
+
+/// A synchronous notification around one case's execution. A start is emitted
+/// before setup or spawning, and a finish before the next case starts, so an
+/// interrupted run still identifies its unfinished case.
+#[derive(Debug)]
+pub enum ConformanceProgress<'a> {
+    /// The case is about to execute, including its fixture setup.
+    Started {
+        /// The contract case that has not returned yet.
+        case: ConformanceCase,
+        /// Cases that have already returned a verdict.
+        completed: usize,
+        /// Cases without a verdict, including this one.
+        pending: usize,
+    },
+    /// The case returned its verdict, before another case starts.
+    Finished(&'a CaseReport),
+}
+
+impl ConformanceProgress<'_> {
+    /// One line describing the start or the completed case's verdict.
+    pub fn receipt_line(&self) -> String {
+        match self {
+            Self::Started {
+                case,
+                completed,
+                pending,
+            } => format!(
+                "harn.sandbox_conformance_start case={} completed={completed} pending={pending}",
+                case.id(),
+            ),
+            Self::Finished(report) => report.receipt_line(),
+        }
+    }
+}
+
+/// Run the same contract as [`run_conformance`], reporting progress as it
+/// happens. Callers writing buffered output must flush it in the observer.
+pub fn run_conformance_with_progress(
+    mut observer: impl FnMut(ConformanceProgress<'_>),
+) -> ConformanceReport {
     let backend = harn_vm::process_sandbox::active_backend_name().to_string();
     let enforcing = harn_vm::process_sandbox::active_backend_filesystem_available();
-    let cases = ConformanceCase::ALL
-        .iter()
-        .map(|&case| run_case(case, enforcing))
-        .collect();
+    let cases = run_cases(
+        ConformanceCase::ALL,
+        |case| run_case(case, enforcing),
+        &mut observer,
+    );
     ConformanceReport {
         backend,
         filesystem_mechanism: harn_vm::process_sandbox::active_backend_filesystem_mechanism()
@@ -141,6 +230,25 @@ pub fn run_conformance() -> ConformanceReport {
         enforcing,
         cases,
     }
+}
+
+fn run_cases(
+    cases: &[ConformanceCase],
+    mut execute: impl FnMut(ConformanceCase) -> CaseReport,
+    observer: &mut impl FnMut(ConformanceProgress<'_>),
+) -> Vec<CaseReport> {
+    let mut reports = Vec::with_capacity(cases.len());
+    for &case in cases {
+        observer(ConformanceProgress::Started {
+            case,
+            completed: reports.len(),
+            pending: cases.len() - reports.len(),
+        });
+        let report = execute(case);
+        observer(ConformanceProgress::Finished(&report));
+        reports.push(report);
+    }
+    reports
 }
 
 fn run_case(case: ConformanceCase, enforcing: bool) -> CaseReport {
@@ -152,6 +260,7 @@ fn run_case(case: ConformanceCase, enforcing: bool) -> CaseReport {
     let expectation = case.expectation(&policy);
     let expected = match expectation {
         Expectation::Observe(observation) => Some(observation),
+        Expectation::DeclaredNotEnforced => Some(Observation::Admitted),
         Expectation::NotApplicable(_) => None,
     };
     let (argv, target) = probe(case, &layout);
@@ -168,12 +277,30 @@ fn run_case(case: ConformanceCase, enforcing: bool) -> CaseReport {
         let verdict = judge(case, expectation, enforcing, Observation::Refused, &target);
         return report(None, verdict, String::new());
     }
-    if is_wrapper_case(case) {
-        if !cargo_on_path() {
-            let reason = "cargo is not installed, so no Rust build could be measured".to_string();
-            return report(None, Verdict::NotMeasured { reason }, String::new());
+    // A probe whose own tool is missing measures nothing. Spawning it would
+    // fail before any sandbox decision and read as an over-refusal.
+    if let Some(tool) = missing_probe_tool(&argv, std::env::var_os("PATH").as_deref()) {
+        let reason = format!("{tool} is not installed, so this case could not be measured");
+        return report(None, Verdict::NotMeasured { reason }, String::new());
+    }
+    let daemon = if case == ConformanceCase::RustcWrapperThatDaemonizesIsSwitchedOff {
+        match DaemonProbe::create(&layout.workspace) {
+            Ok(probe) => Some(probe),
+            Err(error) => {
+                return report(
+                    None,
+                    Verdict::ProbeBroken {
+                        reason: format!("could not create the daemon fixture: {error}"),
+                    },
+                    String::new(),
+                );
+            }
         }
-        if let Err(error) = write_wrapper_crate(case, &layout) {
+    } else {
+        None
+    };
+    if is_wrapper_case(case) {
+        if let Err(error) = write_wrapper_crate(case, &layout, daemon.as_ref()) {
             let reason = format!("could not write the wrapper crate: {error}");
             return report(None, Verdict::ProbeBroken { reason }, String::new());
         }
@@ -194,9 +321,9 @@ fn run_case(case: ConformanceCase, enforcing: bool) -> CaseReport {
             "{} decision={:?} wrapper={:?} reason={:?}",
             child.detail, decision.disposition, decision.wrapper, decision.reason
         );
-        observe_wrapper(case, &child, &target, &decision)
+        observe_wrapper(case, &child, &target, &decision, daemon.as_ref())
     } else {
-        observe(case, &child, &target)
+        observe(case, &layout, &child, &target)
     };
     let observed = match observed {
         Ok(observed) => observed,
@@ -240,7 +367,17 @@ struct Layout {
     _root: tempfile::TempDir,
     workspace: PathBuf,
     outside: PathBuf,
+    /// A root the read-only role cases grant read-only, holding a file.
+    read_only: PathBuf,
     socket_root: PathBuf,
+    /// A directory under the read-only root that the credential case puts on
+    /// the denylist. The read-only grant covers it, so only the denial can
+    /// refuse. A denial under a writable root is reported as not enforced
+    /// rather than held (harn#9028), so it cannot measure the denylist.
+    credentials: PathBuf,
+    /// A loopback listener the network cases connect to. Nonblocking, so a
+    /// connection that never came reads as `WouldBlock` rather than a hang.
+    listener: std::net::TcpListener,
     /// A directory in the host's shared temp dir, holding a file another
     /// process left there. It is the one part of the layout outside `HOME`.
     shared_temp: tempfile::TempDir,
@@ -264,11 +401,17 @@ impl Layout {
         };
         let workspace = base.join("workspace");
         let outside = base.join("outside");
+        let read_only = base.join("read-only");
         let socket_root = base.join("sockets");
-        for dir in [&workspace, &outside, &socket_root] {
+        let credentials = read_only.join(".harn-conformance-credentials");
+        for dir in [&workspace, &outside, &read_only, &socket_root, &credentials] {
             std::fs::create_dir_all(dir)?;
         }
         std::fs::write(outside.join("secret.txt"), OUTSIDE_CONTENT)?;
+        std::fs::write(read_only.join("secret.txt"), OUTSIDE_CONTENT)?;
+        std::fs::write(credentials.join("secret.txt"), OUTSIDE_CONTENT)?;
+        let listener = std::net::TcpListener::bind(("127.0.0.1", 0))?;
+        listener.set_nonblocking(true)?;
         let shared_temp = tempfile::Builder::new()
             .prefix("harn-sandbox-conformance-sibling-")
             .tempdir()?;
@@ -277,15 +420,19 @@ impl Layout {
             _root: root,
             workspace,
             outside,
+            read_only,
             socket_root,
+            credentials,
+            listener,
             shared_temp,
         })
     }
 }
 
 /// The policy a case runs under. Every case shares the worktree profile and a
-/// process-exec ceiling; the socket cases add their roots, and one adds the
-/// network grant that must not narrow them.
+/// process-exec ceiling; the socket cases add their roots, one adds the
+/// network grant that must not narrow them, the credential case denies its
+/// directory, and the network liveness case raises the ceiling.
 fn case_policy(case: ConformanceCase, layout: &Layout) -> CapabilityPolicy {
     let mut policy = CapabilityPolicy {
         sandbox_profile: SandboxProfile::Worktree,
@@ -309,9 +456,49 @@ fn case_policy(case: ConformanceCase, layout: &Layout) -> CapabilityPolicy {
                 ..ProcessSandboxPolicy::default()
             });
         }
+        ConformanceCase::DeniedCredentialReadRefused => {
+            policy.read_only_roots = vec![layout.read_only.display().to_string()];
+            policy.process_sandbox = Box::new(ProcessSandboxPolicy {
+                read_deny_roots: vec![layout.credentials.display().to_string()],
+                ..ProcessSandboxPolicy::default()
+            });
+        }
+        ConformanceCase::NetworkConnectAdmitted => {
+            policy.side_effect_level = Some("network".to_string());
+        }
+        ConformanceCase::ReadOnlyRoleWorkspaceWriteRefused
+        | ConformanceCase::ReadOnlyRoleReadOnlyRootReadAdmitted => {
+            read_only_role(&mut policy, layout);
+        }
+        ConformanceCase::ChildWriteGrantWorkspaceWriteAdmitted
+        | ConformanceCase::ChildWriteGrantTempWriteAdmitted
+        | ConformanceCase::ChildWriteGrantReadOnlyRootWriteRefused
+        | ConformanceCase::ChildWriteGrantOutsideWriteRefused
+        | ConformanceCase::ChildWriteGrantReadOnlyRootReadAdmitted => {
+            read_only_role(&mut policy, layout);
+            policy.process_sandbox.allow_child_workspace_write = true;
+        }
         _ => {}
     }
     policy
+}
+
+/// The capability policy of a role whose tools run commands and edit nothing:
+/// the `workspace` capability reads only, so its children write nowhere
+/// unless the process sandbox grants it. One root is granted read-only.
+fn read_only_role(policy: &mut CapabilityPolicy, layout: &Layout) {
+    policy.capabilities = BTreeMap::from([
+        ("process".to_string(), vec!["exec".to_string()]),
+        (
+            "workspace".to_string(),
+            vec![
+                "read_text".to_string(),
+                "list".to_string(),
+                "exists".to_string(),
+            ],
+        ),
+    ]);
+    policy.read_only_roots = vec![layout.read_only.display().to_string()];
 }
 
 /// The child's argv, and the path it touches (or what it reads, for the
@@ -319,9 +506,23 @@ fn case_policy(case: ConformanceCase, layout: &Layout) -> CapabilityPolicy {
 fn probe(case: ConformanceCase, layout: &Layout) -> (Vec<String>, String) {
     let owned = |argv: &[&str]| argv.iter().map(|arg| arg.to_string()).collect::<Vec<_>>();
     match case {
-        ConformanceCase::WorkspaceWriteAdmitted => {
+        ConformanceCase::WorkspaceWriteAdmitted
+        | ConformanceCase::ReadOnlyRoleWorkspaceWriteRefused
+        | ConformanceCase::ChildWriteGrantWorkspaceWriteAdmitted => {
             let target = layout.workspace.join("probe.txt");
             (write_argv(&target), target.display().to_string())
+        }
+        ConformanceCase::ChildWriteGrantReadOnlyRootWriteRefused => {
+            let target = layout.read_only.join("probe.txt");
+            (write_argv(&target), target.display().to_string())
+        }
+        ConformanceCase::ChildWriteGrantOutsideWriteRefused => {
+            let target = layout.outside.join("grant-probe.txt");
+            (write_argv(&target), target.display().to_string())
+        }
+        ConformanceCase::ReadOnlyRoleReadOnlyRootReadAdmitted
+        | ConformanceCase::ChildWriteGrantReadOnlyRootReadAdmitted => {
+            read_probe(&layout.read_only.join("secret.txt"))
         }
         ConformanceCase::OutsideWriteRefused | ConformanceCase::GuardianOutsideWriteRefused => {
             let target = layout.outside.join("probe.txt");
@@ -331,14 +532,37 @@ fn probe(case: ConformanceCase, layout: &Layout) -> (Vec<String>, String) {
         ConformanceCase::SiblingTempReadRefused => {
             read_probe(&layout.shared_temp.path().join("secret.txt"))
         }
+        ConformanceCase::DeniedCredentialReadRefused => {
+            read_probe(&layout.credentials.join("secret.txt"))
+        }
+        ConformanceCase::NetworkConnectRefused | ConformanceCase::NetworkConnectAdmitted => {
+            match layout.listener.local_addr() {
+                Ok(address) => (connect_argv(address), address.to_string()),
+                Err(error) => (Vec::new(), format!("no listener address: {error}")),
+            }
+        }
         ConformanceCase::AtomicReplaceAdmitted => {
-            // JavaScript for Automation reaches Foundation on every Mac; the
-            // atomic option (1) is the call SwiftPM's build-file writes make.
+            // Apple platform executables ignore the startup directory-suffix
+            // environment, unlike ordinary native tools. Initialize that same
+            // injected binding explicitly in this platform-owned probe, then
+            // verify Foundation resolves it to the private workspace temp root.
             let target = layout.workspace.join("atomic.txt");
             let script = format!(
                 "ObjC.import('Foundation'); \
-                 $.NSString.alloc.initWithUTF8String('probe').dataUsingEncoding(4)\
-                 .writeToURLOptionsError($.NSURL.fileURLWithPath({:?}), 1, null)",
+                 ObjC.bindFunction('_set_user_dir_suffix', ['bool', ['char *']]); \
+                 var env = $.NSProcessInfo.processInfo.environment; \
+                 var suffix = ObjC.unwrap(env.objectForKey('DIRHELPER_USER_DIR_SUFFIX')); \
+                 if (!suffix || !$._set_user_dir_suffix(suffix)) throw Error('missing private temp binding'); \
+                 var actual = $.NSURL.fileURLWithPath($.NSTemporaryDirectory()).URLByResolvingSymlinksInPath.path; \
+                 var expected = $.NSURL.fileURLWithPath(env.objectForKey('TMPDIR')).URLByResolvingSymlinksInPath.path; \
+                 if (ObjC.unwrap(actual) !== ObjC.unwrap(expected)) throw Error('native temp escaped workspace'); \
+                 var error = $(); \
+                 var ok = $.NSString.alloc.initWithUTF8String('probe').dataUsingEncoding(4)\
+                 .writeToURLOptionsError($.NSURL.fileURLWithPath({:?}), 1, error); \
+                 if (!ok) throw Error(JSON.stringify({{ \
+                 message:ObjC.unwrap(error.localizedDescription), \
+                 code:Number(error.code), domain:ObjC.unwrap(error.domain), \
+                 temporary:ObjC.unwrap($.NSTemporaryDirectory()) }})); ok",
                 target.display().to_string()
             );
             (
@@ -346,7 +570,8 @@ fn probe(case: ConformanceCase, layout: &Layout) -> (Vec<String>, String) {
                 target.display().to_string(),
             )
         }
-        ConformanceCase::SessionTempWriteAdmitted => {
+        ConformanceCase::SessionTempWriteAdmitted
+        | ConformanceCase::ChildWriteGrantTempWriteAdmitted => {
             // The child names the file through its own TMPDIR; the target is
             // where the session temp dir must put it.
             let target =
@@ -443,6 +668,30 @@ fn bind_argv(target: &Path) -> Vec<String> {
          bind(S, sockaddr_un($ARGV[0])) or die \"bind: $!\";"
             .into(),
         target.display().to_string(),
+    ]
+}
+
+fn connect_argv(address: std::net::SocketAddr) -> Vec<String> {
+    if cfg!(windows) {
+        return vec![
+            "powershell".into(),
+            "-NoProfile".into(),
+            "-NonInteractive".into(),
+            "-Command".into(),
+            format!(
+                "$c = New-Object Net.Sockets.TcpClient; $c.Connect('{}', {}); $c.Close()",
+                address.ip(),
+                address.port()
+            ),
+        ];
+    }
+    vec![
+        "perl".into(),
+        "-MIO::Socket::INET".into(),
+        "-e".into(),
+        "IO::Socket::INET->new(PeerAddr => $ARGV[0], Proto => 'tcp') or die \"connect: $!\";"
+            .into(),
+        address.to_string(),
     ]
 }
 
@@ -543,7 +792,12 @@ enum Unmeasured {
 
 /// Read what the child did from its effect rather than its exit code where
 /// the effect is observable.
-fn observe(case: ConformanceCase, child: &Child, target: &str) -> Result<Observed, Unmeasured> {
+fn observe(
+    case: ConformanceCase,
+    layout: &Layout,
+    child: &Child,
+    target: &str,
+) -> Result<Observed, Unmeasured> {
     if child.spawn_refused {
         return Ok(Observed::Effect(Observation::SpawnRefused));
     }
@@ -555,8 +809,25 @@ fn observe(case: ConformanceCase, child: &Child, target: &str) -> Result<Observe
         })
     };
     match case {
-        ConformanceCase::OutsideReadRefused | ConformanceCase::SiblingTempReadRefused => {
+        ConformanceCase::OutsideReadRefused
+        | ConformanceCase::SiblingTempReadRefused
+        | ConformanceCase::DeniedCredentialReadRefused
+        | ConformanceCase::ReadOnlyRoleReadOnlyRootReadAdmitted
+        | ConformanceCase::ChildWriteGrantReadOnlyRootReadAdmitted => {
             Ok(took_effect(child.stdout.contains(OUTSIDE_CONTENT)))
+        }
+        // The child has exited, so a connection it made is already queued on
+        // the listener; nothing queued means it never connected.
+        ConformanceCase::NetworkConnectRefused | ConformanceCase::NetworkConnectAdmitted => {
+            match layout.listener.accept() {
+                Ok(_) => Ok(took_effect(true)),
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    Ok(took_effect(false))
+                }
+                Err(error) => Err(Unmeasured::Broken(format!(
+                    "could not read the loopback listener: {error}"
+                ))),
+            }
         }
         ConformanceCase::UndeclaredEnvironmentNameWithheld
         | ConformanceCase::GuardianUndeclaredEnvironmentNameWithheld => {
@@ -623,30 +894,20 @@ fn is_wrapper_case(case: ConformanceCase) -> bool {
     )
 }
 
-/// The detached process the daemonizing wrapper leaves, told apart from
-/// anything else on the host by an argument no one else passes.
-const DAEMON_MARKER_SECONDS: &str = "30713";
-
-/// Whether a process the daemonizing wrapper left is still running.
-fn daemon_marker_alive() -> bool {
-    use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
-    let mut system = System::new();
-    system.refresh_processes_specifics(
-        ProcessesToUpdate::All,
-        true,
-        ProcessRefreshKind::nothing().with_cmd(UpdateKind::Always),
-    );
-    system.processes().values().any(|process| {
-        let cmd = process.cmd();
-        cmd.first()
-            .is_some_and(|arg| arg.to_string_lossy().ends_with("sleep"))
-            && cmd.iter().any(|arg| arg == DAEMON_MARKER_SECONDS)
-    })
-}
-
-fn cargo_on_path() -> bool {
-    std::env::var_os("PATH")
-        .is_some_and(|path| std::env::split_paths(&path).any(|dir| dir.join("cargo").is_file()))
+/// The probe's program when it names a tool `path` does not provide. Windows
+/// probes run shell builtins and system binaries resolved with extensions, so
+/// only Unix probes are checked.
+fn missing_probe_tool(argv: &[String], path: Option<&std::ffi::OsStr>) -> Option<String> {
+    if cfg!(windows) {
+        return None;
+    }
+    let program = argv.first()?;
+    let found = if Path::new(program).is_absolute() {
+        Path::new(program).is_file()
+    } else {
+        path.is_some_and(|path| std::env::split_paths(path).any(|dir| dir.join(program).is_file()))
+    };
+    (!found).then(|| program.clone())
 }
 
 /// Where the wrapper logs. Outside every writable root for the wrapper that
@@ -666,7 +927,11 @@ fn wrapper_log(case: ConformanceCase, layout: &Layout) -> PathBuf {
 /// wrapper that logs each call and then runs the compiler. It needs no
 /// network and no daemon, so whether it runs is decided by the filesystem
 /// alone.
-fn write_wrapper_crate(case: ConformanceCase, layout: &Layout) -> std::io::Result<()> {
+fn write_wrapper_crate(
+    case: ConformanceCase,
+    layout: &Layout,
+    daemon: Option<&DaemonProbe>,
+) -> std::io::Result<()> {
     let workspace = &layout.workspace;
     std::fs::create_dir_all(workspace.join("src"))?;
     std::fs::create_dir_all(workspace.join(".cargo"))?;
@@ -682,16 +947,12 @@ fn write_wrapper_crate(case: ConformanceCase, layout: &Layout) -> std::io::Resul
     // subshell that exits at once, with its descriptors closed, which is how
     // a helper detaches. One that kept the build's output pipes open would
     // hang every build it served, which is a different defect.
-    let detach = if case == ConformanceCase::RustcWrapperThatDaemonizesIsSwitchedOff {
-        format!("( sleep {DAEMON_MARKER_SECONDS} </dev/null >/dev/null 2>&1 & )\n")
-    } else {
-        String::new()
-    };
+    let detach = daemon.map(DaemonProbe::detach_command).unwrap_or_default();
     std::fs::write(
         &wrapper,
         format!(
-            "#!/bin/sh\n{detach}echo \"$*\" >> '{}' || exit 1\nexec \"$@\"\n",
-            log.display()
+            "#!/bin/sh\n{detach}echo \"$*\" >> {} || exit 1\nexec \"$@\"\n",
+            daemon::shell_path(&log)
         ),
     )?;
     #[cfg(unix)]
@@ -713,6 +974,7 @@ fn observe_wrapper(
     child: &Child,
     log: &str,
     decision: &harn_vm::process_sandbox::rustc_wrapper::RustcWrapperDecision,
+    daemon: Option<&DaemonProbe>,
 ) -> Result<Observed, Unmeasured> {
     use harn_vm::process_sandbox::rustc_wrapper::RustcWrapperDisposition;
     if child.spawn_refused {
@@ -722,13 +984,20 @@ fn observe_wrapper(
     let wrapped_the_crate = std::fs::read_to_string(log)
         .map(|text| text.contains("--crate-name seeded"))
         .unwrap_or(false);
+    if daemon.is_some_and(|probe| !probe.started()) {
+        return Err(Unmeasured::Broken(
+            "the daemon fixture did not reach its blocking read".to_string(),
+        ));
+    }
+    let daemon_helpers = daemon.map(DaemonProbe::helper_states);
+    let daemon_alive = daemon_helpers.as_ref().map(|helpers| !helpers.is_empty());
     let (behaved, receipt) = match case {
         ConformanceCase::RustcWrapperThatRunsIsKept => (
             built && wrapped_the_crate,
             decision.disposition == RustcWrapperDisposition::Kept,
         ),
         ConformanceCase::RustcWrapperThatDaemonizesIsSwitchedOff => (
-            built && !wrapped_the_crate && !daemon_marker_alive(),
+            built && !wrapped_the_crate && daemon_alive == Some(false),
             decision.disposition == RustcWrapperDisposition::Disabled,
         ),
         _ => (
@@ -739,7 +1008,8 @@ fn observe_wrapper(
     if behaved != receipt {
         return Err(Unmeasured::Broken(format!(
             "the recorded decision ({:?}: {}) disagrees with the build: completed={built} \
-             wrapper_ran_on_the_crate={wrapped_the_crate}",
+             wrapper_ran_on_the_crate={wrapped_the_crate} daemon_alive={daemon_alive:?} \
+             daemon_helpers={daemon_helpers:?}",
             decision.disposition, decision.reason
         )));
     }

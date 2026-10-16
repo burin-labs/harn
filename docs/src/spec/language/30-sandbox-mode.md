@@ -168,12 +168,11 @@ per-platform mechanisms are:
   Writes are limited to scratch dirs plus declared `workspace_roots`
   only when the policy allows workspace writes; network is allowed
   only when the side-effect ceiling permits `network`.
-- **Windows**: a per-spawn AppContainer with no capability SIDs plus
-  a Job Object capping memory, process count, and UI surface;
-  `icacls` grants the AppContainer SID Modify (or ReadAndExecute)
-  on each `workspace_roots` entry for the lifetime of the spawn.
 - **OpenBSD**: `pledge` promises and `unveil` path permissions
   derived from the same policy.
+- **Windows**: no OS sandbox. Children run unconfined; an
+  `os_hardened` spawn is refused, and `worktree` logs a warning
+  once (or refuses under `HARN_HANDLER_SANDBOX=enforce`).
 
 `SandboxProfile::Unrestricted` skips both path enforcement and OS
 confinement; `harn run --no-sandbox` is the CLI escape hatch that

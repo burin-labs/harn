@@ -160,11 +160,13 @@ impl AcpJsonRpcRequest<AcpSessionPromptParams> {
     }
 }
 
-impl AcpJsonRpcRequest<AcpSessionIdParams> {
-    pub fn session_load(id: impl Into<AcpJsonRpcId>, params: AcpSessionIdParams) -> Self {
+impl AcpJsonRpcRequest<AcpSessionLoadParams> {
+    pub fn session_load(id: impl Into<AcpJsonRpcId>, params: AcpSessionLoadParams) -> Self {
         Self::new(id, ACP_METHOD_SESSION_LOAD, params)
     }
+}
 
+impl AcpJsonRpcRequest<AcpSessionIdParams> {
     pub fn session_resume(id: impl Into<AcpJsonRpcId>, params: AcpSessionIdParams) -> Self {
         Self::new(id, ACP_METHOD_SESSION_RESUME, params)
     }
@@ -276,6 +278,12 @@ pub struct AcpPromptFailureFacts {
     pub kind: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
+    /// Whether the failure originated locally or at the provider.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin: Option<String>,
+    /// Governing inference rule supplied by the local boundary owner.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rule: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub code: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -286,6 +294,9 @@ pub struct AcpPromptFailureFacts {
     pub provider: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
+    /// Durable quota facts from the monetary admission owner.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub machine_spend: Option<harn_vm::llm::MachineSpendExhaustion>,
     /// The per-route ledger the routing failure recorded: which provider/model
     /// each attempt used and how it ended. Empty for a single-route call or any
     /// non-routing failure. Lets a host render the full failover chain instead
@@ -362,11 +373,16 @@ impl AcpPromptFailureFacts {
             category: string_field("category"),
             kind,
             reason: string_field("reason"),
+            origin: string_field("origin"),
+            rule: string_field("rule"),
             code: string_field("code"),
             retryable,
             retry_after_ms,
             provider: string_field("provider"),
             model: string_field("model"),
+            machine_spend: (string_field("quota_scope").as_deref() == Some("machine"))
+                .then(|| serde_json::from_value(thrown.clone()).ok())
+                .flatten(),
             attempts,
             route_unknown,
         }
@@ -448,8 +464,9 @@ pub struct AcpJsonRpcErrorResponse {
     pub error: AcpJsonRpcError,
 }
 
-/// The environment policy a client declares on `session/new`. Omission means
-/// `inherited`. Harn resolves it once into a
+/// The environment policy a client declares on `session/new` or a cold
+/// `session/load`. Both require a declaration. A live load retains its established
+/// policy and refuses a different declaration. Harn resolves it once into a
 /// [`harn_vm::security::SessionEnvironment`].
 ///
 /// The launcher parses its own `--grant name=spec` strings at ITS boundary and
@@ -527,6 +544,35 @@ pub struct AcpSessionRestoreResult {
     pub extra: BTreeMap<String, serde_json::Value>,
 }
 
+/// `session/load` params with the launcher's explicit environment declaration.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AcpSessionLoadParams {
+    #[serde(rename = "sessionId")]
+    pub session_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cwd: Option<String>,
+    #[serde(rename = "environmentPolicy")]
+    pub environment_policy: AcpSessionEnvironmentConfig,
+}
+
+impl AcpSessionLoadParams {
+    pub fn new(
+        session_id: impl Into<String>,
+        environment_policy: AcpSessionEnvironmentConfig,
+    ) -> Self {
+        Self {
+            session_id: session_id.into(),
+            cwd: None,
+            environment_policy,
+        }
+    }
+
+    pub fn with_cwd(mut self, cwd: impl Into<String>) -> Self {
+        self.cwd = Some(cwd.into());
+        self
+    }
+}
+
 /// Params containing only an ACP session id.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AcpSessionIdParams {
@@ -542,12 +588,48 @@ impl AcpSessionIdParams {
     }
 }
 
+/// A caller's message identity, distinct from the durable source event identity.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AcpPromptCorrelation {
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_caller_message_id"
+    )]
+    #[schemars(with = "String")]
+    pub message_id: Option<String>,
+}
+
+fn deserialize_caller_message_id<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = String::deserialize(deserializer)?;
+    if value.trim().is_empty() {
+        return Err(serde::de::Error::custom(
+            "messageId must be a nonempty string",
+        ));
+    }
+    Ok(Some(value))
+}
+
+impl AcpPromptCorrelation {
+    /// The owning schema projected into host transport bindings.
+    pub fn schema() -> serde_json::Value {
+        serde_json::to_value(schemars::schema_for!(Self))
+            .expect("ACP prompt correlation schema serializes")
+    }
+}
+
 /// `session/prompt` params.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AcpSessionPromptParams {
     #[serde(rename = "sessionId")]
     pub session_id: String,
     pub prompt: Vec<AcpContentBlock>,
+    #[serde(flatten)]
+    pub correlation: AcpPromptCorrelation,
     #[serde(flatten, skip_serializing_if = "BTreeMap::is_empty")]
     pub extra: BTreeMap<String, serde_json::Value>,
 }
@@ -557,6 +639,7 @@ impl AcpSessionPromptParams {
         Self {
             session_id: session_id.into(),
             prompt,
+            correlation: AcpPromptCorrelation::default(),
             extra: BTreeMap::new(),
         }
     }
@@ -939,6 +1022,27 @@ mod tests {
     use super::*;
 
     #[test]
+    fn session_load_request_requires_the_typed_launch_declaration() {
+        let params = AcpSessionLoadParams::new(
+            "saved-session",
+            AcpSessionEnvironmentConfig {
+                kind: harn_vm::security::EnvironmentPolicyKind::Isolated,
+                grants: Vec::new(),
+            },
+        )
+        .with_cwd("/workspace");
+        let request = AcpJsonRpcRequest::session_load(7, params)
+            .into_json_value()
+            .expect("typed load request");
+        assert_eq!(request["method"], ACP_METHOD_SESSION_LOAD);
+        assert_eq!(request["params"]["environmentPolicy"]["kind"], "isolated");
+        assert_eq!(request["params"]["cwd"], "/workspace");
+        let mut missing = request["params"].clone();
+        missing.as_object_mut().unwrap().remove("environmentPolicy");
+        assert!(serde_json::from_value::<AcpSessionLoadParams>(missing).is_err());
+    }
+
+    #[test]
     fn session_new_environment_policy_uses_the_harn_extension_field() {
         let params = AcpSessionNewParams {
             cwd: Some("/workspace".to_string()),
@@ -1058,36 +1162,6 @@ mod tests {
         let restored: AcpSessionPromptResult =
             serde_json::from_value(wire).expect("deserialize prompt result");
         assert_eq!(restored, result);
-    }
-
-    #[test]
-    fn a_terminal_without_a_class_keeps_the_bytes_it_already_had() {
-        let result = AcpSessionPromptResult {
-            stop_reason: "max_turn_requests".to_string(),
-            meta: Some(AcpMeta::terminal(
-                harn_vm::agent_events::AgentTerminalOutcome::new(
-                    harn_vm::agent_events::AgentTerminalKind::PolicyBudget,
-                    "max_iterations",
-                ),
-            )),
-        };
-
-        assert_eq!(
-            serde_json::to_value(&result).expect("serialize prompt result"),
-            serde_json::json!({
-                "stopReason": "max_turn_requests",
-                "_meta": {
-                    "harn": {
-                        "terminal": {
-                            "kind": "policy_budget",
-                            "reason": "max_iterations",
-                            "owner": "policy",
-                        },
-                    },
-                },
-            }),
-            "additive means absent, not null, for every outcome that has no class"
-        );
     }
 
     #[test]

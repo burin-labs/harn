@@ -49,7 +49,7 @@ pub struct LlmUsageRecord {
     pub unpriced_calls: i64,
     /// Calls whose provider did not report token/cost accounting facts.
     pub usage_unknown_calls: i64,
-    /// Exact total when every call is priced; unknown for a mixed/unpriced run.
+    /// Exact total when every call has accounting and pricing; otherwise unknown.
     pub cost_usd: Option<f64>,
     /// Sum of priced calls, retained as a lower bound for mixed runs.
     pub known_cost_usd: f64,
@@ -85,7 +85,9 @@ impl From<LlmUsageRecordWire> for LlmUsageRecord {
             call_count: wire.call_count,
             unpriced_calls: wire.unpriced_calls,
             usage_unknown_calls: wire.usage_unknown_calls,
-            cost_usd: wire.cost_usd,
+            cost_usd: wire
+                .cost_usd
+                .filter(|_| wire.unpriced_calls == 0 && wire.usage_unknown_calls == 0),
             known_cost_usd: wire.known_cost_usd.unwrap_or(wire.total_cost),
             total_cost: wire.total_cost,
             models: wire.models,
@@ -352,7 +354,7 @@ pub struct RunTranscriptArtifactDescriptor {
     pub tool_schema_hash: Option<String>,
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct CompactionEventRecord {
     /// Schema version of the receipt this record was projected from. `0` marks a
@@ -381,6 +383,7 @@ pub struct CompactionEventRecord {
     pub compaction_policy: Option<serde_json::Value>,
     /// Observation-mask recap metrics; `None` for non-masking strategies.
     pub recap: Option<super::super::RecapMetrics>,
+    pub classification: Option<Box<super::super::ClassificationReceipt>>,
 }
 
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
@@ -405,7 +408,7 @@ pub struct DaemonEventRecord {
     pub payload_summary: Option<String>,
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct RunObservabilityRecord {
     pub schema_version: usize,
@@ -803,7 +806,8 @@ pub struct EvalPackTrialReport {
     pub comparison: Option<RunDiffReport>,
     pub timed_out: bool,
     pub wall_time_seconds: f64,
-    pub cost_usd: f64,
+    pub cost_usd: Option<f64>,
+    pub known_cost_usd: Option<f64>,
     #[serde(default, alias = "producedPaths")]
     pub produced_paths: Vec<String>,
     #[serde(default, alias = "toolCallSummary", alias = "tool_summary")]
@@ -843,10 +847,11 @@ pub struct EvalPackStatsRow {
     pub status: String,
     pub majority: Option<String>,
     pub wall_time_seconds: f64,
-    pub cost_usd: f64,
+    pub cost_usd: Option<f64>,
+    pub known_cost_usd: Option<f64>,
     pub mean_wall_time_seconds: f64,
     pub stdev_wall_time_seconds: f64,
-    pub total_cost_usd: f64,
+    pub total_cost_usd: Option<f64>,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
@@ -939,10 +944,11 @@ pub struct EvalLedgerRow {
     pub verification: String,
     pub skipped: bool,
     pub wall_time_seconds: f64,
-    pub cost_usd: f64,
+    pub cost_usd: Option<f64>,
+    pub known_cost_usd: Option<f64>,
     pub mean_wall_time_seconds: f64,
     pub stdev_wall_time_seconds: f64,
-    pub total_cost_usd: f64,
+    pub total_cost_usd: Option<f64>,
     pub run_id: String,
     pub workflow_id: String,
     pub source_path: Option<String>,
@@ -1101,21 +1107,7 @@ pub struct RunRecord {
     pub persisted_path: Option<String>,
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(default)]
-pub struct ToolCallRecord {
-    pub tool_name: String,
-    pub tool_use_id: String,
-    pub args_hash: String,
-    pub result: String,
-    pub is_rejected: bool,
-    /// End-to-end tool latency when the terminal session event measured it.
-    /// `Some(0)` is a real sub-millisecond measurement; `None` means the
-    /// source record did not carry a measurement.
-    pub duration_ms: Option<u64>,
-    pub iteration: usize,
-    pub timestamp: String,
-}
+pub use super::tool_call::{ToolCallRecord, ToolCallRecordStatus};
 
 /// Hash a tool invocation for fixture lookup (name + canonical args JSON).
 pub fn tool_fixture_hash(tool_name: &str, args: &serde_json::Value) -> String {

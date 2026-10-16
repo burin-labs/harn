@@ -1,5 +1,5 @@
 {
-  "event": "pagerduty.incident_triggered",
+  "event": "pagerduty.incident.triggered",
   "service": "orchestrator-api",
   "hypothesis": "a deploy introduced a replay-loop regression",
   "symptoms": [

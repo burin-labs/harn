@@ -1,0 +1,10 @@
+import { boolean } from "std/predicate"
+
+fn invalid(llm: HarnessLlm, policy: EvaluationPolicy) {
+  const answers = llm.evaluate("criteria.v1", {text: "window"}, {
+    safe: boolean("Safe?", {true: "Only reads", false: 1}),
+  }, policy)
+  match answers.kind {
+    _ -> { return answers.receipt }
+  }
+}

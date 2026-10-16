@@ -42,7 +42,9 @@ pipeline default(harness: Harness) {
           {id: "mcp2", name: "mirror__echo", arguments: {message: "hello from mirror"}},
         ],
       },
-      llm_text("<done>##DONE##</done>"),
+      llm_text(
+        "<user_response>Called both remote echo tools.</user_response><done>##DONE##</done>",
+      ),
     ],
     { ->
       const opts: AgentSpec = {

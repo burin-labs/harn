@@ -38,6 +38,7 @@ pub fn should_handle(harness: Harness, event: TriggerEvent) -> bool {
             push_dispatcher_llm_mock(
                 &dispatcher,
                 LlmMock {
+                    effective_reasoning_effort: Default::default(),
                     text: "yes".to_string(),
                     tool_calls: Vec::new(),
                     raw_tool_calls: Vec::new(),
@@ -131,6 +132,7 @@ pub fn should_handle(harness: Harness, event: TriggerEvent) -> bool {
             push_dispatcher_llm_mock(
                 &dispatcher,
                 LlmMock {
+                    effective_reasoning_effort: Default::default(),
                     text: "yes".to_string(),
                     tool_calls: Vec::new(),
                     raw_tool_calls: Vec::new(),
@@ -392,6 +394,7 @@ pub fn should_handle(harness: Harness, event: TriggerEvent) -> bool {
             push_dispatcher_llm_mock(
                 &dispatcher,
                 LlmMock {
+                    effective_reasoning_effort: Default::default(),
                     text: "yes".to_string(),
                     tool_calls: Vec::new(),
                     raw_tool_calls: Vec::new(),
@@ -548,7 +551,7 @@ pub fn local_fn(harness: Harness, event: TriggerEvent) -> dict {
     )
     .expect("write module source");
 
-    let mut vm = Vm::new();
+    let mut vm = crate::new_vm();
     register_vm_stdlib(&mut vm);
     vm.set_source_dir(dir.path());
     let exports = vm
@@ -558,6 +561,7 @@ pub fn local_fn(harness: Harness, event: TriggerEvent) -> dict {
     install_manifest_triggers(vec![TriggerBindingSpec {
         id: "github-new-issue".to_string(),
         source: TriggerBindingSource::Manifest,
+        ingress_subscription: false,
         kind: "webhook".to_string(),
         provider: ProviderId::from("github"),
         autonomy_tier: crate::AutonomyTier::ActAuto,
@@ -659,7 +663,7 @@ pub fn local_fn(harness: Harness, event: TriggerEvent) {
     )
     .expect("write module source");
 
-    let mut vm = Vm::new();
+    let mut vm = crate::new_vm();
     register_vm_stdlib(&mut vm);
     vm.set_source_dir(dir.path());
     let exports = vm
@@ -669,6 +673,7 @@ pub fn local_fn(harness: Harness, event: TriggerEvent) {
     install_manifest_triggers(vec![TriggerBindingSpec {
         id: "github-new-issue".to_string(),
         source: TriggerBindingSource::Manifest,
+        ingress_subscription: false,
         kind: "webhook".to_string(),
         provider: ProviderId::from("github"),
         autonomy_tier: crate::AutonomyTier::Suggest,

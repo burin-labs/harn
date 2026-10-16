@@ -8,9 +8,8 @@ use super::streaming::{
     vm_sse_server_response, vm_sse_server_send,
 };
 use super::{
-    handle_from_value, http_mock_calls_snapshot, mock_call_headers_value, push_http_mock,
-    redact_mock_call_url, register_harness_http_mock, reset_http_state, HttpMockRegistry,
-    HttpMockResponse,
+    handle_from_value, http_mock_calls_snapshot, push_http_mock, redact_mock_call_url,
+    register_harness_http_mock, reset_http_state, HttpMockRegistry, HttpMockResponse,
 };
 use crate::connectors::test_util::{FakeHttpResponse, FakeHttpServer};
 use crate::value::VmValue;
@@ -42,14 +41,17 @@ fn parses_retry_after_delta_seconds() {
 fn parses_retry_after_http_date() {
     let now = UNIX_EPOCH + Duration::from_secs(1_700_000_000);
     let header = httpdate::fmt_http_date(now + Duration::from_secs(2));
-    let parsed =
-        super::client::parse_retry_after_value_at(&header, now).expect("http-date should parse");
+    let parsed = super::retry_after::parse_retry_after_value_at(&header, now)
+        .expect("http-date should parse");
     assert_eq!(parsed, Duration::from_secs(2));
 }
 
 #[test]
 fn malformed_retry_after_returns_none() {
     assert_eq!(parse_retry_after_value("soon-ish"), None);
+    assert_eq!(parse_retry_after_value("2seconds"), None);
+    assert_eq!(super::retry_after_hint("2seconds"), None);
+    assert_eq!(super::retry_after_hint("61"), Some((60_000, true)));
 }
 
 #[test]
@@ -78,7 +80,7 @@ fn harness_http_mocks_follow_the_harness_across_threads_without_leaking() {
     assert!(!isolated.has_match("POST", "https://api.example.test/jobs"));
 
     let moved = Arc::clone(&registry);
-    let response = std::thread::spawn(move || {
+    let response = crate::runtime_stack::spawn(move || {
         moved.consume(
             "POST",
             "https://api.example.test/jobs",
@@ -180,31 +182,6 @@ async fn http_mock_records_normalized_headers_and_final_query_url() {
         Some("trace-1")
     );
     reset_http_state();
-}
-
-#[test]
-fn mock_call_headers_redact_sensitive_values() {
-    let headers = crate::value::DictMap::from_iter([
-        (
-            "authorization".to_string(),
-            VmValue::String(arcstr::ArcStr::from("Bearer secret")),
-        ),
-        (
-            "accept".to_string(),
-            VmValue::String(arcstr::ArcStr::from("application/json")),
-        ),
-        (
-            "x-api-key".to_string(),
-            VmValue::String(arcstr::ArcStr::from("secret")),
-        ),
-    ]);
-    let redacted = mock_call_headers_value(&headers, true);
-    assert_eq!(redacted["authorization"].display(), "[redacted]");
-    assert_eq!(redacted["x-api-key"].display(), "[redacted]");
-    assert_eq!(redacted["accept"].display(), "application/json");
-
-    let raw = mock_call_headers_value(&headers, false);
-    assert_eq!(raw["authorization"].display(), "Bearer secret");
 }
 
 #[test]
@@ -430,7 +407,7 @@ async fn http_download_oversize_stream_preserves_existing_file() {
 
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind listener");
     let port = listener.local_addr().expect("listener addr").port();
-    let thread = std::thread::spawn(move || {
+    let thread = crate::runtime_stack::spawn(move || {
         let (mut stream, _) = listener.accept().expect("accept client");
         let request = read_http_request_generic(&mut stream);
         assert!(request.starts_with("GET /oversize HTTP/1.1\r\n"));
@@ -534,7 +511,7 @@ async fn custom_tls_ca_bundle_and_pin_allow_request() {
             )
             .expect("build tls config"),
     );
-    let thread = std::thread::spawn(move || {
+    let thread = crate::runtime_stack::spawn(move || {
         let (tcp, _) = listener.accept().expect("accept tls client");
         let conn = ServerConnection::new(server_config).expect("server connection");
         let mut stream = StreamOwned::new(conn, tcp);
@@ -595,7 +572,7 @@ async fn custom_tls_pin_mismatch_is_rejected() {
             )
             .expect("build tls config"),
     );
-    let thread = std::thread::spawn(move || {
+    let thread = crate::runtime_stack::spawn(move || {
         let (tcp, _) = listener.accept().expect("accept tls client");
         let conn = ServerConnection::new(server_config).expect("server connection");
         let mut stream = StreamOwned::new(conn, tcp);
@@ -944,4 +921,40 @@ async fn ssrf_guard_block_private_off_permits_capture_server() {
     assert!(server.join(), "request should have reached the server");
 
     reset_http_state();
+}
+
+/// The checker types `harness.net` results from these shapes, so a field
+/// the builder stops writing would read as present and typed.
+#[test]
+fn response_builders_write_exactly_their_declared_shapes() {
+    fn field_names(ty: harn_builtin_meta::Ty) -> Vec<String> {
+        let harn_builtin_meta::Ty::Shape(fields) = ty else {
+            panic!("response shapes must stay closed records");
+        };
+        let mut names: Vec<_> = fields.iter().map(|field| field.name.to_string()).collect();
+        names.sort_unstable();
+        names
+    }
+    fn written(value: VmValue) -> Vec<String> {
+        let mut names: Vec<_> = value
+            .as_dict()
+            .expect("dict")
+            .keys()
+            .map(|key| key.to_string())
+            .collect();
+        names.sort_unstable();
+        names
+    }
+    let response =
+        super::client::build_http_response(200, crate::value::DictMap::new(), String::new(), "u");
+    assert_eq!(
+        written(response),
+        field_names(harn_builtin_meta::shapes::HTTP_RESPONSE)
+    );
+    let download =
+        super::client::build_http_download_response(200, crate::value::DictMap::new(), 0);
+    assert_eq!(
+        written(download),
+        field_names(harn_builtin_meta::shapes::HTTP_DOWNLOAD_RESPONSE)
+    );
 }

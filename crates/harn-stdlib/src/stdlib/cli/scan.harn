@@ -39,7 +39,7 @@ fn captures_suffix(caps: dict) -> string {
   }
   let parts = []
   for name in names {
-    parts = parts.appending(name + "=" + caps[name])
+    parts.push(name + "=" + caps[name])
   }
   return "  [" + join_strs(parts, " ") + "]"
 }
@@ -61,14 +61,10 @@ fn run_search(rules: HarnessRules, plan: list) -> dict {
     const matches = res.matches ?? []
     total = total + len(matches)
     for m in matches {
-      seen = seen.merging({[m.path]: true})
-      lines = lines.appending(
-        m.path + ":" + loc(m) + ": " + m.text + captures_suffix(m.captures ?? {}),
-      )
+      seen = seen.merge({[m.path]: true})
+      lines.push(m.path + ":" + loc(m) + ": " + m.text + captures_suffix(m.captures ?? {}))
     }
-    results = results.appending(
-      {language: entry.language, match_count: len(matches), matches: matches},
-    )
+    results.push({language: entry.language, match_count: len(matches), matches: matches})
   }
   return {lines: lines, results: results, total: total, files: len(keys(seen))}
 }
@@ -87,10 +83,10 @@ fn run_report(rules: HarnessRules, plan: list) -> dict {
     total = total + summary.total_rows
     const per_file = summary.per_file ?? {}
     for path in keys(per_file) {
-      seen = seen.merging({[path]: true})
-      lines = lines.appending(path + ": " + to_string(per_file[path]))
+      seen = seen.merge({[path]: true})
+      lines.push(path + ": " + to_string(per_file[path]))
     }
-    tables = tables.appending(table)
+    tables.push(table)
   }
   return {lines: lines, tables: tables, total: total, files: len(keys(seen))}
 }

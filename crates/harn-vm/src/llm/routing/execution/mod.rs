@@ -1,4 +1,3 @@
-use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -1093,31 +1092,13 @@ pub(crate) fn provider_exhausted_error(
     message: String,
     attempts: VmValue,
 ) -> VmError {
-    VmError::Thrown(VmValue::dict(BTreeMap::from([
-        (
-            "category".to_string(),
-            VmValue::String(arcstr::ArcStr::from(category)),
-        ),
-        (
-            "code".to_string(),
-            VmValue::String(arcstr::ArcStr::from("provider_exhausted")),
-        ),
-        (
-            "kind".to_string(),
-            VmValue::String(arcstr::ArcStr::from("terminal")),
-        ),
-        (
-            "reason".to_string(),
-            VmValue::String(arcstr::ArcStr::from(reason)),
-        ),
-        (
-            "message".to_string(),
-            VmValue::String(arcstr::ArcStr::from(message)),
-        ),
-        (
-            "attempt_count".to_string(),
-            VmValue::Int(attempt_count as i64),
-        ),
-        ("attempts".to_string(), attempts),
-    ])))
+    VmError::Thrown(VmValue::dict([
+        ("category", VmValue::string(category)),
+        ("code", VmValue::string("provider_exhausted")),
+        ("kind", VmValue::string("terminal")),
+        ("reason", VmValue::string(reason)),
+        ("message", VmValue::string(message)),
+        ("attempt_count", VmValue::Int(attempt_count as i64)),
+        ("attempts", attempts),
+    ]))
 }

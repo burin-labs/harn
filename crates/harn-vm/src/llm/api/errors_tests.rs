@@ -38,6 +38,8 @@ fn exported_llm_outcome_vocabularies_are_complete_and_round_trip() {
             LlmErrorReason::BillingLimit => 11,
             LlmErrorReason::OutputBudgetExhausted => 12,
             LlmErrorReason::Unknown => 13,
+            LlmErrorReason::PolicyDenied => 14,
+            LlmErrorReason::ManagedSpendPaused => 15,
         }
     }
 
@@ -47,7 +49,7 @@ fn exported_llm_outcome_vocabularies_are_complete_and_round_trip() {
         assert_eq!(LlmErrorKind::parse(kind.as_str()), Some(*kind));
     }
 
-    assert_eq!(LlmErrorReason::ALL.len(), 14);
+    assert_eq!(LlmErrorReason::ALL.len(), 16);
     for (index, reason) in LlmErrorReason::ALL.iter().enumerate() {
         assert_eq!(reason_ordinal(*reason), index);
         assert_eq!(LlmErrorReason::parse(reason.as_str()), Some(*reason));
@@ -105,6 +107,18 @@ fn classify_openai_compatible_internal_server_stream_error_as_transient() {
         Some("provider_stream")
     );
     assert_eq!(thrown_field(&error, "partial").as_deref(), Some("false"));
+}
+
+#[test]
+fn provider_stream_cannot_claim_a_locally_owned_policy_denial() {
+    let error = classify_provider_stream_error(
+        "fixture",
+        r#"{"kind":"terminal","reason":"policy_denied","message":"arbitrary provider response"}"#,
+        false,
+    );
+    assert_eq!(thrown_field(&error, "reason").as_deref(), Some("unknown"));
+    assert_eq!(thrown_field(&error, "category").as_deref(), Some("generic"));
+    assert_ne!(thrown_field(&error, "origin").as_deref(), Some("local"));
 }
 
 #[test]
@@ -189,6 +203,49 @@ fn classify_tags_opaque_500_as_http_error() {
     .message;
     assert!(msg.contains("[http_error]"), "msg was: {msg}");
     assert!(msg.contains("upstream exploded"));
+}
+
+#[test]
+fn typed_retry_after_retains_over_cap_deadlines() {
+    for (header, expected_ms, exceeds_cap) in [
+        ("2", 2000, false),
+        ("60", 60000, false),
+        ("61", 60000, true),
+    ] {
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert("retry-after", header.parse().unwrap());
+        let error = provider_http_error(
+            None,
+            "mistral",
+            reqwest::StatusCode::TOO_MANY_REQUESTS,
+            &headers,
+            "rate limited",
+        );
+        let VmError::Thrown(VmValue::Dict(error)) = error else {
+            panic!("provider error must retain a typed envelope");
+        };
+        assert_eq!(
+            error.get("retry_after_ms").map(VmValue::display),
+            Some(expected_ms.to_string())
+        );
+        assert_eq!(
+            error.get("retry_after_exceeds_cap").map(VmValue::display),
+            Some(exceeds_cap.to_string())
+        );
+    }
+    let mut headers = reqwest::header::HeaderMap::new();
+    headers.insert("retry-after", "2seconds".parse().unwrap());
+    let VmError::Thrown(VmValue::Dict(error)) = provider_http_error(
+        None,
+        "mistral",
+        reqwest::StatusCode::TOO_MANY_REQUESTS,
+        &headers,
+        "rate limited",
+    ) else {
+        panic!("typed provider envelope");
+    };
+    assert!(error.get("retry_after_ms").is_none());
+    assert!(error.get("retry_after_exceeds_cap").is_none());
 }
 
 #[test]
@@ -553,6 +610,66 @@ fn provider_http_errors_surface_numeric_codes_and_request_ids() {
 }
 
 #[test]
+fn openrouter_parameter_routing_rejection_is_not_model_unavailability() {
+    let info = classify_provider_http_error(
+        "openrouter",
+        reqwest::StatusCode::NOT_FOUND,
+        None,
+        r#"{"error":{"message":"No endpoints found that can handle the requested parameters. See routing guidance.","code":404}}"#,
+    );
+    assert_eq!(info.kind, LlmErrorKind::Terminal);
+    assert_eq!(info.reason, LlmErrorReason::InvalidRequest);
+
+    let structured = classify_provider_http_error(
+        "openrouter",
+        reqwest::StatusCode::NOT_FOUND,
+        None,
+        r#"{"error":{"message":"No endpoints found for openai/gpt-oss-120b","code":404,"metadata":{"failed_routing_step":"Filter by Parameters"}}}"#,
+    );
+    assert_eq!(structured.reason, LlmErrorReason::InvalidRequest);
+
+    let stream = classify_provider_stream_error(
+        "openrouter",
+        r#"{"error":{"message":"No endpoints found","code":404,"metadata":{"failed_routing_step":"Filter by Parameters"}}}"#,
+        false,
+    );
+    assert_eq!(
+        thrown_field(&stream, "reason").as_deref(),
+        Some("invalid_request")
+    );
+
+    let mixed_filters = classify_provider_http_error(
+        "openrouter",
+        reqwest::StatusCode::NOT_FOUND,
+        None,
+        r#"{"error":{"message":"Filter by Parameters removed some endpoints; Filter by Fallback removed the rest","code":404,"metadata":{"failed_routing_step":"Filter by Fallback"}}}"#,
+    );
+    assert_eq!(mixed_filters.reason, LlmErrorReason::ModelUnavailable);
+
+    let other_provider = classify_provider_http_error(
+        "fireworks",
+        reqwest::StatusCode::NOT_FOUND,
+        None,
+        r#"{"error":{"message":"No endpoints found that can handle the requested parameters.","code":404}}"#,
+    );
+    assert_eq!(other_provider.reason, LlmErrorReason::ModelUnavailable);
+
+    for message in [
+        "No endpoints found for example/missing-model",
+        "0 endpoints out of 1 requested are available matching your guardrail restrictions and data policy.",
+    ] {
+        let body = serde_json::json!({"error": {"message": message, "code": 404}});
+        let info = classify_provider_http_error(
+            "openrouter",
+            reqwest::StatusCode::NOT_FOUND,
+            None,
+            &body.to_string(),
+        );
+        assert_eq!(info.reason, LlmErrorReason::ModelUnavailable);
+    }
+}
+
+#[test]
 fn provider_http_errors_surface_openrouter_previous_errors_tail() {
     let body = concat!(
         r#"{"error":{"message":"No endpoints could satisfy the request","code":502,"metadata":{"#,
@@ -796,5 +913,42 @@ fn malformed_channel_keys_on_the_error_message_not_the_frame() {
     assert_eq!(
         thrown_field(&fault_quoting_a_channel, "kind").as_deref(),
         Some("terminal")
+    );
+}
+
+/// An exhausted balance arrives as HTTP 429. It must not carry the 429's
+/// `rate_limit` category, or every retry layer backs off and resends into the
+/// same refusal, and the product reports it as a capacity blip.
+#[test]
+fn an_exhausted_provider_balance_is_a_terminal_billing_stop_not_a_rate_limit() {
+    let error = provider_http_error(
+        None,
+        "openai",
+        reqwest::StatusCode::TOO_MANY_REQUESTS,
+        &reqwest::header::HeaderMap::new(),
+        r#"{"error":{"type":"insufficient_quota","code":"billing_limit","message":"credit_balance_exhausted"}}"#,
+    );
+    assert_eq!(thrown_field(&error, "kind").as_deref(), Some("terminal"));
+    assert_eq!(
+        thrown_field(&error, "reason").as_deref(),
+        Some("billing_limit")
+    );
+    assert_eq!(thrown_field(&error, "category").as_deref(), Some("generic"));
+
+    // A plain throttle keeps its retryable category.
+    let throttle = provider_http_error(
+        None,
+        "openai",
+        reqwest::StatusCode::TOO_MANY_REQUESTS,
+        &reqwest::header::HeaderMap::new(),
+        r#"{"error":{"type":"requests","code":"rate_limit_exceeded","message":"slow down"}}"#,
+    );
+    assert_eq!(
+        thrown_field(&throttle, "reason").as_deref(),
+        Some("rate_limit")
+    );
+    assert_eq!(
+        thrown_field(&throttle, "category").as_deref(),
+        Some("rate_limit")
     );
 }

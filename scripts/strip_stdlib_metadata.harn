@@ -158,6 +158,9 @@ pub fn process_file(text: string, path: unknown) -> dict {
   const n = len(lines)
   while i < n {
     const line = lines[i]
+    if line == nil {
+      throw "metadata scan indexed beyond its source lines"
+    }
     const name = match_pub_fn(line)
     if name == "" {
       out = out + [line]

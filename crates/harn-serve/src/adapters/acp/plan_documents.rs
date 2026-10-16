@@ -82,21 +82,21 @@ impl AcpServer {
             return;
         }
 
-        // Client mutations are accepted only while idle, so the server can
-        // safely replace the prior turn's closed sinks with one durable sink
-        // and this transport's live ACP projection.
+        // Client mutations are session-global, but their synchronous projection
+        // must not leave a listener for a delayed prompt producer to acquire.
         clear_session_sinks(&session_id);
         harn_vm::agent_sessions::register_event_log_sink(&session_id);
-        register_sink(
-            session_id.clone(),
-            Arc::new(AcpAgentEventSink::new(self.output.clone())),
-        );
-        harn_vm::agent_events::emit_event(
-            &harn_vm::agent_events::AgentEvent::PlanDocumentUpdated {
-                session_id,
-                event: Box::new(event.clone()),
-            },
-        );
+        harn_vm::agent_events::AgentEventTransport::new(Arc::new(AcpAgentEventSink::new(
+            self.output.clone(),
+        )))
+        .with(|| {
+            harn_vm::agent_events::emit_event(
+                &harn_vm::agent_events::AgentEvent::PlanDocumentUpdated {
+                    session_id,
+                    event: Box::new(event.clone()),
+                },
+            );
+        });
         self.send_response(
             id,
             serde_json::to_value(AcpPlanDocumentMutationResult {

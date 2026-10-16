@@ -67,11 +67,21 @@ pub fn trailing_comma_issues(source: &str) -> Vec<TrailingCommaIssue> {
     let Some((tokens, program)) = lex_and_parse(source) else {
         return Vec::new();
     };
-    let pairs = build_bracket_pairs(source, &tokens);
+    trailing_comma_issues_in(source, &tokens, &program)
+}
+
+/// [`trailing_comma_issues`] over a caller's own analysis of `source`:
+/// `tokens` lexed with comments, and `program` its parse.
+pub fn trailing_comma_issues_in(
+    source: &str,
+    tokens: &[Token],
+    program: &[SNode],
+) -> Vec<TrailingCommaIssue> {
+    let pairs = build_bracket_pairs(source, tokens);
     let pair_by_close: HashMap<usize, BracketPair> =
         pairs.iter().map(|p| (p.close_byte, p.clone())).collect();
 
-    let eligible_opens = collect_eligible_opens(&program, &pair_by_close, &pairs);
+    let eligible_opens = collect_eligible_opens(program, &pair_by_close, &pairs);
     let mut issues = Vec::new();
     for pair in pairs {
         if !eligible_opens.contains(&pair.open_byte) {
@@ -414,7 +424,12 @@ mod tests {
     #[test]
     fn fires_on_method_call_args() {
         let src = "fn f() {\n  const xs = [1, 2]\n  xs.map(fn(x) {\n    x + 1\n  })\n}\n";
-        let _ = fix(src); // smoke test — the method call has args, span should be marked.
+        // The closure argument spans lines, so the argument list counts as
+        // multiline and gains a trailing comma after the closure body.
+        assert_eq!(
+            fix(src),
+            "fn f() {\n  const xs = [1, 2]\n  xs.map(fn(x) {\n    x + 1\n  },)\n}\n"
+        );
     }
 
     #[test]

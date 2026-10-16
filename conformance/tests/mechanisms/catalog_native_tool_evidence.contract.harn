@@ -1,0 +1,48 @@
+import { plan_notice } from "../../../scripts/provider_catalog_notice/workflow"
+import { contract_effect, contract_negative } from "./lib/mechanism_contract"
+
+pipeline default(harness: Harness) {
+  const input = json_parse(
+    harness.fs.read_text("scripts/provider_catalog_notice_fixtures/carried-update.json"),
+  )
+  const candidate = input.extraction.candidate
+    + {kind: "capability", capability: "native_tools", old_value: false, new_value: true}
+  const catalog = {
+    providers: [{id: candidate.provider}],
+    models: [{provider: candidate.provider, id: candidate.model_id, tool_support: {native: false}}],
+  }
+  const extraction = {classification: "candidate", candidate: candidate}
+  const route = {
+    provider: candidate.provider,
+    model: candidate.model_id,
+    passed_probes: ["native_tool_probe"],
+  }
+  for evidence in [
+    {routes: []},
+    {routes: [route + {provider: "different"}]},
+    {routes: [route + {model: "different"}]},
+    {routes: [route + {passed_probes: ["tool_probe"]}]},
+  ] {
+    const plan = plan_notice(harness, input.notice, extraction, catalog, evidence)
+    assert_eq(plan.receipt.disposition, "incomplete_capability")
+    assert(plan.receipt.unresolved_verification.count > 0)
+  }
+  const missing = plan_notice(harness, input.notice, extraction, catalog)
+  contract_effect(
+    harness.stdio,
+    "native_tool_missing_evidence_is_incomplete",
+    missing.receipt.disposition == "incomplete_capability"
+      && missing.receipt.unresolved_verification.count > 0,
+  )
+  const accepted = plan_notice(harness, input.notice, extraction, catalog, {routes: [route]})
+  contract_negative(
+    harness.stdio,
+    "native_tool_exact_live_evidence_allows_patch",
+    accepted.receipt.disposition != "patch",
+  )
+  contract_effect(
+    harness.stdio,
+    "native_tool_receipt_preserves_evidence",
+    accepted.receipt.tool_evidence.routes[0] == route,
+  )
+}

@@ -1,9 +1,10 @@
+pub(super) use super::retry_after::parse_retry_after_value;
 use crate::value::VmDictExt;
 use std::cell::RefCell;
 use std::collections::{HashMap, VecDeque};
 use std::path::Path;
 use std::sync::Arc;
-use std::time::{Duration, SystemTime};
+use std::time::Duration;
 
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
@@ -128,40 +129,31 @@ pub(super) fn clear_http_streams() {
     HTTP_STREAMS.with(|streams| streams.borrow_mut().clear());
 }
 
-fn build_http_response(
+pub(super) fn build_http_response(
     status: i64,
     headers: crate::value::DictMap,
     body: String,
     final_url: &str,
 ) -> VmValue {
     let mut result = crate::value::DictMap::new();
-    result.insert(crate::value::intern_key("status"), VmValue::Int(status));
-    result.insert(crate::value::intern_key("headers"), VmValue::dict(headers));
+    result.put_int("status", status);
+    result.put("headers", VmValue::dict(headers));
     result.put_str("body", body);
     result.put_str("final_url", final_url);
-    result.insert(
-        crate::value::intern_key("ok"),
-        VmValue::Bool((200..300).contains(&(status as u16))),
-    );
+    result.put_bool("ok", (200..300).contains(&(status as u16)));
     VmValue::dict(result)
 }
 
-fn build_http_download_response(
+pub(super) fn build_http_download_response(
     status: i64,
     headers: crate::value::DictMap,
     bytes_written: u64,
 ) -> VmValue {
     let mut result = crate::value::DictMap::new();
-    result.insert(crate::value::intern_key("status"), VmValue::Int(status));
-    result.insert(crate::value::intern_key("headers"), VmValue::dict(headers));
-    result.insert(
-        crate::value::intern_key("bytes_written"),
-        VmValue::Int(u64_to_vm_int(bytes_written)),
-    );
-    result.insert(
-        crate::value::intern_key("ok"),
-        VmValue::Bool((200..300).contains(&(status as u16))),
-    );
+    result.put_int("status", status);
+    result.put("headers", VmValue::dict(headers));
+    result.put_int("bytes_written", u64_to_vm_int(bytes_written));
+    result.put_bool("ok", (200..300).contains(&(status as u16)));
     VmValue::dict(result)
 }
 
@@ -173,10 +165,7 @@ fn response_headers(headers: &reqwest::header::HeaderMap) -> crate::value::DictM
     let mut resp_headers = crate::value::DictMap::new();
     for (name, value) in headers {
         if let Ok(v) = value.to_str() {
-            resp_headers.insert(
-                crate::value::intern_key(name.as_str()),
-                VmValue::String(arcstr::ArcStr::from(v)),
-            );
+            resp_headers.insert(crate::value::intern_key(name.as_str()), VmValue::string(v));
         }
     }
     resp_headers
@@ -605,22 +594,21 @@ fn configure_tls(
                 resolved.display()
             ))
         })?;
-        match reqwest::Certificate::from_pem_bundle(&bytes) {
-            Ok(certs) => {
-                for cert in certs {
-                    builder = builder.add_root_certificate(cert);
-                }
-            }
+        // The bundle adds to the OS trust store; it does not replace it.
+        let certs = match reqwest::Certificate::from_pem_bundle(&bytes) {
+            Ok(certs) => certs,
             Err(pem_error) => {
-                let cert = reqwest::Certificate::from_der(&bytes).map_err(|der_error| {
-                    vm_error(format!(
-                        "http: failed to parse CA bundle {} as PEM ({pem_error}) or DER ({der_error})",
-                        resolved.display()
-                    ))
-                })?;
-                builder = builder.add_root_certificate(cert);
+                vec![
+                    reqwest::Certificate::from_der(&bytes).map_err(|der_error| {
+                        vm_error(format!(
+                            "http: failed to parse CA bundle {} as PEM ({pem_error}) or DER ({der_error})",
+                            resolved.display()
+                        ))
+                    })?,
+                ]
             }
-        }
+        };
+        builder = builder.tls_certs_merge(certs);
     }
 
     if let Some(path) = &tls.client_identity_path {
@@ -793,7 +781,7 @@ pub(super) fn parse_http_request_parts(
             header_map.insert(name, val);
             recorded_headers.insert(
                 crate::value::intern_key(&k.to_ascii_lowercase()),
-                VmValue::String(arcstr::ArcStr::from(v.display())),
+                VmValue::string(v.display()),
             );
         }
     }
@@ -878,35 +866,6 @@ fn should_retry_transport(
     attempt < config.retry.max
         && method_is_retryable(&config.retry, method)
         && (error.is_timeout() || error.is_connect())
-}
-
-pub(super) fn parse_retry_after_value_at(value: &str, now: SystemTime) -> Option<Duration> {
-    let value = value.trim();
-    if value.is_empty() {
-        return None;
-    }
-
-    if let Ok(secs) = value.parse::<f64>() {
-        if !secs.is_finite() || secs < 0.0 {
-            return Some(Duration::from_millis(0));
-        }
-        let millis = (secs * 1_000.0) as u64;
-        return Some(Duration::from_millis(millis.min(MAX_RETRY_DELAY_MS)));
-    }
-
-    if let Ok(target) = httpdate::parse_http_date(value) {
-        let millis = target
-            .duration_since(now)
-            .map(|delta| delta.as_millis() as u64)
-            .unwrap_or(0);
-        return Some(Duration::from_millis(millis.min(MAX_RETRY_DELAY_MS)));
-    }
-
-    None
-}
-
-pub(super) fn parse_retry_after_value(value: &str) -> Option<Duration> {
-    parse_retry_after_value_at(value, SystemTime::now())
 }
 
 fn parse_retry_after_header(value: &reqwest::header::HeaderValue) -> Option<Duration> {
@@ -1348,7 +1307,7 @@ pub(super) async fn vm_http_stream_open(
             streams.insert(id.clone(), handle);
             Ok(())
         })?;
-        return Ok(VmValue::String(arcstr::ArcStr::from(id)));
+        return Ok(VmValue::string(id));
     }
 
     if !final_url.starts_with("http://") && !final_url.starts_with("https://") {
@@ -1405,7 +1364,7 @@ pub(super) async fn vm_http_stream_open(
         streams.insert(id.clone(), handle);
         Ok(())
     })?;
-    Ok(VmValue::String(arcstr::ArcStr::from(id)))
+    Ok(VmValue::string(id))
 }
 
 pub(super) async fn vm_http_stream_read(
@@ -1468,18 +1427,9 @@ pub(super) fn vm_http_stream_info(stream_id: &str) -> Result<VmValue, VmError> {
             .get(stream_id)
             .ok_or_else(|| vm_error(format!("http_stream_info: unknown stream '{stream_id}'")))?;
         let mut dict = crate::value::DictMap::new();
-        dict.insert(
-            crate::value::intern_key("status"),
-            VmValue::Int(handle.status),
-        );
-        dict.insert(
-            crate::value::intern_key("headers"),
-            VmValue::dict(handle.headers.clone()),
-        );
-        dict.insert(
-            crate::value::intern_key("ok"),
-            VmValue::Bool((200..300).contains(&(handle.status as u16))),
-        );
+        dict.put_int("status", handle.status);
+        dict.put("headers", VmValue::dict(handle.headers.clone()));
+        dict.put_bool("ok", (200..300).contains(&(handle.status as u16)));
         Ok(VmValue::dict(dict))
     })
 }
@@ -1552,7 +1502,7 @@ pub(super) fn register_http_client_builtins(vm: &mut Vm) {
             sessions.insert(id.clone(), HttpSession { client, options });
             Ok(())
         })?;
-        Ok(VmValue::String(arcstr::ArcStr::from(id)))
+        Ok(VmValue::string(id))
     });
 
     vm.register_async_builtin("__http_session_request", |_ctx, args| async move {

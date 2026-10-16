@@ -72,6 +72,8 @@ fn legacy_routes_derive_decision_from_supported_structured_strategies() {
     let mut embedding_count = 0;
     let mut declared_count = 0;
     let mut derived_count = 0;
+    let mut default_count = 0;
+    let unsupported_strategy = crate::llm::capabilities::StructuredOutputStrategy::Unsupported;
     for model in &catalog.models {
         let legacy = &config.models[&model.id];
         if legacy.operations.is_some() {
@@ -87,19 +89,56 @@ fn legacy_routes_derive_decision_from_supported_structured_strategies() {
             "{}",
             model.id
         );
+        if matches!(
+            model.id.as_str(),
+            "gpt-6-luna" | "claude-sonnet-5-5" | "claude-haiku-5-5"
+        ) {
+            default_count += 1;
+            assert!(
+                decision_contract_for_route(&legacy.provider, &model.id).is_some(),
+                "{}",
+                model.id
+            );
+            assert!(
+                model.operations.contains(&ModelOperation::Decision),
+                "{}",
+                model.id
+            );
+            let mut unsupported = caps.clone();
+            unsupported.structured_output_strategy = unsupported_strategy;
+            assert!(
+                super::decision_contract::resolved_decision_contract(
+                    &model.id,
+                    legacy,
+                    &unsupported
+                )
+                .is_none(),
+                "{}",
+                model.id
+            );
+            assert!(
+                !super::decision_contract::resolved_operations(&model.id, legacy, &unsupported)
+                    .contains(&ModelOperation::Decision),
+                "{}",
+                model.id
+            );
+        }
         if model.operations.contains(&ModelOperation::Decision)
             && !legacy.supports_operation(ModelOperation::Decision)
         {
             derived_count += 1;
             assert!(model.operations.contains(&ModelOperation::TextGeneration));
             assert_ne!(
-                caps.structured_output_strategy,
-                crate::llm::capabilities::StructuredOutputStrategy::Unsupported,
+                caps.structured_output_strategy, unsupported_strategy,
                 "{}",
                 model.id
             );
         }
     }
+    assert_eq!(
+        default_count, 3,
+        "all current default rows must be measured"
+    );
     assert!(embedding_count > 0, "known non-text route must be measured");
     assert!(derived_count > 0, "structured routes must reach the census");
     assert!(

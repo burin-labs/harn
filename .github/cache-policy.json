@@ -1,9 +1,9 @@
 {
-  "schema_version": 6,
+  "schema_version": 7,
   "rust_cache_action": "./.github/actions/rust-cache",
   "node_cache_action": "./.github/actions/node-cache",
   "persistent_ref": "refs/heads/main",
-  "storage_limit_bytes": 10737418240,
+  "storage_limit_bytes": 21474836480,
   "remote_sccache": false,
   "nextest_version": "0.9.132",
   "windows_workspace_warm": {
@@ -43,24 +43,31 @@
       "shared_key": "workspace-macos"
     },
     {
-      "workflow": "ci.yml",
-      "job": "package-audit",
-      "shared_key": "package-audit"
-    },
-    {
-      "workflow": "ci.yml",
-      "job": "rust-check-inputs",
-      "shared_key": "workspace-tests"
-    },
-    {
       "workflow": "rust-cache-refresh.yml",
       "job": "rust-cache-refresh",
       "shared_key": "workspace-tests"
     },
     {
       "workflow": "rust-cache-refresh.yml",
+      "job": "rust-cache-refresh-cli",
+      "shared_key": "harn-ci-cli"
+    },
+    {
+      "workflow": "rust-cache-refresh.yml",
       "job": "rust-cache-refresh",
       "shared_key": "package-audit"
+    }
+  ],
+  "harn_check_cache_writers": [
+    {
+      "workflow": "harn-check-cache-refresh.yml",
+      "job": "refresh",
+      "family": "audit"
+    },
+    {
+      "workflow": "harn-check-cache-refresh.yml",
+      "job": "refresh",
+      "family": "audit-scripts"
     }
   ]
 }

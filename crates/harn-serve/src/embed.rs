@@ -27,11 +27,11 @@ use tokio::sync::mpsc;
 use crate::adapters::acp::{
     run_acp_channel_server_with_existing_handle, AcpChannelHandle, AcpJsonRpcError,
     AcpJsonRpcErrorResponse, AcpJsonRpcId, AcpJsonRpcRequest, AcpJsonRpcResponse, AcpServerConfig,
-    AcpSessionIdParams, AcpSessionInjectParams, AcpSessionNewParams, AcpSessionPromptParams,
-    AcpSessionPromptResult, AcpSessionRestoreResult, ACP_METHOD_INITIALIZE,
-    ACP_METHOD_SESSION_CANCEL, ACP_METHOD_SESSION_CLOSE, ACP_METHOD_SESSION_INJECT,
-    ACP_METHOD_SESSION_LOAD, ACP_METHOD_SESSION_NEW, ACP_METHOD_SESSION_PROMPT,
-    ACP_METHOD_SESSION_RESUME, HARN_AGENT_EVENT_METHOD,
+    AcpSessionEnvironmentConfig, AcpSessionIdParams, AcpSessionInjectParams, AcpSessionLoadParams,
+    AcpSessionNewParams, AcpSessionPromptParams, AcpSessionPromptResult, AcpSessionRestoreResult,
+    ACP_METHOD_INITIALIZE, ACP_METHOD_SESSION_CANCEL, ACP_METHOD_SESSION_CLOSE,
+    ACP_METHOD_SESSION_INJECT, ACP_METHOD_SESSION_LOAD, ACP_METHOD_SESSION_NEW,
+    ACP_METHOD_SESSION_PROMPT, ACP_METHOD_SESSION_RESUME, HARN_AGENT_EVENT_METHOD,
 };
 
 /// Default name for the dedicated ACP worker thread.
@@ -95,20 +95,22 @@ impl EmbeddedAgent {
         let handle = AcpChannelHandle::default();
         let worker_handle = handle.clone();
 
-        let thread = crate::vm_thread::spawn(thread_name, move || {
-            let runtime = tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .expect("EmbeddedAgent: build current-thread tokio runtime");
-            let server_future = run_acp_channel_server_with_existing_handle(
-                config,
-                request_rx,
-                response_tx,
-                worker_handle,
-            );
-            runtime.block_on(server_future);
-        })
-        .expect("EmbeddedAgent: spawn ACP worker thread");
+        let thread = harn_parser::runtime_stack::builder()
+            .name(thread_name.into())
+            .spawn(move || {
+                let runtime = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .expect("EmbeddedAgent: build current-thread tokio runtime");
+                let server_future = run_acp_channel_server_with_existing_handle(
+                    config,
+                    request_rx,
+                    response_tx,
+                    worker_handle,
+                );
+                runtime.block_on(server_future);
+            })
+            .expect("EmbeddedAgent: spawn ACP worker thread");
 
         Self {
             request_tx: Some(request_tx),
@@ -521,11 +523,12 @@ impl EmbeddedAgentClient {
     pub async fn load_run(
         &mut self,
         session_id: impl Into<String>,
+        environment_policy: AcpSessionEnvironmentConfig,
     ) -> EmbeddedAgentResult<AcpSessionRestoreResult> {
         let result = self
             .request_value(
                 ACP_METHOD_SESSION_LOAD,
-                AcpSessionIdParams::new(session_id.into()),
+                AcpSessionLoadParams::new(session_id, environment_policy),
             )
             .await?;
         restore_result_from_value(result)
@@ -536,11 +539,12 @@ impl EmbeddedAgentClient {
         &mut self,
         session_id: impl Into<String>,
         cwd: impl Into<String>,
+        environment_policy: AcpSessionEnvironmentConfig,
     ) -> EmbeddedAgentResult<AcpSessionRestoreResult> {
         let result = self
             .request_value(
                 ACP_METHOD_SESSION_LOAD,
-                json!({"sessionId": session_id.into(), "cwd": cwd.into()}),
+                AcpSessionLoadParams::new(session_id, environment_policy).with_cwd(cwd),
             )
             .await?;
         restore_result_from_value(result)
@@ -902,6 +906,88 @@ mod tests {
     }
 
     #[test]
+    fn embedded_worker_retains_quota_captured_on_the_host_thread() {
+        let dir = tempfile::tempdir().unwrap();
+        let pipeline = dir.path().join("quota.harn");
+        std::fs::write(&pipeline, r#"pipeline main(harness: Harness) {
+            const refused = try {
+                harness.llm.call("hello", nil, {provider: "openai", model: "gpt-4o-mini", max_tokens: 64, stream: false})
+                false
+            } catch (error) {
+                assert(error.quota_scope == "machine")
+                assert(error.period == "month")
+                assert(error.remaining_microusd == 0)
+                assert(error.reset_at_unix_ms > 0)
+                true
+            }
+            assert(refused, "embedded worker discarded the host quota")
+            harness.stdio.println("machine_quota_reached")
+        }"#).unwrap();
+        let quota = harn_vm::llm::MachineSpendQuota::open(
+            dir.path().join("spend.sqlite"),
+            "person",
+            harn_vm::llm::MachineSpendPolicy {
+                daily_limit_microusd: None,
+                monthly_limit_microusd: Some(0),
+                lifetime_limit_microusd: None,
+            },
+        )
+        .unwrap();
+        let config = block_on(quota.scope(async {
+            AcpServerConfig::for_pipeline(pipeline.to_string_lossy().to_string())
+                .with_llm_overrides(Some(harn_vm::llm_config::parse_config_toml(
+                    "[providers.openai]\nbase_url = \"http://127.0.0.1:9/v1\"\nauth_style = \"none\"\n"
+                ).unwrap()), None)
+        })).unwrap();
+        let agent = EmbeddedAgent::spawn(config);
+        let (requests, responses, handle) = agent.into_parts();
+        let mut responses = responses.unwrap();
+        block_on(handle.wait_ready());
+        requests
+            .send(serde_json::json!({
+                "jsonrpc":"2.0", "id":1, "method":"session/new",
+                "params":{"cwd":dir.path(),"environmentPolicy":{"kind":"isolated"}}
+            }))
+            .unwrap();
+        let created = block_on(recv_json(&mut responses));
+        let session = created["result"]["sessionId"]
+            .as_str()
+            .expect("embedded session");
+        requests
+            .send(serde_json::json!({
+                "jsonrpc":"2.0", "id":2, "method":"session/prompt",
+                "params":{"sessionId":session,"prompt":[{"type":"text","text":"go"}]}
+            }))
+            .unwrap();
+        let mut reached = false;
+        block_on(harn_clock::test_support::within(
+            "embedded quota result",
+            async {
+                loop {
+                    let message = recv_json(&mut responses).await;
+                    if message["method"] == "host/capabilities" {
+                        requests.send(serde_json::json!({"jsonrpc":"2.0", "id":message["id"], "result":{}})).unwrap();
+                    } else if message["params"]["update"]["sessionUpdate"] == "agent_message_chunk"
+                    {
+                        reached |= message["params"]["update"]["content"]["text"]
+                            .as_str()
+                            .is_some_and(|text| text.contains("machine_quota_reached"));
+                    } else if message["id"] == 2 {
+                        assert!(message.get("error").is_none(), "{message}");
+                        break;
+                    }
+                }
+            },
+        ));
+        handle.shutdown();
+        block_on(handle.wait_terminated());
+        assert!(
+            reached,
+            "the real embedded prompt must reach the quota denial"
+        );
+    }
+
+    #[test]
     fn shutdown_interrupts_prompt_waiting_for_host_response() {
         let dir = tempfile::tempdir().expect("tempdir");
         let pipeline = dir.path().join("waiting-for-host.harn");
@@ -939,17 +1025,13 @@ mod tests {
                 "params": {"sessionId": session_id, "modeId": "code"}
             }))
             .expect("send session/set_mode");
-        block_on(async {
-            tokio::time::timeout(std::time::Duration::from_secs(5), async {
-                loop {
-                    if recv_json(&mut responses).await["id"] == 2 {
-                        break;
-                    }
+        block_on(harn_clock::test_support::within("mode response", async {
+            loop {
+                if recv_json(&mut responses).await["id"] == 2 {
+                    break;
                 }
-            })
-            .await
-            .expect("mode response");
-        });
+            }
+        }));
 
         requests
             .send(serde_json::json!({
@@ -965,8 +1047,9 @@ mod tests {
 
         // Observe the prompt's host-capability request before shutting down.
         // A test that only sends a prompt could pass while dispatch was idle.
-        block_on(async {
-            tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        block_on(harn_clock::test_support::within(
+            "prompt reaching its host capability request",
+            async {
                 loop {
                     let message = recv_json(&mut responses).await;
                     if message["method"] == "host/capabilities" {
@@ -977,18 +1060,17 @@ mod tests {
                         "prompt finished before host call: {message}"
                     );
                 }
-            })
-            .await
-            .expect("prompt reached host capability request");
-        });
+            },
+        ));
         assert!(!handle.is_terminated());
 
+        // Unanswered, the host call would park for its own multi-minute
+        // timeout, so a shutdown that failed to interrupt it hangs here.
         handle.shutdown();
-        block_on(async {
-            tokio::time::timeout(std::time::Duration::from_secs(2), handle.wait_terminated())
-                .await
-                .expect("shutdown must interrupt the active dispatch");
-        });
+        block_on(harn_clock::test_support::within(
+            "shutdown interrupting the active dispatch",
+            handle.wait_terminated(),
+        ));
     }
 
     #[cfg(unix)]
@@ -1003,7 +1085,11 @@ mod tests {
         std::fs::write(
             &script,
             format!(
-                "#!/bin/sh\nprintf '%s' \"$$\" > '{}'\nexec /bin/sleep 20\n",
+                // Outlives the test hang ceiling many times over, so only a
+                // shutdown that interrupts initialization and kills the child
+                // lets the waits below finish. The PID is renamed into place
+                // so the file never exists before it holds the whole PID.
+                "#!/bin/sh\nprintf '%s' \"$$\" > '{0}.tmp'\n/bin/mv '{0}.tmp' '{0}'\nexec /bin/sleep 600\n",
                 pid_file.display()
             ),
         )
@@ -1048,17 +1134,13 @@ mod tests {
                 "params": {"sessionId": session_id, "modeId": "code"}
             }))
             .expect("send session/set_mode");
-        block_on(async {
-            tokio::time::timeout(Duration::from_secs(5), async {
-                loop {
-                    if recv_json(&mut responses).await["id"] == 2 {
-                        break;
-                    }
+        block_on(harn_clock::test_support::within("mode response", async {
+            loop {
+                if recv_json(&mut responses).await["id"] == 2 {
+                    break;
                 }
-            })
-            .await
-            .expect("mode response");
-        });
+            }
+        }));
         requests
             .send(serde_json::json!({
                 "jsonrpc": "2.0",
@@ -1073,11 +1155,11 @@ mod tests {
 
         block_on(async {
             // The PID file and process state are external OS events. Polling
-            // them is bounded by named timeouts; the interval is only a probe
-            // cadence, never a delay used to order Harn tasks.
+            // them is bounded by the hang ceiling; the interval is only a
+            // probe cadence, never a delay used to order Harn tasks.
             let mut probe = tokio::time::interval(Duration::from_millis(20));
             probe.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-            tokio::time::timeout(Duration::from_secs(30), async {
+            harn_clock::test_support::within("MCP child start", async {
                 while !pid_file.exists() {
                     tokio::select! {
                         line = responses.recv() => {
@@ -1097,8 +1179,7 @@ mod tests {
                     }
                 }
             })
-            .await
-            .expect("MCP child started");
+            .await;
         });
         let pid: u32 = std::fs::read_to_string(&pid_file)
             .expect("MCP child PID")
@@ -1116,15 +1197,14 @@ mod tests {
         );
 
         handle.shutdown();
-        block_on(async {
-            tokio::time::timeout(Duration::from_secs(2), handle.wait_terminated())
-                .await
-                .expect("shutdown must interrupt MCP initialization");
-        });
+        block_on(harn_clock::test_support::within(
+            "shutdown interrupting MCP initialization",
+            handle.wait_terminated(),
+        ));
         block_on(async {
             let mut probe = tokio::time::interval(Duration::from_millis(20));
             probe.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-            tokio::time::timeout(Duration::from_secs(2), async {
+            harn_clock::test_support::within("MCP child stopping after shutdown", async {
                 loop {
                     let state = process_state();
                     if !state.status.success()
@@ -1137,8 +1217,7 @@ mod tests {
                     probe.tick().await;
                 }
             })
-            .await
-            .expect("MCP child must stop after shutdown");
+            .await;
         });
     }
 
@@ -1194,6 +1273,16 @@ mod tests {
             .expect("session/new through client");
         assert!(!created.session_id.is_empty());
 
+        let loaded = block_on(client.load_run(
+            created.session_id.clone(),
+            AcpSessionEnvironmentConfig {
+                kind: harn_vm::security::EnvironmentPolicyKind::Isolated,
+                grants: Vec::new(),
+            },
+        ))
+        .expect("live session/load through client");
+        assert_eq!(loaded.session_id, created.session_id);
+
         let resumed = block_on(client.resume_run(created.session_id.clone()))
             .expect("session/resume through client");
         assert_eq!(resumed.session_id, created.session_id);
@@ -1202,6 +1291,69 @@ mod tests {
             block_on(client.session_view(created.session_id.clone())).expect("session view query");
         assert_eq!(view.schema, harn_vm::orchestration::SESSION_VIEW_SCHEMA);
         assert_eq!(view.session.session_id, Some(created.session_id));
+
+        client.shutdown();
+        client.join().expect("client worker joins");
+    }
+
+    #[test]
+    fn embedded_agent_client_cold_load_replays_the_canonical_store() {
+        use harn_session_store::{
+            AppendEvent, CreateSession, SessionEventKind, SessionStore, SqliteSessionStore,
+        };
+
+        let project = tempfile::tempdir().expect("project root");
+        std::fs::create_dir(project.path().join(".harn")).expect("project state");
+        let session_id = "01a11000-0000-7000-8000-000000000001";
+        block_on(async {
+            let store = SqliteSessionStore::open(project.path().join(".harn/session-store.sqlite"))
+                .expect("canonical store");
+            store
+                .create(CreateSession {
+                    id: Some(session_id.to_string()),
+                    cwd: Some(project.path().canonicalize().unwrap().display().to_string()),
+                    project_scope: Some(
+                        project.path().canonicalize().unwrap().display().to_string(),
+                    ),
+                    ..CreateSession::default()
+                })
+                .await
+                .expect("stored session");
+            store
+                .append(
+                    session_id,
+                    AppendEvent::new(
+                        SessionEventKind::Message,
+                        json!({"transcript_event": {
+                            "kind": "message", "role": "assistant", "visibility": "public",
+                            "text": "embedded cold restore witness",
+                        }}),
+                    ),
+                )
+                .await
+                .expect("durable transcript");
+        });
+
+        let mut client = block_on(EmbeddedAgentClient::spawn(AcpServerConfig::new(None)))
+            .expect("spawn embedded client");
+        let restored = block_on(client.load_run_with_cwd(
+            session_id,
+            project.path().display().to_string(),
+            AcpSessionEnvironmentConfig {
+                kind: harn_vm::security::EnvironmentPolicyKind::Isolated,
+                grants: Vec::new(),
+            },
+        ))
+        .expect("cold session/load through client");
+        assert_eq!(restored.session_id, session_id);
+        assert!(
+            client.pending.iter().any(|event| {
+                matches!(event, EmbeddedAgentEvent::SessionUpdate { session_id: Some(id), update, raw }
+                    if id == session_id && raw["_harn"]["replayed"] == true
+                        && update["content"]["text"] == "embedded cold restore witness")
+            }),
+            "the public client must receive the durable transcript replay"
+        );
 
         client.shutdown();
         client.join().expect("client worker joins");

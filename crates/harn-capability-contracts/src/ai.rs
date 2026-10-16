@@ -113,13 +113,6 @@ capability_method!(
     "Execute a channel-based streaming model request."
 );
 capability_method!(
-    llm_with_rate_limit,
-    "harness.llm.with_rate_limit",
-    ["state.mutate@arg0", "llm.write@arg0"],
-    "__cap_llm_with_rate_limit(provider: string, callback: closure, options?: dict) -> any",
-    "Run a closure under the provider rate limiter."
-);
-capability_method!(
     llm_stream_call,
     "harness.llm.stream_call",
     ["llm.write@arg2.provider", "llm.write@arg2.model"],
@@ -633,7 +626,8 @@ capability_method!(
     // reject under agent-loop execution policy and abort turns mid-flight.
     [],
     "__cap_agent_session_messages(session_id: string) -> list",
-    "Read an agent session's messages."
+    "Read an agent session's messages.",
+    read_only_preparation
 );
 capability_method!(
     agent_session_visible_messages,

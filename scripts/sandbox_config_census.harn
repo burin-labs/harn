@@ -1,0 +1,341 @@
+/**
+ * Linux toolchain path measurement. Run with --no-sandbox: Bubblewrap owns
+ * the tracing sandbox, and env -i withholds the launcher's credentials.
+ * argv: output.json [temporary-tool-root] [home-containing-sbt-artifacts]
+ */
+type CensusRecord = {
+  tool: string,
+  argv: list<string>,
+  mode: string,
+  exit: int,
+  timed_out: bool,
+  diagnostic: string,
+  paths: dict<string, list<string>>,
+}
+
+type CensusReport = {
+  schema: string,
+  expected_records: int,
+  completed_records: int,
+  pending_records: int,
+  failed_commands: list<string>,
+  timed_out_commands: list<string>,
+  records: list<CensusRecord>,
+}
+
+const CASES: dict<string, list<string>> = {
+  git: ["git", "status", "--porcelain"],
+  cargo: ["cargo", "check", "--offline"],
+  rustfmt: ["rustfmt", "--check", "src/main.rs"],
+  clippy: ["cargo", "clippy", "--offline"],
+  npm: ["npm", "run", "check", "--offline"],
+  pnpm: ["pnpm", "run", "check"],
+  yarn: ["yarn", "run", "check"],
+  corepack_pnpm: ["/usr/bin/pnpm", "run", "check"],
+  corepack_yarn: ["/usr/bin/yarn", "run", "check"],
+  bun: ["bun", "run", "check"],
+  pip: ["python3", "-m", "pip", "list", "--disable-pip-version-check"],
+  uv: ["uv", "pip", "list", "--python", "/usr/bin/python3"],
+  go: ["go", "test", "./goproject/..."],
+  gcc: ["gcc", "-c", "main.c", "-o", "main.o"],
+  clang: ["clang", "-c", "main.c", "-o", "main.o"],
+  cmake: ["cmake", "-S", ".", "-B", "cmake-build"],
+  ninja: ["ninja"],
+  make: ["make"],
+  java: ["javac", "Main.java"],
+  gradle: ["gradle", "--offline", "--no-daemon", "tasks"],
+  maven: ["mvn", "--offline", "validate"],
+  sbt: ["sbt", "--server", "-Dsbt.offline=true", "about"],
+  dotnet: [
+    "/bin/sh",
+    "-c",
+    "dotnet restore --configfile NuGet.Config App.csproj && dotnet build --no-restore App.csproj",
+  ],
+  ruby: ["ruby", "-c", "main.rb"],
+  gem: ["gem", "list", "--local"],
+  bundler: ["bundle", "check"],
+  composer: ["composer", "validate", "--no-check-publish"],
+  swift: ["swift", "build"],
+  julia: ["julia", "--project=.", "-e", "using Pkg; Pkg.offline(true); Pkg.status()"],
+  mise: ["mise", "ls", "--offline"],
+  ruff: ["ruff", "check", "main.py"],
+  black: ["black", "--check", "main.py"],
+  prettier: ["prettier", "--check", "main.js"],
+  eslint: ["eslint", "main.js"],
+}
+
+const FILES: dict<string, string> = {
+  "Cargo.toml": "[package]\nname=\"census\"\nversion=\"0.1.0\"\nedition=\"2021\"\n",
+  "src/main.rs": "fn main() {}\n",
+  "package.json": "{\"name\":\"census\",\"scripts\":{\"check\":\"node main.js\"}}",
+  "main.js": "console.log(\"census\");\n",
+  "main.py": "print(\"census\")\n",
+  "main.rb": "puts \"census\"\n",
+  "go.mod": "module census\n\ngo 1.20\n",
+  "goproject/main.go": "package main\nfunc main() {}\n",
+  "main.c": "int main(void) { return 0; }\n",
+  "Main.java": "class Main { public static void main(String[] args) {} }\n",
+  "CMakeLists.txt":
+    "cmake_minimum_required(VERSION 3.16)\nproject(census C)\nadd_executable(census main.c)\n",
+  Makefile: "all:\n\t@true\n",
+  "build.ninja": "rule check\n  command = true\nbuild result: check\n",
+  "build.gradle": "plugins { id 'java' }\n",
+  "build.sbt": "\n",
+  "project/build.properties": "sbt.version=2.0.0\n",
+  "Project.toml": "[deps]\n",
+  "pom.xml":
+    "<project><modelVersion>4.0.0</modelVersion><groupId>census</groupId><artifactId>census</artifactId><version>1</version></project>",
+  "App.csproj":
+    "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup></Project>",
+  "NuGet.Config": "<configuration><packageSources><clear /></packageSources></configuration>",
+  Gemfile: "source \"https://rubygems.org\"\n",
+  "composer.json": "{\"name\":\"census/census\",\"description\":\"census\",\"license\":\"MIT\"}",
+  "Package.swift":
+    "// swift-tools-version: 6.0\nimport PackageDescription\nlet package = Package(name: \"Census\", targets: [.executableTarget(name: \"Census\")])\n",
+  "Sources/Census/main.swift": "print(\"census\")\n",
+  ".eslintrc.json": "{\"env\":{\"node\":true},\"rules\":{}}",
+}
+
+const CONFIGS: dict<string, string> = {
+  "git/config": "[census]\n marker = measured\n",
+  "pip/pip.conf": "[global]\ndisable-pip-version-check = true\n",
+  "go/env": "GOTOOLCHAIN=local\n",
+  "uv/uv.toml": "offline = true\n",
+  "pnpm/rc": "color=false\n",
+  "yarn/config": "--offline true\n",
+  "composer/config.json": "{}\n",
+  "mise/config.toml": "[settings]\nexperimental = false\n",
+  "unknown-census/token": "DUMMY\n",
+}
+
+fn write_fixture(fs: HarnessFs, root: string, name: string, content: string) {
+  const path = path_join(root, name)
+  fs.mkdir(dirname(path) ?? root)
+  fs.write_text(path, content)
+}
+
+fn trace_paths(text: string, home: string) -> dict<string, list<string>> {
+  let paths: dict<string, list<string>> = {}
+  for line in text.split("\n") {
+    const captures = regex_match(r" = (-1 [A-Z]+|[0-9]+)", line) ?? []
+    if len(captures) == 0 {
+      continue
+    }
+    const result = captures[0].trim()[2:]
+    const outcome = if result.starts_with("-1") {
+      result
+    } else {
+      "success"
+    }
+    for quoted in line.split("\"") {
+      if quoted != home + "/.config" && !quoted.starts_with(home + "/.config/")
+        && quoted != home + "/.cache"
+        && !quoted.starts_with(home + "/.cache/") {
+        continue
+      }
+      let path = replace(quoted, home, "$HOME")
+      if path.starts_with("$HOME/.cache/") {
+        path = join(path.split("/")[0:3], "/")
+      }
+      const previous = paths[path] ?? []
+      if !previous.contains(outcome) {
+        paths[path] = previous + [outcome]
+      }
+    }
+  }
+  return paths
+}
+
+fn report(records: list<CensusRecord>) -> CensusReport {
+  let failed: list<string> = []
+  let timed_out: list<string> = []
+  for record in records {
+    if record.exit != 0 {
+      failed = failed + [record.tool + "/" + record.mode]
+    }
+    if record.timed_out {
+      timed_out = timed_out + [record.tool + "/" + record.mode]
+    }
+  }
+  const expected = 2 * (len(keys(CASES)) + 1)
+  return {
+    schema: "harn.config_census.v1",
+    expected_records: expected,
+    completed_records: len(records),
+    pending_records: expected - len(records),
+    failed_commands: failed,
+    timed_out_commands: timed_out,
+    records: records,
+  }
+}
+
+fn installed_rustup_home(env: HarnessEnv) -> string {
+  const home = env.get("HOME") ?? ""
+  if !home.starts_with("/") {
+    throw "An absolute HOME is required for the installed Rust toolchain"
+  }
+  return env.get("RUSTUP_HOME") ?? path_join(home, ".rustup")
+}
+
+fn main(harness: Harness) {
+  if len(argv) == 0 {
+    throw "Usage: harn run --no-sandbox scripts/sandbox_config_census.harn -- output.json [temporary-tool-root] [sbt-artifact-home]"
+  }
+  if harness.system.platform().os != "linux" {
+    throw "The census requires Linux, bwrap, and strace"
+  }
+  const root = harness.fs.mkdtemp("harn-config-census-")
+  const home = path_join(root, "home")
+  const work = path_join(root, "work")
+  const refused = path_join(root, "refused")
+  defer {
+    harness.process.run({program: "chmod", args: ["700", refused]})
+    harness.fs.delete(root)
+  }
+  harness.fs.mkdir(home)
+  harness.fs.mkdir(work)
+  harness.fs.mkdir(refused)
+  for name in keys(FILES) {
+    const content = FILES[name]
+    if content == nil {
+      throw "Missing fixture: " + name
+    }
+    write_fixture(harness.fs, work, name, content)
+  }
+  for name in keys(CONFIGS) {
+    const content = CONFIGS[name]
+    if content == nil {
+      throw "Missing config fixture: " + name
+    }
+    write_fixture(harness.fs, home + "/.config", name, content)
+  }
+  for name in ["pip", "uv", "go-build", "ruff", "black", "unknown-census"] {
+    harness.fs.mkdir(home + "/.cache/" + name)
+  }
+  write_fixture(
+    harness.fs,
+    home,
+    ".julia/registries/Census/Registry.toml",
+    "name = \"Census\"\nuuid = \"b8608d3a-02ac-443e-a7a0-fb3716a2f84b\"\nrepo = \"file:///unused\"\n[packages]\n",
+  )
+  require harness.process.run({program: "git", args: ["init", "-q", work]}).success
+  require harness.process.run({program: "chmod", args: ["000", refused]}).success
+  if len(argv) > 2 {
+    for suffix in [".sbt/boot", ".cache/sbt/boot", ".cache/coursier"] {
+      const source = path_join(argv[2], suffix)
+      const destination = path_join(home, suffix)
+      if harness.fs.exists(source) {
+        harness.fs.mkdir(dirname(destination) ?? home)
+        require harness.process.run({program: "cp", args: ["-a", source, destination]}).success
+      }
+    }
+  }
+  const rustup_home = installed_rustup_home(harness.env)
+  const tool_path = harness.env.get("PATH") ?? "/usr/bin:/bin"
+  const env = [
+    "-i",
+    "PATH=" + tool_path,
+    "HOME=" + home,
+    "XDG_CONFIG_HOME=" + home + "/.config",
+    "XDG_CACHE_HOME=" + home + "/.cache",
+    "TMPDIR=" + root,
+    "JAVA_TOOL_OPTIONS=-Duser.home=" + home,
+    "RUSTUP_HOME=" + rustup_home,
+    "CARGO_HOME=" + home + "/.cargo",
+    "CARGO_BUILD_JOBS=2",
+    "GOMAXPROCS=2",
+    "GOTOOLCHAIN=local",
+    "DOTNET_CLI_TELEMETRY_OPTOUT=1",
+    "DOTNET_SKIP_FIRST_TIME_EXPERIENCE=1",
+  ]
+  const cases: dict<string, list<string>> = {
+    control: ["/bin/cat", home + "/.config/unknown-census/token"],
+  }
+    + CASES
+  let records: list<CensusRecord> = []
+  for name in ["control"] + keys(CASES) {
+    const command = cases[name]
+    if command == nil {
+      throw "Missing command: " + name
+    }
+    for mode in ["readable", "refused"] {
+      const trace = root + "/" + name + "-" + mode + ".trace"
+      let sandbox = [
+        "bwrap",
+        "--ro-bind",
+        "/",
+        "/",
+        "--dev",
+        "/dev",
+        "--proc",
+        "/proc",
+        "--unshare-net",
+        "--die-with-parent",
+        "--tmpfs",
+        "/tmp",
+        "--bind",
+        root,
+        root,
+        "--chdir",
+        work,
+      ]
+      if len(argv) > 1 && argv[1] != "" {
+        sandbox = sandbox + ["--ro-bind", argv[1], argv[1]]
+      }
+      if mode == "refused" {
+        for directory in [".config", ".cache"] {
+          sandbox = sandbox + ["--ro-bind", refused, home + "/" + directory]
+        }
+      }
+      const result = harness.process.run(
+        {
+          program: "/usr/bin/env",
+          args: env + sandbox
+            + ["--", "strace", "-f", "-qq", "-s", "1024", "-e", "trace=%file", "-o", trace]
+            + command,
+          timeout_ms: 120000,
+        },
+      )
+      const paths = if harness.fs.exists(trace) {
+        trace_paths(harness.fs.read_text(trace), home)
+      } else {
+        {}
+      }
+      let diagnostic = if result.success {
+        ""
+      } else {
+        result.stderr + result.stdout
+      }
+      diagnostic = replace(replace(diagnostic, home, "$HOME"), root, "$CENSUS")
+      if len(diagnostic) > 1500 {
+        diagnostic = diagnostic[len(diagnostic) - 1500:]
+      }
+      let normalized: list<string> = []
+      for arg in command {
+        normalized = normalized + [replace(arg, home, "$HOME")]
+      }
+      records = records
+        + [
+          {
+            tool: name,
+            argv: normalized,
+            mode: mode,
+            exit: result.exit_code,
+            timed_out: result.timed_out,
+            diagnostic: diagnostic,
+            paths: paths,
+          },
+        ]
+      if name == "control" {
+        if result.success != (mode == "readable") {
+          throw "tracing sandbox control didn't fire"
+        }
+        if len(keys(paths)) == 0 {
+          throw "control measured no XDG path"
+        }
+      }
+      harness.stdio.println(name + " " + mode + " exit=" + to_string(result.exit_code))
+    }
+  }
+  harness.fs.write_text(argv[0], json_stringify_pretty(report(records)) + "\n")
+}

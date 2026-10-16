@@ -8,6 +8,7 @@
 //! `interrupt_and_suspend`, and the pre-existing `persona`).
 
 use super::*;
+use crate::native_vm::NativeVmState;
 
 impl Dispatcher {
     pub(super) async fn dispatch_once(
@@ -165,7 +166,7 @@ impl Dispatcher {
             DispatchUri::AutoResume { worker_id } => {
                 let ctx = crate::vm::AsyncBuiltinCtx::from_vm(self.base_vm.child_vm());
                 let value = crate::stdlib::agents::agents_workers::scope_worker_registry(
-                    self.base_vm.worker_registry.clone(),
+                    self.base_vm.native().worker_registry.clone(),
                     crate::stdlib::agents::resume_worker_from_auto_resume_trigger(
                         &ctx, worker_id, event,
                     ),

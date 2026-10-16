@@ -26,7 +26,7 @@ use harn_hostlib::{
 };
 use harn_lexer::Lexer;
 use harn_parser::Parser;
-use harn_vm::{register_vm_stdlib, Compiler, Vm, VmError, VmValue};
+use harn_vm::{register_vm_stdlib, Compiler, VmError, VmValue};
 use sha2::{Digest, Sha256};
 use tempfile::TempDir;
 
@@ -93,7 +93,7 @@ fn execute_harn(source: &str) -> Result<VmValue, VmError> {
                 let program = parser.parse().expect("parse");
                 let chunk = Compiler::new().compile(&program).expect("compile");
 
-                let mut vm = Vm::new();
+                let mut vm = harn_vm::new_vm();
                 register_vm_stdlib(&mut vm);
                 let _ = harn_hostlib::install_default(&mut vm);
                 vm.set_harness(harn_vm::Harness::real());
@@ -239,8 +239,12 @@ fn code_index_capability_registers_documented_methods() {
             "hostlib_code_index_repo_map",
             "hostlib_code_index_branch_overlay",
             "hostlib_code_index_freshness",
+            "hostlib_code_index_module_graph",
             // Cross-file safe rename (#2508).
             "hostlib_code_index_rename_symbol",
+            "hostlib_code_index_change_signature",
+            "hostlib_code_index_extract_function",
+            "hostlib_code_index_move_symbol",
         ]
     );
     // Without a populated workspace, code-index read methods return empty
@@ -391,6 +395,7 @@ fn tools_capability_registers_documented_methods() {
             "hostlib_tools_list_directory",
             "hostlib_tools_get_file_outline",
             "hostlib_tools_git",
+            "hostlib_tools_git_repository_identity",
             // Process tools use the same receiver authority.
             "hostlib_tools_run_command",
             "hostlib_tools_read_command_output",
@@ -448,7 +453,7 @@ fn secret_store_capability_registers_documented_methods() {
 
 #[test]
 fn install_default_wires_every_module_into_a_vm() {
-    let mut vm = harn_vm::Vm::new();
+    let mut vm = harn_vm::new_vm();
     let registry = harn_hostlib::install_default(&mut vm);
 
     // `mut` is only needed when the `computer` feature adds a module below; the
@@ -1284,6 +1289,25 @@ fn every_registered_builtin_has_request_and_response_schemas() {
 
 #[test]
 fn schemas_and_typed_capability_contracts_cannot_drift() {
+    let (_, _, _, fork_schema) = schemas::SCHEMAS
+        .iter()
+        .find(|(module, method, kind, _)| {
+            *module == "session" && *method == "fork" && *kind == schemas::SchemaKind::Request
+        })
+        .expect("canonical fork schema");
+    let fork_schema: serde_json::Value =
+        serde_json::from_str(fork_schema).expect("fork schema JSON");
+    let history_schema = harn_vm::agent_sessions::canonical_history_boundaries_schema();
+    let mut boundary = history_schema["$defs"]["CanonicalSessionBoundary"]
+        .as_object()
+        .expect("owning canonical boundary schema")
+        .clone();
+    boundary.remove("title");
+    assert_eq!(
+        fork_schema["properties"]["canonical_boundary"],
+        serde_json::Value::Object(boundary),
+        "hostlib must project the store-owned boundary contract exactly"
+    );
     let schema_methods: BTreeSet<_> = schemas::SCHEMAS
         .iter()
         .filter(|(_, _, kind, _)| *kind == schemas::SchemaKind::Request)

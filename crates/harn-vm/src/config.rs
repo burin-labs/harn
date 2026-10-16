@@ -490,6 +490,7 @@ pub struct ResolvedConfig {
 }
 
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum ConfigError {
     ParseToml { source: String, message: String },
     ParseJson { source: String, message: String },
@@ -861,24 +862,25 @@ pub fn install_config_path_for_os(os: &str, program_data: Option<&str>) -> PathB
     }
 }
 
+/// `config.toml` in the user configuration directory that
+/// [`crate::user_dirs::config_dir_from_environment`] resolves for `os`.
+#[deprecated(
+    since = "0.10.152",
+    note = "use harn_vm::user_dirs::config_file(\"config.toml\"), the resolver every user config file shares"
+)]
 pub fn user_config_path_for_os(
     os: &str,
     home: Option<&str>,
     xdg_config_home: Option<&str>,
     appdata: Option<&str>,
 ) -> Option<PathBuf> {
-    if os == "windows" {
-        return appdata.map(|root| PathBuf::from(root).join(r"Harn\config.toml"));
-    }
-    if let Some(root) = xdg_config_home.filter(|value| !value.trim().is_empty()) {
-        return Some(PathBuf::from(root).join("harn").join("config.toml"));
-    }
-    home.map(|root| {
-        PathBuf::from(root)
-            .join(".config")
-            .join("harn")
-            .join("config.toml")
-    })
+    crate::user_dirs::config_dir_from_environment(
+        os,
+        home.map(std::path::Path::new),
+        xdg_config_home.map(std::ffi::OsStr::new),
+        appdata.map(std::ffi::OsStr::new),
+    )
+    .map(|dir| dir.join("config.toml"))
 }
 
 fn validate_layer_value(value: &JsonValue, source: &str) -> Result<(), ConfigError> {
@@ -1362,6 +1364,7 @@ alert_on_violation = false
     }
 
     #[test]
+    #[allow(deprecated)]
     fn config_locations_are_cross_platform() {
         assert_eq!(
             install_config_path_for_os("linux", None),
@@ -1381,7 +1384,11 @@ alert_on_violation = false
         );
         assert_eq!(
             user_config_path_for_os("windows", None, None, Some(r"C:\Users\me\AppData\Roaming")),
-            Some(PathBuf::from(r"C:\Users\me\AppData\Roaming").join(r"Harn\config.toml"))
+            Some(
+                PathBuf::from(r"C:\Users\me\AppData\Roaming")
+                    .join("Harn")
+                    .join("config.toml")
+            )
         );
     }
 }

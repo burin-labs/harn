@@ -14,6 +14,180 @@ use harn_vm::llm::AgentTerminalClass;
 use super::generated_rust_binding::{HarnLlmErrorCategory, HarnLlmErrorKind, HarnLlmErrorReason};
 use super::*;
 
+#[test]
+fn machine_quota_facts_survive_native_and_generated_host_projections() {
+    use super::generated_rust_binding::HarnMachineSpendExhaustion;
+    let facts = AcpPromptFailureFacts::from_thrown(&json!({
+        "category":"budget_exceeded", "kind":"terminal", "reason":"budget_exceeded",
+        "origin":"local", "quota_scope":"machine", "period":"month",
+        "limit_microusd":100, "reserved_microusd":100, "remaining_microusd":0,
+        "reset_at_unix_ms":1793491200000i64
+    }));
+    let wire = serde_json::to_value(AcpPromptErrorData::with_facts(
+        AgentTerminalClass::GenericThrow,
+        facts,
+    ))
+    .unwrap();
+    let generated: HarnMachineSpendExhaustion =
+        serde_json::from_value(wire["machineSpend"].clone()).unwrap();
+    assert_eq!(
+        serde_json::to_value(generated).unwrap(),
+        wire["machineSpend"]
+    );
+    let source: serde_json::Value = serde_json::from_str(
+        &protocol_source()
+            .read_text("conformance/protocols/schemas/acp-session-update.schema.json")
+            .unwrap(),
+    )
+    .unwrap();
+    let shape = &source["$defs"]["MachineSpendExhaustion"];
+    let owner = harn_vm::llm::MachineSpendExhaustion::json_schema();
+    let properties = |value: &serde_json::Value| {
+        value["properties"]
+            .as_object()
+            .unwrap()
+            .keys()
+            .cloned()
+            .collect::<std::collections::BTreeSet<_>>()
+    };
+    assert_eq!(properties(shape), properties(&owner));
+    let required = |value: &serde_json::Value| {
+        value["required"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|key| key.as_str().unwrap().to_string())
+            .collect::<std::collections::BTreeSet<_>>()
+    };
+    assert_eq!(required(shape), required(&owner));
+    assert_eq!(
+        shape["properties"]["period"]["enum"],
+        owner["$defs"]["MachineSpendPeriod"]["enum"]
+    );
+    for field in [
+        "limit_microusd",
+        "reserved_microusd",
+        "remaining_microusd",
+        "reset_at_unix_ms",
+    ] {
+        assert_eq!(
+            shape["properties"][field]["type"],
+            owner["properties"][field]["type"]
+        );
+    }
+    let schema = json!({"$ref":"#/$defs/HarnPromptErrorData", "$defs":source["$defs"]});
+    let validator = jsonschema::draft202012::new(&schema).unwrap();
+    validator.validate(&wire).unwrap();
+    let mut invalid = wire;
+    invalid["machineSpend"]
+        .as_object_mut()
+        .unwrap()
+        .remove("period");
+    assert!(
+        !validator.is_valid(&invalid),
+        "missing quota period must not pass the wire schema"
+    );
+}
+
+#[test]
+fn admission_snapshot_round_trips_through_schema_generated_host_records() {
+    use super::generated_rust_binding::{
+        HarnInferenceAdmissionSnapshot, HarnInferenceAdmissionStatus,
+    };
+    use harn_vm::llm::api::{
+        preview_inference_admission, InferenceAdmissionRequest, InferenceBoundary, InferenceReach,
+    };
+    let _guard = crate::tests::common::harn_state_lock::lock_harn_state();
+    let _host = crate::env_guard::ScopedEnvVar::unset("HARN_INFERENCE_BOUNDARY_JSON");
+    let _endpoint = crate::env_guard::ScopedEnvVar::set("OLLAMA_HOST", "http://127.0.0.1:9");
+    for (provider, expected) in [
+        ("ollama", HarnInferenceAdmissionStatus::Admitted),
+        ("openai", HarnInferenceAdmissionStatus::Denied),
+        (
+            "unresearched-provider",
+            HarnInferenceAdmissionStatus::Unknown,
+        ),
+    ] {
+        let request = InferenceAdmissionRequest {
+            provider: provider.into(),
+            model: "projection-fixture-model".into(),
+            boundary: Some(InferenceBoundary {
+                reach: InferenceReach::LocalOnly,
+                allow_training_discounts: false,
+            }),
+            data_controls: None,
+        };
+        let wire = serde_json::to_value(preview_inference_admission(&request)).unwrap();
+        let decoded: HarnInferenceAdmissionSnapshot = serde_json::from_value(wire.clone()).unwrap();
+        assert_eq!(decoded.status, expected);
+        assert_eq!(serde_json::to_value(decoded).unwrap(), wire);
+        let mut absent = wire;
+        absent.as_object_mut().unwrap().remove("status");
+        assert!(serde_json::from_value::<HarnInferenceAdmissionSnapshot>(absent).is_err());
+    }
+}
+
+#[test]
+fn local_policy_denial_survives_the_native_protocol_projection() {
+    let facts = AcpPromptFailureFacts::from_thrown(&serde_json::json!({
+        "category": "egress_blocked",
+        "kind": "terminal",
+        "reason": "policy_denied",
+        "origin": "local",
+        "rule": "inference_boundary.local_only",
+        "retryable": false,
+    }));
+    let envelope = serde_json::to_value(AcpPromptErrorData::with_facts(
+        AgentTerminalClass::ToolPolicyRejected,
+        facts,
+    ))
+    .expect("policy envelope serializes");
+    let reason: HarnLlmErrorReason =
+        serde_json::from_value(envelope["reason"].clone()).expect("typed reason decodes");
+    assert_eq!(reason, HarnLlmErrorReason::PolicyDenied);
+    assert_eq!(envelope["origin"], "local");
+    assert_eq!(envelope["rule"], "inference_boundary.local_only");
+    assert_eq!(envelope["retryable"], false);
+    assert_eq!(envelope["terminalClass"], "tool_policy_rejected");
+}
+
+#[test]
+fn managed_spend_pause_survives_the_generated_prompt_error_projection() {
+    for (owner, expected) in [
+        (
+            AgentTerminalClass::ManagedSpendPaused,
+            HarnLlmErrorReason::ManagedSpendPaused,
+        ),
+        (
+            AgentTerminalClass::ProviderBilling,
+            HarnLlmErrorReason::BillingLimit,
+        ),
+        (
+            AgentTerminalClass::RateLimited,
+            HarnLlmErrorReason::RateLimit,
+        ),
+    ] {
+        let reason = match owner {
+            AgentTerminalClass::ManagedSpendPaused => "managed_spend_paused",
+            AgentTerminalClass::ProviderBilling => "billing_limit",
+            AgentTerminalClass::RateLimited => "rate_limit",
+            _ => unreachable!(),
+        };
+        let transient = owner == AgentTerminalClass::RateLimited;
+        let facts = AcpPromptFailureFacts::from_thrown(&serde_json::json!({
+            "category": if transient { "rate_limit" } else { "generic" },
+            "kind": if transient { "transient" } else { "terminal" }, "reason": reason,
+        }));
+        let envelope = serde_json::to_value(AcpPromptErrorData::with_facts(owner, facts)).unwrap();
+        let decoded: HarnLlmErrorReason =
+            serde_json::from_value(envelope["reason"].clone()).unwrap();
+        assert_eq!(decoded, expected);
+        assert!(decoded.is_known());
+        assert_eq!(envelope["terminalClass"], owner.as_str());
+        assert_eq!(serde_json::to_value(decoded).unwrap(), envelope["reason"]);
+    }
+}
+
 /// The generated binding must carry exactly the owner's vocabulary. If this
 /// drifts, the artifact is stale and every consumer of it is guessing.
 #[test]

@@ -1,0 +1,16 @@
+fn main(harness: Harness) {
+  harness.runtime.checkpoint_clear()
+  const first = harness.runtime.checkpoint_insert("candidate", nil)
+  assert(first.inserted, "first call must retain nil")
+  assert(first.value == nil, "retained value must be nil")
+  const second = harness.runtime.checkpoint_insert("candidate", 7)
+  assert(!second.inserted, "an existing nil must not be replaced")
+  assert(second.value == nil, "later call must return retained nil")
+  assert(harness.runtime.checkpoint_exists("candidate"), "retained nil must exist")
+  harness.runtime.checkpoint_delete("candidate")
+  const replacement = harness.runtime.checkpoint_insert("candidate", {ready: true})
+  assert(replacement.inserted, "deletion permits a new initial value")
+  assert(harness.runtime.checkpoint_get("candidate") == {ready: true}, "value must be durable")
+  harness.runtime.checkpoint_clear()
+  harness.stdio.println("checkpoint insertion passed")
+}

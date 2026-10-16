@@ -126,7 +126,7 @@ pub enum NodeSemantics {
 #[derive(Debug, Clone)]
 pub struct AssignmentSemantics {
     pub target: Option<String>,
-    pub op: Option<String>,
+    pub op: Option<harn_parser::BinaryOperator>,
     pub value: ExprSummary,
 }
 
@@ -135,7 +135,7 @@ pub enum ExprSummary {
     Reference(String),
     Call(String),
     Binary {
-        op: String,
+        op: harn_parser::BinaryOperator,
         left: Box<ExprSummary>,
         right: Box<ExprSummary>,
     },
@@ -323,6 +323,21 @@ impl CapabilityEffect {
             path,
             access,
         }
+    }
+
+    /// Capability a caller must hold to perform this effect.
+    ///
+    /// Authority effects keep their access and resource scope
+    /// (`authority.write@plan_admission`); every other effect requires its
+    /// capability's canonical name.
+    pub fn requirement(&self) -> String {
+        if self.capability == Capability::Authority {
+            return format!(
+                "authority.{}",
+                authority_effect_policy_operation(self.access, self.path.as_deref())
+            );
+        }
+        self.capability.canonical().to_string()
     }
 }
 

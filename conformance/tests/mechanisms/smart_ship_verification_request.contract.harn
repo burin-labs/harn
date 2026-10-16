@@ -1,0 +1,44 @@
+import { execution, fixture, proof } from "../../../personas/smart_ship/fixtures/support"
+import { freeze_snapshot, verify } from "../../../personas/smart_ship/lib/main"
+import { contract_effect, contract_negative } from "./lib/mechanism_contract"
+
+/**
+ * Exercise the public verifier. Stock-runner regressions separately prove
+ * preparation, dispatch, execution, source checks, and original signatures.
+ */
+pipeline default(harness: Harness) {
+  const f = fixture(harness.random)
+  const prior = proof(f, execution(f))
+  const current = freeze_snapshot(f.snapshot + {sequence: 2})
+  const required = current.requirements[0]!
+  contract_effect(
+    harness.stdio,
+    "older_execution_refused",
+    verify(current, [prior], f.policy).status == "invalid",
+  )
+  contract_effect(
+    harness.stdio,
+    "copied_request_refused",
+    verify(current + {requirements: f.snapshot.requirements}, [prior], f.policy).status
+      == "invalid",
+  )
+  contract_effect(
+    harness.stdio,
+    "unsigned_request_rebinding_refused",
+    verify(current, [prior + {original: prior.original + {requirement: required}}], f.policy)
+      .status
+      == "invalid",
+  )
+  const fresh = proof(f, execution(f) + {requirement: required})
+  contract_negative(
+    harness.stdio,
+    "fresh_execution_accepted",
+    verify(current, [fresh], f.policy).status != "verified",
+  )
+  const reused = verify(current, [prior + {mode: "reused"}], f.policy)
+  contract_negative(
+    harness.stdio,
+    "explicit_compatible_reuse_accepted",
+    reused.status != "verified" || reused.reused != 1 || reused.executed != 0,
+  )
+}

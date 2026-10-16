@@ -261,10 +261,14 @@ impl TypeChecker {
             | Node::GuardStmt { condition, .. }
             | Node::RequireStmt { condition, .. }
             | Node::Ternary { condition, .. } => self.check_predicate_boolean(condition, scope),
-            Node::UnaryOp { op, operand } if op == "!" => {
+            Node::UnaryOp { op, operand } if *op == UnaryOperator::Not => {
                 self.check_predicate_boolean(operand, scope);
             }
-            Node::BinaryOp { op, left, right } if op == "&&" || op == "||" => {
+            Node::BinaryOp {
+                op: BinaryOperator::And | BinaryOperator::Or,
+                left,
+                right,
+            } => {
                 self.check_predicate_boolean(left, scope);
                 self.check_predicate_boolean(right, scope);
             }

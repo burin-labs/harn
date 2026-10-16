@@ -56,7 +56,7 @@ impl HostLeaseStore {
             .transpose()?;
         let mut conn = self.connection(SQLITE_MUTATION_BUSY_TIMEOUT)?;
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        cleanup_waiters(&tx, unix_now_ms()?, self.process_inspector.as_ref())?;
+        cleanup_waiters(&tx, self.now_ms()?, self.process_inspector.as_ref())?;
         upsert_waiter(
             &tx,
             resource,
@@ -115,7 +115,7 @@ impl HostLeaseStore {
         };
         let mut conn = self.connection(SQLITE_MUTATION_BUSY_TIMEOUT)?;
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let now = unix_now_ms()?;
+        let now = self.now_ms()?;
         let (active, _) = active_handle(
             &tx,
             &resource.machine,
@@ -140,13 +140,13 @@ impl HostLeaseStore {
     pub(super) fn try_acquire_once(
         &self,
         request: HostLeaseRequest,
-        started_at: Option<Instant>,
+        started_monotonic_ms: Option<i64>,
         deadline_at_ms: Option<i64>,
         identity: &WaiterIdentity,
     ) -> Result<HostLeaseAcquireReceipt, HostLeaseError> {
         self.try_acquire_once_with_registry_timeout(
             request,
-            started_at,
+            started_monotonic_ms,
             deadline_at_ms,
             identity,
             SQLITE_MUTATION_BUSY_TIMEOUT,
@@ -156,7 +156,7 @@ impl HostLeaseStore {
     pub(super) fn try_acquire_once_with_registry_timeout(
         &self,
         request: HostLeaseRequest,
-        started_at: Option<Instant>,
+        started_monotonic_ms: Option<i64>,
         deadline_at_ms: Option<i64>,
         identity: &WaiterIdentity,
         registry_timeout: Duration,
@@ -166,21 +166,22 @@ impl HostLeaseStore {
         let tx = match conn.transaction_with_behavior(TransactionBehavior::Immediate) {
             Ok(tx) => tx,
             Err(error) if sqlite_is_busy(&error) => {
-                let now = unix_now_ms()?;
+                let now = self.now_ms()?;
                 return Ok(registry_busy_receipt(
                     request.host,
                     request.resource_class,
                     request.domain,
                     now,
-                    started_at.map(|started| duration_ms_u64(started.elapsed())),
+                    started_monotonic_ms
+                        .map(|started| duration_ms_u64(self.monotonic_elapsed(started))),
                     deadline_at_ms,
                 ));
             }
             Err(error) => return Err(error.into()),
         };
-        let now = unix_now_ms()?;
-        let waited_ms = started_at
-            .map(|started| duration_ms_u64(started.elapsed()))
+        let now = self.now_ms()?;
+        let waited_ms = started_monotonic_ms
+            .map(|started| duration_ms_u64(self.monotonic_elapsed(started)))
             .unwrap_or(0);
         let host = request.host.clone();
         let resource_class = request.resource_class;

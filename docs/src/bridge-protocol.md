@@ -3,6 +3,37 @@
 Harn's stdio bridge uses JSON-RPC 2.0 notifications and requests for
 host/runtime coordination below ACP session semantics.
 
+## Host request attribution
+
+ACP `host/call` requests carry `_meta.harn.requestTrace` alongside `name` and
+`args`. The trace contains `caller` and `arguments`:
+
+- `caller` contains the invoking Harn `module` and `function`. It is `null`
+  when the request originates outside a Harn call frame. `module` is nullable
+  for source without a filename.
+- `arguments` maps each argument key to its `value_type`. List arguments also
+  carry `list_length`, including zero for an empty list.
+
+The trace excludes argument values, object members, and list elements. Equal
+shapes identify repeated structure; they don't prove identical argument values.
+Calls answered by the runtime's read cache don't produce another host request.
+
+Rust embedders receive this metadata through
+`HostCallBridge::dispatch_traced`. Its default implementation delegates to
+`dispatch`, so existing bridges continue to work. Typed Harness methods and
+privileged `host_call` invocations use the same attribution path.
+
+## Host response deadlines
+
+Human questions and approvals wait for a response, cancellation, or transport
+disconnection. Transport deadlines do not expire `session/request_permission`
+or `host/call` requests named `interaction.ask`, `interaction.ask_user`,
+`interaction.request_approval`, or `permission.request`.
+
+Other requests keep their ordinary transport deadlines. This includes the ACP
+server's `HARN_HOST_CALL_TIMEOUT_SECS` setting. Harn's execution budgets and
+Stop controls remain active while a human response is pending.
+
 ## Native hypothesis attestation
 
 `harness.obs.hypothesis_event_authority_request` sends a `host/call` request
@@ -128,9 +159,20 @@ metadata keys are advertised during `initialize` under
 - `errorCategory`
 - `executionDurationMs`
 - `executor`
+- `intent`
 - `mutationStatus`
 - `parsing`
 - `rawInputPartial`
+
+`intent` appears on `tool_call` only. It is the model's short statement of what
+the call is for, such as `"Looking for PR 456 artifacts"`, taken from the
+`<purpose>` heading the model declares when the agent loop runs with
+`purpose_labels` enabled. Every call in the declaring turn carries the same
+value. Harn collapses whitespace runs to one space and caps the value at 200
+characters, ending a cut value with `…`. The key is absent when the turn declared
+no heading or `purpose_labels` is off. The same value reaches
+`session/request_permission` as `toolCall._meta.harn.intent`, so a host can
+show it as the approval title.
 
 The standard ACP fields (`toolCallId`, `title`, `kind`, `status`,
 `content`, `locations`, `rawInput`, and `rawOutput`) remain available in
@@ -466,6 +508,12 @@ locations. The same policy receipt is copied into
 `PermissionGrant`/`PermissionDeny` transcript-event metadata so approvals are
 auditable and replayable.
 
+`toolCall._meta.harn.intent` is present when the model declared a purpose for
+the turn that issued the call. It is the same string, with the same bounds, as
+the `intent` on that call's `tool_call` update. Both the approval-policy `ask`
+path and the side-effect ceiling escalation set it. Hosts should fall back to
+`title` when it is absent.
+
 Response payload (host-issued):
 
 ```json
@@ -731,6 +779,13 @@ rendered into a model prompt — see
 payload is validated as a reminder spec; non-standard host metadata belongs under
 `_meta`. Malformed reminder payloads are rejected with `HARN-RMD-002`; unknown
 top-level reminder options are rejected with `HARN-RMD-001`.
+
+`pin_reminder` can include a typed `goal_pin` projection with `spec` and
+`control_id`. The spec carries the objective, active and retired criteria
+(`id` and `description`), constraints, and budget. Machine-check callbacks stay
+with the caller. Harn updates this projection when a recorded retarget lands,
+so the pin preserves the current goal across compaction. An optional `max_body`
+preserves the visible-body limit from `pin_reminder` when Harn refreshes the pin.
 
 Hosts that need an operator-facing queue can call
 `session/pending_injections` with `{ "sessionId": "..." }`. The response is

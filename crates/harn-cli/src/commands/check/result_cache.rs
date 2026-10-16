@@ -11,13 +11,20 @@
 //! - the file's content and its transitive user-import closure, stdlib
 //!   digest, codegen fingerprint, harn version, and compiler options — all
 //!   via the bytecode cache's [`bytecode_cache::CacheKey`];
+//! - a digest of the stdlib builtin manifest (every `#[harn_builtin]`
+//!   signature and contract the type checker reads), which lives in
+//!   `harn-vm` outside both source fingerprints, so a rebuilt binary with a
+//!   changed builtin signature cannot serve diagnostics typed against the old
+//!   one;
 //! - a build-time fingerprint of the check driver itself (`harn-lint`,
-//!   `commands/check`, package-config parsing) — `HARN_CHECK_FINGERPRINT` —
+//!   `commands/check`, package-config parsing), composed from linked source owners,
 //!   so within-version edits to lint/preflight logic invalidate entries
 //!   exactly like #2621 did for the compiler;
 //! - the effective per-file `CheckConfig` (exhaustively destructured so new
 //!   fields cannot be forgotten), the `--invariants` flag, the path string
 //!   diagnostics render with, and the file's cross-file lint-exemption set;
+//! - the driver folds the exact project-manifest identity into this base key,
+//!   matching the model aliases and capability overlays scoped to each check;
 //! - a recorded log of every filesystem probe the preflight scan made
 //!   beyond the import closure (template/asset reads, directory checks,
 //!   project-root resolution, the "did you mean" basename walk), replayed
@@ -56,9 +63,29 @@ const RESULT_CACHE_SCHEMA: u32 = 4;
 /// `HARN_BYTECODE_CACHE=0` toggle also disables it).
 pub(crate) const RESULT_CACHE_ENV: &str = "HARN_CHECK_RESULT_CACHE";
 
-/// Build-time fingerprint of the check pipeline's own sources (harn-lint,
-/// commands/check, package config parsing). See `build.rs`.
-const CHECK_FINGERPRINT: &str = env!("HARN_CHECK_FINGERPRINT");
+/// Contributions from the actual linked check owners, including published crates.
+#[path = "../../../build_support/check_sources.rs"]
+mod check_sources;
+
+const CHECK_FINGERPRINT: &str = harn_source_fingerprint::compose(
+    "harn.check-source.v2",
+    &[
+        harn_source_fingerprint::SourceContribution {
+            name: "harn-cli",
+            fingerprint: env!("HARN_LOCAL_CHECK_SOURCE_FINGERPRINT"),
+            roots: check_sources::CHECK_SOURCE_PATHS,
+        },
+        harn_source_fingerprint::SourceContribution::crate_sources(
+            "harn-lint",
+            harn_lint::SOURCE_FINGERPRINT,
+        ),
+        harn_source_fingerprint::SourceContribution::crate_sources(
+            "harn-package",
+            harn_package::SOURCE_FINGERPRINT,
+        ),
+    ],
+)
+.as_str();
 
 /// True when the check-result cache should be consulted and written.
 pub(super) fn enabled() -> bool {
@@ -130,6 +157,41 @@ pub(super) fn with_probe_recording<T>(active: bool, f: impl FnOnce() -> T) -> (T
     let value = f();
     let probes = PROBE_LOG.with(|log| log.borrow_mut().take().unwrap_or_default());
     (value, probes)
+}
+
+/// Run `f` with a private probe log, whatever the caller's recording state,
+/// and return the probes it made instead of appending them to the caller's
+/// log. The per-run preflight memo scans a module once and replays its probes
+/// into every dependent file's log through [`replay_probes`]; capturing
+/// unconditionally keeps a memo built while recording was off complete for a
+/// later file that records. `f` may call [`drain_captured_probes`] to split
+/// the capture at an import boundary.
+pub(super) fn capture_probes<T>(f: impl FnOnce() -> T) -> (T, Vec<Probe>) {
+    let outer = PROBE_LOG.with(|log| log.borrow_mut().replace(Vec::new()));
+    let value = f();
+    let probes = PROBE_LOG.with(|log| std::mem::replace(&mut *log.borrow_mut(), outer));
+    (value, probes.unwrap_or_default())
+}
+
+/// Take the probes recorded so far inside [`capture_probes`], leaving the
+/// capture open.
+pub(super) fn drain_captured_probes() -> Vec<Probe> {
+    PROBE_LOG
+        .with(|log| log.borrow_mut().as_mut().map(std::mem::take))
+        .unwrap_or_default()
+}
+
+/// Append previously captured probes to this thread's log when recording is
+/// on, exactly as if the scan that made them had run here.
+pub(super) fn replay_probes(probes: &[Probe]) {
+    if probes.is_empty() {
+        return;
+    }
+    PROBE_LOG.with(|log| {
+        if let Some(log) = log.borrow_mut().as_mut() {
+            log.extend_from_slice(probes);
+        }
+    });
 }
 
 fn record(probe: Probe) {
@@ -247,6 +309,7 @@ pub(super) fn result_cache_key(
     fold("harn-version", base.harn_version.as_bytes());
     fold("compiler-tag", &[base.compiler_tag]);
     fold("check-fingerprint", CHECK_FINGERPRINT.as_bytes());
+    fold("builtin-manifest", builtin_manifest_digest());
     fold(
         "predicate-model-operations",
         &harn_vm::provider_catalog::predicate_model_catalog_identity(),
@@ -257,6 +320,40 @@ pub(super) fn result_cache_key(
         fold("lint-exemption", name.as_bytes());
     }
     fold_config(&mut fold, config, host_capabilities_content);
+    hasher.finalize().into()
+}
+
+/// Digest of every builtin's name, signature, and contract as the stdlib
+/// declares them. Computed once per process; the manifest is static.
+fn builtin_manifest_digest() -> &'static [u8; 32] {
+    static DIGEST: std::sync::OnceLock<[u8; 32]> = std::sync::OnceLock::new();
+    DIGEST.get_or_init(|| manifest_digest(harn_vm::stdlib::all_builtin_manifest().iter().copied()))
+}
+
+fn manifest_digest<'a, E: std::fmt::Debug + 'a>(
+    entries: impl IntoIterator<Item = &'a E>,
+) -> [u8; 32] {
+    let mut hasher = Sha256::new();
+    for entry in entries {
+        hasher.update(format!("{entry:?}").as_bytes());
+        hasher.update(b"\0");
+    }
+    hasher.finalize().into()
+}
+
+/// Digest of every `CheckConfig` field, the same fold the result key uses.
+pub(super) fn check_config_digest(config: &CheckConfig) -> [u8; 32] {
+    let mut hasher = Sha256::new();
+    fold_config(
+        &mut |label: &str, value: &[u8]| {
+            hasher.update(label.as_bytes());
+            hasher.update(b"\0");
+            hasher.update(value);
+            hasher.update(b"\0");
+        },
+        config,
+        None,
+    );
     hasher.finalize().into()
 }
 
@@ -511,6 +608,23 @@ fn hex(bytes: &[u8; 32]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn builtin_manifest_digest_tracks_signature_changes() {
+        let manifest = harn_vm::stdlib::all_builtin_manifest();
+        let original = manifest_digest(manifest.iter().copied());
+        assert_eq!(original, *builtin_manifest_digest());
+        // A rebuilt binary whose first builtin returns another type must key
+        // differently, or `harn check` replays diagnostics typed against the
+        // old signature.
+        let mut changed: Vec<_> = manifest.iter().map(|entry| **entry).collect();
+        let other = manifest
+            .iter()
+            .find(|entry| entry.signature != changed[0].signature)
+            .expect("manifest has two distinct signatures");
+        changed[0].signature = other.signature;
+        assert_ne!(original, manifest_digest(changed.iter()));
+    }
 
     #[test]
     fn result_key_hashes_resolved_host_capability_snapshot() {

@@ -8,6 +8,7 @@ import {
 } from "std/llm/tool_middleware"
 
 struct ReceiptEcho {
+  ok: bool
   echoed: string
 }
 
@@ -18,7 +19,7 @@ fn smoke_tools() {
     "receipt_echo",
     "Echo receipt smoke input",
     {
-      handler: { args -> return ReceiptEcho {echoed: to_string(args?.message ?? "")} },
+      handler: { args -> return ReceiptEcho {ok: true, echoed: to_string(args?.message ?? "")} },
       parameters: {message: {type: "string"}, token: {type: "string"}},
     },
   )

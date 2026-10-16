@@ -153,6 +153,21 @@ func main() {}
 BODY
 ```""",
   )
+  // The newline before the tag closes the body and is not part of it, so a
+  // whole file keeps its final newline only through an empty line before the
+  // tag. The json tool contract prompt teaches exactly this shape.
+  probe_json(
+    harness.agent,
+    harness.stdio,
+    "uncounted body keeps a final newline from an empty line before the tag",
+    """```tool
+{ "name": "write_file", "args": { "path": "a.go", "content": "<<BODY" } }
+<<BODY
+package main
+
+BODY
+```""",
+  )
   // The fence-immunity promise holds without a count: the chunker keeps the
   // ```tool block open until the tag line, so fenced content survives.
   probe_json(

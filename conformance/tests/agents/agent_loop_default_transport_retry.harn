@@ -54,5 +54,24 @@ pipeline test(harness: Harness) {
   assert_eq(budget.status, "budget_exhausted")
   assert_eq(budget.stop_reason, "budget_exhausted")
   assert(!agent_loop_default_retry_predicate(budget))
+  // An exhausted provider balance is an HTTP 429 that no backoff clears. An
+  // older envelope still labels its category `rate_limit`; the typed reason
+  // decides, so it is never retried.
+  for category in ["generic", "rate_limit"] {
+    const billing = __dispatch_default_result(
+      try {
+        throw {
+          kind: "terminal",
+          reason: "billing_limit",
+          category: category,
+          provider: "openai",
+          message: "openai HTTP 429 [billing_limit] credit_balance_exhausted",
+        }
+      },
+      {provider: "openai", model: "gpt-6-sol"},
+    )
+    assert_eq(billing.status, "provider_error")
+    assert(!agent_loop_default_retry_predicate(billing))
+  }
   harness.stdio.println("agent default transport retries typed Fireworks server errors")
 }

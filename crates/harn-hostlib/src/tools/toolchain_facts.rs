@@ -236,6 +236,7 @@ fn response_from_error(probe: &Probe, error: HostlibError) -> VmValue {
     let status = match error {
         HostlibError::CatastrophicFloor { .. } => "blocked",
         HostlibError::SandboxViolation { .. } => "blocked",
+        HostlibError::SandboxMechanismUnavailable { .. } => "blocked",
         _ => "spawn_failed",
     };
     base_response(probe, status, false)

@@ -8,376 +8,70 @@ use crate::value::VmValue;
 /// Sender for streaming text deltas from an in-flight LLM call.
 pub(crate) type DeltaSender = tokio::sync::mpsc::UnboundedSender<String>;
 
-/// Provider-agnostic reasoning effort.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
-#[serde(rename_all = "lowercase")]
-pub(crate) enum ReasoningEffort {
-    None,
-    Minimal,
-    Low,
-    Medium,
-    High,
-    XHigh,
-    Max,
-}
+pub(crate) use harn_llm::request::{
+    LlmApiMode, LlmRequestPayload, LlmRouteAlternative, LlmRouteFallback, LlmRoutePolicy,
+    LlmRoutingDecision, LogprobsConfig, MirostatConfig, OutputFormat, PromptCacheTtl,
+    ReasoningEffort, ReminderLifecycleEmission, ThinkingConfig, TokenBias, ToolSearchConfig,
+    ToolSearchMode, ToolSearchVariant, Verbosity,
+};
 
-impl ReasoningEffort {
-    pub(crate) fn as_str(self) -> &'static str {
-        match self {
-            ReasoningEffort::None => "none",
-            ReasoningEffort::Minimal => "minimal",
-            ReasoningEffort::Low => "low",
-            ReasoningEffort::Medium => "medium",
-            ReasoningEffort::High => "high",
-            ReasoningEffort::XHigh => "xhigh",
-            ReasoningEffort::Max => "max",
-        }
-    }
-}
+fn emit_reminder(reminder: &ReminderLifecycleEmission) {
+    let payload = serde_json::json!({
+        "session_id": &reminder.session_id,
+        "turn_number": reminder.turn_number,
+        "reminder_id": &reminder.reminder_id,
+        "tags": &reminder.tags,
+        "dedupe_key": &reminder.dedupe_key,
+        "source": &reminder.source,
+        "role_hint": &reminder.role_hint,
+        "authority": &reminder.authority,
+        "rendered_role": &reminder.rendered_role,
+        "body_bytes": reminder.body_bytes,
+        "rendered_bytes": reminder.rendered_bytes,
+        "ttl_turns": &reminder.ttl_turns,
+        "propagate": &reminder.propagate,
+        "originating_agent_id": &reminder.originating_agent_id,
+    });
+    crate::llm::helpers::emit_reminder_lifecycle_event(
+        crate::llm::helpers::REMINDER_FIRED_EVENT_KIND,
+        payload,
+    );
 
-/// Typed `harness.llm.call(..., { thinking: ... })` configuration.
-#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize)]
-#[serde(tag = "mode", rename_all = "snake_case")]
-pub(crate) enum ThinkingConfig {
-    #[default]
-    Disabled,
-    Enabled {
-        budget_tokens: Option<u32>,
-    },
-    Adaptive,
-    Effort {
-        level: ReasoningEffort,
-    },
-}
-
-impl ThinkingConfig {
-    pub(crate) fn is_disabled(&self) -> bool {
-        matches!(
-            self,
-            Self::Disabled
-                | Self::Effort {
-                    level: ReasoningEffort::None
-                }
-        )
-    }
-
-    pub(crate) fn is_enabled(&self) -> bool {
-        !self.is_disabled()
-    }
-}
-
-/// Provider-agnostic structured-output request shape parsed at the script
-/// boundary. Providers translate this into their native wire format.
-#[derive(Clone, Debug, Default, PartialEq, serde::Serialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub(crate) enum OutputFormat {
-    #[default]
-    Text,
-    JsonObject,
-    JsonSchema {
-        schema: serde_json::Value,
-        strict: bool,
-    },
-}
-
-impl OutputFormat {
-    pub(crate) fn is_structured(&self) -> bool {
-        !matches!(self, Self::Text)
-    }
-
-    pub(crate) fn schema(&self) -> Option<&serde_json::Value> {
-        match self {
-            Self::JsonSchema { schema, .. } => Some(schema),
-            _ => None,
-        }
-    }
-}
-
-/// Which tool-search variant to use. BM25/regex match the provider-native
-/// variants; hybrid is a Harn client-mode scorer.
-/// Scripts write the lower-case short name.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum ToolSearchVariant {
-    /// BM25 / natural-language queries. Default when the user wrote just
-    /// `tool_search: true` or omitted the variant.
-    Bm25,
-    /// Python-regex queries (more precise, less ergonomic).
-    Regex,
-    /// Client-side reciprocal-rank fusion over BM25 and weighted field matches.
-    Hybrid,
-}
-
-impl ToolSearchVariant {
-    pub(crate) fn as_short(self) -> &'static str {
-        match self {
-            ToolSearchVariant::Bm25 => "bm25",
-            ToolSearchVariant::Regex => "regex",
-            ToolSearchVariant::Hybrid => "hybrid",
-        }
-    }
-}
-
-/// How to resolve `tool_search` against the active provider.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum ToolSearchMode {
-    /// Auto-select: native if the provider supports it, client-executed
-    /// fallback otherwise. Default.
-    Auto,
-    /// Force the provider's native mechanism; error if unsupported.
-    Native,
-    /// Force the Harn stdlib client-executed fallback even when native is
-    /// available.
-    Client,
-}
-
-/// Provider-side prompt-cache TTL requested by `llm_call` / `agent_loop`.
-/// Harn keeps this typed so provider adapters can decide whether a value is an
-/// explicit wire field or the provider's default behavior.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum PromptCacheTtl {
-    FiveMinutes,
-    OneHour,
-}
-
-impl PromptCacheTtl {
-    pub(crate) fn parse(value: &str) -> Option<Self> {
-        match value {
-            "5m" => Some(Self::FiveMinutes),
-            "1h" => Some(Self::OneHour),
-            _ => None,
-        }
-    }
-
-    pub(crate) fn as_str(self) -> &'static str {
-        match self {
-            Self::FiveMinutes => "5m",
-            Self::OneHour => "1h",
-        }
-    }
-
-    pub(crate) fn anthropic_ttl_field(self) -> Option<&'static str> {
-        match self {
-            Self::FiveMinutes => None,
-            Self::OneHour => Some("1h"),
-        }
-    }
-}
-
-impl serde::Serialize for PromptCacheTtl {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        serializer.serialize_str(self.as_str())
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
-pub(crate) struct LogprobsConfig {
-    pub top: Option<u8>,
-}
-
-#[derive(Clone, Debug, PartialEq, serde::Serialize)]
-pub(crate) struct TokenBias {
-    pub token_id: u32,
-    pub tokenizer: String,
-    pub bias: f64,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
-#[serde(rename_all = "lowercase")]
-pub(crate) enum Verbosity {
-    Low,
-    Medium,
-    High,
-}
-
-impl Verbosity {
-    pub(crate) fn as_str(self) -> &'static str {
-        match self {
-            Self::Low => "low",
-            Self::Medium => "medium",
-            Self::High => "high",
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize)]
-pub(crate) struct MirostatConfig {
-    pub version: u8,
-    pub target_entropy: f64,
-    pub learning_rate: f64,
-}
-
-/// Provider API surface for a call. OpenAI-compatible providers default to
-/// chat completions; the native OpenAI Responses path is explicit because it
-/// has different request, tool, and transcript semantics.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize)]
-#[serde(rename_all = "snake_case")]
-pub(crate) enum LlmApiMode {
-    #[default]
-    ChatCompletions,
-    Responses,
-}
-
-impl LlmApiMode {
-    pub(crate) fn as_str(self) -> &'static str {
-        match self {
-            Self::ChatCompletions => "chat_completions",
-            Self::Responses => "responses",
-        }
-    }
-}
-
-/// User-facing tool_search configuration. Parsed from the `tool_search`
-/// option on `llm_call` / `agent_loop`. Absent means no deferred-loading
-/// machinery is engaged — tools ship eagerly as always.
-#[derive(Clone, Debug)]
-pub(crate) struct ToolSearchConfig {
-    pub variant: ToolSearchVariant,
-    pub mode: ToolSearchMode,
-}
-
-impl ToolSearchConfig {
-    /// Default when the user writes `tool_search: true` with no detail.
-    pub(crate) fn default_bm25_auto() -> Self {
-        Self {
-            variant: ToolSearchVariant::Bm25,
-            mode: ToolSearchMode::Auto,
-        }
-    }
-}
-
-/// First-class cost/latency routing policy for `llm_call`.
-#[derive(Clone, Debug, Default, PartialEq)]
-pub(crate) enum LlmRoutePolicy {
-    /// Keep the historical provider/model resolution path.
-    #[default]
-    Manual,
-    /// Pin to a concrete alias, model id, or `provider:model` selector.
-    Always(String),
-    /// Pick the lowest-cost available candidate at or above the requested
-    /// quality tier.
-    CheapestOverQuality(String),
-    /// Pick the lowest-latency available candidate at or above the requested
-    /// quality tier.
-    FastestOverQuality(String),
-    /// Pick from an explicit ordered candidate list. The strategy is
-    /// `prefer_order`, `cheapest_first`, or `fastest_first`.
-    PreferenceList {
-        targets: Vec<String>,
-        strategy: String,
-    },
-}
-
-impl LlmRoutePolicy {
-    pub(crate) fn as_label(&self) -> String {
-        match self {
-            Self::Manual => "manual".to_string(),
-            Self::Always(target) => format!("always({target})"),
-            Self::CheapestOverQuality(target) => format!("cheapest_over_quality({target})"),
-            Self::FastestOverQuality(target) => format!("fastest_over_quality({target})"),
-            Self::PreferenceList { targets, strategy } => {
-                format!("preference_list({strategy}: {})", targets.join(","))
-            }
-        }
-    }
-}
-
-/// One considered route in a routing decision.
-#[derive(Clone, Debug, serde::Serialize, PartialEq)]
-pub(crate) struct LlmRouteAlternative {
-    pub provider: String,
-    pub model: String,
-    pub quality_tier: String,
-    pub available: bool,
-    pub selected: bool,
-    pub cost_per_1k_in: Option<f64>,
-    pub cost_per_1k_out: Option<f64>,
-    pub latency_p50_ms: Option<u64>,
-    pub reason: String,
-}
-
-/// Serializable route decision kept for transcript/replay fidelity and portal
-/// post-hoc scoring.
-#[derive(Clone, Debug, serde::Serialize, PartialEq)]
-pub(crate) struct LlmRoutingDecision {
-    pub policy: String,
-    pub requested_quality: Option<String>,
-    pub selected_provider: String,
-    pub selected_model: String,
-    pub alternatives: Vec<LlmRouteAlternative>,
-}
-
-#[derive(Clone, Debug, serde::Serialize, PartialEq)]
-pub(crate) struct LlmRouteFallback {
-    pub provider: String,
-    pub model: String,
-}
-
-/// Reminder lifecycle metadata carried to the transport boundary.
-///
-/// Option extraction decides how each reminder renders for the selected
-/// route; the API layer emits the lifecycle record only once preflight
-/// gates have passed and a request is about to be served.
-#[derive(Clone, Debug)]
-pub(crate) struct ReminderLifecycleEmission {
-    pub session_id: Option<String>,
-    pub turn_number: i64,
-    pub reminder_id: String,
-    pub tags: Vec<String>,
-    pub body: String,
-    pub dedupe_key: Option<String>,
-    pub source: String,
-    pub role_hint: String,
-    pub authority: String,
-    pub rendered_role: String,
-    pub body_bytes: usize,
-    pub rendered_bytes: usize,
-    pub ttl_turns: Option<i64>,
-    pub propagate: String,
-    pub originating_agent_id: Option<String>,
-}
-
-impl ReminderLifecycleEmission {
-    pub(crate) fn emit(&self) {
-        let payload = serde_json::json!({
-            "session_id": &self.session_id,
-            "turn_number": self.turn_number,
-            "reminder_id": &self.reminder_id,
-            "tags": &self.tags,
-            "dedupe_key": &self.dedupe_key,
-            "source": &self.source,
-            "role_hint": &self.role_hint,
-            "authority": &self.authority,
-            "rendered_role": &self.rendered_role,
-            "body_bytes": self.body_bytes,
-            "rendered_bytes": self.rendered_bytes,
-            "ttl_turns": &self.ttl_turns,
-            "propagate": &self.propagate,
-            "originating_agent_id": &self.originating_agent_id,
-        });
-        crate::llm::helpers::emit_reminder_lifecycle_event(
-            crate::llm::helpers::REMINDER_FIRED_EVENT_KIND,
-            payload,
+    if let Some(session_id) = reminder.session_id.as_deref().filter(|id| !id.is_empty()) {
+        crate::llm::agent_runtime::emit_agent_event_sync(
+            &crate::agent_events::AgentEvent::ReminderEmitted {
+                session_id: session_id.to_string(),
+                reminder_id: reminder.reminder_id.clone(),
+                tags: reminder.tags.clone(),
+                body: reminder.body.clone(),
+                role_hint: reminder.role_hint.clone(),
+                authority: reminder.authority.clone(),
+                rendered_role: reminder.rendered_role.clone(),
+                source: reminder.source.clone(),
+                ttl_turns: reminder.ttl_turns,
+            },
         );
-
-        if let Some(session_id) = self.session_id.as_deref().filter(|id| !id.is_empty()) {
-            crate::llm::agent_runtime::emit_agent_event_sync(
-                &crate::agent_events::AgentEvent::ReminderEmitted {
-                    session_id: session_id.to_string(),
-                    reminder_id: self.reminder_id.clone(),
-                    tags: self.tags.clone(),
-                    body: self.body.clone(),
-                    role_hint: self.role_hint.clone(),
-                    authority: self.authority.clone(),
-                    rendered_role: self.rendered_role.clone(),
-                    source: self.source.clone(),
-                    ttl_turns: self.ttl_turns,
-                },
-            );
-        }
     }
+}
+
+/// One applied request setting, the value it resolved to, and the
+/// configuration layer that decided it.
+///
+/// A provider quirk costs hours when a value silently came from somewhere the
+/// author did not look (a catalog default, a steer away from the requested
+/// tool channel, an ambient reasoning policy). Every call records these rows
+/// on its `provider_call_request` transcript event under `resolution`.
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize)]
+pub(crate) struct ResolvedSetting {
+    pub setting: &'static str,
+    /// The caller's raw value, when the caller set one.
+    pub requested: Option<String>,
+    pub applied: String,
+    /// `caller.<option>`, `catalog.<field>`, `catalog.steer`,
+    /// `reasoning_policy`, `default`, or `derived`.
+    pub source: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
 }
 
 /// All options for an LLM API call, extracted once from user-facing args.
@@ -561,6 +255,9 @@ pub(crate) struct LlmCallOptions {
     pub cache: bool,
     pub prompt_cache_ttl: Option<PromptCacheTtl>,
 
+    /// How each request setting was decided; see [`ResolvedSetting`].
+    pub(crate) resolution: Vec<ResolvedSetting>,
+
     // --- Transport ---
     pub timeout: Option<u64>,
     /// Per-chunk idle timeout for streaming responses (seconds).
@@ -581,6 +278,8 @@ pub(crate) struct LlmCallOptions {
     /// default so an embedder chooses the default once, in config, instead of
     /// it being chosen by omission inside the runtime.
     pub data_controls: Option<DataPosture>,
+    /// Optional destination and training ceiling supplied by the embedder.
+    pub inference_boundary: Option<super::InferenceBoundary>,
     /// OpenAI Responses background execution flag.
     pub background: Option<bool>,
     /// OpenAI Responses truncation/compaction policy.
@@ -684,6 +383,7 @@ impl Default for LlmCallOptions {
             tool_choice: None,
             tool_search: None,
             cache: false,
+            resolution: Vec::new(),
             prompt_cache_ttl: None,
             timeout: None,
             idle_timeout: None,
@@ -692,6 +392,7 @@ impl Default for LlmCallOptions {
             previous_response_id: None,
             store: None,
             data_controls: None,
+            inference_boundary: None,
             background: None,
             truncation: None,
             compact: None,
@@ -811,18 +512,15 @@ impl LlmCallOptions {
         features
     }
 
-    /// Whether the resolved tool surface contains a provider-NATIVE computer
-    /// tool — a block whose `type` starts with `computer` (e.g.
-    /// `computer_20251124`). Deliberately does NOT match a plain function tool
-    /// merely named `computer`: that universal-path tool needs no provider beta
-    /// and matching it would leak the Anthropic beta onto the neutral path.
+    /// Only the legacy `computer_20251124` descriptor needs this beta.
+    /// The newer toolset and ordinary functions require no computer-use beta.
     /// Checks both `native_tools` and `provider_tools` so detection is
     /// order-independent with respect to the native-tool projection.
     fn request_has_native_computer_tool(&self) -> bool {
         let is_native_computer = |tool: &serde_json::Value| -> bool {
             tool.get("type")
                 .and_then(serde_json::Value::as_str)
-                .is_some_and(|ty| ty.starts_with("computer"))
+                .is_some_and(|ty| ty == "computer_20251124")
         };
         self.native_tools
             .as_deref()
@@ -837,120 +535,21 @@ pub(crate) fn push_unique_anthropic_beta_feature(features: &mut Vec<String>, fea
     }
 }
 
-/// Send-safe subset of `LlmCallOptions` used for provider transport.
-#[derive(Clone, Debug, serde::Serialize)]
-pub(crate) struct LlmRequestPayload {
-    pub provider: String,
-    pub model: String,
-    /// See [`LlmCallOptions::region`]. Forwarded to provider transport so
-    /// multi-region providers (currently Bedrock) can override their
-    /// env-resolved region per call. `None` keeps env-only resolution.
-    pub region: Option<String>,
-    pub api_key: String,
-    pub api_mode: LlmApiMode,
-    pub messages: Vec<serde_json::Value>,
-    pub system: Option<String>,
-    pub max_tokens: i64,
-    pub temperature: Option<f64>,
-    pub top_p: Option<f64>,
-    pub top_k: Option<i64>,
-    pub logprobs: Option<LogprobsConfig>,
-    pub logit_bias: Vec<TokenBias>,
-    pub min_p: Option<f64>,
-    pub repetition_penalty: Option<f64>,
-    pub prediction: Option<String>,
-    pub verbosity: Option<Verbosity>,
-    pub mirostat: Option<MirostatConfig>,
-    pub stop: Option<Vec<String>>,
-    pub seed: Option<i64>,
-    pub frequency_penalty: Option<f64>,
-    pub presence_penalty: Option<f64>,
-    pub parallel_tool_calls: Option<bool>,
-    /// See [`LlmCallOptions::provider_contract_probe`].
-    #[serde(skip_serializing)]
-    pub(crate) provider_contract_probe: Option<crate::llm::capabilities::PortableOption>,
-    /// See [`LlmCallOptions::fast`]. Forwarded to provider body builders so
-    /// they can inject the catalog's fast-mode knob, and to cost recording
-    /// so confirmed-fast responses bill at the premium tier.
-    pub fast: bool,
-    /// See [`LlmCallOptions::reasoning_mode`]. Forwarded to provider body
-    /// builders so they can inject the catalog's reasoning-mode knob.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub reasoning_mode: Option<String>,
-    pub output_format: OutputFormat,
-    /// Provider-compatible output schema used for both the request and
-    /// streaming validation. It retains the caller-selected contract after
-    /// compatibility projection, so transport layers never enforce a rule
-    /// the provider did not receive.
-    pub output_schema: Option<serde_json::Value>,
-    /// See `LlmCallOptions::schema_stream_abort`. Forwarded so the
-    /// off-thread transport task can decide without re-reading VM-local
-    /// option state.
-    pub schema_stream_abort: bool,
-    pub thinking: ThinkingConfig,
-    pub anthropic_beta_features: Vec<String>,
-    pub vision: bool,
-    pub native_tools: Option<Vec<serde_json::Value>>,
-    pub provider_tools: Vec<serde_json::Value>,
-    pub tool_choice: Option<serde_json::Value>,
-    pub cache: bool,
-    pub prompt_cache_ttl: Option<PromptCacheTtl>,
-    pub timeout: Option<u64>,
-    pub idle_timeout: Option<u64>,
-    pub stream: bool,
-    pub provider_overrides: Option<serde_json::Value>,
-    pub previous_response_id: Option<String>,
-    pub store: Option<bool>,
-    /// Resolved posture for this request. Already merged with the catalog
-    /// policy default, so the transport never re-resolves it.
-    pub data_controls: DataPosture,
-    pub background: Option<bool>,
-    pub truncation: Option<String>,
-    pub compact: Option<bool>,
-    pub include: Option<Vec<String>>,
-    pub max_tool_calls: Option<i64>,
-    pub prefill: Option<String>,
-    /// Forwarded session id for streaming-tool-call event emission (#693).
-    /// Cloned out of `LlmCallOptions::session_id` so the transport layer
-    /// can fire `AgentEvent::ToolCall` / `AgentEvent::ToolCallUpdate`
-    /// against the right session. `None` for non-agent-loop calls.
-    pub session_id: Option<String>,
-    /// See `LlmCallOptions::reminder_lifecycle`. Skipped in serialized
-    /// transport snapshots because the prompt already contains the rendered
-    /// reminder text and this is local audit routing metadata.
-    #[serde(skip_serializing)]
-    pub reminder_lifecycle: Vec<ReminderLifecycleEmission>,
-    /// CLI `--llm-mock` replay/recording scope captured before any provider
-    /// work crosses onto Tokio's multithreaded scheduler. Skipped in serialized
-    /// transport snapshots because it is an in-process harness handle.
-    #[serde(skip_serializing)]
-    pub cli_llm_mock_scope: Option<u64>,
-    /// Mock fixture purpose bucket this call draws from (for example
-    /// `agent.main` or `completion.judge`). `None` resolves to the default
-    /// shared bucket. Harn assigns purposes at call sites so auxiliary calls
-    /// cannot cannibalize the main queue. Skipped in serialized transport
-    /// snapshots because it is an in-process test-harness routing hint.
-    #[serde(skip_serializing)]
-    pub mock_scope: Option<String>,
-    /// Agent-loop completion sentinel for the mock provider. Real providers
-    /// ignore it. The simulator finishes generated prose from this field
-    /// rather than scanning the rendered system prompt. Skipped in serialized
-    /// transport snapshots because it is in-process harness state.
-    #[serde(skip_serializing)]
-    pub done_sentinel: Option<String>,
-    /// How to emit [`Self::done_sentinel`]: `done_block`, `plain_text`, or
-    /// `none`. Comes from `agent_completion_prompt_bindings`, not from prompt
-    /// substring matching.
-    #[serde(skip_serializing)]
-    pub done_sentinel_form: Option<String>,
+pub(crate) trait LlmRequestPayloadExt {
+    fn aligned_message_lineage<'a>(
+        &self,
+        opts: &'a LlmCallOptions,
+    ) -> Option<&'a crate::llm::message_lineage::MessageLineageManifest>;
+    fn resolve_timeout(&self) -> u64;
+    fn emit_reminder_lifecycle(&self);
 }
 
-impl LlmRequestPayload {
+impl LlmRequestPayloadExt for LlmRequestPayload {
     /// Return message lineage only when provider egress preserved the exact
     /// ordered message array it describes. Route-specific placement may remove,
     /// merge, rewrite, or reorder messages; byte-for-byte correspondence is the
     /// conservative proof that positional provenance still names the payload.
-    pub(crate) fn aligned_message_lineage<'a>(
+    fn aligned_message_lineage<'a>(
         &self,
         opts: &'a LlmCallOptions,
     ) -> Option<&'a crate::llm::message_lineage::MessageLineageManifest> {
@@ -959,13 +558,13 @@ impl LlmRequestPayload {
             .flatten()
     }
 
-    pub(crate) fn resolve_timeout(&self) -> u64 {
+    fn resolve_timeout(&self) -> u64 {
         resolve_timeout(self.timeout, &self.model)
     }
 
-    pub(crate) fn emit_reminder_lifecycle(&self) {
+    fn emit_reminder_lifecycle(&self) {
         for reminder in &self.reminder_lifecycle {
-            reminder.emit();
+            emit_reminder(reminder);
         }
         crate::llm::reminder_iteration::emit_reminder_iteration_summary(&self.reminder_lifecycle);
     }
@@ -1029,6 +628,7 @@ impl From<&LlmCallOptions> for LlmRequestPayload {
             None => (opts.output_format.clone(), opts.output_schema.clone()),
         };
         let mut payload = Self {
+            reasoning_effort_source: crate::llm::effective_effort::request_source(opts),
             provider: opts.provider.clone(),
             model: opts.model.clone(),
             region: opts.region.clone(),
@@ -1053,6 +653,7 @@ impl From<&LlmCallOptions> for LlmRequestPayload {
             presence_penalty: opts.presence_penalty,
             parallel_tool_calls: opts.parallel_tool_calls,
             provider_contract_probe: opts.provider_contract_probe,
+            portable_option_intent: opts.portable_option_intent.clone(),
             fast: opts.fast,
             reasoning_mode: opts.reasoning_mode.clone(),
             output_format,
@@ -1073,6 +674,7 @@ impl From<&LlmCallOptions> for LlmRequestPayload {
             previous_response_id: opts.previous_response_id.clone(),
             store: opts.store,
             data_controls: opts.resolved_data_posture(),
+            inference_boundary: opts.inference_boundary,
             background: opts.background,
             truncation: opts.truncation.clone(),
             compact: opts.compact,
@@ -1086,6 +688,8 @@ impl From<&LlmCallOptions> for LlmRequestPayload {
             done_sentinel: opts.done_sentinel.clone(),
             done_sentinel_form: opts.done_sentinel_form.clone(),
         };
+        strip_harn_owned_message_metadata(&mut payload.messages);
+        super::tool_result_provenance::defang_tool_result_directives(&mut payload.messages);
         if opts.system_prompt_root == crate::llm::prompt::PromptRoot::Replacement {
             // A replacement is the entire system channel. Drop every
             // system/developer conversation contributor before route-specific
@@ -1102,7 +706,24 @@ impl From<&LlmCallOptions> for LlmRequestPayload {
             // persisted transcript keeps the original roles.
             crate::llm::system_placement::normalize_payload_system_messages(&mut payload);
         }
+        // Last, so the pairing it guarantees survives every rewrite above:
+        // every provider dialect lowers an already-valid tool-call history.
+        payload.messages = crate::llm::tool_call_history::repair_tool_call_history(std::mem::take(
+            &mut payload.messages,
+        ));
         payload
+    }
+}
+
+/// `_harn` belongs to the durable execution transcript, not to a provider's
+/// message schema. Project it away exactly once at the provider request
+/// boundary so admission and transport inspect the same normalized messages
+/// while the source transcript remains intact for audit and replay.
+fn strip_harn_owned_message_metadata(messages: &mut [serde_json::Value]) {
+    for message in messages {
+        if let Some(fields) = message.as_object_mut() {
+            fields.remove("_harn");
+        }
     }
 }
 
@@ -1241,6 +862,12 @@ mod tests {
                 .contains(&beta.to_string()),
             "beta must be requested when the native computer tool is projected"
         );
+        opts.provider_tools = vec![serde_json::json!({
+            "type": "computer_toolset_20260801"
+        })];
+        assert!(!opts
+            .anthropic_beta_features_for_request()
+            .contains(&beta.to_string()));
     }
 
     #[test]
@@ -1353,6 +980,7 @@ mod tests {
                 },
                 expose_as_env: Some("HARN_LLM_TIMEOUT".to_string()),
                 for_command: None,
+                expose_to: Default::default(),
             }],
             &|name| std::env::var(name).ok(),
         )

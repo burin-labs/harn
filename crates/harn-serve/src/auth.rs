@@ -23,6 +23,8 @@ pub const ANONYMOUS_SCHEME: &str = "none";
 pub struct AuthenticatedPrincipal {
     pub subject: String,
     pub scheme: String,
+    /// Verified identity namespace for OAuth subjects.
+    pub issuer: Option<String>,
     /// Scopes the credential carries. Compared against the per-route
     /// `required_scopes` passed to `AuthPolicy::authorize_with_scopes`.
     pub granted_scopes: BTreeSet<String>,
@@ -36,6 +38,19 @@ pub struct AuthenticatedPrincipal {
 }
 
 impl AuthenticatedPrincipal {
+    pub fn task_retry_actor(
+        &self,
+    ) -> Result<harn_vm::task_retry::TaskRetryActor, harn_vm::task_retry::TaskRetryError> {
+        let subject = if self.issuer.is_some() || self.tenant_id.is_some() {
+            credential_subject(&serde_json::json!({
+                "issuer": self.issuer, "tenant_id": self.tenant_id, "subject": self.subject,
+            }))
+        } else {
+            self.subject.clone()
+        };
+        harn_vm::task_retry::TaskRetryActor::new(self.scheme.clone(), subject)
+    }
+
     /// Whether this is the synthetic [`ANONYMOUS_SUBJECT`] principal
     /// harn-serve admits when no credential authenticated the request
     /// (allow-all). The ambient `harness.auth` handle binds nothing for
@@ -120,6 +135,9 @@ fn header_value<'a>(headers: &'a BTreeMap<String, String>, name: &str) -> Option
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ApiKeyEntry {
     pub key: String,
+    /// Stable authenticated identity. Defaults to a private digest of the
+    /// configured key; an explicit subject can survive credential rotation.
+    pub subject: String,
     pub scopes: BTreeSet<String>,
     /// Tenant the key is bound to. When set, every authenticated
     /// dispatch under this key carries the tenant into `DispatchCtx`
@@ -130,11 +148,23 @@ pub struct ApiKeyEntry {
 
 impl ApiKeyEntry {
     pub fn new(key: impl Into<String>, scopes: impl IntoIterator<Item = String>) -> Self {
+        let key = key.into();
+        let subject = credential_subject(&serde_json::json!({"key": key}));
         Self {
-            key: key.into(),
+            key,
+            subject,
             scopes: scopes.into_iter().collect(),
             tenant_id: None,
         }
+    }
+
+    pub fn with_subject(mut self, subject: impl Into<String>) -> Result<Self, String> {
+        let subject = subject.into();
+        if subject.trim().is_empty() {
+            return Err("API key subject must be non-empty".into());
+        }
+        self.subject = subject;
+        Ok(self)
     }
 
     /// Bind this key to a tenant. Chainable so callers can construct
@@ -354,8 +384,9 @@ impl AuthPolicy {
 
     /// Authenticate without checking any per-route scopes. Equivalent to
     /// `authorize_with_scopes(request, &BTreeSet::new())`. Retained as the
-    /// short-form for callers that don't have route metadata (e.g. the
-    /// REST API adapter's static handlers).
+    /// short-form for callers that don't have route scope metadata. The native
+    /// Agents API uses this at its router boundary and rejects tenant-bound or
+    /// scoped principals that its shared-workspace authority cannot enforce.
     pub async fn authorize(&self, request: &AuthRequest) -> AuthorizationDecision {
         self.authorize_with_scopes(request, &BTreeSet::new()).await
     }
@@ -373,6 +404,7 @@ impl AuthPolicy {
             AuthenticatedPrincipal {
                 subject: ANONYMOUS_SUBJECT.to_string(),
                 scheme: ANONYMOUS_SCHEME.to_string(),
+                issuer: None,
                 granted_scopes: BTreeSet::new(),
                 tenant_id: None,
             }
@@ -434,6 +466,7 @@ impl AuthPolicy {
             return AuthorizationDecision::Authorized(AuthenticatedPrincipal {
                 subject: ANONYMOUS_SUBJECT.to_string(),
                 scheme: ANONYMOUS_SCHEME.to_string(),
+                issuer: None,
                 granted_scopes: BTreeSet::new(),
                 tenant_id: None,
             });
@@ -442,6 +475,7 @@ impl AuthPolicy {
             AllowlistOutcome::Allow => AuthorizationDecision::Authorized(AuthenticatedPrincipal {
                 subject: ANONYMOUS_SUBJECT.to_string(),
                 scheme: ANONYMOUS_SCHEME.to_string(),
+                issuer: None,
                 granted_scopes: BTreeSet::new(),
                 tenant_id: None,
             }),
@@ -586,8 +620,9 @@ async fn authorize_method(
             let entry = match_api_key(&config.keys, api_key);
             match entry {
                 Some(entry) => Ok(AuthenticatedPrincipal {
-                    subject: "api-key".to_string(),
+                    subject: entry.subject.clone(),
                     scheme: "api_key".to_string(),
+                    issuer: None,
                     granted_scopes: entry.scopes.clone(),
                     tenant_id: entry.tenant_id.clone(),
                 }),
@@ -610,8 +645,11 @@ async fn authorize_method(
             .await
             .map_err(connector_error_message)?;
             Ok(AuthenticatedPrincipal {
-                subject: "hmac".to_string(),
+                subject: credential_subject(&serde_json::json!({
+                    "provider": config.provider, "credential": config.shared_secret,
+                })),
                 scheme: "hmac".to_string(),
+                issuer: None,
                 granted_scopes: config.granted_scopes.clone(),
                 tenant_id: config.tenant_id.clone(),
             })
@@ -638,6 +676,7 @@ async fn authorize_method(
             Ok(AuthenticatedPrincipal {
                 subject: claims.subject.clone(),
                 scheme: "oauth21".to_string(),
+                issuer: Some(claims.issuer.clone()),
                 granted_scopes: claims.scopes.clone(),
                 // Token-borne claim wins, with the policy-level
                 // fallback (`OAuth21AuthConfig.tenant_id`) covering
@@ -656,6 +695,11 @@ fn match_api_key<'a>(entries: &'a [ApiKeyEntry], candidate: &str) -> Option<&'a 
     entries
         .iter()
         .find(|entry| entry.key.as_bytes().ct_eq(candidate.as_bytes()).into())
+}
+
+fn credential_subject(identity: &serde_json::Value) -> String {
+    use sha2::{Digest, Sha256};
+    hex::encode(Sha256::digest(harn_vm::canonical_json::to_vec(identity)))
 }
 
 fn connector_error_message(error: ConnectorError) -> String {
@@ -845,6 +889,7 @@ mod tests {
             AuthorizationDecision::Authorized(AuthenticatedPrincipal {
                 subject: "alice".to_string(),
                 scheme: "oauth21".to_string(),
+                issuer: Some("https://issuer.example".to_string()),
                 granted_scopes: scopes(&["invoke", "read"]),
                 tenant_id: None,
             })
@@ -906,6 +951,101 @@ mod tests {
             panic!("expected Authorized");
         };
         assert_eq!(principal.granted_scopes, scopes(&["personas:read"]));
+    }
+
+    #[tokio::test]
+    async fn task_retry_actor_is_verified_stable_and_separates_credentials() {
+        async fn actor(
+            key: &str,
+            entries: Vec<ApiKeyEntry>,
+        ) -> harn_vm::task_retry::TaskRetryActor {
+            let policy = AuthPolicy {
+                methods: vec![AuthMethodConfig::ApiKey(ApiKeyAuthConfig { keys: entries })],
+                mcp_allowlist: None,
+            };
+            let request = AuthRequest {
+                headers: BTreeMap::from([("authorization".into(), format!("Bearer {key}"))]),
+                ..AuthRequest::default()
+            };
+            let AuthorizationDecision::Authorized(principal) = policy.authorize(&request).await
+            else {
+                panic!("credential must be verified");
+            };
+            assert!(
+                !principal.subject.contains(key),
+                "actor does not expose the key"
+            );
+            principal.task_retry_actor().unwrap()
+        }
+        let alice = actor("alice-key", vec![ApiKeyEntry::new("alice-key", [])]).await;
+        let reopened = actor("alice-key", vec![ApiKeyEntry::new("alice-key", [])]).await;
+        let bob = actor("bob-key", vec![ApiKeyEntry::new("bob-key", [])]).await;
+        assert_eq!(alice, reopened);
+        assert_ne!(alice, bob);
+        let before_rotation = actor(
+            "old-key",
+            vec![ApiKeyEntry::new("old-key", [])
+                .with_subject("account-one")
+                .unwrap()],
+        )
+        .await;
+        let after_rotation = actor(
+            "new-key",
+            vec![ApiKeyEntry::new("new-key", [])
+                .with_subject("account-one")
+                .unwrap()],
+        )
+        .await;
+        assert_eq!(before_rotation, after_rotation);
+        let other_tenant = actor(
+            "new-key",
+            vec![ApiKeyEntry::new("new-key", [])
+                .with_subject("account-one")
+                .unwrap()
+                .with_tenant("other")],
+        )
+        .await;
+        assert_ne!(after_rotation, other_tenant);
+        let tenant_one = actor(
+            "new-key",
+            vec![ApiKeyEntry::new("new-key", [])
+                .with_subject("account-one")
+                .unwrap()
+                .with_tenant("one")],
+        )
+        .await;
+        assert_ne!(
+            tenant_one, other_tenant,
+            "the same explicit subject in different verified tenants has distinct retry identity"
+        );
+        assert!(ApiKeyEntry::new("key", []).with_subject(" ").is_err());
+        let principal = AuthenticatedPrincipal {
+            subject: "alice".into(),
+            scheme: "oauth21".into(),
+            issuer: Some("issuer-one".into()),
+            granted_scopes: BTreeSet::new(),
+            tenant_id: None,
+        };
+        let other_issuer = AuthenticatedPrincipal {
+            issuer: Some("issuer-two".into()),
+            ..principal.clone()
+        };
+        assert_ne!(
+            principal.task_retry_actor().unwrap(),
+            other_issuer.task_retry_actor().unwrap()
+        );
+        let tenant_one = AuthenticatedPrincipal {
+            tenant_id: Some(TenantId::new("one")),
+            ..principal.clone()
+        };
+        let tenant_two = AuthenticatedPrincipal {
+            tenant_id: Some(TenantId::new("two")),
+            ..principal
+        };
+        assert_ne!(
+            tenant_one.task_retry_actor().unwrap(),
+            tenant_two.task_retry_actor().unwrap()
+        );
     }
 
     #[tokio::test]

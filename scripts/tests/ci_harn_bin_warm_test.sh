@@ -62,6 +62,9 @@ BIN
 esac
 SH
 chmod +x "$fake_bin/cargo"
+cp "$repo_root/scripts/tests/fixtures/harn_bin/fake_rustc.sh" "$fake_bin/rustc"
+chmod +x "$fake_bin/rustc"
+export FAKE_RUST_TOOLCHAIN_FILE="$repo_root/rust-toolchain.toml"
 export FAKE_FRESHNESS_CHECKER="$repo_root/scripts/tests/fixtures/harn_bin/fake_freshness_checker.sh"
 
 unset HARN_BIN HARN_BIN_NO_BUILD

@@ -213,6 +213,20 @@ pub fn enforce_builtin_side_effect_boxed<'a>(
     Box::pin(enforce_builtin_side_effect(name, args))
 }
 
+fn checkpoint_write_action(name: &str) -> Option<SideEffectAction> {
+    first_matching_action(
+        name,
+        &[
+            "checkpoint",
+            "checkpoint_insert",
+            "checkpoint_delete",
+            "checkpoint_clear",
+        ],
+        "checkpoint.write",
+        "checkpoint.write",
+    )
+}
+
 pub fn side_effect_action_for_builtin(name: &str) -> Option<SideEffectAction> {
     first_workspace_write_action(
         name,
@@ -269,14 +283,7 @@ pub fn side_effect_action_for_builtin(name: &str) -> Option<SideEffectAction> {
             "metadata.write",
         )
     })
-    .or_else(|| {
-        first_matching_action(
-            name,
-            &["checkpoint", "checkpoint_delete", "checkpoint_clear"],
-            "checkpoint.write",
-            "checkpoint.write",
-        )
-    })
+    .or_else(|| checkpoint_write_action(name))
     .or_else(|| {
         first_matching_action(
             name,
@@ -364,6 +371,7 @@ pub(crate) async fn enforce_capability_side_effect(
         | (CapabilityId::Process, "shell")
         | (CapabilityId::Process, "shell_at")
         | (CapabilityId::Process, "run") => Some(action("process", "process.exec", "process.exec")),
+        (CapabilityId::Runtime, method) => checkpoint_write_action(method),
         _ => None,
     };
     match action {

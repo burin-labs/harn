@@ -88,12 +88,27 @@ pub fn describe_host_attachment(
   ]
   const result = try {
     if route.provider == nil {
-      llm.call("", options.system, {model: route.model, vision: true, messages: messages})
+      llm.call(
+        "",
+        options.system,
+        {
+          model: route.model,
+          vision: true,
+          messages: messages,
+          mock_scope: "agent.attachment_description",
+        },
+      )
     } else {
       llm.call(
         "",
         options.system,
-        {provider: route.provider, model: route.model, vision: true, messages: messages},
+        {
+          provider: route.provider,
+          model: route.model,
+          vision: true,
+          messages: messages,
+          mock_scope: "agent.attachment_description",
+        },
       )
     }
   } catch (_error) {

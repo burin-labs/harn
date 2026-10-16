@@ -64,8 +64,10 @@ impl Compiler {
         params: &[TypedParam],
         body: &[SNode],
         source_file: Option<String>,
+        throws: Option<&harn_parser::TypeExpr>,
     ) -> Result<CompiledFunction, CompileError> {
         let mut compiler = self.nested_body();
+        compiler.declared_throw = throws.is_some();
         compiler.enum_names = self.enum_names.clone();
         compiler.enum_variant_owners = self.enum_variant_owners.clone();
         compiler.imported_enum_candidates = self.imported_enum_candidates.clone();
@@ -81,6 +83,8 @@ impl Compiler {
         let is_generator = body_contains_yield(body);
         compiler.seed_captured_idents(body);
         compiler.compile_block(body)?;
+        // Run pending defers before implicit return
+        compiler.drain_finallys_to_floor(0)?;
         compiler.chunk.emit(Op::Nil, 0);
         compiler.chunk.emit(Op::Return, 0);
         compiler.chunk.source_file = source_file;
@@ -110,8 +114,9 @@ impl Compiler {
         params: &[TypedParam],
         body: &[SNode],
         source_file: Option<String>,
+        throws: Option<&harn_parser::TypeExpr>,
     ) -> Result<CompiledFunction, CompileError> {
-        let mut function = self.compile_fn_body(type_params, params, body, source_file)?;
+        let mut function = self.compile_fn_body(type_params, params, body, source_file, throws)?;
         function.name = name.to_string();
         Ok(function)
     }

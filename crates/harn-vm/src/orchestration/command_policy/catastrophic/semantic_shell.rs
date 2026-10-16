@@ -6,7 +6,7 @@
 //! security boundary; child processes remain confined by the operating system.
 
 use std::path::PathBuf;
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::time::Duration;
 
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
@@ -488,7 +488,7 @@ fn native_powershell_accepts(command: &str) -> Option<bool> {
     const PARSER: &str = "$s=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($env:HARN_POWERSHELL_PARSE_PAYLOAD));$t=$null;$e=$null;[System.Management.Automation.Language.Parser]::ParseInput($s,[ref]$t,[ref]$e)>$null;if($e.Count){exit 2}";
     let payload = BASE64_STANDARD.encode(command.as_bytes());
     for executable in native_powershell_candidates() {
-        let mut parser = Command::new(&executable);
+        let mut parser = crate::process_sandbox::session_std_command(&executable).ok()?;
         if let Some(parent) = executable
             .parent()
             .filter(|parent| !parent.as_os_str().is_empty())

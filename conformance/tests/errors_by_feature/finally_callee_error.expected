@@ -1,0 +1,28 @@
+cleanup:same-file
+same-file -> caught:same-file
+cleanup:imported
+imported -> caught:imported adapter=original
+cleanup:runtime
+runtime -> caught:Division by zero
+cleanup:inner
+catch:outer:nested
+cleanup:outer
+catch:first
+cleanup:catch-rethrow
+catch-rethrow -> caught:from-catch
+cleanup:typed-miss
+typed-miss -> caught:untyped
+cleanup:replacing
+cleanup-throw -> caught:replacement
+cleanup:returning
+cleanup-return -> returned-from-cleanup
+defer:inner
+defer:outer
+defer -> caught:deferred
+imported-defer:false
+imported-defer:true
+imported-defer -> caught:imported-defer-failed
+loop cleanups=4 caught=2
+cleanup:return
+return -> value
+spawned -> caught:spawned cleanups=1

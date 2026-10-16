@@ -28,7 +28,7 @@ impl OperationHandleInfo {
         dict.put_str("handle_id", self.handle_id);
         dict.put_str("started_at", self.started_at);
         dict.insert("ended_at".to_string(), VmValue::Nil);
-        dict.insert("duration_ms".to_string(), VmValue::Int(0));
+        dict.put_int("duration_ms", 0);
         dict.put_str("status", "running");
         dict.put_str("operation", self.operation);
         dict.put_str("command_or_op_descriptor", self.descriptor);
@@ -72,7 +72,7 @@ where
     let worker_started_at = started_at.clone();
     let worker_operation = operation.clone();
     let worker_descriptor = descriptor.clone();
-    std::thread::Builder::new()
+    crate::runtime_stack::builder()
         .name(format!("hso-worker-{worker_handle_id}"))
         .spawn(move || {
             let started = Instant::now();

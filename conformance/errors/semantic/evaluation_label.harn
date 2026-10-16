@@ -1,0 +1,11 @@
+import { choice } from "std/predicate"
+
+fn invalid(llm: HarnessLlm, policy: EvaluationPolicy) {
+  const answers = llm.evaluate("labels.v1", {text: "window"}, {
+    action: choice("Keep or drop?", {keep: "needed", drop: "superseded"}),
+  }, policy)
+  match answers.kind {
+    "answered" -> { return answers.value.action.choice == "delete" }
+    _ -> { return false }
+  }
+}

@@ -6,8 +6,8 @@ usage() {
 Usage: scripts/cancel_superseded_merge_groups.sh --repo OWNER/REPO [--expected-sha SHA] [--apply]
 
 Cancel active merge_group workflow runs whose exact head SHA no longer belongs
-to a current merge-queue entry. The default is a read-only plan; --apply sends
-the bounded Actions cancellation requests.
+to a current merge-queue entry and has not merged. The default is a read-only
+plan; --apply sends the bounded Actions cancellation requests.
 USAGE
 }
 
@@ -132,6 +132,24 @@ for run_status in requested waiting queued pending in_progress; do
 done
 sort -u -o "$runs" "$runs"
 
+# A group leaves the queue by merging as well as by being superseded. Its run
+# can still be finishing work the merge verdict does not wait for (package
+# verification), and that run is the commit's merge-group proof, so a head the
+# default branch already contains is preserved. An unreadable answer also
+# preserves: leaving a superseded run alone wastes runner time, while
+# cancelling a merged one discards proof.
+default_branch="$(gh api "repos/$repo" --jq '.default_branch' 2>/dev/null || true)"
+head_has_merged() {
+  local sha=$1 status
+  [[ -n "$default_branch" ]] || return 0
+  status="$(gh api "repos/$repo/compare/$sha...$default_branch" --jq '.status' 2>/dev/null || true)"
+  case "$status" in
+    identical|ahead) return 0 ;;
+    behind|diverged) return 1 ;;
+    *) return 0 ;;
+  esac
+}
+
 current_count="$(wc -l < "$queue_shas" | tr -d ' ')"
 stale_count=0
 cancelled_count=0
@@ -147,6 +165,11 @@ while IFS=$'\t' read -r run_id head_sha run_status workflow_name created_epoch; 
   [[ "$created_epoch" =~ ^[0-9]+$ ]] || die "active run $run_id had an invalid creation time"
   if grep -Fxq "$head_sha" "$queue_shas"; then
     printf 'preserve run=%s sha=%s status=%s workflow=%s\n' \
+      "$run_id" "$head_sha" "$run_status" "$workflow_name"
+    continue
+  fi
+  if head_has_merged "$head_sha"; then
+    printf 'preserve run=%s sha=%s status=%s workflow=%s reason=merged_or_unknown\n' \
       "$run_id" "$head_sha" "$run_status" "$workflow_name"
     continue
   fi

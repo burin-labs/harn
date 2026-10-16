@@ -8,7 +8,8 @@ use sha2::{Digest, Sha256};
 
 use crate::cli::{
     SessionArgs, SessionCheckpointArgs, SessionCommand, SessionExportArgs, SessionImportArgs,
-    SessionListArgs, SessionSchemaArgs, SessionValidateArgs, SessionViewFixturesArgs,
+    SessionListArgs, SessionPublicationEvidenceArgs, SessionSchemaArgs, SessionValidateArgs,
+    SessionViewFixturesArgs,
 };
 
 const DEFAULT_SCHEMA_PATH: &str = "spec/schemas/session-bundle.v1.schema.json";
@@ -22,6 +23,32 @@ pub(crate) async fn run(args: SessionArgs) {
         SessionCommand::Validate(validate) => run_validate(validate),
         SessionCommand::Schema(schema) => run_schema(schema),
         SessionCommand::ViewFixtures(fixtures) => run_view_fixtures(fixtures),
+        SessionCommand::PublicationEvidence(evidence) => run_publication_evidence(evidence).await,
+    }
+}
+
+async fn run_publication_evidence(args: SessionPublicationEvidenceArgs) {
+    match harn_vm::session_publication::read_project_session_publication_evidence(
+        &args.project_root,
+        &args.session_id,
+    )
+    .await
+    {
+        Ok(Some(evidence)) => match serde_json::to_string_pretty(&evidence) {
+            Ok(json) => println!("{json}"),
+            Err(error) => {
+                eprintln!("error: failed to serialize publication evidence: {error}");
+                process::exit(1);
+            }
+        },
+        Ok(None) => {
+            eprintln!("error: canonical publication evidence is unavailable for the requested workspace/session");
+            process::exit(1);
+        }
+        Err(error) => {
+            eprintln!("error: failed to read canonical publication evidence: {error}");
+            process::exit(1);
+        }
     }
 }
 

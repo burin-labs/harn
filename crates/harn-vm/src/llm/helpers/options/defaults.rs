@@ -45,24 +45,21 @@ pub(super) fn apply_active_step_defaults(options: &mut Option<crate::value::Dict
                     .entry(crate::value::intern_key("max_cost_usd"))
                     .or_insert_with(|| VmValue::Float(max_usd));
             }
-            opts.insert(
-                crate::value::intern_key("budget"),
-                VmValue::dict(step_budget_dict),
-            );
+            opts.put("budget", VmValue::dict(step_budget_dict));
         }
     }
 }
 
 pub(super) fn toml_value_to_vm_value(value: &toml::Value) -> VmValue {
     match value {
-        toml::Value::String(s) => VmValue::String(arcstr::ArcStr::from(s.as_str())),
+        toml::Value::String(s) => VmValue::string(s.as_str()),
         toml::Value::Integer(i) => VmValue::Int(*i),
         toml::Value::Float(f) => VmValue::Float(*f),
         toml::Value::Boolean(b) => VmValue::Bool(*b),
-        toml::Value::Datetime(dt) => VmValue::String(arcstr::ArcStr::from(dt.to_string())),
-        toml::Value::Array(items) => VmValue::List(std::sync::Arc::new(
-            items.iter().map(toml_value_to_vm_value).collect(),
-        )),
+        toml::Value::Datetime(dt) => VmValue::string(dt.to_string()),
+        toml::Value::Array(items) => {
+            VmValue::list(items.iter().map(toml_value_to_vm_value).collect())
+        }
         toml::Value::Table(table) => VmValue::dict(
             table
                 .iter()

@@ -2,6 +2,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd -P)"
 # shellcheck source=scripts/ci/cache_policy.sh
 source "${SCRIPT_DIR}/cache_policy.sh"
 # shellcheck source=scripts/lib/sha256.sh
@@ -13,7 +14,14 @@ readonly NEXTEST_VERSION
 readonly NEUTRAL_FILTER='all()'
 readonly SECURITY_FILTER='(package(harn-vm) and binary(harn_vm)) or (package(harn-hostlib) and binary(harn_hostlib))'
 readonly EXPECTED_RUSTFLAGS='-D warnings -Clink-arg=-fuse-ld=mold'
+# Mirrors `[profile.dev] debug` in Cargo.toml.
 readonly EXPECTED_DEV_DEBUG='line-tables-only'
+# The shared CLI bundle every Harn proof lane executes is built in the
+# `ci-cli` profile (Cargo.toml): dev semantics, debug assertions and overflow
+# checks included, at opt-level 1. Those lanes are interpreter-bound, and the
+# unoptimized dev build ran them four to five times slower. The test bundle's
+# CLI keeps the dev profile it shares with the test build.
+readonly SHARED_CLI_PROFILE='ci-cli'
 readonly DEFAULT_MAX_BUNDLE_BYTES=9663676416  # 9 GiB: workspace nextest archive is ~8.4 GiB today
 readonly DEFAULT_MAX_SECURITY_BUNDLE_BYTES=1073741824  # 1 GiB: filtered VM + Hostlib sandbox archive
 cleanup_dir=""
@@ -39,7 +47,9 @@ sha256() {
 
 require_nextest_version() {
   local actual first_line program version
-  actual="$(cargo nextest --version)"
+  # Cargo prefers CARGO_HOME/bin for subcommands, ahead of the installer PATH.
+  # Invoke the installed executable so the version check and archive agree.
+  actual="$(cargo-nextest nextest --version)"
   first_line="${actual%%$'\n'*}"
   read -r program version _ <<< "$first_line"
   if [[ "$program" != "cargo-nextest" || "$version" != "$NEXTEST_VERSION" ]]; then
@@ -110,8 +120,11 @@ require_build_contract() {
     echo "error: Rust artifact build requires RUSTFLAGS=${EXPECTED_RUSTFLAGS}" >&2
     exit 1
   fi
-  if [[ "${CARGO_PROFILE_DEV_DEBUG:-}" != "$EXPECTED_DEV_DEBUG" ]]; then
-    echo "error: Rust artifact build requires CARGO_PROFILE_DEV_DEBUG=${EXPECTED_DEV_DEBUG}" >&2
+  # `[profile.dev]` in Cargo.toml owns dev debuginfo. An environment override
+  # that disagrees with it would build a different artifact than the manifest
+  # records.
+  if [[ -n "${CARGO_PROFILE_DEV_DEBUG:-}" && "$CARGO_PROFILE_DEV_DEBUG" != "$EXPECTED_DEV_DEBUG" ]]; then
+    echo "error: Rust artifact build requires the Cargo.toml dev debuginfo (${EXPECTED_DEV_DEBUG}); unset CARGO_PROFILE_DEV_DEBUG" >&2
     exit 1
   fi
 }
@@ -125,9 +138,11 @@ write_rust_manifest() {
   local commit=$2
   local rustc_digest=$3
   local build_freshness=$4
+  local cargo_profile=${5:-dev}
   cat > "$destination/manifest" <<EOF
 schema=harn.rust_artifact.v1
 commit=${commit}
+cargo_profile=${cargo_profile}
 nextest=${NEXTEST_VERSION}
 rustc_sha256=${rustc_digest}
 rust_toolchain_sha256=$(sha256 rust-toolchain.toml)
@@ -215,10 +230,12 @@ verify_cli_manifest() {
   local commit=$2
   require_manifest_value "$destination/manifest" schema harn.rust_artifact.v1
   require_manifest_value "$destination/manifest" commit "$commit"
+  require_manifest_value "$destination/manifest" cargo_profile "$SHARED_CLI_PROFILE"
   require_manifest_value "$destination/manifest" rust_toolchain_sha256 "$(sha256 rust-toolchain.toml)"
   require_manifest_value "$destination/manifest" rustflags_sha256 "$(printf '%s' "$EXPECTED_RUSTFLAGS" | sha256sum | cut -d ' ' -f 1)"
   require_manifest_value "$destination/manifest" dev_debug_sha256 "$(printf '%s' "$EXPECTED_DEV_DEBUG" | sha256sum | cut -d ' ' -f 1)"
   require_manifest_value "$destination/manifest" harn_sha256 "$(sha256 "$destination/harn")"
+  require_manifest_value "$destination/manifest" aot_generator_sha256 "$(sha256 "$destination/harn-cli-aot-gen")"
   require_manifest_object_id "$destination/manifest" build_freshness
 }
 
@@ -253,6 +270,13 @@ prepare_harn_cli() {
   local staging=$1
   local commit=$2
   local target_dir=$3
+  local profile=${4:-dev}
+  local -a profile_args=()
+  local profile_dir=debug
+  if [[ "$profile" != dev ]]; then
+    profile_args=(--profile "$profile")
+    profile_dir=$profile
+  fi
 
   # CI builds from an exact clean commit and the artifact manifest binds the
   # resulting bytes, toolchain, and flags. Embed that commit as the hosted
@@ -260,13 +284,22 @@ prepare_harn_cli() {
   # local content receipts without pretending the producer's absolute Cargo
   # dep-info paths can survive artifact transfer.
   export HARN_BUILD_FRESHNESS_ID="$commit"
-  cargo build --locked --bin harn
-  if [[ ! -x "$target_dir/debug/harn" ]]; then
-    echo "error: build did not produce the required harn CLI at $target_dir/debug/harn" >&2
+  if [[ "$profile" == "$SHARED_CLI_PROFILE" ]]; then
+    cargo build --locked "${profile_args[@]}" -p harn-cli -p harn-cli-aot-gen \
+      --bin harn --bin harn-cli-aot-gen
+  else
+    cargo build --locked "${profile_args[@]}" --bin harn
+  fi
+  if [[ ! -x "$target_dir/$profile_dir/harn" ]]; then
+    echo "error: build did not produce the required harn CLI at $target_dir/$profile_dir/harn" >&2
     exit 1
   fi
-  install -m 0755 "$target_dir/debug/harn" "$staging/harn"
-  write_rust_manifest "$staging" "$commit" "$(rustc_identity_sha256)" "$commit"
+  install -m 0755 "$target_dir/$profile_dir/harn" "$staging/harn"
+  write_rust_manifest "$staging" "$commit" "$(rustc_identity_sha256)" "$commit" "$profile"
+  if [[ "$profile" == "$SHARED_CLI_PROFILE" ]]; then
+    install -m 0755 "$target_dir/$profile_dir/harn-cli-aot-gen" "$staging/harn-cli-aot-gen"
+    echo "aot_generator_sha256=$(sha256 "$staging/harn-cli-aot-gen")" >> "$staging/manifest"
+  fi
 }
 
 pack_cli_bundle() {
@@ -274,8 +307,8 @@ pack_cli_bundle() {
   local output=$2
   (
     cd "$staging"
-    sha256sum harn manifest > CLI_SHA256SUMS
-    tar --zstd -cf "$output.tmp" harn manifest CLI_SHA256SUMS
+    sha256sum harn harn-cli-aot-gen manifest > CLI_SHA256SUMS
+    tar --zstd -cf "$output.tmp" harn harn-cli-aot-gen manifest CLI_SHA256SUMS
   )
   mv "$output.tmp" "$output"
 }
@@ -298,7 +331,14 @@ build_test_bundle() {
   cleanup_dir="$staging"
 
   prepare_harn_cli "$staging" "$commit" "$target_dir"
-  cargo nextest archive --locked --workspace --profile ci \
+  HARN_ENUM_COMPILER_ARCHIVE_STAGE=1 cargo-nextest nextest run --locked --workspace --profile ci \
+    -E 'test(open_enum_source_compatibility)'
+  local selected
+  local packages=()
+  selected=$(bash "${SCRIPT_DIR}/workspace_test_args.sh")
+  read -ra packages <<< "$selected"
+  cargo-nextest nextest archive --locked "${packages[@]}" --profile ci \
+    --tool-config-file "harn-compiler-archive:${REPO_ROOT}/.config/nextest-compiler-archive.toml" \
     -E "$NEUTRAL_FILTER" \
     --archive-file "$staging/harn-tests.tar.zst"
   # The archive digest is written only after nextest creates it.
@@ -329,7 +369,7 @@ restore_cli_bundle() {
   fi
 
   listing="$(tar --zstd -tf "$bundle" | LC_ALL=C sort)"
-  if [[ "$listing" != $'CLI_SHA256SUMS\nharn\nmanifest' ]]; then
+  if [[ "$listing" != $'CLI_SHA256SUMS\nharn\nharn-cli-aot-gen\nmanifest' ]]; then
     echo "error: CLI artifact has an unexpected file set" >&2
     printf '%s\n' "$listing" >&2
     exit 1
@@ -342,12 +382,13 @@ restore_cli_bundle() {
     sha256sum -c CLI_SHA256SUMS
   )
   verify_cli_manifest "$destination" "$commit"
-  if [[ ! -x "$destination/harn" ]]; then
-    echo "error: restored harn CLI is not executable" >&2
+  if [[ ! -x "$destination/harn" || ! -x "$destination/harn-cli-aot-gen" ]]; then
+    echo "error: restored Harn CLI and AOT generator must be executable" >&2
     exit 1
   fi
   if [[ -n "$github_env" ]]; then
     printf 'HARN_BIN=%s\n' "$(cd "$destination" && pwd -P)/harn" >> "$github_env"
+    printf 'HARN_RELEASE_CLI_AOT_GEN_BIN=%s\n' "$(cd "$destination" && pwd -P)/harn-cli-aot-gen" >> "$github_env"
     printf 'SOURCE_GATE_CI_BINARY_COMMIT=%s\n' "$commit" >> "$github_env"
     printf 'SOURCE_GATE_CI_BINARY_SHA256=%s\n' "$(sha256 "$destination/harn")" >> "$github_env"
     printf 'SOURCE_GATE_CI_BINARY_BUILD_FRESHNESS_ID=%s\n' \
@@ -417,7 +458,7 @@ build_cli_bundle() {
   staging="$(mktemp -d "${cli_output_dir}/rust-cli-artifact.XXXXXX")"
   cleanup_dir="$staging"
 
-  prepare_harn_cli "$staging" "$commit" "$target_dir"
+  prepare_harn_cli "$staging" "$commit" "$target_dir" "$SHARED_CLI_PROFILE"
   pack_cli_bundle "$staging" "$cli_output"
   bytes="$(wc -c < "$cli_output" | tr -d ' ')"
   report_timing build "$((SECONDS - started))" "$bytes"
@@ -439,10 +480,13 @@ build_security_bundle() {
   staging="$(mktemp -d "${output_dir}/rust-security-artifact.XXXXXX")"
   cleanup_dir="$staging"
 
-  # Match the following workspace test build's unified feature graph. The
-  # filter limits archived binaries, not compilation, so security consumers
-  # still receive only their selected tests without a second crate build.
-  cargo nextest archive --locked --workspace --profile ci \
+  # Compile the two owning packages with workspace-resolved features. Include
+  # integration harnesses too: they can share a unit target's binary name.
+  local features
+  features="$(bash "$SCRIPT_DIR/workspace_features.sh" harn-vm harn-hostlib)"
+  [[ -n "$features" ]] || { echo 'security archive has no measured workspace features' >&2; exit 1; }
+  cargo-nextest nextest archive --locked -p harn-vm -p harn-hostlib \
+    --features "$features" --profile ci \
     -E "$SECURITY_FILTER" \
     --archive-file "$staging/harn-security-tests.tar.zst"
   write_security_manifest "$staging" "$commit" "$(rustc_identity_sha256)"

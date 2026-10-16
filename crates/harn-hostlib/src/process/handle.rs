@@ -199,6 +199,19 @@ pub enum OutputCapture {
 /// real and mock paths uniform without forcing async into the rest of the
 /// hostlib.
 pub trait ProcessHandle: Send {
+    /// Available only after a normal wait validates this child's prepared runner.
+    fn verifier_execution_receipt(
+        &self,
+    ) -> Option<harn_vm::verifier_provenance::VerifierExecutionReceipt> {
+        None
+    }
+
+    /// First program proven absent before spawn. Consumers may publish this
+    /// evidence only after a normal exit with code 127.
+    fn missing_program(&self) -> Option<&str> {
+        None
+    }
+
     /// OS process id, when available.
     fn pid(&self) -> Option<u32>;
 
@@ -276,6 +289,7 @@ pub trait ProcessSpawner: Send + Sync {
 /// `HostlibError::InvalidParameter` at the call site so the script-side
 /// surface stays unchanged.
 #[derive(Clone, Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum ProcessError {
     /// `argv` was empty or otherwise malformed.
     #[error("invalid argv: {0}")]
@@ -299,6 +313,12 @@ pub enum ProcessError {
         kind: &'static str,
         /// Human-readable OS error.
         message: String,
+    },
+    /// A failed spawn with pre-spawn evidence naming an absent executable.
+    #[error("program not found: {program}")]
+    ProgramNotFound {
+        /// Requested executable name or path.
+        program: String,
     },
     /// A never-approvable UNIVERSAL catastrophic command (machine/disk/data
     /// destruction) was rejected by the floor BEFORE spawning. Enforced
@@ -329,6 +349,22 @@ pub enum ProcessError {
         /// see which of its own options produced the refusal.
         mode: &'static str,
     },
+    /// The spawn required a platform sandbox mechanism this host cannot
+    /// supply. Harn's typed refusal is carried whole, so a script catches the
+    /// same value a spawn made by the VM itself throws.
+    #[error("{0}")]
+    SandboxMechanismUnavailable(Box<harn_vm::process_sandbox::SandboxMechanismUnavailable>),
+}
+
+impl ProcessError {
+    /// A sandbox setup failure. A missing platform mechanism stays typed;
+    /// anything else keeps its diagnostic text.
+    pub(crate) fn sandbox_setup(error: harn_vm::VmError) -> Self {
+        match error.sandbox_mechanism_unavailable() {
+            Some(refusal) => Self::SandboxMechanismUnavailable(Box::new(refusal.clone())),
+            None => Self::SandboxSetup(format!("{error:?}")),
+        }
+    }
 }
 
 use std::cell::RefCell;

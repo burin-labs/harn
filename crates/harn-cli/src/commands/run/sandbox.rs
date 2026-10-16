@@ -489,6 +489,20 @@ pub(super) fn default_run_capability_policy(
         }
     }
 
+    let netns_launcher_path = grants.netns_launcher;
+    #[cfg(target_os = "linux")]
+    let netns_launcher_path = netns_launcher_path.or_else(|| {
+        // Bubblewrap reuses the exact runtime grant above for its exec finalizer.
+        if harn_vm::process_sandbox::active_backend_mechanism()
+            == harn_vm::process_sandbox::SandboxMechanism::LinuxBubblewrap
+        {
+            return std::env::current_exe()
+                .ok()
+                .map(|path| normalize_run_workspace_root(&path).display().to_string());
+        }
+        None
+    });
+
     harn_vm::orchestration::CapabilityPolicy {
         workspace_roots,
         read_only_roots: read_only_roots
@@ -512,7 +526,11 @@ pub(super) fn default_run_capability_policy(
                 .map(|path| path.display().to_string())
                 .collect(),
             allow_process_self_introspection: grants.self_introspection,
-            netns_launcher_path: grants.netns_launcher,
+            // Not needed and not offered as a flag: this policy restricts no
+            // capability, so its children already write their workspace, and
+            // a read-only role nested under it may keep the grant for its own.
+            allow_child_workspace_write: false,
+            netns_launcher_path,
         }),
         side_effect_level: Some(
             if grants.network {
@@ -633,6 +651,16 @@ pub(super) fn run_sandbox_attestation(sandbox: &RunSandboxOptions) -> serde_json
         "process_unix_socket_enforcement": active_policy
             .as_ref()
             .map(harn_vm::unix_socket_enforcement),
+        // Whether this run's children may write their writable roots, and
+        // whether that came from the explicit grant rather than from the
+        // policy's own workspace write. A read-only role without the grant
+        // reads `false` here, which is why its builds fail on the first write.
+        "process_child_writes": active_policy
+            .as_ref()
+            .is_none_or(|policy| policy.children_may_write()),
+        "process_child_workspace_write_granted": active_policy
+            .as_ref()
+            .is_some_and(|policy| policy.process_sandbox.allow_child_workspace_write),
         "side_effect_level": side_effect_level,
         "egress": egress,
     })

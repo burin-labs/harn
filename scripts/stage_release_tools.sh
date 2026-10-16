@@ -20,9 +20,12 @@ for source in \
   release_gate.sh \
   release_contract.harn \
   release_contract.json \
+  release_audit_contract.json \
   release_contract.env \
   verify_release_tag_main_ancestry.sh \
   release_metadata.harn \
+  release_changelog_fold.harn \
+  render_release_notes.harn \
   release_withdrawals.harn \
   path_visibility.harn \
   npm_ci_with_retry.sh \
@@ -35,3 +38,5 @@ do
   cp "$repo_root/scripts/$source" "$destination/$source"
 done
 cp -R "$repo_root/scripts/lib" "$destination/lib"
+cp "$repo_root/scripts/ci/require_full_suite.sh" "$destination/require_full_suite.sh"
+cp "$repo_root/scripts/ci/require_native_qualification.sh" "$destination/require_native_qualification.sh"

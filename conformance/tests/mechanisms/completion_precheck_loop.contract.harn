@@ -1,0 +1,104 @@
+import { agent_capture_events } from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
+import { llm_done, llm_text, with_llm_script } from "std/testing"
+
+pipeline test(harness: Harness) {
+  const sid = "completion-precheck-loop-" + harness.random.uuid()
+  const missing = llm_text(
+    json_stringify(
+      {
+        answers: {
+          achieved: {verdict: false, confidence: 0.98, evidence: "No observed PR"},
+          missing: {choice: "pr", confidence: 0.95, evidence: "PR is missing"},
+        },
+      },
+    ),
+  )
+    + {provider: "openai", model: "gpt-5.4-nano", input_tokens: 100, output_tokens: 30}
+  with_llm_script(
+    harness.llm,
+    [
+      llm_done()
+        + {provider: "openai", model: "gpt-5.4-nano", input_tokens: 100, output_tokens: 30},
+      missing,
+      llm_done()
+        + {provider: "openai", model: "gpt-5.4-nano", input_tokens: 100, output_tokens: 30},
+      missing,
+    ],
+    { ->
+      const captured = agent_capture_events(
+        harness.agent,
+        sid,
+        { ->
+          agent_loop(
+            harness,
+            "Finish the requested work",
+            nil,
+            {
+              provider: "openai",
+              model: "gpt-5.4-nano",
+              budget: {admission: "conservative", total_budget_usd: 1.0},
+              session_id: sid,
+              tools: tool_registry(),
+              loop_until_done: true,
+              done_sentinel: "##DONE##",
+              max_iterations: 2,
+              final_wrapup: false,
+              turn_end_condition: {
+                provider: "openai",
+                model: "gpt-5.4-nano",
+                requirement_contract: {
+                  requirements: [{requirement_id: "pr", name: "Open the pull request"}],
+                },
+                precheck: {
+                  policy: {
+                    evaluation: {
+                      backend: "structured_llm",
+                      provider: "openai",
+                      model: "gpt-5.4-nano",
+                      effort: "none",
+                      temperature: 0.0,
+                      threshold: 0.0,
+                      evaluation_cost_limit: 1.0,
+                      run_cost_limit: 1.0,
+                    },
+                    achieved_ceiling: 0.05,
+                    missing_confidence_floor: 0.9,
+                  },
+                },
+              },
+            },
+          )
+        },
+      )
+      const receipts = captured.events.filter(
+        { event ->
+          event.type == "typed_checkpoint"
+            && event?.checkpoint?.schema == "harn.completion_directive_receipt.v1"
+        },
+      )
+        .map({ event -> event.checkpoint })
+        .to_list()
+      assert(len(receipts) > 0, "the real loop must reach completion arbitration")
+      assert_eq(receipts[0].action, "continue")
+      assert_eq(receipts[0].outcome, "skipped_precheck")
+      assert_eq(receipts[0].precheck.gap_id, "pr")
+      // Arbitration defers delivery to the loop's next-turn composition.
+      // The actual actor request below proves that composition occurred.
+      assert_eq(receipts[0].feedback_delivery, "deferred")
+      assert_eq(
+        len(captured.events.filter({ event -> event.type == "judge_started" }).to_list()),
+        0,
+      )
+      const calls = harness.llm.mock_calls()
+      assert(len(calls) >= 3, "the actor must receive another turn after the veto")
+      assert(
+        contains(json_stringify(calls[2]), "Complete and verify: Open the pull request"),
+        "the next actor request must contain the named missing piece",
+      )
+    },
+  )
+  harness.stdio.println(
+    "completion precheck loop: skipped judge and delivered named gap to next actor turn",
+  )
+}

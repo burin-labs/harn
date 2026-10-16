@@ -76,11 +76,11 @@ mod tests {
     #[test]
     fn a_panic_on_another_thread_is_not_silenced() {
         install_hook();
-        let observed = std::thread::spawn(|| SILENT.with(Cell::get))
+        let observed = crate::runtime_stack::spawn(|| SILENT.with(Cell::get))
             .join()
             .expect("probe thread");
         let _ = catch_unwind_silently(|| {
-            let inside = std::thread::spawn(|| SILENT.with(Cell::get))
+            let inside = crate::runtime_stack::spawn(|| SILENT.with(Cell::get))
                 .join()
                 .expect("probe thread");
             assert!(!inside, "silence does not reach a second thread");

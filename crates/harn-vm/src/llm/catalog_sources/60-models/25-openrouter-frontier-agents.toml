@@ -10,7 +10,7 @@ name = "Qwen3.7 Plus"
 provider = "openrouter"
 context_window = 1000000
 capabilities = ["tools", "vision", "streaming", "thinking", "prompt_caching"]
-pricing = { input_per_mtok = 0.32, output_per_mtok = 1.28, cache_read_per_mtok = 0.064, cache_write_per_mtok = 0.40 }
+pricing = { input_per_mtok = 0.32, output_per_mtok = 1.28, cache_read_per_mtok = 0.064, cache_write_per_mtok = 0.40, input_token_bands = [{ minimum_input_tokens = 256000, input_multiplier = 3.0, output_multiplier = 3.0 }] }
 
 tier = "frontier"
 open_weight = false
@@ -24,6 +24,8 @@ capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
 # The cache-write rate moved with the headline rates and was left behind at
 # $1.5625; OpenRouter bills $1.84375 per MTok (read 2026-09-20).
 pricing = { input_per_mtok = 1.475, output_per_mtok = 4.425, cache_read_per_mtok = 0.295, cache_write_per_mtok = 1.84375 }
+# Still served with no announced shutdown.
+superseded_by = "qwen/qwen3.8-max-0902"
 
 # OpenRouter describes Max as the flagship Qwen3.7 route; keep it out of the
 # value/mid tier so price-sensitive selectors do not confuse it with Flash.
@@ -31,6 +33,27 @@ tier = "frontier"
 open_weight = false
 strengths = ["coding", "agentic", "tool_use", "long_context", "reasoning"]
 complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "qwen", "deepseek"]
+
+# Qwen3.8 Max (0902 snapshot, listed 2026-09-03), Alibaba's hosted flagship.
+# One serving endpoint (Alibaba) at $2 / $6 per MTok, $0.25 cache read and
+# $2.50 cache write (index and endpoint list read 2026-10-01). OpenRouter's
+# `qwen3.8-max-prime` is a faster SKU of the same model at 2x the price and is
+# not catalogued. Capability evidence, including mandatory reasoning, is on
+# the `qwen/qwen3.8-max-0902` OpenRouter capability rule.
+[models."qwen/qwen3.8-max-0902"]
+name = "Qwen3.8 Max (via OpenRouter)"
+provider = "openrouter"
+logical_model = "qwen3.8-max"
+equivalence_group = "qwen3.8-max"
+served_variant = "openrouter"
+released = "2026-09-03"
+context_window = 1000000
+capabilities = ["tools", "vision", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 2.00, output_per_mtok = 6.00, cache_read_per_mtok = 0.25, cache_write_per_mtok = 2.50 }
+tier = "frontier"
+open_weight = false
+strengths = ["coding", "agentic", "tool_use", "long_context", "reasoning", "vision"]
+complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "deepseek", "kimi"]
 [models."kwaipilot/kat-coder-pro-v2"]
 name = "KAT-Coder-Pro V2"
 provider = "openrouter"
@@ -58,3 +81,36 @@ pricing = { input_per_mtok = 0.20, output_per_mtok = 1.15, cache_read_per_mtok =
 tier = "frontier"
 open_weight = false
 strengths = ["agentic", "coding", "long_context", "tool_use", "reasoning"]
+
+# Xiaomi MiMo v2.6 (released 2026-09-21, MIT licence). Pro is a 1.02T / 42B
+# active MoE, Flash 309B / 15B active; both take text, image, video and audio
+# with a ~1M context and 131,072 max output on Xiaomi's endpoint. Prices are
+# the live OpenRouter index only (read 2026-10-09), as #9023 asked, because
+# secondary sources disagree on Flash: Pro $0.435 / $0.0036 cached / $0.87 and
+# Flash $0.14 / $0.0028 cached / $0.28. Probed 2026-10-09 pinned to the Xiaomi
+# endpoint: native tool calls, the tool-result round trip, a required tool
+# choice, reasoning off and on all returned 200, and a second tool turn
+# succeeded without echoing the prior reasoning back.
+[models."xiaomi/mimo-v2.6-pro"]
+name = "MiMo v2.6 Pro (via OpenRouter)"
+provider = "openrouter"
+context_window = 1050000
+released = "2026-09-21"
+capabilities = ["tools", "vision", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 0.435, output_per_mtok = 0.87, cache_read_per_mtok = 0.0036 }
+architecture = { parameter_count_b = 1020.0, active_parameter_count_b = 42.0, moe = true, license = "MIT", source_url = "https://huggingface.co/XiaomiMiMo/MiMo-V2.6-Pro-RL", last_verified = "2026-10-09" }
+tier = "frontier"
+open_weight = true
+strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context", "cheap"]
+
+[models."xiaomi/mimo-v2.6-flash"]
+name = "MiMo v2.6 Flash (via OpenRouter)"
+provider = "openrouter"
+context_window = 1050000
+released = "2026-09-21"
+capabilities = ["tools", "vision", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 0.14, output_per_mtok = 0.28, cache_read_per_mtok = 0.0028 }
+architecture = { parameter_count_b = 309.0, active_parameter_count_b = 15.0, moe = true, license = "MIT", source_url = "https://openrouter.ai/api/v1/models", last_verified = "2026-10-09" }
+tier = "mid"
+open_weight = true
+strengths = ["speed", "cheap", "tool_use", "reasoning", "long_context"]

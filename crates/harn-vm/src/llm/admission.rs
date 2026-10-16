@@ -14,7 +14,10 @@ mod durable;
 mod host;
 use bound::AttemptBound;
 use durable::DurableReservation;
-pub use durable::{MachineSpendPolicy, MachineSpendQuota, MachineSpendReceipt};
+pub use durable::{
+    BudgetCeilingUpdate, MachineSpendExhaustion, MachineSpendPeriod, MachineSpendPolicy,
+    MachineSpendQuota, MachineSpendReceipt,
+};
 pub use host::ConservativeLlmBudget;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -295,6 +298,7 @@ pub(crate) fn check_auxiliary(
 pub(crate) fn reserve(
     opts: &LlmCallOptions,
     request: &LlmRequestPayload,
+    tokens: super::cost_context::LlmCallTokenProjection,
 ) -> Result<Option<AttemptReservation>, VmError> {
     let scope = SCOPE.with(|slot| slot.borrow().clone());
     let mut ledger = scope
@@ -304,7 +308,7 @@ pub(crate) fn reserve(
     activate(&mut ledger, opts.budget.as_ref())?;
     // Latch the execution ceiling even when the adaptive preflight refuses.
     // Such a refusal precedes transport, so it consumes no reservation.
-    super::cost::check_llm_preflight_budget(opts)?;
+    super::cost::check_llm_preflight_budget_for(opts, tokens)?;
     // The provider registry marks a self-hosted runtime as a known-zero
     // billing route. It consumes neither the machine allowance nor an
     // uncertain reservation; an unknown paid route still fails closed below.
@@ -412,6 +416,18 @@ pub(crate) fn reserve_decision(
     reserve_money(&scope, &mut ledger, bound, per_call)
 }
 
+/// The `admission_reason` an admission refusal carries, such as
+/// `late_activation`. `None` for an error this module did not raise.
+pub(crate) fn denial_reason(error: &VmError) -> Option<String> {
+    let VmError::Thrown(value) = error else {
+        return None;
+    };
+    match value.as_dict()?.get("admission_reason")? {
+        VmValue::String(reason) => Some(reason.to_string()),
+        _ => None,
+    }
+}
+
 /// A measured allowance only exists after conservative authority was installed.
 pub(crate) fn remaining_allowance() -> Option<f64> {
     SCOPE.with(|slot| {
@@ -491,19 +507,9 @@ pub(crate) fn machine_remaining_usd() -> Result<Option<f64>, VmError> {
     let machine = SCOPE.with(|slot| slot.borrow().machine.clone());
     machine
         .map(|quota| {
-            let receipt = quota.receipt()?;
-            if receipt.contract_broken {
-                return Ok(0.0);
-            }
-            let remaining = [
-                receipt.daily_remaining_microusd,
-                receipt.monthly_remaining_microusd,
-            ]
-            .into_iter()
-            .flatten()
-            .min()
-            .ok_or_else(|| error(DenialKind::InvalidBudget, "machine spend limit is absent"))?;
-            Ok(remaining as f64 / 1_000_000.0)
+            quota
+                .remaining_microusd()
+                .map(|remaining| remaining as f64 / 1_000_000.0)
         })
         .transpose()
 }

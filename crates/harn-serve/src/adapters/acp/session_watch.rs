@@ -71,16 +71,35 @@ mod tests {
     ) -> (
         mpsc::UnboundedReceiver<String>,
         harn_vm::SessionChangeSubscription,
+        Arc<SessionInfoNotifier>,
     ) {
         let (tx, rx) = mpsc::unbounded_channel();
         let sessions: KnownSessions = Arc::new(Mutex::new(
             known.iter().map(|id| (*id).to_string()).collect(),
         ));
-        let subscription = harn_vm::subscribe_session_changes(Arc::new(SessionInfoNotifier::new(
-            AcpOutput::Channel(tx),
-            sessions,
-        )));
-        (rx, subscription)
+        let notifier = Arc::new(SessionInfoNotifier::new(AcpOutput::Channel(tx), sessions));
+        let subscription = harn_vm::subscribe_session_changes(notifier.clone());
+        (rx, subscription, notifier)
+    }
+
+    async fn receive_title(
+        rx: &mut mpsc::UnboundedReceiver<String>,
+        session_id: &str,
+        title: &str,
+    ) {
+        loop {
+            let line = rx.recv().await.expect("a session/update frame");
+            let frame: serde_json::Value = serde_json::from_str(&line).expect("valid json frame");
+            assert_eq!(frame["method"], "session/update");
+            assert_eq!(frame["params"]["sessionId"], session_id);
+            assert_eq!(
+                frame["params"]["update"]["sessionUpdate"],
+                "session_info_update"
+            );
+            if frame["params"]["update"]["title"] == title {
+                return;
+            }
+        }
     }
 
     async fn write_title(root: &std::path::Path, session_id: &str, title: &str) {
@@ -112,22 +131,23 @@ mod tests {
     #[tokio::test(flavor = "current_thread")]
     async fn a_committed_title_reaches_the_client_as_session_info_update() {
         let workspace = tempfile::tempdir().expect("workspace");
-        let (mut rx, _subscription) = subscribed_client(&["s-1"]);
+        let store = harn_vm::open_canonical_store(workspace.path()).expect("canonical store");
+        let initial = store
+            .create(CreateSession {
+                id: Some("s-1".to_string()),
+                ..CreateSession::default()
+            })
+            .await
+            .expect("create session");
+        assert!(initial.title.is_none());
+        let (mut rx, _subscription, notifier) = subscribed_client(&["s-1"]);
+        // The watcher may publish initial metadata before the committed rename.
+        notifier.session_updated(&initial);
+        assert!(!rx.is_empty(), "the initial untitled frame must be queued");
 
         write_title(workspace.path(), "s-1", "Fix flaky retry backoff").await;
 
-        let line = rx.try_recv().expect("a session/update frame");
-        let frame: serde_json::Value = serde_json::from_str(&line).expect("valid json frame");
-        assert_eq!(frame["method"], "session/update");
-        assert_eq!(frame["params"]["sessionId"], "s-1");
-        assert_eq!(
-            frame["params"]["update"]["sessionUpdate"],
-            "session_info_update"
-        );
-        assert_eq!(
-            frame["params"]["update"]["title"],
-            "Fix flaky retry backoff"
-        );
+        receive_title(&mut rx, "s-1", "Fix flaky retry backoff").await;
     }
 
     /// Observers are registered process-wide, so without a per-client filter a
@@ -136,7 +156,7 @@ mod tests {
     #[tokio::test(flavor = "current_thread")]
     async fn a_session_this_client_never_opened_is_not_pushed_to_it() {
         let workspace = tempfile::tempdir().expect("workspace");
-        let (mut rx, _subscription) = subscribed_client(&["mine"]);
+        let (mut rx, _subscription, _notifier) = subscribed_client(&["mine"]);
 
         write_title(
             workspace.path(),
@@ -150,9 +170,7 @@ mod tests {
         );
 
         write_title(workspace.path(), "mine", "a name from my own session").await;
-        let line = rx.try_recv().expect("my own session still arrives");
-        let frame: serde_json::Value = serde_json::from_str(&line).expect("valid json frame");
-        assert_eq!(frame["params"]["sessionId"], "mine");
+        receive_title(&mut rx, "mine", "a name from my own session").await;
     }
 
     /// A server that is gone must stop receiving, or a long-lived process

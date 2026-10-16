@@ -45,11 +45,22 @@ fn auto_select_prefers_local_provider_without_cloud_credentials() {
     // regardless of ambient cloud API keys: no preferred/credentialed cloud
     // provider is present, so the local fallback wins deterministically.
     let config = parse_config_toml(
-            "[providers.ollama]\nbase_url = \"http://localhost:11434\"\nchat_endpoint = \"/v1/chat/completions\"\n",
+            "[providers.ollama]\nbase_url = \"http://localhost:11434\"\nchat_endpoint = \"/v1/chat/completions\"\nchat_api_adapter = \"ollama_openai_compat\"\n",
         )
         .expect("config parses");
     assert!(provider_is_local(config.providers.get("ollama").unwrap()));
+    assert_eq!(
+        config.providers["ollama"].chat_api_adapter,
+        Some(ChatApiAdapter::OllamaOpenAiCompat)
+    );
     assert_eq!(auto_select_provider(&config), "ollama");
+}
+
+#[test]
+fn chat_api_adapter_rejects_unknown_variant() {
+    let error = parse_config_toml("[providers.ollama]\nchat_api_adapter = \"ollama_v2\"\n")
+        .expect_err("chat adapter variants are closed");
+    assert!(error.to_string().contains("ollama_v2"));
 }
 
 #[test]
@@ -80,28 +91,20 @@ fn suppress_routes_parse_and_merge_dedupe() {
 }
 
 #[test]
-fn test_glob_match_prefix() {
-    assert!(glob_match("claude-*", "claude-sonnet-4-20250514"));
-    assert!(glob_match("gpt-*", "gpt-4o"));
-    assert!(!glob_match("claude-*", "gpt-4o"));
-}
-
-#[test]
-fn test_glob_match_suffix() {
-    assert!(glob_match("*-latest", "llama3.2-latest"));
-    assert!(!glob_match("*-latest", "llama3.2"));
-}
-
-#[test]
-fn test_glob_match_middle() {
-    assert!(glob_match("claude-*-latest", "claude-sonnet-latest"));
-    assert!(!glob_match("claude-*-latest", "claude-sonnet-beta"));
-}
-
-#[test]
-fn test_glob_match_exact() {
-    assert!(glob_match("gpt-4o", "gpt-4o"));
-    assert!(!glob_match("gpt-4o", "gpt-4o-mini"));
+fn glob_matches_prefix_suffix_middle_and_exact_routes() {
+    for (pattern, model, expected) in [
+        ("claude-*", "claude-sonnet-4-20250514", true),
+        ("gpt-*", "gpt-4o", true),
+        ("claude-*", "gpt-4o", false),
+        ("*-latest", "llama3.2-latest", true),
+        ("*-latest", "llama3.2", false),
+        ("claude-*-latest", "claude-sonnet-latest", true),
+        ("claude-*-latest", "claude-sonnet-beta", false),
+        ("gpt-4o", "gpt-4o", true),
+        ("gpt-4o", "gpt-4o-mini", false),
+    ] {
+        assert_eq!(glob_match(pattern, model), expected, "{pattern}: {model}");
+    }
 }
 
 #[test]
@@ -430,20 +433,18 @@ fn test_resolve_base_url_region_env() {
 
 #[test]
 fn capability_tags_include_structured_capability_flags() {
-    let caps = crate::llm::capabilities::Capabilities {
-        native_tools: true,
-        tool_search: vec!["web".to_string()],
-        vision_supported: true,
-        audio: true,
-        pdf: true,
-        video: true,
-        files_api_supported: true,
-        batch_api: true,
-        prompt_caching: true,
-        thinking_modes: vec!["enabled".to_string()],
-        structured_output: Some("native".to_string()),
-        ..Default::default()
-    };
+    let mut caps = crate::llm::capabilities::Capabilities::default();
+    caps.native_tools = true;
+    caps.tool_search = vec!["web".to_string()];
+    caps.vision_supported = true;
+    caps.audio = true;
+    caps.pdf = true;
+    caps.video = true;
+    caps.files_api_supported = true;
+    caps.batch_api = true;
+    caps.prompt_caching = true;
+    caps.thinking_modes = vec!["enabled".to_string()];
+    caps.structured_output = Some("native".to_string());
 
     assert_eq!(
         capability_tags_from_capabilities(&caps),
@@ -480,6 +481,7 @@ fn cerebras_qwen_38_catalog_row_preserves_public_route_metadata() {
             "tools".to_string(),
             "vision".to_string(),
             "thinking".to_string(),
+            "extended_thinking".to_string(),
             "structured_output".to_string(),
         ]
     );
@@ -497,7 +499,7 @@ fn cerebras_qwen_38_catalog_row_preserves_public_route_metadata() {
         capabilities.preferred_tool_format.as_deref(),
         Some("native")
     );
-    assert_eq!(capabilities.thinking_modes, vec!["enabled"]);
+    assert_eq!(capabilities.thinking_modes, vec!["enabled", "effort"]);
 }
 
 #[test]
@@ -506,7 +508,8 @@ fn groq_qwen_3_8_catalog_row_preserves_public_route_metadata() {
         .expect("Groq Qwen 3.8's public preview route must be catalogued");
 
     assert_eq!(model.provider, "groq");
-    assert_eq!(model.context_window, 131_042);
+    // Groq's /models record reported 131,072 on 2026-09-29 (131,042 before).
+    assert_eq!(model.context_window, 131_072);
     assert_eq!(model.wire_model.as_deref(), Some("qwen/qwen3.8-27b"));
     assert_eq!(model.open_weight, Some(true));
     for capability in ["tools", "vision", "streaming", "thinking"] {
@@ -534,6 +537,21 @@ fn groq_qwen_3_8_catalog_row_preserves_public_route_metadata() {
     assert!(capabilities.reasoning_none_supported);
     assert!(capabilities.presence_penalty_supported);
     assert!(!capabilities.top_k_supported);
+}
+
+#[test]
+fn deepinfra_v41_flash_resolves_to_the_served_route() {
+    let id = "deepinfra/deepseek-ai/DeepSeek-V4.1-Flash";
+    let row = model_catalog_entry(id).expect("the observed DeepInfra route is catalogued");
+    assert_eq!(row.provider, "deepinfra");
+    assert_eq!(
+        row.wire_model.as_deref(),
+        Some("deepseek-ai/DeepSeek-V4.1-Flash")
+    );
+    let selected = resolve_model_request(id, None).expect("the route resolves");
+    assert_eq!(selected.resolved_provider, "deepinfra");
+    assert_eq!(selected.resolved_model, id);
+    assert!(model_catalog_entry("deepinfra/deepseek-ai/DeepSeek-V4.2-Flash").is_none());
 }
 
 #[test]
@@ -770,8 +788,136 @@ fn retired_groq_llama_models_are_absent_from_bundled_catalog() {
     assert_eq!(active.provider, "groq");
 }
 
-mod diagnostics;
 mod embedded_catalog;
-mod overlays;
 mod provider_prefix;
 mod tool_protocol;
+
+/// Together still lists these models in `/v1/models`, but a chat call returns
+/// "Unable to access non-serverless model" (live sweep 2026-09-29). They must
+/// stay `dedicated` so hosts never offer them as one-click routes. MiniMax M3
+/// answered serverless the same day and is the control that keeps this from
+/// passing on a catalog that marked every Together row dedicated.
+#[test]
+fn together_routes_that_need_a_dedicated_endpoint_are_marked_dedicated() {
+    for id in [
+        "openai/gpt-oss-20b",
+        "moonshotai/Kimi-K2.7-Code",
+        "MiniMaxAI/MiniMax-M2.7",
+        "Qwen/Qwen2.5-7B-Instruct-Turbo",
+        "google/gemma-4-31B-it",
+        "Qwen/Qwen3.5-397B-A17B",
+        "together/nvidia/nemotron-3-ultra-550b-a55b",
+        "Qwen/Qwen3-Coder-Next-FP8",
+    ] {
+        let model = model_catalog_entry(id).unwrap_or_else(|| panic!("{id} must be catalogued"));
+        assert_eq!(model.provider, "together", "{id}");
+        assert_eq!(model.availability, ModelAvailability::Dedicated, "{id}");
+    }
+    let control = model_catalog_entry("MiniMaxAI/MiniMax-M3").expect("Together MiniMax M3 row");
+    assert_eq!(control.provider, "together");
+    assert_ne!(control.availability, ModelAvailability::Dedicated);
+}
+
+/// Fireworks still lists these models in `/inference/v1/models`, but a chat
+/// call returns HTTP 404 "Model not found, inaccessible, and/or not deployed"
+/// (live sweep 2026-10-01; the weekly provider contract probe measured the same
+/// 404 on 2026-09-28). GLM 5.2 is the odd one: its metadata still reports
+/// `supportsServerless: true`, but its only deployment is non-default, so the
+/// plain id 404s the same way. GLM 5.3 Flash answered serverless the same day and is
+/// the control that keeps this from passing on a catalog that marked every
+/// Fireworks row dedicated.
+#[test]
+fn fireworks_routes_that_need_a_dedicated_deployment_are_marked_dedicated() {
+    for id in [
+        "accounts/fireworks/models/glm-5p2",
+        "accounts/fireworks/models/deepseek-v4-flash-0731",
+        "accounts/fireworks/models/deepseek-v4-pro",
+        "accounts/fireworks/models/deepseek-v4-pro-0813",
+        "accounts/fireworks/models/kimi-k2p6",
+        "accounts/fireworks/models/kimi-k2p7-code",
+    ] {
+        let model = model_catalog_entry(id).unwrap_or_else(|| panic!("{id} must be catalogued"));
+        assert_eq!(model.provider, "fireworks", "{id}");
+        assert_eq!(model.availability, ModelAvailability::Dedicated, "{id}");
+    }
+    let control = model_catalog_entry("accounts/fireworks/models/glm-5p3-flash")
+        .expect("Fireworks GLM 5.3 Flash row");
+    assert_eq!(control.provider, "fireworks");
+    assert_ne!(control.availability, ModelAvailability::Dedicated);
+}
+
+/// Fireworks lists Nemotron 3.5 Lightning as serverless, but on 2026-10-02 every
+/// serverless request to it (two non-streaming, one streaming) returned 0 bytes
+/// in 150 s, and the hosted provider contract probe timed out on it on
+/// 2026-09-28 and 2026-10-02. DeepSeek V4.1 Flash answered on the same key in
+/// 1.4 s and is the control that keeps this from passing on a catalog that
+/// marked every Fireworks row dedicated.
+#[test]
+fn fireworks_routes_whose_serverless_endpoint_hangs_are_marked_dedicated() {
+    let id = "accounts/fireworks/models/nemotron-lightning-3p5-30b-a3b";
+    let model = model_catalog_entry(id).unwrap_or_else(|| panic!("{id} must be catalogued"));
+    assert_eq!(model.provider, "fireworks");
+    assert_eq!(model.availability, ModelAvailability::Dedicated);
+    let control = model_catalog_entry("accounts/fireworks/models/deepseek-v4p1-flash")
+        .expect("Fireworks DeepSeek V4.1 Flash row");
+    assert_eq!(control.provider, "fireworks");
+    assert_ne!(control.availability, ModelAvailability::Dedicated);
+}
+
+/// A provider's default model is its own authored `runtime` entry, whichever
+/// provider is the default. Before this, a user overlay naming another default
+/// provider left `provider: "anthropic"` with no default, and a provider with
+/// no authored default was handed Anthropic's model.
+#[test]
+fn provider_default_does_not_depend_on_the_default_provider() {
+    reset_overrides();
+    for default_provider in ["ollama", "mistral"] {
+        let overlay = parse_config_toml(&format!("default_provider = \"{default_provider}\"\n"))
+            .expect("overlay parses");
+        set_user_overrides(Some(overlay));
+        assert_eq!(
+            default_model_for_provider("anthropic").as_deref(),
+            Ok("claude-sonnet-5-5"),
+            "default_provider = {default_provider}"
+        );
+        assert!(
+            matches!(
+                default_model_for_provider("mistral"),
+                Err(ModelResolutionError::MissingProviderDefault { .. })
+            ),
+            "mistral has no authored default and must not borrow one (default_provider = {default_provider})"
+        );
+        clear_user_overrides();
+    }
+}
+
+/// `fallback_model` is the retired spelling of the default provider's default
+/// model. The merge turns it into that provider's `runtime` entry, and an
+/// explicit `provider_defaults` entry in the same overlay still wins.
+#[test]
+fn legacy_fallback_model_normalizes_into_provider_defaults() {
+    let mut config = parse_config_toml("default_provider = \"anthropic\"\n").expect("base parses");
+    let legacy =
+        parse_config_toml("default_provider = \"ollama\"\nfallback_model = \"llama3.2\"\n")
+            .expect("overlay parses");
+    config.merge_from(&legacy);
+    assert_eq!(config.default_provider.as_deref(), Some("ollama"));
+    assert_eq!(
+        config.provider_defaults["ollama"].runtime.as_deref(),
+        Some("llama3.2")
+    );
+    assert_eq!(
+        config.fallback_model, None,
+        "no second mechanism survives the merge"
+    );
+
+    let explicit = parse_config_toml(
+        "fallback_model = \"legacy\"\n[provider_defaults.ollama]\nruntime = \"explicit\"\n",
+    )
+    .expect("overlay parses");
+    config.merge_from(&explicit);
+    assert_eq!(
+        config.provider_defaults["ollama"].runtime.as_deref(),
+        Some("explicit")
+    );
+}

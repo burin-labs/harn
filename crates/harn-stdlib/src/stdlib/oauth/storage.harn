@@ -350,6 +350,24 @@ fn __secrets_get_stored(secrets: HarnessSecrets, cfg: dict, name: string) {
   return __secrets_parse(cfg, name, raw)
 }
 
+fn __secrets_describe_absence(secrets: HarnessSecrets, cfg: dict, key: string?) {
+  // Why `get` returned nil: the secret host's not-found message names the
+  // providers it consulted and any default provider the configuration left
+  // out (for example the keyring under HARN_SECRET_PROVIDERS=env). Returns
+  // nil when the token is present.
+  const name = __secrets_secret_name(cfg, key)
+  return try {
+    const _ = secrets.read(name, cfg.scope)
+    nil
+  } catch (err) {
+    if __secrets_is_missing(err) {
+      redact(to_string(err?.message ?? ""))
+    } else {
+      throw err
+    }
+  }
+}
+
 fn __secrets_delete(secrets: HarnessSecrets, cfg: dict, key: string?) {
   const name = __secrets_secret_name(cfg, key)
   try {
@@ -393,6 +411,10 @@ fn __secrets_delete(secrets: HarnessSecrets, cfg: dict, key: string?) {
  *   - Non-token fields already in a shared secret (e.g. `harn connect`
  *     metadata) are preserved on write.
  *   - Token material never appears in the handle or in diagnostics.
+ *   - `describe_absence(key)` returns the secret host's not-found detail
+ *     (providers consulted, providers excluded by HARN_SECRET_PROVIDERS)
+ *     when no token is stored, or nil when one is. The OAuth client
+ *     appends it to its "no token in storage" diagnostic.
  *   - Refreshes are single-flight per (provider, key) in-process, so
  *     concurrent TTL / 401 / explicit refreshes coalesce. Durable
  *     cross-process single-flight requires a backend with its own lock
@@ -432,6 +454,7 @@ pub fn secrets(auth: HarnessAuth, secret_store: HarnessSecrets, opts: unknown) -
     get: { key -> __secrets_get(secret_store, cfg, key) },
     set: { key, token_set, ttl_seconds = nil -> __secrets_set(secret_store, cfg, key, token_set) },
     delete: { key -> __secrets_delete(secret_store, cfg, key) },
+    describe_absence: { key -> __secrets_describe_absence(secret_store, cfg, key) },
     with_refresh_lock: { key, body ->
       auth.oauth_storage_with_refresh_lock(cfg.lock_handle, key, body)
     },

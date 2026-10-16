@@ -338,6 +338,14 @@ pipeline test_generated_paths_come_from_the_registry(harness: Harness, task: unk
   assert_eq(generated, ["docs/src/diagnostics.md", "docs/src/spec/language"])
   assert_eq(is_generated("docs/src/diagnostics.md", generated), true)
   assert_eq(is_generated("docs/src/spec/language/10-concurrency.md", generated), true)
+  assert_eq(
+    is_generated("docs/src/spec/language/10-concurrency.md", ["docs/src/spec/language/"]),
+    true,
+  )
+  assert_eq(
+    is_generated("docs/src/spec/language-other/10-concurrency.md", ["docs/src/spec/language/"]),
+    false,
+  )
   // The hand-edited source those pages mirror is still scanned.
   assert_eq(is_generated("spec/chapters/10-concurrency.md", generated), false)
   assert_eq(is_generated("docs/src/builtins.md", generated), false)

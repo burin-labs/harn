@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/code_index/module_graph.response.json",
+  "title": "code_index.module_graph response",
+  "description": "Every list is sorted, so the same index and arguments always produce the same response.",
+  "type": "object",
+  "properties": {
+    "indexed": {
+      "type": "boolean",
+      "description": "False when no workspace has been indexed; the lists are then empty because nothing was measured, not because the workspace has no dependencies."
+    },
+    "nodes": {
+      "type": "array",
+      "description": "Sorted by id. The workspace root is `.`.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "files": { "type": "integer", "minimum": 1, "description": "Source files in the node." },
+          "languages": { "type": "array", "items": { "type": "string" } }
+        },
+        "required": ["id", "files", "languages"],
+        "additionalProperties": false
+      }
+    },
+    "edges": {
+      "type": "array",
+      "description": "Sorted by (from, to). Never contains a self-loop.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "from": { "type": "string" },
+          "to": { "type": "string" },
+          "weight": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Distinct import links from files in `from` into `to`. A whole-module import counts once per node the module's files fall in."
+          },
+          "sample": {
+            "type": "array",
+            "maxItems": 3,
+            "description": "Smallest (importing file, imported file or module root) pairs.",
+            "items": {
+              "type": "array",
+              "items": { "type": "string" },
+              "minItems": 2,
+              "maxItems": 2
+            }
+          }
+        },
+        "required": ["from", "to", "weight", "sample"],
+        "additionalProperties": false
+      }
+    },
+    "external": {
+      "type": "array",
+      "description": "Empty unless include_external. Sorted by (from, spec).",
+      "items": {
+        "type": "object",
+        "properties": {
+          "from": { "type": "string" },
+          "spec": {
+            "type": "string",
+            "description": "The import's string literal when it has one, else the statement as written."
+          },
+          "count": { "type": "integer", "minimum": 1, "description": "Files in `from` with this import." }
+        },
+        "required": ["from", "spec", "count"],
+        "additionalProperties": false
+      }
+    },
+    "unresolved_count": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Import statements in node files that resolved to no workspace file."
+    },
+    "index_seq": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Change-log sequence the graph was read at."
+    }
+  },
+  "required": ["indexed", "nodes", "edges", "external", "unresolved_count", "index_seq"],
+  "additionalProperties": false
+}

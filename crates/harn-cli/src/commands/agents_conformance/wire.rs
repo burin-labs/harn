@@ -8,7 +8,7 @@ use url::Url;
 
 use crate::net;
 
-pub(super) const PROTOCOL_VERSION: &str = "agents-protocol-2026-04-25";
+pub(super) use harn_serve::adapters::api::API_PROTOCOL_VERSION as PROTOCOL_VERSION;
 
 pub(super) type ProbeResult<T = ()> = Result<T, String>;
 
@@ -78,9 +78,16 @@ impl ConformanceClient {
     }
 
     fn url(&self, path: &str) -> ProbeResult<Url> {
-        self.base_url
+        let url = self
+            .base_url
             .join(path.trim_start_matches('/'))
-            .map_err(|error| format!("failed to resolve URL path {path}: {error}"))
+            .map_err(|error| format!("failed to resolve URL path {path}: {error}"))?;
+        if url.origin() != self.base_url.origin() {
+            return Err(
+                "discovered resource must stay on the conformance target origin".to_owned(),
+            );
+        }
+        Ok(url)
     }
 
     pub(super) async fn get_public_json(&self, path: &str) -> ProbeResult<HttpResult> {
@@ -98,24 +105,36 @@ impl ConformanceClient {
             .await
     }
 
-    pub(super) async fn post_json(
-        &self,
-        path: &str,
-        body: &Value,
-        idempotency_key: Option<&str>,
-    ) -> ProbeResult<HttpResult> {
-        self.request_json(Method::POST, path, Some(body), idempotency_key, true, None)
+    pub(super) async fn post_json(&self, path: &str, body: &Value) -> ProbeResult<HttpResult> {
+        self.request_json(Method::POST, path, Some(body), None, true, None)
             .await
     }
 
-    pub(super) async fn patch_json(
+    pub(super) async fn patch_json(&self, path: &str, body: &Value) -> ProbeResult<HttpResult> {
+        self.request_json(Method::PATCH, path, Some(body), None, true, None)
+            .await
+    }
+
+    pub(super) async fn create_task(
         &self,
-        path: &str,
+        session_id: &str,
         body: &Value,
         idempotency_key: Option<&str>,
     ) -> ProbeResult<HttpResult> {
-        self.request_json(Method::PATCH, path, Some(body), idempotency_key, true, None)
-            .await
+        let method = harn_vm::task_retry::TaskRetryPolicy::TaskCreate
+            .supported_method()
+            .expect("task-create retry method");
+        let method = Method::from_bytes(method.as_bytes())
+            .map_err(|error| format!("invalid task-create method: {error}"))?;
+        self.request_json(
+            method,
+            &format!("/v1/sessions/{session_id}/tasks"),
+            Some(body),
+            idempotency_key,
+            true,
+            None,
+        )
+        .await
     }
 
     pub(super) async fn request_json(
@@ -337,6 +356,18 @@ pub(super) fn expect_status_any(response: &HttpResult, expected: &[StatusCode]) 
     }
 }
 
+pub(super) fn expect_task_submission(response: &HttpResult) -> ProbeResult<&Value> {
+    expect_status_any(
+        response,
+        &[StatusCode::CREATED, StatusCode::ACCEPTED, StatusCode::OK],
+    )?;
+    let task = expect_json(response)?;
+    expect_field_eq(task, "object", "task")?;
+    expect_string_field(task, "id")?;
+    expect_task_status(task)?;
+    Ok(task)
+}
+
 /// How much of a failing response body a probe error quotes back.
 const BODY_SNIPPET_MAX_BYTES: usize = 500;
 
@@ -512,6 +543,58 @@ pub(super) fn first_id_from_list(value: &Value) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn discovered_resource_urls_preserve_the_authenticated_target_origin() {
+        let client =
+            ConformanceClient::new("http://target.example/", None, Duration::from_secs(1)).unwrap();
+        assert_eq!(
+            client.url("/v1/runtime").unwrap().as_str(),
+            "http://target.example/v1/runtime"
+        );
+        assert!(client.url("http://target.example/v1/runtime").is_ok());
+        for resource in [
+            "http://other.example/v1/runtime",
+            "https://target.example/v1/runtime",
+            "http://target.example:81/v1/runtime",
+        ] {
+            assert!(client.url(resource).unwrap_err().contains("target origin"));
+        }
+    }
+
+    #[test]
+    fn task_submission_accepts_resource_admission_and_rejects_false_success() {
+        let task = serde_json::json!({"object":"task", "id":"task-one", "status":"WORKING"});
+        let response = |status, json| HttpResult {
+            status,
+            headers: HeaderMap::new(),
+            body: String::new(),
+            json,
+        };
+        for status in [StatusCode::CREATED, StatusCode::ACCEPTED, StatusCode::OK] {
+            assert_eq!(
+                expect_task_submission(&response(status, Some(task.clone()))).unwrap(),
+                &task
+            );
+            for invalid in [
+                None,
+                Some(
+                    serde_json::json!({"object":"workspace", "id":"task-one", "status":"WORKING"}),
+                ),
+                Some(serde_json::json!({"object":"task", "status":"WORKING"})),
+                Some(serde_json::json!({"object":"task", "id":"task-one", "status":"UNKNOWN"})),
+            ] {
+                assert!(expect_task_submission(&response(status, invalid)).is_err());
+            }
+        }
+        for status in [
+            StatusCode::NO_CONTENT,
+            StatusCode::CONFLICT,
+            StatusCode::INTERNAL_SERVER_ERROR,
+        ] {
+            assert!(expect_task_submission(&response(status, Some(task.clone()))).is_err());
+        }
+    }
 
     #[test]
     fn validates_task_transitions() {

@@ -13,9 +13,14 @@
 //! parser's static typechecking tables and the `#[harn_builtin]` macro's
 //! `@NAME` signature injection.
 
+/// Crate-local source contribution to compiler and check cache identities.
+pub const SOURCE_FINGERPRINT: &str = env!("HARN_SOURCE_FINGERPRINT");
+
 pub mod contracts;
+mod harness_kind;
 pub mod host_capabilities;
 pub mod llm_options;
+pub mod methods;
 pub mod predicate;
 pub mod runtime_type_tags;
 pub mod shapes;
@@ -25,11 +30,13 @@ pub use contracts::{
     wire_identifier_key, BuiltinContract, BuiltinExposure, CapabilityId, EffectAccess,
     EffectAuthorization, EffectKind, EffectSpec, ResourceSelector,
 };
+pub use harness_kind::HarnessKind;
+pub use methods::{MethodDescriptor, MethodEffect, MethodMigration, MethodReceiver, RemovedMethod};
 
 /// A complete, static description of one builtin: identifier, arity range,
 /// per-parameter types, generic type parameters, return type, and any
 /// where-clause bounds the type checker should enforce on call.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct BuiltinSignature {
     /// Builtin name as registered in the VM and referenced from Harn source.
     pub name: &'static str,
@@ -55,7 +62,7 @@ pub struct BuiltinSignature {
     pub projection: Option<RecordProjection>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum RecordProjection {
     Pick { source: usize, keys: usize },
 }
@@ -75,7 +82,7 @@ impl BuiltinSignature {
 }
 
 /// One parameter slot inside a [`BuiltinSignature`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Param {
     pub name: &'static str,
     pub ty: Ty,
@@ -106,7 +113,7 @@ impl Param {
 /// `TypeExpr` from `harn-parser` but is constructable in `const` position with
 /// no allocation. Convert to `TypeExpr` at the boundary via the parser-side
 /// `Ty::to_type_expr` helper.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Ty {
     /// A primitive or user-defined named type: `int`, `string`, `bool`,
     /// `float`, `nil`, `bytes`, `dict`, `list`, `closure`, `duration`,
@@ -154,7 +161,7 @@ pub enum Ty {
     LitString(&'static str),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ShapeFieldDescriptor {
     pub name: &'static str,
     pub ty: Ty,

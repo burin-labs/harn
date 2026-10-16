@@ -90,29 +90,38 @@ The following identifiers are reserved:
 | `throws` | `.throwsKw` |
 | `finally` | `.finally` |
 | `fn` | `.fnKw` |
-| `emit` | `.emit` |
 | `spawn` | `.spawnKw` |
 | `while` | `.whileKw` |
 | `type` | `.typeKw` |
 | `enum` | `.enum` |
-| `eval_pack` | `.evalPack` |
 | `struct` | `.struct` |
 | `interface` | `.interface` |
 | `pub` | `.pub` |
-| `from` | `.from` |
-| `to` | `.to` |
-| `tool` | `.tool` |
-| `skill` | `.skill` |
-| `exclusive` | `.exclusive` |
 | `guard` | `.guard` |
-| `require` | `.require` |
-| `deadline` | `.deadline` |
 | `yield` | `.yield` |
-| `mutex` | `.mutex` |
 | `break` | `.break` |
 | `continue` | `.continue` |
-| `select` | `.select` |
 | `impl` | `.impl` |
+
+### Contextual keywords
+
+These words introduce syntax only in one position and are ordinary
+identifiers everywhere else, so `let tool = ...`, `let select = ...`, and
+`config.from` work:
+
+| Word | Introduces syntax when |
+|---|---|
+| `select` | followed by `{` at statement position |
+| `tool`, `skill`, `eval_pack` | followed by a declaration name |
+| `mutex` | followed by `{` or by `( key ) {` |
+| `deadline` | followed by a duration, number, or name, or by `( duration ) {` |
+| `require`, `emit` | at statement position, unless the next token continues a value expression (`=`, `.`, a binary operator, `,`, a closing bracket, or a line break) |
+| `scope`, `block`, `cost_route` | followed by `{` at statement position |
+| `from` | after an import list or a `select` case variable |
+| `gen` | followed by `fn` |
+
+`to` and `exclusive` are not keywords. They spelled ranges before Harn 0.11;
+ranges are now `a..b` and `a..=b`, and `a to b` reports `HARN-PAR-007`.
 
 ### Identifiers
 
@@ -130,7 +139,13 @@ float_literal ::= digit+ '.' digit+
 ```
 
 A number followed by `.` where the next character is not a digit is lexed as an integer
-followed by the `.` operator (enabling `42.method`).
+followed by the `.` operator (enabling `42.method`). `1..3` therefore lexes as an
+integer, the `..` range operator, and an integer.
+
+### Range operators
+
+`..` and `..=` are single tokens. A run of three dots stays three `.` tokens, which the
+parser reads as a spread or rest marker (`[...xs]`).
 
 ### Duration literals
 
@@ -635,16 +650,16 @@ introduce dict literals in expression position, including dict-valued function t
 
 ```ebnf
 expression         ::= pipe_expr
-pipe_expr          ::= range_expr ('|>' range_expr)*
-range_expr         ::= ternary_expr ['to' ternary_expr ['exclusive']]
+pipe_expr          ::= ternary_expr ('|>' ternary_expr)*
 ternary_expr       ::= logical_or ['?' ternary_expr ':' ternary_expr]
 logical_or         ::= logical_and ('||' logical_and)*
 logical_and        ::= equality ('&&' equality)*
 equality           ::= comparison (('==' | '!=') comparison)*
-comparison         ::= additive
-                       (('<' | '>' | '<=' | '>=' | 'in' | 'not in') additive)*
-additive           ::= nil_coal_expr (('+' | '-') nil_coal_expr)*
-nil_coal_expr      ::= multiplicative ('??' multiplicative)*
+comparison         ::= nil_coal_expr
+                       (('<' | '>' | '<=' | '>=' | 'in' | 'not in') nil_coal_expr)*
+nil_coal_expr      ::= range_expr ('??' range_expr)*
+range_expr         ::= additive [('..' | '..=') additive]
+additive           ::= multiplicative (('+' | '-') multiplicative)*
 multiplicative     ::= unary (('*' | '/' | '%') unary)*
 unary              ::= ('!' | '-') unary | power_expr
 power_expr         ::= postfix ['**' unary]
@@ -728,6 +743,7 @@ The table runs from lowest to highest binding. Operators with higher binding
 group first. For example, `a && b || c` parses as `(a && b) || c` because `&&`
 binds more tightly than `||`.
 
+<!-- operator-precedence:begin -->
 | Precedence | Operators | Associativity | Description |
 |---|---|---|---|
 | 1 | `\|>` | Left | Pipe |
@@ -736,15 +752,30 @@ binds more tightly than `||`.
 | 4 | `&&` | Left | Logical AND |
 | 5 | `==` `!=` | Left | Equality |
 | 6 | `<` `>` `<=` `>=` `in` `not in` | Left | Comparison / membership |
-| 7 | `+` `-` | Left | Additive |
-| 8 | `??` | Left | Nil coalescing |
-| 9 | `*` `/` `%` | Left | Multiplicative |
-| 10 | `!` `-` (unary) | Right (prefix) | Unary |
-| 11 | `**` | Right | Exponentiation |
-| 12 | `.` `?.` `[]` `?.[]` `[:]` `()` `?` `!` | Left | Postfix |
+| 7 | `??` | Left | Nil coalescing |
+| 8 | `..` `..=` | None | Range formation |
+| 9 | `+` `-` | Left | Additive |
+| 10 | `*` `/` `%` | Left | Multiplicative |
+| 11 | `!` `-` | Right | Unary prefix |
+| 12 | `**` | Right | Exponentiation |
+| 13 | `.` `?.` `[]` `?.[]` `[:]` `()` `?` `!` | Left | Postfix |
+<!-- operator-precedence:end -->
+
+The table is generated from `harn_parser::operators::Precedence` by
+`make gen-operator-precedence`, which also writes the tree-sitter grammar's
+precedence constants, so the parser, formatter, editor grammar, and this
+table cannot disagree.
+
+`??` and range formation follow Swift's `NilCoalescingPrecedence` and
+`RangeFormationPrecedence`: `??` binds looser than arithmetic and range
+formation and tighter than comparison, so `count ?? 0 + 1` is
+`count ?? (0 + 1)` and `count ?? 0 == 1` is `(count ?? 0) == 1`. Swift makes
+`??` right-associative; Harn groups it to the left, which yields the same
+value because `??` returns its first non-nil operand. Ranges do not chain:
+`a..b..c` is a parse error.
 
 `!` appears at two precedence levels with two distinct meanings: a **prefix**
-`!` (level 10) is logical negation (`!ok`), while a **postfix** `!` (level 12)
+`!` (level 11) is logical negation (`!ok`), while a **postfix** `!` (level 13)
 is the non-null assertion (`value!`). They never collide — a `!` before an
 operand is negation, a `!` after one is the assertion — and `!=` is a single
 token, so neither reading is ambiguous.
@@ -758,14 +789,14 @@ and chained `**` remains right-associative (`2 ** 3 ** 2` is `2 ** (3 ** 2)`).
 ### Multiline expressions
 
 Binary operators `|>`, `||`, `&&`, `==`, `!=`, `<`, `>`, `<=`, `>=`, `??`,
-`+`, `*`, `/`, `%`, `**`, and the `.` / `?.` member access operators can span
-multiple lines. The operator at the start of a continuation line causes the
+`..`, `..=`, `+`, `*`, `/`, `%`, `**`, and the `.` / `?.` member access
+operators can span multiple lines. The operator at the start of a continuation line causes the
 parser to treat it as a continuation of the previous expression rather than a
 new statement.
 
 Note: `-` does not support multiline continuation because it is also a unary
-negation prefix. Keyword operators `in`, `not in`, and `to` also require an
-explicit backslash continuation.
+negation prefix. Keyword operators `in` and `not in` also require an explicit
+backslash continuation.
 
 ```harn,ignore
 const result = items
@@ -859,23 +890,32 @@ value, changing part of it changes the binding's whole value:
   all of them require `let`. Through a `const` binding each is rejected
   identically, with `HARN-OWN-001`. Read `d["k"] = 1` as sugar for
   `d = <a new dict differing at k>` and the requirement is self-evident.
-- **Methods** such as `appending`, `sorted`, and `adding` return a *new* value and leave
-  the receiver's value untouched, so they change nothing and are permitted on
-  a `const` binding. They are ordinary expressions, not assignments.
+- **Mutating methods** (`xs.push(v)`, `xs.pop()`, `xs.sort()`, `s.add(v)`,
+  `d.remove(k)`) are Swift's `mutating` methods: the call computes the
+  receiver's next value and writes it back to the receiver's place. `xs.push(v)`
+  is sugar for `xs = <xs with v appended>`, so the receiver must be a `let`
+  binding or a property or subscript path rooted at one, and a `const`
+  binding, a parameter, or a temporary is rejected with `HARN-OWN-001`. The
+  call's own result is separate from the write: `pop()` returns the removed
+  element.
+- **Copy-returning methods** such as `sorted`, `reversed`, `lower`, and `merge`
+  return a *new* value and leave the receiver's value untouched, so they
+  change nothing and are permitted on a `const` binding. They are ordinary
+  expressions, not assignments.
 
 ```harn
 const base = [1]
 // fine: base is untouched, base == [1]
-const appended = base.appending(2)
+const ordered = base.sorted()
 
 let built = []
 // this is how a collection is built up
-built = built.appending(1)
+built.push(1)
 ```
 
-Because the methods are pure, discarding a result silently does nothing;
-`HARN-LNT-066` rejects that as an error. A bare `l.appending(1)` leaves `l`
-unchanged and is always a bug.
+Because copy-returning methods are pure, discarding a result silently does
+nothing; `HARN-LNT-066` rejects that as an error. A bare `l.sorted()` leaves
+`l` unchanged and is always a bug; `l.sort()` is the in-place form.
 
 #### Why this is Swift's rule, not TypeScript's
 
@@ -888,9 +928,10 @@ takes Swift's position for the same reason.
 
 The two halves are therefore one paradigm, not two: **values are immutable,
 and a binding's value changes only through assignment.** Subscript assignment
-is assignment; a method call is an expression. Swift reaches the same place
-from the other side, defining subscript-set on a value type as a `mutating`
-whole-value reassignment. Harn simply has no `mutating` methods.
+is assignment, and a mutating method call is assignment to its receiver; an
+alias taken before the call keeps the old value. Swift reaches the same place
+from the other side, defining subscript-set and `mutating` methods on a value
+type as whole-value reassignment.
 
 ### Variable assignment
 
@@ -899,8 +940,8 @@ declared with `const`, throws `HarnRuntimeError.immutableAssignment`. If not fou
 throws `HarnRuntimeError.undefinedVariable`.
 
 The same applies to every assignment form that changes a binding's value —
-`l[0] = x`, `d.k = x`, `d["a"]["b"] = x`, `p.x = 9` — since under value
-semantics each one reassigns the binding as a whole. See
+`l[0] = x`, `d.k = x`, `d["a"]["b"] = x`, `p.x = 9`, `l.push(x)` — since under
+value semantics each one reassigns the binding as a whole. See
 [Binding mutability](#binding-mutability).
 
 ### Scope creation
@@ -1300,10 +1341,12 @@ unresolved import itself still surfaces via the runtime loader.
 | `nil` | No |
 | `int(0)` | No |
 | `float(0)` | No |
+| `decimal(0)` | No |
+| `duration(0ms)` | No |
 | `string("")` | No |
 | `bytes(b"")` | No |
 | `list([])` | No |
-| `dict([:])` | No |
+| `dict({})` | No |
 | `set()` (empty) | No |
 | Everything else | Yes |
 
@@ -1429,21 +1472,22 @@ formats as `classified == (fixture?.expect_missing_dep ?? false)`.
 `condition ? trueExpr : falseExpr` evaluates `condition`, then evaluates and returns
 either `trueExpr` (if truthy) or `falseExpr`.
 
-### Ranges (`to`, `to … exclusive`)
+### Ranges (`..`, `..=`)
 
-`a to b` evaluates `a` and `b` (both must be integers) and produces a list of
-consecutive integers. The form is **inclusive** by default — `1 to 5` is
-`[1, 2, 3, 4, 5]` — because that matches how the expression reads aloud.
+`a..b` and `a..=b` evaluate `a` and `b` (both must be integers) and produce a
+lazy range of consecutive integers. `a..b` excludes `b`; `a..=b` includes it,
+matching Rust.
 
-Add the trailing modifier `exclusive` to get the half-open form:
-`1 to 5 exclusive` is `[1, 2, 3, 4]`.
+| Expression | Value             | Shape    |
+|------------|-------------------|----------|
+| `1..=5`    | `[1, 2, 3, 4, 5]` | `[a, b]` |
+| `1..5`     | `[1, 2, 3, 4]`    | `[a, b)` |
+| `0..=3`    | `[0, 1, 2, 3]`    | `[a, b]` |
+| `0..3`     | `[0, 1, 2]`       | `[a, b)` |
 
-| Expression           | Value               | Shape      |
-|----------------------|---------------------|------------|
-| `1 to 5`             | `[1, 2, 3, 4, 5]`   | `[a, b]`   |
-| `1 to 5 exclusive`   | `[1, 2, 3, 4]`      | `[a, b)`   |
-| `0 to 3`             | `[0, 1, 2, 3]`      | `[a, b]`   |
-| `0 to 3 exclusive`   | `[0, 1, 2]`         | `[a, b)`   |
+Range formation binds looser than arithmetic, so `0..n - 1` is `0..(n - 1)`,
+and tighter than `??` and comparison, so `x in 0..n` tests membership in the
+range. Ranges print in source form (`1..=5`, `0..3`).
 
 If `b < a`, the result is the empty list. The `range(n)` / `range(a, b)` stdlib
 builtins always produce the half-open form, for Python-compatible indexing.
@@ -1769,8 +1813,10 @@ defer {
 ```
 
 Registers a block to run when the enclosing lexical scope exits — on normal
-fallthrough, on `return`, on `break` / `continue` out of an enclosing loop,
-or on an uncaught throw. Multiple `defer` blocks in the same scope execute
+fallthrough, on `return` (including the early return of a postfix `?`), on
+`break` / `continue` out of an enclosing loop,
+or on an error leaving the scope, including one raised by a called function
+or a failing operation. Multiple `defer` blocks in the same scope execute
 in LIFO (last-registered, first-executed) order, similar to Zig's `defer`.
 The deferred block runs in the scope where it was declared.
 
@@ -1908,7 +1954,7 @@ fn main(harness: Harness) {
     "state:customer-42", 250ms,
   )
   const slot = harness.runtime.sync_semaphore_acquire(
-    "connector:notion", 4, 1, 2s,
+    "connector:linear", 4, 1, 2s,
   )
   const gate = harness.runtime.sync_gate_acquire(
     "workflow-runner", 8, 5s,
@@ -2058,7 +2104,16 @@ compatibility boundary, and effective file-reader operands produced by the
 quote-aware command parser. Arbitrary string arguments and inert interpreter
 source are not paths. Declared host-absolute paths outside the workspace are
 denied unless `external_roots` covers the path or
-`allow_external_paths: true` is set. `ask` decisions call the host via
+`allow_external_paths: true` is set. Each `external_roots` entry is a path
+string or `{path, access}` with `access` one of `read` (the default) or
+`read_write`; a path string means `read`. The deepest root containing a path
+decides its mode. Under a `read` root, a call not known to be read-only is
+denied with id `external_root_read_only`, even when `allow_external_paths` is
+set. An approval-policy root does not by itself grant filesystem access: the
+file builtins and confined children read only the capability policy's
+`read_only_roots`, so a host projects a `read` root there to make it readable
+by them. Intersecting two approval policies keeps the
+narrower mode for a root both name. `ask` decisions call the host via
 `session/request_permission` and fail closed when no host bridge is attached.
 Each approval decision produces a `harn.permission_policy_decision.v1` receipt
 containing the matched rule, risk labels, normalized context, and rationale;
@@ -3154,8 +3209,16 @@ try { ... } finally { ... }
 try { ... } catch e { ... }
 ```
 
-`return`, `break`, and `continue` inside a try body with a finally block will
-execute the finally block before the control flow transfer completes.
+An error reaches the finally block wherever it was raised: an inline `throw`,
+a called or imported function, or a failing operation such as division by
+zero. The block runs exactly once and the original error then continues to
+propagate. A `throw` from the finally block replaces the original error, and a
+`return` from it discards the original error.
+
+`return`, `break`, `continue`, and the early return of a postfix `?` inside a
+try body with a finally block will execute the finally block before the
+control flow transfer completes. A `throw` from that finally block replaces the
+transfer, and a `return` from it replaces the returned value.
 
 The finally block's return value is discarded — the overall expression value
 comes from the try or catch body.
@@ -4361,14 +4424,14 @@ pipeline with `@persona`, `@step`, `@trigger`, `@handoff`, and `@budget`:
 
 ```harn,ignore
 @persona(
-  triggers: [github.pr_opened, schedule("*/30 * * * *")],
+  triggers: [github.pull_request.opened, schedule("*/30 * * * *")],
   tools: [github, ci, linear],
   autonomy: act_with_approval,
   budget: {daily_usd: 20, frontier_escalations: 3},
   handoffs: [review_captain, human_maintainer],
   receipts: required,
 )
-@trigger(github.check_failed)
+@trigger(github.check_suite.completed)
 @handoff(target: review_captain, reason: "risky diff")
 @budget(daily_usd: 20, max_tokens: 100000)
 fn merge_captain(ctx: HandlerCtx) { ... }
@@ -4394,7 +4457,7 @@ not rewritten by this syntax.
 |---|---|
 | `@persona` | Named metadata: `triggers`, `schedules`, `tools`, `autonomy`, `budget`, `handoffs`, `context_packs`, `evals`, `receipts`, `model`, `owner`, `name`, `description` |
 | `@step` | Named metadata: `name`, `model`, `approval` (`required`/`optional`), `receipt` (`audit`/`none`), `error_boundary` (`fail`/`continue`/`escalate`), `retry` (`{max_attempts: N}`) |
-| `@trigger` | Positional trigger specs (`github.pr_opened`, `"github.pr_opened"`, `schedule("cron")`) or named `id`, `provider`, `kind`, `event`, `when`, `schedule`, `budget` |
+| `@trigger` | Positional trigger specs (`github.pull_request.opened`, `"github.pull_request.opened"`, `schedule("cron")`) or named `id`, `provider`, `kind`, `event`, `when`, `schedule`, `budget` |
 | `@handoff` | Named `target`/`to`, `reason`, `schema`, `artifact` |
 | `@budget` | Named numeric fields: `daily_usd`, `hourly_usd`, `run_usd`, `max_tokens`, `frontier_escalations`, `max_autonomous_decisions_per_hour`, `max_autonomous_decisions_per_day`; string/symbol exhaustion policy via `on_exhausted` or `on_budget_exhausted` |
 
@@ -5061,7 +5124,7 @@ Tuple-to-tuple subtyping is covariant at each position and requires equal
 arity. A tuple widens to `list<T>` when every position is compatible with `T`;
 an arbitrary list cannot narrow to a tuple because it proves neither arity nor
 positional types. Operations that can change arity, including slicing,
-`appending`, and collection transforms, widen to a list of the element union.
+concatenation, and collection transforms, widen to a list of the element union.
 
 Because Harn collections are values rather than shared mutable references, a
 `let` tuple may be updated safely. A constant-index write must satisfy that
@@ -5316,8 +5379,12 @@ wrappers pick up the same narrowing.
   is true for either success; `repair_tier` is `"local"` or `"llm"`
   when a repair produced the payload and `nil` otherwise. Transport
   failures skip both repair tiers.
-- `schema_parse<T>(value: unknown, schema: Schema<T>) -> Result<T, string>`
-- `schema_check<T>(value: unknown, schema: Schema<T>) -> Result<T, string>`
+- `schema_parse<T>(value: unknown, schema: Schema<T>) -> Result<T, SchemaError>`
+- `schema_check<T>(value: unknown, schema: Schema<T>) -> Result<T, SchemaError>`
+- `json_decode<T>(text: string, schema: Schema<T>) -> Result<T, SchemaError>`.
+  Parses and validates in one step; malformed JSON is an `Err`.
+  `SchemaError` is `{message: string, errors: list<string>, issues:
+  list<{path: string, message: string, code: string}>, value?: any}`.
 - `schema_expect<T>(value: unknown, schema: Schema<T>) -> T`
 - `schema_recover<T>(text: string, schema: Schema<T>, options?:
   {repair?: bool | dict, apply_defaults?: bool,
@@ -5974,10 +6041,10 @@ permissive in four ways:
 In addition to compile-time checking, function parameters with type annotations
 are enforced at runtime. When a function is called, the VM verifies that each
 annotated parameter matches its declared type before executing the function body.
-If the types do not match, a `TypeError` is thrown:
+If the types do not match, a type error is thrown:
 
 ```text
-TypeError: parameter 'name' expected string, got int (42)
+Type error: function 'greet' parameter 'name' expected string, got int (42)
 ```
 
 The following types are enforced at runtime: `int`, `float`, `string`, `bytes`,
@@ -6014,59 +6081,64 @@ are not required to be present.
 
 ## Built-in methods
 
-### String methods
+Strings, lists, sets, dicts, ranges, iterators, and generators have builtin
+methods called with dot syntax. One method registry owns every method: its
+receiver type, name, signature, whether it mutates its receiver, and its
+reference text. The typechecker, the linter, the language server, both
+runtimes, and the method reference in the builtins guide all read that
+registry, so the reference lists exactly the methods that exist.
 
-| Method | Signature | Returns |
-|---|---|---|
-| `count` | `.count` (property) | int -- character count |
-| `empty` | `.empty` (property) | bool -- true if empty |
-| `contains(sub)` | string | bool |
-| `replace(old, new)` | string, string | string |
-| `split(sep)` | string | list of strings |
-| `trim()` | (none) | string -- whitespace stripped |
-| `starts_with(prefix)` | string | bool |
-| `ends_with(suffix)` | string | bool |
-| `lowercase()` | (none) | string |
-| `uppercase()` | (none) | string |
-| `substring(start, end?)` | int, int? | string -- character range |
-| `index_of(substr)` | string | int -- first character offset, or -1 |
-| `last_index_of(substr)` / `rfind(substr)` | string | int -- last character offset, or -1 |
-| `chars()` | (none) | list of single-character strings |
+### One name per operation
+
+Each operation has one name, following Python and Rust: `len`, `contains`,
+`lower`, `upper`, `windows`, `chunks`, `map_keys`, `merge`, `all`. A removed
+spelling (`count`, `includes`, `to_lower`, `lowercase`, `each_cons`,
+`appending`, `rekeyed`, …) is a type error, `HARN-NAM-013`, whose repair
+names the replacement; `harn fix` rewrites the mechanical ones. A spelling no
+builtin uses any more is flagged even through an untyped receiver; a spelling
+another receiver still uses (`count` on an iterator) is flagged only when the
+receiver's type is known.
+
+### Mutating methods
+
+These methods change their receiver:
+
+| Receiver | Mutating methods |
+|---|---|
+| list | `push(item)`, `pop()`, `insert(index, item)`, `extend(items)`, `clear()`, `sort()`, `sort_by(key)`, `reverse()` |
+| set | `add(item)`, `remove(item)`, `clear()` |
+| dict | `remove(key)`, `clear()` |
+
+A mutating call `place.m(args)` evaluates `place` once, computes the
+receiver's next value and the call's result, writes the next value back to
+`place`, and evaluates to the result. `place` is a `let` binding or a property
+or subscript path rooted at one; each index in the path is evaluated once. A
+mutating method on a `const` binding, a function parameter, a temporary, or
+through `?.` is a type error (`HARN-OWN-001`). Because values are immutable, an
+alias taken before the call keeps the old value.
+
+| Method | Result |
+|---|---|
+| `pop()` | the removed last element, or `nil` when empty |
+| `remove(item)` on a set | `true` when `item` was a member |
+| `remove(key)` on a dict | the removed value, or `nil` when absent |
+| every other mutating method | `nil` |
+
+`list.insert` clamps an out-of-range index to the ends; a negative index
+counts from the end. When the receiver turns out not to be a builtin value at
+runtime (a struct whose `impl` defines `push`), the call is an ordinary method
+call and nothing is written back.
+
+`sorted()`, `sorted_by(key)`, and `reversed()` return a sorted or reversed copy
+and leave the receiver alone.
+
+### Strings
 
 `chars()` (also the `chars(text)` builtin) materializes a string into a list of
 single-character strings in one linear pass. Because a string is UTF-8, random
-character access (`s[i]`, `s[a:b]`, `.count`, `substring(...)`) is O(n) per call;
-materialize once with `chars()` and scan the list with O(1) indexing when writing
-cursor-style source scanners.
-
-### List methods
-
-| Method | Signature | Returns |
-|---|---|---|
-| `count` | (property) | int |
-| `empty` | (property) | bool |
-| `first` | (property) | value or nil |
-| `last` | (property) | value or nil |
-| `map(closure)` | closure(item) -> value | list |
-| `filter(closure)` | closure(item) -> bool | list |
-| `reduce(init, closure)` | value, closure(acc, item) -> value | value |
-| `find(closure)` | closure(item) -> bool | value or nil |
-| `any(closure)` | closure(item) -> bool | bool |
-| `all(closure)` | closure(item) -> bool | bool |
-| `flat_map(closure)` | closure(item) -> value/list | list (flattened) |
-
-### Dict methods
-
-| Method | Signature | Returns |
-|---|---|---|
-| `keys()` | (none) | list of strings (sorted) |
-| `values()` | (none) | list of values (sorted by key) |
-| `entries()` | (none) | list of `{key, value}` dicts (sorted by key) |
-| `count` | (property) | int |
-| `has(key)` | string | bool |
-| `merge(other)` | dict | dict (other wins on conflict) |
-| `map_values(closure)` | closure(value) -> value | dict |
-| `filter(closure)` | closure(value) -> bool | dict |
+character access (`s[i]`, `s[a:b]`, `.len()`, `substring(...)`) is O(n) per
+call; materialize once with `chars()` and scan the list with O(1) indexing when
+writing cursor-style source scanners.
 
 ### Dict property access
 
@@ -6074,9 +6146,12 @@ cursor-style source scanners.
 
 ### Set builtins
 
-Sets are created with the `set()` builtin and are immutable -- mutation
-operations return a new set. Sets deduplicate values using structural
-equality.
+Sets are created with the `set()` builtin. The `set_*` builtins return a new
+set; the `add` and `remove` methods change a `let` binding in place. Sets deduplicate values using structural
+equality, retaining the first occurrence. Membership uses the same equality
+as `==`, including mixed numeric coercion; closures and NaN are never equal.
+Two sets are equal when their members can be paired one-to-one with equal
+values, regardless of insertion order.
 
 | Function | Signature | Returns |
 |---|---|---|
@@ -6118,6 +6193,7 @@ Sets are iterable with `for ... in` and support `len()`.
 | `bytes_eq(a, b)` | Constant-time byte equality check |
 | `sha256(str)` | Returns the hex-encoded SHA-256 hash of `str` |
 | `md5(str)` | Returns the hex-encoded MD5 hash of `str` |
+| `hash_value(value)` | Returns an equality-compatible integer hash of `value` |
 | `hmac_sha256(key, message)` | Returns HMAC-SHA256 as lowercase hex |
 | `hmac_sha256_base64(key, message)` | Returns HMAC-SHA256 as standard base64 |
 | `constant_time_eq(a, b)` | Constant-time string equality for signatures |
@@ -6138,6 +6214,11 @@ Sets are iterable with `for ... in` and support `len()`.
 | `multipart_field_bytes(field)` | Returns a parsed multipart field's raw bytes |
 | `multipart_field_text(field)` | Decodes a parsed multipart field's bytes as UTF-8, throwing on invalid text |
 | `multipart_form_data(fields, opts?)` | Deterministically builds `{content_type, boundary, body}` multipart fixtures for tests; field content may be bytes or string |
+
+`hash_value(a) == hash_value(b)` whenever `a == b`. The converse does not hold:
+unequal values can share a hash, including mutable atomics and large integers
+that convert to the same float. Results need not remain stable across processes
+or Harn versions. Durable-step replay fingerprints use a separate encoding.
 
 ```harn
 const encoded = base64_encode("hello world")  // "aGVsbG8gd29ybGQ="
@@ -6637,6 +6718,7 @@ migration to another machine.
 | Function | Description |
 |---|---|
 | `checkpoint(key, value)` | Save `value` at `key`; writes to disk immediately |
+| `harness.runtime.checkpoint_insert(key, value)` | Retain the first value atomically; return `{inserted: bool, value: unknown}` |
 | `checkpoint_get(key)` | Retrieve saved value, or `nil` if absent |
 | `checkpoint_exists(key)` | Return `true` if `key` is present (even if value is `nil`) |
 | `checkpoint_delete(key)` | Remove a single key; no-op if absent |
@@ -6645,6 +6727,25 @@ migration to another machine.
 
 `checkpoint_exists` is preferable to `checkpoint_get(key) == nil` when `nil`
 is a valid checkpoint value.
+
+Runs sharing a state root and pipeline name share one checkpoint store. Mutations
+hold an exclusive sidecar-file lock and reload the current file before changing
+it, so another run's committed keys survive. Reads reload durable state on each
+call. A lock that cannot be acquired within five seconds causes an error.
+
+`harness.runtime.checkpoint_insert` returns `inserted: true` to the call that stored the initial
+value and `inserted: false` to later calls, which receive the retained value.
+An existing `nil` counts as a retained value. Checkpoint mutations share the
+`checkpoint.write` autonomy decision across runtime methods and legacy builtins.
+This operation chooses one initial
+value; it does not make a stage's external effects execute exactly once.
+
+Only an absent checkpoint file starts an empty store. If the file is
+unreadable, is not valid JSON, or is not a JSON object, every builtin except
+`checkpoint_clear` throws and leaves the file untouched, so a resumed pipeline
+never replays completed stages from damaged state. Inspect or repair the file,
+or call `checkpoint_clear()` to start over. If a write fails, the next call
+reloads the file instead of trusting the unpersisted in-memory value.
 
 ### std/checkpoint module
 
@@ -7273,6 +7374,13 @@ workspace = ["read_text", "write_text"]
   When present, `harn check` fails with `HARN-CAP-008` for each declared
   operation missing from the served list. The check ignores built-in preflight
   defaults because the project did not declare them.
+- An operation metadata entry may declare `"optional": true`, for example
+  `{"runtime":{"operations":{"report":{"optional":true}}}}`.
+  Optional operations remain known to static checking but need not be served
+  by every host. Their absence produces no `HARN-CAP-008` finding, including
+  under strict ACP reconciliation. This declaration does not install a handler
+  or advertise the operation as served; callers must check `host.has` before
+  invoking it. The `optional` value must be a boolean.
 - `runtime_installed_host_operations` lists exact `capability.operation` pairs
   whose handlers are added at runtime. The static check skips these operations.
   Wildcards and malformed names are not allowed.
@@ -7342,11 +7450,11 @@ name = "merge_captain"
 version = "0.1.0"
 description = "Owns pull request readiness, CI triage, merge approvals, and receipts."
 entry_workflow = "workflows/merge_captain.harn#run"
-tools = ["github", "ci", "linear", "notion", "slack"]
+tools = ["github", "ci", "linear", "slack"]
 capabilities = ["git.get_diff", "project.test_commands", "process.exec"]
 autonomy_tier = "act_with_approval"
 receipt_policy = "required"
-triggers = ["github.pr_opened", "github.check_failed"]
+triggers = ["github.pull_request.opened", "github.check_suite.completed"]
 schedules = ["*/30 * * * *"]
 handoffs = ["review_captain"]
 context_packs = ["repo_policy", "release_rules", "flaky_tests"]
@@ -7373,11 +7481,11 @@ leases, and `disable` records later events as dead-lettered.
 
 ```toml
 [dependencies]
-sdk = { version = "^1.2", registry_name = "@burin/notion-sdk", package = "notion-sdk-harn" }
+sdk = { version = "^1.2", registry_name = "@burin/linear-sdk", package = "linear-sdk-harn" }
 harn-openapi = { git = "https://github.com/burin-labs/harn-openapi", tag = "v1.2.3" }
-notion-sdk-harn = { git = "https://github.com/burin-labs/notion-sdk-harn", tag = "v1.2.3" }
-notion-connector-harn = { git = "https://github.com/burin-labs/notion-connector-harn", tag = "v1.2.3" }
-notion = { git = "https://github.com/burin-labs/notion-sdk-harn", tag = "v1.2.3", package = "notion-sdk-harn" }
+linear-sdk-harn = { git = "https://github.com/burin-labs/linear-sdk-harn", tag = "v1.2.3" }
+linear-connector-harn = { git = "https://github.com/burin-labs/linear-connector-harn", tag = "v1.2.3" }
+linear = { git = "https://github.com/burin-labs/linear-sdk-harn", tag = "v1.2.3", package = "linear-sdk-harn" }
 openapi = { git = "https://github.com/burin-labs/harn-openapi", branch = "main" }
 local-fixture = { path = "../fixture-lib" }
 ```
@@ -7385,7 +7493,7 @@ local-fixture = { path = "../fixture-lib" }
 `harn install` resolves `[dependencies]` into an immutable package generation
 under `.harn/package-generations/<generation>/packages/`, then atomically
 publishes `.harn/package-current.toml`. Imports like
-`import "notion-sdk-harn"` or `import "notion/providers"` resolve through one
+`import "linear-sdk-harn"` or `import "linear/providers"` resolve through one
 leased snapshot of that generation, never through a directory being mutated.
 Each generation contains its exact `harn.lock`, `generation.toml`, and
 `lease.lock`; readers hold a shared lease for their full operation, and
@@ -7419,7 +7527,7 @@ succeeds.
 Transitive package dependencies are resolved from installed package
 manifests and flattened into the published generation's `packages/`
 directory. For example, a connector package can depend on
-`notion-sdk-harn`, and that SDK can depend on `harn-openapi` helpers;
+`linear-sdk-harn`, and that SDK can depend on `harn-openapi` helpers;
 `harn install` records all reachable packages in `harn.lock` and
 materializes them from a clean cache. Git-installed packages cannot
 declare transitive `path` dependencies, because publishable package
@@ -7739,14 +7847,14 @@ filesystem path; relative manifest registry paths resolve from the
 manifest directory.
 
 Registry package names are either unscoped names such as `acme-lib` or
-scoped names such as `@burin/notion-sdk`. Segments must start with an
+scoped names such as `@burin/linear-sdk`. Segments must start with an
 ASCII alphanumeric character and may then contain ASCII alphanumerics,
 `-`, `_`, or `.`. First-party packages should use the `@burin/`
 namespace.
 
 Registry entries map discovery names to the existing git-backed package
 manager path; they do not introduce a second package install mechanism.
-For example, `harn add @burin/notion-sdk@1.2.3` reads the index entry,
+For example, `harn add @burin/linear-sdk@1.2.3` reads the index entry,
 writes the equivalent `[dependencies]` git table, updates `harn.lock`,
 and publishes the same immutable package generation that a direct GitHub
 install would use.
@@ -7755,8 +7863,8 @@ Manifests may also keep a registry dependency semantic:
 
 ```toml
 [dependencies]
-notion-sdk-harn = { version = "^1.2" }
-notion = { version = ">=1.2,<2.0", registry_name = "@burin/notion-sdk", package = "notion-sdk-harn" }
+linear-sdk-harn = { version = "^1.2" }
+linear = { version = ">=1.2,<2.0", registry_name = "@burin/linear-sdk", package = "linear-sdk-harn" }
 ```
 
 `harn install` records the selected exact registry version, resolved git tag
@@ -7780,24 +7888,24 @@ Registry index format:
 version = 2
 
 [[package]]
-name = "@burin/notion-sdk"
-description = "Notion SDK package for Harn connectors"
-repository = "https://github.com/burin-labs/notion-sdk-harn"
+name = "@burin/linear-sdk"
+description = "Linear SDK package for Harn connectors"
+repository = "https://github.com/burin-labs/linear-sdk-harn"
 license = "MIT OR Apache-2.0"
 harn = ">=0.7,<0.8"
 exports = ["client", "schema"]
 connector_contract = "v1"
-docs_url = "https://docs.harnlang.com/connectors/notion"
+docs_url = "https://docs.harnlang.com/connectors/linear"
 checksum = "sha256:..."
-provenance = "https://github.com/burin-labs/notion-sdk-harn/releases/tag/v1.2.3"
+provenance = "https://github.com/burin-labs/linear-sdk-harn/releases/tag/v1.2.3"
 
 [[package.version]]
 version = "1.2.3"
-git = "https://github.com/burin-labs/notion-sdk-harn"
+git = "https://github.com/burin-labs/linear-sdk-harn"
 tag = "v1.2.3"
 rev = "0123456789abcdef0123456789abcdef01234567"
-package = "notion-sdk-harn"
-provenance = "https://github.com/burin-labs/notion-sdk-harn/releases/tag/v1.2.3"
+package = "linear-sdk-harn"
+provenance = "https://github.com/burin-labs/linear-sdk-harn/releases/tag/v1.2.3"
 ```
 
 Package-level metadata includes the registry name, version list,
@@ -8343,12 +8451,11 @@ per-platform mechanisms are:
   Writes are limited to scratch dirs plus declared `workspace_roots`
   only when the policy allows workspace writes; network is allowed
   only when the side-effect ceiling permits `network`.
-- **Windows**: a per-spawn AppContainer with no capability SIDs plus
-  a Job Object capping memory, process count, and UI surface;
-  `icacls` grants the AppContainer SID Modify (or ReadAndExecute)
-  on each `workspace_roots` entry for the lifetime of the spawn.
 - **OpenBSD**: `pledge` promises and `unveil` path permissions
   derived from the same policy.
+- **Windows**: no OS sandbox. Children run unconfined; an
+  `os_hardened` spawn is refused, and `worktree` logs a warning
+  once (or refuses under `HARN_HANDLER_SANDBOX=enforce`).
 
 `SandboxProfile::Unrestricted` skips both path enforcement and OS
 confinement; `harn run --no-sandbox` is the CLI escape hatch that
@@ -8544,7 +8651,7 @@ in the built-in method table for the full rule syntax.
 
 | Variable | Description |
 |---|---|
-| `HARN_HANDLER_SANDBOX` | How the `worktree` sandbox profile reacts when the platform's OS confinement mechanism (Linux Landlock + seccomp, macOS `sandbox-exec`, Windows AppContainer) is unavailable: `enforce`/`required`/`1`/`true` fail the spawn, `warn` (default) logs once and continues with workspace-root path enforcement but **without** OS confinement, and `off`/`none`/`0`/`false` disables the OS portion silently. Workspace-root path enforcement for file builtins is unaffected either way. The `os_hardened` profile always enforces and ignores this variable. |
+| `HARN_HANDLER_SANDBOX` | How the `worktree` sandbox profile reacts when the platform's OS confinement mechanism (Linux Landlock + seccomp, macOS `sandbox-exec`) is unavailable, or on Windows, which has none: `enforce`/`required`/`1`/`true` fail the spawn, `warn` (default) logs once and continues with workspace-root path enforcement but **without** OS confinement, and `off`/`none`/`0`/`false` disables the OS portion silently. Workspace-root path enforcement for file builtins is unaffected either way. The `os_hardened` profile always enforces and ignores this variable. |
 | `HARN_EGRESS_ALLOW` | Comma-separated egress allow rules seeding the egress policy. Rules accept exact hosts, `*.suffix` wildcards, IP literals/CIDR, and an optional `:port`. |
 | `HARN_EGRESS_DENY` | Comma-separated egress deny rules, same syntax as `HARN_EGRESS_ALLOW`. Deny wins over allow. |
 | `HARN_EGRESS_DEFAULT` | Action for destinations matching no rule: `allow` (default) or `deny` (allowlist mode). |

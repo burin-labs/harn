@@ -79,12 +79,13 @@ pipeline test_persona_prompt_compile(harness: Harness) {
       assert(sdk.usage.output_tokens > 0, "compiler receipt records realized output tokens")
       assert_eq(sdk.usage.total_tokens, sdk.usage.input_tokens + sdk.usage.output_tokens)
       const prompt_schema = schema_json(harness.llm.mock_calls()[0].output_format.schema)
+      // The mock route uses its own model; strict provider projection sends literals as singleton enums.
       assert_eq(
         prompt_schema,
         {
           type: "object",
           properties: {
-            schema_version: {const: "1"},
+            schema_version: {enum: ["1"]},
             name: {type: "string"},
             description: {type: "string"},
             goal: {type: "string"},
@@ -96,7 +97,7 @@ pipeline test_persona_prompt_compile(harness: Harness) {
                 {
                   type: "object",
                   properties: {
-                    kind: {const: "cron"},
+                    kind: {enum: ["cron"]},
                     cron: {type: "string"},
                     timezone: {type: "string"},
                   },
@@ -106,7 +107,7 @@ pipeline test_persona_prompt_compile(harness: Harness) {
                 {
                   type: "object",
                   properties: {
-                    kind: {const: "external"},
+                    kind: {enum: ["external"]},
                     provider: {type: "string"},
                     event: {type: "string"},
                   },

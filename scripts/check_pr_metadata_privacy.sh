@@ -95,6 +95,10 @@ while IFS= read -r commit; do
   printf 'commit/%s/message\t%s\n' "$commit" "$message" >>"$sources"
 done <"$commit_range"
 
+# The lines the range adds are public text too: a pull request's diff is as
+# visible as its title. They are one source, scanned as a whole.
+printf 'added-lines\t\n' >>"$sources"
+
 pending=0
 pending_sources=()
 source_count=0
@@ -103,8 +107,13 @@ while IFS=$'\t' read -r label input; do
   source_count=$((source_count + 1))
   output="$tmp_dir/output-$source_count.txt"
   status=0
-  "$repo_root/scripts/check_public_product_names.sh" --stdin-label "$label" \
-    <"$input" >"$output" 2>&1 || status=$?
+  if [[ "$label" == "added-lines" ]]; then
+    "$repo_root/scripts/check_public_product_names.sh" --added-lines "$range_base" "$head_sha" \
+      >"$output" 2>&1 || status=$?
+  else
+    "$repo_root/scripts/check_public_product_names.sh" --stdin-label "$label" \
+      <"$input" >"$output" 2>&1 || status=$?
+  fi
 
   if [[ "$status" -eq 0 ]]; then
     continue

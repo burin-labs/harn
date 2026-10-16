@@ -1,5 +1,4 @@
 use std::path::PathBuf;
-use std::process::Command;
 
 use super::{WorkerExecutionProfile, WorkerWorktreeSpec};
 use crate::value::VmError;
@@ -58,7 +57,7 @@ pub(super) fn ensure_worker_worktree(
         std::fs::create_dir_all(parent)
             .map_err(|e| VmError::Runtime(format!("worker worktree mkdir error: {e}")))?;
     }
-    let output = Command::new("git")
+    let output = crate::process_sandbox::session_std_command("git")?
         .current_dir(&spec.repo)
         .args(["worktree", "add", "-B", &branch, &path, &base_ref])
         .output()
@@ -86,7 +85,10 @@ pub(super) fn cleanup_worker_execution(profile: &WorkerExecutionProfile) {
     let Some(path) = spec.path.as_deref() else {
         return;
     };
-    let _ = Command::new("git")
+    let Ok(mut command) = crate::process_sandbox::session_std_command("git") else {
+        return;
+    };
+    let _ = command
         .current_dir(&spec.repo)
         .args(["worktree", "remove", "--force", path])
         .output();

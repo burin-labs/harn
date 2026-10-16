@@ -1,0 +1,7 @@
+effect_first_step_is_unavailable_not_pass=true
+effect_reason_is_schema_unsupported=true
+effect_count_climbs_per_unreviewed_step=true
+effect_no_judge_call_dispatched=true
+effect_no_unavailable_step_reads_as_pass=true
+effect_turn_still_completes=true
+negative_a_reviewing_judge_is_not_unavailable=true

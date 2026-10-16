@@ -563,8 +563,16 @@ pub(super) async fn connect_stdio_test_script(
     script: &str,
     protocol_version: String,
 ) -> VmMcpClientHandle {
+    connect_stdio_test_script_with_env(script, &BTreeMap::new(), protocol_version).await
+}
+
+async fn connect_stdio_test_script_with_env(
+    script: &str,
+    env: &BTreeMap<String, String>,
+    protocol_version: String,
+) -> VmMcpClientHandle {
     let args = vec!["-u".to_string(), "-c".to_string(), script.to_string()];
-    mcp_connect_stdio_impl("python3", &args, &BTreeMap::new(), None, protocol_version)
+    mcp_connect_stdio_impl("python3", &args, env, None, protocol_version)
         .await
         .expect("stdio test MCP server should connect")
 }
@@ -1062,4 +1070,83 @@ async fn write_http_empty(stream: &mut TcpStream, status: &str) -> Result<(), st
     let response = format!("HTTP/1.1 {status}\r\ncontent-length: 0\r\nconnection: close\r\n\r\n");
     stream.write_all(response.as_bytes()).await?;
     stream.flush().await
+}
+
+/// An MCP stdio server is a child of the session, so it starts under the
+/// session's environment policy: it sees the session-wide grant and neither
+/// the engine variable the policy never admitted nor the in-process-only
+/// grant. The control starts the same server with no policy installed and
+/// reads all three, which proves the server can report a planted variable.
+#[tokio::test(flavor = "current_thread")]
+async fn stdio_server_starts_under_the_session_environment_policy() {
+    use crate::security::child_env_probe as probe;
+    let _planted = probe::plant();
+    let script = format!(
+        r#"
+import json, os, sys
+request = json.loads(sys.stdin.readline())
+print(json.dumps({{
+    "jsonrpc": "2.0",
+    "id": request["id"],
+    "result": {{
+        "resultType": "complete",
+        "supportedVersions": ["2026-07-28"],
+        "capabilities": {{"tools": {{}}}},
+        "ttlMs": 0,
+        "cacheScope": "private",
+        "_meta": {{"io.modelcontextprotocol/serverInfo": {{"name": {report}, "version": "1.0.0"}}}}
+    }}
+}}), flush=True)
+"#,
+        report = probe::python_report()
+    );
+    let reported = |handle: VmMcpClientHandle| async move {
+        let discovery = handle.discovery_result.lock().await.clone().unwrap();
+        discovery["serverInfo"]["name"]
+            .as_str()
+            .expect("server name carries the report")
+            .to_string()
+    };
+
+    let control = {
+        let _session = probe::InstalledSession::install(None);
+        reported(connect_stdio_test_script(&script, PROTOCOL_VERSION.to_string()).await).await
+    };
+    assert_eq!(control, probe::expected_report(&probe::NAMES));
+
+    let governed = {
+        let _session = probe::InstalledSession::install(Some(probe::granted_session()));
+        reported(connect_stdio_test_script(&script, PROTOCOL_VERSION.to_string()).await).await
+    };
+    assert_eq!(governed, probe::expected_report(&[probe::SESSION]));
+
+    // An inherited session hands the server everything but the provider key.
+    let inherited = {
+        let _session = probe::InstalledSession::install(Some(probe::inherited_session()));
+        reported(connect_stdio_test_script(&script, PROTOCOL_VERSION.to_string()).await).await
+    };
+    assert_eq!(inherited, probe::expected_report(&probe::INHERITED_REPORT));
+
+    // A server whose own config declares the key still receives it.
+    let declared = {
+        let _session = probe::InstalledSession::install(Some(probe::inherited_session()));
+        let env = BTreeMap::from([(probe::PROVIDER.to_string(), "declared".to_string())]);
+        reported(
+            connect_stdio_test_script_with_env(&script, &env, PROTOCOL_VERSION.to_string()).await,
+        )
+        .await
+    };
+    assert_eq!(declared, probe::expected_report(&probe::NAMES));
+}
+
+/// Streamable HTTP servers commonly open each SSE event with its `id:` field.
+#[test]
+fn http_response_parser_reads_event_streams_that_lead_with_an_event_id() {
+    let body = "id: prime\ndata: \n\n\
+                id: 2\nevent: message\ndata: {\"jsonrpc\":\"2.0\",\"method\":\"notifications/progress\",\"params\":{\"progressToken\":\"t\",\"progress\":1}}\n\n\
+                id: 3\nevent: message\ndata: {\"jsonrpc\":\"2.0\",\"id\":7,\"result\":{\"content\":[]}}\n\n";
+    let parsed = transport::parse_http_response_body("test", body, 200, Some(7))
+        .expect("an id-led event stream is still an event stream");
+    assert_eq!(parsed["id"], 7);
+    assert!(parsed["result"]["content"].is_array());
 }

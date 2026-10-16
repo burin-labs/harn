@@ -246,13 +246,15 @@ fn shell_c_script(args: &[String]) -> Option<&str> {
     None
 }
 
-fn git_catastrophe(args: &[String]) -> Option<String> {
-    // Skip leading git global options; value-taking ones consume a token.
+/// Split git's argv (after the `git` word) into its subcommand and that
+/// subcommand's arguments, skipping global options. Value-taking global options
+/// consume the next token.
+fn git_subcommand(args: &[String]) -> Option<(&str, &[String])> {
     let mut index = 0;
     while index < args.len() {
         let token = &args[index];
         match token.as_str() {
-            "-C" | "-c" | "--git-dir" | "--work-tree" | "--namespace" => {
+            "-C" | "-c" | "--git-dir" | "--work-tree" | "--namespace" | "--config-env" => {
                 index += 2;
                 continue;
             }
@@ -264,7 +266,230 @@ fn git_catastrophe(args: &[String]) -> Option<String> {
         }
     }
     let subcommand = args.get(index)?.as_str();
-    let rest = &args[(index + 1).min(args.len())..];
+    Some((subcommand, &args[(index + 1).min(args.len())..]))
+}
+
+/// How a `git push` can change remote refs beyond a fast-forward.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RemoteRefRewrite {
+    /// `--delete`/`-d`, `--prune`, or a `:dst` refspec removes a remote ref.
+    Delete,
+    /// `--force`/`-f`, `--force-with-lease`, `--mirror`, or a `+src:dst`
+    /// refspec can overwrite a remote ref with unrelated history.
+    Force,
+}
+
+/// Classify `git push <args>` from its argv. This is the one owner of the
+/// judgment: the never-approvable floor blocks [`RemoteRefRewrite::Force`] and
+/// the `git_force_push` label covers both kinds, so the two cannot disagree.
+///
+/// Long options may be abbreviated to any prefix, as git's option parser
+/// accepts unambiguous ones; an ambiguous prefix fails in git, so classifying
+/// it costs nothing. Refspecs come from argv only: a configured
+/// `remote.<name>.push` or `push.default` is not visible here.
+fn git_push_rewrite(args: &[String]) -> Option<RemoteRefRewrite> {
+    fn abbreviates(name: &str, option: &str) -> bool {
+        name.len() > 2 && option.starts_with(name)
+    }
+
+    let mut rewrite = None;
+    let mut options = true;
+    let mut index = 0;
+    while index < args.len() {
+        let arg = args[index].as_str();
+        index += 1;
+        if options && arg == "--" {
+            options = false;
+            continue;
+        }
+        if options && arg.starts_with("--") {
+            let (name, value) = match arg.split_once('=') {
+                Some((name, value)) => (name, Some(value)),
+                None => (arg, None),
+            };
+            if ["--force", "--force-with-lease", "--mirror"]
+                .iter()
+                .any(|option| abbreviates(name, option))
+            {
+                return Some(RemoteRefRewrite::Force);
+            }
+            if ["--delete", "--prune"]
+                .iter()
+                .any(|option| abbreviates(name, option))
+            {
+                rewrite = Some(RemoteRefRewrite::Delete);
+            } else if value.is_none()
+                && [
+                    "--push-option",
+                    "--repo",
+                    "--receive-pack",
+                    "--exec",
+                    "--recurse-submodules",
+                ]
+                .iter()
+                .filter(|option| abbreviates(name, option))
+                .count()
+                    == 1
+            {
+                index += 1;
+            }
+            continue;
+        }
+        if options && arg.starts_with('-') && arg.len() > 1 {
+            for (offset, flag) in arg.char_indices().skip(1) {
+                match flag {
+                    'f' => return Some(RemoteRefRewrite::Force),
+                    'd' => rewrite = Some(RemoteRefRewrite::Delete),
+                    // `-o` takes the rest of the cluster, or the next token.
+                    'o' => {
+                        if offset + 1 == arg.len() {
+                            index += 1;
+                        }
+                        break;
+                    }
+                    _ => {}
+                }
+            }
+            continue;
+        }
+        if arg.starts_with('+') {
+            return Some(RemoteRefRewrite::Force);
+        }
+        // A bare `:` pushes matching branches without forcing.
+        if arg.starts_with(':') && arg != ":" {
+            rewrite = Some(RemoteRefRewrite::Delete);
+        }
+    }
+    rewrite
+}
+
+/// Whether any command in `analysis`, including one nested in a `bash -c`
+/// payload or behind a wrapper such as `env` or `sudo`, is a `git push` that
+/// can overwrite or delete a remote ref.
+pub(super) fn analysis_rewrites_remote_refs(analysis: &ShellAnalysis) -> bool {
+    analysis_runs_git(analysis, 0, &|sub, rest| {
+        sub == "push" && git_push_rewrite(rest).is_some()
+    })
+}
+
+/// Whether any command in `analysis`, nested or wrapped as above, discards
+/// uncommitted changes in the working tree. See [`git_discards_worktree`].
+pub(super) fn analysis_discards_worktree(analysis: &ShellAnalysis) -> bool {
+    analysis_runs_git(analysis, 0, &git_discards_worktree)
+}
+
+/// Whether any stage, including one in a `bash -c` payload or behind a
+/// wrapper, runs a git subcommand that `matches` accepts.
+fn analysis_runs_git(
+    analysis: &ShellAnalysis,
+    depth: usize,
+    matches: &dyn Fn(&str, &[String]) -> bool,
+) -> bool {
+    if depth > MAX_DEPTH {
+        return false;
+    }
+    analysis.stages.iter().any(|stage| {
+        let tokens = &stage.argv;
+        let command_index = unwrapped_command_index(tokens, 0, tokens.len());
+        let Some(command) = tokens.get(command_index) else {
+            return false;
+        };
+        let args = &tokens[command_index + 1..];
+        match command_basename(command) {
+            "git" => git_subcommand(args).is_some_and(|(sub, rest)| matches(sub, rest)),
+            "bash" | "sh" | "zsh" => shell_c_script(args).is_some_and(|script| {
+                analysis_runs_git(&analyze_shell(script), depth + 1, matches)
+            }),
+            _ => false,
+        }
+    })
+}
+
+/// Classify `git <subcommand> <args>` as discarding uncommitted work in the
+/// working tree. This is an approvable label, not the floor: a scoped
+/// `git checkout -- file` is a routine way to drop one's own edit, while
+/// `git reset --hard` and `git clean -fd` stay never-approvable.
+///
+/// A bare `git checkout name` is a branch switch when `name` is a ref and a
+/// discard when it is only a path, which argv alone cannot tell. It is
+/// labelled when the operand is unambiguously a path (`.`, `./x`, `:/`, a
+/// glob) and left unlabelled otherwise; a caller that means a branch should
+/// say `git checkout name --` or `git switch`. Two or more operands without a
+/// branch-creating option are always `<tree-ish> <pathspec>...`.
+///
+/// Long options match any unambiguous prefix, as git accepts them, and a
+/// short option that takes a value ends its cluster (`-bfix` is `-b fix`).
+fn git_discards_worktree(subcommand: &str, args: &[String]) -> bool {
+    let value_flags: &[char] = match subcommand {
+        "checkout" => &['b', 'B'],
+        "switch" => &['c', 'C'],
+        "restore" => &['s'],
+        _ => return false,
+    };
+    let options = || args.iter().take_while(|arg| *arg != "--");
+    let has_short = |flag: char| {
+        options().any(|arg| {
+            arg.starts_with('-')
+                && !arg.starts_with("--")
+                && arg
+                    .chars()
+                    .skip(1)
+                    .take_while(|c| !value_flags.contains(c))
+                    .chain(arg.chars().skip(1).find(|c| value_flags.contains(c)))
+                    .any(|c| c == flag)
+        })
+    };
+    let has_long = |names: &[&str]| {
+        options().any(|arg| {
+            let name = arg.split_once('=').map_or(arg.as_str(), |(name, _)| name);
+            name.len() > 2
+                && name.starts_with("--")
+                && names.iter().any(|option| option.starts_with(name))
+        })
+    };
+    let operands = || {
+        let mut after_separator = false;
+        args.iter().filter(move |arg| {
+            if *arg == "--" {
+                after_separator = true;
+                return false;
+            }
+            after_separator || !arg.starts_with('-')
+        })
+    };
+    match subcommand {
+        "checkout" => {
+            let creates_branch = has_short('b') || has_short('B') || has_long(&["--orphan"]);
+            let separated = args.iter().skip_while(|arg| *arg != "--").nth(1).is_some();
+            separated
+                || has_short('f')
+                || has_long(&["--force", "--pathspec-from-file"])
+                || (!creates_branch && operands().count() >= 2)
+                || (has_long(&["--ours", "--theirs"]) && operands().next().is_some())
+                || operands().any(|operand| is_unambiguous_pathspec(operand))
+        }
+        "restore" => {
+            let staged_only = (has_short('S') || has_long(&["--staged"]))
+                && !(has_short('W') || has_long(&["--worktree"]));
+            !staged_only && (operands().next().is_some() || has_long(&["--pathspec-from-file"]))
+        }
+        _ => has_short('f') || has_long(&["--force", "--discard-changes"]),
+    }
+}
+
+/// A `git checkout` operand that cannot name a branch.
+fn is_unambiguous_pathspec(operand: &str) -> bool {
+    operand == "."
+        || operand == ".."
+        || operand.starts_with("./")
+        || operand.starts_with("../")
+        || operand.starts_with(":/")
+        || operand.starts_with(":(")
+        || operand.contains(['*', '?', '['])
+}
+
+fn git_catastrophe(args: &[String]) -> Option<String> {
+    let (subcommand, rest) = git_subcommand(args)?;
     match subcommand {
         "reset" => rest.iter().any(|a| a == "--hard").then(|| {
             "`git reset --hard` is blocked: it discards all uncommitted work. Commit or stash first, then reset on a feature branch.".to_string()
@@ -291,18 +516,9 @@ fn git_catastrophe(args: &[String]) -> Option<String> {
                 "`git clean -fd`/`-fdx` is blocked: it permanently deletes untracked files and directories. Inspect with `git clean -nd` first, or remove specific paths.".to_string()
             })
         }
-        "push" => {
-            let force = rest.iter().any(|a| {
-                a == "--force"
-                    || a == "-f"
-                    || a == "--force-with-lease"
-                    || a.starts_with("--force-with-lease=")
-                    || (a.starts_with('-') && !a.starts_with("--") && a.contains('f'))
-            });
-            force.then(|| {
-                "force-push (`git push --force` / `-f` / `--force-with-lease`) is blocked: it can rewrite shared history. Push without `--force`, or perform the force-push yourself after review.".to_string()
-            })
-        }
+        "push" => (git_push_rewrite(rest) == Some(RemoteRefRewrite::Force)).then(|| {
+            "force-push (`--force` / `-f` / `--force-with-lease` / `--mirror` / a `+ref` refspec) is blocked: it can rewrite shared history. Push without forcing, or perform the force-push yourself after review.".to_string()
+        }),
         _ => None,
     }
 }

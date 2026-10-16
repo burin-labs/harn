@@ -1,8 +1,8 @@
 //! The durable, secret-free projection of an effective model route.
 
 use crate::llm_config;
-use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmDictExt, VmError, VmValue};
+use harn_builtin_macros::harn_builtin;
 
 /// Return the Harn-resolved model-route facts that are safe to persist in
 /// replay, eval, and audit receipts.
@@ -32,16 +32,16 @@ fn model_execution_contract_to_vm_value(contract: &llm_config::ModelExecutionCon
         "requested_model",
         contract.resolution.requested_model.as_str(),
     );
-    dict.insert(
-        crate::value::intern_key("alias_chain"),
-        VmValue::List(std::sync::Arc::new(
+    dict.put(
+        "alias_chain",
+        VmValue::list(
             contract
                 .resolution
                 .alias_chain
                 .iter()
                 .map(|value| VmValue::String(arcstr::ArcStr::from(value.as_str())))
                 .collect(),
-        )),
+        ),
     );
     dict.put_str(
         "resolved_provider",
@@ -68,10 +68,7 @@ fn model_execution_contract_to_vm_value(contract: &llm_config::ModelExecutionCon
             super::catalog_projection::toml_value_to_vm_value(value),
         );
     }
-    dict.insert(
-        crate::value::intern_key("generation_defaults"),
-        VmValue::dict(defaults),
-    );
+    dict.put("generation_defaults", VmValue::dict(defaults));
     VmValue::dict(dict)
 }
 

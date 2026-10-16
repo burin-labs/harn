@@ -17,7 +17,7 @@ env:
 jobs:
   thread-parity:
     name: Full suite at ${{ matrix.threads }} threads
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
     strategy:
       # Run all thread counts even if one fails so we see the full picture.
@@ -50,7 +50,7 @@ jobs:
           cache-bin: false
 
       - name: Install cargo-nextest
-        uses: taiki-e/install-action@3f74d7c16a4242f1c95561e98edc25d36adb4375 # v2.87.12
+        uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2.87.22
         continue-on-error: true
         with:
           tool: nextest@0.9.132

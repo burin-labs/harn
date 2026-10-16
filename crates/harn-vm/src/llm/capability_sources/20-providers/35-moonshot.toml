@@ -42,7 +42,6 @@ vision_supported = true
 prompt_caching = true
 # Directly measured with K3's mandatory reasoning on 2026-08-26.
 allowed_tool_choice_modes = ["auto", "required", "none"]
-requires_tool_result_adjacency = true
 # K3 always reasons, requires `max_completion_tokens`, and rejects fixed
 # sampling and penalty knobs.
 requires_completion_tokens = true
@@ -78,7 +77,6 @@ vision_supported = true
 video_supported = true
 prompt_caching = true
 allowed_tool_choice_modes = ["auto", "none"]
-requires_tool_result_adjacency = true
 temperature_supported = false
 top_p_supported = false
 frequency_penalty_supported = false
@@ -101,7 +99,6 @@ thinking_modes = ["enabled"]
 vision = true
 vision_supported = true
 prompt_caching = true
-requires_tool_result_adjacency = true
 allowed_tool_choice_modes = ["auto", "none"]
 # Every Kimi model pins these sampling fields to a single server-side value and
 # rejects any other with HTTP 400 ("invalid temperature: only 1 is allowed for

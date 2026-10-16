@@ -1,3 +1,4 @@
+import { NoticeExtraction, ProviderCatalogCandidate } from "../provider_catalog_notice/types.harn"
 import "../provider_catalog_notice/workflow.harn"
 import {
   build_drift,
@@ -8,6 +9,149 @@ import {
 import { openrouter_scheduled_pricing } from "../provider_catalog_sources.harn"
 
 const FIXTURE_DIR = "../provider_catalog_notice_fixtures"
+
+@test
+pipeline test_live_openrouter_windows_compare_settlement_meaning(harness: Harness) {
+  const pricing = openrouter_scheduled_pricing(
+    {
+      overrides: [
+        {
+          utc_days: ["monday", "tuesday", "wednesday", "thursday", "friday"],
+          utc_start: 100,
+          utc_end: 400,
+          prompt: "0.00000132",
+          completion: "0.00000396",
+          input_cache_read: "0.000000044",
+        },
+        {
+          utc_days: ["monday", "tuesday", "wednesday", "thursday", "friday"],
+          utc_start: 600,
+          utc_end: 1000,
+          prompt: "0.00000132",
+          completion: "0.00000396",
+          input_cache_read: "0.000000044",
+        },
+      ],
+    },
+    {input_per_mtok: 0.66, output_per_mtok: 1.98, cache_read_per_mtok: 0.022},
+  )
+  const catalog = harness.llm.provider_catalog()
+  const row = catalog.models.filter({ model -> model.id == "deepseek/deepseek-v4-pro-0813" })[0]
+  assert_eq(len(row.pricing.schedules), 4)
+  assert_eq(len(pricing.schedules), 17)
+  const obs = observation(
+    "openrouter",
+    row.id,
+    {pricing: pricing},
+    {source_url: "https://openrouter.ai/api/v1/models", source_owner: "provider"},
+  )
+  assert_eq(len(build_drift([obs], catalog).changed), 0)
+  const equivalent = obs
+    + {
+      pricing: pricing
+        + {
+          schedules: pricing.schedules.map(
+            { window ->
+              window
+                + {
+                  id: "renamed",
+                  source_url: "https://example.test/new-source",
+                  review_after: "2030-01-01",
+                  note: "Updated review",
+                }
+            },
+          )
+            .to_list(),
+        },
+    }
+  assert_eq(len(normalize_observations([obs, equivalent]).conflicts), 0)
+  for changed in [
+    {input_multiplier: 0.6},
+    {output_multiplier: 0.6},
+    {cache_read_multiplier: 0.6},
+    {start: "00:01"},
+    {end: "00:59"},
+    {days: ["sun"]},
+    {utc_offset: "+01:00"},
+  ] {
+    const windows = [pricing.schedules[0] + changed] + pricing.schedules.slice(1)
+    const drift = build_drift([obs + {pricing: pricing + {schedules: windows}}], catalog)
+    assert_eq(len(drift.changed), 1)
+    assert_eq(drift.changed[0].pricing_changes[0].key, "schedules")
+  }
+}
+
+@test
+pipeline test_price_metadata_and_band_order_preserve_economic_changes(harness: Harness) {
+  const promotion = {
+    id: "sale",
+    starts_on: "2026-10-01",
+    ends_on: "2026-11-01",
+    input_per_mtok: 1.0,
+    output_per_mtok: 2.0,
+    source_url: "https://example.test/pricing",
+  }
+  const first_band = {minimum_input_tokens: 100, input_multiplier: 2.0, output_multiplier: 2.0}
+  const bands = [
+    first_band,
+    {minimum_input_tokens: 200, input_multiplier: 3.0, output_multiplier: 3.0},
+  ]
+  const pricing = {
+    input_per_mtok: 2.0,
+    output_per_mtok: 4.0,
+    promotions: [promotion],
+    input_token_bands: bands,
+    hosted_tool_fees: {source_url: {per_1k_calls: 10.0, source_url: "https://example.test/fee"}},
+  }
+  const catalog = {models: [{provider: "openrouter", id: "fixture", pricing: pricing}]}
+  const equivalent = pricing
+    + {
+      promotions: [
+        promotion
+          + {
+            id: "provider-sale",
+            source_url: "https://example.test/review",
+            review_after: "2026-10-20",
+          },
+      ],
+      input_token_bands: [bands[1], bands[0]],
+      hosted_tool_fees: {
+        source_url: {per_1k_calls: 10.0, source_url: "https://example.test/new-fee"},
+      },
+    }
+  const obs = observation(
+    "openrouter",
+    "fixture",
+    {pricing: equivalent},
+    {source_url: "https://example.test"},
+  )
+  assert_eq(len(build_drift([obs], catalog).changed), 0)
+  for changed in [
+    {promotions: [promotion + {ends_on: "2026-11-02"}]},
+    {input_token_bands: [first_band + {minimum_input_tokens: 101}, bands[1]]},
+    {input_token_bands: [first_band + {input_multiplier: 2.1}, bands[1]]},
+    {hosted_tool_fees: {source_url: {per_1k_calls: 11.0, source_url: "https://example.test/fee"}}},
+  ] {
+    assert_eq(len(build_drift([obs + {pricing: equivalent + changed}], catalog).changed), 1)
+  }
+}
+
+@test
+pipeline test_notice_extraction_requires_nullable_candidate(harness: Harness, task: unknown) {
+  const schema = schema_of(NoticeExtraction)
+  assert(!schema_is({classification: "candidate", reason: nil}, schema))
+  assert(schema_is({classification: "irrelevant", candidate: nil}, schema))
+  const candidate: ProviderCatalogCandidate = {
+    kind: "retirement",
+    provider: "anthropic",
+    model_id: "claude-sonnet-4-5-20250929",
+    effective_date: "2026-11-30",
+    old_value: false,
+    new_value: true,
+    evidence: "Requests stop working on 2026-11-30.",
+  }
+  assert(schema_is({classification: "candidate", candidate: candidate}, schema))
+}
 
 @test
 pipeline test_pricing_structures_survive_comparison_and_candidate_roundtrip(
@@ -192,6 +336,70 @@ pipeline test_carried_update_prepares_patch(harness: Harness, task: unknown) {
 }
 
 @test
+pipeline test_live_extraction_uses_provider_catalog_identity(harness: Harness, task: unknown) {
+  const input = fixture(harness.fs, "carried-update")
+  const rows = catalog_model_context(BASE_CATALOG, input.notice)
+  assert_eq(len(rows), 1)
+  assert_eq(rows[0].id, input.extraction.candidate.model_id)
+  assert_eq(rows[0].pricing.input_per_mtok, input.extraction.candidate.old_value)
+}
+
+@test
+pipeline test_unresolved_existing_model_cannot_become_addition(harness: Harness, task: unknown) {
+  const input = fixture(harness.fs, "carried-update")
+  const candidate = input.extraction.candidate + {model_id: "Claude Haiku"}
+  const plan = plan_notice(
+    harness,
+    input.notice,
+    {classification: "candidate", candidate: candidate},
+    BASE_CATALOG,
+  )
+  assert_eq(plan.receipt.disposition, "rejected")
+  assert_eq(plan.receipt.change_kind, "price")
+  assert_eq(plan.patch, nil)
+}
+
+@test
+pipeline test_existing_new_price_on_wrong_model_cannot_hide_identity_error(
+  harness: Harness,
+  task: unknown,
+) {
+  const input = fixture(harness.fs, "carried-update")
+  const catalog = BASE_CATALOG
+    + {
+      models: BASE_CATALOG.models
+        + [
+          {
+            provider: "anthropic",
+            id: "claude-3-5-haiku-20241022",
+            name: "Claude Haiku 3.5",
+            pricing: {input_per_mtok: 0.8, output_per_mtok: 4.0},
+          },
+        ],
+    }
+  const candidate = input.extraction.candidate + {model_id: "claude-3-5-haiku-20241022"}
+  const plan = plan_notice(
+    harness,
+    input.notice,
+    {classification: "candidate", candidate: candidate},
+    catalog,
+  )
+  assert_eq(plan.receipt.disposition, "rejected")
+  assert_eq(plan.patch, nil)
+  const exact_notice = input.notice
+    + {text: input.notice.text + " Model id claude-3-5-haiku-20241022."}
+  assert_eq(
+    plan_notice(
+      harness,
+      exact_notice,
+      {classification: "candidate", candidate: candidate},
+      catalog,
+    ).receipt.disposition,
+    "no_op",
+  )
+}
+
+@test
 pipeline test_irrelevant_notice_records_no_op(harness: Harness, task: unknown) {
   const input = fixture(harness.fs, "irrelevant")
   const plan = plan_notice(harness, input.notice, input.extraction, BASE_CATALOG)
@@ -296,6 +504,16 @@ capabilities = ["tools", "streaming"]
   const retirement_out = unwrap(apply_candidate_to_source(source, retirement))
   assert(contains(retirement_out, "deprecated = true"))
   assert(contains(retirement_out, "Use claude-haiku-next"))
+  assert(contains(retirement_out, "sunset_date = \"" + price.effective_date + "\""))
+  assert(contains(retirement_out, "superseded_by = \"claude-haiku-next\""))
+  const followed = "[models.\"claude-haiku-4-5-20251001\"]\nname = \"Claude Haiku\"\n\n"
+    + "# Next model.\n[models.\"claude-haiku-next\"]\nname = \"Next\"\n"
+  const followed_out = unwrap(
+    apply_candidate_to_source(followed, retirement + {evidence: "Retired by notice."}),
+  )
+  assert(contains(followed_out, "name = \"Claude Haiku\"\ndeprecated = true\n"))
+  assert(contains(followed_out, "superseded_by = \"claude-haiku-next\"\n\n# Next model.\n"))
+  assert(contains(followed_out, "per Retired by notice. Use"))
   const capability = price
     + {kind: "capability", capability: "vision", old_value: false, new_value: true}
   const capability_source = """
@@ -390,6 +608,23 @@ pipeline test_canonical_catalog_shapes_validate_all_non_price_variants(
     candidate: common + {kind: "retirement", old_value: false, new_value: true},
   }
   assert_eq(plan_notice(harness, input.notice, retirement, canonical).receipt.disposition, "patch")
+  const guessed = {
+    classification: "candidate",
+    candidate: retirement.candidate + {old_value: true, replacement: "claude-haiku-4-5-20251001."},
+  }
+  const guessed_plan = plan_notice(harness, input.notice, guessed, canonical)
+  assert_eq(guessed_plan.receipt.disposition, "patch")
+  const resolved: dict = guessed_plan.candidate ?? {}
+  assert_eq(resolved.old_value, false)
+  assert_eq(resolved.replacement, "claude-haiku-4-5-20251001")
+  const unknown_replacement = {
+    classification: "candidate",
+    candidate: retirement.candidate + {replacement: "claude-haiku-next"},
+  }
+  assert_eq(
+    plan_notice(harness, input.notice, unknown_replacement, canonical).receipt.disposition,
+    "rejected",
+  )
   const capability = {
     classification: "candidate",
     candidate: common

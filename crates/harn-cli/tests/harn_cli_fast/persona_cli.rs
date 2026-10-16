@@ -11,11 +11,13 @@ use std::collections::BTreeSet;
 use std::fs;
 use std::path::Path;
 use std::sync::Arc;
-use std::time::Duration;
 
 use harn_cli::commands::{persona, persona_doctor, persona_scaffold, persona_supervision};
 use harn_vm::event_log::EventLog as _;
 use tempfile::TempDir;
+
+#[path = "persona_cli/selectors.rs"]
+mod selectors;
 
 fn write_manifest(body: &str) -> TempDir {
     let temp = TempDir::new().unwrap();
@@ -46,7 +48,7 @@ tools = ["github"]
 capabilities = ["git.get_diff", "project.test_commands"]
 autonomy_tier = "act_with_approval"
 receipt_policy = "required"
-triggers = ["github.pr_opened"]
+triggers = ["github.pull_request.opened"]
 schedules = ["*/30 * * * *"]
 handoffs = ["review_captain"]
 context_packs = ["repo_policy"]
@@ -109,7 +111,7 @@ fn persona_list_and_inspect_emit_stable_json() {
     assert_eq!(persona["capabilities"][0], "git.get_diff");
     assert_eq!(persona["model_policy"]["default_model"], "gpt-5.4-mini");
     assert_eq!(persona["budget"]["daily_usd"], 20.0);
-    assert_eq!(persona["triggers"][0], "github.pr_opened");
+    assert_eq!(persona["triggers"][0], "github.pull_request.opened");
     assert_eq!(persona["handoffs"][0], "review_captain");
     assert_eq!(persona["context_packs"][0], "repo_policy");
     assert_eq!(persona["evals"][0], "merge_safety");
@@ -424,7 +426,7 @@ fn persona_manifest_flag_loads_merge_captain_persona() {
     assert_eq!(persona["receipt_policy"], "required");
     assert_eq!(persona["autonomy_tier"], "act_with_approval");
     let triggers = persona["triggers"].as_array().expect("triggers array");
-    assert!(triggers.iter().any(|t| t == "github.pr_opened"));
+    assert!(triggers.iter().any(|t| t == "github.pull_request.opened"));
     let capabilities = persona["capabilities"]
         .as_array()
         .expect("capabilities array");
@@ -898,9 +900,8 @@ async fn persona_supervision_tail_follow_streams_new_events() {
     // `ready_rx` fires only after the tail has flushed its initial read
     // (empty, here) and is about to wait for changes — so any event we
     // append now must traverse the follow path.
-    let log = tokio::time::timeout(Duration::from_secs(5), ready_rx)
+    let log = harn_clock::test_support::within("tail signalling ready", ready_rx)
         .await
-        .expect("tail signalled ready")
         .expect("ready oneshot delivered");
 
     let topic = harn_vm::event_log::Topic::new(harn_vm::PERSONA_RUNTIME_TOPIC).unwrap();
@@ -917,9 +918,8 @@ async fn persona_supervision_tail_follow_streams_new_events() {
         .expect("append followed event");
     log.flush().await.expect("flush followed event");
 
-    let result = tokio::time::timeout(Duration::from_secs(5), task)
+    let result = harn_clock::test_support::within("tail finishing", task)
         .await
-        .expect("tail finished")
         .expect("tail task did not panic");
     result.expect("tail completed without error");
 
@@ -960,7 +960,7 @@ tools = ["github"]
 capabilities = ["git.get_diff"]
 autonomy_tier = "act_with_approval"
 receipt_policy = "required"
-triggers = ["github.pr_opened"]
+triggers = ["github.pull_request.opened"]
 budget = { daily_usd = 0.01, run_usd = 0.01, max_tokens = 10 }
 "#,
     );

@@ -377,28 +377,16 @@ more recursive `SKILL.md` files, the disk corpus is listed instead.
 Pass `--json` for a versioned `JsonEnvelope` payload that agents and
 CI can pipe through `jq`.
 
-```text
-$ harn skill list
-Embedded canonical skills (16):
-  harn-agent            Agent runtime, lifecycle, capabilities, and supervision.
-  harn-apps             Build Harn apps with typed views, event handlers, and model jobs.
-  harn-control-events   Stop, steer, and queue as events a session must answer, not requests it…
-  harn-de-slop          Remove duplicated policy, shallow seams, and weak contracts.
-  harn-diagnostics      Diagnostics, the HARN-* error-code index, explain output, repair plans,…
-  harn-docs             Write task-shaped developer documentation in plain language.
-  harn-language         Harn syntax, modules, types, diagnostics, and script structure.
-  harn-mcp              Connect Harn to MCP servers and expose Harn pipelines as MCP servers.
-  harn-orchestration    Workflows, triggers, workers, handoffs, and lifecycle ownership.
-  harn-probe            Evidence-driven investigation for material or unstable claims.
-  harn-product-quality  Launch-quality product behavior across Harn-powered surfaces.
-  harn-providers        LLM provider configuration, model routing, and provider capability beha…
-  harn-rules            Structural search, lint rules, and codemods with the Harn rule engine.
-  harn-testing          Deterministic, claim-driven Harn verification.
-  harn-tracing          Transcripts, receipts, traces, replay, and observability surfaces.
-  release-harn          Merge-queue-safe Harn patch/minor/major release workflow.
+```bash
+harn skill list
+```
 
-Run `harn skill get <name>` for one entry's frontmatter.
-Run `harn skill get <name> --full` to include the body.
+Run `harn skill get <name>` for one entry's frontmatter, or add `--full`
+to include its body. For release work, discover the version-matched route
+to the [maintainer procedure](maintainer-release.md):
+
+```bash
+harn skill get release-harn --full
 ```
 
 The `--json` output uses the standard envelope (`schemaVersion`, `ok`,
@@ -406,8 +394,7 @@ The `--json` output uses the standard envelope (`schemaVersion`, `ok`,
 same frontmatter fields shown above:
 
 ```bash
-$ harn skill list --json | jq '.data.skills | length'
-13
+harn skill list --json | jq '.data.skills | length'
 ```
 
 ### `harn skill get <name>`

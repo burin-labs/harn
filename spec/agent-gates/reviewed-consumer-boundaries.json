@@ -86,7 +86,7 @@
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/loop_run.harn",
-    "expression": "const final_state = {\n      opts: opts,\n      final_status: final_status,\n      stop_reason: stop_reason,\n      iteration: iteration,\n      loop_start_ms: loop_start_ms,\n      suspend_result: suspend_result,\n      terminal_error: terminal_error,\n      terminal_verification: terminal_verification,\n      abandonment: abandonment,\n      audit_background_tasks: audit_background_tasks,\n      budget: budget,\n      budget_exhausted_emitted: budget_exhausted_emitted,\n      budget_decisions: budget_decisions,\n      current_max: current_max,\n      extensions_used: extensions_used,\n      last_tool_count: last_tool_count,\n      stall_state: stall_state,\n      stall_checkpoint: if stall_enabled_seen {\n        stall_checkpoint + {state: stall_state}\n      } else {\n        nil\n      },\n      stall_enabled_seen: stall_enabled_seen,\n      verify_completion_judge_invocations: verify_completion_judge_invocations,\n      verify_completion_judge_vetoes: verify_completion_judge_vetoes,\n      turn_end_judge_invocations: turn_end_judge_invocations,\n      turn_end_judge_vetoes: turn_end_judge_vetoes,\n    }",
+    "expression": "const final_state = {\n      successful_tools_seen: successful_tools_seen,\n      opts: opts,\n      final_status: final_status,\n      stop_reason: stop_reason,\n      iteration: iteration,\n      loop_start_ms: loop_start_ms,\n      suspend_result: suspend_result,\n      terminal_error: terminal_error,\n      terminal_verification: terminal_verification,\n      abandonment: abandonment,\n      audit_background_tasks: audit_background_tasks,\n      budget: budget,\n      budget_exhausted_emitted: budget_exhausted_emitted,\n      budget_decisions: budget_decisions,\n      current_max: current_max,\n      extensions_used: extensions_used,\n      last_tool_count: last_tool_count,\n      stall_state: stall_state,\n      stall_checkpoint: if stall_enabled_seen {\n        stall_checkpoint + {state: stall_state}\n      } else {\n        nil\n      },\n      stall_enabled_seen: stall_enabled_seen,\n      verify_completion_judge_invocations: verify_completion_judge_invocations,\n      verify_completion_judge_vetoes: verify_completion_judge_vetoes,\n      turn_end_judge_invocations: turn_end_judge_invocations,\n      turn_end_judge_vetoes: turn_end_judge_vetoes,\n    }",
     "owner": "__agent_loop_run",
     "evidence": "Runner transition packets carry options beside mutable loop state. Consumers declare nested options origins; the exact packet construction is reviewed here and source changes invalidate this classification."
   },
@@ -163,7 +163,7 @@
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/loop_run.harn",
-    "expression": "{\n      opts: opts,\n      final_status: final_status,\n      stop_reason: stop_reason,\n      iteration: iteration,\n      loop_start_ms: loop_start_ms,\n      suspend_result: suspend_result,\n      terminal_error: terminal_error,\n      terminal_verification: terminal_verification,\n      abandonment: abandonment,\n      audit_background_tasks: audit_background_tasks,\n      budget: budget,\n      budget_exhausted_emitted: budget_exhausted_emitted,\n      budget_decisions: budget_decisions,\n      current_max: current_max,\n      extensions_used: extensions_used,\n      last_tool_count: last_tool_count,\n      stall_state: stall_state,\n      stall_checkpoint: if stall_enabled_seen {\n        stall_checkpoint + {state: stall_state}\n      } else {\n        nil\n      },\n      stall_enabled_seen: stall_enabled_seen,\n      verify_completion_judge_invocations: verify_completion_judge_invocations,\n      verify_completion_judge_vetoes: verify_completion_judge_vetoes,\n      turn_end_judge_invocations: turn_end_judge_invocations,\n      turn_end_judge_vetoes: turn_end_judge_vetoes,\n    }",
+    "expression": "{\n      successful_tools_seen: successful_tools_seen,\n      opts: opts,\n      final_status: final_status,\n      stop_reason: stop_reason,\n      iteration: iteration,\n      loop_start_ms: loop_start_ms,\n      suspend_result: suspend_result,\n      terminal_error: terminal_error,\n      terminal_verification: terminal_verification,\n      abandonment: abandonment,\n      audit_background_tasks: audit_background_tasks,\n      budget: budget,\n      budget_exhausted_emitted: budget_exhausted_emitted,\n      budget_decisions: budget_decisions,\n      current_max: current_max,\n      extensions_used: extensions_used,\n      last_tool_count: last_tool_count,\n      stall_state: stall_state,\n      stall_checkpoint: if stall_enabled_seen {\n        stall_checkpoint + {state: stall_state}\n      } else {\n        nil\n      },\n      stall_enabled_seen: stall_enabled_seen,\n      verify_completion_judge_invocations: verify_completion_judge_invocations,\n      verify_completion_judge_vetoes: verify_completion_judge_vetoes,\n      turn_end_judge_invocations: turn_end_judge_invocations,\n      turn_end_judge_vetoes: turn_end_judge_vetoes,\n    }",
     "owner": "__agent_loop_run",
     "evidence": "Runner transition packets carry options beside mutable loop state. Consumers declare nested options origins; the exact packet construction is reviewed here and source changes invalidate this classification."
   },
@@ -471,7 +471,7 @@
     "file": "crates/harn-stdlib/src/stdlib/agent/postturn.harn",
     "expression": "missing_tool_call_classifier(harness, options)",
     "owner": "missing_tool_call_classifier",
-    "evidence": "The consumer opts is typed MissingToolCallRecoveryOptions and its file is a required extra source; all literal reads and the dynamic override domain are independently scanned."
+    "evidence": "The consumer opts is typed MissingToolCallRecoveryOptions and its file is a required extra source; all literal reads are independently scanned."
   },
   {
     "scope": "MissingToolCallRecoveryOptions",
@@ -490,9 +490,9 @@
   {
     "scope": "MissingToolCallRecoveryOptions",
     "file": "crates/harn-stdlib/src/stdlib/llm/missing_tool_call.harn",
-    "expression": "cfg[key]",
-    "owner": "missing_tool_call_classifier",
-    "evidence": "The key iterates the literal override list; missing-tool-recovery-key-domain independently audits every list member and requires a nonempty domain."
+    "expression": "__missing_tool_call_policy(harness.llm, cfg)",
+    "owner": "__missing_tool_call_policy",
+    "evidence": "The consumer cfg is typed MissingToolCallRecoveryOptions in the required classifier source; it resolves the route and constructs one typed EvaluationPolicy."
   },
   {
     "scope": "MonologueActuationConfig",
@@ -533,7 +533,7 @@
   {
     "scope": "StepJudgeOptions",
     "file": "crates/harn-stdlib/src/stdlib/agent/step_judge.harn",
-    "expression": "__should_skip(judge_cfg, llm_result, attempts, stall_warning, remaining_iterations)",
+    "expression": "__should_skip(\n    judge_cfg,\n    opts,\n    llm_result,\n    attempts,\n    stall_warning,\n    remaining_iterations,\n  )",
     "owner": "__should_skip",
     "evidence": "Consumer __should_skip has an explicit parameter origin for StepJudgeOptions at the recorded nested path; its literal reads are audited independently.",
     "consumers": [
@@ -541,6 +541,34 @@
         "scope": "StepJudgeOptions",
         "function": "__should_skip",
         "parameter": "judge_cfg"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/step_judge.harn",
+    "expression": "__should_skip(\n    judge_cfg,\n    opts,\n    llm_result,\n    attempts,\n    stall_warning,\n    remaining_iterations,\n  )",
+    "owner": "__should_skip",
+    "evidence": "Consumer __should_skip reads the loop options only to find each called tool's declared annotations (tools, policy), so a step of declared reads is not judged.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__should_skip",
+        "parameter": "opts"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/step_judge.harn",
+    "expression": "__step_is_read_only(opts, llm_result)",
+    "owner": "__step_is_read_only",
+    "evidence": "Consumer __step_is_read_only reads tools and policy only to resolve each called tool's declared annotations; its literal reads are audited independently.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__step_is_read_only",
+        "parameter": "opts"
       }
     ]
   },

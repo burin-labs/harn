@@ -3,22 +3,6 @@
 use super::*;
 
 #[test]
-fn test_invalid_binary_op_literal_bool() {
-    let diags = lint_source(
-        r"
-pipeline default(task) {
-const x = true + 1
-log(x)
-}
-",
-    );
-    assert!(
-        has_rule(&diags, "invalid-binary-op-literal"),
-        "expected invalid-binary-op-literal for bool in arithmetic: {diags:?}"
-    );
-}
-
-#[test]
 fn test_invalid_binary_op_literal_nil() {
     let diags = lint_source(
         r"
@@ -72,6 +56,12 @@ fn test_fix_invalid_binop_string_plus_bool() {
 fn test_fix_invalid_binop_no_fix_for_non_string() {
     let source = "pipeline default(task) {\n  const x = true + 1\n  log(x)\n}";
     let diags = lint_source(source);
+    // Without this, a build that stopped flagging the expression would also
+    // offer no fix and pass.
+    assert!(
+        has_rule(&diags, "invalid-binary-op-literal"),
+        "expected invalid-binary-op-literal for bool in arithmetic: {diags:?}"
+    );
     let fix = get_fix(&diags, "invalid-binary-op-literal");
     assert!(
         fix.is_none(),

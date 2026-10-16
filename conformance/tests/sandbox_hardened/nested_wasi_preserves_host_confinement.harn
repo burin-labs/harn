@@ -1,0 +1,14 @@
+fn main(harness: Harness) {
+  harness.runtime.with_execution_policy(
+    {sandbox_profile: "worktree"},
+    { ->
+      assert_eq(harness.system.sandbox_active_profile(), "worktree")
+      harness.runtime.with_execution_policy(
+        {sandbox_profile: "wasi"},
+        { -> assert_eq(harness.system.sandbox_active_profile(), "worktree") },
+      )
+      assert_eq(harness.system.sandbox_active_profile(), "worktree")
+    },
+  )
+  harness.stdio.println("host process confinement preserved")
+}

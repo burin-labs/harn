@@ -470,7 +470,7 @@ mod tests {
     /// reverse-request and then delivers `reply` for it. Returns a
     /// `JoinHandle` so the caller can `join()` after `dispatch` returns.
     fn spawn_replier(pending: PendingMap, reply: DapHostCallReply) -> thread::JoinHandle<()> {
-        thread::spawn(move || {
+        harn_parser::runtime_stack::spawn(move || {
             let req_seq = await_pending_seq(&pending);
             deliver_reply(&pending, req_seq, reply);
         })

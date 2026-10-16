@@ -495,6 +495,4 @@ The engine is a strict superset of the pre-v2 syntax:
 - `{{ name }}` — interpolation, missing bare identifier passes through verbatim
 - `{{ if key }} ... {{ end }}` — truthy test
 
-All pre-v2 templates render identically. Migrating awkward workarounds to
-the new forms is optional but usually shorter — see the
-[migration guide](./migrations/template-engine-v2.md).
+All pre-v2 templates render identically.

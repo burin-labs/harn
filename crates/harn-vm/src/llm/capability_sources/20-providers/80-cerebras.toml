@@ -60,10 +60,11 @@ serving_precision = "throttled"
 # (Cerebras retired the Gemma route; see 60-models/30-cerebras.toml). The
 # public record at https://api.cerebras.ai/public/v1/models, read 2026-09-20,
 # reports native tools with parallel tool calls, JSON-schema structured
-# outputs, vision, and reasoning. The chat API documents no reasoning-effort
-# parameter for this model, so Harn exposes enabled thinking without inventing
-# a knob. The `qwen-*` rule further down would otherwise catch this row and
-# understate it as a non-reasoning, text-only route.
+# outputs, vision, and reasoning. Live 2026-10-11 probes accepted none/low/
+# medium/high; none returned zero reasoning tokens, while the active rungs
+# returned 23/32/21. xhigh and max were rejected. The current reasoning guide
+# documents the same ladder: https://inference-docs.cerebras.ai/capabilities/reasoning.
+# GPT-OSS still rejects none, so this switch belongs to the exact Qwen row.
 #
 # Unverified here: the streaming tool and schema paths were confirmed live for
 # the retired Gemma row on 2026-08-25, not for this one.
@@ -78,7 +79,12 @@ structured_output = "native"
 # so both live Cerebras routes agree. Source is that provider-level statement,
 # not a per-model probe of this route.
 tools_exclude_response_format = true
-thinking_modes = ["enabled"]
+thinking_modes = ["enabled", "effort"]
+reasoning_effort_supported = true
+reasoning_effort_levels = ["none", "low", "medium", "high"]
+reasoning_none_supported = true
+# Reasoning-off uses the effort rung, not a generic thinking-disable directive.
+reasoning_disable_supported = false
 vision_supported = true
 prefers_xml_scaffolding = false
 prefers_markdown_scaffolding = true

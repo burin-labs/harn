@@ -1,5 +1,11 @@
 use super::auth::should_stream_post_response;
 use super::*;
+
+#[path = "tests/script_source.rs"]
+mod script_source;
+#[path = "tests/support.rs"]
+mod support;
+
 use crate::{ApiKeyAuthConfig, AuthMethodConfig, DispatchCoreConfig};
 use std::collections::{BTreeMap, HashMap};
 use std::num::NonZeroUsize;
@@ -75,8 +81,8 @@ pub fn greet(name: string) -> string {
     assert_eq!(
         tools["tools"][0],
         server
-            .tool_catalog
-            .mcp_tool(&server.tool_catalog.tools[0])
+            .exports_tool_catalog()
+            .mcp_tool(&server.exports_tool_catalog().tools[0])
             .expect("MCP projection")
     );
     assert_eq!(tools["tools"][0]["name"], "greet");
@@ -351,7 +357,9 @@ pub fn greet(name: string) -> string {
         resources["resources"][0]["uri"],
         json!("well-known://mcp-card")
     );
-    let read = server.handle_resources_read(json!(2), &json!({"uri": "well-known://mcp-card"}));
+    let read = server
+        .handle_resources_read(json!(2), &json!({"uri": "well-known://mcp-card"}))
+        .await;
     assert!(read["result"]["contents"][0]["text"]
         .as_str()
         .unwrap()
@@ -1028,25 +1036,6 @@ pub fn greet(name: string) -> string {
     .await;
 
     assert_eq!(response["result"]["content"][0]["text"], json!("alice"));
-}
-
-#[test]
-fn paged_result_returns_next_cursor_and_decodes_it() {
-    let entries = (0..55)
-        .map(|index| json!({"name": format!("tool-{index}")}))
-        .collect::<Vec<_>>();
-    let first = paged_result("tools", entries.clone(), &json!({}));
-    assert_eq!(first["tools"].as_array().unwrap().len(), 50);
-    assert_eq!(first["tools"][49]["name"], json!("tool-49"));
-
-    let second = paged_result(
-        "tools",
-        entries,
-        &json!({"cursor": first["nextCursor"].as_str().unwrap()}),
-    );
-    assert_eq!(second["tools"].as_array().unwrap().len(), 5);
-    assert_eq!(second["tools"][0]["name"], json!("tool-50"));
-    assert!(second.get("nextCursor").is_none());
 }
 
 #[test]

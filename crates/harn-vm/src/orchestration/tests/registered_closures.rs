@@ -37,7 +37,7 @@ fn run_registered_closure_probe(source: &str) -> (Result<String, String>, usize)
         local
             .run_until(async move {
                 let chunk = crate::compile_source(source)?;
-                let mut vm = crate::Vm::new();
+                let mut vm = crate::new_vm();
                 crate::stdlib::register_vm_stdlib(&mut vm);
 
                 let probe = Arc::clone(&probe_for_rt);
@@ -205,7 +205,7 @@ pub fn register_hook_closure(agent: HarnessAgent) {
 /// released. Mirrors Burin registering a provider in one agent-loop VM whose
 /// lifetime ends before the provider fires.
 async fn register_from_disposable_vm(register_fn: &str) {
-    let mut vm = crate::Vm::new();
+    let mut vm = crate::new_vm();
     crate::stdlib::register_vm_stdlib(&mut vm);
     let exports = vm
         .load_module_exports_from_source(
@@ -261,7 +261,7 @@ fn registered_provider_closure_resolves_sibling_fn_after_registering_vm_dropped(
 
                 // Fire from a fresh VM whose `module_cache` never loaded the
                 // module — the runtime's real invocation path.
-                let mut vm = crate::Vm::new();
+                let mut vm = crate::new_vm();
                 crate::stdlib::register_vm_stdlib(&mut vm);
                 vm.register_async_builtin("__test_fire_reminders", |ctx, _args| async move {
                     let report = crate::llm::reminder_providers::evaluate_and_inject(
@@ -320,7 +320,7 @@ fn registered_session_hook_closure_resolves_sibling_fn_after_registering_vm_drop
             .run_until(async {
                 register_from_disposable_vm("register_hook_closure").await;
 
-                let mut vm = crate::Vm::new();
+                let mut vm = crate::new_vm();
                 crate::stdlib::register_vm_stdlib(&mut vm);
                 let chunk = crate::compile_source(
                     r#"pipeline main(harness: Harness) {
@@ -379,7 +379,7 @@ fn registered_provider_closure_unknown_name_still_falls_through_to_bridge() {
         let local = tokio::task::LocalSet::new();
         local
             .run_until(async {
-                let mut vm = crate::Vm::new();
+                let mut vm = crate::new_vm();
                 crate::stdlib::register_vm_stdlib(&mut vm);
                 let exports = vm
                     .load_module_exports_from_source(
@@ -408,7 +408,7 @@ fn registered_provider_closure_unknown_name_still_falls_through_to_bridge() {
                 drop(exports);
                 drop(vm);
 
-                let mut vm = crate::Vm::new();
+                let mut vm = crate::new_vm();
                 crate::stdlib::register_vm_stdlib(&mut vm);
                 vm.register_async_builtin("__test_fire_reminders", |ctx, _args| async move {
                     let report = crate::llm::reminder_providers::evaluate_and_inject(

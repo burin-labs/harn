@@ -43,6 +43,25 @@ pipeline test_probe_streams_are_reproducible_on_one_binary(harness: Harness, tas
   )
 }
 
+pipeline test_health_timing_normalization_preserves_measurement_population(
+  harness: Harness,
+  task: unknown,
+) {
+  const first = "{\"milliseconds\":42,\"actual_to_expected\":1.25,\"sample_count\":2}"
+  const second = "{\"milliseconds\":98,\"actual_to_expected\":0.75,\"sample_count\":2}"
+  assert_eq(loop_equivalence_normalize(first), loop_equivalence_normalize(second))
+  assert_ne(
+    loop_equivalence_normalize(first),
+    loop_equivalence_normalize(
+      "{\"milliseconds\":42,\"actual_to_expected\":1.25,\"sample_count\":3}",
+    ),
+  )
+  assert_ne(
+    loop_equivalence_normalize("{\"actual_to_expected\":null}"),
+    loop_equivalence_normalize("{\"actual_to_expected\":0}"),
+  )
+}
+
 pipeline test_await_arm_actually_suspends(harness: Harness, task: unknown) {
   // A non-vacuous control for the third case. A bare agent loop with no tools
   // never reaches the await-resumption turn and reports done, so this arm is

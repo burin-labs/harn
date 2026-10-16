@@ -52,6 +52,7 @@ pub import {
 } from "./provider_tool_probe_campaign/report"
 import "./provider_tool_probe_campaign/support"
 pub import {
+  PROVIDER_TOOL_PROBE_CAMPAIGN_SCHEMA,
   ProviderToolProbeBehavior,
   ProviderToolProbeCampaignReport,
   ProviderToolProbeCatalogReceipt,
@@ -78,6 +79,7 @@ fn __campaign_failed(report: ProviderToolProbeCampaignReport) -> bool {
   const tool_scorecard_required = (report.runner_summary?.provider_tool_probe?.total ?? 0) > 0
   return (summary.fail ?? 0) > 0
     || (summary.error ?? 0) > 0
+    || (summary.unavailable ?? 0) > 0
     || (report.spend?.unpriced_case_count ?? 0) > 0
     || (report.spend?.unaccounted_probe_count ?? 0) > 0
     || (tool_scorecard_required && report.artifacts?.scorecard_status != "complete")

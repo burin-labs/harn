@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/code_index/module_graph.request.json",
+  "title": "code_index.module_graph request",
+  "description": "Roll the workspace import graph up from files to directories or modules. Edges come from explicit import statements only; same-module visibility and self-loops are excluded.",
+  "type": "object",
+  "properties": {
+    "granularity": {
+      "type": "string",
+      "enum": ["dir", "module"],
+      "default": "module",
+      "description": "`dir` groups files by directory. `module` groups them by Swift target or Go package when the index knows one, else by the nearest directory holding a package manifest (Cargo.toml, package.json, pyproject.toml, Package.swift, ...), else by directory."
+    },
+    "depth": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Keep at most this many leading path segments of each node id, merging deeper nodes into their ancestor. Omit for no limit."
+    },
+    "roots": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Workspace-relative path prefixes. Files outside them are not nodes, and edges into them are dropped. Omit for the whole workspace."
+    },
+    "include_external": {
+      "type": "boolean",
+      "default": false,
+      "description": "List unresolved imports (third-party packages, standard libraries, and imports the resolver could not map) per node."
+    },
+    "min_weight": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 1,
+      "description": "Drop edges with fewer import links than this."
+    }
+  },
+  "additionalProperties": false
+}

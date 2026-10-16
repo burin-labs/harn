@@ -269,6 +269,8 @@ impl ReminderSource {
 /// removed or compacted away."
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SystemReminder {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub goal_pin: Option<Box<super::goal_pin::GoalPinProjection>>,
     pub id: String,
     #[serde(default)]
     pub tags: Vec<String>,
@@ -294,6 +296,7 @@ impl SystemReminder {
     #[allow(dead_code)] // reserved for the R-02+ stdlib reminder providers
     pub fn new(body: impl Into<String>, source: ReminderSource, fired_at_turn: i64) -> Self {
         Self {
+            goal_pin: None,
             id: uuid::Uuid::now_v7().to_string(),
             tags: Vec::new(),
             dedupe_key: None,
@@ -315,9 +318,9 @@ pub(crate) fn transcript_message_list(
 ) -> Result<Vec<VmValue>, VmError> {
     match transcript.get("messages") {
         Some(VmValue::List(list)) => Ok((**list).clone()),
-        Some(_) => Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+        Some(_) => Err(VmError::Thrown(VmValue::string(
             "transcript.messages must be a list",
-        )))),
+        ))),
         None => Ok(Vec::new()),
     }
 }
@@ -327,9 +330,9 @@ pub(crate) fn transcript_asset_list(
 ) -> Result<Vec<VmValue>, VmError> {
     match transcript.get("assets") {
         Some(VmValue::List(list)) => Ok((**list).clone()),
-        Some(_) => Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+        Some(_) => Err(VmError::Thrown(VmValue::string(
             "transcript.assets must be a list",
-        )))),
+        ))),
         None => Ok(Vec::new()),
     }
 }
@@ -402,20 +405,11 @@ pub(crate) fn new_transcript_with_event_prefix(
     events.extend(transcript_events_from_messages(&messages));
     events.extend(extra_events);
     transcript.put_str("_type", TRANSCRIPT_TYPE);
-    transcript.insert("version".to_string(), VmValue::Int(TRANSCRIPT_VERSION));
+    transcript.put_int("version", TRANSCRIPT_VERSION);
     transcript.put_str("id", id.unwrap_or_else(|| uuid::Uuid::now_v7().to_string()));
-    transcript.insert(
-        "messages".to_string(),
-        VmValue::List(std::sync::Arc::new(messages)),
-    );
-    transcript.insert(
-        "events".to_string(),
-        VmValue::List(std::sync::Arc::new(events)),
-    );
-    transcript.insert(
-        "assets".to_string(),
-        VmValue::List(std::sync::Arc::new(assets)),
-    );
+    transcript.put("messages", VmValue::list(messages));
+    transcript.put("events", VmValue::list(events));
+    transcript.put("assets", VmValue::list(assets));
     if let Some(summary) = summary {
         transcript.put_str("summary", summary);
     }
@@ -464,6 +458,11 @@ pub(crate) fn transcript_event_from_message(message: &VmValue) -> VmValue {
         // the harness. Keep both event and block visibility internal.
         return transcript_event("message", &role, "internal", &text, None);
     }
+    if role == "assistant" && !crate::llm::assistant_publication::is_visible(message) {
+        // Block visibility must agree with the envelope. Timeline consumers
+        // inspect blocks independently, including multi-tool narration.
+        return transcript_event("message", &role, "internal", &text, None);
+    }
     let visibility = overall_visibility(&blocks, default_visibility_for_role(&role));
     let kind = if matches!(role.as_str(), "tool" | "tool_result") {
         "tool_result"
@@ -476,10 +475,7 @@ pub(crate) fn transcript_event_from_message(message: &VmValue) -> VmValue {
     event.put_str("role", role.as_str());
     event.put_str("visibility", visibility);
     event.put_str("text", text);
-    event.insert(
-        "blocks".to_string(),
-        VmValue::List(std::sync::Arc::new(blocks)),
-    );
+    event.put("blocks", VmValue::list(blocks));
     VmValue::dict(event)
 }
 
@@ -497,7 +493,7 @@ pub(crate) fn transcript_to_vm_with_events(
     assets: Vec<VmValue>,
     state: Option<&str>,
 ) -> VmValue {
-    let metadata_vm = metadata.as_ref().map(crate::stdlib::json_to_vm_value);
+    let metadata_vm = metadata.as_ref().map(crate::schema::json_to_vm_value);
     new_transcript_with_events(
         id,
         json_messages_to_vm(messages),
@@ -519,7 +515,7 @@ pub(crate) fn transcript_to_vm_with_event_prefix(
     assets: Vec<VmValue>,
     state: Option<&str>,
 ) -> VmValue {
-    let metadata_vm = metadata.as_ref().map(crate::stdlib::json_to_vm_value);
+    let metadata_vm = metadata.as_ref().map(crate::schema::json_to_vm_value);
     new_transcript_with_event_prefix(
         id,
         json_messages_to_vm(messages),
@@ -590,7 +586,7 @@ pub(crate) fn transcript_event_with_id(
     if let Some(metadata) = metadata {
         event.insert(
             "metadata".to_string(),
-            crate::stdlib::json_to_vm_value(&metadata),
+            crate::schema::json_to_vm_value(&metadata),
         );
     }
     VmValue::dict(event)
@@ -654,7 +650,7 @@ pub(crate) fn transcript_reminder_event(reminder: &SystemReminder) -> VmValue {
     // mirror observers already key off.
     event.insert(
         crate::value::intern_key("reminder"),
-        crate::stdlib::json_to_vm_value(&reminder_json),
+        crate::schema::json_to_vm_value(&reminder_json),
     );
     VmValue::dict(event)
 }
@@ -825,7 +821,7 @@ pub(crate) fn emit_reminder_lifecycle_event(kind: &str, mut payload: JsonValue) 
     ensure_reminder_correlation(&mut payload);
     let event = LogEvent::new(kind, payload);
     if tokio::runtime::Handle::try_current().is_ok() {
-        if let Ok(join) = std::thread::Builder::new()
+        if let Ok(join) = crate::runtime_stack::builder()
             .name("harn-reminder-event-log".to_string())
             .spawn(move || {
                 let _ = futures::executor::block_on(log.append(&topic, event));
@@ -921,7 +917,7 @@ fn lifecycle_transcript_event(
     let mut event = envelope.as_dict().cloned().unwrap_or_default();
     event.insert(
         crate::value::intern_key(payload_key),
-        crate::stdlib::json_to_vm_value(payload),
+        crate::schema::json_to_vm_value(payload),
     );
     VmValue::dict(event)
 }
@@ -1007,6 +1003,9 @@ pub(crate) fn reminder_from_vm_value(value: &VmValue) -> SystemReminder {
         .filter(|s| !s.is_empty());
 
     SystemReminder {
+        goal_pin: dict.get("goal_pin").and_then(|value| {
+            super::goal_pin::GoalPinProjection::from_json(crate::llm::vm_value_to_json(value)).ok()
+        }),
         id,
         tags,
         dedupe_key,
@@ -1024,7 +1023,9 @@ pub(crate) fn reminder_from_vm_value(value: &VmValue) -> SystemReminder {
 
 pub(crate) fn reminder_from_event(event: &VmValue) -> Option<SystemReminder> {
     let dict = event.as_dict()?;
-    if dict.get("kind").map(|value| value.display()).as_deref() != Some(SYSTEM_REMINDER_EVENT_KIND)
+    if !dict
+        .get("kind")
+        .is_some_and(|kind| super::displays_as(kind, SYSTEM_REMINDER_EVENT_KIND))
     {
         return None;
     }
@@ -1076,7 +1077,7 @@ pub(crate) fn reminder_propagation_from_transcript(
 
 pub(crate) fn replace_reminder_payload(event: &VmValue, reminder: &SystemReminder) -> VmValue {
     let reminder_json = serde_json::to_value(reminder).unwrap_or(JsonValue::Null);
-    let reminder_value = crate::stdlib::json_to_vm_value(&reminder_json);
+    let reminder_value = crate::schema::json_to_vm_value(&reminder_json);
     let mut dict = event.as_dict().cloned().unwrap_or_default();
     dict.insert(crate::value::intern_key("reminder"), reminder_value.clone());
     dict.insert(crate::value::intern_key("metadata"), reminder_value);
@@ -1098,7 +1099,7 @@ mod tests {
     #[test]
     fn native_tool_result_roles_use_typed_transcript_events() {
         for role in ["tool", "tool_result"] {
-            let message = crate::stdlib::json_to_vm_value(&serde_json::json!({
+            let message = crate::schema::json_to_vm_value(&serde_json::json!({
                 "role": role,
                 "content": "tool output",
             }));
@@ -1118,6 +1119,7 @@ mod tests {
     #[test]
     fn reminder_round_trips_through_serde() {
         let reminder = SystemReminder {
+            goal_pin: None,
             id: "0190abcd-1234-7000-8000-000000000001".to_string(),
             tags: vec!["token_pressure".to_string(), "file_changed".to_string()],
             dedupe_key: Some("token_pressure".to_string()),
@@ -1195,7 +1197,7 @@ mod tests {
             ),
             (
                 "reminder".to_string(),
-                crate::stdlib::json_to_vm_value(&serde_json::json!({
+                crate::schema::json_to_vm_value(&serde_json::json!({
                     "body": "Reload tools",
                     "source": "hook",
                     "tags": ["tool_changed"],
@@ -1434,7 +1436,7 @@ mod tests {
                     "kind".to_string(),
                     VmValue::String(arcstr::ArcStr::from(kind)),
                 ),
-                (slot.to_string(), crate::stdlib::json_to_vm_value(&payload)),
+                (slot.to_string(), crate::schema::json_to_vm_value(&payload)),
             ])));
             let dict = event.as_dict().expect("event is dict");
             assert_eq!(dict.get("kind").map(|v| v.display()).as_deref(), Some(kind));

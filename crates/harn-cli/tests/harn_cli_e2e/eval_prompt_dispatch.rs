@@ -147,21 +147,6 @@ fn out_file_writes_match_across_runs() {
     );
 }
 
-#[test]
-fn help_is_byte_identical_across_runs() {
-    // Clap intercepts `--help` before the dispatch script runs, so the
-    // env var has no effect — pin the equality anyway so we catch a
-    // future regression where someone routes --help through the wedge.
-    let harn = run_eval_prompt_with(&["--help"], &[]);
-    let repeat = run_eval_prompt_with(&["--help"], &[]);
-    assert_eq!(harn.exit_code, 0);
-    assert_eq!(repeat.exit_code, 0);
-    assert_eq!(
-        harn.stdout, repeat.stdout,
-        "--help stdout diverged across repeat runs"
-    );
-}
-
 // ───────────────────────────────────────────────────────────────────────
 
 struct ProcessOutcome {

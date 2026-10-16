@@ -33,6 +33,37 @@ returns a closed outcome naming a receipt. A refusal the route's declared
 limits imply is decided before dispatch and makes no request at all. Cache and
 replay reuse are separate implementation steps.
 
+## Native decision model versions
+
+Jev 1.14 is available as `openrouter/typesafe/jev-1.14`,
+`typesafe/jev-1.14.0`, and `vercel/typesafe-ai/jev-1.14.0`. Direct TypeSafe
+access requires its own credential. Gateway access depends on your account.
+The direct `typesafe/jev-preview` selector points at 1.14, while
+`typesafe/jev-latest` still points at 1.13 as of October 15, 2026.
+OpenRouter's `openrouter/typesafe/jev-latest` already returns 1.14.
+Pin a version when your thresholds depend on its probability distribution.
+
+Harn also catalogs decision models from Cloudflare, Liquid, Microsoft,
+Perplexity, Inception, Nace, Respan, Together, Upstage, and Jared Palmer.
+Use `harn models info <route>` to inspect a route. These models accept typed
+questions through the evaluator and can't drive a chat or agent loop.
+Vercel routes pin the serving provider from the capability registry; the
+model's author doesn't always serve it.
+Custom `vercel_evaluate` rules must set `decision_upstream_provider`; Harn
+refuses a native gateway contract without that explicit pin.
+
+Vercel's Laya, Liquid d1 Ultra, and Decider routes answered unfiltered probes,
+but rejected Harn's required zero-retention filter on October 15. They retain
+unknown availability. A route answering without privacy filters doesn't prove
+that it can serve the evaluator's request.
+
+TypeSafe's October 14 release adds experimental images, `box` questions, and
+longer context behind explicit headers. Harn's evaluator currently exposes
+text/JSON state and boolean, choice, and score questions. It doesn't send
+those experimental headers or assets, expose box answers, or raise Jev's
+default request limits. See [TypeSafe's release announcement](https://typesafe.ai/blog/jev-1-14)
+and [model reference](https://docs.typesafe.ai/models).
+
 ## Saved receipt verification
 
 `harn llm evaluate --request request.json --verify-receipt receipt.json --json`
@@ -94,11 +125,16 @@ question id. Each answer is typed from its own question: `disposition.choice`
 is `"keep" | "reword" | "drop"`, so a `match` on it is exhaustive, and
 `risk.level` is the literal union of the declared levels. A partial answer set
 is never a smaller `answered`; it is `refused` with reason `schema_invalid`.
+Comparing a choice or score answer with an undeclared string literal is
+`HARN-TYP-002`, for both `==` and `!=` in either operand order.
 
 The question set is read at the call, because it types every answer and because
 the site manifest records which questions a site asks. Write it as a dict
 literal whose values are `boolean`, `choice`, or `score` calls with literal
 labels. Anything the checker cannot read is `HARN-TYP-036`.
+`boolean(instructions, criteria?)` accepts optional `BooleanCriteria`:
+`{true: string, false: string}` describes what each verdict means.
+Both backends receive these descriptions, and changing them changes cache identity.
 
 The single-boolean projection keeps its own shape:
 
@@ -139,7 +175,10 @@ and `model`, and a floating-point `threshold`. Optional finite nonnegative
 them does not create budget authority: native calls require an existing
 conservative ledger ceiling and retain a finite per-call price bound. Install
 that authority before the first model call; earlier unreserved calls cannot be
-retroactively covered.
+retroactively covered. A native call refused this way returns `unavailable`
+with reason `admission_refused` before any request, and its receipt's
+`admission_reason` names the cause, such as `late_activation`.
+`authority_denied` is reserved for a provider or credential refusal.
 Checking validates this shape and the resolved `decision` operation. A route
 with a supported structured transport and text generation derives structured
 decision support at the catalog owner. An explicit unsupported schema override
@@ -154,8 +193,14 @@ route using it needs `text_generation` as well. A route on a native protocol
 `decision` alone, and must not inherit a chat transport from its provider. An
 explicit native contract takes precedence over derived structured support.
 
-`effort` and `temperature` are optional chat options. Omit both for
-`native_decision`; supplying either refuses with `unsupported_options` before
+`effort`, `temperature`, `max_tokens`, `top_p`, `seed`, and `timeout_ms` are
+optional chat options. The structured profile caps output at `2048` tokens by
+default. It does not add omitted effort or temperature to chat options;
+explicit temperature zero remains an explicit request.
+Supplied settings participate in the
+request identity and output caps participate in budget admission. Unsupported
+route settings refuse instead of being dropped. Omit these options for
+`native_decision`; supplying any refuses with `unsupported_options` before
 dispatch. Native routes use the catalog's TypeSafe, Vercel, or OpenRouter
 decision protocol, never a chat endpoint. The HTTP client disables retries and
 redirects. Provider rate limits and overload responses remain typed outcomes.
@@ -163,6 +208,11 @@ Vercel requests apply the catalog's documented zero-retention and no-training
 routing restrictions. OpenRouter's native privacy controls remain unverified;
 direct TypeSafe retention is account-scoped. The receipt separates applied
 controls from gateway-reported routing facts.
+
+Structured requests deliver each question's instructions, choice meanings, and
+score levels in the user prompt as well as the output schema. Both projections
+come from the same typed question set. The evaluator instruction version is part
+of request identity, so a prompt change cannot reuse an older cached answer.
 
 Native evaluations reserve their complete request bound in the execution's
 shared monetary ledger before dispatch. Concurrent evaluations share the same

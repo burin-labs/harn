@@ -1519,7 +1519,7 @@ async fn evaluate_vm_provider(
             "register_reminder_provider: evaluate requires an async builtin VM context".to_string(),
         ));
     };
-    let arg = crate::stdlib::json_to_vm_value(&serde_json::json!({
+    let arg = crate::schema::json_to_vm_value(&serde_json::json!({
         "event": ctx.event.as_str(),
         "session": {"id": ctx.session_id},
         "session_id": ctx.session_id,

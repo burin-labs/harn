@@ -10,6 +10,9 @@ use std::path::Path;
 use harn_modules::WildcardResolution;
 use harn_parser::{DiagnosticCode as Code, SNode};
 
+/// Crate-local source contribution to compiler and check cache identities.
+pub const SOURCE_FINGERPRINT: &str = env!("HARN_SOURCE_FINGERPRINT");
+
 mod complexity;
 mod decls;
 mod diagnostic;
@@ -22,6 +25,7 @@ pub mod native;
 mod native_rule;
 mod rule;
 mod rules;
+mod source_tokens;
 mod template_span;
 
 #[cfg(test)]
@@ -55,7 +59,7 @@ pub fn lint_prompt_template(
     branch_threshold: Option<usize>,
     disabled_rules: &[String],
 ) -> Vec<LintDiagnostic> {
-    let constructs = match harn_vm::stdlib::template::lint::parse(source) {
+    let constructs = match harn_prompt_syntax::lint::parse(source) {
         Ok(constructs) => constructs,
         Err(error) => {
             return vec![LintDiagnostic {
@@ -319,6 +323,31 @@ fn lint_full(
     options: &LintOptions<'_>,
     module_graph: Option<(&harn_modules::ModuleGraph, &Path)>,
 ) -> Vec<LintDiagnostic> {
+    let lint = || {
+        lint_full_scoped(
+            program,
+            disabled_rules,
+            source,
+            externally_imported_names,
+            options,
+            module_graph,
+        )
+    };
+    match source {
+        // Every token-reading rule shares one tokenization of this source.
+        Some(source) => source_tokens::scope(source, lint),
+        None => lint(),
+    }
+}
+
+fn lint_full_scoped(
+    program: &[SNode],
+    disabled_rules: &[String],
+    source: Option<&str>,
+    externally_imported_names: &HashSet<String>,
+    options: &LintOptions<'_>,
+    module_graph: Option<(&harn_modules::ModuleGraph, &Path)>,
+) -> Vec<LintDiagnostic> {
     // Generated files (`*.generated.harn`) skip style/declaration lints entirely.
     // Type diagnostics flow through a separate path, so real correctness errors
     // are never hidden.
@@ -335,9 +364,13 @@ fn lint_full(
         program,
         &imported_type_declarations,
     );
-    if let Some(source) = source {
-        let facts = harn_parser::TypeChecker::new().check_with_facts(program, source);
-        linter.install_binding_types(facts.binding_types);
+    match (options.binding_types, source) {
+        (Some(binding_types), _) => linter.install_binding_types(binding_types.iter().cloned()),
+        (None, Some(source)) => {
+            let facts = harn_parser::TypeChecker::new().check_with_facts(program, source);
+            linter.install_binding_types(facts.binding_types);
+        }
+        (None, None) => {}
     }
     // Append project rule-engine rules to the registry. They run in the
     // whole-program phase over the source; a malformed one is skipped.
@@ -447,6 +480,7 @@ fn type_diagnostic_as_lint(diagnostic: &harn_parser::TypeDiagnostic) -> Option<L
         severity: match diagnostic.severity {
             harn_parser::DiagnosticSeverity::Warning => LintSeverity::Warning,
             harn_parser::DiagnosticSeverity::Error => LintSeverity::Error,
+            harn_parser::DiagnosticSeverity::Info => LintSeverity::Info,
         },
         suggestion: diagnostic.help.clone(),
         fix: diagnostic.fix.clone(),

@@ -91,8 +91,20 @@ pub fn control_events(session_id: &str) -> Vec<ControlEvent> {
         let Some(crate::value::VmValue::List(events)) = dict.get("events") else {
             return Vec::new();
         };
+        // `ControlEvent::from_payload` rejects any other schema first. Checking
+        // it on the VM value skips converting every message event to JSON,
+        // which made each read cost the whole transcript.
         events
             .iter()
+            .filter(|event| {
+                event
+                    .as_dict()
+                    .and_then(|event| event.get("schema"))
+                    .is_some_and(|schema| {
+                        matches!(schema, crate::value::VmValue::String(schema)
+                        if schema.as_str() == harn_session_store::CONTROL_EVENT_SCHEMA)
+                    })
+            })
             .filter_map(|event| {
                 ControlEvent::from_payload(&crate::llm::helpers::vm_value_to_json(event))
             })

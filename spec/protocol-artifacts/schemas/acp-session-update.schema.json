@@ -145,6 +145,12 @@
           "type": "object",
           "required": ["sessionId", "kind"],
           "additionalProperties": true,
+          "allOf": [
+            {
+              "if": { "properties": { "kind": { "const": "turn_phase_changed" } }, "required": ["kind"] },
+              "then": { "$ref": "#/$defs/AgentTurnPhase" }
+            }
+          ],
           "properties": {
             "sessionId": { "type": "string", "minLength": 1 },
             "kind": {
@@ -186,6 +192,7 @@
                 "scope_classifier_verdict",
                 "self_consistency_tie",
                 "session_closed",
+                "session_health",
                 "structural_validator_decision",
                 "subagent_join",
                 "subagent_stop",
@@ -193,6 +200,7 @@
                 "tool_batch_disposition",
                 "tool_call_audit",
                 "tool_format_override",
+                "turn_phase_changed",
                 "typed_checkpoint"
               ]
             }
@@ -238,6 +246,38 @@
         "terminal": { "$ref": "#/$defs/AgentTerminalOutcome" }
       }
     },
+    "AgentTurnPhase": {
+      "type": "object",
+      "required": ["phase"],
+      "oneOf": [
+        {
+          "properties": {
+            "phase": { "const": "generating" },
+            "candidate_reply": false,
+            "reply": false,
+            "outcome": false
+          }
+        },
+        {
+          "required": ["candidate_reply"],
+          "properties": {
+            "phase": { "const": "verifying" },
+            "candidate_reply": { "type": "string" },
+            "reply": false,
+            "outcome": false
+          }
+        },
+        {
+          "required": ["reply", "outcome"],
+          "properties": {
+            "phase": { "const": "terminal" },
+            "reply": { "type": "string" },
+            "outcome": { "$ref": "#/$defs/AgentTerminalOutcome" },
+            "candidate_reply": false
+          }
+        }
+      ]
+    },
     "AgentTerminalOutcome": {
       "type": "object",
       "required": ["kind", "reason", "owner"],
@@ -268,6 +308,8 @@
             "context_overflow",
             "provider_misconfigured",
             "provider_unavailable",
+            "provider_content_policy",
+            "provider_billing",
             "rate_limited",
             "timeout",
             "resource_busy",
@@ -275,7 +317,8 @@
             "host_bridge_unimplemented",
             "agent_loop_protocol_failure",
             "parse_dropped",
-            "generic_throw"
+            "generic_throw",
+            "managed_spend_paused"
           ]
         },
         "message": { "type": "string" },
@@ -321,6 +364,8 @@
             "context_overflow",
             "provider_misconfigured",
             "provider_unavailable",
+            "provider_content_policy",
+            "provider_billing",
             "rate_limited",
             "timeout",
             "resource_busy",
@@ -328,17 +373,32 @@
             "host_bridge_unimplemented",
             "agent_loop_protocol_failure",
             "parse_dropped",
-            "generic_throw"
+            "generic_throw",
+            "managed_spend_paused"
           ]
         },
         "category": { "type": "string" },
         "kind": { "type": "string" },
         "reason": { "type": "string" },
+        "origin": { "type": "string" },
+        "rule": { "type": "string" },
         "code": { "type": "string" },
         "retryable": { "type": "boolean" },
         "retryAfterMs": { "type": "integer" },
+        "machineSpend": { "$ref": "#/$defs/MachineSpendExhaustion" },
         "provider": { "type": "string" },
         "model": { "type": "string" }
+      }
+    },
+    "MachineSpendExhaustion": {
+      "type": "object",
+      "required": ["period", "limit_microusd", "reserved_microusd", "remaining_microusd"],
+      "properties": {
+        "period": { "enum": ["day", "month", "lifetime"] },
+        "limit_microusd": { "type": "integer", "format": "int64" },
+        "reserved_microusd": { "type": "integer", "format": "int64" },
+        "remaining_microusd": { "type": "integer", "format": "int64" },
+        "reset_at_unix_ms": { "type": ["integer", "null"], "format": "int64" }
       }
     },
     "SessionUpdateParams": {
@@ -391,6 +451,7 @@
       "properties": {
         "sessionUpdate": { "const": "user_message" },
         "messageId": { "type": "string", "minLength": 1 },
+        "historySourceEventId": { "type": ["string", "null"], "minLength": 1 },
         "content": {
           "type": "array",
           "items": { "$ref": "#/$defs/ContentBlock" }
@@ -403,6 +464,7 @@
       "additionalProperties": true,
       "properties": {
         "sessionUpdate": { "const": "agent_message_chunk" },
+        "historySourceEventId": { "type": ["string", "null"], "minLength": 1 },
         "content": { "$ref": "#/$defs/ContentBlock" }
       }
     },
@@ -486,6 +548,8 @@
         "errorCategory": { "type": "string" },
         "executionDurationMs": { "type": "number", "minimum": 0 },
         "executor": {},
+        "health": { "type": "object" },
+        "intent": { "type": "string", "minLength": 1, "maxLength": 200 },
         "mutationStatus": { "$ref": "#/$defs/ToolMutationStatus" },
         "parsing": { "type": "boolean" },
         "rawInputPartial": { "type": "string" }
@@ -714,7 +778,8 @@
               "mode", "strategy", "snapshotAssetId", "reason", "receiptId", "schemaVersion",
               "engineStrategy", "requestedStrategy", "resolvedThresholdTokens", "thresholdSource",
               "hardLimitTokens", "archivedMessages", "estimatedTokensBefore", "estimatedTokensAfter",
-              "instructionMode", "instructionSource", "compactionPolicy", "recap", "sourceMeasurement"
+              "instructionMode", "instructionSource", "compactionPolicy", "recap", "sourceMeasurement",
+              "classification"
             ],
             "additionalProperties": true,
             "properties": {
@@ -731,7 +796,8 @@
               "resolvedThresholdTokens": { "type": ["integer", "null"], "minimum": 0 },
               "thresholdSource": { "type": ["string", "null"] },
               "hardLimitTokens": { "type": ["integer", "null"], "minimum": 0 },
-              "sourceMeasurement": {}
+              "sourceMeasurement": {},
+              "classification": {}
             }
           } }
         }

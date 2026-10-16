@@ -442,7 +442,7 @@ pub(super) fn policy_for_mode(
 
 /// Add embedder sandbox config to the per-turn policy, skipping duplicate
 /// Harn read roots and delegating process-only merging to the VM policy type.
-fn apply_sandbox_config(policy: &mut CapabilityPolicy, sandbox: &AcpSandboxConfig) {
+pub(super) fn apply_sandbox_config(policy: &mut CapabilityPolicy, sandbox: &AcpSandboxConfig) {
     for root in &sandbox.read_only_roots {
         if !policy
             .read_only_roots
@@ -474,6 +474,10 @@ pub(super) struct ModePolicyScope {
 }
 
 impl ModePolicyScope {
+    pub(super) fn policy(&self) -> Option<&CapabilityPolicy> {
+        self.policy.as_ref()
+    }
+
     pub(super) fn new(mode_id: &str, sandbox: &AcpSandboxConfig) -> Self {
         // Install the SSRF guard only with explicit process confinement.
         // It blocks PRIVATE/loopback/link-local/metadata egress while leaving
@@ -694,26 +698,6 @@ mod tests {
     }
 
     #[test]
-    fn validate_model_selector_accepts_known_alias() {
-        // `claude-sonnet-4-6` is the catalog default; any registered
-        // alias works for this check.
-        let resolved = validate_model_selector("claude-sonnet-4-6")
-            .expect("known alias should validate")
-            .expect("known alias should produce a Some(...) selector");
-        assert_eq!(resolved, "claude-sonnet-4-6");
-    }
-
-    #[test]
-    fn validate_model_selector_rejects_unknown_provider_form() {
-        let error = validate_model_selector("nosuchprovider:nosuchmodel")
-            .expect_err("unknown provider must error");
-        assert!(
-            error.contains("invalid_model"),
-            "error should be tagged invalid_model: {error}"
-        );
-    }
-
-    #[test]
     fn policy_for_code_with_no_config_is_none() {
         // No-config default MUST be byte-identical to historical behavior:
         // ActAuto `code` mode installs no per-turn policy, leaving the ambient
@@ -900,33 +884,6 @@ mod tests {
             vec!["/opt/vendor-cache".to_string()]
         );
         assert!(policy.read_only_roots.is_empty());
-    }
-
-    #[test]
-    fn code_mode_honors_embedder_read_only_roots_when_process_sandbox_is_configured() {
-        // A process-sandbox-configured embedder gets Worktree confinement
-        // with its declared read-only roots still applied, even in
-        // full-access ACP code mode. `read_only_roots` alone (no process
-        // config) is covered by the read-only-roots-only regression above.
-        let mut sandbox =
-            AcpSandboxConfig::with_process(harn_vm::orchestration::ProcessSandboxPolicy {
-                presets: Some(vec![
-                    harn_vm::orchestration::ProcessSandboxPreset::DeveloperToolchains,
-                ]),
-                read_roots: Vec::new(),
-                write_roots: Vec::new(),
-                ..Default::default()
-            });
-        sandbox.read_only_roots = vec!["/opt/burin/pipelines".to_string()];
-        let policy = policy_for_mode("code", &sandbox).expect("configured code mode has policy");
-        assert_eq!(
-            policy.read_only_roots,
-            vec!["/opt/burin/pipelines".to_string()]
-        );
-        assert_eq!(
-            policy.sandbox_profile,
-            harn_vm::orchestration::SandboxProfile::Worktree
-        );
     }
 
     #[test]
@@ -1198,6 +1155,51 @@ mod tests {
             "neither turn's ceiling may outlive its own prompt scope"
         );
         clear_execution_policy_stacks();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn concurrent_prompt_turns_keep_their_own_llm_budget_and_session_spend() {
+        use std::future::Future;
+        use std::task::{Context, Poll, Wake, Waker};
+
+        struct NoopWake;
+        impl Wake for NoopWake {
+            fn wake(self: std::sync::Arc<Self>) {}
+        }
+
+        async fn turn(scope: &ModePolicyScope, max: f64, seed: f64, tokens: u64) {
+            scope
+                .run(async {
+                    // Same install and policy scope used by handle_session_prompt.
+                    let budget = crate::limits::BudgetSpec {
+                        llm_cost_usd: Some(max),
+                        llm_tokens: Some(tokens),
+                        ..Default::default()
+                    };
+                    let _guard = budget.install_session_turn(seed);
+                    tokio::task::yield_now().await;
+                    assert_eq!(harn_vm::peek_llm_cost_budget(), Some(max));
+                    assert_eq!(harn_vm::llm::peek_total_cost(), seed);
+                    assert_eq!(harn_vm::peek_llm_token_budget(), Some(tokens));
+                })
+                .await;
+        }
+
+        let first = ModePolicyScope::new("code", &AcpSandboxConfig::default());
+        let second = ModePolicyScope::new("code", &AcpSandboxConfig::default());
+        let mut first_turn = Box::pin(turn(&first, 1.0, 0.25, 10));
+        let mut second_turn = Box::pin(turn(&second, 2.0, 0.5, 20));
+        let waker = Waker::from(std::sync::Arc::new(NoopWake));
+        let mut cx = Context::from_waker(&waker);
+        assert!(first_turn.as_mut().poll(&mut cx).is_pending());
+        assert!(second_turn.as_mut().poll(&mut cx).is_pending());
+        assert_eq!(first_turn.as_mut().poll(&mut cx), Poll::Ready(()));
+        assert_eq!(harn_vm::peek_llm_cost_budget(), None);
+        assert_eq!(harn_vm::peek_llm_token_budget(), None);
+        assert_eq!(second_turn.as_mut().poll(&mut cx), Poll::Ready(()));
+        assert_eq!(harn_vm::peek_llm_cost_budget(), None);
+        assert_eq!(harn_vm::peek_llm_token_budget(), None);
+        assert_eq!(harn_vm::llm::peek_total_cost(), 0.0);
     }
 
     // ---- an embedder may DECLINE confinement, not only arm it --------------

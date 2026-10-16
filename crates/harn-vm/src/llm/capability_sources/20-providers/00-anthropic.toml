@@ -1,5 +1,15 @@
 # ---------- Anthropic (Claude) ------------------------------------------------
 
+# Claude 5.5 on the Claude API and Google Cloud requires this toolset rather
+# than computer_20251124 (direct API 2026-10-11: legacy=400, toolset=200 on
+# Haiku, Sonnet and Opus). Its member results must echo toolset_name=computer.
+# Scope this protocol change to the measured generation; Bedrock owns a
+# separate capability layer and retains its existing projection.
+[[provider.anthropic]]
+model_match = ["claude-haiku-5-5", "claude-sonnet-5-5", "claude-opus-5-5", "anthropic/claude-haiku-5-5", "anthropic/claude-sonnet-5-5", "anthropic/claude-opus-5-5", "anthropic/claude-haiku-5.5", "anthropic/claude-sonnet-5.5", "anthropic/claude-opus-5.5"]
+extends = true
+computer_use_style = "native_anthropic_toolset"
+
 # `prompt_cache_min_prefix_tokens` is the shortest prefix Anthropic will
 # actually cache. Below it a `cache_control` breakpoint is accepted and then
 # silently ignored — no error, no cache_creation_input_tokens. The value is
@@ -217,6 +227,36 @@ prefers_role_developer = false
 prefers_xml_tools = true
 thinking_block_style = "thinking_blocks"
 
+# Claude Haiku 5.5 (2026-10-07) layers the generation-5 surface onto the
+# adaptive-only row below. Probed through OpenRouter's first-party Anthropic
+# and Claude Platform on AWS endpoints on 2026-10-09 with Haiku 4.5 as the
+# control:
+#   * effort is honored at `low` and `max` (209 and 461 reasoning tokens on the
+#     same prompt), and thinking can be turned off (`reasoning.enabled: false`
+#     returned 200 with zero reasoning tokens). The off switch is `disabled`,
+#     valid at effort `high` or below like the rest of generation 5; the shared
+#     generation-5 clamp in the Anthropic adapter already enforces that ceiling;
+#   * forced tool choice is still accepted (a named-function `tool_choice`
+#     returned a tool call), so unlike Sonnet 5.5 and Opus 5.5 this row leaves
+#     `allowed_tool_choice_modes` unrestricted;
+#   * assistant prefill is a 400 ("This model does not support assistant message
+#     prefill"), where Haiku 4.5 continued the prefill;
+#   * a 914-token prefix wrote and then read a cache entry, where Haiku 4.5
+#     (4096-token floor) cached nothing; Anthropic documents a 512-token floor.
+# Mid-conversation system messages are native on this model (Anthropic
+# migration guide for Haiku 5.5, read 2026-10-09).
+[[provider.anthropic]]
+model_match = "claude-haiku-*"
+version_min = [5, 5]
+extends = true
+native_tools = true
+prompt_cache_min_prefix_tokens = 512
+system_message_placement = "native_directive"
+thinking_modes = ["adaptive", "effort"]
+reasoning_effort_supported = true
+reasoning_effort_levels = ["low", "medium", "high", "xhigh", "max"]
+interleaved_thinking_supported = true
+
 # Claude 4.7+ uses adaptive thinking instead of explicit budgets.
 [[provider.anthropic]]
 model_match = "claude-haiku-*"
@@ -317,6 +357,28 @@ top_k_supported = false
 prefers_role_developer = false
 prefers_xml_tools = true
 thinking_block_style = "thinking_blocks"
+
+# Sonnet 5.5 (2026-09-28) narrows the Sonnet 5 surface in three wire-visible
+# ways, each probed against the live API on 2026-09-29 with Sonnet 5 as the
+# control:
+#   * the off switch is `{"type":"between_tools"}`; `{"type":"disabled"}` is a
+#     400 (Sonnet 5 accepts it). Like `disabled`, it caps effort at `high`:
+#     `xhigh` and `max` with it are 400s;
+#   * forced tool choice is gone — `tool_choice` `any` / `tool` are 400s,
+#     `auto` and `none` return 200 (Sonnet 5 accepts `tool`);
+#   * the minimum cacheable prefix is 512 tokens: a 522-token prefix wrote a
+#     cache entry, while a 776-token prefix on Sonnet 5 wrote none.
+# The `claude-sonnet-5*` glob below matches `claude-sonnet-5-5` too, so without
+# this row Sonnet 5.5 silently inherited Sonnet 5's `disabled` switch and every
+# default Harn call to it failed with a 400.
+[[provider.anthropic]]
+model_match = "claude-sonnet-*"
+version_min = [5, 5]
+extends = true
+native_tools = true
+prompt_cache_min_prefix_tokens = 512
+thinking_off_type = "between_tools"
+allowed_tool_choice_modes = ["auto", "none"]
 
 [[provider.anthropic]]
 model_match = "claude-sonnet-5*"
@@ -473,6 +535,12 @@ prefers_xml_tools = true
 thinking_block_style = "thinking_blocks"
 
 # Sonnet 4.6 rejects assistant prefill while keeping the 4.x tool surface.
+# It accepts `output_config.effort` at low/medium/high/max (no xhigh; high is
+# the API default) and adaptive thinking, with `enabled` + `budget_tokens`
+# still accepted but deprecated. Source: platform.claude.com/docs/en/
+# build-with-claude/effort (supportedModels lists claude-sonnet-4-6), read
+# 2026-09-27. Before this row declared effort, the portable `effort` option
+# was refused on Sonnet 4.6 as unsupported.
 [[provider.anthropic]]
 model_match = "claude-sonnet-*"
 version_min = [4, 6]
@@ -490,7 +558,9 @@ audio_supported = true
 pdf_supported = true
 files_api_supported = true
 structured_output = "native"
-thinking_modes = ["enabled"]
+thinking_modes = ["enabled", "adaptive", "effort"]
+reasoning_effort_supported = true
+reasoning_effort_levels = ["low", "medium", "high", "max"]
 vision_supported = true
 prefers_xml_scaffolding = true
 prefers_markdown_scaffolding = false
@@ -535,6 +605,19 @@ supports_assistant_prefill = true
 prefers_role_developer = false
 prefers_xml_tools = true
 thinking_block_style = "thinking_blocks"
+
+# Prefixed Haiku 5.5 ids mirror the direct 5.5 row above.
+[[provider.anthropic]]
+model_match = "anthropic/claude-haiku-*"
+version_min = [5, 5]
+extends = true
+native_tools = true
+prompt_cache_min_prefix_tokens = 512
+system_message_placement = "native_directive"
+thinking_modes = ["adaptive", "effort"]
+reasoning_effort_supported = true
+reasoning_effort_levels = ["low", "medium", "high", "xhigh", "max"]
+interleaved_thinking_supported = true
 
 # OpenRouter-style `anthropic/claude-...` prefixes.
 [[provider.anthropic]]
@@ -616,6 +699,16 @@ top_k_supported = false
 prefers_role_developer = false
 prefers_xml_tools = true
 thinking_block_style = "thinking_blocks"
+
+# Prefixed Sonnet 5.5 ids mirror the direct 5.5 row above.
+[[provider.anthropic]]
+model_match = "anthropic/claude-sonnet-*"
+version_min = [5, 5]
+extends = true
+native_tools = true
+prompt_cache_min_prefix_tokens = 512
+thinking_off_type = "between_tools"
+allowed_tool_choice_modes = ["auto", "none"]
 
 [[provider.anthropic]]
 model_match = "anthropic/claude-sonnet-5*"
@@ -784,7 +877,9 @@ audio_supported = true
 pdf_supported = true
 files_api_supported = true
 structured_output = "native"
-thinking_modes = ["enabled"]
+thinking_modes = ["enabled", "adaptive", "effort"]
+reasoning_effort_supported = true
+reasoning_effort_levels = ["low", "medium", "high", "max"]
 vision_supported = true
 prefers_xml_scaffolding = true
 prefers_markdown_scaffolding = false

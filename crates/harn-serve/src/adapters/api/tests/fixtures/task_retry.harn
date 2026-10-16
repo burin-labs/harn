@@ -1,0 +1,32 @@
+import { agent_loop } from "std/agent/loop"
+import { AgentSpec } from "std/agent/options"
+import { llm_stream_text, with_llm_script } from "std/testing"
+
+pipeline main(harness: Harness) {
+  with_llm_script(
+    harness.llm,
+    [llm_stream_text(["provider-", "reached"])],
+    { ->
+      const options: AgentSpec = {
+        provider: "mock",
+        model: "task-retry-proof",
+        max_iterations: 1,
+        on_delta: { delta -> harness.stdio.print(delta) },
+      }
+      const response = agent_loop(harness, prompt, nil, options)
+      assert(response.visible_text == "provider-reached", "the streaming provider path fired")
+      assert(len(harness.llm.mock_calls()) == 1, "one provider call per admitted task")
+      harness.fs.write_text(
+        "task-retry-provider-request.json",
+        json_stringify(harness.llm.mock_calls()),
+      )
+      const marker = "task-retry-provider.txt"
+      const previous = if harness.fs.exists(marker) {
+        harness.fs.read_text(marker)
+      } else {
+        ""
+      }
+      harness.fs.write_text(marker, previous + "provider-reached\n")
+    },
+  )
+}

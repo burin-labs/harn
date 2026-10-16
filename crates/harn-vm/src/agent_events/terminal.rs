@@ -24,7 +24,8 @@ use super::agent::AgentEvent;
 /// Serialized `snake_case`. The vocabulary is deliberately extensible —
 /// [`Self::Unknown`] is the honest fallback when no rule matched or the
 /// supplied terminal evidence conflicts.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Serialize, Deserialize, schemars::JsonSchema)]
+#[non_exhaustive]
 #[serde(rename_all = "snake_case")]
 pub enum AgentTerminalKind {
     /// The model/agent finished naturally — a clean completion or a verified
@@ -441,6 +442,9 @@ pub fn classify_agent_terminal_with_class(
         // maps it so the vocabulary is total and any host that does route a
         // cancel through finalize is attributed correctly rather than `Unknown`.
         "cancelled" | "canceled" | "aborted" => AgentTerminalKind::UserCancelled,
+        // The loop-control owner seals this status for its stop command.
+        // A caller's reason is diagnostic text, not another classification key.
+        "stopped" => AgentTerminalKind::PolicyStop,
         "provider_error" => AgentTerminalKind::ProviderError,
         "error" | "failed" => classify_error(terminal_class),
         // A verification cap/budget was exhausted before `done` could be
@@ -636,6 +640,12 @@ mod tests {
 
     #[test]
     fn policy_stops_map_to_specific_kinds() {
+        for reason in ["loop_control", "repair authority revoked"] {
+            let outcome = terminal_outcome_for_finalize("stopped", reason, None, false);
+            assert_eq!(outcome.kind, AgentTerminalKind::PolicyStop);
+            assert_eq!(outcome.kind.owner(), "policy");
+            assert_eq!(outcome.reason, reason);
+        }
         assert_eq!(
             classify_agent_terminal("budget_exhausted", "max_iterations", false, None),
             AgentTerminalKind::PolicyBudget,

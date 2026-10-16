@@ -9,9 +9,8 @@ impl RpcBridge {
     pub(super) fn start(service: Arc<McpOrchestratorService>) -> Self {
         let (tx, mut rx) = mpsc::unbounded_channel::<RpcRequest>();
         // Every MCP request is dispatched on this thread, so it drives the VM.
-        std::thread::Builder::new()
+        harn_parser::runtime_stack::builder()
             .name("harn-mcp-rpc".to_string())
-            .stack_size(crate::CLI_RUNTIME_STACK_SIZE)
             .spawn(move || {
                 let runtime = tokio::runtime::Builder::new_current_thread()
                     .enable_all()

@@ -284,7 +284,7 @@ fn sandbox_exec_profile_scopes_toolchain_cache_writes() {
     );
 }
 
-fn macos_policy_with_workspace_ops(ops: &[&str]) -> CapabilityPolicy {
+pub(super) fn macos_policy_with_workspace_ops(ops: &[&str]) -> CapabilityPolicy {
     CapabilityPolicy {
         tools: Vec::new(),
         capabilities: std::collections::BTreeMap::from([(
@@ -322,16 +322,20 @@ fn sandbox_profile_does_not_grant_global_file_read() {
 
 #[test]
 fn sandbox_profile_allows_tmp_write_only_with_workspace_write() {
-    let read_only = render_profile(&macos_policy_with_workspace_ops(&["read_text"]));
+    let workspace = tempfile::tempdir().unwrap();
+    let mut read_policy = macos_policy_with_workspace_ops(&["read_text"]);
+    read_policy.workspace_roots = vec![workspace.path().display().to_string()];
+    let read_only = render_profile(&read_policy);
     assert!(
         !read_only.contains("(allow file-write* (subpath \"/tmp\")"),
         "read-only profile must not grant temp writes"
     );
 
-    let writable = render_profile(&macos_policy_with_workspace_ops(&["write_text"]));
-    let session_temp =
-        super::super::workspace_local_tmpdir(&macos_policy_with_workspace_ops(&["write_text"]))
-            .expect("a writable workspace has a session temp dir");
+    let mut write_policy = macos_policy_with_workspace_ops(&["write_text"]);
+    write_policy.workspace_roots = read_policy.workspace_roots;
+    let writable = render_profile(&write_policy);
+    let session_temp = super::super::workspace_local_tmpdir(&write_policy)
+        .expect("a writable workspace has a session temp dir");
     assert!(
         writable.contains(&format!(
             "(allow file-read* (subpath \"{}\"))",
@@ -339,14 +343,12 @@ fn sandbox_profile_allows_tmp_write_only_with_workspace_write() {
         )),
         "writable profile should grant the session temp dir: {writable}"
     );
-    let replacement = super::toolchain_roots::foundation_replacement_root()
-        .expect("the per-user temp dir resolves");
+    assert!(super::private_temp::prepare(&write_policy)
+        .expect("native temporary mapping")
+        .is_some());
     assert!(
-        writable.contains(&format!(
-            "(allow file-read* (subpath \"{}\"))",
-            replacement.display()
-        )),
-        "writable profile should grant Foundation's replacement staging dir: {writable}"
+        !writable.contains("TemporaryItems"),
+        "shared replacement storage must not be granted: {writable}"
     );
     // The host's shared temp dirs hold every other process's files.
     for shared in [
@@ -392,10 +394,10 @@ fn sandbox_profile_honors_explicit_process_presets() {
 fn sandbox_profile_allows_package_manager_config_read_only() {
     let temp_home = tempfile::tempdir().expect("temp home");
     std::fs::write(
-        temp_home.path().join(".npmrc"),
-        "registry=https://registry.example\n",
+        temp_home.path().join(".gitconfig"),
+        "[user]\n\tname = Example\n",
     )
-    .expect("write npmrc");
+    .expect("write gitconfig");
 
     let package_roots = super::super::package_manager_config_read_roots_for_home(temp_home.path());
     let profile = render_profile_with_extra_read_roots(
@@ -404,13 +406,13 @@ fn sandbox_profile_allows_package_manager_config_read_only() {
         &package_roots,
         &[],
     );
-    let npmrc_path = super::super::package_manager_config_read_roots_for_home(temp_home.path())
+    let gitconfig_path = super::super::package_manager_config_read_roots_for_home(temp_home.path())
         .into_iter()
-        .find(|path| path.ends_with(".npmrc"))
-        .expect("npmrc root")
+        .find(|path| path.ends_with(".gitconfig"))
+        .expect("gitconfig root")
         .display()
         .to_string();
-    let escaped = sandbox_profile_escape(&npmrc_path);
+    let escaped = sandbox_profile_escape(&gitconfig_path);
 
     assert!(
         profile.contains(&format!("(allow file-read* (subpath \"{escaped}\"))")),
@@ -1093,8 +1095,8 @@ let package = Package(
 
 // ---- read denylist: it must beat the presets ---------------------------
 //
-// `PackageManagerConfig` grants child reads of `~/.netrc`, `~/.config`, and
-// `~/.cache` wholesale. A denylist that merely competed with presets would
+// `PackageManagerConfig` grants child reads of tool configuration, including
+// `~/.config/composer`. A denylist that merely competed with presets would
 // never fire on the paths it exists for, because the credential is INSIDE a
 // directory the preset already opened. Composition order is the feature, so
 // it is what these assert.
@@ -1120,13 +1122,13 @@ fn denylist_home() -> std::path::PathBuf {
 #[test]
 fn the_package_manager_preset_really_grants_the_parent_directory() {
     let profile = render_profile(&package_manager_preset_policy());
-    let config = denylist_home().join(".config");
+    let config = denylist_home().join(".config/composer");
     assert!(
         profile.contains(&format!(
             "(allow file-read* (subpath \"{}\"))",
             config.display()
         )),
-        "PackageManagerConfig must grant ~/.config, or the denial below proves nothing:\n{profile}"
+        "PackageManagerConfig must grant ~/.config/composer, or the denial below proves nothing:\n{profile}"
     );
 }
 

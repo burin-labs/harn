@@ -1,3 +1,4 @@
+use crate::value::VmDictExt;
 use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, VecDeque};
 #[cfg(not(unix))]
@@ -11,7 +12,7 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use crate::stdlib::args::Args;
-use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
+use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
@@ -110,44 +111,6 @@ pub fn reserve_stdio_for_current_thread() -> StdioReservationGuard {
         _thread_bound: PhantomData,
     }
 }
-
-pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
-    &LOG_BUILTIN_DEF,
-    &COLOR_BUILTIN_DEF,
-    &BOLD_BUILTIN_DEF,
-    &DIM_BUILTIN_DEF,
-    &SET_COLOR_MODE_BUILTIN_DEF,
-    &ANSI_ENABLED_BUILTIN_DEF,
-    &READ_STDIN_BUILTIN_DEF,
-    &IO_READ_LINE_BUILTIN_DEF,
-    &IO_WRITE_STDERR_BUILTIN_DEF,
-    &IO_WRITE_STDOUT_BUILTIN_DEF,
-    &IO_PRINT_BUILTIN_DEF,
-    &IO_PRINTLN_BUILTIN_DEF,
-    &IO_EPRINT_BUILTIN_DEF,
-    &IO_EPRINTLN_BUILTIN_DEF,
-    &IS_STDIN_TTY_BUILTIN_DEF,
-    &IS_STDOUT_TTY_BUILTIN_DEF,
-    &IS_STDERR_TTY_BUILTIN_DEF,
-    &MOCK_STDIN_BUILTIN_DEF,
-    &UNMOCK_STDIN_BUILTIN_DEF,
-    &MOCK_TTY_BUILTIN_DEF,
-    &UNMOCK_TTY_BUILTIN_DEF,
-    &CAPTURE_STDERR_START_BUILTIN_DEF,
-    &CAPTURE_STDERR_TAKE_BUILTIN_DEF,
-    &UUID_BUILTIN_DEF,
-    &UUID_PARSE_BUILTIN_DEF,
-    &UUID_V7_BUILTIN_DEF,
-    &UUID_V5_BUILTIN_DEF,
-    &UUID_NIL_BUILTIN_DEF,
-    &LOG_DEBUG_BUILTIN_DEF,
-    &LOG_INFO_BUILTIN_DEF,
-    &LOG_WARN_BUILTIN_DEF,
-    &LOG_ERROR_BUILTIN_DEF,
-    &LOG_SET_LEVEL_BUILTIN_DEF,
-    &PROGRESS_BUILTIN_DEF,
-    &LOG_JSON_BUILTIN_DEF,
-];
 
 /// Reset all io thread-local state for test isolation.
 pub(crate) fn reset_io_state() {
@@ -298,28 +261,28 @@ fn read_line_result(outcome: ReadLineOutcome) -> VmValue {
     let mut out = BTreeMap::new();
     match outcome {
         ReadLineOutcome::Ok(value) => {
-            out.insert("ok".to_string(), VmValue::Bool(true));
-            out.insert("status".to_string(), VmValue::string("ok"));
-            out.insert("value".to_string(), VmValue::string(value));
+            out.put_bool("ok", true);
+            out.put("status", VmValue::string("ok"));
+            out.put("value", VmValue::string(value));
         }
         ReadLineOutcome::Eof => {
-            out.insert("ok".to_string(), VmValue::Bool(false));
-            out.insert("status".to_string(), VmValue::string("eof"));
+            out.put_bool("ok", false);
+            out.put("status", VmValue::string("eof"));
         }
         #[cfg(unix)]
         ReadLineOutcome::Timeout => {
-            out.insert("ok".to_string(), VmValue::Bool(false));
-            out.insert("status".to_string(), VmValue::string("timeout"));
+            out.put_bool("ok", false);
+            out.put("status", VmValue::string("timeout"));
         }
         #[cfg(unix)]
         ReadLineOutcome::Interrupt => {
-            out.insert("ok".to_string(), VmValue::Bool(false));
-            out.insert("status".to_string(), VmValue::string("interrupt"));
+            out.put_bool("ok", false);
+            out.put("status", VmValue::string("interrupt"));
         }
         ReadLineOutcome::Error(error) => {
-            out.insert("ok".to_string(), VmValue::Bool(false));
-            out.insert("status".to_string(), VmValue::string("error"));
-            out.insert("error".to_string(), VmValue::string(error));
+            out.put_bool("ok", false);
+            out.put("status", VmValue::string("error"));
+            out.put("error", VmValue::string(error));
         }
     }
     VmValue::dict(out)
@@ -585,9 +548,7 @@ fn ansi_enabled_for_stream(stream: &str) -> bool {
 }
 
 pub(crate) fn register_io_builtins(vm: &mut Vm) {
-    for def in MODULE_BUILTINS {
-        vm.register_builtin_def(def);
-    }
+    crate::stdlib::macros::register_module_builtins(vm, module_path!());
     use harn_builtin_meta::CapabilityId;
     vm.register_capability_method(CapabilityId::Term, "set_color_mode", set_color_mode_builtin);
     vm.register_capability_method(CapabilityId::Stdio, "read_stdin", read_stdin_builtin);
@@ -635,11 +596,9 @@ fn color_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError
     let text = args.first().map(|a| a.display()).unwrap_or_default();
     let name = args.get(1).map(|a| a.display()).unwrap_or_default();
     if !ansi_enabled_for_stream("stdout") {
-        return Ok(VmValue::String(arcstr::ArcStr::from(text)));
+        return Ok(VmValue::string(text));
     }
-    Ok(VmValue::String(arcstr::ArcStr::from(ansi_colorize(
-        &text, &name,
-    ))))
+    Ok(VmValue::string(ansi_colorize(&text, &name)))
 }
 
 #[harn_builtin(
@@ -652,11 +611,9 @@ fn color_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError
 fn bold_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let text = args.first().map(|a| a.display()).unwrap_or_default();
     if !ansi_enabled_for_stream("stdout") {
-        return Ok(VmValue::String(arcstr::ArcStr::from(text)));
+        return Ok(VmValue::string(text));
     }
-    Ok(VmValue::String(arcstr::ArcStr::from(format!(
-        "\u{1b}[1m{text}\u{1b}[0m"
-    ))))
+    Ok(VmValue::string(format!("\u{1b}[1m{text}\u{1b}[0m")))
 }
 
 #[harn_builtin(
@@ -669,11 +626,9 @@ fn bold_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError>
 fn dim_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let text = args.first().map(|a| a.display()).unwrap_or_default();
     if !ansi_enabled_for_stream("stdout") {
-        return Ok(VmValue::String(arcstr::ArcStr::from(text)));
+        return Ok(VmValue::string(text));
     }
-    Ok(VmValue::String(arcstr::ArcStr::from(format!(
-        "\u{1b}[2m{text}\u{1b}[0m"
-    ))))
+    Ok(VmValue::string(format!("\u{1b}[2m{text}\u{1b}[0m")))
 }
 
 #[harn_builtin(
@@ -690,10 +645,8 @@ fn set_color_mode_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue
         "always" => ColorMode::Always,
         "never" => ColorMode::Never,
         other => {
-            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-                format!(
+            return Err(VmError::Thrown(VmValue::string(format!(
                 "set_color_mode: invalid mode '{other}'. Expected 'auto', 'always', or 'never'."
-            ),
             ))));
         }
     };
@@ -715,10 +668,8 @@ fn ansi_enabled_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
         .unwrap_or_else(|| "stdout".to_string());
     match stream.as_str() {
         "stdin" | "stdout" | "stderr" => Ok(VmValue::Bool(ansi_enabled_for_stream(&stream))),
-        other => Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-            format!(
+        other => Err(VmError::Thrown(VmValue::string(format!(
             "__ansi_enabled: invalid stream '{other}'. Expected 'stdin', 'stdout', or 'stderr'."
-        ),
         )))),
     }
 }
@@ -736,13 +687,13 @@ fn read_stdin_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, V
     if let Some(buf) = mocked {
         // After read_stdin, future read_line calls return nil because stdin is consumed.
         STDIN_LINES.with(|lines| *lines.borrow_mut() = Some(VecDeque::new()));
-        return Ok(VmValue::String(arcstr::ArcStr::from(buf)));
+        return Ok(VmValue::string(buf));
     }
     if !STDIN_ALLOWED.get() {
         return Ok(VmValue::Nil);
     }
     match read_stdin_all_real() {
-        Some(s) => Ok(VmValue::String(arcstr::ArcStr::from(s))),
+        Some(s) => Ok(VmValue::string(s)),
         None => Ok(VmValue::Nil),
     }
 }
@@ -753,7 +704,7 @@ pub(crate) fn read_line_legacy_value() -> VmValue {
         ..ReadLineOptions::default()
     };
     match read_line_from_mock_or_real(&options) {
-        ReadLineOutcome::Ok(line) => VmValue::String(arcstr::ArcStr::from(line)),
+        ReadLineOutcome::Ok(line) => VmValue::string(line),
         ReadLineOutcome::Eof => VmValue::Nil,
         #[cfg(unix)]
         ReadLineOutcome::Timeout => VmValue::Nil,
@@ -974,7 +925,7 @@ fn capture_stderr_start_builtin(_args: &[VmValue], _out: &mut String) -> Result<
 fn capture_stderr_take_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let buf = STDERR_BUFFER.with(|s| std::mem::take(&mut *s.borrow_mut()));
     STDERR_CAPTURING.with(|c| *c.borrow_mut() = false);
-    Ok(VmValue::String(arcstr::ArcStr::from(buf)))
+    Ok(VmValue::string(buf))
 }
 
 #[harn_builtin(
@@ -985,9 +936,7 @@ fn capture_stderr_take_builtin(_args: &[VmValue], _out: &mut String) -> Result<V
     doc = "Generate a random version 4 UUID."
 )]
 fn uuid_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    Ok(VmValue::String(arcstr::ArcStr::from(
-        uuid::Uuid::new_v4().to_string(),
-    )))
+    Ok(VmValue::string(uuid::Uuid::new_v4().to_string()))
 }
 
 #[harn_builtin(
@@ -1000,7 +949,7 @@ fn uuid_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError
 fn uuid_parse_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let raw = args.first().map(|a| a.display()).unwrap_or_default();
     match uuid::Uuid::parse_str(&raw) {
-        Ok(uuid) => Ok(VmValue::String(arcstr::ArcStr::from(uuid.to_string()))),
+        Ok(uuid) => Ok(VmValue::string(uuid.to_string())),
         Err(_) => Ok(VmValue::Nil),
     }
 }
@@ -1013,9 +962,7 @@ fn uuid_parse_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
     doc = "Generate a time-ordered version 7 UUID."
 )]
 fn uuid_v7_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    Ok(VmValue::String(arcstr::ArcStr::from(
-        uuid::Uuid::now_v7().to_string(),
-    )))
+    Ok(VmValue::string(uuid::Uuid::now_v7().to_string()))
 }
 
 #[harn_builtin(
@@ -1036,9 +983,9 @@ fn uuid_v5_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
         VmError::Runtime("uuid_v5: namespace must be a UUID or one of dns/url/oid/x500".to_string())
     })?;
     let name = args[1].display();
-    Ok(VmValue::String(arcstr::ArcStr::from(
+    Ok(VmValue::string(
         uuid::Uuid::new_v5(&namespace, name.as_bytes()).to_string(),
-    )))
+    ))
 }
 
 #[harn_builtin(
@@ -1049,9 +996,7 @@ fn uuid_v5_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
     doc = "Return the nil UUID."
 )]
 fn uuid_nil_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    Ok(VmValue::String(arcstr::ArcStr::from(
-        uuid::Uuid::nil().to_string(),
-    )))
+    Ok(VmValue::string(uuid::Uuid::nil().to_string()))
 }
 
 pub(crate) fn prompt_user_value(args: &[VmValue], out: &mut String) -> Result<VmValue, VmError> {
@@ -1062,9 +1007,7 @@ pub(crate) fn prompt_user_value(args: &[VmValue], out: &mut String) -> Result<Vm
         ..ReadLineOptions::default()
     };
     match read_line_from_mock_or_real(&options) {
-        ReadLineOutcome::Ok(line) => Ok(VmValue::String(arcstr::ArcStr::from(
-            line.trim_end().to_string(),
-        ))),
+        ReadLineOutcome::Ok(line) => Ok(VmValue::string(line.trim_end().to_string())),
         ReadLineOutcome::Eof => Ok(VmValue::Nil),
         #[cfg(unix)]
         ReadLineOutcome::Timeout => Ok(VmValue::Nil),
@@ -1082,7 +1025,7 @@ pub(crate) fn read_password_legacy_value(prompt: &str) -> Result<VmValue, VmErro
         ..ReadLineOptions::default()
     };
     match read_line_from_mock_or_real(&options) {
-        ReadLineOutcome::Ok(line) => Ok(VmValue::String(arcstr::ArcStr::from(line))),
+        ReadLineOutcome::Ok(line) => Ok(VmValue::string(line)),
         ReadLineOutcome::Eof => Err(VmError::Runtime(
             "HarnessTerm.read_password: stdin reached EOF".to_string(),
         )),
@@ -1167,10 +1110,8 @@ fn log_set_level_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue,
             VM_MIN_LOG_LEVEL.store(n, Ordering::Relaxed);
             Ok(VmValue::Nil)
         }
-        None => Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-            format!(
-                "log_set_level: invalid level '{level_str}'. Expected debug, info, warn, or error"
-            ),
+        None => Err(VmError::Thrown(VmValue::string(format!(
+            "log_set_level: invalid level '{level_str}'. Expected debug, info, warn, or error"
         )))),
     }
 }
@@ -1330,224 +1271,4 @@ fn ansi_colorize(text: &str, name: &str) -> String {
 }
 
 #[cfg(test)]
-mod tests {
-    use crate::value::VmDictExt;
-    use std::collections::BTreeMap;
-    #[cfg(unix)]
-    use std::sync::atomic::{AtomicBool, Ordering};
-    #[cfg(unix)]
-    use std::sync::Arc;
-    #[cfg(unix)]
-    use std::time::Instant;
-
-    use crate::value::VmValue;
-
-    use super::{
-        mock_stdin_builtin, read_line_from_mock_or_real, read_stdin_builtin, render_progress_bar,
-        render_progress_line, reserve_stdio_for_current_thread, reset_io_state,
-        set_stdout_passthrough, spinner_frame, stdout_passthrough_enabled, ReadLineOptions,
-        ReadLineOutcome, STDIN_ALLOWED, STDOUT_ALLOWED,
-    };
-
-    static_assertions::assert_not_impl_any!(super::StdioReservationGuard: Send, Sync);
-
-    #[test]
-    fn stdout_passthrough_state_toggles() {
-        reset_io_state();
-
-        assert!(!stdout_passthrough_enabled());
-        assert!(!set_stdout_passthrough(true));
-        assert!(stdout_passthrough_enabled());
-
-        assert!(set_stdout_passthrough(false));
-        assert!(!stdout_passthrough_enabled());
-    }
-
-    #[test]
-    fn scoped_stdio_reservation_is_repeatable_and_restores_prior_policy() {
-        reset_io_state();
-        assert!(STDIN_ALLOWED.get());
-        assert!(STDOUT_ALLOWED.get());
-
-        {
-            let _outer = reserve_stdio_for_current_thread();
-            assert_eq!(
-                read_line_from_mock_or_real(&ReadLineOptions::default()),
-                ReadLineOutcome::Eof
-            );
-            assert!(matches!(
-                read_stdin_builtin(&[], &mut String::new()).unwrap(),
-                VmValue::Nil
-            ));
-            assert!(matches!(
-                read_stdin_builtin(&[], &mut String::new()).unwrap(),
-                VmValue::Nil
-            ));
-            mock_stdin_builtin(&[VmValue::string("fixture")], &mut String::new()).unwrap();
-            assert_eq!(
-                read_stdin_builtin(&[], &mut String::new())
-                    .unwrap()
-                    .display(),
-                "fixture"
-            );
-            assert!(matches!(
-                read_stdin_builtin(&[], &mut String::new()).unwrap(),
-                VmValue::Nil
-            ));
-            {
-                let _inner = reserve_stdio_for_current_thread();
-                assert!(!STDIN_ALLOWED.get());
-                assert!(!STDOUT_ALLOWED.get());
-            }
-            assert!(!STDIN_ALLOWED.get());
-            assert!(!STDOUT_ALLOWED.get());
-        }
-
-        assert!(STDIN_ALLOWED.get());
-        assert!(STDOUT_ALLOWED.get());
-    }
-
-    #[test]
-    fn progress_bar_mode_renders_hash_bar() {
-        let mut options = BTreeMap::new();
-        options.put_str("mode", "bar");
-        options.insert("current".to_string(), VmValue::Int(3));
-        options.insert("total".to_string(), VmValue::Int(5));
-        options.insert("width".to_string(), VmValue::Int(10));
-
-        let line = render_progress_line(&[
-            VmValue::String(arcstr::ArcStr::from("build")),
-            VmValue::String(arcstr::ArcStr::from("Compiling")),
-            VmValue::dict(options),
-        ]);
-
-        assert_eq!(line, "[build] [######----] Compiling (3/5)\n");
-    }
-
-    #[test]
-    fn progress_spinner_mode_uses_step_to_pick_frame() {
-        let mut options = BTreeMap::new();
-        options.put_str("mode", "spinner");
-        options.insert("step".to_string(), VmValue::Int(2));
-
-        let line = render_progress_line(&[
-            VmValue::String(arcstr::ArcStr::from("sync")),
-            VmValue::String(arcstr::ArcStr::from("Waiting")),
-            VmValue::dict(options),
-        ]);
-
-        assert_eq!(line, "[sync] - Waiting\n");
-        assert_eq!(spinner_frame(3), "\\");
-    }
-
-    #[test]
-    fn progress_bar_falls_back_to_empty_bar_for_zero_total() {
-        assert_eq!(render_progress_bar(2, 0, 5), "[-----]");
-    }
-
-    #[test]
-    fn read_line_options_preserve_prompt_whitespace() {
-        let mut options = BTreeMap::new();
-        options.put_str("prompt", "  > ");
-        options.insert("trim".to_string(), VmValue::Bool(false));
-
-        let parsed = super::parse_read_line_options(&[VmValue::dict(options)]).unwrap();
-
-        assert_eq!(parsed.prompt, "  > ");
-        assert!(!parsed.trim);
-    }
-
-    #[test]
-    fn read_line_options_reject_unknown_keys() {
-        let mut options = BTreeMap::new();
-        options.put_str("promtp", "> ");
-
-        let err = super::parse_read_line_options(&[VmValue::dict(options)]).unwrap_err();
-
-        match err {
-            crate::value::VmError::Runtime(message) => assert!(message.contains("promtp")),
-            other => panic!("expected Runtime error, got {other:?}"),
-        }
-    }
-
-    #[cfg(unix)]
-    struct FdGuard(libc::c_int);
-
-    #[cfg(unix)]
-    impl Drop for FdGuard {
-        fn drop(&mut self) {
-            let _ = unsafe { libc::close(self.0) };
-        }
-    }
-
-    #[cfg(unix)]
-    fn pipe_pair() -> (FdGuard, FdGuard) {
-        let mut fds = [0; 2];
-        assert_eq!(unsafe { libc::pipe(fds.as_mut_ptr()) }, 0);
-        (FdGuard(fds[0]), FdGuard(fds[1]))
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn read_line_from_fd_times_out_without_data() {
-        let (read_fd, _write_fd) = pipe_pair();
-        let outcome = super::read_line_from_fd_unix(
-            read_fd.0,
-            &ReadLineOptions {
-                timeout_ms: Some(10),
-                ..ReadLineOptions::default()
-            },
-        );
-
-        assert_eq!(outcome, ReadLineOutcome::Timeout);
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn read_line_from_fd_observes_interrupt_without_stdin_activity() {
-        let (read_fd, _write_fd) = pipe_pair();
-        let cancel = Arc::new(AtomicBool::new(false));
-        let cancel_from_thread = Arc::clone(&cancel);
-        let _guard = crate::op_interrupt::install(Some(cancel), None);
-        let interrupter = std::thread::spawn(move || {
-            // No fixed "wait for the reader to park" sleep: the reader re-checks
-            // the cancel flag every `READ_LINE_INTERRUPT_POLL` heartbeat, so it
-            // observes this store within one interval regardless of ordering.
-            // A blind sleep would only add wall time and reintroduce a race.
-            cancel_from_thread.store(true, Ordering::SeqCst);
-        });
-
-        let started = Instant::now();
-        let outcome = super::read_line_from_fd_unix(read_fd.0, &ReadLineOptions::default());
-
-        interrupter.join().expect("interrupter thread joins");
-        assert_eq!(outcome, ReadLineOutcome::Interrupt);
-        assert!(
-            started.elapsed() < super::READ_LINE_INTERRUPT_POLL * 25,
-            "interrupt heartbeat should wake idle read_line within a few poll \
-             intervals, took {:?}",
-            started.elapsed()
-        );
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn read_line_from_fd_honors_trim_option() {
-        let (read_fd, write_fd) = pipe_pair();
-        let payload = b"  alpha  \n";
-        assert_eq!(
-            unsafe { libc::write(write_fd.0, payload.as_ptr().cast(), payload.len()) },
-            payload.len() as isize
-        );
-        let outcome = super::read_line_from_fd_unix(
-            read_fd.0,
-            &ReadLineOptions {
-                timeout_ms: Some(100),
-                trim: false,
-                ..ReadLineOptions::default()
-            },
-        );
-
-        assert_eq!(outcome, ReadLineOutcome::Ok("  alpha  ".to_string()));
-    }
-}
+mod tests;

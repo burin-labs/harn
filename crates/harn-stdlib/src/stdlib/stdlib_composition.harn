@@ -1,4 +1,5 @@
 import { agent_dispatch_tool_call } from "std/agent/primitives"
+import { agent_tool_handler_result } from "std/agent/tool_lifecycle"
 
 fn __composition_registry(harness: Harness, value: any) {
   if value == nil {
@@ -41,7 +42,7 @@ fn __composition_mcp_registry(harness: Harness, value: dict) {
   let tools = []
   for entry in registry?.tools ?? [] {
     if __composition_mcp_tool(entry) {
-      tools = tools.appending(entry)
+      tools.push(entry)
     }
   }
   return registry + {tools: tools}
@@ -61,7 +62,7 @@ fn __composition_mcp_ranked_names(registry: any, query: string?, options: dict?)
   let names = []
   for item in ranked {
     if item?.tool_name != nil {
-      names = names.appending(item.tool_name)
+      names.push(item.tool_name)
     }
   }
   return names
@@ -73,7 +74,7 @@ fn __composition_mcp_servers(manifest: dict) {
     const metadata = binding?.metadata ?? {}
     const server = metadata?._mcp_server ?? metadata?.mcp_server
     if server != nil && !contains(servers, server) {
-      servers = servers.appending(server)
+      servers.push(server)
     }
   }
   return servers
@@ -110,7 +111,7 @@ fn __composition_dispatch_value(result: dict, name: string) {
     return result?.result
   }
   throw result?.error ?? result?.rendered_result
-    ?? ("composition_mcp_execute: tool failed: " + name)
+    ?? "composition_mcp_execute: tool failed: " + name
 }
 
 fn __composition_mcp_reduced_result(report: dict, opts: dict) {
@@ -268,14 +269,20 @@ pub fn composition_mcp_tools(
         const call_args = args ?? {}
         const manifest = call_args?.manifest
         if manifest != nil {
-          return {
+          const result = {
             manifest: manifest,
             harn_api: composition_harn_api(manifest),
             tool_count: len(manifest?.bindings ?? []),
             servers: __composition_mcp_servers(manifest),
           }
+          return agent_tool_handler_result(to_string(result), result)
         }
-        return composition_mcp_api(harness, call_args?.tools ?? opts?.tools, opts + call_args)
+        const result = composition_mcp_api(
+          harness,
+          call_args?.tools ?? opts?.tools,
+          opts + call_args,
+        )
+        return agent_tool_handler_result(to_string(result), result)
       },
     },
   )
@@ -306,19 +313,17 @@ pub fn composition_mcp_tools(
       annotations: {kind: "think", side_effect_level: "read_only", inline_result: true},
       handler: { args ->
         const call_args = args ?? {}
-        if call_args?.tools != nil || opts?.tools != nil {
-          return composition_mcp_execute(
+        const result = if call_args?.tools != nil || opts?.tools != nil {
+          composition_mcp_execute(
             harness,
             call_args.snippet,
             call_args?.tools ?? opts?.tools,
             opts + call_args,
           )
+        } else {
+          harness.tools.composition_execute(call_args.snippet, call_args.manifest, opts + call_args)
         }
-        return harness.tools.composition_execute(
-          call_args.snippet,
-          call_args.manifest,
-          opts + call_args,
-        )
+        return agent_tool_handler_result(to_string(result), result, result.ok ? "ok" : "error")
       },
     },
   )

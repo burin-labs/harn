@@ -2,12 +2,25 @@ use super::*;
 use crate::llm::api::options::base_opts;
 use crate::llm::cost::LlmBudgetEnvelope;
 
+/// [`super::reserve`] with the attempt's token projection taken from `opts`,
+/// as an observed attempt does.
+fn reserve(
+    opts: &LlmCallOptions,
+    request: &LlmRequestPayload,
+) -> Result<Option<AttemptReservation>, VmError> {
+    super::reserve(
+        opts,
+        request,
+        crate::llm::cost_context::LlmCallTokenProjection::for_options(opts),
+    )
+}
+
 #[test]
 fn concurrent_native_calls_share_one_reservation_and_unknown_usage_keeps_it() {
     let scope = AdmissionScope::default();
     let release = Arc::new(std::sync::Barrier::new(3));
     let (sent, received) = std::sync::mpsc::channel();
-    std::thread::scope(|threads| {
+    crate::runtime_stack::scope(|threads| {
         for _ in 0..2 {
             let scope = scope.clone();
             let release = release.clone();
@@ -105,6 +118,289 @@ fn opts(ceiling: f64) -> LlmCallOptions {
         ..Default::default()
     });
     opts
+}
+
+#[test]
+fn native_tool_history_with_harn_transcript_metadata_keeps_conservative_admission() {
+    swap_scope(AdmissionScope::default());
+    let mut options = opts(10.0);
+    options.messages = vec![
+        serde_json::json!({
+            "role": "assistant",
+            "content": null,
+            "tool_calls": [{"id":"call_1","type":"function","function":{"name":"inspect","arguments":"{}"}}],
+            "_harn": {"tool_calls": [{"id":"call_1","name":"inspect"}]}
+        }),
+        serde_json::json!({
+            "role": "tool",
+            "tool_call_id": "call_1",
+            "content": "inspected",
+            "_harn": {"result_source": "host_tool"}
+        }),
+    ];
+    let request = LlmRequestPayload::from(&options);
+
+    assert!(options
+        .messages
+        .iter()
+        .any(|message| message.get("_harn").is_some()));
+    assert!(request
+        .messages
+        .iter()
+        .all(|message| message.get("_harn").is_none()));
+    assert!(reserve(&options, &request).is_ok());
+}
+
+#[test]
+fn conservative_admission_accepts_only_boolean_tool_result_error_flags() {
+    for (message, accepted) in [
+        (
+            serde_json::json!({
+                "role": "tool_result",
+                "name": "inspect",
+                "tool_call_id": "call_1",
+                "content": "failed",
+                "is_error": true,
+            }),
+            true,
+        ),
+        (
+            serde_json::json!({"role": "user", "content": "failed", "is_error": true}),
+            true,
+        ),
+        (
+            serde_json::json!({
+                "role": "tool_result",
+                "name": "inspect",
+                "tool_call_id": "call_1",
+                "content": "failed",
+                "is_error": "true",
+            }),
+            false,
+        ),
+        (
+            serde_json::json!({"role": "assistant", "content": "failed", "is_error": true}),
+            false,
+        ),
+        (
+            serde_json::json!({
+                "role": "tool_result",
+                "name": "inspect",
+                "tool_call_id": "call_1",
+                "content": "failed",
+                "unknown": true,
+                "is_error": true,
+            }),
+            false,
+        ),
+        (
+            serde_json::json!({
+                "role": "assistant",
+                "content": [{"type": "image", "source": {"type": "base64", "data": "opaque"}}],
+            }),
+            false,
+        ),
+        (
+            serde_json::json!({
+                "role": "assistant",
+                "content": [{
+                    "type": "tool_use",
+                    "id": "call_1",
+                    "name": "inspect",
+                    "input": [],
+                }],
+            }),
+            false,
+        ),
+        (
+            serde_json::json!({
+                "role": "assistant",
+                "content": [{
+                    "type": "tool_use",
+                    "id": "call_1",
+                    "name": "inspect",
+                    "input": {},
+                    "extra": true,
+                }],
+            }),
+            false,
+        ),
+    ] {
+        swap_scope(AdmissionScope::default());
+        let mut options = opts(10.0);
+        options.provider = "anthropic".into();
+        options.model = "claude-opus-4-7".into();
+        options.native_tools = Some(vec![serde_json::json!({
+            "name": "inspect",
+            "input_schema": {"type": "object"},
+        })]);
+        options.messages = if message["role"] == "tool_result"
+            && message["tool_call_id"]
+                .as_str()
+                .is_some_and(|id| !id.is_empty())
+        {
+            vec![
+                serde_json::json!({
+                    "role": "assistant",
+                    "content": [{
+                        "type": "tool_use",
+                        "id": "call_1",
+                        "name": "inspect",
+                        "input": {},
+                    }],
+                }),
+                message.clone(),
+            ]
+        } else {
+            vec![message.clone()]
+        };
+        let request = LlmRequestPayload::from(&options);
+        match reserve(&options, &request) {
+            Ok(_) => assert!(accepted, "unexpected admission for {message}"),
+            Err(error) => {
+                assert!(!accepted, "unexpected refusal for {message}");
+                assert_eq!(
+                    crate::llm::admission::denial_reason(&error).as_deref(),
+                    Some("unsupported_billing_shape"),
+                    "malformed history lacked a typed refusal for {message}"
+                );
+            }
+        }
+    }
+    assert!(!super::bound::supported_tool_result_error_flag(
+        &serde_json::json!({
+            "role": "tool_result",
+            "name": "inspect",
+            "tool_call_id": "",
+            "content": "failed",
+            "is_error": true,
+        })
+    ));
+}
+
+#[test]
+fn anthropic_signed_tool_history_and_private_reasoning_fit_the_full_context_bound() {
+    swap_scope(AdmissionScope::default());
+    let mut options = opts(10.0);
+    options.provider = "anthropic".into();
+    options.model = "claude-opus-4-7".into();
+    options.native_tools = Some(vec![serde_json::json!({
+        "name": "inspect",
+        "input_schema": {"type": "object"},
+    })]);
+    let signed_thinking = serde_json::json!({
+        "type": "thinking",
+        "thinking": "I should inspect the module.",
+        "signature": "opaque-signed-continuation",
+    });
+    let redacted_thinking = serde_json::json!({
+        "type": "redacted_thinking",
+        "data": "opaque-redacted-continuation",
+    });
+    let assistant = crate::llm::tools::build_assistant_response_message(
+        "",
+        &[signed_thinking.clone(), redacted_thinking.clone()],
+        &[serde_json::json!({
+            "id": "call_1",
+            "name": "inspect",
+            "arguments": {},
+        })],
+        Some("private reasoning stays in durable history"),
+    );
+    options.messages = vec![
+        assistant,
+        serde_json::json!({
+            "role": "tool",
+            "tool_call_id": "call_1",
+            "content": "inspected",
+            "_harn": {"result_source": "host_tool"},
+        }),
+    ];
+
+    let request = LlmRequestPayload::from(&options);
+    assert!(request.messages[0].get("provider_continuation").is_some());
+    assert!(request.messages[0].get("reasoning").is_some());
+    assert!(reserve(&options, &request).is_ok());
+
+    let body = crate::llm::providers::AnthropicProvider::build_request_body(&request);
+    let messages = body["messages"].as_array().expect("Anthropic messages");
+    assert_eq!(
+        messages.len(),
+        2,
+        "assistant call and tool result both survive"
+    );
+    assert_eq!(messages[0]["role"], "assistant");
+    assert_eq!(messages[0]["content"][0], signed_thinking);
+    assert_eq!(messages[0]["content"][1], redacted_thinking);
+    assert_eq!(messages[0]["content"][2]["type"], "tool_use");
+    assert!(messages[0].get("reasoning").is_none());
+    assert!(messages[0].get("provider_continuation").is_none());
+    assert_eq!(messages[1]["role"], "user");
+    assert_eq!(messages[1]["content"][0]["type"], "tool_result");
+}
+
+#[test]
+fn conservative_admission_rejects_unknown_or_multimodal_anthropic_continuation() {
+    for continuation in [
+        serde_json::json!({
+            "anthropic": {"content_blocks": [{
+                "type": "thinking", "thinking": "continue", "signature": "signed",
+            }]},
+            "openai": {"reasoning": "not supported"},
+        }),
+        serde_json::json!({
+            "anthropic": {"content_blocks": [{
+                "type": "thinking", "thinking": "continue", "signature": "signed", "extra": true,
+            }]},
+        }),
+        serde_json::json!({
+            "anthropic": {"content_blocks": [{
+                "type": "tool_use", "id": "call_1", "name": "inspect", "input": {},
+            }]},
+        }),
+        serde_json::json!({
+            "anthropic": {"content_blocks": [{
+                "type": "thinking", "thinking": "continue", "signature": "",
+            }]},
+        }),
+    ] {
+        swap_scope(AdmissionScope::default());
+        let mut options = opts(10.0);
+        options.provider = "anthropic".into();
+        options.model = "claude-opus-4-7".into();
+        options.native_tools = Some(vec![serde_json::json!({
+            "name": "inspect",
+            "input_schema": {"type": "object"},
+        })]);
+        options.messages = vec![serde_json::json!({
+            "role": "assistant",
+            "content": "",
+            "provider_continuation": continuation,
+        })];
+        let request = LlmRequestPayload::from(&options);
+        let denial = match reserve(&options, &request) {
+            Err(error) => error,
+            Ok(_) => panic!("unsupported continuation admitted: {continuation}"),
+        };
+        assert_eq!(
+            crate::llm::admission::denial_reason(&denial).as_deref(),
+            Some("unsupported_billing_shape"),
+            "unsupported stored continuation was admitted: {continuation}"
+        );
+    }
+    swap_scope(AdmissionScope::default());
+    let mut options = opts(10.0);
+    options.provider = "openai".into();
+    options.messages = vec![serde_json::json!({
+        "role": "assistant",
+        "content": "",
+        "provider_continuation": {
+            "anthropic": {"content_blocks": [{
+                "type": "thinking", "thinking": "continue", "signature": "signed",
+            }]},
+        },
+    })];
+    assert!(reserve(&options, &LlmRequestPayload::from(&options)).is_err());
 }
 
 fn result(input: i64, output: i64) -> LlmResult {
@@ -561,6 +857,7 @@ fn host_session_budget_inherits_machine_scope_without_replacing_it() {
         MachineSpendPolicy {
             daily_limit_microusd: Some(1_000_000),
             monthly_limit_microusd: Some(1_000_000),
+            lifetime_limit_microusd: None,
         },
     )
     .unwrap();
@@ -602,6 +899,7 @@ fn registered_self_hosted_route_is_known_zero_under_machine_quota() {
         MachineSpendPolicy {
             daily_limit_microusd: Some(0),
             monthly_limit_microusd: Some(0),
+            lifetime_limit_microusd: None,
         },
     )
     .unwrap();
@@ -637,6 +935,7 @@ fn machine_quota_refuses_late_activation_after_provider_admission() {
         MachineSpendPolicy {
             daily_limit_microusd: Some(1_000_000),
             monthly_limit_microusd: Some(1_000_000),
+            lifetime_limit_microusd: None,
         },
     )
     .unwrap();
@@ -659,6 +958,7 @@ fn native_decisions_draw_on_and_are_refused_by_the_machine_quota() {
         MachineSpendPolicy {
             daily_limit_microusd: Some(500_000),
             monthly_limit_microusd: Some(500_000),
+            lifetime_limit_microusd: None,
         },
     )
     .unwrap();

@@ -11,9 +11,9 @@ use crate::value::VmDictExt;
 use std::{cell::RefCell, collections::BTreeMap, sync::Arc};
 
 use crate::agent_events::AgentEvent;
-use crate::stdlib::macros::{harn_builtin, register_builtin_defs, VmBuiltinDef};
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
+use harn_builtin_macros::harn_builtin;
 
 use super::agent_terminal_class::{
     agent_loop_made_no_llm_call, agent_terminal_class, session_status_indicates_error,
@@ -75,6 +75,7 @@ use assistant_messages::durable_anthropic_blocks;
 use cancellation::CancelSafeNestedExecutionGuard;
 mod live_transcript_journal;
 mod message_history;
+pub(crate) use tool_result_messages::harness_repair_tool_result;
 mod plan_document;
 mod run_identity;
 mod session_policies;
@@ -87,7 +88,9 @@ use session_policies::{
 pub(crate) use session_policies::{install_session_policy_guard, options_request_session_policies};
 mod visible_messages;
 #[cfg(test)]
-pub(crate) use visible_messages::visible_messages_with_lineage;
+pub(crate) use visible_messages::{
+    visible_message_projections, visible_message_values, visible_messages_with_lineage,
+};
 
 #[cfg(test)]
 use inbox::{
@@ -105,6 +108,10 @@ use message_history::{
     assistant_message_from_llm_result, host_agent_session_record_assistant_builtin,
     pair_orphaned_tool_use,
 };
+#[cfg(test)]
+pub(crate) fn assistant_message_from_llm_result_for_test(llm_result: &VmValue) -> VmValue {
+    assistant_message_from_llm_result(llm_result)
+}
 use plan_document::{next_plan_document_events, plan_artifact_from_result};
 pub(crate) use run_identity::active_run_id;
 use run_identity::{agent_init_control, agent_init_control_done};
@@ -392,6 +399,51 @@ pub(crate) fn record_provider_dispatch(session_id: &str) {
     });
 }
 
+/// Persist completed-call usage at its observed boundary, independently of
+/// purpose labels or acceptance by an agent turn. The accepted-turn counters
+/// behind `result.llm` remain separate and keep their declared scope.
+#[inline(never)]
+pub(crate) fn record_completed_call_usage(
+    opts: &super::api::LlmCallOptions,
+    result: &super::api::LlmResult,
+    call_id: &str,
+) {
+    let Some(session_id) = opts.session_id.as_deref() else {
+        return;
+    };
+    let mut metadata = result.usage().to_vm_dict(&result.attempts);
+    metadata.put_str("call_id", call_id);
+    metadata.put_str("call_role", opts.context_manifest.call_role());
+    metadata.put_str("provider", &result.provider);
+    metadata.put_str("model", &result.model);
+    metadata.put(
+        "provider_stop_reason",
+        result
+            .stop_reason
+            .as_deref()
+            .map_or(VmValue::Nil, VmValue::string),
+    );
+    metadata.put_str(
+        "canonical_stop_reason",
+        canonical_provider_stop_reason(result.stop_reason.as_deref()),
+    );
+    // Accounting durability must survive a full or trimmed transcript. The
+    // session owner also retains its existing bounded snapshot projection.
+    // The session owner admits the append and refuses unknown IDs atomically.
+    let _ = crate::agent_sessions::append_usage_event(
+        session_id,
+        crate::llm::helpers::transcript_event(
+            "llm_call",
+            "assistant",
+            "internal",
+            "LLM call completed",
+            Some(crate::stdlib::observability::vm_value_to_json(
+                &VmValue::dict(metadata),
+            )),
+        ),
+    );
+}
+
 /// Append a taint record to the session's lethal-trifecta ledger. No-op when
 /// the session is unknown (e.g. tool results recorded outside a host session).
 pub(crate) fn push_session_taint(session_id: &str, record: crate::security::TaintRecord) {
@@ -435,7 +487,7 @@ fn opts_dict(value: Option<&VmValue>) -> crate::value::DictMap {
 }
 
 fn json_to_vm(value: &serde_json::Value) -> VmValue {
-    crate::stdlib::json_to_vm_value(value)
+    crate::schema::json_to_vm_value(value)
 }
 
 pub(crate) fn vm_to_json(value: &VmValue) -> serde_json::Value {
@@ -481,12 +533,28 @@ fn first_provider_cache_usage_i64(
     extractor: fn(&serde_json::Value) -> Result<i64, VmError>,
 ) -> Result<i64, VmError> {
     for source in sources {
-        let tokens = extractor(&vm_to_json(source))?;
+        let tokens = extractor(&cache_usage_json(source))?;
         if tokens != 0 {
             return Ok(tokens);
         }
     }
     Ok(0)
+}
+
+/// The members of `source` the cache-usage aliases can read, as JSON. The
+/// source is often the whole LLM result, transcript included, so converting it
+/// in full made usage recording cost the whole transcript on every turn.
+fn cache_usage_json(source: &VmValue) -> serde_json::Value {
+    let Some(dict) = source.as_dict() else {
+        return vm_to_json(source);
+    };
+    let mut projected = crate::value::DictMap::new();
+    for root in super::usage::cache_field_roots() {
+        if let Some(member) = dict.get(root) {
+            projected.insert(root.into(), member.clone());
+        }
+    }
+    vm_to_json(&VmValue::dict(projected))
 }
 
 fn opt_str(map: &crate::value::DictMap, key: &str) -> Option<String> {
@@ -948,11 +1016,6 @@ fn host_agent_session_record_usage_builtin(
         cache_read_tokens,
         cache_write_tokens,
     );
-    // Provider-request accounting, read from the same `usage` block that owns
-    // every other accounting fact for this call. Absent for a recording made
-    // before the field existed, which is why it is folded in conditionally
-    // rather than defaulting to a zero that would read as "no retries".
-    let provider_attempts = dict_get(&usage_block, "provider_attempts").cloned();
     let stop_reason = match dict_get(&llm_result, "stop_reason") {
         Some(VmValue::String(s)) if !s.is_empty() => Some(s.to_string()),
         _ => None,
@@ -989,45 +1052,11 @@ fn host_agent_session_record_usage_builtin(
         }
         Ok(SessionUsageTotals::from(&*session))
     })?;
-    let mut llm_call_metadata = serde_json::json!({
-        "input_tokens": input_tokens,
-        "output_tokens": output_tokens,
-        "cache_read_tokens": cache_read_tokens,
-        "cache_write_tokens": cache_write_tokens,
-        "provider": provider,
-        "model": model,
-        "cost_usd": accounting.cost_usd,
-        "accounting_status": if accounting.usage_unknown { "unknown" } else { "reported" },
-        "provider_stop_reason": stop_reason,
-        "canonical_stop_reason": canonical_provider_stop_reason(stop_reason.as_deref()),
-    });
-    if let (Some(object), Some(attempts)) = (
-        llm_call_metadata.as_object_mut(),
-        provider_attempts.map(|attempts| crate::stdlib::observability::vm_value_to_json(&attempts)),
-    ) {
-        object.insert("provider_attempts".to_string(), attempts);
-    }
-    crate::agent_sessions::append_event(
-        &session_id,
-        crate::llm::helpers::transcript_event(
-            "llm_call",
-            "assistant",
-            "internal",
-            "LLM call completed",
-            Some(llm_call_metadata),
-        ),
-    )
-    .map_err(VmError::Runtime)?;
     Ok(totals.to_vm(false))
 }
 
-const HOST_SESSION_BUILTINS: &[&VmBuiltinDef] = &[
-    &HOST_AGENT_SESSION_RECORD_TOOL_RESULTS_BUILTIN_DEF,
-    &HOST_AGENT_SESSION_RECORD_USAGE_BUILTIN_DEF,
-];
-
 pub fn register_agent_session_host_primitives(vm: &mut Vm) {
-    register_builtin_defs(vm, HOST_SESSION_BUILTINS);
+    harn_vm_core::builtin_support::register_module_builtins(vm, module_path!());
     control_history::register_control_history_primitives(vm);
     daemon_bridge::register_daemon_bridge_primitives(vm);
     inbox::register_inbox_primitives(vm);

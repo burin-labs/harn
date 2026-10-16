@@ -72,7 +72,7 @@ jobs:
   changes:
     name: Decide whether this pull request runs the E2E suite
     if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
       contents: read
@@ -100,8 +100,9 @@ jobs:
 
   # Where the main-push runs are allowed to land. Read for its `capacity`
   # counts rather than its per-lane booleans: those booleans go false both when
-  # the fleet is switched off and when it is merely busy, and a busy fleet is a
-  # reason to queue, not a reason to send this suite somewhere else.
+  # the fleet is switched off and when it is merely busy. The counts let
+  # `scripts/ci/runner_capacity.sh` tell those apart: a pool with carriers but
+  # none idle routes hosted by name (#9086) rather than queueing behind it.
   #
   # Same-repository events only. A fork pull request cannot read the
   # release-app credentials this probe needs, and it is not eligible for owned
@@ -112,16 +113,15 @@ jobs:
     if: >
       github.event_name != 'pull_request' ||
       github.event.pull_request.head.repo.full_name == github.repository
-    uses: burin-labs/.github/.github/workflows/runner-availability.yml@550bff235c4bf6818ece3b27e0905bcf48aaee8b
+    uses: burin-labs/.github/.github/workflows/runner-availability.yml@cd5b9a60ece73b7dcb5923963b86ca7b570cfdad
     secrets:
       RELEASE_APP_CLIENT_ID: ${{ secrets.RELEASE_APP_CLIENT_ID }}
       RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
 
-  # Say where this suite is about to land, and refuse when that cannot be
-  # measured. The routing expression below can only choose; it cannot report,
-  # and it reads an unreadable census exactly like a census that reported no
-  # capacity. Both would fall through to a hosted runner and silently downgrade
-  # the tier, leaving nothing to attribute the downgrade to.
+  # Say where this suite is about to land, and name a hosted fallback when the
+  # census cannot be read. The routing expression below reads this job's route
+  # output instead of the census, so a census outage sends the suite hosted by
+  # name instead of failing the expression or reading as an empty pool.
   e2e-capacity:
     name: Name the E2E runner capacity decision
     needs: [changes, runner-availability]
@@ -135,11 +135,15 @@ jobs:
       github.event_name == 'schedule' ||
       github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'pull_request' && needs.changes.outputs.should_run != 'false'))
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
+    outputs:
+      route: ${{ steps.decision.outputs.route }}
+      fallback: ${{ steps.decision.outputs.fallback }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Decide where the slow E2E suite lands
+        id: decision
         run: bash scripts/ci/runner_capacity.sh
         env:
           CAPACITY_LABEL: E2E_RUNNER_CAPACITY
@@ -147,16 +151,11 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           SELFHOSTED_DISABLED: ${{ needs.runner-availability.outputs.selfhosted_disabled }}
           RUNNER_CAPACITY: ${{ needs.runner-availability.outputs.capacity }}
-          # The same switch the routing expression below reads. Without it here
-          # this step would report the owned census while the job ran on
-          # elastic paid capacity.
-          FLEET_EVACUATION: ${{ vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true' }}
 
   e2e:
     name: Slow E2E suite
     needs: [changes, runner-availability, e2e-capacity]
-    # The fleet-evacuation switch takes every event to elastic paid capacity.
-    # When it is off, main pushes prefer the big self-hosted rung: 24 cores at
+    # Main pushes prefer the big self-hosted rung: 24 cores at
     # no cost, and this suite compiles the CLI integration tests before running
     # them.
     # `online` rather than `idle` is the deliberate part. A main push is not
@@ -171,14 +170,9 @@ jobs:
     # work on a shared box to serve them is the trade this repository already
     # declined for its per-PR lanes.
     runs-on: >-
-      ${{ (vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true'
-        && 'blacksmith-8vcpu-ubuntu-2404')
-        || (github.event_name == 'push'
-        && needs.runner-availability.outputs.selfhosted_disabled == ''
-        && needs.runner-availability.outputs.capacity != ''
-        && fromJSON(needs.runner-availability.outputs.capacity).linux_big.online > 0
+      ${{ (needs.e2e-capacity.outputs.route == 'owned'
         && fromJSON('["self-hosted", "Linux", "X64", "harn-ci-big"]'))
-        || 'ubuntu-latest' }}
+        || 'ubuntu-24.04' }}
     # Read `!= 'false'` rather than `== 'true'`. A detector that failed, or
     # was skipped, leaves this empty, and treating an unread decision as "do
     # not run" is exactly the silence this workflow is being fixed for. The
@@ -218,11 +212,17 @@ jobs:
           cache-workspace-crates: "true"
           cache-bin: false
       - name: Install cargo-nextest
-        uses: taiki-e/install-action@3f74d7c16a4242f1c95561e98edc25d36adb4375 # v2.87.12
+        uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2.87.22
         with:
           tool: nextest@0.9.132
       - run: make test-e2e
         env:
+          # Some self-hosted runners export this allocator control to every
+          # job, and the bubblewrap fallback refuses an inherited loader
+          # control in its trusted setup. Setting it on every runner keeps the
+          # suite proving it is hermetic against ambient loader controls
+          # instead of passing only on hosts that happen not to set one.
+          MALLOC_ARENA_MAX: "2"
           NEXTEST_PROFILE: e2e
           NEXTEST_TEST_THREADS: ${{ steps.resource-budget.outputs.test_threads }}
           CARGO_BUILD_JOBS: ${{ steps.resource-budget.outputs.build_jobs }}
@@ -242,7 +242,7 @@ jobs:
   # and main cannot be called green while its last executed slow run is red.
   notify:
     name: Surface unattended result
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: e2e
     # Scheduled and main-push runs manage the tracking issue: nobody is
     # watching either one live. Label/dispatch runs are watched by whoever

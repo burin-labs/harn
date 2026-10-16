@@ -205,6 +205,10 @@ What changes when it is accepted:
   restate them.
 - `goal_reloop` goals move their success criteria to `retired_criteria` and
   stop gating completion on them.
+- `with_goal` and `goal_judge` render the projected goal, including retired
+  criteria, before each request. Typed goal pins replace their objective and
+  retire their criteria when the retarget lands, preserving constraints and
+  budget. Unstructured goal pins retire; the replacement directive survives compaction.
 
 The retarget is recorded on the typed control row, and the live
 `control_outcome` carries it as `metadata.goal`. Each completion decision that
@@ -212,6 +216,11 @@ retired rows also emits a `harn.completion_requirements_retired.v1` typed
 checkpoint that names the control, the message, and every retired
 `requirement_id`, so a replay can tell a row a steer retired from a row the run
 satisfied. The latest retarget wins.
+
+Typed goals also emit `harn.goal_criteria_retired.v1` checkpoints with the
+previous objective, replacement objective, control id, message id, and retired
+criterion ids and descriptions. These records distinguish retirement from
+satisfaction even when a criterion had a machine-checkable callback.
 
 `goal` is `{"objective": string}` with a non-blank objective and no other
 fields. A `queue` note may not carry one, because it lands after the last model

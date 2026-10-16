@@ -183,7 +183,7 @@ async fn unmatched_hook_pattern_does_not_fire() {
 async fn lifecycle_hook_patterns_match_payload_shapes() {
     clear_runtime_hooks();
 
-    let mut vm = crate::Vm::new();
+    let mut vm = crate::new_vm();
     crate::register_vm_stdlib(&mut vm);
     let exports = vm
         .load_module_exports_from_source(
@@ -236,7 +236,7 @@ async fn pipeline_on_finish_callback_replaces_return_value() {
     let local = tokio::task::LocalSet::new();
     let value = local
         .run_until(async {
-            let mut vm = crate::Vm::new();
+            let mut vm = crate::new_vm();
             crate::register_vm_stdlib(&mut vm);
             let chunk = crate::compile_source(
                 "pipeline default(harness: Harness) { harness.agent.pipeline_on_finish({ _h, v -> v + 100 }); return 7 }",
@@ -255,7 +255,7 @@ async fn pipeline_on_finish_callback_replaces_return_value() {
     // not re-invoke the previous callback.
     let next = local
         .run_until(async {
-            let mut vm = crate::Vm::new();
+            let mut vm = crate::new_vm();
             crate::register_vm_stdlib(&mut vm);
             let chunk = crate::compile_source("pipeline default(harness: Harness) { return 7 }")
                 .expect("compile");

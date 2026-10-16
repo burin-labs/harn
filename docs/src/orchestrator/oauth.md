@@ -7,7 +7,7 @@ connector configuration.
 
 ## Provider flows
 
-Built-in OAuth commands are available for Slack, Linear, and Notion:
+Built-in OAuth commands are available for Slack and Linear:
 
 ```bash
 harn connect slack \
@@ -17,9 +17,6 @@ harn connect slack \
 harn connect linear \
   --client-id "$LINEAR_CLIENT_ID" \
   --client-secret "$LINEAR_CLIENT_SECRET"
-harn connect notion \
-  --client-id "$NOTION_CLIENT_ID" \
-  --client-secret "$NOTION_CLIENT_SECRET"
 ```
 
 The generic OAuth 2.1 path targets compliant protected resources:
@@ -168,7 +165,10 @@ interactive setup asks for the exact callback registered for that client and
 offers an authorization URL prompt when that field is missing. Press Enter to
 use OAuth discovery, or supply the URL if the provider does not support it. For
 unattended setup, pass `--redirect-uri <uri>` and, when discovery is unavailable,
-`--auth-url <url>`.
-Harn never reuses the old access token, refresh token, or client secret;
-confidential clients prompt for the client secret again. Successful
+`--auth-url <url>`. An explicit `--redirect-uri` always counts, including one
+equal to the loopback default.
+Harn never reuses the old access token, refresh token, or client secret.
+Confidential clients prompt for the client secret again at a terminal. Without
+a terminal, pass `--client-secret-from-env <NAME>` or
+`--client-secret-file <PATH>`. Successful
 registration writes a complete credential to the current namespace.

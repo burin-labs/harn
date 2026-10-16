@@ -4,8 +4,8 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use super::super::{
-    default_run_dir, new_id, now_unix_seconds_text, parse_json_payload, sync_run_handoffs,
-    CompactionReceipt, RecapMetrics,
+    default_run_dir, new_id, now_unix_seconds_text, parse_json_payload, payload_parse_error,
+    sync_run_handoffs, CompactionReceipt, RecapMetrics,
 };
 use super::action_graph::{publish_action_graph_event, refresh_run_observability};
 use super::eval_pack::replay_fixture_from_run;
@@ -163,11 +163,10 @@ pub async fn load_agent_session_replay_events_from_log(
             let Some(event_value) = record.payload.get("event").cloned() else {
                 continue;
             };
-            let event = serde_json::from_value::<AgentEvent>(event_value).map_err(|error| {
-                VmError::Runtime(format!(
-                    "failed to decode agent event replay record {event_id}: {error}"
-                ))
-            })?;
+            let event: AgentEvent = parse_json_payload(
+                event_value,
+                &format!("agent event replay record {event_id}"),
+            )?;
             if event.session_id() == session_id {
                 events.push(AgentSessionReplayEvent {
                     event_id,
@@ -442,11 +441,13 @@ fn compaction_event_record(
             instruction_source: receipt.instruction_source,
             compaction_policy: receipt.compaction_policy,
             recap: receipt.recap,
+            classification: receipt.classification,
         };
     }
 
     CompactionEventRecord {
         schema_version: 0,
+        classification: None,
         id: event_id,
         transcript_id,
         stage_id,
@@ -617,6 +618,7 @@ pub(crate) fn save_run_record_with_transcript(
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)
             .map_err(|e| VmError::Runtime(format!("failed to create run directory: {e}")))?;
+        crate::runtime_paths::self_ignore_default_run_root(parent);
     }
     let mut json_value = serde_json::to_value(&materialized)
         .map_err(|e| VmError::Runtime(format!("failed to encode run record: {e}")))?;
@@ -666,8 +668,8 @@ pub fn load_run_record(path: &Path) -> Result<RunRecord, VmError> {
 pub(super) fn load_run_record_snapshot(path: &Path) -> Result<(RunRecord, Vec<u8>), VmError> {
     let content = std::fs::read(path)
         .map_err(|e| VmError::Runtime(format!("failed to read run record: {e}")))?;
-    let mut run: RunRecord = serde_json::from_slice(&content)
-        .map_err(|e| VmError::Runtime(format!("failed to parse run record: {e}")))?;
+    let mut run: RunRecord =
+        serde_json::from_slice(&content).map_err(|_| payload_parse_error("run record"))?;
     normalize_evidence_identity(&mut run);
     materialize_child_runs_from_stage_metadata(&mut run);
     if run.replay_fixture.is_none() {
@@ -726,6 +728,48 @@ mod execution_retention_tests {
                 .execution_id
                 .as_deref(),
             Some(execution_id)
+        );
+    }
+
+    /// burin-labs/harn#9596: a run record in the default run root showed as an
+    /// untracked file in the host's repository.
+    #[test]
+    fn the_default_run_root_ignores_itself_and_keeps_a_persons_ignore_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let run = RunRecord {
+            id: "run-ignored".to_string(),
+            ..RunRecord::default()
+        };
+
+        let fresh = dir.path().join(".harn-runs");
+        save_run_record(&run, Some(fresh.join("run-ignored.json").to_str().unwrap())).unwrap();
+        let ignore = std::fs::read_to_string(fresh.join(".gitignore")).unwrap();
+        assert!(ignore.lines().any(|line| line.trim() == "*"), "{ignore}");
+
+        let nested = dir.path().join("nested").join(".harn-runs");
+        std::fs::create_dir_all(&nested).unwrap();
+        std::fs::write(nested.join(".gitignore"), "!keep.json\n").unwrap();
+        save_run_record(
+            &run,
+            Some(nested.join("imported/run-ignored.json").to_str().unwrap()),
+        )
+        .unwrap();
+        assert_eq!(
+            std::fs::read_to_string(nested.join(".gitignore")).unwrap(),
+            "!keep.json\n",
+            "a person's own ignore file is theirs"
+        );
+        assert!(!nested.join("imported/.gitignore").exists());
+
+        let chosen = dir.path().join("my-runs");
+        save_run_record(
+            &run,
+            Some(chosen.join("run-ignored.json").to_str().unwrap()),
+        )
+        .unwrap();
+        assert!(
+            !chosen.join(".gitignore").exists(),
+            "an explicitly chosen run directory is the caller's to track"
         );
     }
 
@@ -866,6 +910,46 @@ mod compaction_projection_tests {
         assert_eq!(event.archived_messages, 3);
         assert!(event.available);
         assert!(event.recap.is_none());
+    }
+
+    #[test]
+    fn classified_decisions_survive_transcript_run_record_and_acp_projection() {
+        let receipt: crate::orchestration::CompactionReceipt =
+            serde_json::from_value(serde_json::json!({
+                "schema_version": 2, "receipt_id": "classified-shared-id",
+                "engine_strategy": "classify", "classification": {
+                    "status": "applied", "confidence_floor": 0.8, "rounds": 1,
+                    "budget_bytes": 100, "result_bytes": 125, "budget_met": false,
+                    "summary_applied": false, "fallback_reason": null,
+                    "decisions": [{"index": 3, "question_id": "message_3",
+                        "choice": "drop", "confidence": 0.2,
+                        "confidence_kind": "model_rationale", "evaluation_receipt": "eval-id",
+                        "round": 1, "source": "evaluation", "applied": "reword",
+                        "application_reason": "confidence_floor"}]
+                }
+            }))
+            .unwrap();
+        let transcript = serde_json::json!({"id": "session-classified", "events": [{
+            "kind": "compaction", "id": receipt.receipt_id,
+            "metadata": {"receipt": receipt.to_json()}
+        }]});
+        let events =
+            compaction_events_from_transcript(&transcript, None, None, "run.transcript", None);
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].classification, receipt.classification);
+        let projected = &receipt.to_acp_meta()["classification"];
+        assert_eq!(
+            projected["decisions"][0]["confidence"],
+            serde_json::json!(0.2)
+        );
+        assert_eq!(projected["decisions"][0]["applied"], "reword");
+        assert_eq!(projected["budget_met"], false);
+        let live = crate::agent_events::AgentEvent::TranscriptCompacted {
+            session_id: "session-classified".into(),
+            receipt,
+        };
+        let wire = serde_json::to_value(live).unwrap();
+        assert_eq!(wire["receipt"]["classification"], *projected);
     }
 
     #[test]

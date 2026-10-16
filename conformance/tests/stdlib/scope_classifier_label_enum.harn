@@ -1,0 +1,37 @@
+import { pre_turn_scope_classifier } from "std/llm/scope_classifier"
+import { llm_calls, llm_text, with_llm_script } from "std/testing"
+
+/**
+ * The scope classifier's `label` set is a schema enum, so the typed-output
+ * checkpoint refuses an out-of-set label instead of mapping it to `escalate`
+ * after the fact. The refusal fails open to `escalate` with
+ * `original_label: "error"` and never skips the main turn.
+ */
+pipeline test(harness: Harness) {
+  with_llm_script(
+    harness.llm,
+    [llm_text("{\"label\":\"elsewhere\",\"confidence\":0.99,\"evidence\":\"out of set\"}")],
+    { ->
+      const classify = pre_turn_scope_classifier(
+        harness.agent,
+        harness.llm,
+        {enabled: true, provider: "mock", model: "mock"},
+      )
+      const result = classify(
+        {
+          session_id: "scope-classifier-enum",
+          user_message: "Change the CSS in /workspace/other.",
+          workspace_anchor: {primary: "/workspace/harn", additional_roots: []},
+          messages: [],
+        },
+      )
+      const schema = llm_calls(harness.llm)[0].output_format.schema
+      harness.stdio.println(json_stringify(schema.properties.label.enum))
+      harness.stdio.println(result.classifier_kind)
+      harness.stdio.println(result.label)
+      harness.stdio.println(result.original_label)
+      harness.stdio.println(result.skip_main_turn)
+      harness.stdio.println(result.typed_checkpoint.ok)
+    },
+  )
+}

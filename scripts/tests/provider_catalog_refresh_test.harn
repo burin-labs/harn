@@ -6,10 +6,73 @@
 // cross-source conflict resolution.
 import "../provider_catalog_refresh.harn"
 import "../provider_catalog_sources.harn"
+import { prepare_model_index_sources } from "../update_provider_catalog"
 
 const FIXTURE_BASE = {
   observed_at: "2026-05-11T00:00:00Z",
   http_options: {fetched_at: "fixture-time"},
+}
+
+type StoredProviderRateCard = {id: string, provider: string, pricing: dict}
+
+@test
+pipeline test_live_catalog_preserves_stored_schedules_bands_and_promotions(harness: Harness) {
+  const stored = schema_expect(
+    json_parse(harness.fs.read_text("../../spec/provider-catalog/provider-catalog.json")),
+    {
+      type: "object",
+      required: ["models"],
+      properties: {models: {type: "array", items: {type: "object"}}},
+    },
+  )
+  const catalog = harness.llm.provider_catalog()
+  const ids = ["deepseek/deepseek-v4-pro-0813", "x-ai/grok-4.5", "openai/gpt-5.6-sol"]
+  const expected: list<StoredProviderRateCard> = ids.map(
+    { id ->
+      return schema_expect(
+        stored.models.filter({ row -> row.id == id })[0],
+        schema_of(StoredProviderRateCard),
+      )
+    },
+  )
+    .to_list()
+  assert_eq(len(expected), 3)
+  assert(len(expected[0]?.pricing?.schedules ?? []) > 0)
+  assert(len(expected[1]?.pricing?.input_token_bands ?? []) > 0)
+  assert(len(expected[2]?.pricing?.promotions ?? []) > 0)
+  const observations = expected.map(
+    { row ->
+      observation(
+        row.provider,
+        row.id,
+        {pricing: row.pricing},
+        {
+          source_url: "https://example.com/stored-card",
+          source_kind: "json",
+          source_owner: "provider",
+          observed_at: "2026-10-11T04:44:00Z",
+          confidence: "high",
+          requires_key: false,
+        },
+      )
+    },
+  )
+  const drift = build_drift(observations, catalog)
+  assert_eq(len(drift.added), 0)
+  assert_eq(len(drift.changed), 0)
+  const banded = observations[1] ?? {}
+  const changed = banded
+    + {
+      pricing: banded.pricing
+        + {
+          input_token_bands: [
+            {minimum_input_tokens: 200001, input_multiplier: 3.0, output_multiplier: 2.0},
+          ],
+        },
+    }
+  const control = build_drift([changed], catalog)
+  assert_eq(len(control.changed), 1)
+  assert_eq(control.changed[0].pricing_changes[0].key, "input_token_bands")
 }
 
 fn make_env(secrets: dict?) {
@@ -626,33 +689,67 @@ pipeline test_key_required_adapter_runs_with_key(harness: Harness, task: unknown
       body: "{\"data\":[{\"id\":\"fireworks-x\",\"name\":\"Fireworks X\"}]}",
     },
   )
-  const env = make_env({FIREWORKS_API_KEY: "fixture-secret"})
-  const json_config = {
+  const env = make_env({REGISTRY_API_KEY: "fixture-secret"})
+  const source = {
     id: "fireworks-models-api",
     provider: "fireworks",
     source_url: "https://api.fireworks.ai/inference/v1/models",
-    source_owner: "provider",
-    confidence: "high",
-    mapper: { payload ->
-      let entries = []
-      for record in payload?.data ?? [] {
-        entries = entries + [{model_id: record.id, name: record?.name}]
-      }
-      return entries
-    },
+    mapper: "generic",
+    terms_notes: "Fixture model index.",
   }
-  const config = {
-    id: "fireworks-models-api",
-    kind: "json",
-    source_owner: "provider",
-    source_url: "https://api.fireworks.ai/inference/v1/models",
-    key_envs: ["FIREWORKS_API_KEY"],
-    adapter: { adapter_harness, e -> json_api_adapter(adapter_harness, e, json_config) },
+  const configuration = {
+    schema: "harn.provider_catalog_refresh_sources.v1",
+    egress_hosts: ["api.fireworks.ai"],
+    sources: [source],
   }
-  const result = key_required_adapter(harness, env, config)
+  const catalog = {
+    providers: [
+      {
+        id: "fireworks",
+        auth: {style: "header", header: "x-registry-key", env: ["REGISTRY_API_KEY"]},
+      },
+    ],
+  }
+  const prepared = prepare_model_index_sources(configuration, catalog)
+  const spec = prepared.specs[0]
+  if spec == nil {
+    throw "fixture source was not prepared"
+  }
+  const result = spec.run_fn(harness, env)
   assert_eq(result.run.status, "ok")
   assert_eq(result.run.requires_key, true)
-  assert_eq(result.run.key_envs, ["FIREWORKS_API_KEY"])
+  assert_eq(result.run.key_envs, ["REGISTRY_API_KEY"])
   assert_eq(len(result.observations), 1)
   assert_eq(result.observations[0].model_id, "fireworks-x")
+  const calls = harness.testing.http_mock_calls({include_sensitive: true})
+  assert_eq(calls.count, 1)
+  assert_eq(calls[0].headers["x-registry-key"], "fixture-secret")
+  assert_eq(calls[0].headers.authorization, nil)
+  const public = prepare_model_index_sources(
+    configuration + {sources: [source + {requires_key: false, source_owner: "aggregator"}]},
+    catalog,
+  )
+  const public_spec = public.specs[0]
+  if public_spec == nil {
+    throw "public fixture source was not prepared"
+  }
+  const public_result = public_spec.run_fn(harness, make_env({}))
+  assert_eq(public_result.run.status, "ok")
+  assert_eq(public_spec.key_envs, [])
+  assert_eq(public_result.observations.count, 1)
+  assert_eq(public_result.observations[0].source_owner, "aggregator")
+  const public_calls = harness.testing.http_mock_calls({include_sensitive: true})
+  assert_eq(public_calls.count, 2)
+  assert_eq(public_calls[1].headers["x-registry-key"], nil)
+  assert_eq(public_calls[1].headers.authorization, nil)
+  for invalid_sources in [[], [source, source], [source + {provider: "unknown"}]] {
+    let refused = false
+    try {
+      prepare_model_index_sources(configuration + {sources: invalid_sources}, catalog)
+    } catch (error) {
+      refused = true
+    }
+    assert(refused, "invalid source registry must refuse before a request")
+    assert_eq(harness.testing.http_mock_calls().count, 2)
+  }
 }

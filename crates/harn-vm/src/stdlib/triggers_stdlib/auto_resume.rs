@@ -7,8 +7,8 @@
 //! halves, keyed by trigger id in a thread-local table so a worker that resumes
 //! early cancels its own timeout.
 
+use crate::native_vm::NativeVmState;
 use std::collections::BTreeMap;
-use std::sync::Arc;
 use std::time::Duration;
 
 use harn_builtin_meta::shapes::{
@@ -223,9 +223,11 @@ async fn schedule_auto_resume_timeout(
     cancel_auto_resume_timeout(handle.id.as_str());
     let event_log = ensure_trigger_event_log();
     let base_vm = ctx.child_vm();
-    let worker_registry = base_vm.worker_registry.clone();
-    let pool_registry = base_vm.pool_registry.clone();
-    let harness_inner = base_vm.harness().map(|harness| Arc::clone(harness.inner()));
+    let worker_registry = base_vm.native().worker_registry.clone();
+    let pool_registry = base_vm.native().pool_registry.clone();
+    let harness_inner = base_vm
+        .harness()
+        .and_then(|harness| harness.host_state_arc::<crate::harness::HarnessInner>());
     let duration = Duration::from_secs(timeout.duration_minutes.saturating_mul(60));
     let harness_inner =
         harness_inner.expect("auto-resume timeout requires Harness clock authority");
@@ -250,7 +252,7 @@ async fn schedule_auto_resume_timeout(
         }
         let _ = completion_tx.send(true);
     };
-    let task = crate::vm::subtask::spawn_inherited_child(
+    let task = crate::native_vm::subtask::spawn_inherited_child(
         pool_registry,
         crate::stdlib::agents::agents_workers::scope_worker_registry(worker_registry, timeout_task),
     );

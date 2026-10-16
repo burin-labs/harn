@@ -1,8 +1,8 @@
 //! Per-provider request and token rate limits: set, query, or clear.
 
 use crate::llm_config;
-use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmError, VmValue};
+use harn_builtin_macros::harn_builtin;
 
 use super::provider_projection::rate_limits_to_vm_value;
 

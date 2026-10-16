@@ -17,7 +17,7 @@ use async_trait::async_trait;
 use harn_vm::orchestration::{
     pop_execution_policy, push_execution_policy, CapabilityPolicy, SandboxProfile,
 };
-use harn_vm::{compile_source, stdlib::register_vm_stdlib, Vm, VmValue};
+use harn_vm::{compile_source, stdlib::register_vm_stdlib, VmValue};
 use tempfile::TempDir;
 
 use super::{
@@ -534,7 +534,7 @@ fn run_harn_shell(source: String, policy: CapabilityPolicy) -> SandboxResult<Exe
         local
             .run_until(async move {
                 let _guard = ExecutionPolicyGuard::push(policy);
-                let mut vm = Vm::new();
+                let mut vm = harn_vm::new_vm();
                 register_vm_stdlib(&mut vm);
                 let value = vm.execute(&chunk).await.map_err(|error| {
                     SandboxError::Exec(format!("harn-vm process sandbox rejected exec: {error}"))

@@ -89,13 +89,30 @@ pub(super) fn nesting(policy: &CapabilityPolicy) -> Nesting {
             return Nesting::Unenforceable(Narrowing::Write(dir));
         }
     }
-    let readable = readable_roots(policy);
-    let credential_dirs = read_probes()
-        .into_iter()
-        .filter(|dir| !covered(dir, &readable));
-    for dir in credential_dirs.chain(super::super::process_sandbox_read_deny_roots(policy)) {
+    // Every credential path is a read-deny root, so probing the denials covers
+    // the credential stores the policy must not read.
+    for dir in super::super::process_sandbox_read_deny_roots(policy) {
         if dir.exists() && !outer_denies("file-read-data", Some(&dir)) {
             return Nesting::Unenforceable(Narrowing::Read(dir));
+        }
+    }
+    // A denial inside a writable root holds only while nothing on its path can
+    // be renamed, which the rendered profile ensures with unlink denials.
+    // `sandbox_check` answers "denied" for any path that does not exist,
+    // whatever the profile says (measured on macOS 27), so an absent denied
+    // path cannot be proven safe from a later create-and-rename. Refuse it
+    // rather than inherit a profile whose answer for it is unknown.
+    for denied in super::super::process_sandbox_read_deny_roots(policy) {
+        if !covered(&denied, &writable) {
+            continue;
+        }
+        let renamable = !denied.exists()
+            || denied
+                .ancestors()
+                .take_while(|path| covered(path, &writable))
+                .any(|path| !outer_denies("file-write-unlink", Some(path)));
+        if renamable {
+            return Nesting::Unenforceable(Narrowing::Read(denied));
         }
     }
     Nesting::Inherit
@@ -137,7 +154,7 @@ pub(super) fn report_inherited() {
     );
 }
 
-fn process_is_sandboxed() -> bool {
+pub(super) fn process_is_sandboxed() -> bool {
     // A null operation asks only whether the process is sandboxed at all.
     unsafe { sandbox_check(libc::getpid(), std::ptr::null(), SANDBOX_FILTER_NONE) > 0 }
 }
@@ -145,7 +162,7 @@ fn process_is_sandboxed() -> bool {
 /// Whether the process's own profile denies `operation`, on `path` when given.
 /// An error reads as "not denied", so a probe that cannot answer never
 /// vouches for the outer profile.
-fn outer_denies(operation: &str, path: Option<&Path>) -> bool {
+pub(super) fn outer_denies(operation: &str, path: Option<&Path>) -> bool {
     let Ok(operation) = CString::new(operation) else {
         return false;
     };
@@ -189,43 +206,16 @@ fn write_probes(policy: &CapabilityPolicy) -> Vec<PathBuf> {
     probes
 }
 
-/// Credential directories a policy reads only when a read root names them.
-fn read_probes() -> Vec<PathBuf> {
-    let Some(home) = crate::user_dirs::home_dir() else {
-        return Vec::new();
-    };
-    [".ssh", ".aws", ".gnupg"]
-        .iter()
-        .map(|name| home.join(name))
-        .collect()
-}
-
 /// Every root the rendered profile makes writable. A root missing here can
 /// only make a probe fail, which refuses the spawn: it was refused before.
 fn writable_roots(policy: &CapabilityPolicy) -> Vec<PathBuf> {
     let mut roots = Vec::new();
-    if super::policy_allows_workspace_write(policy) {
+    if super::policy_allows_child_writes(policy) {
         roots.extend(super::process_sandbox_roots(policy));
         roots.extend(super::process_sandbox_policy_write_roots(policy));
         roots.extend(super::preset_write_roots(policy).iter().map(PathBuf::from));
         roots.extend(super::super::process_sandbox_developer_toolchain_cache_roots(policy));
     }
-    roots
-}
-
-/// Every root the rendered profile makes readable, with the same caveat.
-fn readable_roots(policy: &CapabilityPolicy) -> Vec<PathBuf> {
-    let mut roots = writable_roots(policy);
-    roots.extend(super::process_sandbox_roots(policy));
-    roots.extend(super::preset_read_roots(policy).iter().map(PathBuf::from));
-    roots.extend(super::process_sandbox_developer_toolchain_read_roots(
-        policy,
-    ));
-    roots.extend(super::process_sandbox_readonly_roots(policy));
-    roots.extend(super::process_sandbox_policy_read_roots(policy));
-    roots.extend(super::process_sandbox_package_manager_config_read_roots(
-        policy,
-    ));
     roots
 }
 

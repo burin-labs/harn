@@ -14,7 +14,7 @@ mod validation;
 mod wire;
 
 const MAGIC: &[u8; 8] = b"HARNPK01";
-pub const ARTIFACT_VERSION: u16 = 4;
+pub const ARTIFACT_VERSION: u16 = 5;
 /// Maximum UTF-8 source size accepted by every portable compiler adapter.
 const HEADER_BYTES: usize = 8 + 2 + 2 + 4 + 32;
 const SEMANTIC_ABI_DOMAIN: &[u8] = b"harn-portable-kernel-semantic-abi-v4\0";
@@ -505,23 +505,44 @@ fn typecheck_package_module(
         };
         if let Some(alias) = &import.namespace_alias {
             imported_names.insert(alias.clone());
+            let signatures = target
+                .exports
+                .keys()
+                .filter_map(|name| {
+                    let (origin, declaration) =
+                        resolve_export_declaration(target, name, modules, &mut BTreeSet::new())?;
+                    let signature = harn_parser::namespace_signatures::lower_callable_signature(
+                        &declaration,
+                        |type_name| {
+                            resolve_export_declaration(
+                                origin,
+                                type_name,
+                                modules,
+                                &mut BTreeSet::new(),
+                            )
+                            .map(|(_, declaration)| declaration)
+                            .or_else(|| {
+                                origin
+                                    .program
+                                    .iter()
+                                    .find(|node| {
+                                        is_type_declaration(node)
+                                            && declaration_name(node) == Some(type_name)
+                                    })
+                                    .cloned()
+                            })
+                        },
+                    )?;
+                    Some((name.clone(), signature))
+                })
+                .collect();
             namespace_imports.push((
                 alias.clone(),
-                harn_parser::NamespaceImportBinding {
-                    module_path: import.path.clone(),
-                    members: target.exports.keys().cloned().collect::<BTreeSet<_>>(),
-                    // Members stay gradual on the artifact path. Lowering a
-                    // signature needs the defining module's type declarations
-                    // to inline named types (see
-                    // `harn-modules::namespace_member_signatures`), and an
-                    // artifact carries resolved exports rather than that
-                    // declaration graph. Empty preserves the pre-#6172
-                    // behavior here instead of checking against a guess.
-                    member_types: std::collections::BTreeMap::new(),
-                    member_param_names: std::collections::BTreeMap::new(),
-                    member_required_params: std::collections::BTreeMap::new(),
-                    member_type_predicates: std::collections::BTreeMap::new(),
-                },
+                harn_parser::NamespaceImportBinding::from_member_signatures(
+                    import.path.clone(),
+                    target.exports.keys().cloned().collect(),
+                    signatures,
+                ),
             ));
             continue;
         }

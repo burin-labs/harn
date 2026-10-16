@@ -1,10 +1,8 @@
 use std::future::Future;
-use std::thread;
 
 fn run_on_cli_stack<T: Send + 'static>(name: &str, run: impl FnOnce() -> T + Send + 'static) -> T {
-    thread::Builder::new()
+    harn_parser::runtime_stack::builder()
         .name(name.into())
-        .stack_size(crate::CLI_RUNTIME_STACK_SIZE)
         .spawn(run)
         .expect("failed to spawn CLI-stack test thread")
         .join()

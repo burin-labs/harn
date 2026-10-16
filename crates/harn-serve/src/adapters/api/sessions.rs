@@ -3,32 +3,9 @@
 //! session-scoped task list and submission entry points.
 
 use super::*;
-
-#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "lowercase")]
-enum SessionReasoningEffort {
-    None,
-    Minimal,
-    Low,
-    Medium,
-    High,
-    Xhigh,
-    Max,
-}
-
-impl SessionReasoningEffort {
-    const fn as_str(self) -> &'static str {
-        match self {
-            Self::None => "none",
-            Self::Minimal => "minimal",
-            Self::Low => "low",
-            Self::Medium => "medium",
-            Self::High => "high",
-            Self::Xhigh => "xhigh",
-            Self::Max => "max",
-        }
-    }
-}
+use harn_session_store::task::{TaskSessionDescriptor, TaskSessionUpdate};
+use harn_session_store::SessionStatus;
+use harn_vm::llm::capabilities::ReasoningEffort;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -36,7 +13,7 @@ struct SessionModelPolicy {
     provider: String,
     model: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    reasoning_effort: Option<SessionReasoningEffort>,
+    reasoning_effort: Option<ReasoningEffort>,
 }
 
 #[derive(Clone, Debug)]
@@ -46,27 +23,21 @@ enum ModelPolicyChange {
     Set(SessionModelPolicy),
 }
 
-pub(super) async fn list_sessions(
-    State(state): State<ApiState>,
-    OriginalUri(uri): OriginalUri,
-    headers: HeaderMap,
-) -> Response {
-    if let Err(response) = authorize(&state, Method::GET, &uri, &headers, Bytes::new()).await {
-        return response;
+pub(super) async fn list_sessions(State(state): State<ApiState>) -> Response {
+    match state.session_resources() {
+        Ok(sessions) => Json(list_response(sessions)).into_response(),
+        Err(_) => task_store::unavailable_response(),
     }
-    let inner = state.inner.lock().expect("api state poisoned");
-    Json(list_response(inner.sessions.values().cloned().collect())).into_response()
 }
 
-pub(super) async fn create_session(
-    State(state): State<ApiState>,
-    OriginalUri(uri): OriginalUri,
-    headers: HeaderMap,
-    body: Bytes,
-) -> Response {
-    if let Err(response) = authorize(&state, Method::POST, &uri, &headers, body.clone()).await {
-        return response;
-    }
+#[derive(Deserialize)]
+struct CreateSessionProperties {
+    #[serde(default)]
+    metadata: serde_json::Map<String, Value>,
+    persona_id: Option<String>,
+}
+
+pub(super) async fn create_session(State(state): State<ApiState>, body: Bytes) -> Response {
     let Ok(input) = parse_json_body(&body) else {
         return invalid_json_response();
     };
@@ -77,6 +48,16 @@ pub(super) async fn create_session(
             "session request must be a JSON object",
         );
     }
+    let properties = match CreateSessionProperties::deserialize(&input) {
+        Ok(properties) => properties,
+        Err(_) => {
+            return api_error(
+                StatusCode::BAD_REQUEST,
+                "invalid_request",
+                "metadata must be an object and persona_id a string or null",
+            )
+        }
+    };
     let mode_id = match input.get("mode_id") {
         None | Some(Value::Null) => state.default_session_mode.as_str(),
         Some(Value::String(mode_id))
@@ -101,13 +82,21 @@ pub(super) async fn create_session(
     };
     let (workspace_id, workspace_root) = {
         let inner = state.inner.lock().expect("api state poisoned");
-        let workspace_id = input
-            .get("workspace_id")
-            .and_then(Value::as_str)
-            .unwrap_or(&inner.root_workspace_id)
-            .to_string();
-        let root = workspace_root_locked(&inner, &workspace_id)
-            .unwrap_or_else(|| inner.root_workspace_path.clone());
+        let workspace_id = match input.get("workspace_id") {
+            None => inner.root_workspace_id.as_str(),
+            Some(Value::String(id)) if !id.trim().is_empty() => id.as_str(),
+            _ => {
+                return api_error(
+                    StatusCode::BAD_REQUEST,
+                    "invalid_workspace",
+                    "workspace_id must be a nonempty string",
+                )
+            }
+        }
+        .to_owned();
+        let Some(root) = workspace_root_locked(&inner, &workspace_id) else {
+            return api_error(StatusCode::NOT_FOUND, "not_found", "workspace not found");
+        };
         (workspace_id, root)
     };
     let result = match state
@@ -120,7 +109,7 @@ pub(super) async fn create_session(
                 // hosted surface: its sessions never had the launcher's
                 // environment, so naming `isolated` records the behaviour that
                 // was already true instead of choosing a new one.
-                "environmentPolicy": {"kind": "isolated", "grants": []},
+                "environmentPolicy": session_control::environment_policy(),
             }),
         )
         .await
@@ -153,27 +142,42 @@ pub(super) async fn create_session(
     if let Err(message) = apply_model_policy_change(&state, &session_id, &model_policy).await {
         return api_error(StatusCode::BAD_GATEWAY, "acp_error", &message);
     }
-    let mut session = json!({
-        "id": session_id,
-        "object": "session",
-        "created_at": now,
-        "updated_at": now,
-        "metadata": input.get("metadata").cloned().unwrap_or_else(|| json!({})),
-        "workspace_id": workspace_id,
-        "state": "IDLE",
-        "mode_id": mode_id,
-        "transcript": {
-            "source": "harn.acp",
-            "session_id": session_id
+    // A successful custom pipeline need not invoke agent_loop. Record its
+    // empty canonical parent now, using the same owner as forks and replay.
+    if let Err(message) = state
+        .acp
+        .call(
+            harn_vm::agent_sessions::CANONICAL_HISTORY_BOUNDARIES_METHOD,
+            json!({"sessionId": session_id}),
+        )
+        .await
+    {
+        let _ = state
+            .acp
+            .call("session/close", json!({"sessionId": session_id}))
+            .await;
+        return api_error(StatusCode::BAD_GATEWAY, "acp_error", &message);
+    }
+    let mut session = task_store::session_resource(
+        TaskSessionDescriptor {
+            id: session_id.clone(),
+            workspace_id,
+            workspace_root: workspace_root.to_string_lossy().into_owned(),
+            mode_id: mode_id.into(),
+            model_policy: None,
+            metadata: Value::Object(properties.metadata),
+            persona_id: properties.persona_id,
+            root_session_id: None,
+            parent_session_id: None,
+            branch_id: None,
+            created_at: now.clone(),
+            updated_at: now,
+            summary: None,
+            status: SessionStatus::Open,
         },
-        "persona_id": input.get("persona_id").cloned().unwrap_or(Value::Null),
-        "root_session_id": null,
-        "parent_session_id": null,
-        "branch_id": null,
-        "last_event_id": null,
-        "summary": null,
-        "expires_at": null
-    });
+        false,
+        None,
+    );
     project_model_policy(&mut session, &model_policy);
     {
         let mut inner = state.inner.lock().expect("api state poisoned");
@@ -187,30 +191,26 @@ pub(super) async fn create_session(
 pub(super) async fn get_session(
     State(state): State<ApiState>,
     AxumPath(session_id): AxumPath<String>,
-    OriginalUri(uri): OriginalUri,
-    headers: HeaderMap,
 ) -> Response {
-    if let Err(response) = authorize(&state, Method::GET, &uri, &headers, Bytes::new()).await {
-        return response;
-    }
-    let inner = state.inner.lock().expect("api state poisoned");
-    match inner.sessions.get(&session_id).cloned() {
-        Some(session) => Json(session).into_response(),
-        None => api_error(StatusCode::NOT_FOUND, "not_found", "session not found"),
+    match state.session_resource(&session_id) {
+        Ok(session) => Json(session).into_response(),
+        Err(harn_session_store::StoreError::NotFound(_)) => {
+            api_error(StatusCode::NOT_FOUND, "not_found", "session not found")
+        }
+        Err(_) => task_store::unavailable_response(),
     }
 }
 
 pub(super) async fn list_session_live_clients(
     State(state): State<ApiState>,
     AxumPath(session_id): AxumPath<String>,
-    OriginalUri(uri): OriginalUri,
-    headers: HeaderMap,
 ) -> Response {
-    if let Err(response) = authorize(&state, Method::GET, &uri, &headers, Bytes::new()).await {
-        return response;
-    }
-    if !api_session_exists(&state, &session_id) {
-        return api_error(StatusCode::NOT_FOUND, "not_found", "session not found");
+    let _control = match state.restore_session(&session_id).await {
+        Ok(control) => control,
+        Err(error) => return error.response(),
+    };
+    if let Err(error) = state.require_open_session(&session_id) {
+        return error.response();
     }
     match state
         .acp
@@ -225,60 +225,51 @@ pub(super) async fn list_session_live_clients(
 pub(super) async fn attach_session_client(
     State(state): State<ApiState>,
     AxumPath(session_id): AxumPath<String>,
-    OriginalUri(uri): OriginalUri,
-    headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    live_client_mutation(state, session_id, uri, headers, body, "session/attach").await
+    live_client_mutation(state, session_id, body, "session/attach").await
 }
 
 pub(super) async fn takeover_session_client(
     State(state): State<ApiState>,
     AxumPath(session_id): AxumPath<String>,
-    OriginalUri(uri): OriginalUri,
-    headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    live_client_mutation(state, session_id, uri, headers, body, "session/takeover").await
+    live_client_mutation(state, session_id, body, "session/takeover").await
 }
 
 pub(super) async fn detach_session_client(
     State(state): State<ApiState>,
     AxumPath(session_id): AxumPath<String>,
-    OriginalUri(uri): OriginalUri,
-    headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    live_client_mutation(state, session_id, uri, headers, body, "session/detach").await
+    live_client_mutation(state, session_id, body, "session/detach").await
 }
 
 pub(super) async fn heartbeat_session_client(
     State(state): State<ApiState>,
     AxumPath(session_id): AxumPath<String>,
-    OriginalUri(uri): OriginalUri,
-    headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    live_client_mutation(state, session_id, uri, headers, body, "session/heartbeat").await
+    live_client_mutation(state, session_id, body, "session/heartbeat").await
 }
 
 async fn live_client_mutation(
     state: ApiState,
     session_id: String,
-    uri: Uri,
-    headers: HeaderMap,
     body: Bytes,
     method: &'static str,
 ) -> Response {
-    if let Err(response) = authorize(&state, Method::POST, &uri, &headers, body.clone()).await {
-        return response;
-    }
-    if !api_session_exists(&state, &session_id) {
-        return api_error(StatusCode::NOT_FOUND, "not_found", "session not found");
-    }
     let Ok(input) = parse_json_body(&body) else {
         return invalid_json_response();
     };
+    let _control = match state.restore_session(&session_id).await {
+        Ok(control) => control,
+        Err(error) => return error.response(),
+    };
+    if let Err(error) = state.require_open_session(&session_id) {
+        return error.response();
+    }
     let params = json!({
         "sessionId": session_id,
         "clientId": input.get("client_id").cloned().unwrap_or(Value::Null),
@@ -299,12 +290,15 @@ async fn live_client_mutation(
 }
 
 fn api_session_exists(state: &ApiState, session_id: &str) -> bool {
-    state
-        .inner
-        .lock()
-        .expect("api state poisoned")
-        .sessions
-        .contains_key(session_id)
+    let live = {
+        state
+            .inner
+            .lock()
+            .expect("api state poisoned")
+            .sessions
+            .contains_key(session_id)
+    };
+    live || state.session_descriptor(session_id).is_ok()
 }
 
 fn project_live_client_state(state: &ApiState, session_id: &str, result: &Value) {
@@ -323,24 +317,20 @@ fn project_live_client_state(state: &ApiState, session_id: &str, result: &Value)
 pub(super) async fn get_session_view(
     State(state): State<ApiState>,
     AxumPath(session_id): AxumPath<String>,
-    OriginalUri(uri): OriginalUri,
-    headers: HeaderMap,
 ) -> Response {
-    if let Err(response) = authorize(&state, Method::GET, &uri, &headers, Bytes::new()).await {
-        return response;
-    }
-    let (session, history) = {
-        let inner = state.inner.lock().expect("api state poisoned");
-        let Some(session) = inner.sessions.get(&session_id).cloned() else {
-            return api_error(StatusCode::NOT_FOUND, "not_found", "session not found");
-        };
-        let history = inner
-            .events
-            .iter()
-            .filter(|event| event.session_id.as_deref() == Some(session_id.as_str()))
-            .cloned()
-            .collect::<Vec<_>>();
-        (session, history)
+    let session = match state.session_resource(&session_id) {
+        Ok(session) => session,
+        Err(harn_session_store::StoreError::NotFound(_)) => {
+            return api_error(StatusCode::NOT_FOUND, "not_found", "session not found")
+        }
+        Err(_) => return task_store::unavailable_response(),
+    };
+    let history = match state.history(&EventFilter {
+        session_id: Some(session_id),
+        ..EventFilter::default()
+    }) {
+        Ok(history) => history,
+        Err(_) => return task_store::unavailable_response(),
     };
     Json(api_session_view(&session, &history)).into_response()
 }
@@ -348,13 +338,8 @@ pub(super) async fn get_session_view(
 pub(super) async fn update_session(
     State(state): State<ApiState>,
     AxumPath(session_id): AxumPath<String>,
-    OriginalUri(uri): OriginalUri,
-    headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    if let Err(response) = authorize(&state, Method::PATCH, &uri, &headers, body.clone()).await {
-        return response;
-    }
     let Ok(input) = parse_json_body(&body) else {
         return invalid_json_response();
     };
@@ -364,14 +349,81 @@ pub(super) async fn update_session(
             return api_error(StatusCode::BAD_REQUEST, "invalid_model_policy", &message)
         }
     };
+    if input
+        .get("metadata")
+        .is_some_and(|value| !value.is_object())
+        || input
+            .get("summary")
+            .is_some_and(|value| !value.is_null() && !value.is_string())
     {
-        let inner = state.inner.lock().expect("api state poisoned");
-        if !inner.sessions.contains_key(&session_id) {
-            return api_error(StatusCode::NOT_FOUND, "not_found", "session not found");
-        }
+        return api_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_request",
+            "metadata must be an object and summary a string or null",
+        );
     }
-    if let Err(message) = apply_model_policy_change(&state, &session_id, &model_policy).await {
-        return api_error(StatusCode::BAD_GATEWAY, "acp_error", &message);
+    let _control = match state.restore_session(&session_id).await {
+        Ok(control) => control,
+        Err(error) => return error.response(),
+    };
+    if let Err(error) = state.require_open_session(&session_id) {
+        return error.response();
+    }
+    let previous = state.inner.lock().expect("api state poisoned").sessions[&session_id].clone();
+    let mut proposed = previous.clone();
+    merge_mutable_fields(&mut proposed, &input, &["summary", "metadata"]);
+    project_model_policy(&mut proposed, &model_policy);
+    if apply_model_policy_change(&state, &session_id, &model_policy)
+        .await
+        .is_err()
+    {
+        rollback_model_policy(&state, &session_id, &previous).await;
+        return api_error(
+            StatusCode::BAD_GATEWAY,
+            "acp_error",
+            "session model policy could not be applied",
+        );
+    }
+    let now = now_rfc3339();
+    let persisted = match state.update_session_facts(
+        &session_id,
+        TaskSessionUpdate {
+            metadata: input.get("metadata").cloned(),
+            summary: input
+                .get("summary")
+                .map(|value| value.as_str().map(str::to_owned)),
+            model_policy: if matches!(model_policy, ModelPolicyChange::Unchanged) {
+                None
+            } else {
+                Some(proposed.get("model_policy").cloned())
+            },
+            updated_at: now.clone(),
+            ..TaskSessionUpdate::default()
+        },
+    ) {
+        Ok(persisted) => persisted,
+        Err(_) => {
+            // Restore the previous policy before another control can run.
+            // A failed rollback discards the live projection so the next
+            // control must restore the authoritative descriptor again.
+            if !matches!(model_policy, ModelPolicyChange::Unchanged) {
+                rollback_model_policy(&state, &session_id, &previous).await;
+            }
+            return task_store::unavailable_response();
+        }
+    };
+    if let Some(persisted) = persisted {
+        proposed["metadata"] = persisted.metadata;
+        proposed["summary"] = json!(persisted.summary);
+        match persisted.model_policy {
+            Some(policy) => proposed["model_policy"] = policy,
+            None => {
+                proposed
+                    .as_object_mut()
+                    .expect("session resource")
+                    .remove("model_policy");
+            }
+        }
     }
     let session = {
         let mut inner = state.inner.lock().expect("api state poisoned");
@@ -379,9 +431,18 @@ pub(super) async fn update_session(
             .sessions
             .get_mut(&session_id)
             .expect("session existence checked before policy update");
-        merge_mutable_fields(session, &input, &["summary", "metadata"]);
-        project_model_policy(session, &model_policy);
-        session["updated_at"] = json!(now_rfc3339());
+        session["metadata"] = proposed["metadata"].clone();
+        session["summary"] = proposed["summary"].clone();
+        match proposed.get("model_policy") {
+            Some(policy) => session["model_policy"] = policy.clone(),
+            None => {
+                session
+                    .as_object_mut()
+                    .expect("session resource")
+                    .remove("model_policy");
+            }
+        }
+        session["updated_at"] = json!(now);
         session.clone()
     };
     state.append_event(Some(session_id), None, "session.updated", session.clone());
@@ -424,6 +485,32 @@ fn parse_model_policy_change(
     Ok(ModelPolicyChange::Set(policy))
 }
 
+pub(super) async fn restore_model_policy(
+    state: &ApiState,
+    session_id: &str,
+    policy: Option<&Value>,
+) -> Result<(), String> {
+    let input = policy
+        .map(|policy| json!({"model_policy": policy}))
+        .unwrap_or_else(|| json!({"model_policy":null}));
+    let change = parse_model_policy_change(&input, &state.provider_catalog)?;
+    apply_model_policy_change(state, session_id, &change).await
+}
+
+async fn rollback_model_policy(state: &ApiState, session_id: &str, previous: &Value) {
+    if restore_model_policy(state, session_id, previous.get("model_policy"))
+        .await
+        .is_err()
+    {
+        state
+            .inner
+            .lock()
+            .expect("api state poisoned")
+            .sessions
+            .remove(session_id);
+    }
+}
+
 async fn apply_model_policy_change(
     state: &ApiState,
     session_id: &str,
@@ -436,7 +523,7 @@ async fn apply_model_policy_change(
             format!("{}:{}", policy.provider, policy.model),
             policy
                 .reasoning_effort
-                .map(SessionReasoningEffort::as_str)
+                .map(ReasoningEffort::as_str)
                 .unwrap_or("@inherit"),
         ),
     };
@@ -483,12 +570,20 @@ fn project_model_policy(session: &mut Value, change: &ModelPolicyChange) {
 pub(super) async fn close_session(
     State(state): State<ApiState>,
     AxumPath(session_id): AxumPath<String>,
-    OriginalUri(uri): OriginalUri,
-    headers: HeaderMap,
-    body: Bytes,
 ) -> Response {
-    if let Err(response) = authorize(&state, Method::POST, &uri, &headers, body).await {
-        return response;
+    let _control = match state.restore_session(&session_id).await {
+        Ok(control) => control,
+        Err(error) => return error.response(),
+    };
+    if let Err(error) = state.update_session_facts(
+        &session_id,
+        TaskSessionUpdate {
+            status: Some(SessionStatus::Closed),
+            updated_at: now_rfc3339(),
+            ..TaskSessionUpdate::default()
+        },
+    ) {
+        return session_control::SessionControlError::from(error).response();
     }
     state.acp.send_raw(
         json!({"jsonrpc": "2.0", "method": "session/cancel", "params": {"sessionId": session_id}}),
@@ -506,23 +601,40 @@ pub(super) async fn close_session(
     Json(session).into_response()
 }
 
+#[derive(Default, Deserialize)]
+struct ForkSessionInput {
+    branch_id: Option<String>,
+    #[serde(default)]
+    metadata: serde_json::Map<String, Value>,
+}
+
 pub(super) async fn fork_session(
     State(state): State<ApiState>,
     AxumPath(session_id): AxumPath<String>,
-    OriginalUri(uri): OriginalUri,
-    headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    if let Err(response) = authorize(&state, Method::POST, &uri, &headers, body.clone()).await {
-        return response;
-    }
-    let input = parse_json_body(&body).unwrap_or_else(|_| json!({}));
-    let parent = {
-        let inner = state.inner.lock().expect("api state poisoned");
-        inner.sessions.get(&session_id).cloned()
+    let input = if body.is_empty() {
+        ForkSessionInput::default()
+    } else {
+        match serde_json::from_slice::<ForkSessionInput>(&body) {
+            Ok(input) => input,
+            Err(_) => return api_error(
+                StatusCode::BAD_REQUEST,
+                "invalid_request",
+                "fork body must be an object with a string or null branch_id and object metadata",
+            ),
+        }
     };
-    let Some(parent) = parent else {
-        return api_error(StatusCode::NOT_FOUND, "not_found", "session not found");
+    let _control = match state.restore_session(&session_id).await {
+        Ok(control) => control,
+        Err(error) => return error.response(),
+    };
+    if let Err(error) = state.require_open_session(&session_id) {
+        return error.response();
+    }
+    let mut descriptor = match state.session_descriptor(&session_id) {
+        Ok(descriptor) => descriptor,
+        Err(error) => return session_control::SessionControlError::from(error).response(),
     };
     let result = match state
         .acp
@@ -530,7 +642,7 @@ pub(super) async fn fork_session(
             "session/fork",
             json!({
                 "sessionId": session_id,
-                "branchName": input.get("branch_id").and_then(Value::as_str)
+                "branchName": input.branch_id
             }),
         )
         .await
@@ -544,19 +656,15 @@ pub(super) async fn fork_session(
         .map(str::to_string)
         .unwrap_or_else(|| format!("session_{}", Uuid::now_v7()));
     let now = now_rfc3339();
-    let mut session = parent.clone();
-    session["id"] = json!(new_id);
-    session["created_at"] = json!(now);
-    session["updated_at"] = json!(now);
-    session["state"] = json!("IDLE");
-    session["parent_session_id"] = json!(session_id);
-    session["root_session_id"] = parent
-        .get("root_session_id")
-        .cloned()
-        .filter(|value| !value.is_null())
-        .unwrap_or_else(|| parent.get("id").cloned().unwrap_or(Value::Null));
-    session["branch_id"] = input.get("branch_id").cloned().unwrap_or(Value::Null);
-    session["metadata"] = input.get("metadata").cloned().unwrap_or_else(|| json!({}));
+    descriptor.root_session_id.get_or_insert(session_id.clone());
+    descriptor.parent_session_id = Some(session_id);
+    descriptor.branch_id = input.branch_id;
+    descriptor.metadata = Value::Object(input.metadata);
+    descriptor.id = new_id.clone();
+    descriptor.created_at = now.clone();
+    descriptor.updated_at = now;
+    descriptor.status = SessionStatus::Open;
+    let session = task_store::session_resource(descriptor, false, None);
     {
         let mut inner = state.inner.lock().expect("api state poisoned");
         inner.sessions.insert(new_id.clone(), session.clone());
@@ -566,16 +674,63 @@ pub(super) async fn fork_session(
     (StatusCode::CREATED, Json(session)).into_response()
 }
 
+struct SessionMessageSnapshot {
+    task_view: harn_session_store::task::TaskMessageView,
+    // Control-event order is shared by task and standalone message creation.
+    entries: Vec<(String, Value, bool)>,
+}
+
+fn session_message_snapshot(
+    state: &ApiState,
+    session_id: &str,
+) -> harn_session_store::StoreResult<SessionMessageSnapshot> {
+    let store = state.task_store()?;
+    let task_view = store.task_message_view(session_id)?;
+    let inner = state.inner.lock().expect("api state poisoned");
+    let messages = inner.messages.get(session_id);
+    let event_ids: HashMap<_, _> = inner
+        .events
+        .iter()
+        .filter(|event| {
+            event.session_id.as_deref() == Some(session_id) && event.event == "message.created"
+        })
+        .filter_map(|event| event.payload["id"].as_str().map(|id| (id, &event.id)))
+        .collect();
+    let mut entries = Vec::new();
+    if let Some(messages) = messages {
+        for message in messages {
+            let id = message["id"]
+                .as_str()
+                .and_then(|id| event_ids.get(id))
+                .ok_or_else(|| {
+                    harn_session_store::StoreError::Backend(
+                        "message has no control event identity".into(),
+                    )
+                })?;
+            entries.push(((*id).clone(), message.clone(), false));
+        }
+    }
+    let live = messages.is_some();
+    drop(event_ids);
+    drop(inner);
+    if !live {
+        store.get_task_session(session_id)?;
+    }
+    entries.extend(
+        task_view
+            .events
+            .iter()
+            .map(|event| (event.id.clone(), event.payload.clone(), true)),
+    );
+    entries.sort_by(|a, b| a.0.cmp(&b.0));
+    Ok(SessionMessageSnapshot { task_view, entries })
+}
+
 pub(super) async fn truncate_session(
     State(state): State<ApiState>,
     AxumPath(session_id): AxumPath<String>,
-    OriginalUri(uri): OriginalUri,
-    headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    if let Err(response) = authorize(&state, Method::POST, &uri, &headers, body.clone()).await {
-        return response;
-    }
     let Ok(input) = parse_json_body(&body) else {
         return invalid_json_response();
     };
@@ -593,11 +748,12 @@ pub(super) async fn truncate_session(
             )
         }
     };
-    {
-        let inner = state.inner.lock().expect("api state poisoned");
-        if !inner.sessions.contains_key(&session_id) {
-            return api_error(StatusCode::NOT_FOUND, "not_found", "session not found");
-        }
+    let _control = match state.restore_session(&session_id).await {
+        Ok(control) => control,
+        Err(error) => return error.response(),
+    };
+    if let Err(error) = state.require_open_session(&session_id) {
+        return error.response();
     }
 
     let mut acp_params = json!({
@@ -621,22 +777,76 @@ pub(super) async fn truncate_session(
         .unwrap_or(0) as usize;
     let new_tip_turn_id = result.get("newTipTurnId").cloned().unwrap_or(Value::Null);
 
-    let (session, canceled_task) = {
+    let snapshot = match session_message_snapshot(&state, &session_id) {
+        Ok(snapshot) => snapshot,
+        Err(_) => return task_store::unavailable_response(),
+    };
+    let retained_task_ids: Vec<_> = snapshot
+        .entries
+        .iter()
+        .take(keep_first)
+        .filter(|entry| entry.2)
+        .map(|entry| entry.0.clone())
+        .collect();
+    if state
+        .task_store()
+        .and_then(|store| {
+            store.retain_task_messages(
+                &session_id,
+                snapshot.task_view.through_event_id.as_deref(),
+                &retained_task_ids,
+            )
+        })
+        .is_err()
+    {
+        return task_store::unavailable_response();
+    }
+    let observed_messages: BTreeSet<_> = snapshot
+        .entries
+        .iter()
+        .filter(|entry| !entry.2)
+        .filter_map(|entry| entry.1["id"].as_str().map(str::to_owned))
+        .collect();
+    let retained_messages: BTreeSet<_> = snapshot
+        .entries
+        .iter()
+        .take(keep_first)
+        .filter(|entry| !entry.2)
+        .filter_map(|entry| entry.1["id"].as_str().map(str::to_owned))
+        .collect();
+
+    let active_tasks = match state
+        .task_store()
+        .and_then(|store| store.list_tasks(Some(&session_id), None))
+    {
+        Ok(tasks) => tasks,
+        Err(_) => return task_store::unavailable_response(),
+    };
+    for task in active_tasks
+        .into_iter()
+        .filter(|task| task.status.is_active())
+    {
+        if state
+            .change_task(
+                &task.id,
+                harn_session_store::task::TaskStatus::Canceled,
+                None,
+            )
+            .is_err()
+        {
+            return task_store::unavailable_response();
+        }
+    }
+    let session = {
         let mut inner = state.inner.lock().expect("api state poisoned");
         if let Some(messages) = inner.messages.get_mut(&session_id) {
-            messages.truncate(keep_first);
+            messages.retain(|message| {
+                message["id"].as_str().is_some_and(|id| {
+                    !observed_messages.contains(id) || retained_messages.contains(id)
+                })
+            });
         }
-        let canceled_task_id = inner.active_task_by_session.remove(&session_id);
         let now = now_rfc3339();
-        let canceled_task = canceled_task_id.and_then(|task_id| {
-            let task = inner.tasks.get_mut(&task_id)?;
-            if task.get("status").and_then(Value::as_str) != Some("CANCELED") {
-                task["status"] = json!("CANCELED");
-                task["updated_at"] = json!(&now);
-                task["canceled_at"] = json!(&now);
-            }
-            Some((task_id, task.clone()))
-        });
         let Some(session) = inner.sessions.get_mut(&session_id) else {
             return api_error(StatusCode::NOT_FOUND, "not_found", "session not found");
         };
@@ -644,16 +854,8 @@ pub(super) async fn truncate_session(
             session["state"] = json!("IDLE");
         }
         session["updated_at"] = json!(now);
-        (session.clone(), canceled_task)
+        session.clone()
     };
-    if let Some((task_id, task)) = canceled_task {
-        state.append_event(
-            Some(session_id.clone()),
-            Some(task_id),
-            "task.canceled",
-            task,
-        );
-    }
     let response = json!({
         "object": "session.truncate_result",
         "session_id": session_id,
@@ -675,51 +877,47 @@ pub(super) async fn list_session_messages(
     State(state): State<ApiState>,
     AxumPath(session_id): AxumPath<String>,
     Query(query): Query<ListQuery>,
-    OriginalUri(uri): OriginalUri,
-    headers: HeaderMap,
 ) -> Response {
-    if let Err(response) = authorize(&state, Method::GET, &uri, &headers, Bytes::new()).await {
-        return response;
-    }
-    let inner = state.inner.lock().expect("api state poisoned");
-    let Some(messages) = inner.messages.get(&session_id) else {
-        return api_error(StatusCode::NOT_FOUND, "not_found", "session not found");
+    let messages = match session_message_snapshot(&state, &session_id) {
+        Ok(snapshot) => snapshot.entries.into_iter().map(|entry| entry.1).collect(),
+        Err(harn_session_store::StoreError::NotFound(_)) => {
+            return api_error(StatusCode::NOT_FOUND, "not_found", "session not found")
+        }
+        Err(_) => return task_store::unavailable_response(),
     };
-    Json(list_response(limit_values(messages.clone(), query.limit))).into_response()
+    Json(list_response(limit_values(messages, query.limit))).into_response()
 }
 
 pub(super) async fn append_session_message(
     State(state): State<ApiState>,
     AxumPath(session_id): AxumPath<String>,
-    OriginalUri(uri): OriginalUri,
-    headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    if let Err(response) = authorize(&state, Method::POST, &uri, &headers, body.clone()).await {
-        return response;
-    }
     let Ok(input) = parse_json_body(&body) else {
         return invalid_json_response();
     };
     let message_input = input.get("message").cloned().unwrap_or(input.clone());
     let message = message_resource(&session_id, None, message_input.clone());
-    {
-        let mut inner = state.inner.lock().expect("api state poisoned");
-        if !inner.sessions.contains_key(&session_id) {
-            return api_error(StatusCode::NOT_FOUND, "not_found", "session not found");
-        }
-        inner
-            .messages
-            .entry(session_id.clone())
-            .or_default()
-            .push(message.clone());
+    let control = match state.restore_session(&session_id).await {
+        Ok(control) => control,
+        Err(error) => return error.response(),
+    };
+    if let Err(error) = state.require_open_session(&session_id) {
+        return error.response();
     }
-    state.append_event(
-        Some(session_id.clone()),
-        None,
-        "message.created",
-        message.clone(),
-    );
+    if state
+        .append_event_with_persistence(
+            Some(session_id.clone()),
+            None,
+            "message.created",
+            message.clone(),
+            EventPersistence::SessionMessage,
+        )
+        .is_none()
+    {
+        return task_store::unavailable_response();
+    }
+    drop(control);
     if input.get("run").and_then(Value::as_bool).unwrap_or(false) {
         if let Some(prompt) = prompt_text(&message_input) {
             let result = state
@@ -744,33 +942,34 @@ pub(super) async fn list_session_tasks(
     State(state): State<ApiState>,
     AxumPath(session_id): AxumPath<String>,
     Query(query): Query<ListQuery>,
-    OriginalUri(uri): OriginalUri,
-    headers: HeaderMap,
 ) -> Response {
-    if let Err(response) = authorize(&state, Method::GET, &uri, &headers, Bytes::new()).await {
-        return response;
-    }
-    let inner = state.inner.lock().expect("api state poisoned");
-    if !inner.sessions.contains_key(&session_id) {
+    if !api_session_exists(&state, &session_id) {
         return api_error(StatusCode::NOT_FOUND, "not_found", "session not found");
     }
-    let tasks = inner
-        .tasks
-        .values()
-        .filter(|task| task.get("session_id").and_then(Value::as_str) == Some(session_id.as_str()))
-        .cloned()
-        .collect();
-    Json(list_response(limit_values(tasks, query.limit))).into_response()
+    match state
+        .ready_task_store()
+        .and_then(|store| store.list_tasks(Some(&session_id), None))
+    {
+        Ok(tasks) => Json(list_response(limit_values(
+            tasks
+                .iter()
+                .map(harn_session_store::task::TaskRecord::resource)
+                .collect(),
+            query.limit,
+        )))
+        .into_response(),
+        Err(_) => task_store::unavailable_response(),
+    }
 }
 
 pub(super) async fn submit_session_task(
     State(state): State<ApiState>,
     AxumPath(session_id): AxumPath<String>,
-    OriginalUri(uri): OriginalUri,
+    Extension(principal): Extension<AuthenticatedPrincipal>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    tasks::submit_task_inner(state, Some(session_id), uri, headers, body).await
+    tasks::submit_task_inner(state, Some(session_id), principal, headers, body).await
 }
 
 fn api_session_view(session: &Value, history: &[ApiEvent]) -> harn_vm::orchestration::SessionView {

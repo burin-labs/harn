@@ -24,7 +24,7 @@ fn llm_stream_error_item(
         ledger,
     ) {
         VmError::Thrown(value) => value,
-        other => VmValue::String(arcstr::ArcStr::from(other.to_string())),
+        other => VmValue::string(other.to_string()),
     }
 }
 
@@ -50,9 +50,7 @@ pub(super) async fn llm_stream_builtin(args: Vec<VmValue>) -> Result<VmValue, Vm
         if provider == "mock" {
             let words: Vec<&str> = prompt_text.split_whitespace().collect();
             for word in &words {
-                let _ = tx_for_task
-                    .send(VmValue::String(arcstr::ArcStr::from(*word)))
-                    .await;
+                let _ = tx_for_task.send(VmValue::string(*word)).await;
             }
             close_for_task.close();
             return;
@@ -87,7 +85,7 @@ fn llm_stream_chunk(
     visible_delta: &str,
     partial: &str,
     stop_reason: Option<&str>,
-    usage: Option<VmValue>,
+    result: Option<&super::api::LlmResult>,
 ) -> VmValue {
     let mut dict = std::collections::BTreeMap::new();
     dict.put_str("delta", delta);
@@ -96,18 +94,23 @@ fn llm_stream_chunk(
     dict.put_str("role", "assistant");
     // Same spelling as the final `llm_call` envelope: `stop_reason`, never
     // the OpenAI wire name `finish_reason`.
-    dict.insert(
-        "stop_reason".to_string(),
-        stop_reason
-            .map(|reason| VmValue::String(arcstr::ArcStr::from(reason.to_string())))
-            .unwrap_or(VmValue::Nil),
+    dict.put_nullable(
+        "stop_reason",
+        stop_reason.map(|reason| VmValue::string(reason.to_string())),
     );
     // Accounting rides the terminal chunk only, and it is the very same value
     // `llm_call` publishes (see `build_usage_value`). Without it a streaming
     // caller can render tokens but can never report what the turn cost or how
     // fast the server prefilled and decoded it.
-    if let Some(usage) = usage {
-        dict.insert("usage".to_string(), usage);
+    if let Some(result) = result {
+        dict.insert("usage".to_string(), super::api::build_usage_value(result));
+        dict.insert(
+            "effective_reasoning_effort".to_string(),
+            crate::schema::json_to_vm_value(
+                &serde_json::to_value(&result.telemetry.effective_reasoning_effort)
+                    .expect("effort observation serializes"),
+            ),
+        );
     }
     VmValue::dict(dict)
 }
@@ -205,7 +208,7 @@ pub(super) async fn llm_stream_call_impl(args: Vec<VmValue>) -> Result<VmValue, 
                                 "",
                                 &partial,
                                 result.stop_reason.as_deref(),
-                                Some(super::api::build_usage_value(&result)),
+                                Some(&result),
                             );
                             let _ = stream_tx.send(Ok(final_chunk)).await;
                         }
@@ -257,7 +260,7 @@ async fn fire_on_delta(
         return;
     };
     if let Err(err) = child_vm
-        .call_closure_pub(closure, &[VmValue::String(arcstr::ArcStr::from(delta))])
+        .call_closure_pub(closure, &[VmValue::string(delta)])
         .await
     {
         if !*warned {
@@ -404,6 +407,11 @@ mod tests {
                         .expect("stream should produce first chunk")?;
                 assert_eq!(dict_string(&first_chunk, "delta").as_deref(), Some("hello"));
                 drop(first_chunk);
+                let terminal = receiver.recv().await.expect("terminal chunk")?;
+                assert_eq!(
+                    crate::llm::vm_value_to_json(&terminal)["effective_reasoning_effort"],
+                    serde_json::json!({"status": "not_reported"}),
+                );
 
                 let profile = crate::profile::build(&crate::tracing::peek_spans());
                 let first_token_ms = profile

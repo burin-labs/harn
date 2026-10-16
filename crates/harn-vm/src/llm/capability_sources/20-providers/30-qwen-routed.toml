@@ -11,6 +11,19 @@
 # safety with same-named routes elsewhere), so each rule below needs a
 # prefixed twin — capability matching sees the catalog id, not the wire
 # id.
+# Qwen3.8 Max refuses to turn reasoning off on Alibaba's endpoint (OpenRouter
+# probe, 2026-10-09: 400 "Reasoning is mandatory"), so Harn omits the disable
+# rather than trusting Model Studio's `enable_thinking` toggle. It layers onto
+# `dashscope/qwen*`.
+[[provider.dashscope]]
+model_match = "dashscope/qwen3.8-max*"
+extends = true
+reasoning_disable_supported = false
+reasoning_none_supported = false
+vision = true
+vision_supported = true
+prompt_caching = true
+
 [[provider.dashscope]]
 model_match = "dashscope/qwen3.6*"
 native_tools = true
@@ -93,22 +106,64 @@ prefers_role_developer = false
 prefers_xml_tools = false
 thinking_block_style = "inline"
 
-# Fireworks-hosted GPT-OSS (`accounts/fireworks/models/gpt-oss-120b`) bills
-# empty native completions with no dispatchable tool calls in eval JSONL, so it
-# stays off the provider-native channel. Between the two TEXT-channel grammars
-# (`json` fenced-block vs `text` heredoc), an empirical A/B (2026-06-21, real
-# Fireworks calls, 3 samples per arm, task = author a Zig file heavy in `\\`
-# multiline-string literals) showed `json` corrupts the file body in 3/3 runs
-# (doubled `\\` -> `\\\\` multiline prefixes, escaped quotes `\"name\"`, and one
-# run leaked literal `\n`/`\"` for the whole file) while `text`/heredoc emitted
-# byte-clean Zig in 3/3 because a JSON string arg forces the model to escape
-# the backslashes the Zig source already needs, and gpt-oss double-escapes them.
-# Tool-call dispatch was 3/3 on BOTH channels (no heredoc-wrapper regression).
-# Pin to `text` so escape-free heredoc bodies carry source verbatim.
+# Direct Fireworks probe 2026-10-11: native tool call/result round trip,
+# required tool choice and red-image recognition returned 200. Unlike
+# DashScope, enable_thinking and thinking_budget returned 400 (extra fields).
+# reasoning_effort=none produced zero reasoning tokens; low/medium/high/xhigh/
+# max produced reasoning, while an invalid effort returned 400. High/xhigh/max
+# share the same prompt shape, so this declares wire support, not distinct
+# quality levels. Do not inherit the older Qwen chat-template toggles.
+# Stable-session caching: 4112 input tokens reported 0 cached on the cold call
+# and 4111 cached on each of two repeats (2026-10-11).
+[[provider.fireworks]]
+model_match = "accounts/fireworks/models/qwen3p8-max"
+native_tools = true
+preferred_tool_format = "native"
+thinking_modes = ["effort"]
+reasoning_effort_supported = true
+reasoning_effort_levels = ["none", "low", "medium", "high", "xhigh", "max"]
+reasoning_none_supported = true
+# Off must be an authored effort=none; a boolean thinking=false has no wire
+# directive on this route and would leave the provider's reasoning enabled.
+reasoning_disable_supported = false
+prompt_caching = true
+vision = true
+vision_supported = true
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "reasoning_summary"
+
+# Fireworks-hosted GPT-OSS (`accounts/fireworks/models/gpt-oss-120b`) uses the
+# provider-native tool channel, re-measured 2026-09-27 in a downstream host:
+#   * Agent eval, the host's canonical-25 tune cells, N=5, same build, only the
+#     channel changed. Native vs fenced `json`: visible reasoning-voice prose
+#     in main-agent replies 0/19 trials vs 4/19 (21%, 95% CI [5%, 42%]); pass
+#     18/19 vs 16/20 measured; $0.27 vs $0.32. 224 native main-agent replies:
+#     202 carried a tool call, 0 were empty. The "bills empty native
+#     completions" failure that closed this channel in June did not recur.
+#   * Direct calls: 12/12 clean `tool_calls`, reasoning in `thinking`, empty
+#     visible text.
+# Residual risk, still open: backslash-heavy file bodies. Measured 2026-09-27
+# through agent_loop, 20 trials per cell (Python raw strings / LaTeX / Zig):
+#   channel   byte-exact   exact modulo edge newline   backslashes altered
+#   native    29/60        31/60                       29/60 (LaTeX 19, Zig 9)
+#   json       0/60        40/60                       20/60 (Zig 17, Py 3)
+#   text       0/60        43/60                       16/60 (Zig 14, LaTeX 2)
+# Native double-escapes JSON-looking sequences (`\t` in `\textbackslash`);
+# the text channels lose the body's final newline (a Harn parser defect, not
+# the model). No channel is byte-safe here; native trades more backslash
+# corruption than json on LaTeX for the leak fix above. The leak pair is
+# N=5 per cell with no held-out cells. Revert trigger:
+# backslash-heavy authoring regressions on this route -> restore
+# `native_tools = false` and `preferred_tool_format = "text"`.
 [[provider.fireworks]]
 model_match = "accounts/fireworks/models/gpt-oss-*"
-native_tools = false
-preferred_tool_format = "text"
+native_tools = true
+preferred_tool_format = "native"
 text_tool_wire_format_supported = true
 supports_parallel_tool_calls = false
 requires_parallel_tool_calls_false = true
@@ -372,6 +427,21 @@ extends = true
 native_tools = true
 allowed_tool_choice_modes = ["auto", "none"]
 
+# Sonnet 5.5 through OpenRouter, probed 2026-09-29: `tool_choice: "required"`
+# is a 400 carrying Anthropic's "type tool and any are not supported" error,
+# and `reasoning: {enabled: false}` is a 400 ("Reasoning is mandatory for this
+# endpoint and cannot be disabled"). OpenRouter does not expose Anthropic's
+# `between_tools` off switch. With `reasoning_disable_supported = false`, a
+# default call omits the disable directive and succeeds, and an explicit
+# `thinking: false` is refused locally rather than sent to that 400.
+[[provider.openrouter]]
+model_match = "anthropic/claude-sonnet-*"
+version_min = [5, 5]
+extends = true
+native_tools = true
+reasoning_disable_supported = false
+allowed_tool_choice_modes = ["auto", "none"]
+
 [[provider.openrouter]]
 model_match = "anthropic/claude-fable-*"
 native_tools = true
@@ -594,6 +664,7 @@ thinking_block_style = "thinking_blocks"
 
 [[provider.openrouter]]
 model_match = "qwen/qwen3.7-plus"
+top_k_supported = true
 native_tools = true
 preferred_tool_format = "native"
 structured_output = "native"
@@ -617,8 +688,49 @@ prefers_role_developer = false
 prefers_xml_tools = false
 thinking_block_style = "inline"
 
+# Qwen3.8 Max (0902) on OpenRouter, served by Alibaba. Unlike Qwen3.7 Max
+# below and the `qwen/*` catch-all, reasoning cannot be turned off. Live probe
+# 2026-10-01 on /chat/completions:
+#   reasoning_effort none -> 400 "Reasoning is mandatory for this endpoint and
+#     cannot be disabled." (qwen/qwen3.7-max at none -> 200, 0 reasoning tokens)
+#   reasoning_effort low/medium/high/xhigh/max -> 200; reasoning arrives in
+#     the `reasoning` field
+#   tool_choice auto and required -> one native tool call each
+#   temperature=0.2 -> 200; a PNG image was read correctly
+#   strict json_schema -> 200 with schema-valid JSON
+#   a repeated 3.2K-token prefix reported 3072 cached tokens on the second call
+# Without this row the catch-all's reasoning-off agent override would send a
+# disable on every agent, verify, and code turn and get the 400 back.
+[[provider.openrouter]]
+model_match = "qwen/qwen3.8-max-0902"
+top_k_supported = true
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+thinking_modes = ["effort"]
+reasoning_effort_supported = true
+reasoning_effort_levels = ["low", "medium", "high", "xhigh", "max"]
+reasoning_none_supported = false
+reasoning_disable_supported = false
+prompt_caching = true
+cache_breakpoint_style = "last_block"
+vision = true
+vision_supported = true
+server_parser = "none"
+honors_chat_template_kwargs = false
+recommended_endpoint = "/v1/chat/completions"
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+
 [[provider.openrouter]]
 model_match = "qwen/qwen3.7-max"
+top_k_supported = true
 native_tools = true
 preferred_tool_format = "native"
 structured_output = "native"
@@ -642,6 +754,7 @@ thinking_block_style = "inline"
 
 [[provider.openrouter]]
 model_match = "qwen/qwen3.6-plus"
+top_k_supported = true
 native_tools = true
 preferred_tool_format = "native"
 structured_output = "native"
@@ -670,6 +783,7 @@ provider_route_denylist = ["Ambient"]
 
 [[provider.openrouter]]
 model_match = "qwen/qwen3.6-flash"
+top_k_supported = true
 native_tools = true
 preferred_tool_format = "native"
 structured_output = "native"
@@ -698,6 +812,7 @@ provider_route_denylist = ["Ambient"]
 
 [[provider.openrouter]]
 model_match = "qwen/qwen3.6*"
+top_k_supported = true
 native_tools = true
 preferred_tool_format = "native"
 structured_output = "native"
@@ -778,6 +893,7 @@ thinking_block_style = "none"
 
 [[provider.openrouter]]
 model_match = "qwen/qwen3-coder*"
+top_k_supported = true
 native_tools = true
 preferred_tool_format = "text"
 # Qwen3-Coder reserves <tool_call> as a special token and emits the wrapper on
@@ -839,6 +955,7 @@ thinking_block_style = "none"
 
 [[provider.openrouter]]
 model_match = "qwen/*"
+top_k_supported = true
 native_tools = true
 preferred_tool_format = "native"
 structured_output = "native"

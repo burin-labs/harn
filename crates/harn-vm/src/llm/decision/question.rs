@@ -52,16 +52,26 @@ impl QuestionRefusalReason {
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub enum QuestionBody {
     Boolean,
+    /// Explicit yes/no descriptions; plain boolean identities stay unchanged.
+    BooleanWithCriteria(BooleanCriteria),
     /// Label to the description the model judges against, in declared order.
     Choice(Vec<(String, String)>),
     /// Ordered levels, lowest first.
     Score(Vec<String>),
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+pub struct BooleanCriteria {
+    #[serde(rename = "true")]
+    pub yes: String,
+    #[serde(rename = "false")]
+    pub no: String,
+}
+
 impl QuestionBody {
     pub fn kind(&self) -> DecisionQuestionKind {
         match self {
-            Self::Boolean => DecisionQuestionKind::Boolean,
+            Self::Boolean | Self::BooleanWithCriteria(_) => DecisionQuestionKind::Boolean,
             Self::Choice(_) => DecisionQuestionKind::Choice,
             Self::Score(_) => DecisionQuestionKind::Score,
         }
@@ -71,7 +81,7 @@ impl QuestionBody {
     /// carries one probability rather than a map, so it has none.
     pub fn labels(&self) -> Vec<String> {
         match self {
-            Self::Boolean => Vec::new(),
+            Self::Boolean | Self::BooleanWithCriteria(_) => Vec::new(),
             Self::Choice(criteria) => criteria.iter().map(|(label, _)| label.clone()).collect(),
             Self::Score(levels) => levels.clone(),
         }
@@ -123,7 +133,25 @@ impl QuestionSet {
             let kind = text(fields.get("kind"))
                 .ok_or_else(|| format!("question `{id}` has no question kind"))?;
             let body = match kind.as_str() {
-                "boolean" => QuestionBody::Boolean,
+                "boolean" => match fields.get("criteria") {
+                    None | Some(VmValue::Nil) => QuestionBody::Boolean,
+                    Some(criteria) => {
+                        let criteria = criteria.as_dict().ok_or_else(|| {
+                            format!("boolean question `{id}` has non-record criteria")
+                        })?;
+                        if criteria.len() != 2 {
+                            return Err(format!("boolean question `{id}` criteria must contain exactly true and false"));
+                        }
+                        QuestionBody::BooleanWithCriteria(BooleanCriteria {
+                            yes: text(criteria.get("true")).ok_or_else(|| {
+                                format!("boolean question `{id}` has no string true criterion")
+                            })?,
+                            no: text(criteria.get("false")).ok_or_else(|| {
+                                format!("boolean question `{id}` has no string false criterion")
+                            })?,
+                        })
+                    }
+                },
                 "choice" => {
                     let criteria = fields
                         .get("criteria")
@@ -217,7 +245,7 @@ impl QuestionSet {
                 return refuse(QuestionRefusalReason::UnsupportedQuestionKind);
             }
             match &question.body {
-                QuestionBody::Boolean => {}
+                QuestionBody::Boolean | QuestionBody::BooleanWithCriteria(_) => {}
                 QuestionBody::Choice(criteria) => {
                     if criteria.is_empty() {
                         return refuse(QuestionRefusalReason::EmptyOptions);

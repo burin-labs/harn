@@ -45,6 +45,33 @@ fn current_thread_runtime() -> tokio::runtime::Runtime {
 }
 
 #[test]
+fn zai_glm53_flash_rejects_explicit_disable_but_allows_an_unspecified_probe() {
+    let _key = ScopedEnvVar::set("ZAI_API_KEY", "test-key");
+    let mut options = crate::value::DictMap::from_iter([
+        (
+            crate::value::intern_key("provider"),
+            VmValue::String(arcstr::ArcStr::from("zai")),
+        ),
+        (
+            crate::value::intern_key("model"),
+            VmValue::String(arcstr::ArcStr::from("glm-5.3-flash")),
+        ),
+    ]);
+
+    let unspecified = extract_with_options(options.clone()).expect("plain probe must be admitted");
+    assert_eq!(
+        unspecified.thinking,
+        crate::llm::api::ThinkingConfig::Disabled
+    );
+
+    options.insert(crate::value::intern_key("thinking"), VmValue::Bool(false));
+    let error = extract_with_options(options).expect_err("explicit disable is unsupported");
+    assert!(error
+        .to_string()
+        .contains("option `thinking` is not supported"));
+}
+
+#[test]
 fn moonshot_kimi_k3_accepts_only_its_documented_effort_ladder() {
     let _moonshot_key = ScopedEnvVar::set("MOONSHOT_API_KEY", "test-key");
 

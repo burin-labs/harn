@@ -1,0 +1,137 @@
+/** Local repair replay. The runtime owns ordering; the connector owns publication. */
+import { BumpPrState, BumpRepairs } from "std/bump/runtime"
+import { command_run } from "std/command"
+
+fn git(tools: HarnessTools, root: string, args: list<string>) {
+  const result = command_run(tools, ["git", "-C", root] + args, {max_inline_bytes: 16777216})
+  if result.stdout_truncated ?? false {
+    throw "std/bump/repairs: git output exceeded the repair capture limit"
+  }
+  return result
+}
+
+fn checked(tools: HarnessTools, root: string, args: list<string>) -> string {
+  const result = git(tools, root, args)
+  if !result.success {
+    throw "std/bump/repairs: git failed: " + trim(result.stderr ?? "")
+  }
+  return trim(result.stdout ?? "")
+}
+
+fn lines(value: string) -> list<string> {
+  return split(value, "\n").filter({ line -> line != "" }).to_list()
+}
+
+/**
+ * Replay non-bot commits and the repair IDs recorded by earlier publications.
+ * Repair IDs survive flattening into a signed bump commit as Git trailers.
+ * Every patch is applied with three-way conflict detection against refreshed
+ * files. The checkout's HEAD stays at base for the signed worktree publisher.
+ *
+ * @effects: [fs, process, net]
+ * @errors: [invalid commit IDs, unavailable commits, failed Git commands, oversized capture]
+ */
+pub fn replay_bump_repairs(
+  tools: HarnessTools,
+  root: string,
+  is_generated_commit: fn(string) -> bool,
+  existing: BumpPrState?,
+  base: string,
+  fetch: fn(string) -> {ok: bool, detail: string},
+) -> BumpRepairs {
+  if existing == nil {
+    return {ok: true, commits: [], conflicts: [], detail: "no open bump PR"}
+  }
+  for oid in [base, existing.head_oid] {
+    if regex_match("^[0-9a-f]{40}$", oid) == nil {
+      throw "std/bump/repairs: base and PR head must be full commit IDs"
+    }
+  }
+  const fetched = fetch(existing.head_oid)
+  if !fetched.ok {
+    throw "std/bump/repairs: could not fetch inspected PR head: " + fetched.detail
+  }
+  const history = lines(
+    checked(tools, root, ["rev-list", "--reverse", base + ".." + existing.head_oid]),
+  )
+  let repairs: list<string> = []
+  for oid in history {
+    if is_generated_commit(oid) {
+      const trailers = lines(
+        checked(
+          tools,
+          root,
+          ["show", "-s", "--format=%(trailers:key=Harn-Repair-Commit,valueonly)", oid],
+        ),
+      )
+      for repair in trailers {
+        if len(repair) != 40 || regex_match("^[0-9a-f]{40}$", repair) == nil {
+          throw "std/bump/repairs: invalid repair commit trailer"
+        }
+        if !contains(repairs, repair) {
+          repairs = repairs + [repair]
+        }
+      }
+    } else if !contains(repairs, oid) {
+      repairs = repairs + [oid]
+    }
+  }
+  let pending: list<string> = []
+  for oid in repairs {
+    if !git(tools, root, ["cat-file", "-e", oid + "^{commit}"]).success {
+      const fetched_repair = fetch(oid)
+      if !fetched_repair.ok {
+        throw "std/bump/repairs: could not fetch recorded repair " + oid
+      }
+    }
+    // Exit 1 means non-ancestry; an unreadable commit is a failure, not that verdict.
+    const ancestry = git(tools, root, ["merge-base", "--is-ancestor", oid, base])
+    if ancestry.exit_code == 1 {
+      pending = pending + [oid]
+    } else if !ancestry.success {
+      throw "std/bump/repairs: could not compare repair " + oid + " with base"
+    }
+  }
+  repairs = pending
+  if len(repairs) == 0 {
+    return {ok: true, commits: [], conflicts: [], detail: "no unmerged repairs"}
+  }
+  checked(tools, root, ["add", "--all"])
+  for oid in repairs {
+    const parents = split(checked(tools, root, ["rev-list", "--parents", "-n", "1", oid]), " ")
+    if len(parents) != 2 {
+      return {
+        ok: false,
+        commits: repairs,
+        conflicts: [oid],
+        detail: "repair must have exactly one parent: " + oid,
+      }
+    }
+    const patch = git(tools, root, ["diff", "--binary", parents[1], oid])
+    if !patch.success {
+      throw "std/bump/repairs: could not read repair patch " + oid
+    }
+    if (patch.stdout ?? "") == "" {
+      continue
+    }
+    const applied = command_run(
+      tools,
+      {mode: "argv", argv: ["git", "-C", root, "apply", "--3way", "--index"], stdin: patch.stdout},
+    )
+    if !applied.success {
+      const conflicts = lines(checked(tools, root, ["diff", "--name-only", "--diff-filter=U"]))
+      return {
+        ok: false,
+        commits: repairs,
+        conflicts: conflicts,
+        detail: "repair " + oid + " failed: " + trim(applied.stderr ?? ""),
+      }
+    }
+  }
+  return {
+    ok: true,
+    commits: repairs,
+    conflicts: [],
+    detail: "replayed ${len(repairs)} repair commits",
+  }
+}

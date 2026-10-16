@@ -1,21 +1,11 @@
 # Supply-chain gate for the Harn Rust workspace (cargo-deny).
 #
-# Policy lives in `deny.toml`; reproduce locally with `cargo deny check`.
-# cargo-deny only reads `Cargo.lock` + crate metadata, so there is no workspace
-# compile here — the job is cheap (~1 min) and needs no Rust toolchain or auth.
-#
-# Two invocations with deliberately different blocking behavior:
-#   * `check bans licenses sources` is deterministic (only changes when
-#     Cargo.lock / Cargo.toml / deny.toml change), so a failure is meaningful
-#     and actionable — it catches a new disallowed license, a duplicate-crate
-#     ban, or an unreviewed (non-crates.io) source.
-#   * `check advisories` reads the RustSec database, which updates continuously;
-#     a brand-new advisory must not red an unrelated PR, so it is advisory-only
-#     (continue-on-error). A vulnerable/yanked dependency introduced BY a PR
-#     still surfaces here for a human to act on.
-#
-# This workflow is intentionally NOT yet a required status check, so it reports
-# without blocking merges while the ignore policy settles.
+# Policy lives in `deny.toml`; reproduce locally with `cargo deny check`. The
+# pinned cargo-deny binary and how its verdicts are reported live in the shared
+# burin-labs/.github `cargo-deny.yml` workflow, which runs the deterministic
+# `check bans licenses sources` and the RustSec `check advisories` checks in one
+# job. This workflow is NOT a required status check: a newly published advisory
+# can turn it red on an unrelated PR, and that red run is the report.
 
 name: Supply chain
 
@@ -33,54 +23,26 @@ on:
       - "Cargo.lock"
       - "deny.toml"
       - ".github/workflows/supply-chain.yml"
+  schedule:
+    # Daily. The path filters above fire only when a dependency file changes,
+    # so without this a new RustSec advisory against an unchanged `Cargo.lock`
+    # is never looked for.
+    - cron: "23 8 * * *"
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: supply-chain-${{ github.ref }}
+  # PR runs supersede each other. Main pushes key by SHA so each merge commit
+  # keeps its own verdict instead of one cancelling the next (secret-scan.yml
+  # uses the same key for the same reason).
+  # The event is part of the key: a `schedule` run sits on `refs/heads/main`
+  # at the same tip SHA as that commit's push run, so without it one cancels
+  # the other's verdict.
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || (github.ref == 'refs/heads/main' && github.sha) || github.ref }}
   cancel-in-progress: true
 
 jobs:
   cargo-deny:
-    name: cargo-deny
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      # Install a pinned, checksum-verified cargo-deny prebuilt binary — same
-      # curl + sha256 pattern used elsewhere for actionlint. No compile (so no
-      # Rust toolchain needed). Bump VERSION + SHA256 together.
-      - name: Install cargo-deny
-        env:
-          CARGO_DENY_VERSION: "0.19.9"
-          CARGO_DENY_SHA256: "f1f8eedc2a3ac297c540873f93785d4104b102c0079506b2a6b3221b7ec956af"
-        run: |
-          set -euo pipefail
-          slug="cargo-deny-${CARGO_DENY_VERSION}-x86_64-unknown-linux-musl"
-          archive="${RUNNER_TEMP}/${slug}.tar.gz"
-          # --retry-all-errors, not plain --retry: a truncated transfer exits
-          # 18, which is outside curl's default retry set, and surfaces one
-          # line later as a sha256 mismatch that reads like a supply-chain
-          # alarm rather than the network blip it is. --max-time covers the
-          # other half — a stalled-but-alive connection never errors, so
-          # retrying alone never escapes it.
-          # Flags match the host-repo actionlint wrapper.
-          curl -fsSL --retry 3 --retry-all-errors \
-            --connect-timeout 15 --max-time 120 \
-            -o "${archive}" \
-            "https://github.com/EmbarkStudios/cargo-deny/releases/download/${CARGO_DENY_VERSION}/${slug}.tar.gz"
-          echo "${CARGO_DENY_SHA256}  ${archive}" | sha256sum -c -
-          tar -xzf "${archive}" -C "${RUNNER_TEMP}" "${slug}/cargo-deny"
-          mkdir -p "${HOME}/.local/bin"
-          install -m 0755 "${RUNNER_TEMP}/${slug}/cargo-deny" "${HOME}/.local/bin/cargo-deny"
-          echo "${HOME}/.local/bin" >> "$GITHUB_PATH"
-          "${HOME}/.local/bin/cargo-deny" --version
-      - name: License / bans / sources gate (deterministic)
-        run: cargo-deny --all-features check bans licenses sources
-      - name: Security advisories (advisory-only — RustSec DB updates continuously)
-        continue-on-error: true
-        run: cargo-deny --all-features check advisories
+    uses: burin-labs/.github/.github/workflows/cargo-deny.yml@96fb8ab9c9b9cc50c222762f4061c48264033e66

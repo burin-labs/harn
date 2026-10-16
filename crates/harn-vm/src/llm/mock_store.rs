@@ -9,7 +9,8 @@ use std::collections::{BTreeMap, VecDeque};
 use harn_glob::match_prose as mock_glob_match;
 
 use super::mock::{
-    LlmMock, LlmMockFixture, MockConsumptionReceipt, DEFAULT_MOCK_SCOPE, SHARED_MOCK_SCOPE,
+    LlmMock, LlmMockFixture, LlmMockPrefixMarker, LlmMockPrefixServedBy, MockConsumptionReceipt,
+    DEFAULT_MOCK_SCOPE, SHARED_MOCK_SCOPE,
 };
 
 /// A mutable fixture queue partitioned by the logical scope requested by an
@@ -21,6 +22,31 @@ pub(crate) struct MockQueue {
     strict_scopes: bool,
     buckets: BTreeMap<String, VecDeque<LlmMock>>,
     warnings: Vec<String>,
+    live_prefix: Option<LivePrefix>,
+}
+
+/// Progress through a `liveAfterCalls` fixture. `calls` counts every call this
+/// queue answered or handed off, so the fixture/live boundary and each call's
+/// ordinal come from one counter under the queue's own lock.
+#[derive(Clone, Copy, Debug)]
+struct LivePrefix {
+    live_after_calls: u64,
+    calls: u64,
+}
+
+impl LivePrefix {
+    fn handed_off(self) -> bool {
+        self.calls >= self.live_after_calls
+    }
+
+    fn next(&mut self, served_by: LlmMockPrefixServedBy) -> LlmMockPrefixMarker {
+        self.calls += 1;
+        LlmMockPrefixMarker {
+            served_by,
+            call: self.calls,
+            live_after_calls: self.live_after_calls,
+        }
+    }
 }
 
 /// A response selected by the queue matcher, with the receipt constructed at
@@ -28,6 +54,8 @@ pub(crate) struct MockQueue {
 pub(crate) struct QueueMatch {
     pub mock: LlmMock,
     pub receipt: MockConsumptionReceipt,
+    /// Present only for a `liveAfterCalls` fixture.
+    pub prefix: Option<LlmMockPrefixMarker>,
 }
 
 impl MockQueue {
@@ -37,8 +65,18 @@ impl MockQueue {
             strict_scopes: fixture.strict_scopes,
             buckets: BTreeMap::new(),
             warnings: fixture.warnings,
+            live_prefix: fixture.live_after_calls.map(|live_after_calls| LivePrefix {
+                live_after_calls,
+                calls: 0,
+            }),
         };
-        for mock in fixture.mocks {
+        let mut mocks = fixture.mocks;
+        // Entries past the prefix are never served: a full recording can carry
+        // a shorter prefix without being truncated by hand.
+        if let Some(live_after_calls) = fixture.live_after_calls {
+            mocks.truncate(usize::try_from(live_after_calls).unwrap_or(usize::MAX));
+        }
+        for mock in mocks {
             queue
                 .buckets
                 .entry(mock.scope.clone())
@@ -60,8 +98,38 @@ impl MockQueue {
         self.buckets.values().map(VecDeque::len).sum()
     }
 
+    /// Whether this queue still intercepts calls. A `liveAfterCalls` fixture
+    /// stops intercepting once its prefix is served, which is what routes the
+    /// next call through the configured provider.
     pub(crate) fn is_active(&self) -> bool {
-        self.schema_version > 0 || self.count() > 0
+        !self.handed_off() && (self.schema_version > 0 || self.count() > 0)
+    }
+
+    pub(crate) fn live_after_calls(&self) -> Option<u64> {
+        self.live_prefix.map(|prefix| prefix.live_after_calls)
+    }
+
+    /// True once a `liveAfterCalls` prefix has served all of its calls.
+    pub(crate) fn handed_off(&self) -> bool {
+        self.live_prefix.is_some_and(LivePrefix::handed_off)
+    }
+
+    /// The call a miss would have been inside an unfinished replay prefix, as
+    /// `(call, live_after_calls)`. A miss there is a divergence from the
+    /// recording and must fail closed instead of going live early.
+    pub(crate) fn prefix_miss(&self) -> Option<(u64, u64)> {
+        self.live_prefix
+            .filter(|prefix| !prefix.handed_off())
+            .map(|prefix| (prefix.calls + 1, prefix.live_after_calls))
+    }
+
+    /// Count one live call after the handoff and return its marker.
+    pub(crate) fn next_live_call(&mut self) -> Option<LlmMockPrefixMarker> {
+        let prefix = self
+            .live_prefix
+            .as_mut()
+            .filter(|prefix| prefix.handed_off())?;
+        Some(prefix.next(LlmMockPrefixServedBy::Live))
     }
 
     pub(crate) fn scopes(&self) -> Vec<String> {
@@ -84,6 +152,18 @@ impl MockQueue {
         requested_scope: &str,
         match_text: &str,
     ) -> Option<QueueMatch> {
+        if self.handed_off() {
+            return None;
+        }
+        let mut selected = self.match_scopes(requested_scope, match_text)?;
+        selected.prefix = self
+            .live_prefix
+            .as_mut()
+            .map(|prefix| prefix.next(LlmMockPrefixServedBy::Fixture));
+        Some(selected)
+    }
+
+    fn match_scopes(&mut self, requested_scope: &str, match_text: &str) -> Option<QueueMatch> {
         if let Some((mock, remaining)) = self.match_bucket(requested_scope, match_text) {
             return Some(QueueMatch {
                 receipt: MockConsumptionReceipt::hit(
@@ -94,6 +174,7 @@ impl MockQueue {
                     remaining,
                 ),
                 mock,
+                prefix: None,
             });
         }
 
@@ -108,6 +189,7 @@ impl MockQueue {
                         remaining,
                     ),
                     mock,
+                    prefix: None,
                 });
             }
         }
@@ -126,6 +208,7 @@ impl MockQueue {
                         remaining,
                     ),
                     mock,
+                    prefix: None,
                 });
             }
         }
@@ -137,6 +220,7 @@ impl MockQueue {
         mock.scope = DEFAULT_MOCK_SCOPE.to_string();
         self.schema_version = 0;
         self.strict_scopes = false;
+        self.live_prefix = None;
         self.warnings.clear();
         self.buckets
             .entry(DEFAULT_MOCK_SCOPE.to_string())

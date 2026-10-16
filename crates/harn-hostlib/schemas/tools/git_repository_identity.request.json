@@ -1,0 +1,10 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/tools/git_repository_identity.request.json",
+  "title": "tools.git_repository_identity request",
+  "description": "Observe repository identity with fixed system Git arguments, without granting general process execution.",
+  "type": "object",
+  "properties": { "repo": { "type": "string", "minLength": 1 } },
+  "required": ["repo"],
+  "additionalProperties": false
+}

@@ -64,11 +64,28 @@ pub fn take_session_changed_paths(session_id: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// Drop a session's recorded mutated paths (explicit teardown / test reset).
+/// Drop a session's recorded mutated paths (explicit teardown / test reset),
+/// including every per-tool-call record it still holds.
 pub fn clear_session_changed_paths(session_id: &str) {
     if let Ok(mut store) = session_changed_paths_store().lock() {
         store.remove(session_id);
     }
+    crate::tool_call_mutations::clear_session(session_id);
+}
+
+/// Record that the current tool call finished mutating `path`.
+///
+/// Call it only AFTER the mutation succeeded, never before: a write that
+/// failed changed nothing, and a stopped call must not report it as applied.
+/// A no-op outside an active session or tool-call scope.
+pub fn record_tool_call_mutation(path: &str) {
+    let Some(session_id) = super::current_session_id().filter(|id| !id.is_empty()) else {
+        return;
+    };
+    let Some(tool_call_id) = super::current_tool_call_id().filter(|id| !id.is_empty()) else {
+        return;
+    };
+    crate::tool_call_mutations::record(&session_id, &tool_call_id, path);
 }
 
 /// Drop every session's recorded mutated paths at process teardown.
@@ -80,6 +97,7 @@ pub fn clear_all_session_changed_paths() {
     if let Ok(mut store) = session_changed_paths_store().lock() {
         store.clear();
     }
+    crate::tool_call_mutations::clear_all();
 }
 
 #[cfg(test)]
@@ -96,7 +114,7 @@ mod tests {
 
         let owner_a_ready = Arc::clone(&owners_ready);
         let owner_a_reset = Arc::clone(&owner_b_reset);
-        let owner_a = std::thread::spawn(move || {
+        let owner_a = crate::runtime_stack::spawn(move || {
             super::super::open_or_create_for_test(Some(owner_a_session.clone()));
             record_session_changed_path(&owner_a_session, "src/owner-a.rs");
             owner_a_ready.wait();
@@ -112,7 +130,7 @@ mod tests {
 
         let owner_b_ready = Arc::clone(&owners_ready);
         let owner_b_reset = Arc::clone(&owner_b_reset);
-        let owner_b = std::thread::spawn(move || {
+        let owner_b = crate::runtime_stack::spawn(move || {
             super::super::open_or_create_for_test(Some(owner_b_session));
             owner_b_ready.wait();
             super::super::reset_session_store();

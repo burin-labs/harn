@@ -106,7 +106,7 @@ fn stdio_worker_reuses_prepared_modules_without_leaking_state() {
     assert!(initialized["result"]["server_version"].is_string());
     assert_eq!(
         initialized["result"]["capabilities"]["test_run"]["schema_version"],
-        4
+        5
     );
 
     let first = run_suite(1, &suite, &mut client);
@@ -123,7 +123,11 @@ fn stdio_worker_reuses_prepared_modules_without_leaking_state() {
     assert_eq!(first["result"]["summary"]["passed"], 1);
     assert_eq!(second["result"]["summary"]["passed"], 1);
     assert_eq!(second["result"]["run_count"], 2);
-    assert_eq!(second["result"]["schema_version"], 4);
+    assert_eq!(second["result"]["schema_version"], 5);
+    let first_work = &first["result"]["summary"]["results"][0]["work"];
+    let second_work = &second["result"]["summary"]["results"][0]["work"];
+    assert!(first_work["vm_steps"].as_u64().unwrap() > 0);
+    assert_eq!(first_work, second_work);
     assert_eq!(
         second["result"]["summary"]["results"][0]["phases"]["modules"]["modules_compiled"],
         0

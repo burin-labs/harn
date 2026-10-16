@@ -75,7 +75,7 @@ fn visible_text_in_content(content: &VmValue) -> String {
             .iter()
             .filter_map(text_in_block)
             .collect::<Vec<_>>()
-            .join("\n\n"),
+            .concat(),
         VmValue::Dict(_) => text_in_block(content).unwrap_or_default().to_string(),
         _ => content.display(),
     }
@@ -90,7 +90,7 @@ pub(crate) fn visible_assistant_text(message: &VmValue) -> Option<String> {
     let role = dict_get(message, "role")
         .map(VmValue::display)
         .unwrap_or_default();
-    if role != "assistant" {
+    if role != "assistant" || !super::assistant_publication::is_visible(message) {
         return None;
     }
     let visible = dict_get(message, "content")
@@ -110,9 +110,7 @@ fn text_in_block(block: &VmValue) -> Option<&str> {
     if !crate::llm::content::is_user_facing_text_block_type(block_type) {
         return None;
     }
-    dict_get(block, "text")
-        .and_then(string_value)
-        .filter(|text| !text.trim().is_empty())
+    dict_get(block, "text").and_then(string_value)
 }
 
 /// The key the loop sets on an assistant turn it wrote for its own
@@ -124,7 +122,9 @@ fn text_in_block(block: &VmValue) -> Option<&str> {
 /// the transcript and reach the provider, which is exactly why it cannot be
 /// distinguished by its content: it is an ordinary text block, and every
 /// alternative encoding would drop it from the provider request. Writers set
-/// this key; the answer projection below is the only reader.
+/// this key. Two readers: the answer projection below, and the turn boundary
+/// (`turn_boundary_directives`), which guarantees a directive follows the
+/// placeholder before the next request.
 pub(crate) const BOOKKEEPING_TURN_KEY: &str = "harn_bookkeeping_turn";
 
 /// True when the loop wrote this turn for its own bookkeeping.
@@ -188,6 +188,27 @@ pub(crate) fn last_assistant_text(snapshot: &VmValue) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn split_answer_preserves_json_bytes_and_excludes_private_blocks() {
+        let message = crate::schema::json_to_vm_value(&serde_json::json!({
+            "role": "assistant",
+            "content": [
+                {"type": "text", "text": "{\"verdict\":\"refuted\",\"reason\":\"jobs."},
+                {"type": "thinking", "thinking": "private reasoning", "signature": "private"},
+                {"type": "text", "text": "<job_id>.defaults.run\",\"words\":\"two"},
+                {"type": "text", "text": " "},
+                {"type": "text", "text": "words\"}"}
+            ]
+        }));
+        let text = visible_assistant_text(&message).expect("a public answer was emitted");
+        let expected = "{\"verdict\":\"refuted\",\"reason\":\"jobs.<job_id>.defaults.run\",\"words\":\"two words\"}";
+        assert_eq!(text, expected);
+        let parsed: serde_json::Value =
+            serde_json::from_str(&text).expect("the answer remains JSON");
+        assert_eq!(parsed["reason"], "jobs.<job_id>.defaults.run");
+        assert_eq!(parsed["words"], "two words");
+    }
 
     #[test]
     fn tools_used_collapses_repeats_and_keeps_first_use_order() {

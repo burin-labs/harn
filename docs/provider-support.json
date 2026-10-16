@@ -2,8 +2,8 @@
   "schema_version": 1,
   "generated_by": "harn provider catalog support",
   "sources": {
-    "provider_catalog_schema_version": 12,
-    "capability_matrix": "crates/harn-vm/src/llm/capabilities.toml",
+    "provider_catalog_schema_version": 13,
+    "capability_matrix": "crates/harn-provider-catalog/src/capabilities.toml",
     "notes": "crates/harn-cli/data/provider_support_notes.toml",
     "empirical": []
   },
@@ -441,8 +441,8 @@
       "recommended": {
         "selector": "haiku",
         "provider": "anthropic",
-        "model": "claude-haiku-4-5-20251001",
-        "display_name": "Claude Haiku 4.5",
+        "model": "claude-haiku-5-5",
+        "display_name": "Claude Haiku 5.5",
         "tool_format": "native",
         "harn_options": [
           "provider = \"anthropic\"",
@@ -460,7 +460,9 @@
         "structured_output_mode": "native_json",
         "streaming": true,
         "reasoning_knobs": [
-          "enabled"
+          "adaptive",
+          "effort",
+          "reasoning_effort"
         ],
         "prompt_or_context_cache": true,
         "batch_api": true,
@@ -499,7 +501,8 @@
       },
       "notes": [
         "Native tools, prompt caching, file upload, and XML-oriented scaffolding are first-class in Harn capability data.",
-        "Claude 4.7 rows use adaptive thinking; older Claude 4 rows use explicit thinking controls where supported."
+        "Claude 4.7 rows use adaptive thinking; older Claude 4 rows use explicit thinking controls where supported.",
+        "Claude Haiku 5.5 (the `haiku` selector) rejects temperature, top_p, top_k and assistant prefill; pin `haiku45` for workflows that need them."
       ],
       "caveats": [
         "Strict JSON output is modeled as tool-use or XML-tagged output rather than OpenAI-style response_json_schema."
@@ -1080,7 +1083,7 @@
         "provider": "fireworks",
         "model": "accounts/fireworks/models/gpt-oss-120b",
         "display_name": "GPT-OSS 120B (Fireworks)",
-        "tool_format": "text",
+        "tool_format": "native",
         "harn_options": [
           "provider = \"fireworks\"",
           "model = \"accounts/fireworks/models/gpt-oss-120b\"",
@@ -1089,10 +1092,10 @@
         ]
       },
       "capabilities": {
-        "native_tools": false,
+        "native_tools": true,
         "text_tools": true,
-        "preferred_tool_format": "text",
-        "tool_mode_parity": "text_only",
+        "preferred_tool_format": "native",
+        "tool_mode_parity": "unknown",
         "structured_output_transport": "none",
         "structured_output_mode": "native_json",
         "streaming": true,
@@ -2122,14 +2125,14 @@
         "NIM_API_KEY"
       ],
       "recommended": {
-        "selector": "nvidia:nvidia/kimi-k2.6",
+        "selector": "nvidia:nvidia/kimi-k3",
         "provider": "nvidia",
-        "model": "nvidia/kimi-k2.6",
-        "display_name": "Kimi K2.6 (NVIDIA NIM)",
+        "model": "nvidia/kimi-k3",
+        "display_name": "Kimi K3 (NVIDIA NIM)",
         "tool_format": "native",
         "harn_options": [
           "provider = \"nvidia\"",
-          "model = \"nvidia/kimi-k2.6\"",
+          "model = \"nvidia/kimi-k3\"",
           "tool_format = \"native\"",
           "structured_output_mode = \"native_json\""
         ]
@@ -2142,14 +2145,12 @@
         "structured_output_transport": "native",
         "structured_output_mode": "native_json",
         "streaming": true,
-        "reasoning_knobs": [
-          "enabled"
-        ],
-        "prompt_or_context_cache": true,
+        "reasoning_knobs": [],
+        "prompt_or_context_cache": false,
         "batch_api": false,
         "batch_discount_percent": null,
         "serving_tiers": [],
-        "usage_accounting_confidence": "high"
+        "usage_accounting_confidence": "provider_default"
       },
       "empirical": {
         "status": "not_recorded",
@@ -2340,14 +2341,14 @@
         "OPENROUTER_API_KEY"
       ],
       "recommended": {
-        "selector": "openrouter:google/gemini-2.5-flash",
+        "selector": "openrouter:google/gemini-3.5-flash-lite",
         "provider": "openrouter",
-        "model": "google/gemini-2.5-flash",
-        "display_name": "Gemini 2.5 Flash (via OpenRouter)",
+        "model": "google/gemini-3.5-flash-lite",
+        "display_name": "Gemini 3.5 Flash-Lite (via OpenRouter)",
         "tool_format": "native",
         "harn_options": [
           "provider = \"openrouter\"",
-          "model = \"google/gemini-2.5-flash\"",
+          "model = \"google/gemini-3.5-flash-lite\"",
           "tool_format = \"native\"",
           "structured_output_mode = \"native_json\""
         ]
@@ -2361,6 +2362,7 @@
         "structured_output_mode": "native_json",
         "streaming": true,
         "reasoning_knobs": [
+          "adaptive",
           "effort",
           "enabled",
           "reasoning_effort"
@@ -2654,31 +2656,30 @@
         "TOGETHER_AI_API_KEY"
       ],
       "recommended": {
-        "selector": "together:openai/gpt-oss-20b",
+        "selector": "together:MiniMaxAI/MiniMax-M3",
         "provider": "together",
-        "model": "openai/gpt-oss-20b",
-        "display_name": "GPT-OSS 20B (Together)",
-        "tool_format": "native",
+        "model": "MiniMaxAI/MiniMax-M3",
+        "display_name": "MiniMax M3 (Together)",
+        "tool_format": "text",
         "harn_options": [
           "provider = \"together\"",
-          "model = \"openai/gpt-oss-20b\"",
-          "tool_format = \"native\"",
+          "model = \"MiniMaxAI/MiniMax-M3\"",
+          "tool_format = \"text\"",
           "structured_output_mode = \"native_json\""
         ]
       },
       "capabilities": {
         "native_tools": true,
         "text_tools": true,
-        "preferred_tool_format": "native",
-        "tool_mode_parity": "unknown",
+        "preferred_tool_format": "text",
+        "tool_mode_parity": "native_unreliable",
         "structured_output_transport": "native",
         "structured_output_mode": "native_json",
         "streaming": true,
         "reasoning_knobs": [
-          "effort",
-          "reasoning_effort"
+          "enabled"
         ],
-        "prompt_or_context_cache": false,
+        "prompt_or_context_cache": true,
         "batch_api": true,
         "batch_discount_percent": 50,
         "serving_tiers": [],
@@ -2696,7 +2697,9 @@
         "evidence": []
       },
       "notes": [],
-      "caveats": [],
+      "caveats": [
+        "Family-on-host consistency pin: Together MiniMax-M2.7 native was 1/5 fidelity in the 2026-06-24 sweep; no M3-on-Together probe yet, so inherit text rather than an optimistic native pin."
+      ],
       "mcp_notes": [],
       "local_setup_notes": []
     },

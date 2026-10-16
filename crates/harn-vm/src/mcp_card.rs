@@ -209,6 +209,7 @@ pub fn invalidate_cached(source: &str) {
 /// Errors the card consumer can surface. Stringified into user-facing
 /// VM errors by the builtin wrapper.
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum CardError {
     Io(String),
     Http(String),

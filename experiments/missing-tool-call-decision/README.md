@@ -183,12 +183,15 @@ measured mismatch. None is a model-quality trial.
 
 ## Production scope
 
-The default missing-call classifier retains its existing typed-output checkpoint
-and prompt. The attempted decision-backed cutover is archived at signed commit
+The October 10 cutover uses the shared decision evaluator for production
+missing-call recovery. Its fresh corpus, calibration, measurements, retained
+failures, and source identities are recorded in
+[the cutover report](CUTOVER-2026-10-10.md).
+
+The September decision-backed attempt was archived at signed commit
 `4c7ff80ba8707536a50f5d61402ca474f4c2bdd6` on
 `codex/experiment-missing-call-cutover-8543`. The quality outcome of issue #8543
-remains incomplete. Its intent/target prompts and evaluator fixture are
-retained here with the experiment, not registered as production assets. The
-typed custom-fixture seam and invalid-confidence refusal remain independently
-verified. Generic dynamic evaluator, transport admission, answer projection,
-settlement, and provenance fixes are separate from promoting this consumer.
+was incomplete at that point. Its intent/target prompts and evaluator fixture
+remain here as historical experiment assets. The October production assets live
+under the owning stdlib modules. The archived fixtures remain evidence for
+their revisions; the October report records the current consumer controls.

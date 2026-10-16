@@ -981,6 +981,9 @@ fn type_check_or_fail(
     let mut had_error = false;
     let mut messages = String::new();
     for diag in harn_parser::TypeChecker::new().check_with_source(program, source) {
+        if !diag.severity.reported_when_executing() {
+            continue;
+        }
         let rendered = harn_parser::diagnostic::render_type_diagnostic(source, path, &diag);
         if matches!(diag.severity, DiagnosticSeverity::Error) {
             had_error = true;

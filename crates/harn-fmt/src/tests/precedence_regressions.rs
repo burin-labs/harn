@@ -48,3 +48,26 @@ fn unparenthesized_pipeline_ternary_keeps_its_parse_shape() {
     );
     assert_roundtrip(source);
 }
+
+#[test]
+fn nil_coalescing_groups_with_swift_precedence() {
+    let source = r"pipeline default(task) {
+  let a = count ?? 0 + 1
+  let b = (count ?? 0) + 1
+  let c = count ?? (0 + 1)
+}";
+    let result = format_source(source).unwrap();
+    assert!(
+        result.contains("let a = count ?? 0 + 1"),
+        "`??` already binds looser than `+`, got:\n{result}"
+    );
+    assert!(
+        result.contains("let b = (count ?? 0) + 1"),
+        "a `??` operand of `+` needs its parentheses, got:\n{result}"
+    );
+    assert!(
+        result.contains("let c = count ?? 0 + 1"),
+        "redundant parentheses around a tighter operand are dropped, got:\n{result}"
+    );
+    assert_roundtrip(source);
+}

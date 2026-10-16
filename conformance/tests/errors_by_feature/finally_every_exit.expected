@@ -1,0 +1,48 @@
+  finally
+  defer
+inline throw -> caught:inline
+  finally
+  defer
+callee throw -> caught:callee
+  finally
+  defer
+runtime error -> caught:Division by zero
+  finally
+  defer
+try* -> caught:try-star
+  finally
+  defer
+? err -> Result.Err(question)
+  body:7
+  finally
+  after-try
+  defer
+? ok -> Result.Ok(7)
+  inner-finally
+  outer-finally
+? nested -> Result.Err(nested)
+  finally:1
+  defer:1
+  finally:2
+  defer:2
+? in loop -> Result.Err(loop)
+  catch:first
+  finally
+? from catch -> Result.Err(from-catch)
+? owned drop -> Result.Err(owned) closed=true
+  finally-throws
+? then finally throws -> caught:from-finally
+  finally-returns
+? then finally returns -> Result.Ok(99)
+  finally
+  defer
+return -> returned
+  finally
+return from catch -> from-catch
+  finally
+throw from catch -> caught:from-catch
+  finally:1
+  defer:1
+  finally:2
+  defer:2
+break/continue -> loop-done

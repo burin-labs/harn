@@ -32,10 +32,10 @@ impl PreparedTools {
         &self,
         tool: &str,
         result: Result<harn_vm::VmValue, harn_vm::VmError>,
-    ) -> Result<(harn_vm::VmValue, serde_json::Value), DispatchError> {
+    ) -> Result<(serde_json::Value, Option<String>), DispatchError> {
         match harn_vm::tool_registry::classify_tool_result(&self.contract, tool, result) {
-            Ok(harn_vm::tool_registry::ToolInvocationOutcome::Success { value, json }) => {
-                Ok((value, json))
+            Ok(harn_vm::tool_registry::ToolInvocationOutcome::Success { json, text, .. }) => {
+                Ok((json, text))
             }
             Ok(harn_vm::tool_registry::ToolInvocationOutcome::ApplicationError(error)) => {
                 Err(DispatchError::Application(error))

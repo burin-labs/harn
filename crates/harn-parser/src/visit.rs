@@ -25,10 +25,21 @@ use crate::ast::{BindingPattern, DictEntry, MatchArm, Node, SNode, SelectCase, T
 
 /// Walk every node in `program` in pre-order, invoking `visitor` on
 /// each.
-pub fn walk_program(program: &[SNode], visitor: &mut impl FnMut(&SNode)) {
+pub fn walk_program<'a>(program: &'a [SNode], visitor: &mut impl FnMut(&'a SNode)) {
     let mut stack = Vec::with_capacity(program.len());
     push_nodes_reversed(program, &mut stack);
     walk_stack(&mut stack, visitor);
+}
+
+/// Walk declaration bodies and expression children in pre-order, excluding
+/// attribute arguments. Attributed declarations are visited as their inner
+/// declaration, so compile-time metadata cannot look like an executed call.
+pub fn walk_program_unattributed<'a>(program: &'a [SNode], visitor: &mut impl FnMut(&'a SNode)) {
+    let mut stack = Vec::with_capacity(program.len());
+    push_nodes_reversed(program, &mut stack);
+    walk_projected_stack(&mut stack, visitor, |node| {
+        crate::ast::peel_attributes(node).1
+    });
 }
 
 /// Walk `program` INCLUDING the expressions inside `${...}` string
@@ -57,17 +68,43 @@ pub fn walk_program_interpolated(
     program: &[SNode],
     visitor: &mut impl FnMut(&SNode),
 ) {
+    walk_interpolated(source, program, visitor, |node| node);
+}
+
+/// Walk executable children and string interpolation, excluding attribute metadata.
+pub fn walk_program_unattributed_interpolated(
+    source: &str,
+    program: &[SNode],
+    visitor: &mut impl FnMut(&SNode),
+) {
+    walk_interpolated(source, program, visitor, |node| {
+        crate::ast::peel_attributes(node).1
+    });
+}
+
+fn walk_interpolated(
+    source: &str,
+    program: &[SNode],
+    visitor: &mut impl FnMut(&SNode),
+    project: fn(&SNode) -> &SNode,
+) {
     let mut holes = Vec::new();
-    walk_program(program, &mut |node| {
-        if let Node::InterpolatedString(segments) = &node.node {
-            for segment in segments {
-                if let harn_lexer::StringSegment::Expression(text, line, column) = segment {
-                    holes.push((text.clone(), *line, *column));
+    let mut stack = Vec::with_capacity(program.len());
+    push_nodes_reversed(program, &mut stack);
+    walk_projected_stack(
+        &mut stack,
+        &mut |node| {
+            if let Node::InterpolatedString(segments) = &node.node {
+                for segment in segments {
+                    if let harn_lexer::StringSegment::Expression(text, line, column) = segment {
+                        holes.push((text.clone(), *line, *column));
+                    }
                 }
             }
-        }
-        visitor(node);
-    });
+            visitor(node);
+        },
+        project,
+    );
     // Recurse: an interpolation inside an interpolation is rare but legal, and
     // stopping at one level would restore the same unsoundness one layer down.
     while let Some((text, line, column)) = holes.pop() {
@@ -76,7 +113,7 @@ pub fn walk_program_interpolated(
         else {
             continue;
         };
-        walk_program_interpolated(source, std::slice::from_ref(&expression), visitor);
+        walk_interpolated(source, std::slice::from_ref(&expression), visitor, project);
     }
 }
 
@@ -147,7 +184,7 @@ fn contains_identifier_enum_pattern_node(node: &SNode) -> bool {
 }
 
 /// Visit `node`, then recurse into its children.
-pub fn walk_node(node: &SNode, visitor: &mut impl FnMut(&SNode)) {
+pub fn walk_node<'a>(node: &'a SNode, visitor: &mut impl FnMut(&'a SNode)) {
     let mut stack = vec![node];
     walk_stack(&mut stack, visitor);
 }
@@ -155,19 +192,28 @@ pub fn walk_node(node: &SNode, visitor: &mut impl FnMut(&SNode)) {
 /// Recurse into `node`'s children without re-visiting `node` itself.
 /// Useful when a caller wants to handle the parent specially and then
 /// continue the default traversal.
-pub fn walk_children(node: &SNode, visitor: &mut impl FnMut(&SNode)) {
+pub fn walk_children<'a>(node: &'a SNode, visitor: &mut impl FnMut(&'a SNode)) {
     let mut stack = Vec::new();
     collect_children(node, &mut |child| stack.push(child));
     stack.reverse();
     walk_stack(&mut stack, visitor);
 }
 
-fn walk_stack<'a>(stack: &mut Vec<&'a SNode>, visitor: &mut impl FnMut(&SNode)) {
+fn walk_stack<'a>(stack: &mut Vec<&'a SNode>, visitor: &mut impl FnMut(&'a SNode)) {
+    walk_projected_stack(stack, visitor, |node| node);
+}
+
+fn walk_projected_stack<'a>(
+    stack: &mut Vec<&'a SNode>,
+    visitor: &mut impl FnMut(&'a SNode),
+    project: impl Fn(&'a SNode) -> &'a SNode,
+) {
     // One scratch buffer reused across the whole walk: collecting children
     // into a fresh Vec per node made every walker pay one heap alloc/free
     // per AST node, which dominated whole-module analyses.
     let mut scratch: Vec<&'a SNode> = Vec::new();
     while let Some(node) = stack.pop() {
+        let node = project(node);
         visitor(node);
         scratch.clear();
         collect_children(node, &mut |child| scratch.push(child));
@@ -506,7 +552,7 @@ fn collect_binding_pattern<'a>(pattern: &'a BindingPattern, children: &mut impl 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ast::{spanned, Node, TypedParam};
+    use crate::ast::{spanned, BinaryOperator, Node, TypedParam, UnaryOperator};
     use harn_lexer::Span;
 
     fn dummy(node: Node) -> SNode {
@@ -519,7 +565,7 @@ mod tests {
             pattern: BindingPattern::Identifier("x".to_string()),
             type_ann: None,
             value: Box::new(dummy(Node::BinaryOp {
-                op: "+".to_string(),
+                op: BinaryOperator::Add,
                 left: Box::new(dummy(Node::IntLiteral(1))),
                 right: Box::new(dummy(Node::IntLiteral(2))),
             })),
@@ -585,7 +631,7 @@ mod tests {
         let mut node = dummy(Node::IntLiteral(0));
         for _ in 0..10_000 {
             node = dummy(Node::UnaryOp {
-                op: "!".to_string(),
+                op: UnaryOperator::Not,
                 operand: Box::new(node),
             });
         }

@@ -5,8 +5,7 @@ use crate::orchestration::CapabilityPolicy;
 #[cfg(test)]
 use crate::orchestration::{annotate_nested_execution_options, NestedExecutionKind};
 use crate::stdlib::args::{ErrorKind, Options};
-use crate::value::VmDictExt;
-use crate::value::{VmError, VmValue};
+use crate::value::{VmDictExt, VmError, VmValue};
 use crate::vm::AsyncBuiltinCtx;
 use lifecycle::{
     finish_sub_agent, normalize_run_identity, stop_details_for_error, stop_details_for_result,
@@ -1037,6 +1036,7 @@ pub(super) async fn execute_sub_agent(
 mod tests {
     use super::*;
     use crate::llm::mock::reset_llm_mock_state;
+    use crate::NativeBuiltinCtxExt;
 
     struct ExecutionPolicyGuard;
 
@@ -1538,7 +1538,7 @@ mod tests {
             stop_emitted: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         };
 
-        let mut vm = crate::Vm::new();
+        let mut vm = crate::new_vm();
         crate::register_vm_stdlib(&mut vm);
         let ctx = crate::vm::AsyncBuiltinCtx::for_test(vm);
         let result = execute_sub_agent(&ctx, spec).await.unwrap();

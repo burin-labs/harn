@@ -276,6 +276,7 @@ pub enum RedactionClass {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+#[non_exhaustive]
 pub enum ReceiptValidationError {
     InvalidSchema(String),
     MissingField(&'static str),

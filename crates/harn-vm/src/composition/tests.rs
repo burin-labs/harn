@@ -45,7 +45,7 @@ async fn run_composition_dispatcher_source_with_execution_id(
         .compile(&program)
         .map_err(|error| VmError::Runtime(error.to_string()))?;
 
-    let mut vm = crate::Vm::new();
+    let mut vm = crate::new_vm();
     crate::register_vm_stdlib(&mut vm);
     vm.set_harness(crate::Harness::real());
     configure(&mut vm);
@@ -643,58 +643,6 @@ pipeline default(harness: Harness, task: unknown) {
     {"dispatcher": dispatcher}
   )
 }
-"#,
-        |vm| {
-            vm.register_capability_method(
-                harn_builtin_meta::CapabilityId::Runtime,
-                "host_has",
-                |args, output| {
-                    assert!(output.is_empty());
-                    let capability = args.first().map(VmValue::display).unwrap_or_default();
-                    let operation = args.get(1).map(VmValue::display).unwrap_or_default();
-                    Ok(VmValue::Bool(
-                        capability == "runtime" && operation == "set_result",
-                    ))
-                },
-            );
-        },
-    )
-    .await
-    .expect("composition succeeds");
-
-    assert_eq!(report["ok"], true);
-    assert_eq!(report["run"]["result"]["binding"], "look");
-    assert_eq!(report["run"]["result"]["has_runtime_result"], true);
-    assert_eq!(report["run"]["result"]["path"], "README.md");
-    assert_eq!(report["child_results"][0]["status"], "completed");
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn harn_composition_dispatcher_closure_preserves_custom_host_has() {
-    let report = run_composition_dispatcher_source(
-        r#"
-pipeline default(harness: Harness, task: unknown) {
-  const tools = [
-    {
-      "name": "look",
-      "parameters": {"type": "object", "required": ["path"]},
-      "annotations": {"side_effect_level": "read_only"}
-    }
-  ]
-  const manifest = composition_binding_manifest(tools)
-  const dispatcher = { binding, input ->
-    return {
-      "binding": binding,
-      "has_runtime_result": harness.runtime.host_has("runtime", "set_result"),
-      "path": input.path
-    }
-  }
-  return harness.tools.composition_execute(
-    "const result = look({path: \"README.md\"})\nreturn result",
-    manifest,
-    {"dispatcher": dispatcher}
-  )
-        }
 "#,
         |vm| {
             vm.register_capability_method(

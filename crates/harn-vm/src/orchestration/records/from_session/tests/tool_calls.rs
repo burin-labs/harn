@@ -154,7 +154,7 @@ async fn tool_duration_distinguishes_measured_zero_from_missing_timing() {
 }
 
 /// A rejected call still produces a result event. Folding the result's error
-/// flag into `is_rejected` would clear the rejection recorded moments earlier,
+/// flag into the call's status would clear the rejection recorded moments earlier,
 /// turning a refused tool call into an ordinary one in the report.
 #[tokio::test]
 async fn a_result_arriving_after_a_rejection_does_not_clear_it() {
@@ -176,8 +176,9 @@ async fn a_result_arriving_after_a_rejection_does_not_clear_it() {
         .await
         .expect("project");
     let record = &run.tool_recordings[0];
-    assert!(
-        record.is_rejected,
+    assert_eq!(
+        record.status,
+        crate::orchestration::ToolCallRecordStatus::Rejected,
         "a rejected call stays rejected once its result lands"
     );
     assert!(record.result.contains("declined"));

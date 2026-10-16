@@ -42,7 +42,7 @@ default = ["full"]
 # families are sliced out of the VM.
 full = ["postgres", "sqlite", "content", "compression", "http-compression", "cloud-aws", "native-keyring"]
 llm-bench-internals = []
-vm-bench-internals = []
+vm-bench-internals = ["harn-vm-core/vm-bench-internals", "harn-orchestration/vm-bench-internals"]
 # Document extraction and HTML querying builtins. Kept in the default product
 # surface; lean embedders and the test engine can omit their parser/PDF graph.
 content = ["dep:lopdf", "dep:scraper"]
@@ -61,8 +61,11 @@ cloud-aws = ["dep:aws-config", "dep:aws-credential-types", "dep:aws-sigv4", "dep
 # lean embedders and reports no default store until the product opts in.
 native-keyring = [
     "dep:apple-native-keyring-store",
+    "dep:async-io",
+    "dep:secret-service",
     "dep:security-framework",
     "dep:windows-native-keyring-store",
+    "dep:zbus",
     "dep:zbus-secret-service-keyring-store",
 ]
 # PostgreSQL client builtins (the `pg.*` namespace + `stdlib/postgres`).
@@ -88,29 +91,33 @@ otel = [
 testbench-wasi = ["dep:wasmtime", "dep:wasmtime-wasi", "dep:wat", "dep:tempfile"]
 
 [dependencies]
-harn-builtin-meta = { path = "../harn-builtin-meta", version = "=0.10.144" }
-harn-builtin-registry = { path = "../harn-builtin-registry", version = "=0.10.144" }
-harn-capability-contracts = { path = "../harn-capability-contracts", version = "=0.10.144" }
-harn-builtin-macros = { path = "../harn-builtin-macros", version = "=0.10.144" }
-harn-opcode-macros = { path = "../harn-opcode-macros", version = "=0.10.144" }
-linkme = "0.3"
+harn-vm-core = { path = "../harn-vm-core", version = "=0.10.168" }
+harn-llm = { path = "../harn-llm", version = "=0.10.168" }
+harn-orchestration = { path = "../harn-orchestration", version = "=0.10.168" }
+harn-builtin-meta = { path = "../harn-builtin-meta", version = "=0.10.168" }
+harn-builtin-registry = { path = "../harn-builtin-registry", version = "=0.10.168" }
+harn-capability-contracts = { path = "../harn-capability-contracts", version = "=0.10.168" }
+harn-builtin-macros = { path = "../harn-builtin-macros", version = "=0.10.168" }
 lopdf = { version = "0.45", default-features = false, features = ["wasm_js"], optional = true }
 parking_lot = "0.12"
 pin-project-lite = "0.2"
-harn-clock = { path = "../harn-clock", version = "=0.10.144" }
-harn-provider-catalog = { path = "../harn-provider-catalog", version = "=0.10.144" }
-harn-flock = { path = "../harn-flock", version = "=0.10.144" }
-harn-glob = { path = "../harn-glob", version = "=0.10.144" }
-harn-session-store = { path = "../harn-session-store", version = "=0.10.144" }
-harn-sqlite = { path = "../harn-sqlite", version = "=0.10.144" }
-harn-ir = { path = "../harn-ir", version = "=0.10.144" }
-harn-kernel = { path = "../harn-kernel", version = "=0.10.144" }
-harn-lexer = { path = "../harn-lexer", version = "=0.10.144" }
-harn-modules = { path = "../harn-modules", version = "=0.10.144" }
-harn-parser = { path = "../harn-parser", version = "=0.10.144" }
-harn-stdlib = { path = "../harn-stdlib", version = "=0.10.144" }
+harn-clock = { path = "../harn-clock", version = "=0.10.168" }
+harn-provider-catalog = { path = "../harn-provider-catalog", version = "=0.10.168" }
+harn-execution-policy = { path = "../harn-execution-policy", version = "=0.10.168" }
+harn-prompt-syntax = { path = "../harn-prompt-syntax", version = "=0.10.168" }
+harn-flock = { path = "../harn-flock", version = "=0.10.168" }
+harn-glob = { path = "../harn-glob", version = "=0.10.168" }
+harn-languages = { path = "../harn-languages", version = "=0.10.168" }
+harn-session-store = { path = "../harn-session-store", version = "=0.10.168" }
+harn-sqlite = { path = "../harn-sqlite", version = "=0.10.168" }
+harn-ir = { path = "../harn-ir", version = "=0.10.168" }
+harn-kernel = { path = "../harn-kernel", version = "=0.10.168" }
+harn-lexer = { path = "../harn-lexer", version = "=0.10.168" }
+harn-modules = { path = "../harn-modules", version = "=0.10.168" }
+harn-parser = { path = "../harn-parser", version = "=0.10.168" }
+harn-stdlib-catalog = { path = "../harn-stdlib-catalog", version = "=0.10.168" }
 async-trait = "0.1"
-aws-config = { version = "1.10.1", optional = true }
+aws-config = { package = "harn-aws-config", path = "../harn-aws-config", version = "=0.10.168", optional = true }
 aws-credential-types = { version = "1.3.0", optional = true }
 aws-sigv4 = { version = "1.5.1", optional = true }
 # Smithy JSON 0.63 cannot compile against the Document API in types 1.7.
@@ -129,29 +136,33 @@ aws-sigv4 = { version = "1.5.1", optional = true }
 # `<1.7.0` is the whole constraint. The lower bound only keeps the range from
 # admitting ancient releases; the sibling AWS crates raise the effective floor
 # on their own, which is why the contract above declares no minimum.
-aws-smithy-types = { version = ">=1.6.3, <1.7.0", optional = true }
-postcard = { version = "1.1", default-features = false, features = ["alloc"] }
-quick_cache = "0.7"
+aws-smithy-types = { version = ">=1.6.3, <1.9.0", optional = true }
+roxmltree = "0.21.1"
 # Persistent (immutable, structurally shared) collections backing VmValue's
 # Dict/List payloads. Copy-on-write mutation becomes an O(log n) path copy
 # instead of an O(n) BTreeMap/Vec deep clone, which is the dominant allocation
 # cost when an aliased collection is updated in a loop.
-imbl = { version = "7", features = ["serde"] }
 chrono = "0.4"
 chrono-tz = "0.10.4"
 croner = "4.0.0"
 regex = "1"
 scraper = { version = "0.27", optional = true }
 serde_json = { version = "1", features = ["unbounded_depth"] }
+semver = "1"
 rand = "0.10"
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync", "time", "test-util", "process", "io-util", "io-std", "macros"] }
-reqwest = { version = "0.12", default-features = false, features = ["json", "multipart", "rustls-tls"] }
-reqwest-eventsource = "0.6"
+reqwest = { workspace = true, features = ["form", "json", "multipart", "stream"] }
+eventsource-stream = "0.2"
 rmcp = { version = "=3.1.4", default-features = false, features = ["client", "transport-child-process"] }
-tokio-tungstenite = { version = "0.30", default-features = false, features = ["connect", "rustls-tls-webpki-roots"] }
+rustls.workspace = true
+rustls-platform-verifier.workspace = true
+# `websocket_connect` passes its own platform-verifier connector, so the
+# bundled roots this feature names are never consulted; the feature only
+# compiles tungstenite's rustls support in.
+tokio-tungstenite = { version = "0.30", default-features = false, features = ["connect", "rustls-tls-native-roots"] }
 jsonwebtoken = { version = "11", default-features = false, features = ["use_pem", "aws_lc_rs"] }
-jsonschema = { version = "0.56", default-features = false }
-rcgen = "0.14"
+jsonschema.workspace = true
+rcgen.workspace = true
 libc = "0.2"
 tokio-stream = "0.1"
 base64 = "0.23"
@@ -173,13 +184,11 @@ shell-words = "1.1"
 tree-sitter = "0.27"
 tree-sitter-bash = "0.25"
 tree-sitter-powershell = "0.26.4"
-strip-ansi-escapes = "0.2"
 strsim = "0.11"
 # On-demand native stack growth for recursive walks over arbitrarily deep
 # `VmValue` trees (display, equality, ordering, hashing, JSON). Same approach
 # serde/rustc/syn use to keep deeply nested data from overflowing the OS
 # thread stack and aborting the process. See `value::recursion`.
-stacker = "0.1"
 blake3 = "1.8.7"
 md-5 = "0.11"
 aes-gcm = "0.11"
@@ -192,13 +201,11 @@ grep-regex = "0.1"
 grep-searcher = "0.1"
 walkdir = "2"
 toml = "1.1"
-serde_yaml_ng = "0.10"
+serde-saphyr = "1.3"
 serde = { version = "1", features = ["derive"] }
 schemars = "=1.2.2"
 ts-rs = { version = "=12.0.1", features = ["serde-json-impl"] }
 serde_ignored = "0.1"
-serde_path_to_error = "0.1"
-tiktoken-rs = "0.12.0"
 subtle = "2.6"
 time = { version = "0.3", features = ["formatting", "parsing", "serde"] }
 uuid = { version = "1", features = ["serde", "v4", "v5", "v7"] }
@@ -220,16 +227,16 @@ sysinfo = { version = "0.39", default-features = false, features = ["system", "c
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json", "registry"] }
 thiserror = "2"
-opentelemetry = { version = "0.32", optional = true }
-opentelemetry_sdk = { version = "0.32", optional = true, features = ["rt-tokio", "experimental_trace_batch_span_processor_with_async_runtime"] }
-opentelemetry-otlp = { version = "0.32", default-features = false, features = ["http-json", "reqwest-client", "reqwest-rustls"], optional = true }
-tracing-opentelemetry = { version = "0.33", optional = true }
+opentelemetry = { version = "0.33", optional = true }
+opentelemetry_sdk = { version = "0.33", optional = true, features = ["rt-tokio", "experimental_trace_batch_span_processor_with_async_runtime"] }
+opentelemetry-otlp = { version = "0.33", default-features = false, features = ["http-json", "reqwest-client", "reqwest-rustls"], optional = true }
+tracing-opentelemetry = { version = "0.34", optional = true }
 zeroize = "1"
 flate2 = { version = "1.1.9", optional = true }
 zstd = "0.14.0"
 brotli = { version = "9.0.0", optional = true }
 tar = { version = "0.4.46", default-features = false }
-zip = { version = "8", default-features = false, features = ["deflate-flate2"], optional = true }
+zip = { version = "9", default-features = false, features = ["deflate-flate2"], optional = true }
 x509-parser = "0.18.1"
 wasmtime = { version = "48", optional = true, default-features = false, features = ["cranelift", "runtime"] }
 wasmtime-wasi = { version = "48", optional = true, default-features = false, features = ["p1"] }
@@ -244,17 +251,16 @@ windows-native-keyring-store = { version = "1.1", optional = true }
 windows-sys = { version = "0.61.2", features = [
     "Win32_Foundation",
     "Win32_Security",
-    "Win32_Security_Authorization",
-    "Win32_Security_Isolation",
     "Win32_Storage_FileSystem",
     "Win32_System_Com",
+    "Win32_System_Diagnostics_ToolHelp",
     "Win32_System_JobObjects",
-    "Win32_System_Pipes",
-    "Win32_System_SystemServices",
     "Win32_System_Threading",
+    "Win32_UI_Shell",
 ] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
+landlock = "0.4.7"
 seccompiler = "0.5"
 
 [target.'cfg(target_os = "macos")'.dependencies]
@@ -266,13 +272,22 @@ apple-native-keyring-store = { version = "1.0", features = ["protected"], option
 
 [target.'cfg(all(unix, not(any(target_os = "macos", target_os = "ios", target_os = "android"))))'.dependencies]
 zbus-secret-service-keyring-store = { version = "1.0", features = ["rt-async-io-crypto-rust"], optional = true }
+# The lock-state probe in `secrets/secret_service_lock.rs` talks to the Secret
+# Service directly, on the same versions and runtime the adapter above pins.
+secret-service = { version = "5.1", features = ["rt-async-io-crypto-rust"], optional = true }
+async-io = { version = "2.6", optional = true }
+zbus = { version = "5.17", default-features = false, features = ["async-io"], optional = true }
 
 [dev-dependencies]
+harn-orchestration = { path = "../harn-orchestration", version = "=0.10.168", features = ["test-support"] }
+harn-llm = { path = "../harn-llm", version = "=0.10.168", features = ["test-support"] }
+harn-vm-core = { path = "../harn-vm-core", version = "=0.10.168", features = ["vm-test-support"] }
 criterion = "0.8"
+harn-clock = { path = "../harn-clock", version = "=0.10.168", features = ["test-support"] }
+harn-modules = { path = "../harn-modules", version = "=0.10.168", features = ["bundled-stdlib"] }
+harn-stdlib = { path = "../harn-stdlib", version = "=0.10.168" }
 http = "1"
 proptest = "1"
-rcgen = "0.14"
-rustls = { version = "0.23", features = ["aws-lc-rs"] }
 static_assertions = "1.1"
 tempfile = "3"
 
@@ -314,6 +329,3 @@ harness = false
 
 [lints]
 workspace = true
-
-[build-dependencies]
-sha2 = "0.11"

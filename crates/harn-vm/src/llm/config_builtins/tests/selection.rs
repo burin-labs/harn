@@ -2,10 +2,35 @@
 
 use super::super::selection_builtins::{
     llm_model_defaults_builtin, llm_model_ladder_builtin, llm_resolved_options_builtin,
+    parse_complementary_reviewer_options,
 };
 use super::fixtures::build_dict;
 use crate::llm_config;
 use crate::value::VmValue;
+
+#[test]
+fn complementary_reviewer_budget_options_cross_builtin_boundary() {
+    let options = build_dict(vec![
+        ("author_model", VmValue::string("gpt-6-luna")),
+        ("max_price_multiplier", VmValue::Float(3.0)),
+        ("min_price_cap_per_mtok", VmValue::Float(6.0)),
+        ("max_price_cap_per_mtok", VmValue::Float(15.0)),
+    ]);
+    let parsed = parse_complementary_reviewer_options(Some(&options)).expect("valid budget");
+    assert_eq!(parsed.max_price_multiplier, Some(3.0));
+    assert_eq!(parsed.min_price_cap_per_mtok, Some(6.0));
+    assert_eq!(parsed.max_price_cap_per_mtok, Some(15.0));
+
+    let inverted = build_dict(vec![
+        ("author_model", VmValue::string("gpt-6-luna")),
+        ("min_price_cap_per_mtok", VmValue::Float(16.0)),
+        ("max_price_cap_per_mtok", VmValue::Float(15.0)),
+    ]);
+    assert!(parse_complementary_reviewer_options(Some(&inverted))
+        .expect_err("inverted budget must fail")
+        .to_string()
+        .contains("min_price_cap_per_mtok must not exceed"),);
+}
 
 #[test]
 fn test_llm_model_defaults_returns_empty_for_unknown_model() {
@@ -49,7 +74,7 @@ fn test_llm_resolved_options_uses_dispatch_defaults_without_model() {
     let _guard = crate::llm::env_guard();
     llm_config::clear_user_overrides();
     let expected_provider = crate::llm::helpers::vm_resolve_provider(&None);
-    let expected_model = crate::llm::helpers::vm_resolve_model(&None, &expected_provider);
+    let expected_model = crate::llm::helpers::vm_resolve_model(&None, &expected_provider).unwrap();
     let mut out = String::new();
     for options in [
         build_dict(vec![]),
@@ -66,6 +91,72 @@ fn test_llm_resolved_options_uses_dispatch_defaults_without_model() {
             Some(expected_model.clone())
         );
     }
+}
+
+#[test]
+fn test_provider_without_default_requires_explicit_model() {
+    let _guard = crate::llm::env_guard();
+    let _env = crate::test_env::test_env_guard();
+    llm_config::clear_user_overrides();
+    let provider = "fixture-no-default";
+    let model_id = "fixture-model";
+    let mut overlay = llm_config::ProvidersConfig::default();
+    overlay.providers.insert(
+        provider.to_string(),
+        llm_config::ProviderDef {
+            base_url: "https://fixture.invalid/v1".to_string(),
+            chat_endpoint: "/chat/completions".to_string(),
+            ..Default::default()
+        },
+    );
+    let mut model = llm_config::model_catalog_entries()
+        .into_iter()
+        .find(|(_, model)| {
+            !model.deprecated
+                && model.supports_operation(llm_config::ModelOperation::TextGeneration)
+        })
+        .expect("catalog has a text-generation model")
+        .1;
+    model.provider = provider.to_string();
+    overlay.models.insert(model_id.to_string(), model);
+    llm_config::set_user_overrides(Some(overlay));
+
+    let mut out = String::new();
+    let error = llm_resolved_options_builtin(
+        &[build_dict(vec![("provider", VmValue::string(provider))])],
+        &mut out,
+    )
+    .expect_err("provider without a default must fail before dispatch");
+    let crate::value::VmError::Thrown(value) = error else {
+        panic!("expected a typed model-resolution error");
+    };
+    let fields = value.as_dict().expect("typed error fields");
+    assert_eq!(
+        fields.get("code").map(VmValue::display).as_deref(),
+        Some("model_resolution_failed")
+    );
+    assert!(fields
+        .get("message")
+        .is_some_and(|message| { message.display().contains("pass an explicit model") }));
+
+    let result = llm_resolved_options_builtin(
+        &[build_dict(vec![
+            ("provider", VmValue::string(provider)),
+            ("model", VmValue::string(model_id)),
+        ])],
+        &mut out,
+    )
+    .expect("explicit catalog model still resolves");
+    let fields = result.as_dict().expect("resolved options");
+    assert_eq!(
+        fields.get("provider").map(VmValue::display).as_deref(),
+        Some(provider)
+    );
+    assert_eq!(
+        fields.get("model").map(VmValue::display).as_deref(),
+        Some(model_id)
+    );
+    llm_config::clear_user_overrides();
 }
 
 #[test]

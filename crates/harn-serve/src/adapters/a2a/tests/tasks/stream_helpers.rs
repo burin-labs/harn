@@ -5,14 +5,11 @@ pub(super) async fn collect_task_stream_until_terminal(
 ) -> Vec<JsonValue> {
     let mut events = Vec::new();
     loop {
-        let event = tokio::time::timeout(std::time::Duration::from_secs(2), rx.next())
-            .await
-            .unwrap_or_else(|_| {
-                panic!(
-                    "timed out waiting for stream event: {}",
-                    events_json(&events)
-                )
-            });
+        let event = harn_clock::test_support::within(
+            &format!("stream event after {}", events_json(&events)),
+            rx.next(),
+        )
+        .await;
         let Some(event) = event else {
             break;
         };

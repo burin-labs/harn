@@ -1,0 +1,37 @@
+/** Typed projection of the runtime's bundled approval-review policy. */
+pub type ApprovalReviewPolicy = {
+  version: int,
+  reviewer: ApprovalReviewerPolicy,
+  breaker: ApprovalReviewBreakerPolicy,
+  floor: ApprovalReviewFloorPolicy,
+  denylist: ApprovalReviewDenylistPolicy,
+  trust: ApprovalReviewTrustPolicy,
+  verdict: ApprovalReviewVerdictPolicy,
+  host_guidance: string?,
+}
+
+pub type ApprovalReviewerPolicy = {
+  model: string,
+  effort: string,
+  timeout_ms: int,
+  on_error: "deny",
+  provider: string?,
+}
+
+pub type ApprovalReviewBreakerPolicy = {
+  max_consecutive_denials: int,
+  max_denials_per_turn: int,
+  cell_flag_denied_trial_share: float,
+}
+
+pub type ApprovalReviewFloorPolicy = {never_grant: list<string>}
+
+pub type ApprovalReviewDenylistPolicy = {categories: list<string>}
+
+pub type ApprovalReviewTrustPolicy = {trusted_inputs: list<string>, untrusted_inputs: list<string>}
+
+pub type ApprovalReviewVerdictPolicy = {
+  risk_levels: list<string>,
+  authorization_levels: list<string>,
+  thresholds: map<string, string>,
+}

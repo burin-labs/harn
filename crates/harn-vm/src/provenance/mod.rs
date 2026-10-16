@@ -529,11 +529,7 @@ fn key_id_for_verifying_key(key: &VerifyingKey) -> String {
 }
 
 fn secret_error_is_not_found(error: &SecretError) -> bool {
-    match error {
-        SecretError::NotFound { .. } => true,
-        SecretError::All(errors) => errors.iter().all(secret_error_is_not_found),
-        _ => false,
-    }
+    error.is_not_found()
 }
 
 #[cfg(test)]

@@ -17,8 +17,8 @@ mod interactions_tests;
 mod test_support;
 
 use crate::llm::api::{
-    DeltaSender, LlmRequestPayload, LlmResult, OutputFormat, ProviderTelemetry,
-    RawProviderToolCall, ReasoningEffort, ThinkingConfig,
+    DeltaSender, LlmRequestPayload, LlmRequestPayloadExt, LlmResult, OutputFormat,
+    ProviderTelemetry, RawProviderToolCall, ReasoningEffort, ThinkingConfig,
 };
 use crate::llm::provider::{LlmProvider, LlmProviderChat};
 use crate::llm::providers::common::{
@@ -44,7 +44,7 @@ impl LlmProviderChat for GeminiProvider {
         &'a self,
         request: &'a LlmRequestPayload,
         delta_tx: Option<DeltaSender>,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<LlmResult, VmError>> + 'a>> {
+    ) -> crate::llm::provider::ProviderChatFuture<'a> {
         Box::pin(self.chat_impl(request, delta_tx))
     }
 }
@@ -383,25 +383,7 @@ fn gemini_message_parts(message: &serde_json::Value) -> Vec<serde_json::Value> {
     parts
 }
 
-/// Return Gemini's opaque thought signature from either a live provider
-/// response or Harn's portable provider-metadata fixture representation.
-pub(crate) fn gemini_tool_call_thought_signature(value: &serde_json::Value) -> Option<&str> {
-    value
-        .get("thoughtSignature")
-        .or_else(|| value.get("thought_signature"))
-        .or_else(|| {
-            value
-                .get("provider_metadata")
-                .and_then(|metadata| metadata.get("gemini"))
-                .and_then(|gemini| {
-                    gemini
-                        .get("thought_signature")
-                        .or_else(|| gemini.get("thoughtSignature"))
-                })
-        })
-        .and_then(serde_json::Value::as_str)
-        .filter(|signature| !signature.is_empty())
-}
+pub(crate) use harn_llm::reasoning_history::gemini_tool_call_thought_signature;
 
 fn gemini_function_call_part(call: &serde_json::Value) -> Option<serde_json::Value> {
     let function = call.get("function").unwrap_or(call);
@@ -695,7 +677,9 @@ mod tests {
     #[test]
     fn gemini_image_content_maps_to_inline_data() {
         let payload = LlmRequestPayload {
+            reasoning_effort_source: crate::llm::ReasoningEffortSource::Request,
             data_controls: crate::llm_config::DataPosture::Default,
+            inference_boundary: None,
             provider: "gemini".to_string(),
             model: "gemini-2.5-flash".to_string(),
             region: None,
@@ -726,6 +710,7 @@ mod tests {
             presence_penalty: None,
             parallel_tool_calls: None,
             provider_contract_probe: None,
+            portable_option_intent: Default::default(),
             fast: false,
             reasoning_mode: None,
             output_format: crate::llm::api::OutputFormat::Text,
@@ -769,7 +754,9 @@ mod tests {
     #[test]
     fn gemini_image_url_content_maps_to_file_data() {
         let mut payload = LlmRequestPayload {
+            reasoning_effort_source: crate::llm::ReasoningEffortSource::Request,
             data_controls: crate::llm_config::DataPosture::Default,
+            inference_boundary: None,
             provider: "gemini".to_string(),
             model: "gemini-2.5-flash".to_string(),
             region: None,
@@ -799,6 +786,7 @@ mod tests {
             presence_penalty: None,
             parallel_tool_calls: None,
             provider_contract_probe: None,
+            portable_option_intent: Default::default(),
             fast: false,
             reasoning_mode: None,
             output_format: crate::llm::api::OutputFormat::Text,
@@ -847,7 +835,9 @@ mod tests {
     #[test]
     fn gemini_pdf_and_audio_content_maps_to_parts() {
         let payload = LlmRequestPayload {
+            reasoning_effort_source: crate::llm::ReasoningEffortSource::Request,
             data_controls: crate::llm_config::DataPosture::Default,
+            inference_boundary: None,
             provider: "gemini".to_string(),
             model: "gemini-2.5-flash".to_string(),
             region: None,
@@ -878,6 +868,7 @@ mod tests {
             presence_penalty: None,
             parallel_tool_calls: None,
             provider_contract_probe: None,
+            portable_option_intent: Default::default(),
             fast: false,
             reasoning_mode: None,
             output_format: crate::llm::api::OutputFormat::Text,

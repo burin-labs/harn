@@ -1,53 +1,11 @@
-import { approval_reviewer_on_route } from "std/agent/approval_review"
+import {
+  __loop_dispatch_options,
+  __resolve_max_concurrent_tools,
+} from "std/agent/loop_dispatch_options"
 import "std/agent/loop_foundation"
 import "std/agent/loop_result_status"
 import "std/agent/loop_support"
 import "std/agent/loop_tool_calls"
-
-pub fn __resolve_max_concurrent_tools(turn_opts: any) {
-  const raw = turn_opts?.max_concurrent_tools
-  if type_of(raw) == "int" && raw > 1 {
-    return raw
-  }
-  return 1
-}
-
-/**
- * Resolve the intra-turn failing-fan-out cap K (#A4). When a single model
- * response fans out a large batch of byte-identical FAILING tool calls, every
- * call is dispatched synchronously with no LLM call or progress check between
- * them, so the cross-turn loop-detector / no-progress terminator fire a whole
- * turn too late — after all N drain, having burned turn/wall budget and flooded
- * context with N identical errors (observed: 127 identical `edit` rejections in
- * ~2.7s on swift-feat). This cap is the intra-turn analog of the cross-turn
- * no-progress terminator: after the Kth consecutive byte-identical failing
- * result within ONE batch, the remaining identical calls are skipped and
- * collapsed into a single synthetic result.
- *
- * Default OFF: returns `0` (no cap) unless `intra_turn_failure_fanout_cap` is
- * set to a positive int. A value of e.g. `3` collapses after 3 identical
- * failures. Reachability is exercised by the `agent_loop_intra_turn_*`
- * conformance tests, which prove that flipping the flag changes dispatch
- * behavior end-to-end.
- *
- * @effects: []
- * @errors: []
- */
-pub fn __resolve_intra_turn_failure_fanout_cap(turn_opts: any) {
-  const raw = turn_opts?.intra_turn_failure_fanout_cap
-  if type_of(raw) == "int" && raw > 0 {
-    return raw
-  }
-  return 0
-}
-
-pub fn __resolve_intra_turn_resource_fail_fast(turn_opts: any) -> bool {
-  const raw = turn_opts?.intra_turn_resource_fail_fast
-  if type_of(raw) == "bool" {
-    return raw
-  }
-  return true
-}
 
 const __TOOL_BATCH_OBSERVATION_KINDS = ["read", "search", "think", "fetch", "inspect", "list"]
 
@@ -96,7 +54,7 @@ fn __tool_batch_entry_executor(entry: any) -> string {
 }
 
 fn __tool_batch_call_classification(call: any, tools: any, options: any = {}) {
-  const tool_name = to_string(call?.name ?? call?.tool_name ?? "")
+  const tool_name = __tool_registry_name(call)
   const entry = __tool_registry_entry(tools, tool_name)
   const annotations = __tool_resource_annotations(entry, options?.policy, tool_name)
   const kind = __intra_turn_annotation_text(
@@ -195,7 +153,7 @@ fn __tool_batch_plan(clock: HarnessClock, tool_calls: list, tools: any, options:
       selected_phase = phase
       selected_rank = phase_rank
     }
-    entries = entries.appending(
+    entries.push(
       {
         index: index,
         call: call,
@@ -210,7 +168,7 @@ fn __tool_batch_plan(clock: HarnessClock, tool_calls: list, tools: any, options:
         },
       },
     )
-    signatures = signatures.appending(signature)
+    signatures.push(signature)
   }
   entries = entries.map({ entry -> entry + {selected: entry.phase == selected_phase} })
   const batch_id = sha256(
@@ -261,7 +219,7 @@ fn __tool_batch_receipt(
     source_batch_id: plan?.previous?.batch_id,
     call_index: entry.index,
     tool_call_id: to_string(entry.call?.id ?? entry.call?.tool_call_id ?? ""),
-    tool_name: to_string(entry.call?.name ?? entry.call?.tool_name ?? ""),
+    tool_name: __tool_registry_name(entry.call),
     phase: entry.phase,
     selected_phase: plan.selected_phase,
     disposition: disposition,
@@ -293,7 +251,7 @@ fn __tool_batch_deferred_result(
   options: any,
 ) {
   const receipt = __tool_batch_receipt(plan, entry, "deferred", "effect_phase_boundary")
-  const name = receipt.tool_name
+  const name = __tool_registry_name(entry.call)
   const observation = "[deferred `" + name + "` tool call]\n"
     + "This call was NOT executed. The current response crossed from effect phase `"
     + plan.selected_phase
@@ -375,7 +333,7 @@ fn __tool_batch_result_blocks_later_phase(entry: any, result: any) -> bool {
 fn __tool_batch_blocking_result(entry: any, result: any) {
   return {
     tool_call_id: to_string(entry.call?.id ?? entry.call?.tool_call_id ?? ""),
-    tool_name: to_string(entry.call?.name ?? entry.call?.tool_name ?? ""),
+    tool_name: __tool_registry_name(entry.call),
     mutation_status: __intra_turn_result_mutation_status(result),
     error_category: to_string(result?.error_category ?? ""),
   }
@@ -391,7 +349,7 @@ fn __tool_batch_merge_deferred_signatures(previous: any, newly_deferred: list, e
   let merged = previous_sigs.filter({ sig -> !contains(executed_sigs, sig) })
   for sig in __tool_batch_deferred_signatures(newly_deferred) {
     if !contains(merged, sig) {
-      merged = merged.appending(sig)
+      merged.push(sig)
     }
   }
   return merged
@@ -427,7 +385,7 @@ fn __tool_batch_dispatch(harness: Harness, tool_calls: list, tools: any, options
   if __tool_batch_blocking_barrier_applies(plan) {
     let blocked_results = []
     for entry in plan.entries {
-      blocked_results = blocked_results.appending(
+      blocked_results.push(
         __tool_batch_blocked_result(
           harness.agent,
           harness.random,
@@ -508,16 +466,14 @@ fn __tool_batch_dispatch(harness: Harness, tool_calls: list, tools: any, options
       receipt_timing,
       raw_result?.partial_apply,
     )
-    ordered = ordered.appending(
-      {index: entry.index, result: raw_result + {dispatch_receipt: receipt}},
-    )
+    ordered.push({index: entry.index, result: raw_result + {dispatch_receipt: receipt}})
     __tool_batch_emit_receipt(harness.agent, options, receipt)
     if __tool_batch_result_blocks_later_phase(entry, raw_result) {
       blocking_result = __tool_batch_blocking_result(entry, raw_result)
     }
   }
   for entry in deferred {
-    ordered = ordered.appending(
+    ordered.push(
       {
         index: entry.index,
         result: __tool_batch_deferred_result(
@@ -588,7 +544,7 @@ pub fn __intra_turn_call_signature(call: any) {
   if type_of(call) != "dict" {
     return nil
   }
-  const name = to_string(call?.name ?? call?.tool_name ?? "")
+  const name = __tool_registry_name(call)
   const args = call?.arguments ?? {}
   return sha256(json_stringify({name: name, args: args}))
 }
@@ -756,7 +712,7 @@ pub fn __intra_turn_push_resource_key(keys: any, value: any) {
   if contains(keys, key) {
     return keys
   }
-  return keys.appending(key)
+  return keys + [key]
 }
 
 pub fn __intra_turn_push_resource_value(keys: any, value: any) {
@@ -878,7 +834,7 @@ pub fn __intra_turn_dependency_target_ranges(resource_keys: any, args: any, anno
       continue
     }
     for key in resource_keys {
-      ranges = ranges.appending({resource_key: key, start: range.start, end: range.end})
+      ranges.push({resource_key: key, start: range.start, end: range.end})
     }
   }
   return ranges
@@ -894,7 +850,7 @@ pub fn __intra_turn_dependency_key_components(args: any, annotations: any) {
       if type_of(value) == "string" && trim(value) == "" {
         continue
       }
-      components = components.appending({name: name, value: value})
+      components.push({name: name, value: value})
     }
   }
   return components
@@ -908,13 +864,13 @@ pub fn __intra_turn_dependency_target_keys(resource_keys: any, args: any, annota
   const digest = substring(sha256(json_stringify(components)), 0, 24)
   let keys = []
   for key in resource_keys {
-    keys = keys.appending(key + "#target:" + digest)
+    keys.push(key + "#target:" + digest)
   }
   return keys
 }
 
 pub fn __intra_turn_resource_keys(call: any, tools: any, options: any = {}) {
-  const tool_name = to_string(call?.name ?? call?.tool_name ?? "")
+  const tool_name = __tool_registry_name(call)
   const entry = __tool_registry_entry(tools, tool_name)
   const annotations = __tool_resource_annotations(entry, options?.policy, tool_name)
   if !__intra_turn_annotations_mutate_resource(annotations) {
@@ -935,7 +891,7 @@ pub fn __intra_turn_resource_keys(call: any, tools: any, options: any = {}) {
 }
 
 pub fn __intra_turn_resource_guard(call: any, tools: any, options: any = {}) {
-  const tool_name = to_string(call?.name ?? call?.tool_name ?? "")
+  const tool_name = __tool_registry_name(call)
   const entry = __tool_registry_entry(tools, tool_name)
   const annotations = __tool_resource_annotations(entry, options?.policy, tool_name)
   if !__intra_turn_annotations_mutate_resource(annotations) {
@@ -1034,7 +990,7 @@ pub fn __intra_turn_failed_guard_record(call: any, index: any, resource_guard: a
   return resource_guard
     + {
       failed_call_index: index,
-      failed_tool_name: to_string(call?.name ?? call?.tool_name ?? ""),
+      failed_tool_name: __tool_registry_name(call),
       failed_tool_call_id: to_string(call?.id ?? call?.tool_call_id ?? ""),
       failed_mutation_status: __intra_turn_result_mutation_status(result),
     }
@@ -1078,7 +1034,7 @@ pub fn __intra_turn_partial_apply_receipt(
     executed_prefix_count: index,
     skipped_suffix_count: skipped_suffix_count,
     skipped_call_index: index,
-    skipped_tool_name: to_string(call?.name ?? call?.tool_name ?? ""),
+    skipped_tool_name: __tool_registry_name(call),
     skipped_tool_call_id: to_string(call?.id ?? call?.tool_call_id ?? ""),
     blocking_prior_call_index: blocking_guard?.failed_call_index,
     blocking_prior_tool_name: to_string(blocking_guard?.failed_tool_name ?? ""),
@@ -1158,8 +1114,8 @@ pub fn __intra_turn_has_keyed_mutating_calls(
  * @effects: []
  * @errors: []
  */
-pub fn __intra_turn_collapsed_result(call: any, sample_result: any) {
-  const name = to_string(call?.name ?? sample_result?.tool_name ?? "")
+pub fn __intra_turn_collapsed_result(call: any, _sample_result: any) {
+  const name = __tool_registry_name(call)
   const observation = "[collapsed remaining identical failing `" + name + "` call(s) "
     + "from this turn]\n"
     + "These calls had byte-identical arguments and produced the byte-identical "
@@ -1189,7 +1145,7 @@ pub fn __intra_turn_resource_blocked_result(
   index: any,
   skipped_suffix_count: any,
 ) {
-  const name = to_string(call?.name ?? call?.tool_name ?? "")
+  const name = __tool_registry_name(call)
   const receipt = __intra_turn_partial_apply_receipt(
     call,
     current_guard,
@@ -1256,31 +1212,7 @@ pub fn __dispatch_tool_calls(harness: Harness, session_id: any, tool_calls: any,
   // to cause-name empty-args tool calls: finish_reason=length means the
   // arguments were TRUNCATED by the output cap, anything else means the
   // provider dropped them (an IDE host bug report).
-  const dispatch_options = {
-    session_id: session_id,
-    tool_format: turn_opts.tool_format,
-    policy: turn_opts?.policy,
-    approval_policy: turn_opts?.approval_policy,
-    // The AutoReview answerer, on this loop's route. This list is an allowlist:
-    // an option not named here never reaches dispatch, which is how the seam
-    // once worked when called directly and did nothing through the loop.
-    approval_reviewer: approval_reviewer_on_route(
-      turn_opts?.approval_reviewer,
-      {provider: turn_opts?.provider, model: turn_opts?.model},
-    ),
-    command_policy: turn_opts?.command_policy,
-    permissions: turn_opts?.permissions,
-    reminders: turn_opts?.reminders,
-    _iteration: turn_opts?._iteration ?? 0,
-    _tool_caller: turn_opts?._tool_caller,
-    _max_concurrent_tools: cap,
-    _prefetch_next_turn: turn_opts?.prefetch_next_turn ?? false,
-    _stop_reason: turn_opts?._stop_reason ?? "",
-    _intra_turn_failure_fanout_cap: __resolve_intra_turn_failure_fanout_cap(turn_opts),
-    _intra_turn_resource_fail_fast: __resolve_intra_turn_resource_fail_fast(turn_opts),
-    _stop_after_successful_tools: turn_opts?.stop_after_successful_tools ?? [],
-    _tool_batch_dependency_state: turn_opts?._tool_batch_dependency_state,
-  }
+  const dispatch_options = __loop_dispatch_options(turn_opts, session_id, cap)
   const phased = __tool_batch_dispatch(harness, tool_calls, tools, dispatch_options, cap)
   const raw_dispatch = phased.results
   const audit_flushes = __collect_audit_flushes(raw_dispatch)
@@ -1395,7 +1327,7 @@ pub fn __dispatch_tool_calls_with_middleware(
           tools,
           options,
         )
-        results = results.appending(blocked)
+        results.push(blocked)
         continue
       }
       if fanout_cap > 0 && capped_call_signature != nil
@@ -1412,13 +1344,13 @@ pub fn __dispatch_tool_calls_with_middleware(
             tools,
             options,
           )
-          results = results.appending(collapsed)
+          results.push(collapsed)
           collapsed_emitted = true
         }
         continue
       }
       const result = __invoke_tool_with_index(harness, call, source_index, tools, options)
-      results = results.appending(result)
+      results.push(result)
       // Poison this resource for later same-resource siblings only when the
       // execution boundary cannot prove the failure was a no-op. A structured
       // `mutation_status: "not_applied"` leaves the view byte-identical, so an
@@ -1426,7 +1358,7 @@ pub fn __dispatch_tool_calls_with_middleware(
       // Unknown still poisons, preserving today's conservative behavior.
       if resource_guard != nil && !__tool_result_ok(result)
         && __intra_turn_failure_poisons_resource(result) {
-        failed_resource_guards = failed_resource_guards.appending(
+        failed_resource_guards.push(
           __intra_turn_failed_guard_record(call, source_index, resource_guard, result),
         )
       }
@@ -1461,7 +1393,7 @@ pub fn __dispatch_tool_calls_with_middleware(
   }
   let indexed = []
   for (index, call) in iter(tool_calls).enumerate() {
-    indexed = indexed.appending({index: __dispatch_source_index(source_indices, index), call: call})
+    indexed.push({index: __dispatch_source_index(source_indices, index), call: call})
   }
   const settled = parallel settle indexed with { max_concurrent: cap } { entry ->
     __invoke_tool_with_index(harness, entry.call, entry.index, tools, options)
@@ -1469,7 +1401,7 @@ pub fn __dispatch_tool_calls_with_middleware(
   let results = []
   for r in settled.results {
     if is_ok(r) {
-      results = results.appending(unwrap(r))
+      results.push(unwrap(r))
     } else {
       // `__invoke_tool` traps its own middleware exceptions, so a thrown
       // value here is a VM-level bug (e.g. parallel-task plumbing). Surface a
@@ -1479,7 +1411,7 @@ pub fn __dispatch_tool_calls_with_middleware(
       if __agent_error_must_propagate(err) {
         throw err
       }
-      results = results.appending(
+      results.push(
         {
           ok: false,
           status: "error",

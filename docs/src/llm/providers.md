@@ -11,6 +11,46 @@ harn models list --provider anthropic
 harn models info <model>
 ```
 
+### Inference admission preview
+
+`harn provider admission --request '<JSON>'` returns a policy decision for a
+concrete provider and model without resolving credentials or contacting the
+provider. For example:
+
+```bash
+harn provider admission --request '{"provider":"ollama","model":"selected-model","boundary":{"reach":"local_only","allow_training_discounts":false}}'
+```
+
+The request accepts `provider`, `model`, an optional `boundary`, and optional
+`data_controls`. The boundary meets the process and inherited inference
+ceilings; it cannot widen them. Data controls use the selected chat transport's
+actual control plan under default API routing, including models that require
+Responses. Live preflight also checks an explicitly selected API mode.
+
+Read the required `status` field: `admitted`, `denied`, or `unknown`. A valid
+snapshot exits successfully for all three decisions. Missing catalog facts or
+malformed host authority remain `unknown`. The snapshot contains rule names and
+route facts, never credentials, endpoint URLs, or request-control values.
+`training_control_planned` describes a control the transport can apply. The
+preview does not apply it or establish model readiness. Inference enforces its
+boundary again at dispatch.
+
+`data_posture` is the data posture inference will send on this route: the
+request's `data_controls` when given, otherwise the catalog's
+`[data_controls_policy] default_posture`, and `default` on a transport that
+cannot carry per-request controls. The per-request receipt reports the same
+value as `requested_posture`. `data_controls_outcome` is what that posture does
+on the route, and `data_controls_note` is the route's own handling note when its
+model row declares one, otherwise its provider's. A route the catalog records as
+training on API traffic with no control to stop it is `denied` under
+`strictest_available`, with governing rule `data_controls.training_refused`
+and the typed `data_controls_refusal: training_without_control`, because
+inference refuses it before sending. Hosts read the typed field.
+
+Embedders can call `harn_vm::llm::api::preview_inference_admission`. Request and
+snapshot schemas and host records are generated from those owning types in
+the published protocol artifacts.
+
 Set the provider credential in the environment. The complete list of providers
 and the variables each one reads is in
 [credential variables](../provider-support.md#credential-variables), generated
@@ -34,6 +74,48 @@ pin native tools.
 
 Ollama runs locally and doesn't require an API key. The default host is
 `http://localhost:11434`.
+
+### Meta Muse models
+
+Muse Spark Open is the open-weight release; `muse-spark-1.3` selects Meta's
+proprietary API model. Use `meta/muse-spark-open` through OpenRouter or select
+a provider-qualified route from `harn models list`. The catalog also includes
+Together, Fireworks, Hugging Face Router, Baseten, Groq, and Vercel routes.
+Their context limits, prices, and account access differ.
+
+Groq's route requires organization acceptance of the model's terms and access
+to its limited preview. Baseten's route has no
+live verification with Harn's probe account. Both retain unknown availability;
+neither advertises verified native tool support. OpenRouter also serves the
+model through Nebius. A partner announcement doesn't establish a direct model
+ID or access for your account.
+
+The [October catalog evidence](https://github.com/burin-labs/harn/blob/main/docs/llm/provider-evidence/2026-10-15-catalog-refresh.md)
+records live tool and vision checks, account restrictions, and unverified routes.
+
+Muse Wonder uses `muse-wonder-1.0` on Meta's API, `meta/muse-wonder` through
+OpenRouter, and `vercel/meta/muse-wonder-1.0` on Vercel. Wonder Full is available
+through Muse Code subscriptions and has no public API route. Meta's discounted
+Spark contributor routes permit training on your traffic; Wonder has no
+contributor API tier. See [Meta's rate card](https://dev.meta.ai/docs/pricing-rate-limits).
+
+Modal's shared endpoints use a workspace-specific hostname as the request's
+model ID. Configure an OpenAI-compatible provider overlay with the base URL
+`https://inference.us-west.modal.direct/v1`, bearer authentication, and a
+credential environment variable such as `MODAL_PROXY_TOKEN`. Set `wire_model`
+to the hostname Modal shows for your endpoint. Harn doesn't invent a global
+Modal model ID. See [Modal's endpoint integrations](https://modal.com/docs/guide/endpoint-integrations).
+
+### Gemini 4 Argon
+
+`gemini-4-argon` uses Google's Interactions API. Input, thinking, and output
+share one context window. Harn supports the `low`, `medium`, and `high` thinking
+levels and omits unsupported sampling controls. Explicit cache creation isn't
+supported; implicit caching applies to eligible prefixes.
+
+The direct route's introductory pricing ends November 30, 2026. Its catalog
+promotion restores the published regular rates on December 1. Gateway routes
+have separate rate cards. See [Google's migration reference](https://ai.google.dev/gemini-api/docs/latest-model).
 
 On a fresh install, `harn run` and `harn playground`/`harn try` detect Harn
 programs that call provider-backed LLM builtins such as `harness.llm.call`,
@@ -332,6 +414,17 @@ container credentials, and EC2 instance profile credentials. Set `AWS_REGION`,
 as `anthropic.claude-3-5-sonnet-20240620-v1:0` or
 `meta.llama3-70b-instruct-v1:0`.
 
+The SDK reads the session's captured launcher environment, including profile
+selection, container authorization, region settings, and ordinary inputs needed
+by profile credential helpers. Concurrent sessions keep separate captures;
+changing process variables after launch does not change a session's SDK inputs.
+Embedders supply a `LauncherEnvironment` through
+`AcpServerConfig::with_launcher_environment` before starting the server. This
+capture is an in-memory host input, never a credential-bearing ACP JSON field.
+Granted sessions retain their static credential restriction and do not run SDK
+discovery. A nonempty `AWS_SESSION_TOKEN` takes precedence over the declared
+legacy `AWS_SECURITY_TOKEN`; empty tokens are absent.
+
 Azure OpenAI requires `AZURE_OPENAI_ENDPOINT`, for example
 `https://my-resource.openai.azure.com`. Harn routes the request to
 `/openai/deployments/{deployment}/chat/completions` and uses the Harn
@@ -469,7 +562,7 @@ that provider declares them itself.
 ### Capability matrix + `harn.toml` overrides
 
 The provider support table is generated from
-`crates/harn-vm/src/llm/capabilities.toml` and matched against the
+`crates/harn-provider-catalog/src/capabilities.toml` and matched against the
 `(provider, model)` pair at call time. Scripts can query the effective
 capability surface without carrying vendor-specific knowledge:
 
@@ -552,7 +645,7 @@ but do not override runtime capability resolution.
 `.harn-runs/coding-agent-bench/latest/tool_mode_parity_overlay.toml`, and
 `harn provider capabilities promote-from-eval <overlay>` applies those
 deterministic parity verdicts back into
-`crates/harn-vm/src/llm/capabilities.toml`.
+`crates/harn-provider-catalog/src/capabilities.toml`.
 
 The matrix also records format preferences that prompt renderers can use
 without branching on provider names: XML vs. Markdown section scaffolding,
@@ -610,6 +703,7 @@ accepts these fields:
 | `tool_format_justification` | table | Why this row chose native vs text tools. Required on self-hosted rows that set `native_tools` or `preferred_tool_format`. One of `{ measured = "<receipt of THIS runtime>" }`, `{ assumed = "<why the pin holds, and the rollback>" }`, or `{ mirrors = { provider = "...", model_match = "..." } }`. A comment that cites a sibling is not a receipt. A `mirrors` link must stay in sync with the cited row (#6829). |
 | `message_wire_format` | string | Shared request/response message format: `openai`, `anthropic`, `gemini`, or `ollama`. |
 | `live_endpoint_family` | string | Which synchronous endpoint a route dispatches to when its dialect serves more than one: `gemini_generate_content` (default) or `gemini_interactions`. Absent for dialects with a single live endpoint. Independent of `batch_wire_format` — Gemini Batch stays `generateContent`-shaped either way. |
+| `decision_upstream_provider` | string | Exact serving-provider pin for a native gateway decision route. Required for `vercel_evaluate`; it can differ from the model author. |
 | `native_tool_wire_format` | string | Native tool definition shape for shared helpers: `openai` or `anthropic`. Gemini and Vertex accept Harn's canonical tool definitions and their adapters emit Google `functionDeclarations`. |
 | `defer_loading` | bool | Whether `defer_loading: true` on tool definitions is honored server-side. |
 | `tool_search` | list of strings | Native `tool_search` variants, preferred first. Anthropic: `["bm25", "regex"]`. OpenAI: `["hosted", "client"]`. Empty = no native support (client fallback only). |
@@ -649,6 +743,7 @@ accepts these fields:
 | `reasoning_wire_format` | string | Non-standard OpenAI-compatible reasoning request shape: `openrouter` or `enabled`. |
 | `reasoning_effort_supported` | bool | Provider accepts a `reasoning_effort` request field for effort-capable models. |
 | `reasoning_none_supported` | bool | Provider accepts `reasoning_effort: "none"` as true reasoning-off instead of flooring at `minimal`. |
+| `thinking_off_type` | string | Anthropic `thinking.type` sent for `thinking: false` where reasoning can be disabled: `disabled` (default), or `between_tools` for Claude Sonnet 5.5, which rejects `disabled`. An unknown value fails capability loading. |
 | `interleaved_thinking_supported` | bool | `thinking: true` can request Anthropic's `interleaved-thinking-2025-05-14` beta header. |
 | `anthropic_beta_features` | list of strings | Anthropic beta feature names always requested for this provider/model route. |
 | `vision_supported` | bool | Image content accepted by the provider/model route. |
@@ -726,6 +821,10 @@ credential-free `endpoint`, `detail`, `native_tools`, and
 See llama.cpp's [`/props` response](https://github.com/ggml-org/llama.cpp/blob/master/tools/server/README.md#get-props)
 and Ollama's [`/api/show` response](https://docs.ollama.com/api/show)
 for the upstream fields.
+
+The returned `reasoning_effort_levels` lists the route's declared effort
+ladder from lowest to highest. An empty list means unknown or unrestricted,
+so it does not prove that any particular effort is supported.
 
 First match wins. User rules for a given provider are consulted
 before the shipped rules — so the order inside the TOML file matters
@@ -837,6 +936,36 @@ The provider files in steps 2-4 are overlays, so a starter file can set
 definition. Project manifests can therefore configure provider adapters and
 model aliases without editing Rust-side registration code.
 
+For Ollama's OpenAI-compatible chat endpoint, declare the response adapter
+alongside the endpoint. Keep the route's `message_wire_format = "ollama"` in
+the model capability row:
+
+```toml
+[llm.providers.ollama]
+chat_endpoint = "/v1/chat/completions"
+chat_api_adapter = "ollama_openai_compat"
+```
+
+This selects OpenAI Chat Completions SSE decoding while mapping request values
+to fields the Ollama `/v1` server consumes. The adapter rejects Ollama-only
+sampling options it cannot carry. `/v1` does not carry `num_ctx` or
+`keep_alive`; use an Ollama Modelfile for context sizing and native `/api/chat`
+when those runtime controls are needed. These fields follow
+[Ollama 0.34's compatibility handler](https://github.com/ollama/ollama/blob/v0.34.0/openai/openai.go).
+
+An overlay declaring `chat_endpoint` replaces the endpoint and its adapter
+together. Omitting `chat_api_adapter` restores the provider/model's default
+request and response handling. For Ollama, an endpoint-only `/api/chat`
+override therefore restores native Ollama handling. Declare
+`chat_api_adapter = "ollama_openai_compat"` whenever selecting `/v1/chat/completions`.
+
+An adapter-only overlay changes the adapter while retaining the endpoint.
+`chat_api_adapter = "model_default"` explicitly selects the default handling.
+Overlays declaring neither field preserve both values.
+
+[`harn provider dispatch-explain`](../cli-reference.md#harn-provider-dispatch-explain)
+reports the effective endpoint, adapter, and source layer for each field.
+
 ### Managed provider supply
 
 A product or hosted gateway that supplies provider credentials can declare an
@@ -849,7 +978,7 @@ base_url = "https://gateway.example.com/v1"
 chat_endpoint = "/chat/completions"
 auth_style = "bearer"
 auth_env = "PRODUCT_INFERENCE_GRANT"
-managed_supply = { version = 1 }
+managed_supply = { version = 2 }
 ```
 
 Callers still select an ordinary Harn catalog model. Harn uses that model's
@@ -860,11 +989,15 @@ egress Harn adds this versioned request extension:
 ```json
 {
   "harn_managed_supply": {
-    "version": 1,
+    "version": 2,
     "logical_route": {
       "provider": "openai",
       "model": "gpt-5.4-mini",
       "capability_fingerprint": "<64 hex characters>"
+    },
+    "inference_boundary": {
+      "reach": "any_hosted",
+      "allow_training_discounts": false
     }
   }
 }
@@ -876,11 +1009,28 @@ pinned to the same Harn release verifies it before selecting a physical route
 with the same fingerprint; this makes Harn's catalog the contract instead of
 requiring products to copy capability tables.
 
+Version 2 requires the caller's resolved inference boundary. Harn captures the
+trusted host ceiling and any tighter call scope once, and retains that same
+request for terminal receipt validation. Missing, malformed, and version 1
+authority are refused; there is no implicit hosted grant. Managed supply uses
+the OpenAI chat-completions transport; ACP, Responses and other wire adapters
+are refused before dispatch. Every declared managed provider enters the same
+request and receipt wrapper. Provider wire overrides cannot replace the
+captured `harn_managed_supply` authority. The managed relay
+must also declare its own researched data policy. A model's physical provider
+policy does not establish how the relay handles prompts.
+
+Before provider egress, `compatible_served_route` checks the physical model
+against that boundary through Harn's shared admission decision. Equal
+capability fingerprints do not establish equal weight class or training policy.
+The hosted wire adapter sends no opt-out controls, so a planned control cannot
+justify admission. A gateway may enforce a stricter no-training floor.
+
 Every successful JSON response, or the terminal SSE frame of a streaming
 response, must contain a `harn_managed_supply` receipt with `version`,
 `request_id`, `served_route`, non-negative `input_tokens` and `output_tokens`,
 decimal-string `cost_usd`, `cost_basis`, `capability_mode`, and typed
-`routing_attempts`. Managed supply v1 requires `capability_mode = "exact"`;
+`routing_attempts`. Managed supply v2 requires `capability_mode = "exact"`;
 each attempt reports only its route, typed outcome, elapsed time, optional HTTP
 status, and a safe gateway detail code. Provider payloads and credential names
 do not cross this audit boundary. The served route carries its own capability
@@ -1086,13 +1236,24 @@ permissions.
 - Auth: `Authorization: Bearer <key>`
 - Same message format as OpenAI
 
+### Cerebras
+
+- Endpoint: `https://api.cerebras.ai/v1/chat/completions`
+- Auth: `Authorization: Bearer <CEREBRAS_API_KEY>`
+- Qwen 3.8 27B accepts `effort: "none"`, `"low"`, `"medium"`, and `"high"`.
+  `"none"` disables reasoning. GPT-OSS 120B accepts only `"low"`, `"medium"`, and `"high"`.
+- Streamed responses report input and output usage. See the
+  [Cerebras reasoning guide](https://inference-docs.cerebras.ai/capabilities/reasoning)
+  for provider defaults and response formats.
+
 ### Vercel AI Gateway
 
 - Endpoint: `https://ai-gateway.vercel.sh/v1/chat/completions` or `/v1/responses`
 - Auth: `Authorization: Bearer <AI_GATEWAY_API_KEY>`; the longer
   `VERCEL_AI_GATEWAY_API_KEY` spelling is also accepted
 - Models use creator/model wire ids. Collision-free Harn catalog ids and
-  aliases such as `vercel-gpt-5.4-nano` resolve to those ids automatically.
+  aliases such as `vercel-claude-haiku-4.5` resolve to those ids
+  automatically.
 - Model capabilities follow the routed creator/model family, so Claude,
   Gemini, OpenAI, and open-weight routes keep their distinct tool, reasoning,
   caching, multimodal, and structured-output behavior.
@@ -1102,12 +1263,12 @@ permissions.
 ```harn
 harness.llm.call("Summarize the change.", nil, {
   provider: "vercel_ai_gateway",
-  model: "vercel-gpt-5.4-nano",
+  model: "vercel-claude-haiku-4.5",
   vercel_ai_gateway: {
     providerOptions: {
       gateway: {
         sort: "cost",
-        models: ["google/gemini-3.1-flash-lite"],
+        models: ["google/gemini-3.5-flash-lite"],
       },
     },
   },
@@ -1264,7 +1425,7 @@ The declarations are projected into the provider catalog, so the accurate table
 comes from the binary rather than from prose that drifts:
 
 ```sh
-harn provider catalog show --json > catalog.json
+harn provider catalog show > catalog.json
 jq -r '.providers[] | select(.data_controls) | [.id, .data_controls.control_scope, .data_controls.retention_default, .data_controls.training_default] | @tsv' catalog.json
 ```
 
@@ -1283,6 +1444,43 @@ that wants it everywhere sets it once in provider config:
 [data_controls_policy]
 default_posture = "strictest_available"
 ```
+
+## Inference destination boundaries
+
+An embedder may set `HARN_INFERENCE_BOUNDARY_JSON` in the trusted Harn process
+launch environment. Its value is a closed JSON object with `reach` and
+`allow_training_discounts`, for example
+`{"reach":"local_only","allow_training_discounts":false}`. A call or agent
+may supply the same typed `inference_boundary` option to narrow that ceiling;
+workers inherit it and cannot widen it. Without a host ceiling or call option,
+standalone Harn keeps its existing routing behavior. A malformed supplied
+ceiling refuses activation before provider configuration seeding or accepting
+server connections. CLI run and server launch capture that value once. New,
+loaded, and forked sessions retain it even when their environment is isolated.
+Ordinary child processes never receive the reserved variable; unrelated
+environment values still follow the selected environment policy.
+
+Library embedders set the typed `host_inference_boundary` field on
+`AcpServerConfig` or `DispatchCoreConfig`; both constructors default to no host
+ceiling. `InferenceBoundary::capture_process()` validates a process launch
+value for that field. A session may also grant the variable with an
+`in_process` audience. Its ceiling meets the trusted host ceiling and may
+tighten it, never remove or widen it. Receipts record one effective host
+exposure as `literal` and `in_process`, without its value.
+
+`local_only` admits only cataloged local runtimes whose resolved endpoint is
+loopback (`localhost`, `127.0.0.0/8`, or `::1`). A provider marked local with
+a remote base URL is refused. `hosted_open_weight` also admits hosted routes
+whose model row explicitly declares `open_weight = true`; `any_hosted` admits
+other hosted routes. Hosted routes still need a cataloged no-training default,
+an applied per-request no-training control, or explicit permission for a
+cataloged training route. A no-training ceiling selects the route's declared
+training restriction even when the caller requests `default`. It doesn't add
+retention restrictions; `strictest_available` still selects all declared controls.
+Unknown training behavior without an applied training control is refused.
+Native adapters can't credit controls they don't apply. Every allowed live call
+includes the governing rule and the catalog
+locality and open-weight declarations in its data-controls receipt.
 
 ## Provider resolution order
 
@@ -1311,6 +1509,14 @@ Each provider defines an `auth_style` and one or more environment variables:
 | Vertex AI | `VERTEX_AI_ACCESS_TOKEN`, `GOOGLE_APPLICATION_CREDENTIALS` | bearer |
 | Ollama | (none) | none |
 | Local | (none) | none |
+
+A provider whose platform SDK reads credentials from further variables
+declares them as `credential_env`. Bedrock declares `AWS_ACCESS_KEY_ID`,
+`AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`, `AWS_SECURITY_TOKEN`,
+`AWS_PROFILE`, and `AWS_CONTAINER_AUTHORIZATION_TOKEN`. Harn never requires
+these names. Like `auth_env`, they are withheld from every child process a
+session spawns. Catalog validation fails when a provider requires auth but
+declares neither `auth_env` nor `credential_env`.
 
 ## Model selection
 

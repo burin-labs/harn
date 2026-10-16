@@ -188,7 +188,7 @@ fn receipt_counts(events: list) {
   let total = 0
   for event in events {
     if event?.type == "tool_call_audit" && event?.receipt != nil {
-      audit_orders = audit_orders.appending(event.receipt.emit_order)
+      audit_orders.push(event.receipt.emit_order)
     }
     if event?.type != "tool_batch_disposition" {
       continue
@@ -202,18 +202,18 @@ fn receipt_counts(events: list) {
     if receipt.disposition == "executed" {
       executed = executed + 1
       if receipt.tool_name == "edit_state" {
-        executed_mutations = executed_mutations.appending(receipt.tool_call_id)
+        executed_mutations.push(receipt.tool_call_id)
       }
     } else if receipt.disposition == "deferred" {
       deferred = deferred + 1
     } else if receipt.disposition == "skipped_after_blocking_result" {
       skipped = skipped + 1
-      skipped_blockers = skipped_blockers.appending(receipt.blocking_tool_call_id)
+      skipped_blockers.push(receipt.blocking_tool_call_id)
     }
     if receipt.proposal_status == "re_proposed" {
       reproposed = reproposed + 1
-      reproposed_ids = reproposed_ids.appending(receipt.tool_call_id)
-      reproposed_names = reproposed_names.appending(receipt.tool_name)
+      reproposed_ids.push(receipt.tool_call_id)
+      reproposed_names.push(receipt.tool_name)
     }
     require receipt.planned_at_ms >= 0, "every call needs planning timing"
     if receipt.disposition == "executed" {
@@ -523,9 +523,7 @@ fn run_failed_terminal_fanout_retains_deferred(harness: Harness, counters: dict)
   let failing_done_calls = []
   let index = 0
   while index < 6 {
-    failing_done_calls = failing_done_calls.appending(
-      done_call("failed-terminal-" + to_string(index), true),
-    )
+    failing_done_calls.push(done_call("failed-terminal-" + to_string(index), true))
     index = index + 1
   }
   const captured = agent_capture_events(

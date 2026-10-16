@@ -1,5 +1,6 @@
 use super::*;
 use crate::orchestration::{CapabilityPolicy, WorkflowNode};
+use crate::NativeBuiltinCtxExt;
 use std::collections::BTreeMap;
 
 fn ceiling_with_tools(tools: &[&str]) -> CapabilityPolicy {
@@ -22,6 +23,30 @@ fn ceiling_pass_through_is_within() {
     assert!(ceiling.assert_within_ceiling(&ceiling).is_ok());
     let options = options_with_policy(&ceiling);
     assert!(enforce_flattened_ceiling(&options, &ceiling).is_ok());
+}
+
+#[test]
+fn flattened_stage_cannot_remove_host_process_confinement() {
+    let mut ceiling = CapabilityPolicy::default();
+    ceiling.process_sandbox.read_deny_roots = vec!["/private/host-secret".into()];
+    ceiling.process_sandbox.netns_launcher_path = Some("/opt/host/netns".into());
+    assert!(enforce_flattened_ceiling(&options_with_policy(&ceiling), &ceiling).is_ok());
+
+    let mut denied_path_removed = ceiling.clone();
+    denied_path_removed.process_sandbox.read_deny_roots.clear();
+    let mut helper_replaced = ceiling.clone();
+    helper_replaced.process_sandbox.netns_launcher_path = Some("/tmp/stage/netns".into());
+    let mut profile_loosened = ceiling.clone();
+    profile_loosened.sandbox_profile = crate::orchestration::SandboxProfile::Wasi;
+    for requested in [denied_path_removed, helper_replaced, profile_loosened] {
+        assert!(matches!(
+            enforce_flattened_ceiling(&options_with_policy(&requested), &ceiling),
+            Err(VmError::CategorizedError {
+                category: crate::value::ErrorCategory::ToolRejected,
+                ..
+            })
+        ));
+    }
 }
 
 #[test]
@@ -528,7 +553,7 @@ async fn flatten_matches_expected_stage_contract() {
             .collect(),
     };
 
-    let mut vm = crate::Vm::new();
+    let mut vm = crate::new_vm();
     crate::register_vm_stdlib(&mut vm);
     let ctx = crate::vm::AsyncBuiltinCtx::for_test(vm);
 

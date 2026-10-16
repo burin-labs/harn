@@ -1,0 +1,133 @@
+import {
+  Review,
+  ReviewActor,
+  ReviewObservation,
+  ReviewedChangeObservation,
+  decode_reviewed_change,
+} from "./review"
+import {
+  GithubConnectorResult,
+  GithubPullRequestReviewCensus,
+  GithubPullRequestReviewCensusRequest,
+  GithubReviewActor,
+  GithubReviewDecision,
+  GithubReviewState,
+  github_pr_review_census,
+} from "harn-github-connector/default"
+
+fn review_state(
+  state: GithubReviewState,
+) -> "approved" | "changes_requested" | "commented" | "dismissed" | "pending" {
+  match state {
+    "APPROVED" -> { return "approved" }
+    "CHANGES_REQUESTED" -> { return "changes_requested" }
+    "COMMENTED" -> { return "commented" }
+    "DISMISSED" -> { return "dismissed" }
+    "PENDING" -> { return "pending" }
+  }
+}
+
+fn actor_observation(value: GithubReviewActor?) -> ReviewActor? {
+  return if value == nil {
+    nil
+  } else {
+    {id: value.id, name: value.login, kind: value.type}
+  }
+}
+
+fn change_state(state: "OPEN" | "CLOSED" | "MERGED") -> "open" | "closed" | "merged" {
+  match state {
+    "OPEN" -> { return "open" }
+    "CLOSED" -> { return "closed" }
+    "MERGED" -> { return "merged" }
+  }
+}
+
+fn platform_decision(
+  state: GithubReviewDecision?,
+) -> "approved" | "changes_requested" | "review_required" | nil {
+  match state {
+    "APPROVED" -> { return "approved" }
+    "CHANGES_REQUESTED" -> { return "changes_requested" }
+    "REVIEW_REQUIRED" -> { return "review_required" }
+    nil -> { return nil }
+  }
+}
+
+/** Normalize the connector's complete exact-head census for live reads and deterministic replay. */
+pub fn github_reviewed_change(census: GithubPullRequestReviewCensus) -> ReviewedChangeObservation {
+  require census.number > 0 && census.pages_fetched >= 2,
+    "GitHub review observation requires a measured census for one pull request"
+  let reviews: list<Review> = []
+  for row in census.reviews {
+    const review: Review = {
+      id: row.id,
+      state: review_state(row.state),
+      head: row.commit_oid,
+      actor: actor_observation(row.author),
+      updated_at: row.updated_at,
+      submitted_at: row.submitted_at,
+    }
+    reviews = reviews + [review]
+  }
+  const observation: ReviewObservation = {
+    schema: "smart-ship.review-observation.v1",
+    repository: census.repository,
+    change: to_string(census.number),
+    head: census.head_oid,
+    base: census.base_oid,
+    base_branch: census.base_branch,
+    platform_decision: platform_decision(census.review_decision),
+    declared_reviews: census.total_reviews,
+    declared_threads: census.total_threads,
+    reviews: reviews,
+    threads: census.threads.map({ row -> pick(row, ["id", "resolved", "outdated"]) }),
+  }
+  return decode_reviewed_change(
+    {
+      source: {
+        repository: census.repository,
+        change: to_string(census.number),
+        head: census.head_oid,
+        base: census.base_oid,
+        base_branch: census.base_branch,
+        author: actor_observation(census.author),
+        state: change_state(census.state),
+        draft: census.is_draft,
+        head_repository: if census.head_repository == nil {
+          nil
+        } else {
+          census.head_repository.full_name
+        },
+        base_repository: if census.base_repository == nil {
+          nil
+        } else {
+          census.base_repository.full_name
+        },
+        head_repository_id: if census.head_repository == nil {
+          nil
+        } else {
+          census.head_repository.id
+        },
+        base_repository_id: if census.base_repository == nil {
+          nil
+        } else {
+          census.base_repository.id
+        },
+      },
+      reviews: observation,
+    },
+  )
+}
+
+/** Read-only initial forge adapter. Errors retain the connector's structured refusal. */
+pub fn read_github_reviewed_change(
+  harness: Harness,
+  request: GithubPullRequestReviewCensusRequest,
+) -> GithubConnectorResult<ReviewedChangeObservation> {
+  const census = github_pr_review_census(harness, request)
+  match census {
+    Ok(value) -> { return Ok(github_reviewed_change(value)) }
+    Err(error) -> { return Err(error) }
+  }
+}

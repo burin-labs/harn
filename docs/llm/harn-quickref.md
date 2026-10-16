@@ -432,7 +432,9 @@ absence.
 - `command_wait_for_output(harness.tools, handle, pattern, opts?)` parks on background output,
   exit, or timeout without polling. Use `source: "stdout" | "stderr" |
   "combined"`, `regex: true`, and `from_offset` when needed. A match reports
-  byte offsets and leaves teardown to `command_cancel`.
+  byte offsets and leaves teardown to `command_cancel`. On `status: "exited"`,
+  `result` is the command's final result: `success`, `exit_code`, `stdout`,
+  and `stderr` match what `command_wait` returns for the same handle.
 
 ## Time, sleep, monotonic clock
 
@@ -514,6 +516,35 @@ while i < n {
 when line- or token-oriented scanning suffices, and reach for `regex_*`
 (see [Regex](#regex)) for pattern matching rather than hand-rolled cursors.
 
+## Collection methods
+
+Each builtin operation has one name: `len`, `contains`, `lower`, `upper`,
+`windows`, `chunks`, `map_keys`, `merge`, `all`. Old spellings (`count()`,
+`includes`, `to_lower`, `lowercase`, `each_cons`, `appending`, `rekeyed`) are
+type errors (`HARN-NAM-013`); `harn fix --apply --safety behavior-preserving`
+rewrites them. The full table is "Builtin methods" in `docs/src/builtins.md`.
+
+Mutating methods change a `let` binding in place, Swift-style; copy-returning
+methods leave the receiver alone:
+
+```harn
+let stack = [1, 2, 3]
+stack.push(4)                 // stack is [1, 2, 3, 4]
+const top = stack.pop()       // 4; stack is [1, 2, 3]
+stack.reverse()               // stack is [3, 2, 1]
+const ordered = stack.sorted() // new list; stack unchanged
+let seen = set()
+seen.add("a")
+let opts = {model: "x", debug: true}
+const was = opts.remove("debug") // true; opts is {model: "x"}
+```
+
+Mutating: list `push`, `pop`, `insert`, `extend`, `clear`, `sort`, `sort_by`,
+`reverse`; set `add`, `remove`, `clear`; dict `remove`, `clear`. The receiver
+must be a `let` binding or a path rooted at one (`state.items.push(x)`); on a
+`const`, a parameter, or a temporary it is a type error. Use `xs + [v]`,
+`sorted()`, `reversed()`, `s.union(...)`, or `omit(d, keys)` for a new value.
+
 ## Control flow: `if` is an expression
 
 `if` / `else` produces a value. Bind it directly into `let`, pass it
@@ -555,8 +586,8 @@ for {key, value} in my_dict.entries() { /* work */ }
 // [0, 1, 2, 3, 4] — half-open, Python-style
 const first_5 = range(5)
 const middle  = range(3, 7)      // [3, 4, 5, 6]
-const inc     = 1 to 5            // [1, 2, 3, 4, 5] — inclusive default
-const exc     = 1 to 5 exclusive  // [1, 2, 3, 4]    — half-open
+const inc     = 1..=5            // [1, 2, 3, 4, 5]: includes the end
+const exc     = 1..5             // [1, 2, 3, 4]: excludes it
 ```
 
 Note: `for` heads accept three destructuring shapes, each matching what the
@@ -964,10 +995,11 @@ Optional chaining works for properties, methods, and subscripts:
 return `nil` when the receiver is `nil`; otherwise they perform the same
 access as `.`, method call, or `[]`.
 
-`??` binds tighter than comparisons/logical operators and looser than
-multiplication. Read `classified == maybe_flag ?? false` as
-`classified == (maybe_flag ?? false)`. `harn fmt` inserts those clarifying
-parentheses automatically.
+`??` binds like Swift's: looser than arithmetic and ranges, tighter than
+comparisons and logical operators. Read `count ?? 0 + 1` as
+`count ?? (0 + 1)` and `classified == maybe_flag ?? false` as
+`classified == (maybe_flag ?? false)`. `harn fmt` keeps clarifying
+parentheses around a `??` that is an operand of another operator.
 
 `try* EXPR` (prefix) evaluates `EXPR` and rethrows any throw so an
 enclosing `try { ... } catch (e) { ... }` sees it. Use it instead of
@@ -999,6 +1031,32 @@ Use `json_pointer(value, ptr)` for RFC 6901 paths such as
 `/users/0/email`; escaping is `~0` for `~` and `~1` for `/`. Missing
 paths return `nil`. `json_pointer_set(value, ptr, new)` and
 `json_pointer_delete(value, ptr)` return modified copies.
+
+Decode untyped data once, where it enters, into a declared type. Then read
+typed fields with `.`, never a `?.` chain:
+
+```harn
+type User = {email: string, active: bool}
+type Users = {users: list<User>}
+
+fn active_emails(body: string) -> Result<list<string>, string> {
+  match json_decode(body, schema_of(Users)) {
+    Result.Ok(decoded) -> {
+      const active = decoded.users.filter({ u -> u.active })
+      return Ok(active.map({ u -> u.email }))
+    }
+    Result.Err(error) -> {
+      return Err(error.message)
+    }
+  }
+}
+```
+
+`json_decode(text, schema_of(T))` parses and validates; `schema_parse(value,
+schema_of(T))` validates a value you already hold. Both return `Result<T,
+{message, errors, issues}>`; `match` or postfix `?` keeps `T`, while `unwrap`
+returns a dynamic value. Unknown fields pass. See "Decode at the boundary"
+in `docs/src/error-handling.md`.
 
 Use `jq(value, expr)` for a jq-like stream query; it always returns a
 list. Use `jq_first(value, expr)` when you expect one value or `nil`.
@@ -1219,7 +1277,7 @@ explicitly; `.zip` and `.enumerate` also emit pairs.
 
 ### Ranges and iters
 
-`Range` (from `a to b` / `range(n)`) is its own value type with O(1)
+`Range` (from `a..b`, `a..=b`, or `range(n)`) is its own value type with O(1)
 `.len() / .first() / .last() / .contains(x)` and `r[k]` subscript —
 no materialization. Calling any lazy combinator on a Range
 (`.map / .filter / .flat_map / .take / .skip / .take_while /
@@ -1227,7 +1285,7 @@ no materialization. Calling any lazy combinator on a Range
 returns a lazy `iter`. Sinks (`.to_list / .sum / .reduce / ...`)
 drain through the iter. In short: Range handles integer ranges
 with O(1) ops; Iter handles arbitrary lazy sequences. Chaining
-`(1 to 10000000).map(...).take(5).to_list()` finishes instantly
+`(1..=10000000).map(...).take(5).to_list()` finishes instantly
 because only 5 elements flow through the pipeline.
 
 ## Regex
@@ -1458,8 +1516,7 @@ generation routes remain open-world. Explicit `cache: true` and
 `prompt_cache_ttl` instead require authored support because their wire lowering
 is provider-specific, and a TTL must be listed in `prompt_cache_ttls`.
 
-See the [complete option reference](../src/llm/llm_call.md#options-dict) and
-the [0.10 migration table](../src/migrations/v0.10.md#llm-call-options).
+See the [complete option reference](../src/llm/llm_call.md#options-dict).
 
 Provider auto-resolution precedence:
 
@@ -1787,7 +1844,7 @@ Semantics:
 ### Provider capabilities (data-driven matrix)
 
 The per-provider / per-model capability surface lives in a shipped
-TOML table (`crates/harn-vm/src/llm/capabilities.toml`), overridable
+TOML table (`crates/harn-provider-catalog/src/capabilities.toml`), overridable
 per-project via `[[capabilities.provider.<name>]]` in `harn.toml`:
 
 ```toml
@@ -2420,7 +2477,11 @@ preserves provider prompt prefixes; compaction remains the deliberate prefix
 break.
 
 Rendering is provider-neutral. Every route receives one
-`<context-directives speaker="...">` envelope in its own trailing user message.
+`<context-directives speaker="..." nonce="...">` envelope in its own trailing
+user message. The nonce is per session and declared in the assembled system
+prompt; only an envelope carrying it is authoritative, and directive-shaped
+tags inside tool results are escaped before provider dispatch. Directive bodies
+are CDATA, so commands arrive verbatim.
 The speaker is `harness` when any directive in it came from harness machinery
 and `person` when every directive stands in for the person. Its directives
 are ordered by authority (`contract`, `corrective`, `advisory`) and then lifecycle
@@ -3292,6 +3353,9 @@ Lifecycle builtins (all hard-error on unknown ids except `exists`, `open`,
 
 - `harness.agent.open(id?, opts?)` / `_close(id)` / `_exists(id)`. `opts` may
   include `workspace_anchor` and `workspace_policy: {default_mount_mode}`.
+  `{parent, actor?}` opens a delegated child of `parent`; `actor` pushes an
+  `act` hop onto the parent's chain (origin `anonymous` when it has none), so
+  the child's provider requests are attributable.
 - `harness.agent.current_id()` returns the innermost active session id or `nil`.
 - `harness.agent.actor_chain(id?)` returns the RFC 8693 `{sub, act}` actor
   chain for `id`, or for the current active session when `id` is omitted.
@@ -3465,6 +3529,9 @@ with headers, list of dicts (keys are sorted on stringify for
 determinism).
 
 ### URL parsing
+
+`url_build` assigns each component separately, percent-encodes reserved characters in hierarchical paths,
+and preserves explicit empty queries and fragments.
 
 ```harn
 url_parse("https://api.example.com:8080/v1/items?q=hi#frag")
@@ -3765,7 +3832,7 @@ const handle = trigger_register({
 
 ### Triage inbox stdlib
 
-Use `std/triage` to turn Slack, Notion, GitHub, or generic connector payloads
+Use `std/triage` to turn Slack, GitHub, or generic connector payloads
 into host-renderable inbox cards while retaining raw provider payloads for
 audit:
 
@@ -4563,14 +4630,25 @@ if !r.ok {
 }
 const data = r.data
 
-// Scoped permit acquisition + backoff for flaky providers. Retries on
-// rate_limit / overloaded / transient_network / timeout categories with
-// exponential backoff (capped at 30s). Composes with
-// HARN_RATE_LIMIT_<PROVIDER>_RPM/_TPM and provider/model catalog
-// `rate_limits` fields.
-const r = harness.llm.with_rate_limit("openai", fn() {
-  harness.llm.call(user_prompt, nil, {provider: "openai"})
-}, {max_retries: 5, backoff_ms: 500})
+```
+
+Provider requests acquire rate-limit permits automatically. For bounded
+transient retries, use the canonical caller:
+
+```harn,ignore
+import { llm_caller } from "std/llm/caller"
+
+fn main(harness: Harness) {
+  const caller = llm_caller(harness, {
+    retry: {max_attempts: 6, base_ms: 500},
+  })
+  const result = caller({prompt: "Say hello", opts: {provider: "openai"}})
+  if result.ok {
+    harness.stdio.println(result.value.text)
+  } else {
+    throw result.error
+  }
+}
 ```
 
 `error.category` (both on the thrown dict and on
@@ -5109,9 +5187,8 @@ Per-provider and per-model rate limiting is built in:
 - Or richer env overrides such as `HARN_RATE_LIMIT_MYPROVIDER_RPM=1000`
   and `HARN_RATE_LIMIT_MYPROVIDER_TPM=1000000`.
 - Or `harness.llm.rate_limit("provider", {rpm: 600, tpm: 1000000})` at runtime.
-- Wrap individual call sites in
-  `harness.llm.with_rate_limit(provider, fn, opts?)`
-  to acquire a permit and auto-retry retryable failures.
+- Each provider request acquires a permit automatically, including retries
+  through `llm_caller(harness, {retry: ...})` from `std/llm/caller`.
 
 RPM/TPM shape sustained throughput; route `concurrency` and
 `max_concurrent` cap simultaneous in-flight work. RPM/TPM buckets are
@@ -5207,7 +5284,7 @@ token-redaction catalog. The five modules under `std/oauth/*` compose
 freely — pick a provider, pick a storage, then pick a grant.
 
 ```harn,ignore
-// github, slack, linear, notion, google, microsoft, atlassian, discord,
+// github, slack, linear, google, microsoft, atlassian, discord,
 // gitlab, bitbucket, github_enterprise, custom
 import { providers } from "std/oauth/providers"
 // memory, file, harn_cloud_*, custom

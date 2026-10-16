@@ -166,6 +166,7 @@ pub(super) fn user_test_report_from_summary(
             duration_ms: result.duration_ms,
             timeout: result.timeout,
             phases: result.phases,
+            work: result.work.as_deref().copied(),
             timing_spans: result.timing_spans.clone(),
             message: result.skip_reason.clone().or_else(|| result.error.clone()),
             captured_output: result.captured_output.clone(),
@@ -174,6 +175,18 @@ pub(super) fn user_test_report_from_summary(
     report.set_duration_ms(summary.duration_ms);
     report.set_execution_metrics(summary.timing, summary.aggregate);
     let mut shard_plan = summary.shard_plan.clone();
+    if let Some(matrix) = shard_plan.as_mut().and_then(|plan| plan.matrix.as_mut()) {
+        matrix.source_confirmed = matrix.source.is_some()
+            && matrix.source == crate::test_shard_coverage::clean_source(suite_root);
+        for case in &mut matrix.cases {
+            case.file = report_relative_path(suite_root, &case.file);
+        }
+        // Wire order follows portable relative paths, not a host's absolute
+        // paths or separator byte, so identical plans hash identically.
+        matrix
+            .cases
+            .sort_by(|a, b| (&a.file, &a.name).cmp(&(&b.file, &b.name)));
+    }
     if let Some(dominant) = shard_plan
         .as_mut()
         .and_then(|plan| plan.dominant_case.as_mut())
@@ -481,7 +494,7 @@ mod tests {
     }
 
     #[test]
-    fn user_report_conversion_pins_v4_execution_metrics() {
+    fn user_report_conversion_pins_v5_execution_metrics() {
         let modules = harn_vm::ModulePhaseStats::default();
         let phases = PhaseTimings {
             execute_ms: 30,
@@ -503,6 +516,7 @@ mod tests {
                     }),
                     duration_ms: 30,
                     phases: Some(phases),
+                    work: Some(Box::new(harn_vm::VmWork { vm_steps: 12 })),
                     timing_spans: Vec::new(),
                 },
                 TestResult {
@@ -515,6 +529,7 @@ mod tests {
                     timeout: None,
                     duration_ms: 0,
                     phases: None,
+                    work: None,
                     timing_spans: Vec::new(),
                 },
             ],
@@ -538,7 +553,9 @@ mod tests {
             serde_json::to_value(user_test_report_from_summary(Path::new("/suite"), &summary))
                 .expect("report serializes");
 
-        assert_eq!(value["schemaVersion"], 4);
+        assert_eq!(value["schemaVersion"], 5);
+        assert_eq!(value["cases"][0]["work"]["vm_steps"], 12);
+        assert!(value["cases"][1].get("work").unwrap().is_null());
         assert_eq!(value["timing"]["sample_count"], 1);
         assert_eq!(value["aggregate"]["modules"]["modules_loaded"], 0);
         assert_eq!(value["cases"][0]["timeout"]["phase"], "execute");

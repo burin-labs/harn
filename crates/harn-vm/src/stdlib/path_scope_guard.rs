@@ -15,7 +15,7 @@ use crate::orchestration::{
     set_singleton_pre_tool_hook, PreToolAction, PreToolHookFn, ReminderSpec,
 };
 use crate::stdlib::args::{ArgError, Args, ErrorKind};
-use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
+use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 use crate::workspace_anchor::MountMode;
@@ -36,13 +36,8 @@ const DEFAULT_ARG_KEYS: &[&str] = &[
 pub const PATH_SCOPE_VIOLATION_PREFIX: &str = "[path_scope_violation] ";
 
 pub fn register_path_scope_guard_builtins(vm: &mut Vm) {
-    for def in MODULE_BUILTINS {
-        vm.register_builtin_def(def);
-    }
+    crate::stdlib::macros::register_module_builtins(vm, module_path!());
 }
-
-pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] =
-    &[&REGISTER_PATH_SCOPE_GUARD_DEF, &CLEAR_PATH_SCOPE_GUARD_DEF];
 
 /// Install a PreToolUse hook that denies (or emits a `<scope-alert>`
 /// reminder for) tool calls whose path-shaped args point outside the
@@ -151,6 +146,7 @@ pub fn scope_alert_reminder(
         anchor = anchor.primary.display(),
     );
     SystemReminder {
+        goal_pin: None,
         id: format!("scope-alert:{tool_name}:{}", short_path_hash(path)),
         tags: vec!["scope_alert".to_string()],
         dedupe_key: Some(format!("scope_alert:{tool_name}:{}", short_path_hash(path))),

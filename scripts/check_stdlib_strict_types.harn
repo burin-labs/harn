@@ -1,0 +1,36 @@
+import { DiagnosticFile, collect_stdlib_diagnostics } from "./lib/stdlib_diagnostics.harn"
+
+const FRONTIER = [
+  "crates/harn-stdlib/src/stdlib/agent/user.harn",
+  "crates/harn-stdlib/src/stdlib/stdlib_agents.harn",
+]
+
+pub fn strict_type_violations(files: list<DiagnosticFile>) -> list<string> {
+  let failures: list<string> = []
+  for file in files {
+    for diagnostic in file.diagnostics {
+      const code = diagnostic.code ?? ""
+      if (diagnostic.severity == "error"
+          && (code.starts_with("HARN-TYP-") || diagnostic.source != "lint"))
+        || (code == "HARN-OWN-004" && !FRONTIER.contains(file.path)) {
+        failures = failures + ["${file.path}: ${code}: ${diagnostic.message}"]
+      }
+    }
+  }
+  return failures
+}
+
+fn main(harness: Harness) {
+  const binary = harness.env.get("HARN_BIN") ?? "harn"
+  const files = collect_stdlib_diagnostics(pick(harness, ["fs", "process"]), binary, "check")
+  const failures = strict_type_violations(files)
+  for failure in failures {
+    harness.stdio.eprintln(failure)
+  }
+  if failures.count > 0 {
+    throw "stdlib type-safety gate failed: ${failures.count} findings, ${files.count} files scanned. Ordinary errors are not baseline-eligible; narrow unvalidated boundaries."
+  }
+  harness.stdio.println(
+    "stdlib type-safety gate passed: ${files.count} files scanned, 0 failing findings.",
+  )
+}
