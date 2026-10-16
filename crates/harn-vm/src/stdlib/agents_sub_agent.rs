@@ -400,11 +400,18 @@ pub(super) fn physical_usage_for_session(session_id: &str) -> Option<serde_json:
         .map(crate::llm::vm_value_to_json)
 }
 
+fn sub_agent_usage_value(physical_usage: &serde_json::Value, tokens_used: i64) -> VmValue {
+    let mut usage = physical_usage.clone();
+    usage["total_tokens"] = serde_json::Value::from(tokens_used);
+    crate::stdlib::json_to_vm_value(&usage)
+}
+
 fn wrap_sub_agent_error(
     summary: String,
     artifacts: VmValue,
     evidence_added: i64,
     tokens_used: i64,
+    physical_usage: &serde_json::Value,
     budget_exceeded: bool,
     session_id: &str,
     error: VmValue,
@@ -419,6 +426,10 @@ fn wrap_sub_agent_error(
         session_id,
     );
     envelope.insert(crate::value::intern_key("ok"), VmValue::Bool(false));
+    envelope.insert(
+        crate::value::intern_key("usage"),
+        sub_agent_usage_value(physical_usage, tokens_used),
+    );
     let status = error
         .as_dict()
         .and_then(|dict| dict.get("category"))
@@ -895,6 +906,7 @@ pub(super) async fn execute_sub_agent(
                 artifacts,
                 evidence_added,
                 tokens_used,
+                &result["physical_usage"],
                 true,
                 &spec.session_id,
                 error_value,
@@ -916,11 +928,9 @@ pub(super) async fn execute_sub_agent(
     envelope.insert(crate::value::intern_key("transcript"), transcript.clone());
     // Preserve the finalized per-child physical usage ledger, including its
     // scope and accounting certainty, in addition to the base total.
-    let mut usage = result["physical_usage"].clone();
-    usage["total_tokens"] = serde_json::Value::from(tokens_used);
     envelope.insert(
         crate::value::intern_key("usage"),
-        crate::stdlib::json_to_vm_value(&usage),
+        sub_agent_usage_value(&result["physical_usage"], tokens_used),
     );
 
     if wants_structured_output {
@@ -955,6 +965,7 @@ pub(super) async fn execute_sub_agent(
                 artifacts,
                 evidence_added,
                 tokens_used,
+                &result["physical_usage"],
                 budget_exceeded,
                 &spec.session_id,
                 sub_agent_error_dict("permission_denied", reason, Some(tool)),

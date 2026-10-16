@@ -527,12 +527,20 @@ async fn execute_sub_agent_propagates_nested_budget_denial() {
     };
 
     let mut vm = crate::new_vm();
+    vm.set_harness(crate::Harness::real());
     crate::register_vm_stdlib(&mut vm);
     let ctx = crate::vm::AsyncBuiltinCtx::for_test(vm);
     let result = execute_sub_agent(&ctx, spec).await.unwrap();
 
     assert_eq!(result.payload["ok"].as_bool(), Some(false));
     assert_eq!(result.payload["budget_exceeded"].as_bool(), Some(true));
+    assert_eq!(
+        result.payload["usage"]["token_scope"],
+        "every_provider_call"
+    );
+    assert_eq!(result.payload["usage"]["status"], "not_run");
+    assert_eq!(result.payload["usage"]["provider_call_count"], 0);
+    assert_eq!(result.payload["usage"]["total_tokens"], 0);
     assert_eq!(
         result.payload["error"]["category"].as_str(),
         Some("budget_exceeded")

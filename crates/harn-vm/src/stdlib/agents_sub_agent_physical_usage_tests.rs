@@ -235,6 +235,26 @@ async fn exhausted_structured_child_usage_includes_native_tool_and_wrapup_reques
     assert_eq!(usage["total_tokens"].as_i64(), Some(26));
     assert_eq!(usage["provider_call_count"].as_i64(), Some(2));
 
+    // Error receipts use the same wrapper for nested-budget and tool-policy
+    // refusals. Neither may discard the accounting reached above.
+    for category in ["budget_exceeded", "permission_denied"] {
+        let failed = wrap_sub_agent_error(
+            String::new(),
+            VmValue::List(Arc::new(Vec::new())),
+            0,
+            26,
+            usage,
+            category == "budget_exceeded",
+            "physical-usage-error-projection",
+            sub_agent_error_dict(category, "refused", None),
+            None,
+        );
+        let failed = crate::llm::vm_value_to_json(&failed);
+        assert_eq!(failed["ok"], false);
+        assert_eq!(failed["tokens_used"], 26);
+        assert_eq!(&failed["usage"], usage);
+    }
+
     let requests = requests.lock().expect("request capture lock");
     assert_eq!(
         requests.len(),
