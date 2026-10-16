@@ -1,4 +1,4 @@
-use crate::value::{VmDictExt, VmError, VmValue};
+use crate::value::{VmDictExt, VmError};
 
 use super::CompactionPolicy;
 
@@ -18,14 +18,8 @@ pub(super) fn render_llm_compaction_prompt(
         "retained_messages",
         format_compaction_messages(retained_messages),
     );
-    bindings.insert(
-        crate::value::intern_key("archived_count"),
-        VmValue::Int(archived_count as i64),
-    );
-    bindings.insert(
-        crate::value::intern_key("retained_count"),
-        VmValue::Int(retained_messages.len() as i64),
-    );
+    bindings.put_int("archived_count", archived_count as i64);
+    bindings.put_int("retained_count", retained_messages.len() as i64);
 
     let mut prompt = if policy.has_prompt_directives()
         && policy.extend_default_instructions == Some(false)

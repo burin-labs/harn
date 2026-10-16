@@ -29,40 +29,6 @@ thread_local! {
 const FILE_TEXT_CACHE_MAX_ENTRIES: usize = RuntimeLimits::DEFAULT.max_file_text_cache_entries;
 static HOST_FS_MUTATION_EPOCH: AtomicU64 = AtomicU64::new(0);
 
-pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
-    &READ_FILE_BUILTIN_DEF,
-    &READ_FILE_RESULT_BUILTIN_DEF,
-    &READ_FILE_BYTES_BUILTIN_DEF,
-    &WRITE_FILE_BUILTIN_DEF,
-    &WRITE_FILE_BYTES_BUILTIN_DEF,
-    &conditional_replace::REPLACE_FILE_BUILTIN_DEF,
-    &conditional_replace::REPLACE_FILE_RESULT_BUILTIN_DEF,
-    &conditional_replace::REPLACE_FILE_BYTES_BUILTIN_DEF,
-    &conditional_replace::REPLACE_FILE_BYTES_RESULT_BUILTIN_DEF,
-    &FILE_EXISTS_BUILTIN_DEF,
-    &PATH_STATUS_BUILTIN_DEF,
-    &DELETE_FILE_BUILTIN_DEF,
-    &APPEND_FILE_BUILTIN_DEF,
-    &APPEND_FILE_LOCKED_BUILTIN_DEF,
-    &LIST_DIR_BUILTIN_DEF,
-    &MKDIR_BUILTIN_DEF,
-    &PATH_JOIN_BUILTIN_DEF,
-    &COPY_FILE_BUILTIN_DEF,
-    &TEMP_DIR_BUILTIN_DEF,
-    &WORKSPACE_TEMP_DIR_BUILTIN_DEF,
-    &MKDTEMP_BUILTIN_DEF,
-    &MKDTEMP_IN_WORKSPACE_BUILTIN_DEF,
-    &STAT_BUILTIN_DEF,
-    &MOVE_FILE_BUILTIN_DEF,
-    &READ_LINES_BUILTIN_DEF,
-    &line_page::READ_LINES_PAGE_RESULT_BUILTIN_DEF,
-    &line_page::READ_LINES_APPEND_PAGE_RESULT_BUILTIN_DEF,
-    &WALK_DIR_BUILTIN_DEF,
-    &GLOB_BUILTIN_DEF,
-    &find_text::FIND_TEXT_BUILTIN_DEF,
-    &find_evidence::FIND_EVIDENCE_BUILTIN_DEF,
-];
-
 #[derive(Clone)]
 struct FileTextCacheEntry {
     content: arcstr::ArcStr,
@@ -144,7 +110,7 @@ fn io_error_value_with_kind(kind: &'static str, message: impl AsRef<str>) -> VmV
     let mut dict = BTreeMap::new();
     dict.put_str("error", "io_error");
     dict.put_str("kind", kind);
-    dict.put_str("message", message);
+    dict.put_str("message", message.as_ref());
     VmValue::dict(dict)
 }
 
@@ -435,6 +401,40 @@ pub(crate) fn register_fs_builtins(vm: &mut Vm) {
         vm.register_builtin_def(def);
     }
 }
+
+const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
+    &READ_FILE_BUILTIN_DEF,
+    &READ_FILE_RESULT_BUILTIN_DEF,
+    &READ_FILE_BYTES_BUILTIN_DEF,
+    &WRITE_FILE_BUILTIN_DEF,
+    &WRITE_FILE_BYTES_BUILTIN_DEF,
+    &conditional_replace::REPLACE_FILE_BUILTIN_DEF,
+    &conditional_replace::REPLACE_FILE_RESULT_BUILTIN_DEF,
+    &conditional_replace::REPLACE_FILE_BYTES_BUILTIN_DEF,
+    &conditional_replace::REPLACE_FILE_BYTES_RESULT_BUILTIN_DEF,
+    &FILE_EXISTS_BUILTIN_DEF,
+    &PATH_STATUS_BUILTIN_DEF,
+    &DELETE_FILE_BUILTIN_DEF,
+    &APPEND_FILE_BUILTIN_DEF,
+    &APPEND_FILE_LOCKED_BUILTIN_DEF,
+    &LIST_DIR_BUILTIN_DEF,
+    &MKDIR_BUILTIN_DEF,
+    &PATH_JOIN_BUILTIN_DEF,
+    &COPY_FILE_BUILTIN_DEF,
+    &TEMP_DIR_BUILTIN_DEF,
+    &WORKSPACE_TEMP_DIR_BUILTIN_DEF,
+    &MKDTEMP_BUILTIN_DEF,
+    &MKDTEMP_IN_WORKSPACE_BUILTIN_DEF,
+    &STAT_BUILTIN_DEF,
+    &MOVE_FILE_BUILTIN_DEF,
+    &READ_LINES_BUILTIN_DEF,
+    &line_page::READ_LINES_PAGE_RESULT_BUILTIN_DEF,
+    &line_page::READ_LINES_APPEND_PAGE_RESULT_BUILTIN_DEF,
+    &WALK_DIR_BUILTIN_DEF,
+    &GLOB_BUILTIN_DEF,
+    &find_text::FIND_TEXT_BUILTIN_DEF,
+    &find_evidence::FIND_EVIDENCE_BUILTIN_DEF,
+];
 
 #[harn_builtin(
     exposure = "runtime_internal",

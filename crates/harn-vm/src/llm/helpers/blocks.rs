@@ -43,10 +43,7 @@ pub(super) fn normalize_message_blocks(content: Option<&VmValue>, role: &str) ->
 
 fn normalize_transcript_block(block: &VmValue, default_visibility: &str) -> VmValue {
     let mut normalized = block.as_dict().cloned().unwrap_or_else(|| {
-        crate::value::DictMap::from_iter([(
-            "text".to_string(),
-            VmValue::String(arcstr::ArcStr::from(block.display())),
-        )])
+        crate::value::DictMap::from_iter([("text".to_string(), VmValue::string(block.display()))])
     });
     if !normalized.contains_key("type") {
         normalized.put_str("type", "text");

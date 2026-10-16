@@ -553,7 +553,7 @@ fn call_harness_auth_method_sync_fast(
                         .collect::<Vec<_>>()
                 })
                 .unwrap_or_default();
-            Some(Ok(VmValue::List(std::sync::Arc::new(scopes))))
+            Some(Ok(VmValue::list(scopes)))
         }
         "subject" => Some(match principal {
             Some(principal) if !principal.subject.is_empty() => {

@@ -24,7 +24,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 
 use crate::stdlib::host::dispatch_host_operation;
-use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
+use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
@@ -216,21 +216,8 @@ struct CachedEmbedding {
 }
 
 pub(crate) fn register_memory_builtins(vm: &mut Vm) {
-    for def in MODULE_BUILTINS {
-        vm.register_builtin_def(def);
-    }
+    crate::stdlib::macros::register_module_builtins(vm, module_path!());
 }
-
-pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
-    &MEMORY_STORE_IMPL_DEF,
-    &MEMORY_RECALL_IMPL_DEF,
-    &MEMORY_OPEN_IMPL_DEF,
-    &MEMORY_SUMMARIZE_IMPL_DEF,
-    &MEMORY_FORGET_IMPL_DEF,
-    &MEMORY_UPDATE_IMPL_DEF,
-    &MEMORY_LIST_IMPL_DEF,
-    &EMBED_IMPL_DEF,
-];
 
 /// Reserved cache namespace for standalone `__embed` calls. Keeps the
 /// content-addressed embedding cache for ad-hoc embeds (e.g. the semantic
@@ -257,21 +244,18 @@ async fn embed_impl(
     let embedding =
         embed_cached(Some(&ctx), &root, EMBED_CACHE_NAMESPACE, &text, &model_hint).await?;
     let mut map = crate::value::DictMap::new();
-    map.insert(
-        crate::value::intern_key("vector"),
-        VmValue::List(std::sync::Arc::new(
+    map.put(
+        "vector",
+        VmValue::list(
             embedding
                 .vector
                 .iter()
                 .map(|value| VmValue::Float(*value))
                 .collect(),
-        )),
+        ),
     );
     map.put_str("model", embedding.model.as_str());
-    map.insert(
-        crate::value::intern_key("dim"),
-        VmValue::Int(embedding.dim as i64),
-    );
+    map.put_int("dim", embedding.dim as i64);
     Ok(VmValue::dict(map))
 }
 
@@ -369,13 +353,13 @@ async fn memory_recall_impl(
         &config,
     )
     .await?;
-    Ok(VmValue::List(std::sync::Arc::new(
+    Ok(VmValue::list(
         scored
             .into_iter()
             .take(limit)
             .map(|item| memory_record_to_vm(&item.record, Some(item.score)))
             .collect(),
-    )))
+    ))
 }
 
 #[harn_builtin(
@@ -598,7 +582,7 @@ fn memory_list_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
         Some(limit) => filtered.take(limit).collect(),
         None => filtered.collect(),
     };
-    Ok(VmValue::List(std::sync::Arc::new(items)))
+    Ok(VmValue::list(items))
 }
 
 /// Parse an `options.flags` value into a `{name: bool}` map. Accepts a dict of
@@ -1580,48 +1564,33 @@ fn memory_record_to_vm(record: &MemoryRecord, score: Option<f64>) -> VmValue {
         crate::stdlib::json_to_vm_value(&record.value),
     );
     map.put_str("text", record.text.as_str());
-    map.insert(
-        crate::value::intern_key("tags"),
-        VmValue::List(std::sync::Arc::new(
+    map.put(
+        "tags",
+        VmValue::list(
             record
                 .tags
                 .iter()
                 .map(|tag| VmValue::String(arcstr::ArcStr::from(tag.as_str())))
                 .collect(),
-        )),
+        ),
     );
     map.put_str("stored_at", record.stored_at.as_str());
-    map.insert(
-        crate::value::intern_key("provenance"),
+    map.put_nullable(
+        "provenance",
         record
             .provenance
             .as_ref()
-            .map(crate::stdlib::json_to_vm_value)
-            .unwrap_or(VmValue::Nil),
+            .map(crate::stdlib::json_to_vm_value),
     );
-    map.insert(
-        crate::value::intern_key("status"),
-        record
-            .status
-            .as_deref()
-            .map(|status| VmValue::String(arcstr::ArcStr::from(status)))
-            .unwrap_or(VmValue::Nil),
-    );
-    map.insert(
-        crate::value::intern_key("scope"),
-        record
-            .scope
-            .as_deref()
-            .map(|scope| VmValue::String(arcstr::ArcStr::from(scope)))
-            .unwrap_or(VmValue::Nil),
-    );
+    map.put_nullable_str("status", record.status.as_deref());
+    map.put_nullable_str("scope", record.scope.as_deref());
     let mut flag_map = crate::value::DictMap::new();
     for (key, value) in &record.flags {
         flag_map.insert(crate::value::intern_key(key), VmValue::Bool(*value));
     }
-    map.insert(crate::value::intern_key("flags"), VmValue::dict(flag_map));
+    map.put("flags", VmValue::dict(flag_map));
     if let Some(score) = score {
-        map.insert(crate::value::intern_key("score"), VmValue::Float(score));
+        map.put("score", VmValue::Float(score));
     }
     VmValue::dict(map)
 }
@@ -1643,19 +1612,16 @@ fn summary_to_vm(namespace: &str, records: Vec<MemoryRecord>) -> VmValue {
     let mut map = crate::value::DictMap::new();
     map.put_str("_type", "memory_summary");
     map.put_str("namespace", namespace);
-    map.insert(
-        crate::value::intern_key("count"),
-        VmValue::Int(records.len() as i64),
-    );
+    map.put_int("count", records.len() as i64);
     map.put_str("text", text);
-    map.insert(
-        crate::value::intern_key("records"),
-        VmValue::List(std::sync::Arc::new(
+    map.put(
+        "records",
+        VmValue::list(
             records
                 .iter()
                 .map(|record| memory_record_to_vm(record, None))
                 .collect(),
-        )),
+        ),
     );
     VmValue::dict(map)
 }
@@ -1665,19 +1631,16 @@ fn forget_result_to_vm(event: &ForgetEvent) -> VmValue {
     map.put_str("_type", "memory_forget");
     map.put_str("id", event.id.as_str());
     map.put_str("namespace", event.namespace.as_str());
-    map.insert(
-        crate::value::intern_key("forgotten"),
-        VmValue::Int(event.forgotten_ids.len() as i64),
-    );
-    map.insert(
-        crate::value::intern_key("forgotten_ids"),
-        VmValue::List(std::sync::Arc::new(
+    map.put_int("forgotten", event.forgotten_ids.len() as i64);
+    map.put(
+        "forgotten_ids",
+        VmValue::list(
             event
                 .forgotten_ids
                 .iter()
                 .map(|id| VmValue::String(arcstr::ArcStr::from(id.as_str())))
                 .collect(),
-        )),
+        ),
     );
     map.put_str("forgotten_at", event.forgotten_at.as_str());
     VmValue::dict(map)
@@ -1694,35 +1657,13 @@ fn memory_open_to_vm(event: &OpenEvent) -> VmValue {
         MemoryBackend::Hybrid => "hybrid",
     };
     map.put_str("backend", backend);
-    map.insert(
-        crate::value::intern_key("embed_model_hint"),
-        event
-            .embed_model_hint
-            .as_deref()
-            .map(|hint| VmValue::String(arcstr::ArcStr::from(hint)))
-            .unwrap_or(VmValue::Nil),
+    map.put_nullable_str("embed_model_hint", event.embed_model_hint.as_deref());
+    map.put_nullable(
+        "embed_dim",
+        event.embed_dim.map(|dim| VmValue::Int(dim as i64)),
     );
-    map.insert(
-        crate::value::intern_key("embed_dim"),
-        event
-            .embed_dim
-            .map(|dim| VmValue::Int(dim as i64))
-            .unwrap_or(VmValue::Nil),
-    );
-    map.insert(
-        crate::value::intern_key("bm25_weight"),
-        event
-            .bm25_weight
-            .map(VmValue::Float)
-            .unwrap_or(VmValue::Nil),
-    );
-    map.insert(
-        crate::value::intern_key("cosine_weight"),
-        event
-            .cosine_weight
-            .map(VmValue::Float)
-            .unwrap_or(VmValue::Nil),
-    );
+    map.put_nullable("bm25_weight", event.bm25_weight.map(VmValue::Float));
+    map.put_nullable("cosine_weight", event.cosine_weight.map(VmValue::Float));
     map.put_str("opened_at", event.opened_at.as_str());
     VmValue::dict(map)
 }

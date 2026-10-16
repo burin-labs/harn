@@ -398,13 +398,13 @@ pub(crate) fn build_llm_error_dict(err: &VmError, provider: &str, model: &str) -
     if let VmError::Thrown(VmValue::Dict(existing)) = err {
         let mut dict = existing.as_ref().clone();
         dict.entry(crate::value::intern_key("category"))
-            .or_insert_with(|| VmValue::String(arcstr::ArcStr::from(category.as_str())));
+            .or_insert_with(|| VmValue::string(category.as_str()));
         dict.entry(crate::value::intern_key("kind"))
-            .or_insert_with(|| VmValue::String(arcstr::ArcStr::from(llm_error.kind.as_str())));
+            .or_insert_with(|| VmValue::string(llm_error.kind.as_str()));
         dict.entry(crate::value::intern_key("reason"))
-            .or_insert_with(|| VmValue::String(arcstr::ArcStr::from(llm_error.reason.as_str())));
+            .or_insert_with(|| VmValue::string(llm_error.reason.as_str()));
         dict.entry(crate::value::intern_key("message"))
-            .or_insert_with(|| VmValue::String(arcstr::ArcStr::from(message.as_str())));
+            .or_insert_with(|| VmValue::string(message.as_str()));
         // `origin` answers a question the rest of the taxonomy cannot: did this
         // request ever leave the process? A route that refuses `effort` and a
         // Harn option check that refuses to send `effort` are both
@@ -412,7 +412,7 @@ pub(crate) fn build_llm_error_dict(err: &VmError, provider: &str, model: &str) -
         // provider's verdict from Harn's own. Anything reaching here that did
         // not already claim `local` came back from the provider.
         dict.entry(crate::value::intern_key("origin"))
-            .or_insert_with(|| VmValue::String(arcstr::ArcStr::from("provider")));
+            .or_insert_with(|| VmValue::string("provider"));
         // Fill provider/model only when the routing failure did not already
         // record the route that actually failed. A fallback/ladder that failed
         // on a different provider/model owns its own route here; overwriting it
@@ -430,9 +430,9 @@ pub(crate) fn build_llm_error_dict(err: &VmError, provider: &str, model: &str) -
         );
         if !no_single_route {
             dict.entry(crate::value::intern_key("provider"))
-                .or_insert_with(|| VmValue::String(arcstr::ArcStr::from(provider)));
+                .or_insert_with(|| VmValue::string(provider));
             dict.entry(crate::value::intern_key("model"))
-                .or_insert_with(|| VmValue::String(arcstr::ArcStr::from(model)));
+                .or_insert_with(|| VmValue::string(model));
         }
         return VmValue::dict(dict);
     }
@@ -442,19 +442,18 @@ pub(crate) fn build_llm_error_dict(err: &VmError, provider: &str, model: &str) -
     dict.put_str("reason", llm_error.reason.as_str());
     dict.put_str("message", message);
     if let Some(ms) = agent_observe::extract_retry_after_ms(err) {
-        dict.insert("retry_after_ms".to_string(), VmValue::Int(ms as i64));
+        dict.put_int("retry_after_ms", ms as i64);
     }
     if let Some(failure) = err.provider_stream_failure() {
         dict.put_str("source", "provider_stream");
         dict.put_str("phase", failure.phase.as_str());
-        dict.insert(
-            "deadline".to_string(),
+        dict.put_nullable(
+            "deadline",
             failure
                 .deadline
-                .map(|deadline| VmValue::String(arcstr::ArcStr::from(deadline.as_str())))
-                .unwrap_or(VmValue::Nil),
+                .map(|deadline| VmValue::string(deadline.as_str())),
         );
-        dict.insert("partial".to_string(), VmValue::Bool(failure.partial));
+        dict.put_bool("partial", failure.partial);
     }
     dict.put_str("origin", "provider");
     dict.put_str("provider", provider);
@@ -466,8 +465,8 @@ pub(crate) fn build_llm_error_dict(err: &VmError, provider: &str, model: &str) -
 /// initial call; `status` distinguishes disabled from exhausted.
 pub(crate) fn schema_retry_failure_facts(attempts: usize, budget: usize) -> VmValue {
     let mut facts = std::collections::BTreeMap::new();
-    facts.insert("attempts".to_string(), VmValue::Int(attempts as i64));
-    facts.insert("budget".to_string(), VmValue::Int(budget as i64));
+    facts.put_int("attempts", attempts as i64);
+    facts.put_int("budget", budget as i64);
     facts.put_str("status", if budget == 0 { "disabled" } else { "exhausted" });
     VmValue::dict(facts)
 }
@@ -487,7 +486,7 @@ pub(crate) fn invalid_request_error(
     );
     fields.put_str("kind", "terminal");
     fields.put_str("reason", "invalid_request");
-    fields.put_str("message", message);
+    fields.put_str("message", message.as_ref());
     // Set before the envelope fills defaults, so this survives as `local`.
     fields.put_str("origin", "local");
     fields.put_str("provider", provider);
@@ -802,16 +801,10 @@ fn attach_routing_block(
     routing_dict.put_str("policy", label);
     routing_dict.insert("attempts".to_string(), routing::trace_to_vm_attempts(trace));
     if let Some(selected) = trace.selected {
-        routing_dict.insert("selected".to_string(), VmValue::Int(selected as i64));
+        routing_dict.put_int("selected", selected as i64);
     }
-    routing_dict.insert(
-        "session_cost_usd".to_string(),
-        VmValue::Float(trace.session_cost_usd),
-    );
-    dict.insert(
-        crate::value::intern_key("routing"),
-        VmValue::dict(routing_dict),
-    );
+    routing_dict.put("session_cost_usd", VmValue::Float(trace.session_cost_usd));
+    dict.put("routing", VmValue::dict(routing_dict));
     VmValue::dict(dict)
 }
 
@@ -1083,7 +1076,7 @@ fn schema_stream_abort_message(abort: &SchemaStreamAbort) -> String {
 
 pub(super) fn llm_safe_envelope_ok(response: VmValue) -> VmValue {
     let mut dict = std::collections::BTreeMap::new();
-    dict.insert("ok".to_string(), VmValue::Bool(true));
+    dict.put_bool("ok", true);
     dict.insert("response".to_string(), response);
     dict.insert("error".to_string(), VmValue::Nil);
     VmValue::dict(dict)
@@ -1097,9 +1090,9 @@ pub(super) fn llm_safe_envelope_err(err: &VmError) -> VmValue {
     // users — with `category` / `message` always populated.
     if let VmError::Thrown(VmValue::Dict(d)) = err {
         let mut dict = std::collections::BTreeMap::new();
-        dict.insert("ok".to_string(), VmValue::Bool(false));
+        dict.put_bool("ok", false);
         dict.insert("response".to_string(), VmValue::Nil);
-        dict.insert("error".to_string(), VmValue::Dict(d.clone()));
+        dict.put("error", VmValue::Dict(d.clone()));
         return VmValue::dict(dict);
     }
     let category = crate::value::error_to_category(err);
@@ -1111,9 +1104,9 @@ pub(super) fn llm_safe_envelope_err(err: &VmError) -> VmValue {
     err_dict.put_str("reason", llm_error.reason.as_str());
     err_dict.put_str("message", message);
     let mut dict = std::collections::BTreeMap::new();
-    dict.insert("ok".to_string(), VmValue::Bool(false));
+    dict.put_bool("ok", false);
     dict.insert("response".to_string(), VmValue::Nil);
-    dict.insert("error".to_string(), VmValue::dict(err_dict));
+    dict.put("error", VmValue::dict(err_dict));
     VmValue::dict(dict)
 }
 
@@ -1169,9 +1162,9 @@ pub(crate) fn rewrite_structured_args(args: Vec<VmValue>) -> Result<Vec<VmValue>
 
     let mut output = crate::value::DictMap::new();
     output.insert(crate::value::intern_key("schema"), schema);
-    output.insert(crate::value::intern_key("strict"), VmValue::Bool(true));
+    output.put_bool("strict", true);
     output.put_str("validation", "error");
-    options.insert(crate::value::intern_key("output"), VmValue::dict(output));
+    options.put("output", VmValue::dict(output));
 
     Ok(vec![
         prompt,
@@ -1195,7 +1188,7 @@ pub(crate) fn extract_structured_data(response: VmValue) -> VmValue {
 /// of `response` (the full result dict), matching the issue shape.
 pub(crate) fn structured_safe_envelope_ok(data: VmValue) -> VmValue {
     let mut dict = std::collections::BTreeMap::new();
-    dict.insert("ok".to_string(), VmValue::Bool(true));
+    dict.put_bool("ok", true);
     dict.insert("data".to_string(), data);
     dict.insert("error".to_string(), VmValue::Nil);
     VmValue::dict(dict)
@@ -1204,9 +1197,9 @@ pub(crate) fn structured_safe_envelope_ok(data: VmValue) -> VmValue {
 pub(crate) fn structured_safe_envelope_err(err: &VmError) -> VmValue {
     if let VmError::Thrown(VmValue::Dict(d)) = err {
         let mut dict = std::collections::BTreeMap::new();
-        dict.insert("ok".to_string(), VmValue::Bool(false));
+        dict.put_bool("ok", false);
         dict.insert("data".to_string(), VmValue::Nil);
-        dict.insert("error".to_string(), VmValue::Dict(d.clone()));
+        dict.put("error", VmValue::Dict(d.clone()));
         return VmValue::dict(dict);
     }
     let category = crate::value::error_to_category(err);
@@ -1218,9 +1211,9 @@ pub(crate) fn structured_safe_envelope_err(err: &VmError) -> VmValue {
     err_dict.put_str("reason", llm_error.reason.as_str());
     err_dict.put_str("message", message);
     let mut dict = std::collections::BTreeMap::new();
-    dict.insert("ok".to_string(), VmValue::Bool(false));
+    dict.put_bool("ok", false);
     dict.insert("data".to_string(), VmValue::Nil);
-    dict.insert("error".to_string(), VmValue::dict(err_dict));
+    dict.put("error", VmValue::dict(err_dict));
     VmValue::dict(dict)
 }
 

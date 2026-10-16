@@ -1,13 +1,9 @@
-use std::collections::BTreeMap;
-
-use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
+use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
 pub(crate) fn register_shape_builtins(vm: &mut Vm) {
-    for def in MODULE_BUILTINS {
-        vm.register_builtin_def(def);
-    }
+    crate::stdlib::macros::register_module_builtins(vm, module_path!());
 }
 
 #[harn_builtin(
@@ -17,12 +13,10 @@ pub(crate) fn register_shape_builtins(vm: &mut Vm) {
 )]
 fn keys_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     match args.first().cloned().unwrap_or(VmValue::Nil) {
-        VmValue::Dict(map) => Ok(VmValue::List(std::sync::Arc::new(
-            map.keys()
-                .map(|k| VmValue::String(arcstr::ArcStr::from(k.as_str())))
-                .collect(),
-        ))),
-        _ => Ok(VmValue::List(std::sync::Arc::new(Vec::new()))),
+        VmValue::Dict(map) => Ok(VmValue::list(
+            map.keys().map(|k| VmValue::string(k.as_str())).collect(),
+        )),
+        _ => Ok(VmValue::list(Vec::new())),
     }
 }
 
@@ -33,10 +27,8 @@ fn keys_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
 )]
 fn values_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     match args.first().cloned().unwrap_or(VmValue::Nil) {
-        VmValue::Dict(map) => Ok(VmValue::List(std::sync::Arc::new(
-            map.values().cloned().collect(),
-        ))),
-        _ => Ok(VmValue::List(std::sync::Arc::new(Vec::new()))),
+        VmValue::Dict(map) => Ok(VmValue::list(map.values().cloned().collect())),
+        _ => Ok(VmValue::list(Vec::new())),
     }
 }
 
@@ -47,20 +39,14 @@ fn values_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> 
 )]
 fn entries_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     match args.first().cloned().unwrap_or(VmValue::Nil) {
-        VmValue::Dict(map) => Ok(VmValue::List(std::sync::Arc::new(
+        VmValue::Dict(map) => Ok(VmValue::list(
             map.iter()
                 .map(|(k, v)| {
-                    VmValue::dict(BTreeMap::from([
-                        (
-                            "key".to_string(),
-                            VmValue::String(arcstr::ArcStr::from(k.as_str())),
-                        ),
-                        ("value".to_string(), v.clone()),
-                    ]))
+                    VmValue::dict([("key", VmValue::string(k.as_str())), ("value", v.clone())])
                 })
                 .collect(),
-        ))),
-        _ => Ok(VmValue::List(std::sync::Arc::new(Vec::new()))),
+        )),
+        _ => Ok(VmValue::list(Vec::new())),
     }
 }
 
@@ -246,19 +232,6 @@ fn __make_struct(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError
         },
     }
 }
-
-pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
-    &KEYS_IMPL_DEF,
-    &VALUES_IMPL_DEF,
-    &ENTRIES_IMPL_DEF,
-    &__ASSERT_INTERFACE_DEF,
-    &__ASSERT_DICT_DEF,
-    &__ASSERT_LIST_DEF,
-    &__ASSERT_PAIR_DEF,
-    &__ASSERT_SCHEMA_DEF,
-    &__DICT_REST_DEF,
-    &__MAKE_STRUCT_DEF,
-];
 
 fn field_names_from_value(value: &VmValue) -> Option<Vec<String>> {
     let VmValue::List(items) = value else {

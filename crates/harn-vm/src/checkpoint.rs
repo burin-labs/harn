@@ -18,7 +18,7 @@ use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
+use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
@@ -143,10 +143,10 @@ impl CheckpointState {
             self.data.insert(key.clone(), value);
             self.persist()?;
         }
-        Ok(VmValue::dict(BTreeMap::from([
-            ("inserted".to_owned(), VmValue::Bool(inserted)),
-            ("value".to_owned(), json_to_vm_value(&self.data[&key])),
-        ])))
+        Ok(VmValue::dict([
+            ("inserted", VmValue::Bool(inserted)),
+            ("value", json_to_vm_value(&self.data[&key])),
+        ]))
     }
 
     fn clear(&mut self) -> Result<(), String> {
@@ -254,20 +254,8 @@ fn register_checkpoint_state(vm: &mut Vm, state: CheckpointState) {
     CHECKPOINT_STATE.with(|cell| {
         *cell.borrow_mut() = Some(state);
     });
-    for def in MODULE_BUILTINS {
-        vm.register_builtin_def(def);
-    }
+    crate::stdlib::macros::register_module_builtins(vm, module_path!());
 }
-
-pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
-    &CHECKPOINT_IMPL_DEF,
-    &CHECKPOINT_INSERT_IMPL_DEF,
-    &CHECKPOINT_GET_IMPL_DEF,
-    &CHECKPOINT_CLEAR_IMPL_DEF,
-    &CHECKPOINT_LIST_IMPL_DEF,
-    &CHECKPOINT_EXISTS_IMPL_DEF,
-    &CHECKPOINT_DELETE_IMPL_DEF,
-];
 
 #[harn_builtin(
     exposure = "harness.runtime.checkpoint",
@@ -342,11 +330,9 @@ fn checkpoint_clear_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue
 fn checkpoint_list_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     with_state("checkpoint_list", |state| {
         let keys = state.list().map_err(VmError::Runtime)?;
-        Ok(VmValue::List(std::sync::Arc::new(
-            keys.into_iter()
-                .map(|k| VmValue::String(arcstr::ArcStr::from(k)))
-                .collect(),
-        )))
+        Ok(VmValue::list(
+            keys.into_iter().map(VmValue::string).collect(),
+        ))
     })
 }
 

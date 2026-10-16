@@ -1,11 +1,9 @@
-use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
+use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmError, VmSet, VmValue};
 use crate::vm::Vm;
 
 pub(crate) fn register_set_builtins(vm: &mut Vm) {
-    for def in MODULE_BUILTINS {
-        vm.register_builtin_def(def);
-    }
+    crate::stdlib::macros::register_module_builtins(vm, module_path!());
 }
 
 /// Extract the backing [`VmSet`] from a set argument, throwing `message` when
@@ -167,17 +165,3 @@ fn set_is_disjoint_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
     };
     Ok(VmValue::Bool(a.is_disjoint(b)))
 }
-
-pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
-    &SET_IMPL_DEF,
-    &SET_ADD_IMPL_DEF,
-    &SET_REMOVE_IMPL_DEF,
-    &SET_CONTAINS_IMPL_DEF,
-    &SET_UNION_IMPL_DEF,
-    &SET_INTERSECT_IMPL_DEF,
-    &SET_DIFFERENCE_IMPL_DEF,
-    &SET_SYMMETRIC_DIFFERENCE_IMPL_DEF,
-    &SET_IS_SUBSET_IMPL_DEF,
-    &SET_IS_SUPERSET_IMPL_DEF,
-    &SET_IS_DISJOINT_IMPL_DEF,
-];

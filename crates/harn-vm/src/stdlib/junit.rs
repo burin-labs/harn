@@ -5,7 +5,7 @@
 
 use std::time::Duration;
 
-use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
+use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmDictExt, VmError, VmValue};
 use crate::vm::Vm;
 
@@ -83,13 +83,8 @@ impl ReportError {
 }
 
 pub(crate) fn register_junit_builtins(vm: &mut Vm) {
-    for def in MODULE_BUILTINS {
-        vm.register_builtin_def(def);
-    }
+    crate::stdlib::macros::register_module_builtins(vm, module_path!());
 }
-
-pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] =
-    &[&PARSE_JUNIT_XML_IMPL_DEF, &PARSE_JUNIT_XML_RESULT_IMPL_DEF];
 
 #[harn_builtin(
     exposure = "pure", effects = [],
@@ -128,29 +123,22 @@ fn input_bytes(args: &[VmValue], name: &str) -> Result<Vec<u8>, VmError> {
         Some(VmValue::String(value)) => Ok(value.as_bytes().to_vec()),
         Some(VmValue::Bytes(value)) => Ok((**value).clone()),
         Some(VmValue::Nil) | None => Ok(Vec::new()),
-        Some(other) => Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-            format!(
-                "{name}: expected string or bytes, got {}",
-                other.type_name()
-            ),
+        Some(other) => Err(VmError::Thrown(VmValue::string(format!(
+            "{name}: expected string or bytes, got {}",
+            other.type_name()
         )))),
     }
 }
 
 fn records_to_value(records: Vec<TestRecord>) -> VmValue {
-    VmValue::List(std::sync::Arc::new(
-        records.into_iter().map(record_to_value).collect(),
-    ))
+    VmValue::list(records.into_iter().map(record_to_value).collect())
 }
 
 fn record_to_value(record: TestRecord) -> VmValue {
     let mut map = crate::value::DictMap::new();
     map.put_str("name", record.name);
     map.put_str("status", record.status.as_str());
-    map.insert(
-        crate::value::intern_key("duration_ms"),
-        VmValue::Int(record.duration_ms as i64),
-    );
+    map.put_int("duration_ms", record.duration_ms as i64);
     for (name, value) in [
         ("message", record.message),
         ("stdout", record.stdout),
@@ -159,15 +147,10 @@ fn record_to_value(record: TestRecord) -> VmValue {
     ] {
         map.insert(
             crate::value::intern_key(name),
-            value
-                .map(|text| VmValue::String(arcstr::ArcStr::from(text)))
-                .unwrap_or(VmValue::Nil),
+            value.map(VmValue::string).unwrap_or(VmValue::Nil),
         );
     }
-    map.insert(
-        crate::value::intern_key("line"),
-        record.line.map(VmValue::Int).unwrap_or(VmValue::Nil),
-    );
+    map.put_nullable("line", record.line.map(VmValue::Int));
     VmValue::dict(map)
 }
 

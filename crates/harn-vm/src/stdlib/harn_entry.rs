@@ -54,10 +54,8 @@ pub(crate) async fn call_agent_loop(
         "workflow_stage_agent_loop",
         &[
             harness,
-            VmValue::String(arcstr::ArcStr::from(prompt)),
-            system
-                .map(|value| VmValue::String(arcstr::ArcStr::from(value)))
-                .unwrap_or(VmValue::Nil),
+            VmValue::string(prompt),
+            system.map(VmValue::string).unwrap_or(VmValue::Nil),
             VmValue::dict(options),
         ],
     )

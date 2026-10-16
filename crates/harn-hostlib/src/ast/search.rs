@@ -286,7 +286,7 @@ fn ok_response(
         ("health", health.to_vm_value()),
         (
             "matches",
-            VmValue::List(Arc::new(matches.iter().map(match_to_value).collect())),
+            VmValue::list(matches.iter().map(match_to_value).collect()),
         ),
     ])
 }

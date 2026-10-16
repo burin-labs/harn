@@ -7,7 +7,6 @@ use std::sync::Arc;
 use crate::value::{VmError, VmValue};
 use crate::vm::{Vm, VmBuiltinArity, VmBuiltinMetadata};
 use harn_builtin_macros::harn_builtin;
-use harn_vm_core::builtin_support::{register_builtin_defs, VmBuiltinDef};
 
 use super::agent_observe::observed_llm_call;
 use super::helpers::{
@@ -18,13 +17,6 @@ use super::helpers::{
 use super::tools::build_assistant_response_message;
 
 const PREFILL_ASSISTANT_FEEDBACK_KIND: &str = "prefill_assistant";
-
-const AGENT_CONTROL_BUILTINS: &[&VmBuiltinDef] = &[
-    &AGENT_SUBSCRIBE_BUILTIN_DEF,
-    &AGENT_INJECT_FEEDBACK_BUILTIN_DEF,
-    &AGENT_INJECT_HOST_EVENT_BUILTIN_DEF,
-    &PROMPT_EXPLAIN_BUILTIN_DEF,
-];
 
 fn agent_prefill_message(content: &str) -> VmValue {
     let mut msg = std::collections::BTreeMap::new();
@@ -342,7 +334,7 @@ pub fn register_agent_loop_with_bridge(_vm: &mut Vm, bridge: Arc<crate::bridge::
 }
 
 pub(crate) fn register_agent_control_primitives(vm: &mut Vm) {
-    register_builtin_defs(vm, AGENT_CONTROL_BUILTINS);
+    harn_vm_core::builtin_support::register_module_builtins(vm, module_path!());
 }
 
 /// Subscribe a Harn callback to events for an agent session.

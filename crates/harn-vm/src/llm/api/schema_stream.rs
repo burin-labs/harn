@@ -133,24 +133,21 @@ pub(crate) fn aborted_result_value(abort: &SchemaStreamAbort) -> VmValue {
     meta.put_str("reason_kind", abort.reason_kind.as_str());
     meta.put_str("reason", abort.reason.as_str());
     meta.put_str("path", abort.path.as_str());
-    meta.insert(
-        "chunks_consumed".to_string(),
-        VmValue::Int(abort.chunks_consumed as i64),
-    );
+    meta.put_int("chunks_consumed", abort.chunks_consumed as i64);
     meta.put_str("provider", abort.provider.as_str());
     meta.put_str("model", abort.model.as_str());
     let mut dict = std::collections::BTreeMap::new();
     dict.put_str("text", "");
     dict.put_str("model", abort.model.as_str());
     dict.put_str("provider", abort.provider.as_str());
-    dict.insert(
-        "usage".to_string(),
+    dict.put(
+        "usage",
         VmValue::dict(
             crate::llm::usage::LlmUsage::stream_aborted_attempt().to_vm_dict(&Default::default()),
         ),
     );
     dict.insert("data".to_string(), VmValue::Nil);
-    dict.insert("schema_stream_aborted".to_string(), VmValue::dict(meta));
+    dict.put("schema_stream_aborted", VmValue::dict(meta));
     VmValue::dict(dict)
 }
 

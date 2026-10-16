@@ -9,7 +9,6 @@
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 
 use harn_vm::VmValue;
 use sha2::{Digest, Sha256};
@@ -640,7 +639,7 @@ fn structural_response(
         ("path_b", str_value(path_b)),
         ("language", str_value(language.name())),
         ("fallback_reason", VmValue::Nil),
-        ("changes", VmValue::List(Arc::new(change_values))),
+        ("changes", VmValue::list(change_values)),
         ("line_diff", VmValue::Nil),
         (
             "summary",
@@ -685,7 +684,7 @@ fn line_fallback(
             language.map_or(VmValue::Nil, |lang| str_value(lang.name())),
         ),
         ("fallback_reason", str_value(reason)),
-        ("changes", VmValue::List(Arc::new(Vec::new()))),
+        ("changes", VmValue::list(Vec::new())),
         ("line_diff", line_diff),
         (
             "summary",

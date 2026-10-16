@@ -34,7 +34,7 @@ fn vm_message_to_json(msg: &VmValue) -> Option<serde_json::Value> {
     let content = d
         .get("content")
         .cloned()
-        .unwrap_or_else(|| VmValue::String(arcstr::ArcStr::from("")));
+        .unwrap_or_else(|| VmValue::string(""));
     let content_json = match &content {
         VmValue::String(text) => serde_json::Value::String(text.to_string()),
         other => vm_value_to_json(other),
@@ -81,7 +81,7 @@ fn vm_message_to_json(msg: &VmValue) -> Option<serde_json::Value> {
 }
 
 pub(crate) fn vm_message(role: &str, content: &str) -> VmValue {
-    vm_message_value(role, VmValue::String(arcstr::ArcStr::from(content)))
+    vm_message_value(role, VmValue::string(content))
 }
 
 pub(crate) fn vm_message_value(role: &str, content: VmValue) -> VmValue {
@@ -170,11 +170,9 @@ pub(crate) fn vm_add_role_message(args: &[VmValue], role: &str) -> Result<VmValu
             let mut new_messages = (**list).clone();
             new_messages.push(vm_message_value(
                 role,
-                args.get(1)
-                    .cloned()
-                    .unwrap_or_else(|| VmValue::String(arcstr::ArcStr::from(""))),
+                args.get(1).cloned().unwrap_or_else(|| VmValue::string("")),
             ));
-            Ok(VmValue::List(std::sync::Arc::new(new_messages)))
+            Ok(VmValue::list(new_messages))
         }
         Some(VmValue::Dict(d))
             if d.get("_type").map(|v| v.display()).as_deref() == Some(TRANSCRIPT_TYPE) =>
@@ -182,9 +180,7 @@ pub(crate) fn vm_add_role_message(args: &[VmValue], role: &str) -> Result<VmValu
             let mut messages = transcript_message_list(d)?;
             messages.push(vm_message_value(
                 role,
-                args.get(1)
-                    .cloned()
-                    .unwrap_or_else(|| VmValue::String(arcstr::ArcStr::from(""))),
+                args.get(1).cloned().unwrap_or_else(|| VmValue::string("")),
             ));
             Ok(new_transcript_with_events(
                 transcript_id(d),
@@ -199,8 +195,8 @@ pub(crate) fn vm_add_role_message(args: &[VmValue], role: &str) -> Result<VmValu
                 }),
             ))
         }
-        _ => Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-            format!("add_{role}: first argument must be a message list or transcript"),
+        _ => Err(VmError::Thrown(VmValue::string(format!(
+            "add_{role}: first argument must be a message list or transcript"
         )))),
     }
 }

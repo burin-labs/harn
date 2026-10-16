@@ -269,7 +269,7 @@ fn host_agent_undispatched_tool_results_builtin(
             ))
         })
         .collect();
-    Ok(VmValue::List(Arc::new(results)))
+    Ok(VmValue::list(results))
 }
 
 fn attach_hook_reminder_audit(
@@ -488,7 +488,7 @@ async fn host_agent_dispatch_tool_batch_impl(
         host_agent_dispatch_tool_batch_capped(ctx, calls, tools.as_ref(), &options, cap).await?
     };
 
-    Ok(VmValue::List(std::sync::Arc::new(results)))
+    Ok(VmValue::list(results))
 }
 
 /// A fired trifecta gate: the human-facing `reason` plus whether an in-context

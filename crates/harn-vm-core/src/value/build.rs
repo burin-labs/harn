@@ -11,25 +11,25 @@
 
 use std::collections::BTreeMap;
 
-use super::{DictMap, VmValue};
+use super::{DictMap, HarnStr, VmValue};
 
 /// Minimal string-keyed insert, implemented for both the transient `BTreeMap`
 /// builders still used at call sites and the persistent [`DictMap`] that backs
 /// a live `VmValue::Dict`. Keeps [`VmDictExt`] a single generic impl rather
 /// than two near-identical copies.
 pub trait DictInsert {
-    fn dict_insert(&mut self, key: String, value: VmValue);
+    fn dict_insert(&mut self, key: &str, value: VmValue);
 }
 
 impl DictInsert for BTreeMap<String, VmValue> {
-    fn dict_insert(&mut self, key: String, value: VmValue) {
-        self.insert(key, value);
+    fn dict_insert(&mut self, key: &str, value: VmValue) {
+        self.insert(key.to_owned(), value);
     }
 }
 
 impl DictInsert for DictMap {
-    fn dict_insert(&mut self, key: String, value: VmValue) {
-        self.insert(super::intern_key(&key), value);
+    fn dict_insert(&mut self, key: &str, value: VmValue) {
+        self.insert(super::intern_key(key), value);
     }
 }
 
@@ -39,14 +39,18 @@ impl DictInsert for DictMap {
 /// and the persistent [`DictMap`]), so the methods are unavailable on unrelated
 /// maps and cannot be applied by mistake.
 pub trait VmDictExt {
-    /// Inserts `value` under `key` (owning the key as a `String`).
+    /// Inserts `value` using the map's owned key representation.
     fn put(&mut self, key: &str, value: VmValue);
     /// Inserts a string value built via [`VmValue::string`].
-    fn put_str(&mut self, key: &str, value: impl AsRef<str>);
+    fn put_str(&mut self, key: &str, value: impl Into<HarnStr>);
     /// Inserts a string value only when `value` is `Some`.
-    fn put_opt_str(&mut self, key: &str, value: Option<impl AsRef<str>>);
+    fn put_opt_str(&mut self, key: &str, value: Option<impl Into<HarnStr>>);
     /// Inserts a `VmValue` only when `value` is `Some`.
     fn put_opt(&mut self, key: &str, value: Option<VmValue>);
+    /// Always inserts the field, using nil when its optional value is absent.
+    fn put_nullable(&mut self, key: &str, value: Option<VmValue>);
+    /// Always inserts a string field, using nil when the string is absent.
+    fn put_nullable_str(&mut self, key: &str, value: Option<impl Into<HarnStr>>);
     /// Inserts a boolean value.
     fn put_bool(&mut self, key: &str, value: bool);
     /// Inserts an integer value.
@@ -79,31 +83,39 @@ impl DictRetain for DictMap {
 
 impl<M: DictInsert> VmDictExt for M {
     fn put(&mut self, key: &str, value: VmValue) {
-        self.dict_insert(key.to_string(), value);
+        self.dict_insert(key, value);
     }
 
-    fn put_str(&mut self, key: &str, value: impl AsRef<str>) {
-        self.dict_insert(key.to_string(), VmValue::string(value));
+    fn put_str(&mut self, key: &str, value: impl Into<HarnStr>) {
+        self.dict_insert(key, VmValue::string(value));
     }
 
-    fn put_opt_str(&mut self, key: &str, value: Option<impl AsRef<str>>) {
+    fn put_opt_str(&mut self, key: &str, value: Option<impl Into<HarnStr>>) {
         if let Some(value) = value {
-            self.dict_insert(key.to_string(), VmValue::string(value));
+            self.dict_insert(key, VmValue::string(value));
         }
     }
 
     fn put_opt(&mut self, key: &str, value: Option<VmValue>) {
         if let Some(value) = value {
-            self.dict_insert(key.to_string(), value);
+            self.dict_insert(key, value);
         }
     }
 
+    fn put_nullable(&mut self, key: &str, value: Option<VmValue>) {
+        self.put(key, value.unwrap_or(VmValue::Nil));
+    }
+
+    fn put_nullable_str(&mut self, key: &str, value: Option<impl Into<HarnStr>>) {
+        self.put_nullable(key, value.map(VmValue::string));
+    }
+
     fn put_bool(&mut self, key: &str, value: bool) {
-        self.dict_insert(key.to_string(), VmValue::Bool(value));
+        self.dict_insert(key, VmValue::Bool(value));
     }
 
     fn put_int(&mut self, key: &str, value: i64) {
-        self.dict_insert(key.to_string(), VmValue::Int(value));
+        self.dict_insert(key, VmValue::Int(value));
     }
 }
 
@@ -119,6 +131,28 @@ mod tests {
             Some(VmValue::String(s)) => assert_eq!(s.as_str(), "v"),
             other => panic!("expected string value, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn value_builders_retain_owned_storage() {
+        let text = HarnStr::from("runtime-owned text");
+        let mut dict = BTreeMap::new();
+        dict.put_str("shared", text.clone());
+        let VmValue::String(stored) = &dict["shared"] else {
+            panic!("expected string value");
+        };
+        assert!(HarnStr::ptr_eq(&text, stored));
+        let VmValue::String(stored) = VmValue::string(text.clone()) else {
+            panic!("expected string value");
+        };
+        assert!(HarnStr::ptr_eq(&text, &stored));
+        let values = vec![VmValue::Int(42)];
+        let storage = values.as_ptr();
+        let VmValue::List(stored) = VmValue::list(values) else {
+            panic!("expected list value");
+        };
+        assert_eq!(stored.as_ptr(), storage);
+        assert!(matches!(stored[0], VmValue::Int(42)));
     }
 
     #[test]
@@ -139,5 +173,15 @@ mod tests {
         assert!(matches!(dict.get("b"), Some(VmValue::Bool(true))));
         assert!(matches!(dict.get("n"), Some(VmValue::Int(7))));
         assert!(matches!(dict.get("nil"), Some(VmValue::Nil)));
+        dict.put_nullable("absent_value", None);
+        dict.put_nullable("present_value", Some(VmValue::Int(7)));
+        dict.put_opt("omitted", None);
+        dict.put_nullable_str("missing_string", None::<&str>);
+        dict.put_nullable_str("present_string", Some("value"));
+        assert!(matches!(dict.get("absent_value"), Some(VmValue::Nil)));
+        assert!(matches!(dict.get("present_value"), Some(VmValue::Int(7))));
+        assert!(!dict.contains_key("omitted"));
+        assert!(matches!(dict.get("missing_string"), Some(VmValue::Nil)));
+        assert!(matches!(dict.get("present_string"), Some(VmValue::String(s)) if s == "value"));
     }
 }

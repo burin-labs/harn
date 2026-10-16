@@ -455,10 +455,7 @@ impl ObservedAttemptToken {
         Self {
             session_id: super::agent_runtime::current_agent_session_id(),
             dispatches: super::provider_dispatch::ProviderDispatchLedger::for_current_attempt(),
-            reasoning_receipts: super::reasoning_receipt::RequestReceipts::for_journal(
-                opts.session_id.as_deref(),
-                call_id,
-            ),
+            reasoning_receipts: super::reasoning_receipt::RequestReceipts::for_call(opts, call_id),
             rate_limit: super::rate_limit::LlmCallAdmission::for_attempt(opts, token_projection),
             token_projection,
         }

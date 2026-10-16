@@ -14,7 +14,6 @@ use crate::agent_events::AgentEvent;
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 use harn_builtin_macros::harn_builtin;
-use harn_vm_core::builtin_support::{register_builtin_defs, VmBuiltinDef};
 
 use super::agent_terminal_class::{
     agent_loop_made_no_llm_call, agent_terminal_class, session_status_indicates_error,
@@ -1094,13 +1093,8 @@ fn host_agent_session_record_usage_builtin(
     Ok(totals.to_vm(false))
 }
 
-const HOST_SESSION_BUILTINS: &[&VmBuiltinDef] = &[
-    &HOST_AGENT_SESSION_RECORD_TOOL_RESULTS_BUILTIN_DEF,
-    &HOST_AGENT_SESSION_RECORD_USAGE_BUILTIN_DEF,
-];
-
 pub fn register_agent_session_host_primitives(vm: &mut Vm) {
-    register_builtin_defs(vm, HOST_SESSION_BUILTINS);
+    harn_vm_core::builtin_support::register_module_builtins(vm, module_path!());
     control_history::register_control_history_primitives(vm);
     daemon_bridge::register_daemon_bridge_primitives(vm);
     inbox::register_inbox_primitives(vm);

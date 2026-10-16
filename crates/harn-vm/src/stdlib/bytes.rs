@@ -1,5 +1,5 @@
 use crate::stdlib::args::Args;
-use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
+use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
@@ -8,9 +8,7 @@ fn runtime_error(message: impl Into<String>) -> VmError {
 }
 
 pub(crate) fn register_bytes_builtins(vm: &mut Vm) {
-    for def in MODULE_BUILTINS {
-        vm.register_builtin_def(def);
-    }
+    crate::stdlib::macros::register_module_builtins(vm, module_path!());
 }
 
 #[harn_builtin(
@@ -34,7 +32,7 @@ fn bytes_to_string_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
     let bytes = Args::runtime("bytes_to_string", args).bytes(0, "input")?;
     let text = std::str::from_utf8(bytes)
         .map_err(|error| runtime_error(format!("bytes_to_string: {error}")))?;
-    Ok(VmValue::String(arcstr::ArcStr::from(text)))
+    Ok(VmValue::string(text))
 }
 
 #[harn_builtin(
@@ -45,9 +43,7 @@ fn bytes_to_string_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
 )]
 fn bytes_to_string_lossy_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let bytes = Args::runtime("bytes_to_string_lossy", args).bytes(0, "input")?;
-    Ok(VmValue::String(arcstr::ArcStr::from(
-        String::from_utf8_lossy(bytes).into_owned(),
-    )))
+    Ok(VmValue::string(String::from_utf8_lossy(bytes).into_owned()))
 }
 
 #[harn_builtin(
@@ -57,7 +53,7 @@ fn bytes_to_string_lossy_impl(args: &[VmValue], _out: &mut String) -> Result<VmV
 )]
 fn bytes_to_hex_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let bytes = Args::runtime("bytes_to_hex", args).bytes(0, "input")?;
-    Ok(VmValue::String(arcstr::ArcStr::from(hex::encode(bytes))))
+    Ok(VmValue::string(hex::encode(bytes)))
 }
 
 #[harn_builtin(
@@ -81,9 +77,9 @@ fn bytes_to_base64_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
     use base64::Engine;
 
     let bytes = Args::runtime("bytes_to_base64", args).bytes(0, "input")?;
-    Ok(VmValue::String(arcstr::ArcStr::from(
+    Ok(VmValue::string(
         base64::engine::general_purpose::STANDARD.encode(bytes),
-    )))
+    ))
 }
 
 #[harn_builtin(
@@ -199,21 +195,6 @@ fn bytes_eq_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError
     let right = eq.bytes(1, "right")?;
     Ok(VmValue::Bool(bool::from(left.ct_eq(right))))
 }
-
-pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
-    &BYTES_FROM_STRING_IMPL_DEF,
-    &BYTES_TO_STRING_IMPL_DEF,
-    &BYTES_TO_STRING_LOSSY_IMPL_DEF,
-    &BYTES_TO_HEX_IMPL_DEF,
-    &BYTES_FROM_HEX_IMPL_DEF,
-    &BYTES_TO_BASE64_IMPL_DEF,
-    &BYTES_FROM_BASE64_IMPL_DEF,
-    &BYTES_FROM_BASE64URL_IMPL_DEF,
-    &BYTES_LEN_IMPL_DEF,
-    &BYTES_CONCAT_IMPL_DEF,
-    &BYTES_SLICE_IMPL_DEF,
-    &BYTES_EQ_IMPL_DEF,
-];
 
 #[cfg(test)]
 mod tests {

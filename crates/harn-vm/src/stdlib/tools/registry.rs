@@ -22,11 +22,9 @@ fn tool_invocation_binding_impl(_args: &[VmValue], _out: &mut String) -> Result<
     category = "tools"
 )]
 fn tool_schema_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    let registry = args.first().ok_or_else(|| {
-        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-            "tool_schema: requires a tool registry",
-        )))
-    })?;
+    let registry = args
+        .first()
+        .ok_or_else(|| VmError::Thrown(VmValue::string("tool_schema: requires a tool registry")))?;
     let schema = crate::tool_registry::tool_registry_schema(registry)?;
     Ok(crate::schema::json_to_vm_value(&schema))
 }
@@ -40,10 +38,7 @@ fn tool_schema_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
 fn tool_registry_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let mut registry = crate::value::DictMap::new();
     registry.put_str("_type", "tool_registry");
-    registry.insert(
-        crate::value::intern_key("tools"),
-        VmValue::List(Vec::new().into()),
-    );
+    registry.put("tools", VmValue::List(Vec::new().into()));
     for (index, key) in [(0, "info"), (1, "components"), (2, "cli")] {
         if let Some(value) = args
             .get(index)
@@ -53,10 +48,7 @@ fn tool_registry_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
         }
     }
     let registry = VmValue::dict(registry);
-    crate::tool_registry::tool_registry_catalog(&registry).map_err(|error| {
-        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
-            "tool_registry: {error}"
-        ))))
-    })?;
+    crate::tool_registry::tool_registry_catalog(&registry)
+        .map_err(|error| VmError::Thrown(VmValue::string(format!("tool_registry: {error}"))))?;
     Ok(registry)
 }

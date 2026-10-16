@@ -1,6 +1,7 @@
+use crate::value::VmDictExt;
 use std::time::Duration;
 
-use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
+use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
@@ -8,12 +9,8 @@ const DEFAULT_TIMEOUT_MS: u64 = 1_000;
 const DEFAULT_MAX_RESPONSE_BYTES: usize = 1_048_576;
 
 pub(crate) fn register_net_builtins(vm: &mut Vm) {
-    for def in MODULE_BUILTINS {
-        vm.register_builtin_def(def);
-    }
+    crate::stdlib::macros::register_module_builtins(vm, module_path!());
 }
-
-pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[&NET_UNIX_SOCKET_JSON_REQUEST_IMPL_DEF];
 
 #[derive(Clone, Copy)]
 struct UnixSocketOptions {
@@ -44,10 +41,7 @@ fn unix_socket_options(value: Option<&VmValue>) -> UnixSocketOptions {
 }
 
 fn insert_string(dict: &mut crate::value::DictMap, key: &str, value: impl Into<String>) {
-    dict.insert(
-        crate::value::intern_key(key),
-        VmValue::String(arcstr::ArcStr::from(value.into())),
-    );
+    dict.insert(crate::value::intern_key(key), VmValue::string(value.into()));
 }
 
 fn insert_int(dict: &mut crate::value::DictMap, key: &str, value: i64) {
@@ -68,7 +62,7 @@ fn socket_result(
     response: Option<VmValue>,
 ) -> VmValue {
     let mut out = crate::value::DictMap::new();
-    out.insert(crate::value::intern_key("ok"), VmValue::Bool(ok));
+    out.put_bool("ok", ok);
     insert_string(&mut out, "status", status);
     insert_string(&mut out, "path", path);
     insert_int(&mut out, "duration_ms", elapsed_ms(started_ms));
@@ -272,9 +266,9 @@ fn net_unix_socket_json_request_impl(
     let started_ms = crate::stdlib::clock::now_monotonic_ms();
     let path = args.first().map(VmValue::display).unwrap_or_default();
     if path.is_empty() {
-        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+        return Err(VmError::Thrown(VmValue::string(
             "__net_unix_socket_json_request: path is required",
-        ))));
+        )));
     }
     let request = args.get(1).unwrap_or(&VmValue::Nil);
     let request_json = super::json::vm_value_to_json(request);

@@ -432,21 +432,8 @@ fn host_agent_session_apply_reminder_post_turn_builtin(
     Ok(crate::schema::json_to_vm_value(&report))
 }
 
-const INBOX_BUILTINS: &[&VmBuiltinDef] = &[
-    &HOST_AGENT_TRUNCATED_TOOL_CALL_BUILTIN_DEF,
-    &HOST_AGENT_SESSION_DRAIN_FEEDBACK_BUILTIN_DEF,
-    &HOST_AGENT_SESSION_DRAIN_COMMAND_UPDATES_BUILTIN_DEF,
-    &HOST_AGENT_SESSION_DRAIN_HOST_INJECTIONS_BUILTIN_DEF,
-    &HOST_AGENT_SESSION_TOTALS_BUILTIN_DEF,
-    &HOST_AGENT_SESSION_INJECT_FEEDBACK_BUILTIN_DEF,
-    &HOST_AGENT_SESSION_INJECT_REMINDER_BUILTIN_DEF,
-    &HOST_AGENT_SESSION_POST_EVENT_BUILTIN_DEF,
-    &HOST_AGENT_SESSION_APPLY_REMINDER_POST_TURN_BUILTIN_DEF,
-    &HOST_AGENT_SESSION_AWAIT_INBOX_DEF,
-];
-
 pub(super) fn register_inbox_primitives(vm: &mut Vm) {
-    register_builtin_defs(vm, INBOX_BUILTINS);
+    harn_vm_core::builtin_support::register_module_builtins(vm, module_path!());
 }
 
 #[cfg(test)]

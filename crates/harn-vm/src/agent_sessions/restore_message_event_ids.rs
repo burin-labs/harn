@@ -36,10 +36,7 @@ pub(crate) fn restore_message_event_ids(
                 VmValue::dict(event)
             })
             .collect();
-        transcript.insert(
-            crate::value::intern_key("events"),
-            VmValue::List(std::sync::Arc::new(restored)),
-        );
+        transcript.put("events", VmValue::list(restored));
         super::apply_transcript_with_budget(
             state,
             VmValue::dict(transcript),

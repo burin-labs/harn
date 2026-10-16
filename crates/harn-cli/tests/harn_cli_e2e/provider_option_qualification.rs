@@ -5,7 +5,8 @@ use std::path::Path;
 use std::process::Output;
 use std::sync::{Arc, Mutex};
 
-use axum::http::{HeaderMap, StatusCode};
+use axum::http::{header, HeaderMap, HeaderValue, StatusCode};
+use axum::response::IntoResponse;
 use serde_json::{json, Value};
 
 use crate::test_util::process::harn_e2e_command;
@@ -45,7 +46,13 @@ impl Pool {
                             .unwrap()
                             .pop_front()
                             .expect("unexpected provider request");
-                        (status, axum::Json(response))
+                        let mut response = (status, axum::Json(response)).into_response();
+                        if status == StatusCode::TOO_MANY_REQUESTS {
+                            response
+                                .headers_mut()
+                                .insert(header::RETRY_AFTER, HeaderValue::from_static("0"));
+                        }
+                        response
                     }
                 },
             ),
@@ -109,7 +116,7 @@ async fn invoke_probe(
     model: &str,
     replies: Vec<Reply>,
 ) -> (Output, Value) {
-    invoke_probe_with_mode(root, pool, model, "top_k", false, replies).await
+    invoke_probe_with_mode(root, pool, model, "top_k", false, replies, &[0]).await
 }
 
 async fn invoke_probe_with_mode(
@@ -119,6 +126,7 @@ async fn invoke_probe_with_mode(
     option: &str,
     gated: bool,
     replies: Vec<Reply>,
+    option_requests: &[usize],
 ) -> (Output, Value) {
     let before = pool.requests.lock().unwrap().len();
     let expected = replies.len();
@@ -173,7 +181,7 @@ async fn invoke_probe_with_mode(
     assert_eq!(requests.len() - before, expected);
     for (index, body) in requests[before..].iter().enumerate() {
         assert_eq!(body["model"], model);
-        if index == 0 {
+        if option_requests.contains(&index) {
             assert!(
                 body.get(option).is_some(),
                 "selected option must reach transport"
@@ -203,6 +211,7 @@ async fn measured_catalog_options_admit_supported_requests_and_gate_unsupported_
         "top_k",
         true,
         vec![accepted(Some(model), "ok")],
+        &[0],
     )
     .await;
     assert!(output.status.success());
@@ -211,7 +220,7 @@ async fn measured_catalog_options_admit_supported_requests_and_gate_unsupported_
     assert_eq!(report["probe"]["attempt"]["response_model"], model);
     assert_eq!(report["diff"]["status"], "match");
     let (output, report) =
-        invoke_probe_with_mode(root.path(), &pool, model, "stop", true, vec![]).await;
+        invoke_probe_with_mode(root.path(), &pool, model, "stop", true, vec![], &[]).await;
     assert_eq!(output.status.code(), Some(2));
     assert_eq!(report["catalog"]["claimed_supported"], false);
     assert_eq!(report["probe"]["verdict"], "gated_locally");
@@ -238,14 +247,19 @@ async fn changing_pool_qualification_retains_distinct_selections_and_controlled_
         assert_eq!(report["diff"]["observed_supported"], true);
         assert_eq!(report["probe"]["attempt"]["response_model"], backend);
         assert_eq!(report["probe"]["attempt"]["input_tokens"], 4);
-        let (output, report) = invoke_probe(
+        let (output, report) = invoke_probe_with_mode(
             root.path(),
             &pool,
             "openrouter/free",
+            "top_k",
+            false,
             vec![
                 rejected(),
                 accepted(Some("control-backend"), "qualification-positive"),
+                rejected(),
+                accepted(Some("second-control-backend"), "qualification-positive"),
             ],
+            &[0, 2],
         )
         .await;
         assert_eq!(output.status.code(), Some(2));
@@ -254,11 +268,111 @@ async fn changing_pool_qualification_retains_distinct_selections_and_controlled_
         assert_eq!(report["probe"]["measured_count"], 0);
         assert_eq!(
             report["probe"]["attempt"]["control_response_model"],
+            "second-control-backend"
+        );
+        assert_eq!(report["probe"]["attempt"]["retry_count"], 1);
+        assert_eq!(
+            report["probe"]["attempt"]["retry_from"]["control_response_model"],
             "control-backend"
         );
         assert!(report["probe"]["attempt"]["response_model"].is_null());
     }
-    assert_eq!(pool.requests.lock().unwrap().len(), 6);
+    assert_eq!(pool.requests.lock().unwrap().len(), 10);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn changing_pool_recovers_once_and_retains_the_first_failure_and_all_requests() {
+    let root = tempfile::tempdir().unwrap();
+    let pool = Pool::start(root.path()).await;
+    let (output, report) = invoke_probe_with_mode(
+        root.path(),
+        &pool,
+        "openrouter/free",
+        "stop",
+        false,
+        vec![
+            rejected(),
+            accepted(Some("control-backend"), "control"),
+            accepted(Some("selected-backend"), "ok"),
+        ],
+        &[0, 2],
+    )
+    .await;
+    assert!(output.status.success());
+    assert_eq!(report["diff"]["status"], "match");
+    assert_eq!(report["diff"]["observed_supported"], true);
+    assert_eq!(report["probe"]["measured_count"], 1);
+    let attempt = &report["probe"]["attempt"];
+    assert_eq!(attempt["retry_count"], 1);
+    assert_eq!(attempt["response_model"], "selected-backend");
+    assert!(attempt["control_response_model"].is_null());
+    assert_eq!(attempt["retry_from"]["verdict"], "rejected");
+    assert_eq!(attempt["retry_from"]["reason"], "invalid_request");
+    assert_eq!(
+        attempt["retry_from"]["control_response_model"],
+        "control-backend"
+    );
+    assert!(attempt["retry_from"]["error"]
+        .as_str()
+        .unwrap()
+        .contains("No endpoints found that can handle the requested parameters"));
+    assert_eq!(attempt["observed_cost_count"], 3);
+    assert_eq!(attempt["observed_usage_count"], 2);
+    assert_eq!(attempt["input_tokens"], 8);
+    assert_eq!(attempt["output_tokens"], 2);
+    assert_eq!(attempt["cost_usd"], 0.000002);
+
+    let (output, report) = invoke_probe_with_mode(
+        root.path(),
+        &pool,
+        "openrouter/free",
+        "stop",
+        false,
+        vec![
+            rejected(),
+            accepted(Some("control-backend"), "control"),
+            accepted(None, "ok"),
+        ],
+        &[0, 2],
+    )
+    .await;
+    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(report["diff"]["status"], "unmeasured");
+    assert!(report["diff"]["observed_supported"].is_null());
+    assert!(report["probe"]["attempt"]["response_model"].is_null());
+    assert_eq!(report["probe"]["attempt"]["retry_count"], 1);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn changing_pool_and_rate_limit_recovery_share_one_attempt() {
+    let root = tempfile::tempdir().unwrap();
+    let pool = Pool::start(root.path()).await;
+    let (output, report) = invoke_probe_with_mode(
+        root.path(),
+        &pool,
+        "openrouter/free",
+        "top_k",
+        false,
+        vec![
+            (
+                StatusCode::TOO_MANY_REQUESTS,
+                json!({"error": {"code": 429, "message": "rate limited"}}),
+            ),
+            rejected(),
+            accepted(Some("control-backend"), "control"),
+        ],
+        &[0, 1],
+    )
+    .await;
+    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(report["diff"]["status"], "unavailable");
+    assert!(report["diff"]["observed_supported"].is_null());
+    assert_eq!(report["probe"]["attempt"]["retry_count"], 1);
+    assert_eq!(
+        report["probe"]["attempt"]["retry_from"]["reason"],
+        "rate_limit"
+    );
+    assert_eq!(report["probe"]["attempt"]["observed_cost_count"], 2);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -316,10 +430,26 @@ async fn qualification_preserves_stable_rejections_failed_controls_and_account_p
         report["probe"]["attempt"]["failure_class"],
         "control_failed"
     );
+    let (output, report) = invoke_probe(
+        root.path(),
+        &pool,
+        "openrouter/free",
+        vec![
+            rejected(),
+            (StatusCode::OK, json!({"error": {"code": 502, "message": "JSON error injected into SSE stream", "metadata": {"error_type": "provider_unavailable"}}})),
+        ],
+    )
+    .await;
+    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(report["diff"]["status"], "unmeasured");
+    assert_eq!(
+        report["probe"]["attempt"]["failure_class"],
+        "control_failed"
+    );
     let (output, report) = invoke_probe(root.path(), &pool, "openrouter/free", vec![(StatusCode::NOT_FOUND, json!({"error": {"code": 404, "message": "0 endpoints out of 1 requested are available matching your guardrail restrictions and data policy."}}))]).await;
     assert_eq!(output.status.code(), Some(2));
     assert_eq!(report["probe"]["verdict"], "excluded_by_account_policy");
     assert_eq!(report["diff"]["status"], "unmeasured");
     assert!(report["diff"]["observed_supported"].is_null());
-    assert_eq!(pool.requests.lock().unwrap().len(), 5);
+    assert_eq!(pool.requests.lock().unwrap().len(), 7);
 }

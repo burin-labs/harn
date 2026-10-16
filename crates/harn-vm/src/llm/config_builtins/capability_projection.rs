@@ -22,125 +22,77 @@ pub(crate) fn capabilities_to_vm_value(
     let batch_api = crate::llm_config::effective_batch_api_supported(provider, caps);
     dict.put_str("provider", provider);
     dict.put_str("model", model);
-    dict.insert(
-        crate::value::intern_key("native_tools"),
-        VmValue::Bool(caps.native_tools),
-    );
-    dict.insert(
-        crate::value::intern_key("runtime_probe"),
-        caps.runtime_probe
-            .as_ref()
-            .map(runtime_probe_to_vm_value)
-            .unwrap_or(VmValue::Nil),
+    dict.put_bool("native_tools", caps.native_tools);
+    dict.put_nullable(
+        "runtime_probe",
+        caps.runtime_probe.as_ref().map(runtime_probe_to_vm_value),
     );
     dict.put_str("message_wire_format", caps.message_wire_format.as_str());
     // Absent for every dialect that serves one live endpoint; only the Gemini
     // routes carry a value, so scripts can tell `:generateContent` from
     // Interactions without matching on model names.
-    dict.insert(
-        crate::value::intern_key("live_endpoint_family"),
+    dict.put_nullable(
+        "live_endpoint_family",
         caps.live_endpoint_family
-            .map(|family| VmValue::String(arcstr::ArcStr::from(family.as_str())))
-            .unwrap_or(VmValue::Nil),
+            .map(|family| VmValue::string(family.as_str())),
     );
     // Decision request contract. Absent on every route that answers no
     // decision request, so a script can tell "this route cannot decide" from
     // "this route decides over some other protocol" without a name match.
-    dict.insert(
-        crate::value::intern_key("decision_protocol"),
+    dict.put_nullable(
+        "decision_protocol",
         caps.decision_protocol
-            .map(|protocol| VmValue::String(arcstr::ArcStr::from(protocol.as_str())))
-            .unwrap_or(VmValue::Nil),
+            .map(|protocol| VmValue::string(protocol.as_str())),
     );
-    dict.insert(
-        crate::value::intern_key("decision_question_kinds"),
-        VmValue::List(std::sync::Arc::new(
+    dict.put(
+        "decision_question_kinds",
+        VmValue::list(
             caps.decision_question_kinds
                 .iter()
                 .map(|kind| VmValue::String(arcstr::ArcStr::from(kind.as_str())))
                 .collect(),
-        )),
+        ),
     );
-    dict.insert(
-        crate::value::intern_key("decision_upstream_provider"),
-        caps.decision_upstream_provider
-            .as_deref()
-            .map(|provider| VmValue::String(arcstr::ArcStr::from(provider)))
-            .unwrap_or(VmValue::Nil),
+    dict.put_nullable_str(
+        "decision_upstream_provider",
+        caps.decision_upstream_provider.as_deref(),
     );
-    dict.insert(
-        crate::value::intern_key("decision_limits"),
-        caps.decision_limits
-            .map(decision_limits_to_vm_value)
-            .unwrap_or(VmValue::Nil),
+    dict.put_nullable(
+        "decision_limits",
+        caps.decision_limits.map(decision_limits_to_vm_value),
     );
     dict.put_str(
         "native_tool_wire_format",
         caps.native_tool_wire_format.clone(),
     );
-    dict.insert(
-        crate::value::intern_key("text_tool_wire_format_supported"),
-        VmValue::Bool(caps.text_tool_wire_format_supported),
+    dict.put_bool(
+        "text_tool_wire_format_supported",
+        caps.text_tool_wire_format_supported,
     );
-    dict.insert(
-        crate::value::intern_key("preferred_tool_format"),
-        caps.preferred_tool_format
-            .as_deref()
-            .map(|format| VmValue::String(arcstr::ArcStr::from(format)))
-            .unwrap_or(VmValue::Nil),
+    dict.put_nullable_str(
+        "preferred_tool_format",
+        caps.preferred_tool_format.as_deref(),
     );
     insert_tool_mode_parity_fields(&mut dict, caps);
     dict.insert(crate::value::intern_key("tools"), tools_value(caps));
-    dict.insert(
-        crate::value::intern_key("defer_loading"),
-        VmValue::Bool(caps.defer_loading),
-    );
+    dict.put_bool("defer_loading", caps.defer_loading);
     dict.insert(
         crate::value::intern_key("tool_search"),
         string_list_to_vm_value(caps.tool_search.clone()),
     );
-    dict.insert(
-        crate::value::intern_key("responses_api"),
-        VmValue::Bool(caps.responses_api),
-    );
+    dict.put_bool("responses_api", caps.responses_api);
     dict.insert(
         crate::value::intern_key("hosted_tools"),
         string_list_to_vm_value(caps.hosted_tools.clone()),
     );
-    dict.insert(
-        crate::value::intern_key("remote_mcp"),
-        VmValue::Bool(caps.remote_mcp),
-    );
-    dict.insert(
-        crate::value::intern_key("conversation_state"),
-        VmValue::Bool(caps.conversation_state),
-    );
-    dict.insert(
-        crate::value::intern_key("compaction"),
-        VmValue::Bool(caps.compaction),
-    );
-    dict.insert(
-        crate::value::intern_key("background_mode"),
-        VmValue::Bool(caps.background_mode),
-    );
+    dict.put_bool("remote_mcp", caps.remote_mcp);
+    dict.put_bool("conversation_state", caps.conversation_state);
+    dict.put_bool("compaction", caps.compaction);
+    dict.put_bool("background_mode", caps.background_mode);
     insert_batch_support_fields(&mut dict, batch_api, caps);
-    dict.insert(
-        crate::value::intern_key("tool_approval_policy"),
-        caps.tool_approval_policy
-            .as_deref()
-            .map(|value| VmValue::String(arcstr::ArcStr::from(value)))
-            .unwrap_or(VmValue::Nil),
-    );
-    dict.insert(
-        crate::value::intern_key("max_tools"),
-        caps.max_tools
-            .map(|n| VmValue::Int(n as i64))
-            .unwrap_or(VmValue::Nil),
-    );
-    dict.insert(
-        crate::value::intern_key("prompt_caching"),
-        VmValue::Bool(caps.prompt_caching),
-    );
+    dict.put_nullable_str("tool_approval_policy", caps.tool_approval_policy.as_deref());
+    dict.put_nullable("max_tools", caps.max_tools.map(|n| VmValue::Int(n as i64)));
+    dict.put_bool("prompt_caching", caps.prompt_caching);
     dict.put_str(
         "cache_breakpoint_style",
         caps.cache_breakpoint_style.as_str(),
@@ -152,29 +104,18 @@ pub(crate) fn capabilities_to_vm_value(
     // provider-specific branch of their own.
     let cache_profile = crate::llm::cache_conformance::CacheControlProfile::from_capabilities(caps);
     let mut cache_control = crate::value::DictMap::new();
-    cache_control.insert(
-        crate::value::intern_key("prompt_caching"),
-        VmValue::Bool(cache_profile.prompt_caching),
-    );
+    cache_control.put_bool("prompt_caching", cache_profile.prompt_caching);
     cache_control.put_str(
         "cache_breakpoint_style",
         &cache_profile.cache_breakpoint_style,
     );
-    cache_control.insert(
-        crate::value::intern_key("min_useful_prefix_tokens"),
+    cache_control.put_nullable(
+        "min_useful_prefix_tokens",
         cache_profile
             .min_useful_prefix_tokens
-            .map(|n| VmValue::Int(n as i64))
-            .unwrap_or(VmValue::Nil),
+            .map(|n| VmValue::Int(n as i64)),
     );
-    cache_control.insert(
-        crate::value::intern_key("ttl_notes"),
-        cache_profile
-            .ttl_notes
-            .as_deref()
-            .map(|value| VmValue::String(arcstr::ArcStr::from(value)))
-            .unwrap_or(VmValue::Nil),
-    );
+    cache_control.put_nullable_str("ttl_notes", cache_profile.ttl_notes.as_deref());
     cache_control.insert(
         crate::value::intern_key("supported_ttls"),
         string_list_to_vm_value(cache_profile.supported_ttls),
@@ -187,170 +128,111 @@ pub(crate) fn capabilities_to_vm_value(
         "cache_write_usage_field",
         &cache_profile.cache_write_usage_field,
     );
-    dict.insert(
-        crate::value::intern_key("cache_control"),
-        VmValue::dict(cache_control),
-    );
-    dict.insert(
-        crate::value::intern_key("prefers_xml_scaffolding"),
-        VmValue::Bool(caps.prefers_xml_scaffolding),
-    );
-    dict.insert(
-        crate::value::intern_key("prefers_markdown_scaffolding"),
-        VmValue::Bool(caps.prefers_markdown_scaffolding),
+    dict.put("cache_control", VmValue::dict(cache_control));
+    dict.put_bool("prefers_xml_scaffolding", caps.prefers_xml_scaffolding);
+    dict.put_bool(
+        "prefers_markdown_scaffolding",
+        caps.prefers_markdown_scaffolding,
     );
     dict.put_str(
         "structured_output_mode",
         caps.structured_output_mode.as_str(),
     );
-    dict.insert(
-        crate::value::intern_key("supports_assistant_prefill"),
-        VmValue::Bool(caps.supports_assistant_prefill),
+    dict.put_bool(
+        "supports_assistant_prefill",
+        caps.supports_assistant_prefill,
     );
-    dict.insert(
-        crate::value::intern_key("prefers_role_developer"),
-        VmValue::Bool(caps.prefers_role_developer),
-    );
-    dict.insert(
-        crate::value::intern_key("prefers_xml_tools"),
-        VmValue::Bool(caps.prefers_xml_tools),
-    );
-    dict.insert(
-        crate::value::intern_key("thinking"),
-        VmValue::Bool(!caps.thinking_modes.is_empty()),
-    );
+    dict.put_bool("prefers_role_developer", caps.prefers_role_developer);
+    dict.put_bool("prefers_xml_tools", caps.prefers_xml_tools);
+    dict.put_bool("thinking", !caps.thinking_modes.is_empty());
     dict.put_str("thinking_block_style", caps.thinking_block_style.as_str());
     dict.insert(
         crate::value::intern_key("thinking_modes"),
         string_list_to_vm_value(caps.thinking_modes.clone()),
     );
-    dict.insert(
-        crate::value::intern_key("interleaved_thinking_supported"),
-        VmValue::Bool(caps.interleaved_thinking_supported),
+    dict.put_bool(
+        "interleaved_thinking_supported",
+        caps.interleaved_thinking_supported,
     );
     dict.insert(
         crate::value::intern_key("anthropic_beta_features"),
         string_list_to_vm_value(caps.anthropic_beta_features.clone()),
     );
-    dict.insert(
-        crate::value::intern_key("vision_supported"),
-        VmValue::Bool(caps.vision_supported),
-    );
-    dict.insert(crate::value::intern_key("audio"), VmValue::Bool(caps.audio));
-    dict.insert(crate::value::intern_key("pdf"), VmValue::Bool(caps.pdf));
-    dict.insert(crate::value::intern_key("video"), VmValue::Bool(caps.video));
-    dict.insert(
-        crate::value::intern_key("files_api_supported"),
-        VmValue::Bool(caps.files_api_supported),
-    );
-    dict.insert(
-        crate::value::intern_key("file_upload_wire_format"),
+    dict.put_bool("vision_supported", caps.vision_supported);
+    dict.put_bool("audio", caps.audio);
+    dict.put_bool("pdf", caps.pdf);
+    dict.put_bool("video", caps.video);
+    dict.put_bool("files_api_supported", caps.files_api_supported);
+    dict.put_nullable(
+        "file_upload_wire_format",
         caps.file_upload_wire_format
             .as_ref()
-            .map(|value| VmValue::String(arcstr::ArcStr::from(value.clone())))
-            .unwrap_or(VmValue::Nil),
+            .map(|value| VmValue::string(value.clone())),
     );
-    dict.insert(
-        crate::value::intern_key("structured_output"),
-        caps.structured_output
-            .as_deref()
-            .map(|value| VmValue::String(arcstr::ArcStr::from(value)))
-            .unwrap_or(VmValue::Nil),
-    );
-    dict.insert(
-        crate::value::intern_key("structured_output_strategy"),
+    dict.put_nullable_str("structured_output", caps.structured_output.as_deref());
+    dict.put(
+        "structured_output_strategy",
         VmValue::string(caps.structured_output_strategy.as_str()),
     );
-    dict.insert(
-        crate::value::intern_key("json_schema"),
-        caps.json_schema
-            .as_deref()
-            .map(|value| VmValue::String(arcstr::ArcStr::from(value)))
-            .unwrap_or(VmValue::Nil),
-    );
-    dict.insert(
-        crate::value::intern_key("prefers_xml_scaffolding"),
-        VmValue::Bool(caps.prefers_xml_scaffolding),
-    );
-    dict.insert(
-        crate::value::intern_key("prefers_markdown_scaffolding"),
-        VmValue::Bool(caps.prefers_markdown_scaffolding),
+    dict.put_nullable_str("json_schema", caps.json_schema.as_deref());
+    dict.put_bool("prefers_xml_scaffolding", caps.prefers_xml_scaffolding);
+    dict.put_bool(
+        "prefers_markdown_scaffolding",
+        caps.prefers_markdown_scaffolding,
     );
     dict.put_str(
         "structured_output_mode",
         caps.structured_output_mode.as_str(),
     );
-    dict.insert(
-        crate::value::intern_key("supports_assistant_prefill"),
-        VmValue::Bool(caps.supports_assistant_prefill),
+    dict.put_bool(
+        "supports_assistant_prefill",
+        caps.supports_assistant_prefill,
     );
-    dict.insert(
-        crate::value::intern_key("prefers_role_developer"),
-        VmValue::Bool(caps.prefers_role_developer),
-    );
-    dict.insert(
-        crate::value::intern_key("prefers_xml_tools"),
-        VmValue::Bool(caps.prefers_xml_tools),
-    );
+    dict.put_bool("prefers_role_developer", caps.prefers_role_developer);
+    dict.put_bool("prefers_xml_tools", caps.prefers_xml_tools);
     dict.put_str("thinking_block_style", caps.thinking_block_style.as_str());
-    dict.insert(
-        crate::value::intern_key("preserve_thinking"),
-        VmValue::Bool(caps.preserve_thinking),
+    dict.put_bool("preserve_thinking", caps.preserve_thinking);
+    dict.put_bool(
+        "honors_preserve_thinking_kwarg",
+        caps.honors_preserve_thinking_kwarg,
     );
-    dict.insert(
-        crate::value::intern_key("honors_preserve_thinking_kwarg"),
-        VmValue::Bool(caps.honors_preserve_thinking_kwarg),
-    );
-    dict.insert(
-        crate::value::intern_key("requires_parallel_tool_calls_false"),
-        VmValue::Bool(caps.requires_parallel_tool_calls_false),
+    dict.put_bool(
+        "requires_parallel_tool_calls_false",
+        caps.requires_parallel_tool_calls_false,
     );
     dict.insert(
         crate::value::intern_key("reasoning_history_wire_field"),
         reasoning_history_wire_field_value(caps),
     );
-    dict.insert(
-        crate::value::intern_key("requires_completion_tokens"),
-        VmValue::Bool(caps.requires_completion_tokens),
+    dict.put_bool(
+        "requires_completion_tokens",
+        caps.requires_completion_tokens,
     );
-    dict.insert(
-        crate::value::intern_key("chat_completions_unsupported"),
-        VmValue::Bool(caps.chat_completions_unsupported),
+    dict.put_bool(
+        "chat_completions_unsupported",
+        caps.chat_completions_unsupported,
     );
-    dict.insert(
-        crate::value::intern_key("requires_streaming"),
-        VmValue::Bool(caps.requires_streaming),
-    );
-    dict.insert(
-        crate::value::intern_key("reasoning_effort_supported"),
-        VmValue::Bool(caps.reasoning_effort_supported),
+    dict.put_bool("requires_streaming", caps.requires_streaming);
+    dict.put_bool(
+        "reasoning_effort_supported",
+        caps.reasoning_effort_supported,
     );
     dict.insert(
         crate::value::intern_key("reasoning_effort_levels"),
         string_list_to_vm_value(caps.reasoning_effort_levels.clone()),
     );
-    dict.insert(
-        crate::value::intern_key("reasoning_none_supported"),
-        VmValue::Bool(caps.reasoning_none_supported),
+    dict.put_bool("reasoning_none_supported", caps.reasoning_none_supported);
+    dict.put_bool(
+        "reasoning_disable_supported",
+        caps.reasoning_disable_supported,
     );
-    dict.insert(
-        crate::value::intern_key("reasoning_disable_supported"),
-        VmValue::Bool(caps.reasoning_disable_supported),
-    );
-    dict.insert(
-        crate::value::intern_key("thinking_off_type"),
-        VmValue::String(arcstr::ArcStr::from(caps.thinking_off_type.as_str())),
-    );
-    dict.insert(
-        crate::value::intern_key("reasoning_text_promotable"),
-        VmValue::Bool(caps.reasoning_text_promotable),
-    );
-    dict.insert(
-        crate::value::intern_key("reasoning_wire_format"),
+    dict.put_str("thinking_off_type", caps.thinking_off_type.as_str());
+    dict.put_bool("reasoning_text_promotable", caps.reasoning_text_promotable);
+    dict.put_nullable(
+        "reasoning_wire_format",
         caps.reasoning_wire_format
             .as_ref()
-            .map(|value| VmValue::String(arcstr::ArcStr::from(value.clone())))
-            .unwrap_or(VmValue::Nil),
+            .map(|value| VmValue::string(value.clone())),
     );
     dict.insert(
         crate::value::intern_key("reasoning_excluded_portable_options"),
@@ -361,10 +243,7 @@ pub(crate) fn capabilities_to_vm_value(
                 .collect(),
         ),
     );
-    dict.insert(
-        crate::value::intern_key("seed_supported"),
-        VmValue::Bool(caps.seed_supported),
-    );
+    dict.put_bool("seed_supported", caps.seed_supported);
     dict.insert(
         crate::value::intern_key("portable_option_qualification"),
         json_to_vm_value(
@@ -372,10 +251,7 @@ pub(crate) fn capabilities_to_vm_value(
                 .expect("typed option qualification is serializable"),
         ),
     );
-    dict.insert(
-        crate::value::intern_key("top_k_supported"),
-        VmValue::Bool(caps.top_k_supported),
-    );
+    dict.put_bool("top_k_supported", caps.top_k_supported);
     dict.insert(
         crate::value::intern_key("portable_option_effort_support"),
         json_to_vm_value(
@@ -383,53 +259,44 @@ pub(crate) fn capabilities_to_vm_value(
                 .expect("typed option effort requirements are serializable"),
         ),
     );
-    dict.insert(
-        crate::value::intern_key("temperature_supported"),
-        VmValue::Bool(caps.temperature_supported),
+    dict.put_bool("temperature_supported", caps.temperature_supported);
+    dict.put_bool("top_p_supported", caps.top_p_supported);
+    dict.put_bool(
+        "frequency_penalty_supported",
+        caps.frequency_penalty_supported,
     );
-    dict.insert(
-        crate::value::intern_key("top_p_supported"),
-        VmValue::Bool(caps.top_p_supported),
+    dict.put_bool(
+        "presence_penalty_supported",
+        caps.presence_penalty_supported,
     );
-    dict.insert(
-        crate::value::intern_key("frequency_penalty_supported"),
-        VmValue::Bool(caps.frequency_penalty_supported),
-    );
-    dict.insert(
-        crate::value::intern_key("presence_penalty_supported"),
-        VmValue::Bool(caps.presence_penalty_supported),
-    );
-    dict.insert(
-        crate::value::intern_key("stop_supported"),
-        VmValue::Bool(caps.stop_supported),
-    );
-    dict.insert(
-        crate::value::intern_key("advanced_generation_options"),
-        VmValue::List(std::sync::Arc::new(
+    dict.put_bool("stop_supported", caps.stop_supported);
+    dict.put(
+        "advanced_generation_options",
+        VmValue::list(
             caps.advanced_generation_options
                 .iter()
                 .map(|option| VmValue::String(arcstr::ArcStr::from(option.name())))
                 .collect(),
-        )),
+        ),
     );
-    dict.insert(
-        crate::value::intern_key("allowed_tool_choice_modes"),
-        VmValue::List(std::sync::Arc::new(
+    dict.put(
+        "allowed_tool_choice_modes",
+        VmValue::list(
             caps.allowed_tool_choice_modes
                 .iter()
                 .map(|mode| VmValue::String(arcstr::ArcStr::from(mode.as_str())))
                 .collect(),
-        )),
+        ),
     );
-    dict.insert(
-        crate::value::intern_key("auto_reasoning_overrides"),
+    dict.put(
+        "auto_reasoning_overrides",
         VmValue::dict(
             caps.auto_reasoning_overrides
                 .iter()
                 .map(|(task, mode)| {
                     (
                         crate::value::intern_key(task),
-                        VmValue::String(arcstr::ArcStr::from(mode.clone())),
+                        VmValue::string(mode.clone()),
                     )
                 })
                 .collect::<crate::value::DictMap>(),
@@ -443,10 +310,7 @@ pub(crate) fn capabilities_to_vm_value(
         crate::llm::serving_tiers::fast_gate(model),
         crate::llm::serving_tiers::ServingTierGate::Usable
     );
-    dict.insert(
-        crate::value::intern_key("fast_tier_supported"),
-        VmValue::Bool(fast_tier_supported),
-    );
+    dict.put_bool("fast_tier_supported", fast_tier_supported);
     if let Some(fast_tier) = fast_tier {
         dict.insert(
             crate::value::intern_key("fast_tier"),
@@ -463,19 +327,10 @@ fn runtime_probe_to_vm_value(
     dict.put_str("status", receipt.status.as_str());
     dict.put_str("endpoint", &receipt.endpoint);
     dict.put_str("detail", &receipt.detail);
-    dict.insert(
-        crate::value::intern_key("native_tools"),
-        receipt
-            .native_tools
-            .map(VmValue::Bool)
-            .unwrap_or(VmValue::Nil),
-    );
-    dict.insert(
-        crate::value::intern_key("supports_parallel_tool_calls"),
-        receipt
-            .supports_parallel_tool_calls
-            .map(VmValue::Bool)
-            .unwrap_or(VmValue::Nil),
+    dict.put_nullable("native_tools", receipt.native_tools.map(VmValue::Bool));
+    dict.put_nullable(
+        "supports_parallel_tool_calls",
+        receipt.supports_parallel_tool_calls.map(VmValue::Bool),
     );
     VmValue::dict(dict)
 }
@@ -494,15 +349,9 @@ fn batch_support_to_vm_value(
         return VmValue::Nil;
     };
     let mut dict = crate::value::DictMap::new();
-    dict.insert(crate::value::intern_key("api"), VmValue::Bool(true));
-    dict.insert(
-        crate::value::intern_key("wire_format"),
-        VmValue::String(arcstr::ArcStr::from(wire_format)),
-    );
-    dict.insert(
-        crate::value::intern_key("input_mode"),
-        VmValue::String(arcstr::ArcStr::from(input_mode)),
-    );
+    dict.put_bool("api", true);
+    dict.put_str("wire_format", wire_format);
+    dict.put_str("input_mode", input_mode);
     dict.insert(
         crate::value::intern_key("discount_percent"),
         optional_batch_u32(batch_api, caps.batch_discount_percent),
@@ -555,10 +404,7 @@ pub(super) fn insert_batch_support_fields(
     batch_api: bool,
     caps: &crate::llm::capabilities::Capabilities,
 ) {
-    dict.insert(
-        crate::value::intern_key("batch_api"),
-        VmValue::Bool(batch_api),
-    );
+    dict.put_bool("batch_api", batch_api);
     dict.insert(
         crate::value::intern_key("batch_wire_format"),
         optional_batch_string(batch_api, caps.batch_wire_format.as_deref()),

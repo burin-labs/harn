@@ -2,6 +2,7 @@
 //! dispatchable result. Complete and streaming parsers share this contract.
 
 use crate::llm::usage::ProviderUsageReceipt;
+use crate::value::VmDictExt;
 use crate::value::{VmError, VmValue};
 
 /// Provider facts retained when parsing proves that a response completed but
@@ -57,15 +58,15 @@ impl ProviderResponseEnvelope {
         VmValue::dict(crate::value::DictMap::from_iter([
             (
                 crate::value::intern_key("response_id"),
-                self.response_id.as_deref().map_or(VmValue::Nil, |value| {
-                    VmValue::String(arcstr::ArcStr::from(value))
-                }),
+                self.response_id
+                    .as_deref()
+                    .map_or(VmValue::Nil, VmValue::string),
             ),
             (
                 crate::value::intern_key("stop_reason"),
-                self.stop_reason.as_deref().map_or(VmValue::Nil, |value| {
-                    VmValue::String(arcstr::ArcStr::from(value))
-                }),
+                self.stop_reason
+                    .as_deref()
+                    .map_or(VmValue::Nil, VmValue::string),
             ),
             (
                 crate::value::intern_key("content_blocks"),
@@ -76,12 +77,12 @@ impl ProviderResponseEnvelope {
                     ),
                     (
                         crate::value::intern_key("types"),
-                        VmValue::List(std::sync::Arc::new(
+                        VmValue::list(
                             self.content_block_types
                                 .iter()
-                                .map(|value| VmValue::String(arcstr::ArcStr::from(value.as_str())))
+                                .map(|value| VmValue::string(value.as_str()))
                                 .collect(),
-                        )),
+                        ),
                     ),
                 ])),
             ),
@@ -301,41 +302,20 @@ fn provider_completion_error(
     message: String,
 ) -> VmError {
     let mut fields = crate::value::DictMap::from_iter([
-        (
-            "category".to_string(),
-            VmValue::String(arcstr::ArcStr::from("server_error")),
-        ),
-        (
-            "code".to_string(),
-            VmValue::String(arcstr::ArcStr::from(code)),
-        ),
-        (
-            "reason".to_string(),
-            VmValue::String(arcstr::ArcStr::from(reason)),
-        ),
+        ("category".to_string(), VmValue::string("server_error")),
+        ("code".to_string(), VmValue::string(code)),
+        ("reason".to_string(), VmValue::string(reason)),
         (
             "completion_kind".to_string(),
-            VmValue::String(arcstr::ArcStr::from(completion_kind)),
+            VmValue::string(completion_kind),
         ),
-        (
-            "provider".to_string(),
-            VmValue::String(arcstr::ArcStr::from(provider)),
-        ),
-        (
-            "model".to_string(),
-            VmValue::String(arcstr::ArcStr::from(model)),
-        ),
-        (
-            "message".to_string(),
-            VmValue::String(arcstr::ArcStr::from(message)),
-        ),
+        ("provider".to_string(), VmValue::string(provider)),
+        ("model".to_string(), VmValue::string(model)),
+        ("message".to_string(), VmValue::string(message)),
         ("provider_usage".to_string(), usage.to_vm_value()),
     ]);
     if let Some(output_tokens) = usage.output_tokens() {
-        fields.insert(
-            crate::value::intern_key("output_tokens"),
-            VmValue::Int(output_tokens),
-        );
+        fields.put_int("output_tokens", output_tokens);
     }
     if let Some(response) = response {
         fields.insert(

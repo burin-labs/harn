@@ -14,34 +14,28 @@ impl crate::vm::Vm {
             "contains" => Ok(VmValue::Bool(
                 s.contains(&*args.first().map(|a| a.as_str_cow()).unwrap_or_default()),
             )),
-            "replace" if args.len() >= 2 => Ok(VmValue::String(arcstr::ArcStr::from(
+            "replace" if args.len() >= 2 => Ok(VmValue::string(
                 s.replace(&*args[0].as_str_cow(), &args[1].as_str_cow()),
-            ))),
+            )),
             "split" => {
                 let Some(sep) = args.first().map(|a| a.as_str_cow()) else {
                     return Err(crate::value::split_separator_required());
                 };
-                Ok(VmValue::List(std::sync::Arc::new(
-                    s.split(&*sep)
-                        .map(|p| VmValue::String(arcstr::ArcStr::from(p)))
-                        .collect(),
-                )))
+                Ok(VmValue::list(s.split(&*sep).map(VmValue::string).collect()))
             }
-            "trim" => Ok(VmValue::String(arcstr::ArcStr::from(s.trim()))),
+            "trim" => Ok(VmValue::string(s.trim())),
             "starts_with" => Ok(VmValue::Bool(
                 s.starts_with(&*args.first().map(|a| a.as_str_cow()).unwrap_or_default()),
             )),
             "ends_with" => Ok(VmValue::Bool(
                 s.ends_with(&*args.first().map(|a| a.as_str_cow()).unwrap_or_default()),
             )),
-            "lower" => Ok(VmValue::String(arcstr::ArcStr::from(s.to_lowercase()))),
-            "upper" => Ok(VmValue::String(arcstr::ArcStr::from(s.to_uppercase()))),
-            "substring" => Ok(VmValue::String(arcstr::ArcStr::from(
-                crate::value::char_substring(
-                    s,
-                    args.first().and_then(|a| a.as_int()).unwrap_or(0),
-                    args.get(1).and_then(|a| a.as_int()),
-                ),
+            "lower" => Ok(VmValue::string(s.to_lowercase())),
+            "upper" => Ok(VmValue::string(s.to_uppercase())),
+            "substring" => Ok(VmValue::string(crate::value::char_substring(
+                s,
+                args.first().and_then(|a| a.as_int()).unwrap_or(0),
+                args.get(1).and_then(|a| a.as_int()),
             ))),
             // `slice` is a list method, but harness authors (and JS/Python
             // muscle memory) routinely call it on strings. Aliasing it to a
@@ -68,9 +62,7 @@ impl crate::vm::Vm {
                     len as usize
                 };
                 let (start_byte, end_byte) = char_range_to_byte_range(s, start, end);
-                Ok(VmValue::String(arcstr::ArcStr::from(
-                    &s[start_byte..end_byte],
-                )))
+                Ok(VmValue::string(&s[start_byte..end_byte]))
             }
             "index_of" => {
                 let needle = args.first().map(|a| a.as_str_cow()).unwrap_or_default();
@@ -83,11 +75,9 @@ impl crate::vm::Vm {
             "repeat" => {
                 let n = args.first().and_then(|a| a.as_int()).unwrap_or(1);
                 let repeated = crate::limits::checked_repeat(s, n.max(0) as usize)?;
-                Ok(VmValue::String(arcstr::ArcStr::from(repeated)))
+                Ok(VmValue::string(repeated))
             }
-            "reversed" => Ok(VmValue::String(arcstr::ArcStr::from(
-                s.chars().rev().collect::<String>(),
-            ))),
+            "reversed" => Ok(VmValue::string(s.chars().rev().collect::<String>())),
             "pad_left" | "pad_right" => {
                 let left = method == "pad_left";
                 let width = args.first().and_then(|a| a.as_int()).unwrap_or(0).max(0) as usize;
@@ -107,23 +97,15 @@ impl crate::vm::Vm {
                         width - current_len,
                     )?;
                     if left {
-                        Ok(VmValue::String(arcstr::ArcStr::from(format!(
-                            "{padding}{s}"
-                        ))))
+                        Ok(VmValue::string(format!("{padding}{s}")))
                     } else {
-                        Ok(VmValue::String(arcstr::ArcStr::from(format!(
-                            "{s}{padding}"
-                        ))))
+                        Ok(VmValue::string(format!("{s}{padding}")))
                     }
                 }
             }
-            "trim_start" => Ok(VmValue::String(arcstr::ArcStr::from(s.trim_start()))),
-            "trim_end" => Ok(VmValue::String(arcstr::ArcStr::from(s.trim_end()))),
-            "lines" => Ok(VmValue::List(std::sync::Arc::new(
-                s.lines()
-                    .map(|l| VmValue::String(arcstr::ArcStr::from(l)))
-                    .collect(),
-            ))),
+            "trim_start" => Ok(VmValue::string(s.trim_start())),
+            "trim_end" => Ok(VmValue::string(s.trim_end())),
+            "lines" => Ok(VmValue::list(s.lines().map(VmValue::string).collect())),
             "char_at" => {
                 let idx = args.first().and_then(|a| a.as_int()).unwrap_or(0);
                 let Ok(idx) = usize::try_from(idx) else {

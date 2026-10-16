@@ -3,25 +3,12 @@ use crate::value::VmDictExt;
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 use harn_builtin_macros::harn_builtin;
-use harn_vm_core::builtin_support::{register_builtin_defs, VmBuiltinDef};
 
 use super::{helpers, mock};
 
-const LLM_MOCK_BUILTINS: &[&VmBuiltinDef] = &[
-    &LLM_MOCK_BUILTIN_DEF,
-    &LLM_MOCK_LOAD_JSONL_BUILTIN_DEF,
-    &LLM_MOCK_SNAPSHOT_BUILTIN_DEF,
-    &LLM_MOCK_KNOWN_SCOPES_BUILTIN_DEF,
-    &LLM_MOCK_CALLS_BUILTIN_DEF,
-    &LLM_MOCK_RECEIPTS_BUILTIN_DEF,
-    &LLM_MOCK_CLEAR_BUILTIN_DEF,
-    &LLM_MOCK_PUSH_SCOPE_BUILTIN_DEF,
-    &LLM_MOCK_POP_SCOPE_BUILTIN_DEF,
-];
-
 /// Register deterministic LLM mock builtins.
 pub(super) fn register_llm_mock_builtins(vm: &mut Vm) {
-    register_builtin_defs(vm, LLM_MOCK_BUILTINS);
+    harn_vm_core::builtin_support::register_module_builtins(vm, module_path!());
 }
 
 /// Register a legacy v0 inline LLM mock response for tests.
@@ -73,40 +60,34 @@ fn llm_mock_load_jsonl_builtin(args: &[VmValue], _out: &mut String) -> Result<Vm
         .map_err(|error| VmError::Runtime(format!("llm_mock_load_jsonl: {error}")))?;
     let receipt = mock::install_builtin_llm_mock_fixture(fixture);
     let mut result = std::collections::BTreeMap::new();
-    result.insert(
-        "schema_version".to_string(),
-        VmValue::Int(i64::from(receipt.schema_version)),
-    );
-    result.insert(
-        "strict_scopes".to_string(),
-        VmValue::Bool(receipt.strict_scopes),
-    );
+    result.put_int("schema_version", i64::from(receipt.schema_version));
+    result.put_bool("strict_scopes", receipt.strict_scopes);
     if let Some(live_after_calls) = receipt.live_after_calls {
-        result.insert(
-            "live_after_calls".to_string(),
-            VmValue::Int(i64::try_from(live_after_calls).unwrap_or(i64::MAX)),
+        result.put_int(
+            "live_after_calls",
+            i64::try_from(live_after_calls).unwrap_or(i64::MAX),
         );
     }
-    result.insert("count".to_string(), VmValue::Int(receipt.count as i64));
-    result.insert(
-        "scopes".to_string(),
-        VmValue::List(std::sync::Arc::new(
+    result.put_int("count", receipt.count as i64);
+    result.put(
+        "scopes",
+        VmValue::list(
             receipt
                 .scopes
                 .into_iter()
                 .map(|scope| VmValue::String(arcstr::ArcStr::from(scope)))
                 .collect(),
-        )),
+        ),
     );
-    result.insert(
-        "warnings".to_string(),
-        VmValue::List(std::sync::Arc::new(
+    result.put(
+        "warnings",
+        VmValue::list(
             receipt
                 .warnings
                 .into_iter()
                 .map(|warning| VmValue::String(arcstr::ArcStr::from(warning)))
                 .collect(),
-        )),
+        ),
     );
     Ok(VmValue::dict(result))
 }
@@ -131,12 +112,12 @@ fn llm_mock_snapshot_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmV
     sig = "llm_mock_known_scopes() -> list", category = "llm.mock"
 )]
 fn llm_mock_known_scopes_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    Ok(VmValue::List(std::sync::Arc::new(
+    Ok(VmValue::list(
         mock::KNOWN_MOCK_SCOPES
             .iter()
-            .map(|scope| VmValue::String(arcstr::ArcStr::from(*scope)))
+            .map(|scope| VmValue::string(*scope))
             .collect(),
-    )))
+    ))
 }
 
 /// Return recorded LLM mock calls.
@@ -154,14 +135,11 @@ fn llm_mock_calls_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValu
             dict.put_str("mock_scope", c.mock_scope.as_str());
             dict.put_str("api_mode", c.api_mode.as_str());
             let messages: Vec<VmValue> = c.messages.iter().map(json_to_vm_value).collect();
-            dict.insert(
-                "messages".to_string(),
-                VmValue::List(std::sync::Arc::new(messages)),
-            );
+            dict.put("messages", VmValue::list(messages));
             dict.insert(
                 "system".to_string(),
                 match &c.system {
-                    Some(s) => VmValue::String(arcstr::ArcStr::from(s.as_str())),
+                    Some(s) => VmValue::string(s.as_str()),
                     None => VmValue::Nil,
                 },
             );
@@ -170,7 +148,7 @@ fn llm_mock_calls_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValu
                 match &c.tools {
                     Some(t) => {
                         let tools: Vec<VmValue> = t.iter().map(json_to_vm_value).collect();
-                        VmValue::List(std::sync::Arc::new(tools))
+                        VmValue::list(tools)
                     }
                     None => VmValue::Nil,
                 },
@@ -180,7 +158,7 @@ fn llm_mock_calls_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValu
                 match &c.provider_tools {
                     Some(t) => {
                         let tools: Vec<VmValue> = t.iter().map(json_to_vm_value).collect();
-                        VmValue::List(std::sync::Arc::new(tools))
+                        VmValue::list(tools)
                     }
                     None => VmValue::Nil,
                 },
@@ -197,104 +175,46 @@ fn llm_mock_calls_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValu
                 json_to_vm_value(&c.output_format),
             );
             dict.insert("thinking".to_string(), json_to_vm_value(&c.thinking));
-            dict.insert("max_tokens".to_string(), VmValue::Int(c.max_tokens));
-            dict.insert(
-                "temperature".to_string(),
-                c.temperature.map(VmValue::Float).unwrap_or(VmValue::Nil),
+            dict.put_int("max_tokens", c.max_tokens);
+            dict.put_nullable("temperature", c.temperature.map(VmValue::Float));
+            dict.put_nullable("top_p", c.top_p.map(VmValue::Float));
+            dict.put_nullable("top_k", c.top_k.map(VmValue::Int));
+            dict.put_nullable(
+                "stop",
+                c.stop.as_ref().map(|items| {
+                    VmValue::list(
+                        items
+                            .iter()
+                            .map(|item| VmValue::string(item.as_str()))
+                            .collect(),
+                    )
+                }),
             );
-            dict.insert(
-                "top_p".to_string(),
-                c.top_p.map(VmValue::Float).unwrap_or(VmValue::Nil),
+            dict.put_nullable("seed", c.seed.map(VmValue::Int));
+            dict.put_nullable("frequency_penalty", c.frequency_penalty.map(VmValue::Float));
+            dict.put_nullable("presence_penalty", c.presence_penalty.map(VmValue::Float));
+            dict.put_nullable_str("previous_response_id", c.previous_response_id.as_deref());
+            dict.put_nullable("store", c.store.map(VmValue::Bool));
+            dict.put_nullable("background", c.background.map(VmValue::Bool));
+            dict.put_nullable_str("truncation", c.truncation.as_deref());
+            dict.put_nullable("compact", c.compact.map(VmValue::Bool));
+            dict.put_nullable(
+                "include",
+                c.include.as_ref().map(|items| {
+                    VmValue::list(
+                        items
+                            .iter()
+                            .map(|item| VmValue::string(item.as_str()))
+                            .collect(),
+                    )
+                }),
             );
-            dict.insert(
-                "top_k".to_string(),
-                c.top_k.map(VmValue::Int).unwrap_or(VmValue::Nil),
-            );
-            dict.insert(
-                "stop".to_string(),
-                c.stop
-                    .as_ref()
-                    .map(|items| {
-                        VmValue::List(std::sync::Arc::new(
-                            items
-                                .iter()
-                                .map(|item| VmValue::String(arcstr::ArcStr::from(item.as_str())))
-                                .collect(),
-                        ))
-                    })
-                    .unwrap_or(VmValue::Nil),
-            );
-            dict.insert(
-                "seed".to_string(),
-                c.seed.map(VmValue::Int).unwrap_or(VmValue::Nil),
-            );
-            dict.insert(
-                "frequency_penalty".to_string(),
-                c.frequency_penalty
-                    .map(VmValue::Float)
-                    .unwrap_or(VmValue::Nil),
-            );
-            dict.insert(
-                "presence_penalty".to_string(),
-                c.presence_penalty
-                    .map(VmValue::Float)
-                    .unwrap_or(VmValue::Nil),
-            );
-            dict.insert(
-                "previous_response_id".to_string(),
-                c.previous_response_id
-                    .as_deref()
-                    .map(|value| VmValue::String(arcstr::ArcStr::from(value)))
-                    .unwrap_or(VmValue::Nil),
-            );
-            dict.insert(
-                "store".to_string(),
-                c.store.map(VmValue::Bool).unwrap_or(VmValue::Nil),
-            );
-            dict.insert(
-                "background".to_string(),
-                c.background.map(VmValue::Bool).unwrap_or(VmValue::Nil),
-            );
-            dict.insert(
-                "truncation".to_string(),
-                c.truncation
-                    .as_deref()
-                    .map(|value| VmValue::String(arcstr::ArcStr::from(value)))
-                    .unwrap_or(VmValue::Nil),
-            );
-            dict.insert(
-                "compact".to_string(),
-                c.compact.map(VmValue::Bool).unwrap_or(VmValue::Nil),
-            );
-            dict.insert(
-                "include".to_string(),
-                c.include
-                    .as_ref()
-                    .map(|items| {
-                        VmValue::List(std::sync::Arc::new(
-                            items
-                                .iter()
-                                .map(|item| VmValue::String(arcstr::ArcStr::from(item.as_str())))
-                                .collect(),
-                        ))
-                    })
-                    .unwrap_or(VmValue::Nil),
-            );
-            dict.insert(
-                "max_tool_calls".to_string(),
-                c.max_tool_calls.map(VmValue::Int).unwrap_or(VmValue::Nil),
-            );
-            dict.insert(
-                "prefill".to_string(),
-                c.prefill
-                    .as_deref()
-                    .map(|value| VmValue::String(arcstr::ArcStr::from(value)))
-                    .unwrap_or(VmValue::Nil),
-            );
+            dict.put_nullable("max_tool_calls", c.max_tool_calls.map(VmValue::Int));
+            dict.put_nullable_str("prefill", c.prefill.as_deref());
             VmValue::dict(dict)
         })
         .collect();
-    Ok(VmValue::List(std::sync::Arc::new(result)))
+    Ok(VmValue::list(result))
 }
 
 /// Return the scope-consumption receipts emitted since the last clear.
@@ -313,21 +233,15 @@ fn llm_mock_receipts_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmV
             let mut dict = std::collections::BTreeMap::new();
             dict.put_str("requested_scope", receipt.requested_scope.as_str());
             dict.put_str("resolved_scope", receipt.resolved_scope.as_str());
-            dict.insert("matched".to_string(), VmValue::Bool(receipt.matched));
+            dict.put_bool("matched", receipt.matched);
             dict.put_str("id", receipt.id.as_str());
             dict.put_str("consume", receipt.consume.as_str());
-            dict.insert(
-                "fell_through".to_string(),
-                VmValue::Bool(receipt.fell_through),
-            );
-            dict.insert(
-                "remaining".to_string(),
-                VmValue::Int(receipt.remaining as i64),
-            );
+            dict.put_bool("fell_through", receipt.fell_through);
+            dict.put_int("remaining", receipt.remaining as i64);
             VmValue::dict(dict)
         })
         .collect();
-    Ok(VmValue::List(std::sync::Arc::new(result)))
+    Ok(VmValue::list(result))
 }
 
 /// Clear deterministic LLM mocks and recorded calls.
@@ -360,9 +274,9 @@ fn llm_mock_push_scope_builtin(_args: &[VmValue], _out: &mut String) -> Result<V
 )]
 fn llm_mock_pop_scope_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     if !mock::pop_llm_mock_scope() {
-        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+        return Err(VmError::Thrown(VmValue::string(
             "llm_mock_pop_scope: no scope to pop",
-        ))));
+        )));
     }
     Ok(VmValue::Nil)
 }

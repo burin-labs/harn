@@ -145,7 +145,7 @@ pub fn provider_tool_probe_campaign_option_probe_telemetry(
     request_attempt_count: report.probe.request_count,
     retry_count: attempt.retry_count ?? 0,
     retry_accounting:
-      "provider option-probe includes at most one timeout retry and one rejection control in its physical request count",
+      "provider option-probe shares one recovery attempt across timeouts, rate limits, and controlled pool unavailability; its physical request count includes every attempt and rejection control",
     observed_usage_count: attempt.observed_usage_count
       ?? if attempt.input_tokens != nil || attempt.output_tokens != nil {
         1

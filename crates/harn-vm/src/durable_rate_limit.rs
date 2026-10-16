@@ -2,14 +2,13 @@ use crate::cancellation::cancelled_without_machine;
 use crate::value::VmDictExt;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use rusqlite::{params, Connection, ErrorCode, TransactionBehavior};
 
 use crate::runtime_sqlite::{initialize_runtime_sqlite, RuntimeSqliteError, RuntimeSqliteSchema};
 use crate::stdlib::args::{Args, ErrorKind};
-use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
+use crate::stdlib::macros::harn_builtin;
 use crate::stdlib::sandbox::{self, FsAccess};
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
@@ -165,9 +164,7 @@ impl Drop for FairWaiterGuard {
 }
 
 pub(crate) fn register_durable_rate_limit_builtins(vm: &mut Vm) {
-    for def in MODULE_BUILTINS {
-        vm.register_builtin_def(def);
-    }
+    crate::stdlib::macros::register_module_builtins(vm, module_path!());
 }
 
 #[harn_builtin(
@@ -207,8 +204,6 @@ async fn durable_rate_limit_acquire_impl(
         &buckets,
     ))
 }
-
-pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[&DURABLE_RATE_LIMIT_ACQUIRE_IMPL_DEF];
 
 fn parse_state_path(options: &crate::value::DictMap) -> Result<PathBuf, VmError> {
     match options.get("state_path") {
@@ -1167,42 +1162,33 @@ fn result_value(
     buckets: &[RateBucket],
 ) -> VmValue {
     let mut dict = BTreeMap::new();
-    dict.insert("ok".to_string(), VmValue::Bool(ok));
-    dict.insert("timed_out".to_string(), VmValue::Bool(timed_out));
-    dict.insert("waited_ms".to_string(), VmValue::Int(u64_to_i64(waited_ms)));
-    dict.insert(
-        "retry_after_ms".to_string(),
-        VmValue::Int(u64_to_i64(retry_after_ms)),
-    );
+    dict.put_bool("ok", ok);
+    dict.put_bool("timed_out", timed_out);
+    dict.put_int("waited_ms", u64_to_i64(waited_ms));
+    dict.put_int("retry_after_ms", u64_to_i64(retry_after_ms));
     dict.put_str("state_path", state_path.to_string_lossy());
     dict.insert("buckets".to_string(), bucket_list_value(buckets));
     VmValue::dict(dict)
 }
 
 fn bucket_list_value(buckets: &[RateBucket]) -> VmValue {
-    VmValue::List(Arc::new(
+    VmValue::list(
         buckets
             .iter()
             .map(|bucket| {
-                VmValue::dict(BTreeMap::from([
+                VmValue::dict([
+                    ("key", VmValue::string(bucket.key.as_str())),
+                    ("limit", VmValue::Int(u64_to_i64(bucket.limit))),
+                    ("units", VmValue::Int(u64_to_i64(bucket.units))),
                     (
-                        "key".to_string(),
-                        VmValue::String(arcstr::ArcStr::from(bucket.key.as_str())),
-                    ),
-                    ("limit".to_string(), VmValue::Int(u64_to_i64(bucket.limit))),
-                    ("units".to_string(), VmValue::Int(u64_to_i64(bucket.units))),
-                    (
-                        "charged_units".to_string(),
+                        "charged_units",
                         VmValue::Int(u64_to_i64(bucket.charged_units)),
                     ),
-                    (
-                        "window_ms".to_string(),
-                        VmValue::Int(u64_to_i64(bucket.window_ms)),
-                    ),
-                ]))
+                    ("window_ms", VmValue::Int(u64_to_i64(bucket.window_ms))),
+                ])
             })
             .collect(),
-    ))
+    )
 }
 
 #[cfg(test)]

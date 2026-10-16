@@ -622,7 +622,7 @@ fn host_tool_scan_bare_units_builtin(
             VmValue::Nil
         })
         .collect();
-    Ok(VmValue::List(std::sync::Arc::new(results)))
+    Ok(VmValue::list(results))
 }
 
 fn string_arg(args: &[VmValue], index: usize, field: &str, label: &str) -> Result<String, VmError> {

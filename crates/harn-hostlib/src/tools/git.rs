@@ -6,7 +6,6 @@
 //! `schemas/tools/git.{request,response}.json`.
 
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 
 use harn_vm::VmValue;
 
@@ -199,7 +198,7 @@ fn run_status(repo: &PathBuf) -> Result<VmValue, HostlibError> {
         }
         entries.push(build_dict(entry));
     }
-    Ok(VmValue::List(Arc::new(entries)))
+    Ok(VmValue::list(entries))
 }
 
 fn run_diff(
@@ -266,7 +265,7 @@ fn run_log(
             ("subject", str_value(parts[4])),
         ]));
     }
-    Ok(VmValue::List(Arc::new(commits)))
+    Ok(VmValue::list(commits))
 }
 
 fn run_blame(
@@ -312,7 +311,7 @@ fn run_blame(
             ]));
         }
     }
-    Ok(VmValue::List(Arc::new(blame_entries)))
+    Ok(VmValue::list(blame_entries))
 }
 
 fn run_show(repo: &PathBuf, rev: Option<&str>) -> Result<VmValue, HostlibError> {
@@ -351,7 +350,7 @@ fn run_branch_list(repo: &PathBuf) -> Result<VmValue, HostlibError> {
             ("sha", str_value(parts[1])),
         ]));
     }
-    Ok(VmValue::List(Arc::new(branches)))
+    Ok(VmValue::list(branches))
 }
 
 fn run_current_branch(repo: &PathBuf) -> Result<VmValue, HostlibError> {
@@ -380,7 +379,7 @@ fn run_remote_list(repo: &PathBuf) -> Result<VmValue, HostlibError> {
             ("url", str_value(url)),
         ]));
     }
-    Ok(VmValue::List(Arc::new(remotes)))
+    Ok(VmValue::list(remotes))
 }
 
 /// Validate a user-supplied revision/refspec/range. We forward the value

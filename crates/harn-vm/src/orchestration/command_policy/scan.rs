@@ -1256,10 +1256,7 @@ pub(super) fn redacted_vm_request(params: &crate::value::DictMap) -> crate::valu
         .iter()
         .map(|(key, value)| {
             if key.as_str() == "env" || key.as_str() == "stdin" {
-                (
-                    key.clone(),
-                    VmValue::String(arcstr::ArcStr::from("<redacted>")),
-                )
+                (key.clone(), VmValue::string("<redacted>"))
             } else {
                 (key.clone(), value.clone())
             }

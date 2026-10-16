@@ -103,7 +103,7 @@ async fn pg_introspect_tables_impl(
     rows_to_list(
         pool.as_ref(),
         sql,
-        &[VmValue::String(arcstr::ArcStr::from(schema))],
+        &[VmValue::string(schema)],
         "pg_introspect_tables",
     )
     .await
@@ -143,10 +143,7 @@ async fn pg_introspect_columns_impl(
     rows_to_list(
         pool.as_ref(),
         sql,
-        &[
-            VmValue::String(arcstr::ArcStr::from(schema)),
-            VmValue::String(arcstr::ArcStr::from(table)),
-        ],
+        &[VmValue::string(schema), VmValue::string(table)],
         "pg_introspect_columns",
     )
     .await
@@ -191,10 +188,7 @@ async fn pg_introspect_indexes_impl(
     rows_to_list(
         pool.as_ref(),
         sql,
-        &[
-            VmValue::String(arcstr::ArcStr::from(schema)),
-            VmValue::String(arcstr::ArcStr::from(table)),
-        ],
+        &[VmValue::string(schema), VmValue::string(table)],
         "pg_introspect_indexes",
     )
     .await
@@ -221,62 +215,35 @@ async fn pg_pool_stats_impl(
     let in_use = (size as usize).saturating_sub(idle);
 
     let mut dict = crate::value::DictMap::new();
-    dict.insert(
-        crate::value::intern_key("size"),
-        VmValue::Int(i64::from(size)),
-    );
-    dict.insert(crate::value::intern_key("idle"), VmValue::Int(idle as i64));
-    dict.insert(
-        crate::value::intern_key("in_use"),
-        VmValue::Int(in_use as i64),
-    );
-    dict.insert(
-        crate::value::intern_key("max_connections"),
-        VmValue::Int(i64::from(max)),
-    );
-    dict.insert(
-        crate::value::intern_key("statement_cache_capacity"),
-        VmValue::Int(record.statement_cache_capacity as i64),
+    dict.put_int("size", i64::from(size));
+    dict.put_int("idle", idle as i64);
+    dict.put_int("in_use", in_use as i64);
+    dict.put_int("max_connections", i64::from(max));
+    dict.put_int(
+        "statement_cache_capacity",
+        record.statement_cache_capacity as i64,
     );
     dict.put_str("read_routing_policy", record.read_routing_policy.as_str());
-    dict.insert(
-        crate::value::intern_key("replicas"),
-        VmValue::Int(record.replicas.len() as i64),
-    );
+    dict.put_int("replicas", record.replicas.len() as i64);
     if !record.replicas.is_empty() {
         let replica_stats: Vec<VmValue> = record
             .replicas
             .iter()
             .map(|pool| {
                 let mut entry = crate::value::DictMap::new();
-                entry.insert(
-                    crate::value::intern_key("size"),
-                    VmValue::Int(i64::from(pool.size())),
-                );
-                entry.insert(
-                    crate::value::intern_key("idle"),
-                    VmValue::Int(pool.num_idle() as i64),
-                );
+                entry.put_int("size", i64::from(pool.size()));
+                entry.put_int("idle", pool.num_idle() as i64);
                 VmValue::dict(entry)
             })
             .collect();
-        dict.insert(
-            crate::value::intern_key("replica_stats"),
-            VmValue::List(std::sync::Arc::new(replica_stats)),
-        );
+        dict.put("replica_stats", VmValue::list(replica_stats));
     }
     let circuit_state = record.circuit.snapshot();
     dict.put_str("circuit_state", circuit_state.state);
-    dict.insert(
-        crate::value::intern_key("circuit_failures"),
-        VmValue::Int(circuit_state.failures as i64),
-    );
-    dict.insert(
-        crate::value::intern_key("circuit_opened_at_ms"),
-        circuit_state
-            .opened_at_ms
-            .map(VmValue::Int)
-            .unwrap_or(VmValue::Nil),
+    dict.put_int("circuit_failures", circuit_state.failures as i64);
+    dict.put_nullable(
+        "circuit_opened_at_ms",
+        circuit_state.opened_at_ms.map(VmValue::Int),
     );
     Ok(VmValue::dict(dict))
 }
@@ -525,12 +492,12 @@ async fn pg_partition_create_for_window_impl(
                 .await
                 .map_err(|error| runtime_error(format!("{builtin}: {error}")))?;
         }
-        created.push(VmValue::String(arcstr::ArcStr::from(format!(
+        created.push(VmValue::string(format!(
             "{}.{}",
             parent.schema, window.name
-        ))));
+        )));
     }
-    Ok(VmValue::List(std::sync::Arc::new(created)))
+    Ok(VmValue::list(created))
 }
 
 /// What to do with a partition node during a recursive prune.
@@ -570,7 +537,7 @@ async fn prune_partitions(
     let root_oid = resolve_regclass_oid(pool, &parent.qualified, builtin).await?;
     let mut pruned = Vec::new();
     prune_subtree(pool, root_oid, before, dry_run, builtin, &mut pruned).await?;
-    Ok(VmValue::List(std::sync::Arc::new(pruned)))
+    Ok(VmValue::list(pruned))
 }
 
 const PARTITION_CHILDREN_SQL: &str = "
@@ -622,9 +589,7 @@ fn prune_subtree<'a>(
                             .await
                             .map_err(|error| runtime_error(format!("{builtin}: {error}")))?;
                     }
-                    pruned.push(VmValue::String(arcstr::ArcStr::from(format!(
-                        "{schema}.{part_name}"
-                    ))));
+                    pruned.push(VmValue::string(format!("{schema}.{part_name}")));
                 }
                 PruneAction::Descend => {
                     prune_subtree(pool, oid, before, dry_run, builtin, pruned).await?;
@@ -643,7 +608,7 @@ async fn resolve_regclass_oid(
 ) -> Result<i64, VmError> {
     let row = bind_params(
         query("SELECT ($1::regclass)::oid::bigint AS oid"),
-        &[VmValue::String(arcstr::ArcStr::from(qualified))],
+        &[VmValue::string(qualified)],
     )?
     .fetch_one(pool)
     .await
@@ -663,7 +628,7 @@ async fn existing_partition_names(
              JOIN pg_class c ON c.oid = inh.inhrelid
              WHERE inh.inhparent = ($1::regclass)::oid",
         ),
-        &[VmValue::String(arcstr::ArcStr::from(qualified))],
+        &[VmValue::string(qualified)],
     )?
     .fetch_all(pool)
     .await
@@ -798,7 +763,7 @@ async fn rows_to_list(
     rows.into_iter()
         .map(row_to_value)
         .collect::<Result<Vec<_>, _>>()
-        .map(|values| VmValue::List(std::sync::Arc::new(values)))
+        .map(VmValue::list)
 }
 
 fn split_qualified(input: &str, builtin: &'static str) -> Result<(String, String), VmError> {
