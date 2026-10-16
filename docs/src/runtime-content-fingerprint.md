@@ -29,7 +29,7 @@ compatibility field. It excludes the receipt schema, its own digest, and
 content. The optional revision remains useful provenance, but consumers must
 keep `null` distinct from an observed revision. The library returns `null` for
 this field. An embedding executable can clone the receipt and attach its own
-measured Harn source revision; it must leave the field absent when that revision
+measured Harn source revision; it must keep the field `null` when that revision
 is unavailable. Build stamps belong to the executable so a new stamp does not
 invalidate the runtime library and its unit-test binary.
 
