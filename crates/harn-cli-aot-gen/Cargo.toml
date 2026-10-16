@@ -16,6 +16,7 @@ publish = false
 ignored = ["serde_json", "sha2"]
 
 [dependencies]
+harn-source-fingerprint-build = { path = "../harn-source-fingerprint-build", version = "=0.10.167" }
 harn-modules = { path = "../harn-modules", version = "=0.10.167" }
 harn-parser = { path = "../harn-parser", version = "=0.10.167" }
 harn-stdlib = { path = "../harn-stdlib", version = "=0.10.167" }

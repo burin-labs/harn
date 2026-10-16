@@ -713,6 +713,8 @@ pub struct Capabilities {
     /// Declared request ceilings for the decision route. See
     /// [`DecisionLimits`].
     pub decision_limits: Option<DecisionLimits>,
+    /// Exact upstream pin for a gateway decision request.
+    pub decision_upstream_provider: Option<String>,
     /// Whether this route emits its reasoning INLINE in the text channel as
     /// `<think>...</think>` blocks (local Ollama/llama.cpp reasoning models,
     /// Qwen3 via vLLM, Kimi) rather than in a separate provider reasoning
@@ -885,6 +887,7 @@ impl Default for Capabilities {
             decision_protocol: None,
             decision_question_kinds: Vec::new(),
             decision_limits: None,
+            decision_upstream_provider: None,
             emits_inline_reasoning: false,
             thinking_modes: Vec::new(),
             interleaved_thinking_supported: false,

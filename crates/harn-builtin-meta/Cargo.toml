@@ -10,5 +10,8 @@ description = "Shared type definitions for Harn builtin signatures (BuiltinSigna
 
 [dependencies]
 
+[build-dependencies]
+harn-source-fingerprint-build = { path = "../harn-source-fingerprint-build", version = "=0.10.167" }
+
 [lints]
 workspace = true

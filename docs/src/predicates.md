@@ -33,6 +33,37 @@ returns a closed outcome naming a receipt. A refusal the route's declared
 limits imply is decided before dispatch and makes no request at all. Cache and
 replay reuse are separate implementation steps.
 
+## Native decision model versions
+
+Jev 1.14 is available as `openrouter/typesafe/jev-1.14`,
+`typesafe/jev-1.14.0`, and `vercel/typesafe-ai/jev-1.14.0`. Direct TypeSafe
+access requires its own credential. Gateway access depends on your account.
+The direct `typesafe/jev-preview` selector points at 1.14, while
+`typesafe/jev-latest` still points at 1.13 as of October 15, 2026.
+OpenRouter's `openrouter/typesafe/jev-latest` already returns 1.14.
+Pin a version when your thresholds depend on its probability distribution.
+
+Harn also catalogs decision models from Cloudflare, Liquid, Microsoft,
+Perplexity, Inception, Nace, Respan, Together, Upstage, and Jared Palmer.
+Use `harn models info <route>` to inspect a route. These models accept typed
+questions through the evaluator and can't drive a chat or agent loop.
+Vercel routes pin the serving provider from the capability registry; the
+model's author doesn't always serve it.
+Custom `vercel_evaluate` rules must set `decision_upstream_provider`; Harn
+refuses a native gateway contract without that explicit pin.
+
+Vercel's Laya, Liquid d1 Ultra, and Decider routes answered unfiltered probes,
+but rejected Harn's required zero-retention filter on October 15. They retain
+unknown availability. A route answering without privacy filters doesn't prove
+that it can serve the evaluator's request.
+
+TypeSafe's October 14 release adds experimental images, `box` questions, and
+longer context behind explicit headers. Harn's evaluator currently exposes
+text/JSON state and boolean, choice, and score questions. It doesn't send
+those experimental headers or assets, expose box answers, or raise Jev's
+default request limits. See [TypeSafe's release announcement](https://typesafe.ai/blog/jev-1-14)
+and [model reference](https://docs.typesafe.ai/models).
+
 ## Saved receipt verification
 
 `harn llm evaluate --request request.json --verify-receipt receipt.json --json`

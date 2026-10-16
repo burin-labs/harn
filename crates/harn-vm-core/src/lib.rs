@@ -2,6 +2,9 @@
 #![allow(clippy::result_large_err, clippy::cloned_ref_to_slice_refs)]
 //! Bytecode execution with required host services supplied by an execution backend.
 
+#[path = "../build_support/compiler_sources.rs"]
+mod compiler_sources;
+
 pub mod atomic_io;
 #[cfg(feature = "vm-bench-internals")]
 #[doc(hidden)]

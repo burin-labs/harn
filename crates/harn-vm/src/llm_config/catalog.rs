@@ -6,6 +6,7 @@ use std::collections::BTreeMap;
 use super::*;
 
 use harn_glob::match_name as glob_match;
+use harn_provider_catalog::normalize_model_id_with_config;
 use time::OffsetDateTime;
 
 /// The instant a caller with no request of its own settles at.
@@ -568,7 +569,15 @@ pub fn model_catalog_entry(model_id: &str) -> Option<ModelDef> {
 /// without allowing an identically named model from another provider to win.
 pub fn model_catalog_id_for_route(provider: &str, model_id: &str) -> Option<String> {
     let config = effective_config();
-    let normalized_id = normalize_model_id(model_id);
+    model_catalog_id_for_route_with_config(&config, provider, model_id)
+}
+
+pub(super) fn model_catalog_id_for_route_with_config(
+    config: &ProvidersConfig,
+    provider: &str,
+    model_id: &str,
+) -> Option<String> {
+    let normalized_id = normalize_model_id_with_config(model_id, config);
     config
         .models
         .get_key_value(model_id)

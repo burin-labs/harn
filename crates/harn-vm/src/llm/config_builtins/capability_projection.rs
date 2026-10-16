@@ -62,6 +62,13 @@ pub(crate) fn capabilities_to_vm_value(
         )),
     );
     dict.insert(
+        crate::value::intern_key("decision_upstream_provider"),
+        caps.decision_upstream_provider
+            .as_deref()
+            .map(|provider| VmValue::String(arcstr::ArcStr::from(provider)))
+            .unwrap_or(VmValue::Nil),
+    );
+    dict.insert(
         crate::value::intern_key("decision_limits"),
         caps.decision_limits
             .map(decision_limits_to_vm_value)

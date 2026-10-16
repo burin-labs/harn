@@ -2,6 +2,8 @@
 default-members = ["crates/harn-cli"]
 members = [
     "crates/harn-aws-config",
+    "crates/harn-source-fingerprint",
+    "crates/harn-source-fingerprint-build",
     "crates/harn-builtin-meta",
     "crates/harn-builtin-registry",
     "crates/harn-builtin-macros",

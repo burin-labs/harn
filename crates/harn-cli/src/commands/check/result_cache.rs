@@ -17,7 +17,7 @@
 //!   changed builtin signature cannot serve diagnostics typed against the old
 //!   one;
 //! - a build-time fingerprint of the check driver itself (`harn-lint`,
-//!   `commands/check`, package-config parsing) — `HARN_CHECK_FINGERPRINT` —
+//!   `commands/check`, package-config parsing), composed from linked source owners,
 //!   so within-version edits to lint/preflight logic invalidate entries
 //!   exactly like #2621 did for the compiler;
 //! - the effective per-file `CheckConfig` (exhaustively destructured so new
@@ -63,9 +63,29 @@ const RESULT_CACHE_SCHEMA: u32 = 4;
 /// `HARN_BYTECODE_CACHE=0` toggle also disables it).
 pub(crate) const RESULT_CACHE_ENV: &str = "HARN_CHECK_RESULT_CACHE";
 
-/// Build-time fingerprint of the check pipeline's own sources (harn-lint,
-/// commands/check, package config parsing). See `build.rs`.
-const CHECK_FINGERPRINT: &str = env!("HARN_CHECK_FINGERPRINT");
+/// Contributions from the actual linked check owners, including published crates.
+#[path = "../../../build_support/check_sources.rs"]
+mod check_sources;
+
+const CHECK_FINGERPRINT: &str = harn_source_fingerprint::compose(
+    "harn.check-source.v2",
+    &[
+        harn_source_fingerprint::SourceContribution {
+            name: "harn-cli",
+            fingerprint: env!("HARN_LOCAL_CHECK_SOURCE_FINGERPRINT"),
+            roots: check_sources::CHECK_SOURCE_PATHS,
+        },
+        harn_source_fingerprint::SourceContribution::crate_sources(
+            "harn-lint",
+            harn_lint::SOURCE_FINGERPRINT,
+        ),
+        harn_source_fingerprint::SourceContribution::crate_sources(
+            "harn-package",
+            harn_package::SOURCE_FINGERPRINT,
+        ),
+    ],
+)
+.as_str();
 
 /// True when the check-result cache should be consulted and written.
 pub(super) fn enabled() -> bool {

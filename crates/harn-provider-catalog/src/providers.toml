@@ -4008,7 +4008,7 @@ context_window = 1048576
 capabilities = ["tools", "vision", "streaming", "thinking"]
 pricing = { input_per_mtok = 0.10, output_per_mtok = 0.40, cache_read_per_mtok = 0.01 }
 deprecated = true
-deprecation_note = "Unavailable to new Gemini API users as of August 2026 and scheduled to shut down 2026-10-16. Use gemini-3.5-flash-lite."
+deprecation_note = "Restricted to existing Gemini API users. Google's deprecations page explicitly lists no shutdown date as of 2026-10-15; the previously recorded October 16 shutdown is no longer announced. Use gemini-3.5-flash-lite for new projects."
 superseded_by = "gemini-3.5-flash-lite"
 tier = "small"
 open_weight = false
@@ -4411,7 +4411,8 @@ strengths = ["cheap", "coding", "speed", "tool_use", "long_context"]
 #
 # Rate card, verified 2026-09-02 against dev.meta.ai/docs/pricing-rate-limits:
 #   standard    $1.25 in / $0.15 cached / $4.25 out per MTok, 3,000 rpm
-#   contributor $0.10 in / $0.002 cached / $0.20 out per MTok,   100 rpm
+#   contributor $0.10 in / $0.002 cached / $0.20 out per MTok,   150 rpm
+# Contributor RPM re-checked against the current rate card on 2026-10-15.
 # Every generation shares its tier's rate card, so 1.1, 1.2 and 1.3 carry the
 # same standard prices. Do not "correct" one row toward another generation.
 #
@@ -4463,7 +4464,7 @@ capabilities = ["tools", "streaming", "thinking", "prompt_caching", "vision"]
 pricing = { input_per_mtok = 0.10, output_per_mtok = 0.20, cache_read_per_mtok = 0.002 }
 tier = "reasoning"
 strengths = ["reasoning", "coding", "tool_use", "long_context", "cheap"]
-rate_limits = { rpm = 100 }
+rate_limits = { rpm = 150 }
 
 [models."muse-spark-1.3-contributor".data_controls]
 training_default = "trains"
@@ -4496,7 +4497,7 @@ capabilities = ["tools", "streaming", "thinking", "prompt_caching", "vision"]
 pricing = { input_per_mtok = 0.10, output_per_mtok = 0.20, cache_read_per_mtok = 0.002 }
 tier = "reasoning"
 strengths = ["reasoning", "coding", "tool_use", "long_context", "cheap"]
-rate_limits = { rpm = 100 }
+rate_limits = { rpm = 150 }
 
 [models."muse-spark-1.2-contributor".data_controls]
 training_default = "trains"
@@ -4520,6 +4521,308 @@ training_default = "does_not_train"
 checked_on = "2026-09-02"
 sources = ["https://developer.meta.com/ai/products/meta-model-api/"]
 note = "Meta documents the standard tier as not used to improve its products."
+
+# Released October 12; standard mode only. Wonder Full is a Muse Code
+# subscription offering, not an API model ID. Price and limits checked on
+# https://dev.meta.ai/docs/pricing-rate-limits, 2026-10-15.
+[models."muse-wonder-1.0"]
+name = "Muse Wonder 1.0"
+provider = "meta"
+context_window = 1048576
+logical_model = "meta-muse-wonder-1.0"
+equivalence_group = "meta-muse-wonder-1.0"
+family = "meta-muse"
+lineage = "meta-muse-wonder"
+released = "2026-10-12"
+capabilities = ["tools", "streaming", "thinking", "prompt_caching", "vision"]
+pricing = { input_per_mtok = 4.00, output_per_mtok = 20.00, cache_read_per_mtok = 0.20, hosted_tool_fees = { web_search = { per_1k_calls = 2.50, source_url = "https://dev.meta.ai/docs/pricing-rate-limits" } } }
+tier = "reasoning"
+strengths = ["reasoning", "coding", "agentic", "tool_use", "long_context"]
+rate_limits = { rpm = 3000, tpm = 4000000 }
+
+[models."muse-wonder-1.0".data_controls]
+training_default = "does_not_train"
+checked_on = "2026-10-15"
+sources = ["https://dev.meta.ai/docs/pricing-rate-limits"]
+note = "Muse Wonder is offered only in standard mode on the Model API, which does not train on requests or responses."
+
+# --- source: 60-models/13-meta-hosted.toml ---
+# October 15, 2026: Meta's open release is distinct from the proprietary
+# Muse Spark 1.3 API. Route prices/context come from each serving API or its
+# model page, not from the weights' maximum context.
+# https://research.meta.ai/blog/muse-spark-open
+# https://openrouter.ai/api/v1/models/meta/muse-spark-open/endpoints
+# https://docs.together.ai/docs/serverless/models
+# https://fireworks.ai/models/fireworks/muse-spark-open
+# https://console.groq.com/docs/model/meta-models/muse-spark-open
+# https://www.baseten.co/blog/muse-spark-open-launch/
+# https://router.huggingface.co/v1/models
+# Modal requires a workspace-specific endpoint hostname as its model ID;
+# configure that route as a provider overlay rather than inventing a global ID.
+
+[models."meta/muse-spark-open"]
+name = "Muse Spark Open (OpenRouter)"
+provider = "openrouter"
+context_window = 1048576
+logical_model = "meta-muse-spark-open"
+equivalence_group = "meta-muse-spark-open"
+family = "meta-muse"
+lineage = "meta-muse-spark"
+released = "2026-10-15"
+capabilities = ["tools", "streaming", "thinking", "vision", "prompt_caching"]
+pricing = { input_per_mtok = 1.25, output_per_mtok = 4.25, cache_read_per_mtok = 0.15 }
+tier = "frontier"
+open_weight = true
+strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context"]
+architecture = { parameter_count_b = 816.0, active_parameter_count_b = 42.0, moe = true, license = "Muse Model License", source_url = "https://huggingface.co/meta-models/Muse-Spark-Open-816B-A42B", last_verified = "2026-10-15" }
+
+[models."accounts/fireworks/models/muse-spark-open"]
+name = "Muse Spark Open (Fireworks)"
+provider = "fireworks"
+context_window = 1048576
+logical_model = "meta-muse-spark-open"
+equivalence_group = "meta-muse-spark-open"
+family = "meta-muse"
+lineage = "meta-muse-spark"
+capabilities = ["tools", "streaming", "thinking", "vision", "prompt_caching"]
+pricing = { input_per_mtok = 1.25, output_per_mtok = 4.25, cache_read_per_mtok = 0.15 }
+tier = "frontier"
+open_weight = true
+strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context"]
+
+[models."together/meta-models/Muse-Spark-Open-816B-A42B"]
+name = "Muse Spark Open (Together)"
+provider = "together"
+wire_model = "meta-models/Muse-Spark-Open-816B-A42B"
+context_window = 1048576
+logical_model = "meta-muse-spark-open"
+equivalence_group = "meta-muse-spark-open"
+family = "meta-muse"
+lineage = "meta-muse-spark"
+capabilities = ["tools", "streaming", "thinking", "vision", "prompt_caching"]
+pricing = { input_per_mtok = 1.25, output_per_mtok = 4.25, cache_read_per_mtok = 0.15 }
+tier = "frontier"
+open_weight = true
+strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context"]
+
+# Groq documents a 128K limited enterprise preview, and our /models index
+# does not list it. Keep availability unknown until this account can call it.
+# No public price is published, so no rate is borrowed from another host.
+[models."groq/meta-models/muse-spark-open"]
+name = "Muse Spark Open (Groq limited preview)"
+provider = "groq"
+wire_model = "meta-models/muse-spark-open"
+context_window = 131072
+logical_model = "meta-muse-spark-open"
+equivalence_group = "meta-muse-spark-open"
+family = "meta-muse"
+lineage = "meta-muse-spark"
+capabilities = ["streaming", "thinking", "vision"]
+availability = "unknown"
+tier = "frontier"
+open_weight = true
+strengths = ["coding", "agentic", "reasoning"]
+
+[models."baseten/meta-models/Muse-Spark-Open-816B-A42B"]
+name = "Muse Spark Open (Baseten)"
+provider = "baseten"
+wire_model = "meta-models/Muse-Spark-Open-816B-A42B"
+context_window = 1048576
+logical_model = "meta-muse-spark-open"
+equivalence_group = "meta-muse-spark-open"
+family = "meta-muse"
+lineage = "meta-muse-spark"
+capabilities = ["streaming", "thinking", "vision", "prompt_caching"]
+pricing = { input_per_mtok = 1.25, output_per_mtok = 4.25, cache_read_per_mtok = 0.15 }
+availability = "unknown"
+tier = "frontier"
+open_weight = true
+strengths = ["coding", "agentic", "reasoning", "long_context"]
+
+[models."huggingface/meta-models/Muse-Spark-Open-816B-A42B"]
+name = "Muse Spark Open (Hugging Face Router)"
+provider = "huggingface"
+wire_model = "meta-models/Muse-Spark-Open-816B-A42B"
+context_window = 1048576
+logical_model = "meta-muse-spark-open"
+equivalence_group = "meta-muse-spark-open"
+family = "meta-muse"
+lineage = "meta-muse-spark"
+capabilities = ["tools", "streaming", "thinking", "vision"]
+tier = "frontier"
+open_weight = true
+strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context"]
+
+[models."vercel/meta/muse-spark-open"]
+name = "Muse Spark Open (Vercel AI Gateway)"
+provider = "vercel_ai_gateway"
+wire_model = "meta/muse-spark-open"
+context_window = 1048576
+logical_model = "meta-muse-spark-open"
+equivalence_group = "meta-muse-spark-open"
+family = "meta-muse"
+lineage = "meta-muse-spark"
+capabilities = ["tools", "streaming", "thinking", "vision", "prompt_caching"]
+pricing = { input_per_mtok = 1.25, output_per_mtok = 4.25, cache_read_per_mtok = 0.15 }
+tier = "frontier"
+open_weight = true
+strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context"]
+
+[models."meta/muse-wonder"]
+name = "Muse Wonder (OpenRouter)"
+provider = "openrouter"
+context_window = 1048576
+logical_model = "meta-muse-wonder-1.0"
+equivalence_group = "meta-muse-wonder-1.0"
+family = "meta-muse"
+lineage = "meta-muse-wonder"
+released = "2026-10-12"
+capabilities = ["tools", "streaming", "thinking", "vision", "prompt_caching"]
+pricing = { input_per_mtok = 4.00, output_per_mtok = 20.00, cache_read_per_mtok = 0.20 }
+tier = "reasoning"
+open_weight = false
+strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context"]
+
+[models."vercel/meta/muse-wonder-1.0"]
+name = "Muse Wonder (Vercel AI Gateway)"
+provider = "vercel_ai_gateway"
+wire_model = "meta/muse-wonder-1.0"
+context_window = 1048576
+logical_model = "meta-muse-wonder-1.0"
+equivalence_group = "meta-muse-wonder-1.0"
+family = "meta-muse"
+lineage = "meta-muse-wonder"
+capabilities = ["tools", "streaming", "thinking", "vision", "prompt_caching"]
+pricing = { input_per_mtok = 4.00, output_per_mtok = 20.00, cache_read_per_mtok = 0.20 }
+# Indexed, but the available gateway account returned paid-credit access 403.
+availability = "unknown"
+tier = "reasoning"
+open_weight = false
+strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context"]
+
+[models."meta/muse-glimmer-30b"]
+name = "Muse Glimmer 30B (OpenRouter)"
+provider = "openrouter"
+context_window = 131072
+logical_model = "meta-muse-glimmer-30b"
+equivalence_group = "meta-muse-glimmer-30b"
+family = "meta-muse"
+lineage = "meta-muse-glimmer"
+capabilities = ["tools", "streaming", "thinking", "vision", "prompt_caching"]
+pricing = { input_per_mtok = 0.30, output_per_mtok = 1.20, cache_read_per_mtok = 0.04 }
+tier = "mid"
+open_weight = true
+strengths = ["speed", "tool_use", "vision"]
+
+[models."together/meta-models/Muse-Glimmer-30B"]
+name = "Muse Glimmer 30B (Together)"
+provider = "together"
+wire_model = "meta-models/Muse-Glimmer-30B"
+context_window = 131072
+logical_model = "meta-muse-glimmer-30b"
+equivalence_group = "meta-muse-glimmer-30b"
+family = "meta-muse"
+lineage = "meta-muse-glimmer"
+capabilities = ["tools", "streaming", "thinking", "vision", "prompt_caching"]
+pricing = { input_per_mtok = 0.35, output_per_mtok = 1.50, cache_read_per_mtok = 0.04 }
+tier = "mid"
+open_weight = true
+strengths = ["speed", "tool_use", "vision"]
+
+[models."deepinfra/meta-models/Muse-Glimmer-30B"]
+name = "Muse Glimmer 30B (DeepInfra)"
+provider = "deepinfra"
+wire_model = "meta-models/Muse-Glimmer-30B"
+context_window = 131072
+logical_model = "meta-muse-glimmer-30b"
+equivalence_group = "meta-muse-glimmer-30b"
+family = "meta-muse"
+lineage = "meta-muse-glimmer"
+capabilities = ["tools", "streaming", "thinking", "vision", "prompt_caching"]
+pricing = { input_per_mtok = 0.30, output_per_mtok = 1.20, cache_read_per_mtok = 0.04 }
+tier = "mid"
+open_weight = true
+strengths = ["speed", "tool_use", "vision"]
+
+[models."nvidia/meta/muse-glimmer-30b"]
+name = "Muse Glimmer 30B (NVIDIA)"
+provider = "nvidia"
+wire_model = "meta/muse-glimmer-30b"
+context_window = 131072
+logical_model = "meta-muse-glimmer-30b"
+equivalence_group = "meta-muse-glimmer-30b"
+family = "meta-muse"
+lineage = "meta-muse-glimmer"
+capabilities = ["tools", "streaming", "thinking", "vision"]
+tier = "mid"
+open_weight = true
+strengths = ["speed", "tool_use", "vision"]
+
+[models."vercel/meta/muse-glimmer-30b"]
+name = "Muse Glimmer 30B (Vercel AI Gateway)"
+provider = "vercel_ai_gateway"
+availability = "unknown"
+wire_model = "meta/muse-glimmer-30b"
+context_window = 131072
+logical_model = "meta-muse-glimmer-30b"
+equivalence_group = "meta-muse-glimmer-30b"
+family = "meta-muse"
+lineage = "meta-muse-glimmer"
+capabilities = ["tools", "streaming", "thinking", "vision", "prompt_caching"]
+pricing = { input_per_mtok = 0.35, output_per_mtok = 1.50, cache_read_per_mtok = 0.04 }
+tier = "mid"
+open_weight = true
+strengths = ["speed", "tool_use", "vision"]
+
+# --- source: 60-models/14-gemini-4.toml ---
+# Gemini 4 Argon released October 13, 2026. Its unified window includes input,
+# thinking, and output. Direct API uses Interactions, implicit caching only,
+# and no sampling controls. Introductory pricing ends November 30; preserve
+# December's durable card rather than baking the temporary discount in.
+# https://ai.google.dev/gemini-api/docs/latest-model
+# https://ai.google.dev/gemini-api/docs/models/gemini-4-argon
+
+[models."gemini-4-argon"]
+name = "Gemini 4 Argon"
+provider = "gemini"
+context_window = 1048576
+released = "2026-10-13"
+capabilities = ["tools", "vision", "audio", "files", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 4.00, output_per_mtok = 20.00, cache_read_per_mtok = 0.20, promotions = [{ id = "argon-introductory", starts_on = "2026-10-13", ends_on = "2026-11-30", input_per_mtok = 2.00, output_per_mtok = 10.00, cache_read_per_mtok = 0.10, source_url = "https://ai.google.dev/gemini-api/docs/latest-model" }] }
+tier = "reasoning"
+open_weight = false
+family = "google-gemini"
+lineage = "google-gemini-4"
+strengths = ["coding", "reasoning", "agentic", "tool_use", "long_context"]
+
+# Gateway cards are independent. Neither index publishes the future direct
+# rate, so do not apply the direct API's promotion schedule to these routes.
+[models."google/gemini-4-argon"]
+name = "Gemini 4 Argon (OpenRouter)"
+provider = "openrouter"
+context_window = 1048576
+capabilities = ["tools", "vision", "audio", "files", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 2.00, output_per_mtok = 10.00, cache_read_per_mtok = 0.10 }
+tier = "reasoning"
+open_weight = false
+family = "google-gemini"
+lineage = "google-gemini-4"
+strengths = ["coding", "reasoning", "agentic", "tool_use", "long_context"]
+
+[models."vercel/google/gemini-4-argon"]
+name = "Gemini 4 Argon (Vercel AI Gateway)"
+provider = "vercel_ai_gateway"
+# Indexed; live verification requires paid gateway credits on this account.
+availability = "unknown"
+wire_model = "google/gemini-4-argon"
+context_window = 1000000
+capabilities = ["tools", "vision", "audio", "files", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 2.00, output_per_mtok = 10.00, cache_read_per_mtok = 0.10 }
+tier = "reasoning"
+open_weight = false
+family = "google-gemini"
+lineage = "google-gemini-4"
+strengths = ["coding", "reasoning", "agentic", "tool_use", "long_context"]
 
 # --- source: 60-models/20-open-weight-openrouter.toml ---
 # Open-weight executor candidates (<$2/Mtok with function calling). Use
@@ -4556,13 +4859,13 @@ open_weight = true
 strengths = ["coding", "cheap", "long_context", "agentic", "tool_use"]
 
 # Qwen3.5-397B-A17B — the open-tier Qwen flagship (native VLM MoE).
-# OpenRouter serverless rate verified 2026-07-02.
+# OpenRouter route rate card re-read from /api/v1/models, 2026-10-15.
 [models."qwen/qwen3.5-397b-a17b"]
 name = "Qwen3.5 397B A17B"
 provider = "openrouter"
 context_window = 262144
 capabilities = ["tools", "vision", "streaming", "thinking"]
-pricing = { input_per_mtok = 0.55, output_per_mtok = 3.50, cache_read_per_mtok = 0.225 }
+pricing = { input_per_mtok = 0.50, output_per_mtok = 3.60, cache_read_per_mtok = 0.30 }
 availability = "serverless"
 architecture = { parameter_count_b = 397.0, active_parameter_count_b = 17.0, moe = true, license = "Apache-2.0", source_url = "https://huggingface.co/Qwen/Qwen3.5-397B-A17B", last_verified = "2026-07-02" }
 benchmarks = { swe_bench_verified = 76.4 }
@@ -4592,7 +4895,7 @@ name = "DeepSeek V3.2"
 provider = "openrouter"
 context_window = 163840
 capabilities = ["tools", "streaming"]
-pricing = { input_per_mtok = 0.28, output_per_mtok = 0.42, cache_read_per_mtok = 0.028 }
+pricing = { input_per_mtok = 0.259, output_per_mtok = 0.80, cache_read_per_mtok = 0.14 }
 tier = "mid"
 open_weight = true
 strengths = ["coding", "tool_use", "cheap"]
@@ -4646,7 +4949,9 @@ equivalence_group = "openai-gpt-oss-120b"
 served_variant = "openrouter"
 api_dialect = "openai_chat"
 capabilities = ["tools", "streaming"]
-pricing = { input_per_mtok = 0.037, output_per_mtok = 0.17, cache_read_per_mtok = 0.075 }
+# OpenRouter's 2026-10-15 index lists $0.15/$0.60; the former headline
+# underpriced input even below the route's cached-input rate.
+pricing = { input_per_mtok = 0.15, output_per_mtok = 0.60, cache_read_per_mtok = 0.075 }
 architecture = { parameter_count_b = 117.0, active_parameter_count_b = 5.1, moe = true, license = "Apache-2.0", source_url = "https://developers.openai.com/api/docs/models/gpt-oss-120b", last_verified = "2026-06-05" }
 # Explicit metadata keeps this row self-described across fragment boundaries.
 # GPT-OSS 120B is Apache-2.0 (open weight) and text-only; it is Burin's cheap
@@ -5003,6 +5308,507 @@ tier = "mid"
 open_weight = true
 strengths = ["tool_use", "cheap"]
 
+# --- source: 60-models/27-october-hosted-refresh.toml ---
+# Provider-owned indexes read October 15, 2026:
+# https://openrouter.ai/api/v1/models
+# https://api.together.xyz/v1/models
+# https://api.deepinfra.com/v1/openai/models
+# https://api.fireworks.ai/inference/v1/models
+# https://ai-gateway.vercel.sh/v1/models
+# https://integrate.api.nvidia.com/v1/models
+# NVIDIA's Bolt weights are local NVIDIA deployments, not a hosted NIM ID;
+# Bolt E4B is announced for October 23 and is not yet a released model.
+# https://blogs.nvidia.com/blog/nemotron-3-5-super-vl/
+
+[models."nvidia/nemotron-3.5-super-vl"]
+name = "Nemotron 3.5 Super VL (OpenRouter)"
+provider = "openrouter"
+context_window = 1048576
+capabilities = ["tools", "streaming", "thinking", "vision", "prompt_caching"]
+pricing = { input_per_mtok = 0.15, output_per_mtok = 0.50, cache_read_per_mtok = 0.02 }
+logical_model = "nvidia-nemotron-3.5-super-vl"
+equivalence_group = "nvidia-nemotron-3.5-super-vl"
+family = "nvidia-nemotron"
+lineage = "nvidia-nemotron-3-5"
+tier = "mid"
+open_weight = true
+strengths = ["speed", "tool_use", "vision", "long_context"]
+
+[models."nvidia/nemotron-3.5-super-vl:free"]
+name = "Nemotron 3.5 Super VL (OpenRouter free)"
+provider = "openrouter"
+# The available account excludes this free endpoint under its privacy guard.
+availability = "unknown"
+context_window = 1000000
+capabilities = ["tools", "streaming", "thinking", "vision"]
+pricing = { input_per_mtok = 0.0, output_per_mtok = 0.0 }
+logical_model = "nvidia-nemotron-3.5-super-vl"
+equivalence_group = "nvidia-nemotron-3.5-super-vl"
+family = "nvidia-nemotron"
+lineage = "nvidia-nemotron-3-5"
+tier = "mid"
+open_weight = true
+strengths = ["cheap", "tool_use", "vision", "long_context"]
+
+[models."together/nvidia/NVIDIA-Nemotron-3.5-Super-VL"]
+name = "Nemotron 3.5 Super VL (Together)"
+provider = "together"
+wire_model = "nvidia/NVIDIA-Nemotron-3.5-Super-VL"
+context_window = 262144
+capabilities = ["tools", "streaming", "thinking", "vision", "prompt_caching"]
+pricing = { input_per_mtok = 0.15, output_per_mtok = 0.50, cache_read_per_mtok = 0.02 }
+logical_model = "nvidia-nemotron-3.5-super-vl"
+equivalence_group = "nvidia-nemotron-3.5-super-vl"
+family = "nvidia-nemotron"
+lineage = "nvidia-nemotron-3-5"
+tier = "mid"
+open_weight = true
+strengths = ["speed", "tool_use", "vision", "long_context"]
+
+[models."deepinfra/nvidia/NVIDIA-Nemotron-3.5-Super-VL"]
+name = "Nemotron 3.5 Super VL (DeepInfra)"
+provider = "deepinfra"
+wire_model = "nvidia/NVIDIA-Nemotron-3.5-Super-VL"
+context_window = 262144
+capabilities = ["tools", "streaming", "thinking", "vision", "prompt_caching"]
+pricing = { input_per_mtok = 0.20, output_per_mtok = 1.00, cache_read_per_mtok = 0.10 }
+logical_model = "nvidia-nemotron-3.5-super-vl"
+equivalence_group = "nvidia-nemotron-3.5-super-vl"
+family = "nvidia-nemotron"
+lineage = "nvidia-nemotron-3-5"
+tier = "mid"
+open_weight = true
+strengths = ["speed", "tool_use", "vision", "long_context"]
+
+[models."nvidia/nemotron-3.5-super-vl-120b-a12b"]
+name = "Nemotron 3.5 Super VL (NVIDIA)"
+provider = "nvidia"
+context_window = 1048576
+capabilities = ["tools", "streaming", "thinking", "vision"]
+logical_model = "nvidia-nemotron-3.5-super-vl"
+equivalence_group = "nvidia-nemotron-3.5-super-vl"
+family = "nvidia-nemotron"
+lineage = "nvidia-nemotron-3-5"
+tier = "mid"
+open_weight = true
+strengths = ["tool_use", "vision", "long_context"]
+
+[models."vercel/nvidia/nemotron-3.5-super-vl"]
+name = "Nemotron 3.5 Super VL (Vercel AI Gateway)"
+provider = "vercel_ai_gateway"
+wire_model = "nvidia/nemotron-3.5-super-vl"
+context_window = 1048576
+capabilities = ["tools", "streaming", "thinking", "vision", "prompt_caching"]
+pricing = { input_per_mtok = 0.20, output_per_mtok = 0.50, cache_read_per_mtok = 0.04 }
+logical_model = "nvidia-nemotron-3.5-super-vl"
+equivalence_group = "nvidia-nemotron-3.5-super-vl"
+family = "nvidia-nemotron"
+lineage = "nvidia-nemotron-3-5"
+tier = "mid"
+open_weight = true
+strengths = ["tool_use", "vision", "long_context"]
+
+[models."stepfun/step-5-preview"]
+name = "Step 5 Preview (OpenRouter)"
+provider = "openrouter"
+context_window = 1048576
+capabilities = ["tools", "streaming", "thinking", "vision", "prompt_caching"]
+pricing = { input_per_mtok = 1.00, output_per_mtok = 2.70, cache_read_per_mtok = 0.10 }
+family = "stepfun-step"
+lineage = "stepfun-step-5"
+tier = "frontier"
+open_weight = true
+strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context"]
+
+[models."deepinfra/stepfun-ai/Step-5-Preview"]
+name = "Step 5 Preview (DeepInfra)"
+provider = "deepinfra"
+wire_model = "stepfun-ai/Step-5-Preview"
+context_window = 1048576
+capabilities = ["tools", "streaming", "thinking", "vision", "prompt_caching"]
+pricing = { input_per_mtok = 1.00, output_per_mtok = 2.70, cache_read_per_mtok = 0.05 }
+family = "stepfun-step"
+lineage = "stepfun-step-5"
+tier = "frontier"
+open_weight = true
+strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context"]
+
+[models."inception/mercury-2.5"]
+name = "Mercury 2.5 (OpenRouter)"
+provider = "openrouter"
+context_window = 260000
+capabilities = ["streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 0.04, output_per_mtok = 0.15, cache_read_per_mtok = 0.004 }
+# Indexed, but live tool and effort probes returned upstream 502 errors.
+availability = "unknown"
+family = "inception-mercury"
+lineage = "inception-mercury-2"
+tier = "mid"
+open_weight = false
+strengths = ["speed", "cheap"]
+
+[models."mercury-2.5"]
+name = "Mercury 2.5 (Inception)"
+provider = "inception"
+context_window = 260000
+capabilities = ["streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 0.20, output_per_mtok = 0.75 }
+availability = "unknown"
+family = "inception-mercury"
+lineage = "inception-mercury-2"
+tier = "mid"
+open_weight = false
+strengths = ["speed", "cheap"]
+
+[models."fireworks/ember-1"]
+name = "Ember 1 (OpenRouter)"
+provider = "openrouter"
+context_window = 1048576
+capabilities = ["tools", "streaming", "thinking", "vision", "prompt_caching"]
+pricing = { input_per_mtok = 3.00, output_per_mtok = 15.00, cache_read_per_mtok = 0.30 }
+family = "fireworks-ember"
+lineage = "fireworks-ember-1"
+tier = "frontier"
+strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context"]
+
+[models."accounts/fireworks/models/ember-1"]
+name = "Ember 1 (Fireworks)"
+provider = "fireworks"
+context_window = 1048576
+capabilities = ["tools", "streaming", "thinking", "vision", "prompt_caching"]
+pricing = { input_per_mtok = 3.00, output_per_mtok = 15.00, cache_read_per_mtok = 0.30 }
+family = "fireworks-ember"
+lineage = "fireworks-ember-1"
+tier = "frontier"
+strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context"]
+
+[models."inclusionai/ling-3.1-flash"]
+name = "Ling 3.1 Flash (OpenRouter)"
+provider = "openrouter"
+context_window = 262144
+capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 0.075, output_per_mtok = 0.225, cache_read_per_mtok = 0.015 }
+family = "inclusionai-ling"
+lineage = "inclusionai-ling-3"
+tier = "mid"
+open_weight = true
+strengths = ["speed", "cheap", "tool_use"]
+
+[models."deepinfra/inclusionAI/Ling-3.1-flash"]
+name = "Ling 3.1 Flash (DeepInfra)"
+provider = "deepinfra"
+wire_model = "inclusionAI/Ling-3.1-flash"
+context_window = 262144
+capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 0.30, output_per_mtok = 0.90, cache_read_per_mtok = 0.06 }
+family = "inclusionai-ling"
+lineage = "inclusionai-ling-3"
+tier = "mid"
+open_weight = true
+strengths = ["speed", "cheap", "tool_use"]
+
+[models."liquid/lfm-2.5-24b-a2b"]
+name = "LFM 2.5 24B A2B (OpenRouter)"
+provider = "openrouter"
+context_window = 128000
+capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 0.05, output_per_mtok = 0.70, cache_read_per_mtok = 0.025 }
+family = "liquid-lfm"
+lineage = "liquid-lfm-2-5"
+tier = "mid"
+open_weight = true
+strengths = ["speed", "cheap", "tool_use"]
+
+# Vision specialists do not advertise function calling in their route index.
+[models."moondream/moondream3.1-9b-a2b"]
+name = "Moondream 3.1 (OpenRouter)"
+provider = "openrouter"
+context_window = 32000
+capabilities = ["streaming", "vision", "thinking"]
+pricing = { input_per_mtok = 0.30, output_per_mtok = 2.50 }
+family = "moondream"
+lineage = "moondream-3"
+tier = "small"
+open_weight = true
+strengths = ["vision"]
+
+# --- source: 60-models/28-reasoning-routes.toml ---
+# Additional current reasoning routes from provider indexes, 2026-10-15.
+# https://openrouter.ai/api/v1/models
+# https://api.together.xyz/v1/models
+# https://api.deepinfra.com/v1/openai/models
+# https://fireworks.ai/models/fireworks/inkling
+
+[models."thinkingmachines/inkling"]
+name = "Inkling (OpenRouter)"
+provider = "openrouter"
+context_window = 524288
+capabilities = ["tools", "streaming", "thinking", "vision", "prompt_caching"]
+pricing = { input_per_mtok = 1.00, output_per_mtok = 4.05, cache_read_per_mtok = 0.17 }
+tier = "frontier"
+open_weight = true
+family = "thinkingmachines-inkling"
+strengths = ["coding", "reasoning", "tool_use", "long_context"]
+
+[models."thinkingmachines/inkling-small"]
+name = "Inkling Small (OpenRouter)"
+provider = "openrouter"
+context_window = 524288
+capabilities = ["tools", "streaming", "thinking", "vision", "prompt_caching"]
+pricing = { input_per_mtok = 0.45, output_per_mtok = 1.20, cache_read_per_mtok = 0.10 }
+tier = "mid"
+open_weight = true
+family = "thinkingmachines-inkling"
+strengths = ["speed", "reasoning", "tool_use", "long_context"]
+
+[models."together/thinkingmachines/Inkling"]
+name = "Inkling (Together)"
+provider = "together"
+wire_model = "thinkingmachines/Inkling"
+context_window = 524288
+capabilities = ["tools", "streaming", "thinking", "vision", "prompt_caching"]
+pricing = { input_per_mtok = 1.00, output_per_mtok = 4.05, cache_read_per_mtok = 0.17 }
+tier = "frontier"
+open_weight = true
+family = "thinkingmachines-inkling"
+strengths = ["coding", "reasoning", "tool_use", "long_context"]
+
+[models."accounts/fireworks/models/inkling"]
+name = "Inkling (Fireworks)"
+provider = "fireworks"
+context_window = 1048576
+capabilities = ["tools", "streaming", "thinking", "vision"]
+tier = "frontier"
+open_weight = true
+family = "thinkingmachines-inkling"
+strengths = ["coding", "reasoning", "tool_use", "long_context"]
+
+[models."deepinfra/thinkingmachines/Inkling-Small"]
+name = "Inkling Small (DeepInfra)"
+provider = "deepinfra"
+wire_model = "thinkingmachines/Inkling-Small"
+context_window = 524288
+capabilities = ["tools", "streaming", "thinking", "vision", "prompt_caching"]
+pricing = { input_per_mtok = 0.45, output_per_mtok = 1.20, cache_read_per_mtok = 0.10 }
+tier = "mid"
+open_weight = true
+family = "thinkingmachines-inkling"
+strengths = ["speed", "reasoning", "tool_use", "long_context"]
+
+[models."nvidia/nemotron-3.5-lightning"]
+name = "Nemotron 3.5 Lightning (OpenRouter)"
+provider = "openrouter"
+context_window = 262144
+capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 0.07, output_per_mtok = 0.20, cache_read_per_mtok = 0.04 }
+tier = "mid"
+open_weight = true
+family = "nvidia-nemotron"
+lineage = "nvidia-nemotron-3-5"
+strengths = ["speed", "cheap", "tool_use"]
+
+[models."deepinfra/nvidia/NVIDIA-Nemotron-3.5-Lightning"]
+name = "Nemotron 3.5 Lightning (DeepInfra)"
+provider = "deepinfra"
+wire_model = "nvidia/NVIDIA-Nemotron-3.5-Lightning"
+context_window = 262144
+capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 0.06, output_per_mtok = 0.16, cache_read_per_mtok = 0.03 }
+tier = "mid"
+open_weight = true
+family = "nvidia-nemotron"
+lineage = "nvidia-nemotron-3-5"
+strengths = ["speed", "cheap", "tool_use"]
+
+[models."qwen/qwen3.8-max-prime"]
+name = "Qwen 3.8 Max Prime (OpenRouter)"
+provider = "openrouter"
+context_window = 1000000
+capabilities = ["tools", "streaming", "thinking", "vision", "prompt_caching"]
+pricing = { input_per_mtok = 4.00, output_per_mtok = 12.00, cache_read_per_mtok = 0.50 }
+tier = "reasoning"
+open_weight = false
+family = "qwen"
+lineage = "qwen-3-8"
+strengths = ["coding", "reasoning", "tool_use", "long_context"]
+
+# --- source: 60-models/29-hosted-family-refresh.toml ---
+# Latest hosted family releases from https://openrouter.ai/api/v1/models,
+# read October 15, 2026. Native tool claims are backed by the refresh report at
+# docs/llm/provider-evidence/2026-10-15-catalog-refresh.md.
+
+[models."unbiased/pareto-26.9"]
+name = "Pareto 26.9 (OpenRouter)"
+provider = "openrouter"
+context_window = 262144
+capabilities = ["tools", "streaming", "vision", "prompt_caching"]
+pricing = { input_per_mtok = 2.50, output_per_mtok = 7.50, cache_read_per_mtok = 0.25 }
+family = "unbiased-pareto"
+lineage = "unbiased-pareto-26"
+tier = "frontier"
+
+[models."perceptron/perceptron-mk1.5"]
+name = "Perceptron Mk1.5 (OpenRouter)"
+provider = "openrouter"
+context_window = 36864
+capabilities = ["tools", "streaming", "thinking", "vision"]
+pricing = { input_per_mtok = 0.15, output_per_mtok = 1.50 }
+family = "perceptron"
+lineage = "perceptron-mk1"
+tier = "mid"
+
+[models."aion-labs/aion-3.5"]
+name = "Aion 3.5 (OpenRouter)"
+provider = "openrouter"
+context_window = 262144
+capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 3.00, output_per_mtok = 6.00, cache_read_per_mtok = 0.75 }
+family = "aion"
+lineage = "aion-3"
+tier = "frontier"
+
+[models."aion-labs/aion-3.5-mini"]
+name = "Aion 3.5 Mini (OpenRouter)"
+provider = "openrouter"
+context_window = 262144
+capabilities = ["streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 0.70, output_per_mtok = 1.40, cache_read_per_mtok = 0.18 }
+family = "aion"
+lineage = "aion-3"
+tier = "mid"
+
+[models."upstage/solar-mini4"]
+name = "Solar Mini 4 (OpenRouter)"
+provider = "openrouter"
+context_window = 524288
+capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 0.05, output_per_mtok = 0.20, cache_read_per_mtok = 0.005 }
+family = "upstage-solar"
+lineage = "upstage-solar-4"
+tier = "small"
+
+[models."upstage/solar-pro4"]
+name = "Solar Pro 4 (OpenRouter)"
+provider = "openrouter"
+context_window = 524288
+capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 0.09, output_per_mtok = 0.36, cache_read_per_mtok = 0.018 }
+family = "upstage-solar"
+lineage = "upstage-solar-4"
+tier = "mid"
+
+[models."xiaomi/mimo-v2.6-pro-ultraspeed"]
+name = "MiMo V2.6 Pro UltraSpeed (OpenRouter)"
+provider = "openrouter"
+context_window = 1048576
+capabilities = ["tools", "streaming", "thinking", "vision", "prompt_caching"]
+pricing = { input_per_mtok = 4.35, output_per_mtok = 8.70, cache_read_per_mtok = 0.036 }
+family = "xiaomi-mimo"
+lineage = "xiaomi-mimo-v2"
+tier = "frontier"
+
+[models."qwen/qwen3.8-omni-flash"]
+name = "Qwen 3.8 Omni Flash (OpenRouter)"
+provider = "openrouter"
+context_window = 1000000
+capabilities = ["tools", "streaming", "thinking", "vision", "prompt_caching"]
+pricing = { input_per_mtok = 0.15, output_per_mtok = 0.47, cache_read_per_mtok = 0.016 }
+family = "qwen"
+lineage = "qwen-3-8"
+tier = "mid"
+
+[models."qwen/qwen3.8-flash"]
+name = "Qwen 3.8 Flash (OpenRouter)"
+provider = "openrouter"
+context_window = 1000000
+capabilities = ["tools", "streaming", "thinking", "vision", "prompt_caching"]
+pricing = { input_per_mtok = 0.15, output_per_mtok = 0.47, cache_read_per_mtok = 0.016 }
+family = "qwen"
+lineage = "qwen-3-8"
+tier = "mid"
+
+[models."qwen/qwen3.8-2.4t-a95b"]
+name = "Qwen 3.8 2.4T A95B (OpenRouter)"
+provider = "openrouter"
+context_window = 1048576
+capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 2.00, output_per_mtok = 6.00, cache_read_per_mtok = 0.25 }
+family = "qwen"
+lineage = "qwen-3-8"
+tier = "frontier"
+open_weight = true
+
+[models."tencent/hy4-preview"]
+name = "Tencent Hy4 Preview (OpenRouter)"
+provider = "openrouter"
+context_window = 1048576
+capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
+# Daytime route rate. The index also advertises a cheaper UTC night rate.
+pricing = { input_per_mtok = 0.834, output_per_mtok = 2.501, cache_read_per_mtok = 0.042 }
+family = "tencent-hunyuan"
+lineage = "tencent-hy4"
+tier = "frontier"
+open_weight = true
+
+[models."nex-agi/nex-n2.5-pro"]
+name = "Nex N2.5 Pro (OpenRouter)"
+provider = "openrouter"
+context_window = 262144
+capabilities = ["tools", "streaming", "thinking", "vision", "prompt_caching"]
+pricing = { input_per_mtok = 0.075, output_per_mtok = 0.25, cache_read_per_mtok = 0.015 }
+family = "nex-agi"
+lineage = "nex-n2"
+tier = "mid"
+
+[models."ibm-granite/granite-4.2-8b"]
+name = "Granite 4.2 8B (OpenRouter)"
+provider = "openrouter"
+context_window = 131072
+capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 0.06, output_per_mtok = 0.25, cache_read_per_mtok = 0.015 }
+family = "ibm-granite"
+lineage = "ibm-granite-4"
+tier = "small"
+open_weight = true
+
+[models."meta/muse-spark-1.3"]
+name = "Muse Spark 1.3 (OpenRouter)"
+provider = "openrouter"
+context_window = 1048576
+capabilities = ["tools", "streaming", "thinking", "vision", "prompt_caching"]
+pricing = { input_per_mtok = 1.25, output_per_mtok = 4.25, cache_read_per_mtok = 0.15 }
+family = "meta-muse"
+lineage = "meta-muse-spark"
+tier = "frontier"
+
+[models."meta/muse-spark-1.3-contributor"]
+name = "Muse Spark 1.3 Contributor (OpenRouter)"
+provider = "openrouter"
+# The only upstream trains on requests; this account's privacy guard refuses it.
+availability = "unknown"
+context_window = 1048576
+capabilities = ["tools", "streaming", "thinking", "vision", "prompt_caching"]
+pricing = { input_per_mtok = 0.10, output_per_mtok = 0.20, cache_read_per_mtok = 0.002 }
+family = "meta-muse"
+lineage = "meta-muse-spark"
+tier = "mid"
+
+[models."meta/muse-spark-1.3-contributor".data_controls]
+training_default = "trains"
+note = "Meta's contributor tier trains on requests. OpenRouter account privacy settings can exclude this route."
+checked_on = "2026-10-15"
+sources = ["https://developer.meta.com/ai/products/meta-model-api/"]
+
+[models."bytedance-seed/seed-2-1-turbo"]
+name = "Seed 2.1 Turbo (OpenRouter)"
+provider = "openrouter"
+context_window = 262144
+capabilities = ["tools", "streaming", "thinking", "vision"]
+pricing = { input_per_mtok = 0.50, output_per_mtok = 2.50 }
+family = "bytedance-seed"
+lineage = "bytedance-seed-2"
+tier = "mid"
+
 # --- source: 60-models/30-cerebras.toml ---
 # Cerebras-hosted open-weight models. Serverless rows mirror
 # https://api.cerebras.ai/public/v1/models; dedicated-endpoint families are
@@ -5171,7 +5977,8 @@ name = "MiniMax M2.7 (via OpenRouter)"
 provider = "openrouter"
 context_window = 204800
 capabilities = ["tools", "streaming"]
-pricing = { input_per_mtok = 0.21, output_per_mtok = 0.84, cache_read_per_mtok = 0.042 }
+# Hosted cards re-read from https://openrouter.ai/api/v1/models, 2026-10-15.
+pricing = { input_per_mtok = 0.30, output_per_mtok = 1.20, cache_read_per_mtok = 0.06 }
 tier = "frontier"
 open_weight = true
 strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context"]
@@ -5180,7 +5987,7 @@ name = "MiniMax M2.5 (via OpenRouter)"
 provider = "openrouter"
 context_window = 204800
 capabilities = ["tools", "streaming"]
-pricing = { input_per_mtok = 0.27, output_per_mtok = 1.08, cache_read_per_mtok = 0.027 }
+pricing = { input_per_mtok = 0.27, output_per_mtok = 0.95, cache_read_per_mtok = 0.03 }
 tier = "frontier"
 open_weight = true
 strengths = ["coding", "agentic", "tool_use", "long_context"]
@@ -5189,7 +5996,7 @@ name = "MiniMax M2 (via OpenRouter)"
 provider = "openrouter"
 context_window = 204800
 capabilities = ["tools", "streaming"]
-pricing = { input_per_mtok = 0.3, output_per_mtok = 1.2 }
+pricing = { input_per_mtok = 0.255, output_per_mtok = 1.02 }
 # Inline metadata keeps this row independent of fragment-order defaults.
 tier = "frontier"
 open_weight = true
@@ -5926,7 +6733,8 @@ name = "Gemma 4 31B (OpenRouter)"
 provider = "openrouter"
 context_window = 262144
 capabilities = ["tools", "vision", "streaming", "thinking"]
-pricing = { input_per_mtok = 0.09, output_per_mtok = 0.34, cache_read_per_mtok = 0.05 }
+# OpenRouter route card, 2026-10-15; other Gemma hosts have separate cards.
+pricing = { input_per_mtok = 0.20, output_per_mtok = 0.40, cache_read_per_mtok = 0.05 }
 tier = "frontier"
 open_weight = true
 strengths = ["vision", "reasoning", "coding", "cheap"]
@@ -6396,6 +7204,40 @@ capabilities = ["tools", "streaming"]
 tier = "mid"
 open_weight = true
 strengths = ["general", "tool_use"]
+
+# --- source: 60-models/91-cohere-north.toml ---
+# Cohere's current model index, read October 15, 2026, lists North alongside
+# Command A+. These shared API routes are free for evaluation up to account
+# rate limits; Model Vault production deployments have separate pricing.
+# https://docs.cohere.com/docs/models
+# No direct Cohere credential is available for live capability verification.
+
+[models."north-mini-code-1-0"]
+name = "North Mini Code 1.0 (Cohere evaluation)"
+provider = "cohere"
+context_window = 262144
+capabilities = ["streaming"]
+pricing = { input_per_mtok = 0.0, output_per_mtok = 0.0 }
+availability = "unknown"
+family = "cohere-north"
+lineage = "cohere-north-code-1"
+tier = "small"
+open_weight = true
+architecture = { parameter_count_b = 30.0, active_parameter_count_b = 3.0, moe = true, license = "Apache-2.0", source_url = "https://docs.cohere.com/docs/north-mini-code-1.0", last_verified = "2026-10-15" }
+strengths = ["coding"]
+
+[models."north-small-translate-1-0"]
+name = "North Small Translate 1.0 (Cohere evaluation)"
+provider = "cohere"
+context_window = 16384
+capabilities = ["streaming"]
+pricing = { input_per_mtok = 0.0, output_per_mtok = 0.0 }
+availability = "unknown"
+family = "cohere-north"
+lineage = "cohere-north-translate-1"
+tier = "mid"
+open_weight = true
+architecture = { parameter_count_b = 218.0, active_parameter_count_b = 25.0, moe = true, license = "CC-BY-NC-4.0", source_url = "https://docs.cohere.com/docs/north-small-translate-1.0", last_verified = "2026-10-15" }
 
 # --- source: 60-models/92-vertex.toml ---
 # Stable Vertex AI Gemini route. The collision-free catalog id keeps the
@@ -8149,6 +8991,240 @@ strengths = ["coding", "reasoning", "tool_use", "long_context", "vision"]
 # (HTTP 404 `Model not found, inaccessible, and/or not deployed`); its model
 # listing carries only `glm-5p2`, which stays catalogued above.
 
+# --- source: 60-models/99-system-one.toml ---
+# Decision-only additions verified October 15, 2026 against:
+# https://openrouter.ai/api/v1/models?output_modalities=decisions
+# https://ai-gateway.vercel.sh/v1/models
+# Every OpenRouter row below answered boolean, choice and score in one live
+# request. These are not chat models, even where their weights come from an LLM.
+# Harn currently exposes text/JSON state, not the providers' image extensions.
+# Rows with missing context or unknown contracts remain out of the catalog.
+
+[models."openrouter/respan/span-02"]
+name = "Span 02 (OpenRouter)"
+provider = "openrouter"
+wire_model = "respan/span-02"
+operations = ["decision"]
+context_window = 131072
+pricing = { input_per_mtok = 0.01, output_per_mtok = 0.0 }
+tier = "small"
+open_weight = true
+family = "respan-span"
+
+[models."openrouter/liquid/d1"]
+name = "Liquid d1 (OpenRouter)"
+provider = "openrouter"
+wire_model = "liquid/d1"
+operations = ["decision"]
+context_window = 65536
+pricing = { input_per_mtok = 0.02, output_per_mtok = 0.0 }
+tier = "small"
+family = "liquid-d1"
+
+[models."openrouter/liquid/d1-ultra"]
+name = "Liquid d1 Ultra (OpenRouter)"
+provider = "openrouter"
+wire_model = "liquid/d1-ultra"
+operations = ["decision"]
+context_window = 32768
+pricing = { input_per_mtok = 0.042, output_per_mtok = 0.0 }
+tier = "small"
+family = "liquid-d1"
+
+[models."openrouter/scaledown/classify-1"]
+name = "Classify 1 (OpenRouter)"
+provider = "openrouter"
+wire_model = "scaledown/classify-1"
+operations = ["decision"]
+context_window = 1000000
+pricing = { input_per_mtok = 0.04, output_per_mtok = 0.0 }
+tier = "small"
+family = "scaledown-classify"
+
+[models."openrouter/nace-ai/drex-v1.5"]
+name = "Drex 1.5 (OpenRouter)"
+provider = "openrouter"
+wire_model = "nace-ai/drex-v1.5"
+operations = ["decision"]
+context_window = 131072
+pricing = { input_per_mtok = 0.04, output_per_mtok = 0.0 }
+tier = "small"
+family = "nace-drex"
+superseded_by = "openrouter/nace-ai/drex-v2.0"
+
+[models."openrouter/nace-ai/drex-v2.0"]
+name = "Drex 2.0 (OpenRouter)"
+provider = "openrouter"
+wire_model = "nace-ai/drex-v2.0"
+operations = ["decision"]
+context_window = 131072
+pricing = { input_per_mtok = 0.06, output_per_mtok = 0.0 }
+tier = "small"
+family = "nace-drex"
+
+[models."openrouter/microsoft/microsoft-decision-1"]
+name = "Microsoft Decision 1 (OpenRouter)"
+provider = "openrouter"
+wire_model = "microsoft/microsoft-decision-1"
+operations = ["decision"]
+context_window = 32768
+pricing = { input_per_mtok = 0.042, output_per_mtok = 0.0 }
+tier = "small"
+family = "microsoft-decision"
+
+[models."openrouter/cloudflare/clef"]
+name = "Clef (OpenRouter)"
+provider = "openrouter"
+wire_model = "cloudflare/clef"
+operations = ["decision"]
+context_window = 65536
+pricing = { input_per_mtok = 0.042, output_per_mtok = 0.0 }
+tier = "small"
+open_weight = true
+family = "cloudflare-clef"
+
+[models."openrouter/cloudflare/clef-flash"]
+name = "Clef Flash (OpenRouter)"
+provider = "openrouter"
+wire_model = "cloudflare/clef-flash"
+operations = ["decision"]
+context_window = 24576
+pricing = { input_per_mtok = 0.021, output_per_mtok = 0.0 }
+tier = "small"
+open_weight = true
+family = "cloudflare-clef"
+
+[models."openrouter/cloudflare/clef-omni"]
+name = "Clef Omni (OpenRouter)"
+provider = "openrouter"
+wire_model = "cloudflare/clef-omni"
+operations = ["decision"]
+context_window = 65536
+pricing = { input_per_mtok = 0.15, output_per_mtok = 0.0 }
+tier = "small"
+open_weight = true
+family = "cloudflare-clef"
+
+[models."openrouter/perplexity/pplx-decider-v1.1-27b"]
+name = "Decider 1.1 27B (OpenRouter)"
+provider = "openrouter"
+wire_model = "perplexity/pplx-decider-v1.1-27b"
+operations = ["decision"]
+context_window = 262144
+pricing = { input_per_mtok = 0.02, output_per_mtok = 0.0 }
+tier = "small"
+family = "perplexity-decider"
+row_kind = "snapshot"
+
+[models."openrouter/perplexity/pplx-decider-latest"]
+name = "Decider Latest (OpenRouter)"
+provider = "openrouter"
+wire_model = "~perplexity/pplx-decider-latest"
+operations = ["decision"]
+context_window = 262144
+pricing = { input_per_mtok = 0.02, output_per_mtok = 0.0 }
+tier = "small"
+family = "perplexity-decider"
+row_kind = "selector"
+current_snapshot = "openrouter/perplexity/pplx-decider-v1.1-27b"
+
+[models."openrouter/openai/gpt-6-luna-decisions"]
+name = "GPT 6 Luna Decisions (OpenRouter)"
+provider = "openrouter"
+wire_model = "openai/gpt-6-luna-decisions"
+operations = ["decision"]
+context_window = 1050000
+pricing = { input_per_mtok = 0.10, output_per_mtok = 0.0 }
+tier = "small"
+open_weight = false
+family = "openai-decisions"
+
+[models."openrouter/togethercomputer/tev1-4b-experimental"]
+name = "Tev1 4B Experimental (OpenRouter)"
+provider = "openrouter"
+wire_model = "togethercomputer/tev1-4b-experimental"
+operations = ["decision"]
+context_window = 32768
+pricing = { input_per_mtok = 0.042, output_per_mtok = 0.0 }
+tier = "small"
+family = "together-tev"
+
+[models."openrouter/inception/mercury-decide"]
+name = "Mercury Decide (OpenRouter)"
+provider = "openrouter"
+wire_model = "inception/mercury-decide"
+operations = ["decision"]
+context_window = 65536
+pricing = { input_per_mtok = 0.02, output_per_mtok = 0.0 }
+tier = "small"
+family = "inception-mercury-decide"
+
+[models."openrouter/upstage/solar-decide"]
+name = "Solar Decide (OpenRouter)"
+provider = "openrouter"
+wire_model = "upstage/solar-decide"
+operations = ["decision"]
+context_window = 524288
+pricing = { input_per_mtok = 0.05, output_per_mtok = 0.0 }
+tier = "small"
+family = "upstage-solar-decide"
+
+[models."openrouter/upstage/solar-decide-flash"]
+name = "Solar Decide Flash (OpenRouter)"
+provider = "openrouter"
+wire_model = "upstage/solar-decide-flash"
+operations = ["decision"]
+context_window = 524288
+pricing = { input_per_mtok = 0.05, output_per_mtok = 0.0 }
+tier = "small"
+family = "upstage-solar-decide"
+
+[models."openrouter/jaredpalmer/kev-4b"]
+name = "Kev 4B (OpenRouter)"
+provider = "openrouter"
+wire_model = "jaredpalmer/kev-4b"
+operations = ["decision"]
+context_window = 8192
+pricing = { input_per_mtok = 0.042, output_per_mtok = 0.0 }
+tier = "small"
+open_weight = true
+family = "jaredpalmer-kev"
+
+# Served by Boundless, not by the model author. A typed capability pin owns
+# that distinction; the transport must not hard-code TypeSafe for all models.
+[models."vercel/convaiinnovations/laya"]
+name = "Laya (Vercel AI Gateway)"
+provider = "vercel_ai_gateway"
+wire_model = "convaiinnovations/laya"
+operations = ["decision"]
+context_window = 8192
+availability = "unknown"
+pricing = { input_per_mtok = 0.0, output_per_mtok = 0.0 }
+tier = "small"
+family = "convai-laya"
+
+[models."vercel/liquid/d1-ultra"]
+name = "Liquid d1 Ultra (Vercel AI Gateway)"
+provider = "vercel_ai_gateway"
+wire_model = "liquid/d1-ultra"
+operations = ["decision"]
+context_window = 32768
+availability = "unknown"
+pricing = { input_per_mtok = 0.042, output_per_mtok = 0.0 }
+tier = "small"
+family = "liquid-d1"
+
+[models."vercel/perplexity/pplx-decider-v1.1-27b"]
+name = "Decider 1.1 27B (Vercel AI Gateway)"
+provider = "vercel_ai_gateway"
+wire_model = "perplexity/pplx-decider-v1.1-27b"
+operations = ["decision"]
+context_window = 262144
+availability = "unknown"
+pricing = { input_per_mtok = 0.02, output_per_mtok = 0.0 }
+tier = "small"
+family = "perplexity-decider"
+
 # --- source: 60-models/99-typesafe-jev.toml ---
 # ── TypeSafe Jev — decision-only routes ──────────────────────────────────────
 #
@@ -8174,8 +9250,11 @@ strengths = ["coding", "reasoning", "tool_use", "long_context", "vision"]
 #     32k state ceiling, because that is the bound a caller has to plan against
 #     and the one OpenRouter publishes for the route.
 #     https://docs.typesafe.ai/models, https://openrouter.ai/typesafe
-#   * Text and structured JSON only; no image, audio, or video input.
-#     https://docs.typesafe.ai/concepts/system-one
+#   * Text and structured JSON on Harn's evaluator. TypeSafe announced opt-in
+#     images, box questions (1.14 only), and 262k context on October 14.
+#     These require explicit experimental headers and assets and are not
+#     advertised as ordinary chat vision or larger default request limits.
+#     https://typesafe.ai/blog/jev-1-14
 #
 # `logical_model` and `equivalence_group` are shared so that cross-route
 # equivalence is visible to a human reading the catalog. They are NOT a
@@ -8205,6 +9284,99 @@ open_weight = false
 strengths = ["speed", "cheap"]
 availability = "unknown"
 row_kind = "snapshot"
+family = "typesafe-jev"
+lineage = "typesafe-jev-1"
+
+# Jev 1.14 shipped under jev-preview on October 14. As of October 15,
+# jev-latest still points at 1.13; the announcement plans to move it a week
+# after launch. No formal sunset was announced for either version.
+# https://docs.typesafe.ai/models
+[models."typesafe/jev-1.14.0"]
+name = "Jev 1.14.0 (TypeSafe)"
+provider = "typesafe"
+wire_model = "jev-1.14.0"
+logical_model = "typesafe-jev-1.14"
+equivalence_group = "typesafe-jev-1.14"
+operations = ["decision"]
+context_window = 32000
+pricing = { input_per_mtok = 0.042, output_per_mtok = 0.0 }
+tier = "small"
+open_weight = false
+availability = "unknown"
+row_kind = "snapshot"
+released = "2026-10-14"
+family = "typesafe-jev"
+lineage = "typesafe-jev-1"
+
+[models."typesafe/jev-preview"]
+name = "Jev Preview (TypeSafe)"
+provider = "typesafe"
+wire_model = "jev-preview"
+logical_model = "typesafe-jev-1.14"
+equivalence_group = "typesafe-jev-1.14"
+operations = ["decision"]
+context_window = 32000
+pricing = { input_per_mtok = 0.042, output_per_mtok = 0.0 }
+tier = "small"
+open_weight = false
+availability = "unknown"
+row_kind = "selector"
+current_snapshot = "typesafe/jev-1.14.0"
+family = "typesafe-jev"
+lineage = "typesafe-jev-1"
+
+# Vercel's October 15 model index exposes both immutable versions alongside
+# typesafe-ai/jev. Keep the generic selector's recorded 1.13 identity until
+# a live response proves its revision changed.
+[models."vercel/typesafe-ai/jev-1.13.0"]
+name = "Jev 1.13.0 (Vercel AI Gateway)"
+provider = "vercel_ai_gateway"
+availability = "unknown"
+wire_model = "typesafe-ai/jev-1.13.0"
+logical_model = "typesafe-jev-1.13"
+equivalence_group = "typesafe-jev-1.13"
+operations = ["decision"]
+context_window = 32000
+pricing = { input_per_mtok = 0.042, output_per_mtok = 0.0 }
+tier = "small"
+open_weight = false
+row_kind = "snapshot"
+family = "typesafe-jev"
+lineage = "typesafe-jev-1"
+
+[models."vercel/typesafe-ai/jev-1.14.0"]
+name = "Jev 1.14.0 (Vercel AI Gateway)"
+provider = "vercel_ai_gateway"
+availability = "unknown"
+wire_model = "typesafe-ai/jev-1.14.0"
+logical_model = "typesafe-jev-1.14"
+equivalence_group = "typesafe-jev-1.14"
+operations = ["decision"]
+context_window = 32000
+pricing = { input_per_mtok = 0.042, output_per_mtok = 0.0 }
+tier = "small"
+open_weight = false
+row_kind = "snapshot"
+released = "2026-10-14"
+family = "typesafe-jev"
+lineage = "typesafe-jev-1"
+
+# The decisions endpoint has a model-specific index; absence from the chat
+# /models list is not deprecation evidence for a decision-only route.
+# https://openrouter.ai/api/v1/models/typesafe/jev-1.14/endpoints
+[models."openrouter/typesafe/jev-1.14"]
+name = "Jev 1.14 (OpenRouter)"
+provider = "openrouter"
+wire_model = "typesafe/jev-1.14"
+logical_model = "typesafe-jev-1.14"
+equivalence_group = "typesafe-jev-1.14"
+operations = ["decision"]
+context_window = 32000
+pricing = { input_per_mtok = 0.042, output_per_mtok = 0.0 }
+tier = "small"
+open_weight = false
+row_kind = "snapshot"
+released = "2026-10-14"
 family = "typesafe-jev"
 lineage = "typesafe-jev-1"
 
@@ -8278,14 +9450,15 @@ lineage = "typesafe-jev-1"
 
 # OpenRouter moving selector. On 2026-09-26 a boolean question sent to
 # `~typesafe/jev-latest` on /api/alpha/decisions came back from
-# typesafe/jev-1.13-20260917. https://openrouter.ai/api/v1/models/~typesafe/jev-latest/endpoints
+# typesafe/jev-1.13-20260917. On 2026-10-15 it returned
+# typesafe/jev-1.14-20261014, ahead of the direct TypeSafe stable alias.
 [models."openrouter/typesafe/jev-latest"]
 name = "Jev Latest (OpenRouter)"
 blurb = "Follows TypeSafe's current Jev release through OpenRouter's alpha decisions endpoint."
 provider = "openrouter"
 wire_model = "~typesafe/jev-latest"
-logical_model = "typesafe-jev-1.13"
-equivalence_group = "typesafe-jev-1.13"
+logical_model = "typesafe-jev-1.14"
+equivalence_group = "typesafe-jev-1.14"
 served_variant = "openrouter"
 operations = ["decision"]
 context_window = 32000
@@ -8294,7 +9467,7 @@ tier = "small"
 open_weight = false
 strengths = ["speed", "cheap"]
 row_kind = "selector"
-current_snapshot = "openrouter/typesafe/jev-1.13"
+current_snapshot = "openrouter/typesafe/jev-1.14"
 family = "typesafe-jev"
 lineage = "typesafe-jev-1"
 

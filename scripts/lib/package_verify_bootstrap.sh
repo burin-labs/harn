@@ -145,3 +145,125 @@ apply_external_publish_pins() {
     fi
   done <<<"$external_publish_pins_table"
 }
+
+# Own both builds over one frozen set of extracted archives. Only Cargo.lock
+# changes between them. A byte-identical minimum lockfile reuses the successful
+# latest build; the minimum metadata read and its contract assertions still run.
+package_verify_check_resolutions() {
+  local manifest="$1" target="$2" build_dir="$3" scratch="$4" filter="$5"
+  shift 5
+  local latest_metadata="$scratch/resolver-latest-metadata.json"
+  local minimum_metadata="$scratch/declared-minimum-metadata.json"
+  local latest_lock="$scratch/resolver-latest.lock"
+  local lockfile
+  lockfile="$(dirname "$manifest")/Cargo.lock" || return $?
+  local minimum_rows dependency minimum
+
+  cargo generate-lockfile --manifest-path "$manifest" || return $?
+  apply_external_publish_pins "$manifest" || return $?
+  echo "=== Check all extracted publishable packages with resolver-latest dependencies ==="
+  HARN_REQUIRE_CLI_AOT=1 CARGO_TARGET_DIR="$target" CARGO_BUILD_BUILD_DIR="$build_dir" \
+    cargo check --locked --workspace --manifest-path "$manifest" || return $?
+  cargo metadata --locked --format-version 1 --manifest-path "$manifest" \
+    >"$latest_metadata" || return $?
+  if [[ "$#" -eq 0 ]]; then
+    return 0
+  fi
+  package_verify_emit_resolution_receipts resolver-latest "$latest_metadata" 0 "$filter" "$@" || return $?
+  if [[ ! -s "$lockfile" ]]; then
+    echo 'error: successful latest build has no nonempty lockfile to prove reuse' >&2
+    return 1
+  fi
+  cp "$lockfile" "$latest_lock" || return $?
+  minimum_rows="$(package_verify_select_minimums "$latest_metadata" "$filter" "$@")" || return $?
+  while IFS=$'\t' read -r dependency minimum; do
+    [[ -n "$dependency" ]] || continue
+    cargo update --manifest-path "$manifest" -p "$dependency" --precise "$minimum" || return $?
+  done <<<"$minimum_rows"
+
+  if cmp -s "$latest_lock" "$lockfile"; then
+    echo "=== Reuse resolver-latest compilation: declared-minimum lockfile is identical ==="
+  else
+    echo "=== Check all extracted publishable packages with declared-minimum dependencies ==="
+    HARN_REQUIRE_CLI_AOT=1 CARGO_TARGET_DIR="$target" CARGO_BUILD_BUILD_DIR="$build_dir" \
+      cargo check --locked --workspace --manifest-path "$manifest" || return $?
+  fi
+  cargo metadata --locked --format-version 1 --manifest-path "$manifest" \
+    >"$minimum_metadata" || return $?
+  package_verify_emit_resolution_receipts declared-minimum "$minimum_metadata" 1 "$filter" "$@"
+}
+
+package_verify_emit_resolution_receipts() {
+  local phase="$1" metadata_path="$2" require_minimum="$3" filter="$4"
+  shift 4
+  local row package package_version dependency requirement minimum resolution_name resolved
+  for row in "$@"; do
+    IFS=$'\t' read -r package package_version dependency requirement minimum resolution_name <<<"$row"
+    resolved="$(package_verify_resolved_version "$metadata_path" "$filter" \
+      "$package" "$package_version" "$resolution_name")" || return $?
+    # `none` describes a ceiling contract with no declared minimum to pin.
+    if [[ "$require_minimum" == 1 && "$minimum" != none && "$resolved" != "$minimum" ]]; then
+      echo "error: $phase resolved $package dependency $dependency to $resolved, expected minimum $minimum" >&2
+      return 1
+    fi
+    printf 'dependency_resolution phase=%s package=%s@%s dependency=%s requirement=%s minimum=%s resolved=%s\n' \
+      "$phase" "$package" "$package_version" "$dependency" "$requirement" "$minimum" "$resolved"
+  done
+}
+
+package_verify_resolved_version() {
+  local metadata_path=$1 filter=$2 package=$3 package_version=$4 resolution_name=$5
+  jq -er --arg package "$package" --arg package_version "$package_version" \
+    --arg resolution_name "$resolution_name" -f "$filter" "$metadata_path"
+}
+
+package_verify_select_minimums() {
+  local metadata_path=$1 filter=$2
+  shift 2
+  local row _package _package_version dependency _requirement minimum _resolution_name
+  local selected=()
+  local entry selected_dependency selected_minimum found
+  for row in "$@"; do
+    IFS=$'\t' read -r _package _package_version dependency _requirement minimum _resolution_name <<<"$row"
+    [[ "$minimum" != none ]] || continue
+    found=0
+    # Bash 3.2 rejects an empty array expansion under nounset.
+    if [[ "${#selected[@]}" -gt 0 ]]; then
+      for entry in "${selected[@]}"; do
+        IFS=$'\t' read -r selected_dependency selected_minimum <<<"$entry"
+        if [[ "$selected_dependency" == "$dependency" ]]; then
+          found=1
+          if [[ "$selected_minimum" != "$minimum" ]]; then
+            echo "error: dependency contracts disagree on minimum for $dependency: $selected_minimum vs $minimum" >&2
+            return 1
+          fi
+        fi
+      done
+    fi
+    if [[ "$found" -eq 0 ]]; then
+      selected+=("$dependency"$'\t'"$minimum")
+    fi
+  done
+  [[ "${#selected[@]}" -gt 0 ]] || return 0
+  local package package_version resolution_name resolved measured needs_pin
+  for entry in "${selected[@]}"; do
+    IFS=$'\t' read -r selected_dependency selected_minimum <<<"$entry"
+    measured=0
+    needs_pin=0
+    for row in "$@"; do
+      IFS=$'\t' read -r package package_version dependency _requirement minimum resolution_name <<<"$row"
+      [[ "$dependency" == "$selected_dependency" && "$minimum" != none ]] || continue
+      resolved="$(package_verify_resolved_version "$metadata_path" "$filter" \
+        "$package" "$package_version" "$resolution_name")" || return $?
+      measured=$((measured + 1))
+      [[ "$resolved" == "$selected_minimum" ]] || needs_pin=1
+    done
+    if [[ "$measured" -eq 0 ]]; then
+      echo "error: no measured resolution for minimum dependency $selected_dependency" >&2
+      return 1
+    fi
+    if [[ "$needs_pin" -eq 1 ]]; then
+      printf '%s\n' "$entry"
+    fi
+  done
+}

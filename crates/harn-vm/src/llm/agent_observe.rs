@@ -440,6 +440,7 @@ fn rand_range_inclusive<R: rand::RngExt>(max: u64, rng: &mut R) -> u64 {
 #[derive(Clone)]
 pub(crate) struct ObservedAttemptToken {
     session_id: Option<String>,
+    dispatches: super::provider_dispatch::ProviderDispatchLedger,
     reasoning_receipts: super::reasoning_receipt::RequestReceipts,
     rate_limit: super::rate_limit::LlmCallAdmission,
     token_projection: super::cost_context::LlmCallTokenProjection,
@@ -453,6 +454,7 @@ impl ObservedAttemptToken {
     ) -> Self {
         Self {
             session_id: super::agent_runtime::current_agent_session_id(),
+            dispatches: super::provider_dispatch::ProviderDispatchLedger::for_current_attempt(),
             reasoning_receipts: super::reasoning_receipt::RequestReceipts::for_journal(
                 opts.session_id.as_deref(),
                 call_id,
@@ -486,7 +488,7 @@ impl ObservedAttemptToken {
     /// indistinguishable from an unmeasured attempt
     /// (burin-labs/harn#8529).
     pub(super) fn record_provider_dispatch(&self) {
-        super::provider_dispatch::record_dispatch();
+        self.dispatches.record();
         if let Some(session_id) = self.session_id.as_deref() {
             super::agent_session_host::record_provider_dispatch(session_id);
         }
@@ -559,6 +561,7 @@ pub(crate) async fn observed_llm_call(
     // transactions. Carry their canonical usage into the final logical-call
     // ledger so downstream schema/repair aggregation cannot lose them.
     let mut completed_retry_usage = Vec::new();
+    let mut physical_attempts = 0usize;
     loop {
         // Network recovery waits share this call's transport budget. A child's
         // temporary route failure must not terminate a recoverable parent turn.
@@ -751,6 +754,9 @@ pub(crate) async fn observed_llm_call(
         .await;
         let duration_ms = start.elapsed().as_millis() as u64;
         let attempt_count = attempt + 1;
+        physical_attempts = physical_attempts.saturating_add(
+            usize::try_from(observed_attempt.dispatches.observed()).unwrap_or(usize::MAX),
+        );
 
         // Release the governor slot reserved above and drive AIMD + the circuit
         // (no-op when the flag is off). Runs once per gated attempt, BEFORE the
@@ -1069,7 +1075,10 @@ pub(crate) async fn observed_llm_call(
                     if let Some(usage) = error_usage.as_ref() {
                         reported.push(usage.clone());
                     }
-                    crate::llm::usage::LlmUsage::aggregate_attempt_ledger(&reported, attempt_count)
+                    crate::llm::usage::LlmUsage::aggregate_attempt_ledger(
+                        &reported,
+                        physical_attempts,
+                    )
                 });
                 annotate_current_span(&[
                     ("status", serde_json::json!(status)),

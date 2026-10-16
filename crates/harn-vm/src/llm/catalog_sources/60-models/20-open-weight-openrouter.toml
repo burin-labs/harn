@@ -32,13 +32,13 @@ open_weight = true
 strengths = ["coding", "cheap", "long_context", "agentic", "tool_use"]
 
 # Qwen3.5-397B-A17B — the open-tier Qwen flagship (native VLM MoE).
-# OpenRouter serverless rate verified 2026-07-02.
+# OpenRouter route rate card re-read from /api/v1/models, 2026-10-15.
 [models."qwen/qwen3.5-397b-a17b"]
 name = "Qwen3.5 397B A17B"
 provider = "openrouter"
 context_window = 262144
 capabilities = ["tools", "vision", "streaming", "thinking"]
-pricing = { input_per_mtok = 0.55, output_per_mtok = 3.50, cache_read_per_mtok = 0.225 }
+pricing = { input_per_mtok = 0.50, output_per_mtok = 3.60, cache_read_per_mtok = 0.30 }
 availability = "serverless"
 architecture = { parameter_count_b = 397.0, active_parameter_count_b = 17.0, moe = true, license = "Apache-2.0", source_url = "https://huggingface.co/Qwen/Qwen3.5-397B-A17B", last_verified = "2026-07-02" }
 benchmarks = { swe_bench_verified = 76.4 }
@@ -68,7 +68,7 @@ name = "DeepSeek V3.2"
 provider = "openrouter"
 context_window = 163840
 capabilities = ["tools", "streaming"]
-pricing = { input_per_mtok = 0.28, output_per_mtok = 0.42, cache_read_per_mtok = 0.028 }
+pricing = { input_per_mtok = 0.259, output_per_mtok = 0.80, cache_read_per_mtok = 0.14 }
 tier = "mid"
 open_weight = true
 strengths = ["coding", "tool_use", "cheap"]
@@ -122,7 +122,9 @@ equivalence_group = "openai-gpt-oss-120b"
 served_variant = "openrouter"
 api_dialect = "openai_chat"
 capabilities = ["tools", "streaming"]
-pricing = { input_per_mtok = 0.037, output_per_mtok = 0.17, cache_read_per_mtok = 0.075 }
+# OpenRouter's 2026-10-15 index lists $0.15/$0.60; the former headline
+# underpriced input even below the route's cached-input rate.
+pricing = { input_per_mtok = 0.15, output_per_mtok = 0.60, cache_read_per_mtok = 0.075 }
 architecture = { parameter_count_b = 117.0, active_parameter_count_b = 5.1, moe = true, license = "Apache-2.0", source_url = "https://developers.openai.com/api/docs/models/gpt-oss-120b", last_verified = "2026-06-05" }
 # Explicit metadata keeps this row self-described across fragment boundaries.
 # GPT-OSS 120B is Apache-2.0 (open weight) and text-only; it is Burin's cheap

@@ -1,0 +1,32 @@
+# Cohere's current model index, read October 15, 2026, lists North alongside
+# Command A+. These shared API routes are free for evaluation up to account
+# rate limits; Model Vault production deployments have separate pricing.
+# https://docs.cohere.com/docs/models
+# No direct Cohere credential is available for live capability verification.
+
+[models."north-mini-code-1-0"]
+name = "North Mini Code 1.0 (Cohere evaluation)"
+provider = "cohere"
+context_window = 262144
+capabilities = ["streaming"]
+pricing = { input_per_mtok = 0.0, output_per_mtok = 0.0 }
+availability = "unknown"
+family = "cohere-north"
+lineage = "cohere-north-code-1"
+tier = "small"
+open_weight = true
+architecture = { parameter_count_b = 30.0, active_parameter_count_b = 3.0, moe = true, license = "Apache-2.0", source_url = "https://docs.cohere.com/docs/north-mini-code-1.0", last_verified = "2026-10-15" }
+strengths = ["coding"]
+
+[models."north-small-translate-1-0"]
+name = "North Small Translate 1.0 (Cohere evaluation)"
+provider = "cohere"
+context_window = 16384
+capabilities = ["streaming"]
+pricing = { input_per_mtok = 0.0, output_per_mtok = 0.0 }
+availability = "unknown"
+family = "cohere-north"
+lineage = "cohere-north-translate-1"
+tier = "mid"
+open_weight = true
+architecture = { parameter_count_b = 218.0, active_parameter_count_b = 25.0, moe = true, license = "CC-BY-NC-4.0", source_url = "https://docs.cohere.com/docs/north-small-translate-1.0", last_verified = "2026-10-15" }
