@@ -10,6 +10,7 @@ pub mod message_lineage;
 pub mod protocol_violation;
 pub mod reasoning_history;
 pub mod request;
+pub mod response_tool_calls;
 pub mod schema_compat;
 pub mod token_count;
 pub mod tool_delimiter;

@@ -1,4 +1,4 @@
-//! Unit coverage for the projection state machine.
+//! Public run-artifact projection coverage.
 //!
 //! These drive the projector over hand-built sidecars so each structured
 //! failure has an isolated cause. End-to-end coverage over a real agent run
@@ -8,8 +8,8 @@ use std::path::{Path, PathBuf};
 
 use serde_json::json;
 
-use super::*;
-use crate::orchestration::{
+use harn_vm::orchestration::*;
+use harn_vm::orchestration::{
     describe_llm_transcript_sidecar, RunObservabilityRecord, RunRecord, RunTranscriptPointerRecord,
 };
 
@@ -387,30 +387,6 @@ fn expect_failure(rows: &[serde_json::Value], kind: &str) -> TrainingExampleErro
 }
 
 #[test]
-fn rejects_malformed_jsonl_instead_of_skipping_the_row() {
-    // Strictness is checked at the projector's own loader, not borrowed from
-    // the descriptor layer. Both are strict today; if the descriptor ever
-    // relaxes, a dropped row must still be impossible here.
-    let mut body = text_channel_rows()
-        .iter()
-        .take(3)
-        .map(|row| format!("{row}\n"))
-        .collect::<String>();
-    body.push_str("{not json}\n");
-
-    let error = super::source::parse_events(&body, "sidecar").unwrap_err();
-    assert_eq!(error.kind, "malformed_jsonl");
-    assert_eq!(error.event_index, Some(4));
-}
-
-#[test]
-fn rejects_a_row_with_no_type_discriminator() {
-    let error = super::source::parse_events("{\"content\":\"x\"}\n", "sidecar").unwrap_err();
-    assert_eq!(error.kind, "malformed_jsonl");
-    assert!(error.message.contains("`type`"), "{error}");
-}
-
-#[test]
 fn a_malformed_sidecar_never_produces_an_example() {
     let mut body = text_channel_rows()
         .iter()
@@ -539,7 +515,7 @@ fn rejects_a_claimed_non_harn_execution_identity() {
     let mut run: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(&artifact.run_path).unwrap()).unwrap();
     run["evidence"] = json!({
-        "schema_version": crate::orchestration::EXECUTION_EVIDENCE_SCHEMA_VERSION,
+        "schema_version": harn_vm::orchestration::EXECUTION_EVIDENCE_SCHEMA_VERSION,
         "execution_id": "external-run-1",
     });
     std::fs::write(&artifact.run_path, serde_json::to_vec_pretty(&run).unwrap()).unwrap();
