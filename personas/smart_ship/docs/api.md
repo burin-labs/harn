@@ -22,6 +22,18 @@ pub type GithubCandidate = {
 }
 ```
 
+### type `GithubCandidateCleanupCommand`
+
+Candidate cleanup must name the integration that durably retained its signed object.
+
+```harn
+pub type GithubCandidateCleanupCommand = {
+  action: "cleanup-candidate",
+  request: CandidateEffect,
+  integration: IntegrationEffect,
+}
+```
+
 ### type `GithubCandidateCommand`
 
 Candidate inputs retain the complete ordered signed admissions; credentials come from installation.
@@ -144,7 +156,9 @@ pub type GithubCiRead = {endpoint: string, response: unknown}
 One command boundary replaces the former per-PR REST merge route.
 
 ```harn
-pub type GithubCommand = GithubCandidateCommand | GithubIntegrationCommand
+pub type GithubCommand = GithubCandidateCommand \
+  | GithubIntegrationCommand \
+  | GithubCandidateCleanupCommand
 ```
 
 ### type `GithubCommandResult`
@@ -156,6 +170,7 @@ pub type GithubCommandResult = {
   schema: "smart-ship.github-command-result.v1",
   action: "prepare" \
     | "recover-candidate" \
+    | "cleanup-candidate" \
     | "integrate" \
     | "recover-integration" \
     | "cleanup-integration",
@@ -170,16 +185,10 @@ pub type GithubCommandResult = {
 
 ### type `GithubIntegrationCleanup`
 
-Unresolved integrations retain their objects. Cleanup never overwrites a competing ref.
+Integration staging uses the shared temporary-object cleanup outcome.
 
 ```harn
-pub type GithubIntegrationCleanup = {
-  status: "deleted" | "retained" | "unknown",
-  observed: string?,
-  provider: GithubRefUpdatesReceipt?,
-  error: GithubConnectorError?,
-  reason: string?,
-}
+pub type GithubIntegrationCleanup = GithubObjectCleanup
 ```
 
 ### type `GithubIntegrationCommand`
@@ -318,6 +327,20 @@ pub type GithubIssuerSettings = {
 }
 ```
 
+### type `GithubObjectCleanup`
+
+Cleanup is observed separately from the provider acknowledgement.
+
+```harn
+pub type GithubObjectCleanup = {
+  status: "deleted" | "retained" | "unknown",
+  observed: string?,
+  provider: GithubRefUpdatesReceipt?,
+  error: GithubConnectorError?,
+  reason: string?,
+}
+```
+
 ### type `GithubReservation`
 
 A reservation is durable intent, not a signing or integration acknowledgement.
@@ -347,6 +370,20 @@ pub fn assess_github_ci(
   artifacts: list<GithubCiArtifact>,
   at_ms: int,
 ) -> GithubCiAssessment {
+}
+```
+
+### fn `cleanup_github_candidate`
+
+Retain the signing branch until its exact candidate is integrated and retained by destination.
+
+```harn
+pub fn cleanup_github_candidate(
+  harness: Harness,
+  configuration: GithubIntegrationConfiguration,
+  request: CandidateEffect,
+  integration: IntegrationEffect,
+) -> GithubObjectCleanup {
 }
 ```
 

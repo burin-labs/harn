@@ -1,14 +1,21 @@
 import { git_env_remove, git_noninteractive_env } from "std/git"
-import { CandidateEffect, EffectTarget, qualify_group_effect } from "./controller"
+import {
+  CandidateEffect,
+  EffectTarget,
+  IntegrationEffect,
+  qualify_group_effect,
+} from "./controller"
 import { effect_receipt } from "./effect_contract"
 import { EffectClaim, claim_reserved_effect, settle_owned_effect } from "./effect_owner"
 import { prepare_group_tree, require_group_ancestry } from "./git_group"
 import {
   fetch_state_objects,
+  read_remote_ref,
   read_state,
   read_state_revision,
   require_git_transport,
 } from "./git_store"
+import { GithubObjectCleanup, cleanup_github_object } from "./github_cleanup"
 import {
   GithubIntegrationConfiguration,
   github_authority_owned,
@@ -16,6 +23,7 @@ import {
   read_github_reviews,
   require_github_claim,
 } from "./github_owner"
+import { reconcile_github_integration, recover_github_integration } from "./github_publisher"
 import { qualify_github_heads } from "./github_review"
 import { policy_digest } from "./identity"
 import { Fence } from "./types"
@@ -511,4 +519,68 @@ pub fn reconcile_github_candidate(
     return unresolved
   }
   return settle_candidate(harness.process, configuration, claim, request, unwrap(inspected))
+}
+
+/**
+ * Retain the signing branch until its exact candidate is integrated and retained by destination.
+ */
+pub fn cleanup_github_candidate(
+  harness: Harness,
+  configuration: GithubIntegrationConfiguration,
+  request: CandidateEffect,
+  integration: IntegrationEffect,
+) -> GithubObjectCleanup {
+  const retained: GithubObjectCleanup = {
+    status: "retained",
+    observed: nil,
+    provider: nil,
+    error: nil,
+    reason: nil,
+  }
+  const qualified = try {
+    const recovered = reconcile_github_candidate(harness, configuration, request)
+    require recovered.status == "confirmed" && recovered.candidate != nil,
+      "candidate has no conclusive signed confirmation"
+    const candidate = recovered.candidate
+    require integration.repository == request.repository
+      && integration.source == candidate.commit.oid,
+      "integration does not address this exact signed candidate"
+    const transaction = recover_github_integration(harness.process, configuration, integration)
+    const reconciled = reconcile_github_integration(harness.process, configuration, transaction)
+    require reconciled.status == "confirmed" && reconciled.observed != nil,
+      "candidate integration is not conclusively confirmed"
+    const store = configuration.installation.store
+    const destination = transaction.witness.destination.ref
+    const head = read_remote_ref(harness.process, store + {ref: destination})
+    require head != nil, "candidate destination has no measured head"
+    fetch_state_objects(harness.process, store, [head, candidate.commit.oid])
+    git(
+      harness.process,
+      store.workspace,
+      ["merge-base", "--is-ancestor", candidate.commit.oid, head],
+      store.timeout_ms,
+    )
+    {candidate: candidate, authority: reconciled.observed, destination: destination, head: head}
+  }
+  if is_err(qualified) {
+    return retained
+      + {
+        reason: "candidate retention is not established: "
+          + to_string(unwrap_err(qualified))[0:2048],
+      }
+  }
+  const proof = unwrap(qualified)
+  return cleanup_github_object(
+    harness,
+    configuration,
+    {
+      repository: request.repository,
+      authority_commit: proof.authority,
+      ref: "refs/heads/" + proof.candidate.branch,
+      expected: proof.candidate.commit.oid,
+      retention_guards: [
+        {ref: proof.destination, before_oid: proof.head, after_oid: proof.head, force: false},
+      ],
+    },
+  )
 }

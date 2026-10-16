@@ -53,7 +53,7 @@ fn fence(state: Controller) -> Fence {
   return pick(state.authority, ["installation", "generation", "revision", "controller"])
 }
 
-fn signed_response(
+pub fn signed_response(
   f: CandidateFixture,
   wrong_parent: bool = false,
   bad_signature: bool = false,
@@ -383,6 +383,12 @@ pub fn exercise_candidate(harness: Harness, f: CandidateFixture, mode: string) {
   assert_eq(input.fileChanges.deletions, [])
   for addition in input.fileChanges.additions {
     assert_eq(base64_decode(addition.contents), addition.path.replace(".txt", " reviewed\n"))
+  }
+  if mode == "cleanup_setup" {
+    assert_eq(result.status, "confirmed", result.reason ?? "unreported")
+    assert_eq(state.effects[0]!.status, "confirmed")
+    assert_eq(result.candidate!.commit.tree_oid, f.tree)
+    return
   }
   if ["normal", "command", "command_new"].contains(mode) {
     assert_eq(result.status, "confirmed", result.reason ?? "unreported")

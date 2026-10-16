@@ -23,7 +23,9 @@ import {
   reserve_effect,
   transfer,
 } from "../lib/main"
+import { exercise_candidate_cleanup } from "./github-candidate-cleanup-test"
 import { exercise_candidate } from "./github-candidate-test"
+import { prepare_cleanup_stop } from "./github-cleanup-control"
 import { git } from "./neutral"
 import { digest, execution, finish_reviewed_admission, fixture, reviewed_request } from "./support"
 import { GithubRefUpdate } from "harn-github-connector/default"
@@ -202,7 +204,7 @@ pub fn exercise_publisher(harness: Harness, mode: string) {
       )
     withdrawn_pages = withdrawn_pages + review_pages(identity, number, head, false)
   }
-  const initial: Controller = {
+  let initial: Controller = {
     schema: "smart-ship.controller.v1",
     authority: f.authority
       + {
@@ -250,6 +252,22 @@ pub fn exercise_publisher(harness: Harness, mode: string) {
       mode[10:],
     )
     return
+  }
+  const candidate_fixture = {
+    root: root,
+    remote: remote,
+    workspace: workspace,
+    base: base,
+    candidate: candidate,
+    tree: group.tree,
+    initial: initial,
+    config: config,
+    changes: changes,
+    pages: pages,
+  }
+  if mode.starts_with("candidate_cleanup:") {
+    exercise_candidate(harness, candidate_fixture, "cleanup_setup")
+    initial = read_state(harness.process, config.installation.store + {remote: remote}).state!
   }
   const snapshot = freeze_snapshot(
     f.snapshot
@@ -433,13 +451,15 @@ pub fn exercise_publisher(harness: Harness, mode: string) {
       prepare_state(
         harness.process,
         config.installation.store,
-        {commit: nil, state: nil},
+        read_state(harness.process, config.installation.store),
         reserved,
       ),
     ).status,
     "committed",
   )
-  harness.testing.respond("secrets", "read", "public-synthetic-fixture-token")
+  if !mode.starts_with("candidate_cleanup:") {
+    harness.testing.respond("secrets", "read", "public-synthetic-fixture-token")
+  }
   harness.testing.http_mock(
     "POST",
     API + "/graphql",
@@ -469,6 +489,13 @@ pub fn exercise_publisher(harness: Harness, mode: string) {
     invoked.integration!
   } else {
     dispatch_github_integration(harness, config, fence(reserved), request, base)
+  }
+  if mode.starts_with("candidate_cleanup:") {
+    assert_eq(result.status, "confirmed", result.reason ?? "unreported")
+    assert_eq(harness.runtime.atomic_get(applied), 1)
+    assert_eq(git(harness.process, remote, ["rev-parse", "refs/heads/main"]), candidate)
+    exercise_candidate_cleanup(harness, candidate_fixture, request, mode[18:])
+    return
   }
   if ["withdraw_before_prepare", "withdraw_during_upload"].contains(mode) {
     const durable = read_state(harness.process, config.installation.store)
@@ -736,6 +763,9 @@ pub fn exercise_publisher(harness: Harness, mode: string) {
   ]
   const cleanup_id = "refs-"
     + sha256_hex(json_stringify({repo: REPOSITORY, updates: cleanup_updates}))
+  if mode == "cleanup_stop" {
+    prepare_cleanup_stop(pick(harness, ["process", "fs"]), config.installation.store, root)
+  }
   harness.testing.http_mock(
     "POST",
     API + "/graphql",

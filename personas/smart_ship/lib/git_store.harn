@@ -84,6 +84,12 @@ fn remote_commit(process: HarnessProcess, store: GitStore, ref: string? = nil) -
   return commit
 }
 
+/** Measure one exact remote ref without decoding its object as controller state. */
+pub fn read_remote_ref(process: HarnessProcess, store: GitStore) -> string? {
+  check_store(process, store)
+  return remote_commit(process, store)
+}
+
 /** Fetch exact object identities into the private workspace without moving a local ref. */
 pub fn fetch_state_objects(process: HarnessProcess, store: GitStore, objects: list<string>) {
   check_store(process, store)

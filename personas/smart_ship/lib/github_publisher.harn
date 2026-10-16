@@ -15,6 +15,7 @@ import {
   stage_state,
   validate_state_write,
 } from "./git_store"
+import { GithubObjectCleanup, cleanup_github_object } from "./github_cleanup"
 import {
   GithubIntegrationTransaction,
   GithubIntegrationWitness,
@@ -79,15 +80,6 @@ pub type GithubIntegrationPreparationRefusal = {
   details_omitted: bool,
 }
 
-/** Unresolved integrations retain their objects. Cleanup never overwrites a competing ref. */
-pub type GithubIntegrationCleanup = {
-  status: "deleted" | "retained" | "unknown",
-  observed: string?,
-  provider: GithubRefUpdatesReceipt?,
-  error: GithubConnectorError?,
-  reason: string?,
-}
-
 type Prepared = {
   witness: GithubIntegrationWitness,
   write: StateWrite,
@@ -95,6 +87,9 @@ type Prepared = {
 }
 
 type ProviderReply = {outcome: GithubConnectorResult<GithubRefUpdatesReceipt>}
+
+/** Integration staging uses the shared temporary-object cleanup outcome. */
+pub type GithubIntegrationCleanup = GithubObjectCleanup
 
 fn preparation_matches(
   refusal: GithubIntegrationPreparationRefusal,
@@ -688,79 +683,15 @@ pub fn cleanup_github_integration(
     || unwrap(qualified).staging_needed {
     return result + {reason: "unresolved integration objects must be retained"}
   }
-  const store = configuration.installation.store + {ref: unwrap(qualified).staging_ref}
-  const before = try {
-    read_state(harness.process, store)
-  }
-  if is_err(before) {
-    return result + {status: "unknown", reason: "staging ref could not be measured"}
-  }
-  const observed = unwrap(before).commit
-  if observed == nil {
-    return result + {status: "deleted"}
-  }
-  result = result + {observed: observed}
-  if observed != transaction.state_commit {
-    return result + {reason: "staging ref names a competing object"}
-  }
-  const parts = transaction.repository.split("/")
-  const attempted = try {
-    const reply: ProviderReply = {
-      outcome: github_update_refs(
-        harness,
-        {
-          owner: parts[0]!,
-          repo: parts[1]!,
-          updates: [
-            {
-              ref: configuration.installation.store.ref,
-              before_oid: unwrap(qualified).observed!,
-              after_oid: unwrap(qualified).observed!,
-              force: false,
-            },
-            {
-              ref: store.ref,
-              before_oid: transaction.state_commit,
-              after_oid: "0".repeat(40),
-              force: false,
-            },
-          ],
-          options: {
-            installation_token: harness.secrets.read(configuration.token_reference),
-            allow_gh_auth_fallback: false,
-            retry_unsafe: false,
-            retry: {max_attempts: 1},
-          },
-        },
-      ),
-    }
-    reply
-  }
-  if is_ok(attempted) {
-    const outcome = unwrap(attempted).outcome
-    if is_ok(outcome) {
-      result = result + {provider: unwrap(outcome)}
-    } else {
-      result = result + {error: unwrap_err(outcome)}
-    }
-  }
-  const after = try {
-    read_state(harness.process, store)
-  }
-  if is_err(after) {
-    return result + {status: "unknown", reason: "cleanup read-back is unavailable"}
-  }
-  const remaining = unwrap(after).commit
-  return result
-    + {
-      status: if remaining == nil {
-        "deleted"
-      } else if result.error?.mutation_outcome == "refused"
-        || remaining != transaction.state_commit {
-        "retained"
-      } else {
-        "unknown"
-      },
-      observed: remaining,
-    }
+  return cleanup_github_object(
+    harness,
+    configuration,
+    {
+      repository: transaction.repository,
+      authority_commit: unwrap(qualified).observed!,
+      ref: unwrap(qualified).staging_ref,
+      expected: transaction.state_commit,
+      retention_guards: [],
+    },
+  )
 }

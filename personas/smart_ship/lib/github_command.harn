@@ -15,6 +15,7 @@ import {
 } from "./git_store"
 import {
   GithubCandidateResult,
+  cleanup_github_candidate,
   dispatch_github_candidate,
   reconcile_github_candidate,
 } from "./github_candidate"
@@ -54,8 +55,17 @@ pub type GithubIntegrationCommand = {
   expected_base: string,
 }
 
+/** Candidate cleanup must name the integration that durably retained its signed object. */
+pub type GithubCandidateCleanupCommand = {
+  action: "cleanup-candidate",
+  request: CandidateEffect,
+  integration: IntegrationEffect,
+}
+
 /** One command boundary replaces the former per-PR REST merge route. */
-pub type GithubCommand = GithubCandidateCommand | GithubIntegrationCommand
+pub type GithubCommand = GithubCandidateCommand \
+  | GithubIntegrationCommand \
+  | GithubCandidateCleanupCommand
 
 /** A reservation is durable intent, not a signing or integration acknowledgement. */
 pub type GithubReservation = {
@@ -73,6 +83,7 @@ pub type GithubCommandResult = {
   schema: "smart-ship.github-command-result.v1",
   action: "prepare" \
     | "recover-candidate" \
+    | "cleanup-candidate" \
     | "integrate" \
     | "recover-integration" \
     | "cleanup-integration",
@@ -204,6 +215,21 @@ pub fn execute_github_command(
     integration: nil,
     reconciliation: nil,
     cleanup: nil,
+  }
+  if command.action == "cleanup-candidate" {
+    const cleanup: GithubCandidateCleanupCommand = schema_expect(
+      command,
+      schema_of(GithubCandidateCleanupCommand),
+    )
+    return result
+      + {
+        cleanup: cleanup_github_candidate(
+          harness,
+          configuration,
+          cleanup.request,
+          cleanup.integration,
+        ),
+      }
   }
   if command.action == "prepare" || command.action == "recover-candidate" {
     const candidate: GithubCandidateCommand = schema_expect(

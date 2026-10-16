@@ -144,6 +144,14 @@ exact temporary state-object ref and preserves unresolved objects. Missing
 outcome fields mean that stage was not measured. Keep the complete command
 result and remote authority history across restarts.
 
+After confirmed integration, use `action: cleanup-candidate` with the original
+candidate `request` and the confirmed `integration` request. Cleanup rechecks the
+signed identity and requires the destination to retain that candidate. It deletes
+only the exact owned candidate ref, guarding the measured authority and destination
+in the same transaction. An unresolved integration or a changed destination retains
+the branch. Repeat the command to observe an uncertain deletion; an already absent
+branch does not cause another provider mutation.
+
 ## Uninstall
 
 Disable the installation's event triggers, drain admitted work, and reconcile
