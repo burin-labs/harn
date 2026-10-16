@@ -69,6 +69,7 @@ pub import {
   StateObjectStage,
   StateRead,
   StateWrite,
+  StateWriteDiagnostic,
   commit_state,
   prepare_state,
   read_state,

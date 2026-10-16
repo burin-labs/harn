@@ -49,7 +49,10 @@ fn change(process: HarnessProcess, config: Installation, request: Request) {
     config.store,
     prepare_state(process, config.store, previous, next),
   )
-  require result.status == "committed", "control change is unconfirmed: " + result.status
+  require result.status == "committed",
+    "control change is unconfirmed: " + result.status
+    + " "
+    + json_stringify(result.diagnostic)
 }
 
 /** The CLI and embedding hosts share the complete guarded installation command boundary. */

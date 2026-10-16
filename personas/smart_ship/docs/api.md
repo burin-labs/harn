@@ -834,6 +834,7 @@ pub type CommitResult = {
   status: "committed" | "conflict" | "unknown",
   commit: string,
   observed: string?,
+  diagnostic?: StateWriteDiagnostic,
 }
 ```
 
@@ -902,7 +903,7 @@ pub type EffectClaim = {remote: string, ref: string, commit: string, state: Cont
 A refused or uncertain claim grants no provider authority; retain the measured revision.
 
 ```harn
-pub type EffectClaimRefusal = {observed: string?}
+pub type EffectClaimRefusal = {observed: string?, diagnostic?: StateWriteDiagnostic}
 ```
 
 ### type `EffectDispatch`
@@ -915,6 +916,7 @@ pub type EffectDispatch = {
   dispatch_started: bool,
   state_commit: string?,
   outcome: EffectOutcome?,
+  diagnostic?: StateWriteDiagnostic,
 }
 ```
 
@@ -1566,6 +1568,18 @@ Keep the prepared commit across retries, including an uncertain network result.
 
 ```harn
 pub type StateWrite = {expected: string?, commit: string, state: Controller}
+```
+
+### type `StateWriteDiagnostic`
+
+The measured failing phase and command outcome of an unconfirmed write.
+
+```harn
+pub type StateWriteDiagnostic = {
+  phase: "read_before_push" | "push" | "read_after_push",
+  detail: string,
+  command?: {exit_code: int?, timed_out: bool, stderr: string},
+}
 ```
 
 ### type `TestEvidence`
