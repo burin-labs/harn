@@ -54,15 +54,28 @@ fn assistant(text: &str, visibility: &str) -> AppendEvent {
     )
 }
 
-fn checkpoint(iteration: i64, kind: &str) -> AppendEvent {
+fn iteration_boundary(iteration: i64, kind: &str) -> AppendEvent {
     identified(
-        custom("loop_checkpoint"),
+        custom(kind),
         transcript(
-            "loop_checkpoint",
+            kind,
             "assistant",
             "internal",
             "",
-            json!({"iteration": iteration, "kind": kind}),
+            json!({"iteration": iteration}),
+        ),
+    )
+}
+
+fn publication(text: &str) -> AppendEvent {
+    identified(
+        custom("assistant_publication"),
+        transcript(
+            "assistant_publication",
+            "assistant",
+            "public",
+            text,
+            json!({}),
         ),
     )
 }
@@ -247,19 +260,19 @@ async fn append_fixture(store: &dyn SessionStore, id: &str) {
                 json!({}),
             ),
         ),
-        checkpoint(0, "iteration_start"),
+        iteration_boundary(0, "iteration_start"),
         assistant("I implemented the projection.", "public"),
         assistant("private chain of thought", "private"),
         tool_call("tool-1"),
         tool_result("tool-1"),
         plan(),
         progress(),
-        checkpoint(0, "iteration_end"),
-        checkpoint(1, "iteration_start"),
+        iteration_boundary(0, "iteration_end"),
+        iteration_boundary(1, "iteration_start"),
         assistant("I verified the replay projection.", "public"),
         tool_call("tool-2"),
         tool_result("tool-2"),
-        checkpoint(1, "iteration_end"),
+        iteration_boundary(1, "iteration_end"),
         terminal(),
     ] {
         store.append(id, event).await.expect("append fixture event");
@@ -355,7 +368,7 @@ async fn missing_empty_and_incomplete_states_remain_distinct() {
     create_session(&store, "incomplete").await;
     for event in [
         user("Run the tests"),
-        checkpoint(0, "iteration_start"),
+        iteration_boundary(0, "iteration_start"),
         assistant("Tests passed", "public"),
         tool_call("tool-open"),
     ] {
@@ -381,6 +394,97 @@ async fn missing_empty_and_incomplete_states_remain_distinct() {
     assert!(incomplete.turns[0].iterations[0].tools[0]
         .verification
         .is_none());
+}
+
+#[tokio::test]
+async fn terminal_success_cannot_cover_a_missing_iteration_end_or_tool_result() {
+    let store = MemorySessionStore::default();
+    for (id, has_end, has_result, state, tool_state) in [
+        (
+            "missing-end",
+            false,
+            true,
+            RecapCompletionState::Incomplete,
+            RecapToolState::Completed,
+        ),
+        (
+            "missing-result",
+            true,
+            false,
+            RecapCompletionState::Incomplete,
+            RecapToolState::Incomplete,
+        ),
+        (
+            "complete",
+            true,
+            true,
+            RecapCompletionState::Complete,
+            RecapToolState::Completed,
+        ),
+    ] {
+        create_session(&store, id).await;
+        let mut events = vec![
+            user("Run the tests"),
+            iteration_boundary(0, "iteration_start"),
+            tool_call("check"),
+        ];
+        if has_result {
+            events.push(tool_result("check"));
+        }
+        if has_end {
+            events.push(iteration_boundary(0, "iteration_end"));
+        }
+        events.push(publication("Finished the check."));
+        events.push(terminal());
+        for event in events {
+            store
+                .append(id, event)
+                .await
+                .expect("append lifecycle fact");
+        }
+        let recap = query_session_recap(&store, SessionRecapQuery::for_session(id))
+            .await
+            .expect("query lifecycle recap")
+            .expect("session exists");
+        assert_eq!(recap.coverage.pending, 0);
+        assert_eq!(recap.coverage.unassigned, 0);
+        let turn = &recap.turns[0];
+        assert_eq!(
+            turn.terminal.as_ref().expect("terminal observed").state,
+            RecapCompletionState::Complete
+        );
+        assert_eq!(turn.state, state, "{id}");
+        assert_eq!(turn.iterations[0].tools[0].state, tool_state, "{id}");
+        assert_eq!(turn.iterations.len(), 1, "publication must not reopen {id}");
+        assert_eq!(
+            turn.iterations[0].assistant_text[0].text,
+            "Finished the check."
+        );
+    }
+}
+
+#[tokio::test]
+async fn publication_without_iteration_boundaries_remains_unassigned() {
+    let store = MemorySessionStore::default();
+    let id = "publication-without-boundaries";
+    create_session(&store, id).await;
+    for event in [user("Run the check"), publication("Finished."), terminal()] {
+        store
+            .append(id, event)
+            .await
+            .expect("append publication fact");
+    }
+    let recap = query_session_recap(&store, SessionRecapQuery::for_session(id))
+        .await
+        .expect("query unassigned publication")
+        .expect("session exists");
+    assert_eq!(recap.coverage.unassigned, 1);
+    assert_eq!(recap.turns[0].state, RecapCompletionState::Incomplete);
+    assert_eq!(recap.turns[0].iterations[0].iteration, None);
+    assert_eq!(
+        recap.turns[0].iterations[0].assistant_text[0].text,
+        "Finished."
+    );
 }
 
 #[tokio::test]
