@@ -14,6 +14,7 @@ vm-bench-internals = []
 
 [dependencies]
 harn-clock = { path = "../harn-clock", version = "=0.10.167" }
+harn-execution-policy = { path = "../harn-execution-policy", version = "=0.10.167" }
 harn-llm = { path = "../harn-llm", version = "=0.10.167" }
 harn-vm-core = { path = "../harn-vm-core", version = "=0.10.167" }
 serde = { version = "1", features = ["derive"] }

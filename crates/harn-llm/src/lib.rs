@@ -1,6 +1,7 @@
 //! Provider-neutral content, message provenance, tokenization and wire contracts.
 
 pub mod agent_control;
+pub mod agent_terminal_class;
 pub mod content;
 pub mod effective_effort;
 pub mod inference;

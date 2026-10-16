@@ -3895,6 +3895,7 @@ name = "harn-orchestration"
 version = "0.10.167"
 dependencies = [
  "harn-clock",
+ "harn-execution-policy",
  "harn-llm",
  "harn-vm-core",
  "serde",
