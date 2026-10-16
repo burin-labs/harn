@@ -66,15 +66,39 @@ fn probe_registry() -> VmValue {
     ])
 }
 
-fn respond(stream: &mut std::net::TcpStream, response: &serde_json::Value, streaming: bool) {
+#[derive(Clone, Copy, Debug)]
+enum StubProtocol {
+    Responses,
+    ChatCompletions,
+}
+
+fn respond(
+    stream: &mut std::net::TcpStream,
+    response: &serde_json::Value,
+    protocol: StubProtocol,
+    streaming: bool,
+) {
     let (content_type, body) = if streaming {
-        (
-            "text/event-stream",
-            format!(
+        let events = match protocol {
+            StubProtocol::Responses => format!(
                 "data: {}\n\n",
                 serde_json::json!({"type": "response.completed", "response": response})
             ),
-        )
+            StubProtocol::ChatCompletions => {
+                let mut delta = response["choices"][0]["message"].clone();
+                if let Some(calls) = delta["tool_calls"].as_array_mut() {
+                    for (index, call) in calls.iter_mut().enumerate() {
+                        call["index"] = serde_json::json!(index);
+                    }
+                }
+                format!(
+                    "data: {}\n\ndata: {}\n\ndata: [DONE]\n\n",
+                    serde_json::json!({"model": response["model"], "choices": [{"index": 0, "delta": delta, "finish_reason": null}]}),
+                    serde_json::json!({"model": response["model"], "choices": [{"index": 0, "delta": {}, "finish_reason": response["choices"][0]["finish_reason"]}], "usage": response["usage"]})
+                )
+            }
+        };
+        ("text/event-stream", events)
     } else {
         ("application/json", response.to_string())
     };
@@ -87,15 +111,18 @@ fn respond(stream: &mut std::net::TcpStream, response: &serde_json::Value, strea
     .expect("write provider response");
 }
 
-fn read_request_body(reader: &mut BufReader<&mut std::net::TcpStream>) -> serde_json::Value {
+fn read_request_body(
+    reader: &mut BufReader<&mut std::net::TcpStream>,
+) -> (StubProtocol, serde_json::Value) {
     let mut request_line = String::new();
     reader
         .read_line(&mut request_line)
         .expect("read request line");
-    assert!(
-        request_line.starts_with("POST /v1/responses HTTP/1.1\r\n"),
-        "unexpected provider request line: {request_line:?}"
-    );
+    let protocol = match request_line.as_str() {
+        "POST /v1/responses HTTP/1.1\r\n" => StubProtocol::Responses,
+        "POST /v1/chat/completions HTTP/1.1\r\n" => StubProtocol::ChatCompletions,
+        _ => panic!("unexpected provider request line: {request_line:?}"),
+    };
     let mut content_length = None;
     loop {
         let mut line = String::new();
@@ -114,7 +141,10 @@ fn read_request_body(reader: &mut BufReader<&mut std::net::TcpStream>) -> serde_
     reader
         .read_exact(&mut body)
         .expect("read full request body");
-    serde_json::from_slice(&body).expect("provider request body is JSON")
+    (
+        protocol,
+        serde_json::from_slice(&body).expect("provider request body is JSON"),
+    )
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -124,17 +154,44 @@ async fn exhausted_structured_child_usage_includes_native_tool_and_wrapup_reques
     crate::agent_sessions::reset_session_store();
     reset_llm_mock_state();
 
-    let requests = Arc::new(Mutex::new(Vec::<serde_json::Value>::new()));
+    let requests = Arc::new(Mutex::new(Vec::<(StubProtocol, serde_json::Value)>::new()));
     let captured = Arc::clone(&requests);
     let server = crate::llm::api::transport_stub_tests::spawn_llm_stub_many(
         "sub-agent physical usage",
         2,
         move |attempt, stream| {
             let mut reader = BufReader::new(stream);
-            let request = read_request_body(&mut reader);
+            let (protocol, request) = read_request_body(&mut reader);
             let streaming = request["stream"].as_bool().unwrap_or(false);
-            captured.lock().expect("request capture lock").push(request);
-            let response = if attempt == 0 {
+            captured
+                .lock()
+                .expect("request capture lock")
+                .push((protocol, request));
+            let response = if matches!(protocol, StubProtocol::ChatCompletions) {
+                let (message, finish_reason, input_tokens, output_tokens) = if attempt == 0 {
+                    (
+                        serde_json::json!({"role": "assistant", "content": null, "tool_calls": [{
+                            "id": "call_probe", "type": "function",
+                            "function": {"name": "probe", "arguments": "{}"}
+                        }]}),
+                        "tool_calls",
+                        11,
+                        3,
+                    )
+                } else {
+                    (
+                        serde_json::json!({"role": "assistant", "content": "{\"answer\":\"wrapped\"}"}),
+                        "stop",
+                        7,
+                        5,
+                    )
+                };
+                serde_json::json!({
+                    "id": "native-child-response", "model": "gpt-5.6-luna",
+                    "choices": [{"index": 0, "message": message, "finish_reason": finish_reason}],
+                    "usage": {"prompt_tokens": input_tokens, "completion_tokens": output_tokens, "total_tokens": input_tokens + output_tokens}
+                })
+            } else if attempt == 0 {
                 serde_json::json!({
                     "id": "tool-turn",
                     "model": "gpt-5.6-luna",
@@ -165,7 +222,7 @@ async fn exhausted_structured_child_usage_includes_native_tool_and_wrapup_reques
                     "usage": {"input_tokens": 7, "output_tokens": 5, "total_tokens": 12}
                 })
             };
-            respond(reader.get_mut(), &response, streaming);
+            respond(reader.get_mut(), &response, protocol, streaming);
         },
     );
     crate::llm::api::transport_stub_tests::install_openai_stub_provider("openai", server.addr());
@@ -238,7 +295,13 @@ async fn exhausted_structured_child_usage_includes_native_tool_and_wrapup_reques
         requests.lock().expect("request capture lock")
     );
     assert_eq!(result.payload["ok"].as_bool(), Some(false));
-    assert_eq!(result.payload["budget_exceeded"].as_bool(), Some(true));
+    assert_eq!(
+        result.payload["budget_exceeded"].as_bool(),
+        Some(true),
+        "child envelope: {}; captured requests: {:?}",
+        result.payload,
+        requests.lock().expect("request capture lock")
+    );
     assert_eq!(result.payload["data"]["answer"].as_str(), Some("wrapped"));
     let usage = &result.payload["usage"];
     assert_eq!(usage["token_scope"].as_str(), Some("every_provider_call"));
@@ -274,32 +337,56 @@ async fn exhausted_structured_child_usage_includes_native_tool_and_wrapup_reques
         2,
         "both physical provider calls reached HTTP"
     );
+    let (tool_request_protocol, tool_request) = &requests[0];
+    let tool = match tool_request_protocol {
+        StubProtocol::Responses => &tool_request["tools"][0],
+        StubProtocol::ChatCompletions => &tool_request["tools"][0]["function"],
+    };
     assert_eq!(
-        requests[0]["tools"][0]["name"].as_str(),
+        tool["name"].as_str(),
         Some("probe"),
         "the first request served the native tool contract"
     );
-    assert_eq!(requests[0]["tools"][0]["type"].as_str(), Some("function"));
-    let wrapup_input = requests[1]["input"]
-        .as_array()
-        .expect("wrap-up request input");
+    assert_eq!(tool_request["tools"][0]["type"].as_str(), Some("function"));
+    let (wrapup_protocol, wrapup_request) = &requests[1];
+    let (wrapup_input, wrapup_format, wrapup_schema) = match wrapup_protocol {
+        StubProtocol::Responses => (
+            wrapup_request["input"].as_array().expect("wrap-up input"),
+            &wrapup_request["text"]["format"]["type"],
+            &wrapup_request["text"]["format"]["schema"],
+        ),
+        StubProtocol::ChatCompletions => (
+            wrapup_request["messages"]
+                .as_array()
+                .expect("wrap-up messages"),
+            &wrapup_request["response_format"]["type"],
+            &wrapup_request["response_format"]["json_schema"]["schema"],
+        ),
+    };
     assert!(
-        wrapup_input.iter().any(|item| {
-            item["type"].as_str() == Some("function_call_output")
-                && item["call_id"].as_str() == Some("call_probe")
-                && item["output"]
-                    .as_str()
-                    .is_some_and(|content| content.contains("native-tool-executed"))
+        wrapup_input.iter().any(|item| match wrapup_protocol {
+            StubProtocol::Responses =>
+                item["type"].as_str() == Some("function_call_output")
+                    && item["call_id"].as_str() == Some("call_probe")
+                    && item["output"]
+                        .as_str()
+                        .is_some_and(|content| content.contains("native-tool-executed")),
+            StubProtocol::ChatCompletions =>
+                item["role"].as_str() == Some("tool")
+                    && item["tool_call_id"].as_str() == Some("call_probe")
+                    && item["content"]
+                        .as_str()
+                        .is_some_and(|content| content.contains("native-tool-executed")),
         }),
         "wrap-up request follows the fired tool result: {wrapup_input:?}"
     );
     assert_eq!(
-        requests[1]["text"]["format"]["type"].as_str(),
+        wrapup_format.as_str(),
         Some("json_schema"),
         "the exhausted wrap-up request carries the declared output contract"
     );
     assert_eq!(
-        requests[1]["text"]["format"]["schema"]["properties"]["answer"]["type"].as_str(),
+        wrapup_schema["properties"]["answer"]["type"].as_str(),
         Some("string")
     );
 }
