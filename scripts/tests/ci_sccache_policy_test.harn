@@ -564,7 +564,7 @@ fn workflow() {
           },
           {
             name: "Prepare Linux cache generation save",
-            if: "steps.rust-cache.outputs.cache-hit != 'true'",
+            if: "github.ref == 'refs/heads/main' && steps.rust-cache.outputs.cache-hit != 'true'",
             run:
               "./scripts/prune_ci_cache_generations.sh --clear-family-prefix prefix\n./scripts/prune_ci_cache_generations.sh --ensure-headroom bytes",
           },
@@ -916,16 +916,13 @@ pipeline test_rejects_a_cache_refresh_trigger_that_may_never_fire(harness: Harne
 }
 
 @test
-pipeline test_rejects_unbounded_or_unconditional_cache_generation_save(
-  harness: Harness,
-  task: unknown,
-) {
+pipeline test_rejects_unbounded_or_non_main_cache_generation_save() {
   const valid = workflow()
   const refresh = valid.jobs["rust-cache-refresh"]
   const invalid_steps = refresh.steps.map(
     fn(step: dict) -> dict {
       if step?.name == "Prepare Linux cache generation save" {
-        return {...step, if: "", run: "echo unbounded"}
+        return {...step, if: "steps.rust-cache.outputs.cache-hit != 'true'", run: "echo unbounded"}
       }
       return step
     },
@@ -952,7 +949,7 @@ pipeline test_rejects_unbounded_or_unconditional_cache_generation_save(
   )
   assert(
     errors.contains(
-      "rust-cache-refresh.yml:rust-cache-refresh must prepare a generation only after a cache miss",
+      "rust-cache-refresh.yml:rust-cache-refresh must prepare a generation only from owning main after a cache miss",
     ),
   )
   assert(

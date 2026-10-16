@@ -578,6 +578,8 @@ pub fn rust_cache_refresh_concurrency_errors(workflow: dict) -> list<string> {
 
 const CACHE_MISS_GUARD = "steps.rust-cache.outputs.cache-hit != 'true'"
 
+const CACHE_SAVE_GUARD = "github.ref == 'refs/heads/main' && " + CACHE_MISS_GUARD
+
 /**
  * GitHub cache entries are immutable, so an exact-key restore leaves the
  * refresher nothing to write: Swatinem's post step reports "Cache up-to-date."
@@ -587,10 +589,10 @@ const CACHE_MISS_GUARD = "steps.rust-cache.outputs.cache-hit != 'true'"
 pub fn rust_cache_refresh_miss_only_errors(job: dict) -> list<string> {
   let errors: list<string> = []
   const headroom = step_by_name(job?.steps ?? [], "Prepare Linux cache generation save")
-  if trim(headroom?.if ?? "") != CACHE_MISS_GUARD {
+  if trim(headroom?.if ?? "") != CACHE_SAVE_GUARD {
     errors = errors
       + [
-        "${CACHE_REFRESH_WORKFLOW}:rust-cache-refresh must prepare a generation only after a cache miss",
+        "${CACHE_REFRESH_WORKFLOW}:rust-cache-refresh must prepare a generation only from owning main after a cache miss",
       ]
   }
   for name in ["Install cargo-nextest", "Warm Cargo graph"] {

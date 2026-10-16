@@ -14,7 +14,7 @@ type CacheSourceManifest = {
     version: string,
     edition: string,
     publish: bool,
-    metadata: {harn: {source: string}},
+    metadata: {harn: {source: string, artifact_retention?: string}},
   },
   workspace: dict,
 }
@@ -202,6 +202,7 @@ pipeline test_cache_identity_executes_precise_generation_and_upstream_archive_pa
     schema_of(CacheSourceManifest),
   )
   assert_eq(parsed.package.metadata.harn.source, "sourcehash")
+  assert_eq(parsed.package.metadata.harn.artifact_retention, "harn.workspace_artifact_retention.v1")
   assert_eq(parsed.workspace, {})
   const changed = run_cache_identity(
     pick(harness, ["fs", "process"]),
