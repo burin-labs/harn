@@ -66,11 +66,21 @@ fn probe_registry() -> VmValue {
     ])
 }
 
-fn respond(stream: &mut std::net::TcpStream, body: &serde_json::Value) {
-    let body = body.to_string();
+fn respond(stream: &mut std::net::TcpStream, response: &serde_json::Value, streaming: bool) {
+    let (content_type, body) = if streaming {
+        (
+            "text/event-stream",
+            format!(
+                "data: {}\n\n",
+                serde_json::json!({"type": "response.completed", "response": response})
+            ),
+        )
+    } else {
+        ("application/json", response.to_string())
+    };
     write!(
         stream,
-        "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+        "HTTP/1.1 200 OK\r\ncontent-type: {content_type}\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
         body.len(),
         body
     )
@@ -122,6 +132,7 @@ async fn exhausted_structured_child_usage_includes_native_tool_and_wrapup_reques
         move |attempt, stream| {
             let mut reader = BufReader::new(stream);
             let request = read_request_body(&mut reader);
+            let streaming = request["stream"].as_bool().unwrap_or(false);
             captured.lock().expect("request capture lock").push(request);
             let response = if attempt == 0 {
                 serde_json::json!({
@@ -154,7 +165,7 @@ async fn exhausted_structured_child_usage_includes_native_tool_and_wrapup_reques
                     "usage": {"input_tokens": 7, "output_tokens": 5, "total_tokens": 12}
                 })
             };
-            respond(reader.get_mut(), &response);
+            respond(reader.get_mut(), &response, streaming);
         },
     );
     crate::llm::api::transport_stub_tests::install_openai_stub_provider("openai", server.addr());
@@ -219,7 +230,13 @@ async fn exhausted_structured_child_usage_includes_native_tool_and_wrapup_reques
         .await
         .expect("child execution should return a terminal envelope");
 
-    assert_eq!(result.payload["status"].as_str(), Some("budget_exhausted"));
+    assert_eq!(
+        result.payload["status"].as_str(),
+        Some("budget_exhausted"),
+        "child envelope: {}; captured requests: {:?}",
+        result.payload,
+        requests.lock().expect("request capture lock")
+    );
     assert_eq!(result.payload["ok"].as_bool(), Some(false));
     assert_eq!(result.payload["budget_exceeded"].as_bool(), Some(true));
     assert_eq!(result.payload["data"]["answer"].as_str(), Some("wrapped"));
