@@ -42,6 +42,7 @@ pub import {
   GithubIntegrationCleanup,
   GithubIntegrationConfiguration,
   GithubIntegrationDispatch,
+  GithubIntegrationPreparationRefusal,
   GithubIntegrationReconciliation,
   GithubIntegrationRefusal,
   cleanup_github_integration,

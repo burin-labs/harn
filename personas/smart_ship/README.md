@@ -121,16 +121,21 @@ candidate or prove that a provider accepted a ref update.
 
 `dispatch_github_integration` consumes a provider-bound reservation, rechecks
 complete current reviews and candidate materialization, uploads the exact state
-object, then makes one SDK ref transaction. A provider acknowledgement alone
+object, then reads complete reviews again before making one SDK ref transaction.
+A changed review census requires new preparation. A provider acknowledgement alone
 cannot confirm integration: actual authority must retain the witnessed effect
 and pending verification. Definite provider refusals settle through the same
-effect owner. Unknown outcomes require observation and never redispatch.
+effect owner. Preparation failures also settle a durable refusal before publication,
+so rejected work does not retain a dispatch claim indefinitely. Unknown publication
+outcomes require observation and never redispatch.
 
 `recover_github_integration` reconstructs preparation from remote authority
 history and the staging branch. Each dispatch records its immutable authority
 revision, so later controls do not hide the original claim. Confirmed work remains
 recoverable from history after staging cleanup; refusals retain the complete
-transaction in their durable receipt. `reconcile_github_integration` reads the
+transaction in their durable receipt. Oversized refusal details retain a transaction
+digest and keep the staging object available for recovery. Early refusals have no
+prepared transaction. `reconcile_github_integration` reads the
 actual outcome. `cleanup_github_integration` deletes only the exact staged object
 after conclusive confirmation or refusal, using another provider comparison.
 Unresolved objects remain available for recovery.

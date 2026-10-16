@@ -1,6 +1,7 @@
 import { prepare_group_tree } from "../lib/git_group"
 import {
   GithubIntegrationConfiguration,
+  GithubIntegrationPreparationRefusal,
   cleanup_github_integration,
   dispatch_github_integration,
   github_integration_binding,
@@ -12,12 +13,14 @@ import {
   Controller,
   Fence,
   commit_state,
+  control,
   freeze_snapshot,
   integration_effect,
   policy_digest,
   prepare_state,
   read_state,
   reserve_effect,
+  transfer,
 } from "../lib/main"
 import { git } from "./neutral"
 import { digest, execution, finish_reviewed_admission, fixture, reviewed_request } from "./support"
@@ -42,12 +45,41 @@ type ProviderReport = {applied: bool, updates: int}
 
 type CommandHook = {request: {argv: list<string>}}
 
+fn review_pages(identity: dict, number: int, head: string, approved: bool) -> list<dict> {
+  const page_info = {hasNextPage: false, endCursor: nil}
+  return [
+    identity
+      + {
+        inventory: {
+          totalCount: 1,
+          nodes: [
+            {
+              id: "review-" + to_string(number),
+              state: if approved {
+                "APPROVED"
+              } else {
+                "DISMISSED"
+              },
+              commit: {oid: head},
+              author: {id: "fixture-reviewer", login: "trusted", type: "Bot"},
+              updatedAt: "2026-10-15T12:00:00Z",
+              submittedAt: "2026-10-15T11:00:00Z",
+            },
+          ],
+          pageInfo: page_info,
+        },
+      },
+    identity + {inventory: {totalCount: 0, nodes: [], pageInfo: page_info}},
+    identity + {reviews: {totalCount: 1}, reviewThreads: {totalCount: 0}},
+  ]
+}
+
 fn fence(state: Controller) -> Fence {
   return pick(state.authority, ["installation", "generation", "revision", "controller"])
 }
 
 /** Actual Git objects and ref transactions; only HTTP and transport endpoints are test-owned. */
-// The six controls deliberately share one instrumented lifecycle and positive setup.
+// The controls deliberately share one instrumented lifecycle and positive setup.
 @complexity(allow)
 pub fn exercise_publisher(harness: Harness, mode: string) {
   const root = harness.fs.mkdtemp_in_workspace("smart-ship-publisher-")
@@ -104,6 +136,7 @@ pub fn exercise_publisher(harness: Harness, mode: string) {
   const now = harness.clock.now_ms()
   let changes: list<Change> = []
   let pages: list<dict> = []
+  let withdrawn_pages: list<dict> = []
   for number in [42, 43] {
     const head = heads[number - 42]!
     const original = execution(f)
@@ -156,29 +189,8 @@ pub fn exercise_publisher(harness: Harness, mode: string) {
       headRepository: {id: "fixture-repository", nameWithOwner: REPOSITORY},
       baseRepository: {id: "fixture-repository", nameWithOwner: REPOSITORY},
     }
-    const page_info = {hasNextPage: false, endCursor: nil}
-    pages = pages
-      + [
-        identity
-          + {
-            inventory: {
-              totalCount: 1,
-              nodes: [
-                {
-                  id: "review-" + to_string(number),
-                  state: "APPROVED",
-                  commit: {oid: head},
-                  author: {id: "fixture-reviewer", login: "trusted", type: "Bot"},
-                  updatedAt: "2026-10-15T12:00:00Z",
-                  submittedAt: "2026-10-15T11:00:00Z",
-                },
-              ],
-              pageInfo: page_info,
-            },
-          },
-        identity + {inventory: {totalCount: 0, nodes: [], pageInfo: page_info}},
-        identity + {reviews: {totalCount: 1}, reviewThreads: {totalCount: 0}},
-      ]
+    pages = pages + review_pages(identity, number, head, mode != "withdraw_before_prepare")
+    withdrawn_pages = withdrawn_pages + review_pages(identity, number, head, false)
   }
   const initial: Controller = {
     schema: "smart-ship.controller.v1",
@@ -334,28 +346,41 @@ pub fn exercise_publisher(harness: Harness, mode: string) {
               },
             ]
             const id = "refs-" + sha256_hex(json_stringify({repo: REPOSITORY, updates: updates}))
+            const refreshed_pages = if mode == "withdraw_during_upload" {
+              withdrawn_pages
+            } else {
+              pages
+            }
+            const acknowledgement = {
+              status: 200,
+              body: if ["stop", "head_change"].contains(mode) {
+                json_stringify({errors: [{type: "UNPROCESSABLE"}]})
+              } else {
+                json_stringify(
+                  {
+                    data: {
+                      updateRefs: {
+                        clientMutationId: if mode == "lost_ack" {
+                          "lost-acknowledgement"
+                        } else {
+                          id
+                        },
+                      },
+                    },
+                  },
+                )
+              },
+            }
             harness.testing.http_mock(
               "POST",
               API + "/graphql",
               {
-                status: 200,
-                body: if ["stop", "head_change"].contains(mode) {
-                  json_stringify({errors: [{type: "UNPROCESSABLE"}]})
-                } else {
-                  json_stringify(
-                    {
-                      data: {
-                        updateRefs: {
-                          clientMutationId: if mode == "lost_ack" {
-                            "lost-acknowledgement"
-                          } else {
-                            id
-                          },
-                        },
-                      },
-                    },
-                  )
-                },
+                responses: refreshed_pages.map(
+                  { page ->
+                    {status: 200, body: json_stringify({data: {repository: {pullRequest: page}}})}
+                  },
+                )
+                  + [acknowledgement],
               },
             )
           }
@@ -396,6 +421,85 @@ pub fn exercise_publisher(harness: Harness, mode: string) {
     {status: 200, body: json_stringify({node_id: "fixture-repository"})},
   )
   const result = dispatch_github_integration(harness, config, fence(reserved), request, base)
+  if ["withdraw_before_prepare", "withdraw_during_upload"].contains(mode) {
+    const durable = read_state(harness.process, config.installation.store)
+    const draining = unwrap(control(durable.state!, fence(durable.state!), "draining"))
+    const mutation_count = harness.testing.http_mock_calls().filter(
+      { call ->
+        const parsed = try {
+          json_parse(call.body)
+        }
+        call.method == "POST" && is_ok(parsed) && schema_is(unwrap(parsed), AtomicRequest)
+      },
+    )
+      .len()
+    const observed = {
+      main: git(harness.process, remote, ["rev-parse", "refs/heads/main"]),
+      result: result.status,
+      durable: durable.state!.effects[0]!.status,
+      pending_absent: durable.state!.pending == nil,
+      provider_started: result.dispatch_started,
+      mutation_count: mutation_count,
+      transfer_released: is_ok(transfer(draining, fence(draining), digest("next controller"))),
+    }
+    harness.stdio.println(json_stringify(observed + {expected_main: base, mode: mode}))
+    assert_eq(
+      observed,
+      {
+        main: base,
+        result: "refused",
+        durable: "refused",
+        pending_absent: true,
+        provider_started: false,
+        mutation_count: 0,
+        transfer_released: true,
+      },
+      "withdrawn review must refuse before publication and release the no-dispatch claim",
+    )
+    const refusal: GithubIntegrationPreparationRefusal = schema_expect(
+      json_parse(durable.state!.effects[0]!.receipt!.body),
+      schema_of(GithubIntegrationPreparationRefusal),
+    )
+    assert(!refusal.details_omitted)
+    assert(refusal.reviews != nil && len(refusal.reviews) == 2)
+    const stage_ref = "refs/heads/smart-ship-objects/" + result.claim!.commit
+    const stage_store = config.installation.store + {ref: stage_ref}
+    if mode == "withdraw_before_prepare" {
+      assert_eq(result.transaction, nil)
+      assert_eq(read_state(harness.process, stage_store).commit, nil)
+      const recovery = try {
+        recover_github_integration(harness.process, config, request)
+      }
+      assert(is_err(recovery), "an early refusal must not invent a prepared transaction")
+    } else {
+      const recovered = recover_github_integration(harness.process, config, request)
+      assert_eq(recovered, result.transaction!)
+      assert_eq(reconcile_github_integration(harness.process, config, recovered).status, "refused")
+      assert_eq(read_state(harness.process, stage_store).commit, recovered.state_commit)
+      const updates: list<GithubRefUpdate> = [
+        {
+          ref: stage_ref,
+          before_oid: recovered.state_commit,
+          after_oid: "0".repeat(40),
+          force: false,
+        },
+      ]
+      const id = "refs-" + sha256_hex(json_stringify({repo: REPOSITORY, updates: updates}))
+      harness.testing.http_mock(
+        "POST",
+        API + "/graphql",
+        {status: 200, body: json_stringify({data: {updateRefs: {clientMutationId: id}}})},
+      )
+      assert_eq(cleanup_github_integration(harness, config, recovered).status, "deleted")
+      assert_eq(read_state(harness.process, stage_store).commit, nil)
+      assert_eq(read_state(harness.process, config.installation.store), durable)
+      assert_eq(recover_github_integration(harness.process, config, request), recovered)
+      const calls = harness.testing.http_mock_calls()
+      assert_eq(cleanup_github_integration(harness, config, recovered).status, "deleted")
+      assert_eq(harness.testing.http_mock_calls(), calls)
+    }
+    return
+  }
   assert(
     result.dispatch_started,
     "publisher did not reach its provider: " + (result.reason ?? "unreported"),

@@ -245,6 +245,24 @@ pub type GithubIntegrationDispatch = {
 }
 ```
 
+### type `GithubIntegrationPreparationRefusal`
+
+A refusal before the publication call proves that no destination mutation was started.
+
+```harn
+pub type GithubIntegrationPreparationRefusal = {
+  schema: "smart-ship.github-preparation-refusal.v1",
+  request: EffectTarget,
+  claim_commit: string,
+  transaction: GithubIntegrationTransaction?,
+  transaction_digest: string?,
+  reviews: list<GithubPullRequestReviewCensus>?,
+  reason: string,
+  reason_truncated: bool,
+  details_omitted: bool,
+}
+```
+
 ### type `GithubIntegrationReconciliation`
 
 Read-back is conclusive only when the exact atomic confirmation survives in current authority.
@@ -255,6 +273,7 @@ pub type GithubIntegrationReconciliation = {
   observed: string?,
   state_commit: string,
   staging_ref: string,
+  staging_needed: bool,
 }
 ```
 

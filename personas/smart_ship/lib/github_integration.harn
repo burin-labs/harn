@@ -37,6 +37,12 @@ fn retained_changes(state: Controller) -> list<Change> {
   return (state.pending ?? state.active ?? state.checkpoint?.snapshot)?.changes ?? []
 }
 
+/** Select only newly admitted changes; preparation and final requalification share this owner. */
+pub fn github_incoming_changes(claim: EffectClaim, request: IntegrationEffect) -> list<Change> {
+  const prior = retained_changes(claim.state)
+  return request.snapshot.changes.filter({ change -> !prior.contains(change) }).to_list()
+}
+
 fn require_present_object(oid: string) {
   require is_git_id(oid) && oid != "0".repeat(len(oid)),
     "integration requires existing objects, never a ref deletion"
@@ -83,8 +89,7 @@ fn build_witness(
   )
   require known_source == nil || known_source.commit == expected_base,
     "integration destination drifted from the retained controller frontier"
-  const prior = retained_changes(claim.state)
-  const incoming = request.snapshot.changes.filter({ change -> !prior.contains(change) })
+  const incoming = github_incoming_changes(claim, request)
   require len(incoming) > 0 && len(incoming) <= 30 && len(observations) == len(incoming),
     "integration requires one complete observation per new change and at most thirty heads"
   const branch = incoming[0]!.admission.record.source.base_branch

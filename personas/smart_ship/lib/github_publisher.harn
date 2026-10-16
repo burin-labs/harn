@@ -1,8 +1,9 @@
 import { IntegrationEffect } from "./controller"
-import { effect_receipt } from "./effect_contract"
+import { EffectTarget, effect_receipt } from "./effect_contract"
 import { EffectClaim, claim_reserved_effect, settle_owned_effect } from "./effect_owner"
 import { prepare_group_tree, require_group_candidate } from "./git_group"
 import {
+  GitStore,
   StateObjectStage,
   StateWrite,
   fetch_state_objects,
@@ -17,6 +18,7 @@ import {
 import {
   GithubIntegrationTransaction,
   GithubIntegrationWitness,
+  github_incoming_changes,
   github_integration_state,
   github_integration_transaction,
   prepare_github_integration,
@@ -58,6 +60,7 @@ pub type GithubIntegrationReconciliation = {
   observed: string?,
   state_commit: string,
   staging_ref: string,
+  staging_needed: bool,
 }
 
 /** A conclusive provider refusal is retained independently of a successful transaction witness. */
@@ -65,6 +68,19 @@ pub type GithubIntegrationRefusal = {
   schema: "smart-ship.github-integration-refusal.v1",
   transaction: GithubIntegrationTransaction,
   provider: GithubConnectorError,
+}
+
+/** A refusal before the publication call proves that no destination mutation was started. */
+pub type GithubIntegrationPreparationRefusal = {
+  schema: "smart-ship.github-preparation-refusal.v1",
+  request: EffectTarget,
+  claim_commit: string,
+  transaction: GithubIntegrationTransaction?,
+  transaction_digest: string?,
+  reviews: list<GithubPullRequestReviewCensus>?,
+  reason: string,
+  reason_truncated: bool,
+  details_omitted: bool,
 }
 
 /** Unresolved integrations retain their objects. Cleanup never overwrites a competing ref. */
@@ -80,10 +96,20 @@ type Prepared = {
   witness: GithubIntegrationWitness,
   write: StateWrite,
   transaction: GithubIntegrationTransaction,
-  stage: StateObjectStage,
 }
 
 type ProviderReply = {outcome: GithubConnectorResult<GithubRefUpdatesReceipt>}
+
+fn preparation_matches(
+  refusal: GithubIntegrationPreparationRefusal,
+  transaction: GithubIntegrationTransaction,
+) -> bool {
+  return refusal.claim_commit == transaction.witness.authority_before
+    && refusal.request
+      == pick(transaction.witness.request, ["repository", "source", "input_digest"])
+    && (refusal.transaction == transaction
+      || refusal.transaction_digest == "sha256:" + sha256_hex(json_stringify(transaction)))
+}
 
 /** The reservation binds the configured provider identity before any claim can invoke it. */
 pub fn github_integration_binding(configuration: GithubIntegrationConfiguration) -> string {
@@ -100,20 +126,15 @@ pub fn github_integration_binding(configuration: GithubIntegrationConfiguration)
     )
 }
 
-fn prepare(
+fn read_reviews(
   harness: Harness,
   configuration: GithubIntegrationConfiguration,
   claim: EffectClaim,
   request: IntegrationEffect,
-  expected_base: string,
-) -> Prepared {
-  const store = configuration.installation.store
+) -> list<GithubPullRequestReviewCensus> {
   const parts = request.repository.split("/")
   require len(parts) == 2 && parts.all({ part -> part != "" }), "repository identity is invalid"
-  const prior = (claim.state.pending ?? claim.state.active ?? claim.state.checkpoint?.snapshot)
-    ?.changes
-    ?? []
-  const incoming = request.snapshot.changes.filter({ change -> !prior.contains(change) })
+  const incoming = github_incoming_changes(claim, request)
   require len(incoming) > 0 && len(incoming) <= 30,
     "integration requires one to thirty new reviewed changes"
   let observations: list<GithubPullRequestReviewCensus> = []
@@ -141,6 +162,27 @@ fn prepare(
         ),
       ]
   }
+  return observations
+}
+
+fn prepare(
+  harness: {clock: HarnessClock, process: HarnessProcess},
+  configuration: GithubIntegrationConfiguration,
+  claim: EffectClaim,
+  request: IntegrationEffect,
+  expected_base: string,
+  observations: list<GithubPullRequestReviewCensus>,
+) -> Prepared {
+  const store = configuration.installation.store
+  const incoming = github_incoming_changes(claim, request)
+  const witness = prepare_github_integration(
+    claim,
+    request,
+    store.ref,
+    expected_base,
+    observations,
+    harness.clock.now_ms(),
+  )
   const heads = incoming.map({ change -> change.head })
   fetch_state_objects(harness.process, store, [expected_base, request.source] + heads)
   const group = prepare_group_tree(
@@ -160,14 +202,6 @@ fn prepare(
     request.snapshot.sources[0]!.tree,
     store.timeout_ms,
   )
-  const witness = prepare_github_integration(
-    claim,
-    request,
-    store.ref,
-    expected_base,
-    observations,
-    harness.clock.now_ms(),
-  )
   const write = prepare_state(
     harness.process,
     store,
@@ -179,9 +213,55 @@ fn prepare(
     { update -> update.ref == "refs/heads/smart-ship-objects/" + claim.commit },
   ),
     "object staging cannot address a destination, authority or reviewed source branch"
-  require_git_transport(harness.process, store, claim.remote)
-  const stage = stage_state(harness.process, store, write)
-  return {witness: witness, write: write, transaction: transaction, stage: stage}
+  return {witness: witness, write: write, transaction: transaction}
+}
+
+fn refuse_preparation(
+  process: HarnessProcess,
+  store: GitStore,
+  result: GithubIntegrationDispatch,
+  request: IntegrationEffect,
+  reason: string,
+  reviews: list<GithubPullRequestReviewCensus>? = nil,
+) -> GithubIntegrationDispatch {
+  const claim = result.claim!
+  const refusal: GithubIntegrationPreparationRefusal = {
+    schema: "smart-ship.github-preparation-refusal.v1",
+    request: pick(request, ["repository", "source", "input_digest"]),
+    claim_commit: claim.commit,
+    transaction: result.transaction,
+    transaction_digest: if result.transaction == nil {
+      nil
+    } else {
+      "sha256:" + sha256_hex(json_stringify(result.transaction))
+    },
+    reviews: reviews,
+    reason: reason[0:2048],
+    reason_truncated: len(reason) > 2048,
+    details_omitted: false,
+  }
+  const full = try {
+    effect_receipt(json_stringify(refusal))
+  }
+  const receipt = if is_ok(full) {
+    unwrap(full)
+  } else {
+    effect_receipt(
+      json_stringify(refusal + {transaction: nil, reviews: nil, details_omitted: true}),
+    )
+  }
+  const settled = try {
+    settle_owned_effect(process, store, claim, request, {status: "refused", receipt: receipt})
+  }
+  return result
+    + {
+      status: if is_ok(settled) && unwrap(settled).status == "committed" {
+        "refused"
+      } else {
+        "reconciliation_required"
+      },
+      reason: reason,
+    }
 }
 
 /**
@@ -245,16 +325,78 @@ pub fn dispatch_github_integration(
   }
   const claim = unwrap(claimed)
   result = result + {status: "reconciliation_required", claim: claim}
+  const observed = try {
+    read_reviews(harness, configuration, claim, request)
+  }
+  if is_err(observed) {
+    return refuse_preparation(
+      harness.process,
+      config.store,
+      result,
+      request,
+      "review census unavailable: " + to_string(unwrap_err(observed)),
+    )
+  }
+  const observations = unwrap(observed)
   const prepared = try {
-    prepare(harness, configuration, claim, request, expected_base)
+    prepare(
+      pick(harness, ["clock", "process"]),
+      configuration,
+      claim,
+      request,
+      expected_base,
+      observations,
+    )
   }
   if is_err(prepared) {
-    return result + {reason: "integration preparation refused: " + to_string(unwrap_err(prepared))}
+    return refuse_preparation(
+      harness.process,
+      config.store,
+      result,
+      request,
+      "integration preparation refused: " + to_string(unwrap_err(prepared)),
+      observations,
+    )
   }
   const ready = unwrap(prepared)
-  result = result + {transaction: ready.transaction, stage: ready.stage}
-  if ready.stage.result.status != "committed" {
-    return result + {reason: "state object upload is " + ready.stage.result.status}
+  result = result + {transaction: ready.transaction}
+  const staged = try {
+    require_git_transport(harness.process, config.store, claim.remote)
+    stage_state(harness.process, config.store, ready.write)
+  }
+  if is_err(staged) {
+    return refuse_preparation(
+      harness.process,
+      config.store,
+      result,
+      request,
+      "state object staging failed: " + to_string(unwrap_err(staged)),
+      observations,
+    )
+  }
+  const stage = unwrap(staged)
+  result = result + {stage: stage}
+  if stage.result.status != "committed" {
+    return refuse_preparation(
+      harness.process,
+      config.store,
+      result,
+      request,
+      "state object upload is " + stage.result.status,
+      observations,
+    )
+  }
+  const refreshed = try {
+    read_reviews(harness, configuration, claim, request)
+  }
+  if is_err(refreshed) {
+    return refuse_preparation(
+      harness.process,
+      config.store,
+      result,
+      request,
+      "final review census unavailable: " + to_string(unwrap_err(refreshed)),
+    )
   }
   // Upload duration cannot silently extend the admission debt budget. Stops and other
   // authority changes remain guarded by the exact authority beforeOid in the transaction.
@@ -264,13 +406,37 @@ pub fn dispatch_github_integration(
       request,
       config.store.ref,
       expected_base,
-      ready.witness.observations,
+      unwrap(refreshed),
       harness.clock.now_ms(),
     )
   }
-  if is_err(timely) {
-    return result + {reason: "integration qualification expired during object preparation"}
+  if is_err(timely) || unwrap(timely).observations != ready.witness.observations {
+    return refuse_preparation(
+      harness.process,
+      config.store,
+      result,
+      request,
+      if is_err(timely) {
+        "final integration qualification refused: " + to_string(unwrap_err(timely))
+      } else {
+        "review census changed during preparation; requalify a new request"
+      },
+      unwrap(refreshed),
+    )
   }
+  return publish_prepared(harness, configuration, result, ready)
+}
+
+fn publish_prepared(
+  harness: Harness,
+  configuration: GithubIntegrationConfiguration,
+  initial: GithubIntegrationDispatch,
+  ready: Prepared,
+) -> GithubIntegrationDispatch {
+  const config = configuration.installation
+  const claim = initial.claim!
+  const request = ready.witness.request
+  let result = initial
   const parts = request.repository.split("/")
   const attempted = try {
     const reply: ProviderReply = {
@@ -362,6 +528,9 @@ pub fn reconcile_github_integration(
   const witness = transaction.witness
   const current = read_state(process, store)
   const observed = current.state
+  require observed == nil
+    || observed.authority.installation == configuration.installation.policy.installation,
+    "reconciliation authority belongs to another installation"
   // A terminal refusal retains the exact transaction in current authority. Its
   // temporary prepared object may already have been collected after safe cleanup.
   if observed != nil {
@@ -381,6 +550,24 @@ pub fn reconcile_github_integration(
             observed: current.commit,
             state_commit: transaction.state_commit,
             staging_ref: "refs/heads/smart-ship-objects/" + witness.authority_before,
+            staging_needed: false,
+          }
+        }
+      }
+      if schema_is(parsed, GithubIntegrationPreparationRefusal) {
+        const refusal: GithubIntegrationPreparationRefusal = schema_expect(
+          parsed,
+          schema_of(GithubIntegrationPreparationRefusal),
+        )
+        if preparation_matches(refusal, transaction)
+          && witness.repository_remote == store.remote
+          && witness.authority_ref == store.ref {
+          return {
+            status: "refused",
+            observed: current.commit,
+            state_commit: transaction.state_commit,
+            staging_ref: "refs/heads/smart-ship-objects/" + witness.authority_before,
+            staging_needed: refusal.details_omitted,
           }
         }
       }
@@ -418,6 +605,7 @@ pub fn reconcile_github_integration(
     observed: current.commit,
     state_commit: transaction.state_commit,
     staging_ref: "refs/heads/smart-ship-objects/" + claim.commit,
+    staging_needed: !confirmed,
   }
 }
 
@@ -463,6 +651,29 @@ pub fn recover_github_integration(
         "durable refusal differs from its exact dispatch and transaction"
       return refusal.transaction
     }
+    if schema_is(parsed, GithubIntegrationPreparationRefusal) {
+      const refusal: GithubIntegrationPreparationRefusal = schema_expect(
+        parsed,
+        schema_of(GithubIntegrationPreparationRefusal),
+      )
+      require refusal.claim_commit == claim.commit
+        && refusal.request == pick(request, ["repository", "source", "input_digest"]),
+        "preparation refusal belongs to a different dispatch"
+      const transaction = refusal.transaction
+      if transaction != nil {
+        const expected: StateWrite = {
+          expected: claim.commit,
+          commit: transaction.state_commit,
+          state: unwrap(github_integration_state(claim, transaction.witness)),
+        }
+        require preparation_matches(refusal, transaction)
+          && github_integration_transaction(claim, transaction.witness, expected) == transaction,
+          "preparation refusal differs from its complete guarded transaction"
+        return transaction
+      }
+      require refusal.transaction_digest != nil,
+        "request was refused before any transaction was prepared"
+    }
   }
   const staged = if effect.status == "confirmed" {
     read_state_revision(process, store, current, effect.dispatch_revision + 1)
@@ -481,7 +692,19 @@ pub fn recover_github_integration(
   )
   const write: StateWrite = {expected: original.commit, commit: staged.commit, state: staged.state}
   validate_state_write(process, store, write)
-  return github_integration_transaction(claim, witness, write)
+  const transaction = github_integration_transaction(claim, witness, write)
+  if effect.status == "refused" && effect.receipt != nil {
+    const parsed = json_parse(effect.receipt.body)
+    if schema_is(parsed, GithubIntegrationPreparationRefusal) {
+      const refusal: GithubIntegrationPreparationRefusal = schema_expect(
+        parsed,
+        schema_of(GithubIntegrationPreparationRefusal),
+      )
+      require preparation_matches(refusal, transaction),
+        "staged transaction differs from its retained refusal digest"
+    }
+  }
+  return transaction
 }
 
 /** Delete only a conclusively reconciled transaction's exact owned staging object. */
@@ -501,7 +724,8 @@ pub fn cleanup_github_integration(
   const qualified = try {
     reconcile_github_integration(harness.process, configuration, transaction)
   }
-  if is_err(qualified) || unwrap(qualified).status == "unresolved" {
+  if is_err(qualified) || unwrap(qualified).status == "unresolved"
+    || unwrap(qualified).staging_needed {
     return result + {reason: "unresolved integration objects must be retained"}
   }
   const store = configuration.installation.store + {ref: unwrap(qualified).staging_ref}
