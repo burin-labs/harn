@@ -1,0 +1,182 @@
+import { github_api_json } from "./github_api.harn"
+
+pub type CiJobIdentity = {
+  repository: string,
+  run_id: int,
+  head_sha: string,
+  run_status: string,
+  run_conclusion: string,
+}
+
+type GitHubJobIdentity = {
+  id: int,
+  run_id: int,
+  name: string,
+  status: string,
+  started_at: string?,
+  check_run_url: string,
+}
+
+type GitHubTerminalCheck = {
+  id: int,
+  name: string,
+  url: string,
+  details_url: string,
+  head_sha: string,
+  app: {slug: string},
+  status: string,
+  conclusion: string?,
+  started_at: string?,
+  completed_at: string?,
+}
+
+type GitHubJobsResponse = {jobs: list<unknown>}
+
+pub type CiTerminalJobEvidence = {
+  status: string,
+  conclusion: string,
+  started_at: string,
+  completed_at: string,
+}
+
+pub type CiJobCensus = {
+  jobs: list<unknown>,
+  reconciled: list<string>,
+  pending: list<string>,
+  failing: list<string>,
+}
+
+pub fn timestamp_ms(raw: unknown) -> int? {
+  if type_of(raw) != "string" || raw == "" {
+    return nil
+  }
+  const parsed = try {
+    date_parse(raw)
+  }
+  if is_err(parsed) {
+    return nil
+  }
+  const seconds = to_float(unwrap(parsed))
+  if seconds == nil {
+    return nil
+  }
+  return to_int(round(seconds * 1000.0))
+}
+
+pub fn elapsed_ms(started_at: unknown, completed_at: unknown) -> int? {
+  const started_ms = timestamp_ms(started_at)
+  const completed_ms = timestamp_ms(completed_at)
+  if started_ms == nil || completed_ms == nil || completed_ms < started_ms {
+    return nil
+  }
+  return completed_ms - started_ms
+}
+
+fn terminal_check_path(identity: CiJobIdentity, raw_job: unknown) -> string? {
+  if identity.run_status != "completed" || identity.run_conclusion != "success"
+    || identity.run_id <= 0
+    || regex_match("^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$", identity.repository) == nil
+    || regex_match("^[0-9a-f]{40}$", identity.head_sha) == nil {
+    return nil
+  }
+  const parsed = schema_parse(raw_job, schema_of(GitHubJobIdentity))
+  if is_err(parsed) {
+    return nil
+  }
+  const job: GitHubJobIdentity = unwrap(parsed)
+  if job.id <= 0 || job.run_id != identity.run_id
+    || !["queued", "pending", "waiting", "in_progress"].contains(job.status) {
+    return nil
+  }
+  const prefix = "https://api.github.com/repos/" + identity.repository + "/check-runs/"
+  if !job.check_run_url.starts_with(prefix) {
+    return nil
+  }
+  const check_id = job.check_run_url.replace(prefix, "")
+  if regex_match("^[1-9][0-9]*$", check_id) == nil || to_int(check_id) == nil {
+    return nil
+  }
+  return "/repos/" + identity.repository + "/check-runs/" + check_id
+}
+
+/** Recover a stale job row only from its own terminal Actions check run. */
+pub fn verified_terminal_job(
+  identity: CiJobIdentity,
+  raw_job: unknown,
+  raw_check: unknown,
+) -> CiTerminalJobEvidence? {
+  const path = terminal_check_path(identity, raw_job)
+  const parsed = schema_parse(raw_check, schema_of(GitHubTerminalCheck))
+  if path == nil || is_err(parsed) {
+    return nil
+  }
+  const job: GitHubJobIdentity = schema_expect(raw_job, schema_of(GitHubJobIdentity))
+  const check: GitHubTerminalCheck = unwrap(parsed)
+  const details = "https://github.com/" + identity.repository + "/actions/runs/"
+    + to_string(identity.run_id)
+    + "/job/"
+    + to_string(job.id)
+  if check.url != job.check_run_url || check.url != "https://api.github.com" + path
+    || check.id <= 0
+    || !check.url.ends_with("/" + to_string(check.id))
+    || check.details_url != details
+    || check.head_sha != identity.head_sha
+    || check.name != job.name
+    || check.app.slug != "github-actions"
+    || check.status != "completed"
+    || check.conclusion == nil
+    || check.conclusion == ""
+    || check.started_at == nil
+    || check.started_at != job.started_at
+    || check.completed_at == nil
+    || elapsed_ms(check.started_at, check.completed_at) == nil {
+    return nil
+  }
+  const evidence: CiTerminalJobEvidence = schema_expect(
+    pick(check, ["status", "conclusion", "started_at", "completed_at"]),
+    schema_of(CiTerminalJobEvidence),
+  )
+  return evidence
+}
+
+/** Read one run's jobs, retaining unresolved and failed evidence explicitly. */
+pub fn completed_run_jobs(
+  process: HarnessProcess,
+  clock: HarnessClock,
+  identity: CiJobIdentity,
+) -> CiJobCensus {
+  const data = github_api_json(
+    process,
+    clock,
+    "/repos/" + identity.repository + "/actions/runs/" + to_string(identity.run_id)
+      + "/jobs?per_page=100",
+  )
+  const census: GitHubJobsResponse = schema_expect(data, schema_of(GitHubJobsResponse))
+  let jobs: list<unknown> = []
+  let reconciled: list<string> = []
+  let pending: list<string> = []
+  let failing: list<string> = []
+  for raw_job in census.jobs {
+    const path = terminal_check_path(identity, raw_job)
+    let observed = raw_job
+    if path != nil {
+      const lookup = try {
+        github_api_json(process, clock, path)
+      }
+      if is_ok(lookup) {
+        const evidence = verified_terminal_job(identity, raw_job, unwrap(lookup))
+        if evidence != nil {
+          observed = raw_job + evidence
+          reconciled = reconciled + [to_string(raw_job.name)]
+        }
+      }
+    }
+    if observed.status != "completed" {
+      pending = pending + [to_string(observed.name)]
+    } else if !["success", "skipped", "neutral"].contains(observed.conclusion) {
+      failing = failing + [to_string(observed.name)]
+    }
+    jobs = jobs + [observed]
+  }
+  return {jobs: jobs, reconciled: reconciled, pending: pending, failing: failing}
+}

@@ -1064,6 +1064,9 @@ fn live_artifact_handoff_errors(workflow: dict) -> list<string> {
 
 fn walltime_report_errors(workflow: dict) -> list<string> {
   const report_job = workflow?.jobs?.["ci-walltime-report"]
+  if trim(report_job?.permissions?.checks ?? "") != "read" {
+    return ["ci.yml:ci-walltime-report requires read-only Checks access for terminal job evidence"]
+  }
   const report_step = step_by_name(report_job?.steps ?? [], "Write CI timing report")
   const upload_report_step = step_by_name(report_job?.steps ?? [], "Upload CI timing report")
   const status_job = workflow?.jobs?.["ci-status"]
