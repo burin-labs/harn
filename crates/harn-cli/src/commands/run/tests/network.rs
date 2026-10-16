@@ -140,11 +140,14 @@ else:
     raise SystemExit('remote network unexpectedly allowed')";
     let source = format!(
         r#"
+{PROCESS_REFUSAL_REPORTING}
 fn main(harness: Harness) -> int {{
-  const child = harness.process.run({{
+  const attempted = try {{ harness.process.run({{
     program: "/usr/bin/python3",
     args: ["-c", {python}, {outside_file}],
-  }})
+  }}) }}
+  const child = process_result_or_refusal(harness.stdio, attempted)
+  if child == nil {{ return 0 }}
   harness.stdio.print(child.stdout)
   harness.stdio.eprint(child.stderr)
   return child.exit_code
@@ -182,12 +185,12 @@ fn main(harness: Harness) -> int {{
         outcome.stderr, outcome.stdout
     );
     let workspace = std::fs::canonicalize(temp.path()).expect("canonical workspace");
-    assert_eq!(
-        outcome.stdout,
-        format!(
-            "CWD={}\nFILESYSTEM_DENIED\nLOOPBACK_OK\nREMOTE_DENIED\n",
+    assert_run_process_output(
+        &outcome,
+        &format!(
+            "CWD={}\nFILESYSTEM_DENIED\nLOOPBACK_OK\nREMOTE_DENIED",
             workspace.display()
-        )
+        ),
     );
     harn_vm::reset_thread_local_state();
 }

@@ -25,7 +25,9 @@ mod exit_status;
 mod host_dispatch;
 mod network;
 #[cfg(unix)]
-use command_grant_diagnostic::COMMAND_GRANT_FAILURE_DIAGNOSTIC;
+use crate::tests::common::process_sandbox::assert_run_process_output;
+#[cfg(unix)]
+use command_grant_diagnostic::{COMMAND_GRANT_FAILURE_DIAGNOSTIC, PROCESS_REFUSAL_REPORTING};
 
 fn write_manifest_trigger_project(root: &Path, main_source: &str) -> PathBuf {
     std::fs::write(
@@ -662,14 +664,17 @@ async fn execute_run_allows_command_run_read_from_process_only_root() {
         &script,
         format!(
             r#"
+{PROCESS_REFUSAL_REPORTING}
 import {{ command_run }} from "std/command"
 
 pipeline main(harness: Harness) {{
-  const result = command_run(
+  const attempted = try {{ command_run(
     harness.tools,
     {{argv: ["cat", "{secret_literal}"]}},
     {{capture: {{max_inline_bytes: 8}}, timeout_ms: 5000}},
-  )
+  ) }}
+  const result = process_result_or_refusal(harness.stdio, attempted)
+  if result == nil {{ return }}
   if !result.success {{
     throw "command_run failed: exit_code=${{result.exit_code}} stderr=${{result.stderr}}"
   }}
@@ -695,7 +700,7 @@ pipeline main(harness: Harness) {{
     .await;
 
     assert_eq!(outcome.exit_code, 0, "stderr:\n{}", outcome.stderr);
-    assert_eq!(outcome.stdout.trim(), "payload");
+    assert_run_process_output(&outcome, "payload");
     assert!(
         outcome
             .stderr
@@ -727,16 +732,21 @@ async fn execute_run_allows_transitive_runtime_reexecution() {
         .to_string_lossy()
         .replace('\\', "\\\\")
         .replace('"', "\\\"");
+    let marker = project.join("runtime-launched");
+    let marker_literal = serde_json::to_string(&marker).expect("marker path");
     let script = project.join("main.harn");
     std::fs::write(
         &script,
         format!(
             r#"
+{PROCESS_REFUSAL_REPORTING}
 pipeline main(harness: Harness) {{
-  const result = harness.process.run({{
+  const attempted = try {{ harness.process.run({{
     program: "sh",
-    args: ["-c", "\"$1\" --help >/dev/null", "_", "{runtime}"],
-  }})
+    args: ["-c", "printf reached > \"$2\"; \"$1\" --help >/dev/null", "_", "{runtime}", {marker_literal}],
+  }}) }}
+  const result = process_result_or_refusal(harness.stdio, attempted)
+  if result == nil {{ return }}
   if !result.success {{
     throw "transitive runtime execution failed: exit=${{result.exit_code}} stderr=${{result.stderr}}"
   }}
@@ -760,7 +770,17 @@ pipeline main(harness: Harness) {{
     )
     .await;
 
-    assert_eq!(outcome.exit_code, 0, "stderr:\n{}", outcome.stderr);
+    assert_run_process_output(&outcome, "");
+    #[cfg(target_os = "macos")]
+    let expected_launch =
+        crate::tests::common::process_sandbox::unavailable_worktree_sandbox().is_none();
+    #[cfg(not(target_os = "macos"))]
+    let expected_launch = true;
+    assert_eq!(
+        marker.exists(),
+        expected_launch,
+        "actual child-launch boundary"
+    );
     harn_vm::reset_thread_local_state();
 }
 
@@ -785,15 +805,18 @@ async fn execute_run_granted_policy_injects_into_subprocess_env() {
         &script,
         [
             COMMAND_GRANT_FAILURE_DIAGNOSTIC,
+            PROCESS_REFUSAL_REPORTING,
             r#"
 import { command_run } from "std/command"
 
 pipeline main(harness: Harness) {
-  const result = command_run(
+  const attempted = try { command_run(
     harness.tools,
     {argv: ["sh", "-c", "printf %s \"$HARN_TEST_CHILD_VAR\""]},
     {capture: {max_inline_bytes: 64}, timeout_ms: 5000},
-  )
+  ) }
+  const result = process_result_or_refusal(harness.stdio, attempted)
+  if result == nil { return }
   if !result.success {
     throw "command_run failed: ${json_stringify(command_grant_failure(result))}"
   }
@@ -830,7 +853,7 @@ pipeline main(harness: Harness) {
     std::env::remove_var(src);
 
     assert_eq!(outcome.exit_code, 0, "stderr:\n{}", outcome.stderr);
-    assert_eq!(outcome.stdout.trim(), "granted-secret-value");
+    assert_run_process_output(&outcome, "granted-secret-value");
     assert!(
         outcome.stderr.contains("environment policy: granted"),
         "the grant must be disclosed; stderr:\n{}",
@@ -857,15 +880,18 @@ async fn execute_run_command_bound_grant_skips_non_matching_exec() {
         &script,
         [
             COMMAND_GRANT_FAILURE_DIAGNOSTIC,
+            PROCESS_REFUSAL_REPORTING,
             r#"
 import { command_run } from "std/command"
 
 pipeline main(harness: Harness) {
-  const result = command_run(
+  const attempted = try { command_run(
     harness.tools,
     {argv: ["env"]},
     {capture: {max_inline_bytes: 65536}, timeout_ms: 5000},
-  )
+  ) }
+  const result = process_result_or_refusal(harness.stdio, attempted)
+  if result == nil { return }
   if !result.success {
     throw "command_run failed: ${json_stringify(command_grant_failure(result))}"
   }
@@ -902,7 +928,7 @@ pipeline main(harness: Harness) {
     std::env::remove_var(src);
 
     assert_eq!(outcome.exit_code, 0, "stderr:\n{}", outcome.stderr);
-    assert_eq!(outcome.stdout.trim(), "absent");
+    assert_run_process_output(&outcome, "absent");
     harn_vm::reset_thread_local_state();
 }
 
@@ -926,18 +952,25 @@ async fn execute_run_isolated_policy_closes_subprocess_env() {
     let script = project.join("main.harn");
     std::fs::write(
         &script,
-        r#"
+        [
+            PROCESS_REFUSAL_REPORTING,
+            r#"
 import { command_run } from "std/command"
 
 pipeline main(harness: Harness) {
-  const result = command_run(
+  const attempted = try { command_run(
     harness.tools,
     {argv: ["sh", "-c", "printf %s \"$HARN_TEST_ISOLATED_SECRET\""]},
     {capture: {max_inline_bytes: 64}, timeout_ms: 5000},
-  )
+  ) }
+  const result = process_result_or_refusal(harness.stdio, attempted)
+  if result == nil { return }
+  if !result.success { throw "isolated command did not execute successfully" }
   harness.stdio.println(result.stdout == "" ? "CLOSED" : "LEAKED")
 }
 "#,
+        ]
+        .concat(),
     )
     .expect("write script");
 
@@ -961,7 +994,7 @@ pipeline main(harness: Harness) {
     std::env::remove_var(secret);
 
     assert_eq!(outcome.exit_code, 0, "stderr:\n{}", outcome.stderr);
-    assert_eq!(outcome.stdout.trim(), "CLOSED");
+    assert_run_process_output(&outcome, "CLOSED");
     assert!(
         outcome.stderr.contains("environment policy: isolated"),
         "the isolated policy must be disclosed; stderr:\n{}",

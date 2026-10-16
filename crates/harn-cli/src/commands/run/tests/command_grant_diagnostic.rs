@@ -1,3 +1,14 @@
+// A compatibility host must expose the actual refusal, never substitute empty output.
+pub(super) const PROCESS_REFUSAL_REPORTING: &str = r"
+fn process_result_or_refusal(stdio: HarnessStdio, attempted: any) -> any {
+  if is_err(attempted) {
+    stdio.println(json_stringify({process_refusal: unwrap_err(attempted)}))
+    return nil
+  }
+  return unwrap(attempted)
+}
+";
+
 // Both grant controls share this bounded failure projection. It excludes child
 // output, environment, denial command/resource text, and cleanup command names.
 pub(super) const COMMAND_GRANT_FAILURE_DIAGNOSTIC: &str = r"

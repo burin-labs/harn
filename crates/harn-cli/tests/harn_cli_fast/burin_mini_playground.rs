@@ -302,7 +302,8 @@ fn burin_mini_comment_file_fixture_run_updates_workspace_copy() {
     let report = generated_report_path(&experiment_root, &stdout, "comment_file-latest.json");
     let report_json = read_json(&report);
     #[cfg(target_os = "macos")]
-    if let Some(refusal) = crate::test_util::process::unavailable_worktree_sandbox() {
+    if let Some(refusal) = harn_cli::tests::common::process_sandbox::unavailable_worktree_sandbox()
+    {
         assert_comment_verification_refused(&report_json, &refusal.to_string());
     } else {
         assert_report_passes(&report_json, &stdout);
@@ -677,27 +678,31 @@ mod stage_summary_tests {
             "confines_processes": false,
             "os_hardened_refusal": harn_vm::value::json::vm_value_to_json(&refusal.thrown_value()),
         });
-        let compatible =
-            crate::test_util::process::worktree_sandbox_for_host(unsupported.clone(), "ci");
+        let compatible = harn_cli::tests::common::process_sandbox::worktree_sandbox_for_host(
+            unsupported.clone(),
+            "ci",
+        );
         assert!(
             compatible.is_some(),
             "compatibility checks must retain a measured refusal"
         );
         let required = std::panic::catch_unwind(|| {
-            crate::test_util::process::worktree_sandbox_for_host(
+            harn_cli::tests::common::process_sandbox::worktree_sandbox_for_host(
                 unsupported,
-                crate::test_util::process::native_qualification_profile(),
+                harn_cli::tests::common::process_sandbox::native_qualification_profile(),
             )
         });
         assert!(
             required.is_err(),
             "a required qualification cannot pass by accepting a refusal"
         );
-        assert!(crate::test_util::process::worktree_sandbox_for_host(
-            serde_json::json!({"confines_processes": true}),
-            crate::test_util::process::native_qualification_profile()
-        )
-        .is_none());
+        assert!(
+            harn_cli::tests::common::process_sandbox::worktree_sandbox_for_host(
+                serde_json::json!({"confines_processes": true}),
+                harn_cli::tests::common::process_sandbox::native_qualification_profile()
+            )
+            .is_none()
+        );
     }
     use serde_json::json;
 

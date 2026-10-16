@@ -1447,6 +1447,18 @@ fn main(harness: Harness) {
             exit_code: 0,
         };
 
+        // A compatibility host still reads and edits. Only the process-backed
+        // verification is refused, and its exact runtime error must be observed.
+        #[cfg(target_os = "macos")]
+        if let Some(refusal) = crate::tests::common::process_sandbox::unavailable_worktree_sandbox()
+        {
+            let verification = &mut fixture.expected.tools[2];
+            verification.status = harn_vm::agent_events::ToolCallStatus::Failed;
+            verification.result_blake3 =
+                super::canonical_blake3(&serde_json::json!(refusal.into_error().to_string()));
+            verification.exit_code = None;
+        }
+
         let receipt = execute_once(&replay_path, &fixture, 1)
             .await
             .expect("re-execution setup");

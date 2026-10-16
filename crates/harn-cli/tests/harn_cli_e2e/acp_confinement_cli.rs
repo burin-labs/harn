@@ -125,7 +125,8 @@ pub(crate) fn confine_workspace_holds_the_server_and_its_commands_to_the_workspa
     fs::create_dir_all(&outside).unwrap();
 
     #[cfg(target_os = "macos")]
-    if let Some(refusal) = crate::test_util::process::unavailable_worktree_sandbox() {
+    if let Some(refusal) = harn_cli::tests::common::process_sandbox::unavailable_worktree_sandbox()
+    {
         let output = harn_e2e_command()
             .current_dir(&workspace)
             .args(["serve", "acp", "--confine-workspace"])
