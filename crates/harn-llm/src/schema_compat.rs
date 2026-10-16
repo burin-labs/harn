@@ -381,14 +381,12 @@ impl SchemaSanitizer<'_> {
                 "single-value enum preserves const semantics in openai_strict schemas",
             ),
             Some(Value::Array(values))
-                if value.as_str().is_some_and(|constant| {
-                    values
-                        .iter()
-                        .any(|candidate| candidate.as_str() == Some(constant))
-                }) => (
+                if values
+                    .iter()
+                    .any(|candidate| jsonschema::json::cmp::equal(&value, candidate)) => (
                 vec![value],
                 "intersected_with_const",
-                "single-value enum preserves the string const and enum intersection in openai_strict schemas",
+                "single-value enum preserves the const and enum intersection in openai_strict schemas",
             ),
             Some(_) => (
                 Vec::new(),
@@ -1119,27 +1117,35 @@ pub(crate) mod tests {
                 "#/const",
                 "const",
                 "intersected_with_const",
-                "single-value enum preserves the string const and enum intersection in openai_strict schemas",
+                "single-value enum preserves the const and enum intersection in openai_strict schemas",
             )])
         );
     }
 
     #[test]
     fn openai_strict_fails_closed_for_empty_const_enum_intersection() {
-        let schema = serde_json::json!({"type": "string", "const": "a", "enum": ["b"]});
-
-        let (sanitized, changes) = sanitize_openai_with_changes(&schema);
-
-        assert_eq!(sanitized, serde_json::json!({"type": "string", "enum": []}));
-        assert_eq!(
-            changes,
-            Value::Array(vec![openai_receipt_change(
-                "#/const",
-                "const",
-                "rewritten_to_empty_enum",
-                "empty enum fails closed when const and enum have no safely supported intersection in openai_strict schemas",
-            )])
-        );
+        for (constant, candidates) in [
+            (serde_json::json!("a"), serde_json::json!(["b"])),
+            (serde_json::json!(1), serde_json::json!([2, 3])),
+            (serde_json::json!(1.0), serde_json::json!([1.5])),
+            (
+                serde_json::json!(9007199254740993_u64),
+                serde_json::json!([9007199254740992_u64]),
+            ),
+        ] {
+            let schema = serde_json::json!({"const": constant, "enum": candidates});
+            let (sanitized, changes) = sanitize_openai_with_changes(&schema);
+            assert_eq!(sanitized, serde_json::json!({"enum": []}));
+            assert_eq!(
+                changes,
+                Value::Array(vec![openai_receipt_change(
+                    "#/const",
+                    "const",
+                    "rewritten_to_empty_enum",
+                    "empty enum fails closed when const and enum have no safely supported intersection in openai_strict schemas",
+                )])
+            );
+        }
     }
 
     #[test]

@@ -3811,6 +3811,7 @@ dependencies = [
  "harn-builtin-macros",
  "harn-provider-catalog",
  "harn-vm-core",
+ "jsonschema",
  "proptest",
  "regex",
  "schemars",
