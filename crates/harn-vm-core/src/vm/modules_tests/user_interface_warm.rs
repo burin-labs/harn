@@ -148,6 +148,17 @@ fn cache_preparation_reuses_graph_projections_and_keeps_module_proofs_local() {
     let root = dir.path().join("m0.harn");
     let source = std::fs::read_to_string(&root).unwrap();
     let mut compiler = crate::bytecode_cache::CachePrecompiler::default();
+    for provenance in [
+        ModuleProvenance::EmbeddedStdlib,
+        ModuleProvenance::PrivilegedWire,
+    ] {
+        assert!(compiler.prepare(&root, &source, provenance).is_err());
+    }
+    assert_eq!(
+        compiler.module_count(),
+        0,
+        "unsupported authority must not prepare files"
+    );
     let (walks, parses) = parse_work_during(|| {
         compiler
             .prepare(&root, &source, ModuleProvenance::User)

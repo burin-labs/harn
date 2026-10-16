@@ -40,6 +40,8 @@ impl CachePrecompiler {
     /// source. Return the same entry projection and store identity to the
     /// caller, which owns entry compilation and package-manager authority.
     /// Call `prepare_stdlib_catalog` first when preparing an executing backend.
+    /// File roots support user or trusted host-dispatch provenance; embedded
+    /// stdlib preparation belongs to `prepare_stdlib_catalog`.
     /// Unlike execution's opportunistic writes, persistence failures are errors.
     pub fn prepare(
         &mut self,
@@ -48,6 +50,14 @@ impl CachePrecompiler {
         provenance: ModuleProvenance,
     ) -> Result<(ModuleCompilationContext, LookupOutcome), VmError> {
         require_cache()?;
+        if !matches!(
+            provenance,
+            ModuleProvenance::User | ModuleProvenance::TrustedHostDispatch
+        ) {
+            return Err(VmError::Runtime(
+                "file preparation requires user or trusted host-dispatch provenance".into(),
+            ));
+        }
         let slot = InterfaceSlot::open(path, source)
             .ok_or_else(|| VmError::Runtime("module interface cache is unavailable".into()))?;
         let result = shipped_interface::recall(path, source)
@@ -143,19 +153,15 @@ impl CachePrecompiler {
                         context,
                     )?
                 }
-                ModuleProvenance::EmbeddedStdlib => {
-                    compile_embedded_stdlib_module_artifact_from_source_with_context(
-                        path,
-                        source.as_str(),
-                        context,
-                    )?
-                }
-                ModuleProvenance::User | ModuleProvenance::PrivilegedWire => {
-                    compile_module_artifact_from_source_with_context(
-                        path,
-                        source.as_str(),
-                        context,
-                    )?
+                ModuleProvenance::User => compile_module_artifact_from_source_with_context(
+                    path,
+                    source.as_str(),
+                    context,
+                )?,
+                ModuleProvenance::EmbeddedStdlib | ModuleProvenance::PrivilegedWire => {
+                    return Err(VmError::Runtime(
+                        "unsupported file preparation provenance".into(),
+                    ));
                 }
             },
         };
