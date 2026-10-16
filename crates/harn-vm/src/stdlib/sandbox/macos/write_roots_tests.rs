@@ -112,12 +112,17 @@ fn a_live_child_with_no_write_roots_cannot_write_outside_the_workspace() {
             policy,
             SandboxProfile::Worktree,
         )
-        .expect("spawn confined shell")
     };
 
     let policy = system_runtime_only_policy(&workspace_path.display().to_string());
     let inside_marker = workspace_path.join("inside-marker");
-    let inside = write(&policy, &inside_marker);
+    let result = write(&policy, &inside_marker);
+    if crate::sandbox_host::assert_unavailable_result(&result) {
+        assert!(!inside_marker.exists());
+        assert!(!outside_path.join("outside-marker").exists());
+        return;
+    }
+    let inside = result.expect("spawn confined shell");
     assert!(
         inside.status.success() && inside_marker.exists(),
         "the workspace write must succeed: {}",
@@ -125,7 +130,7 @@ fn a_live_child_with_no_write_roots_cannot_write_outside_the_workspace() {
     );
 
     let outside_marker = outside_path.join("outside-marker");
-    let refused = write(&policy, &outside_marker);
+    let refused = write(&policy, &outside_marker).expect("spawn confined shell");
     assert!(
         !refused.status.success() && !outside_marker.exists(),
         "a write outside every granted root must be refused"
@@ -133,7 +138,7 @@ fn a_live_child_with_no_write_roots_cannot_write_outside_the_workspace() {
 
     let mut granted = policy;
     granted.process_sandbox.write_roots = vec![outside_path.display().to_string()];
-    let admitted = write(&granted, &outside_marker);
+    let admitted = write(&granted, &outside_marker).expect("spawn confined shell");
     assert!(
         admitted.status.success() && outside_marker.exists(),
         "a named write root must admit the same write: {}",
