@@ -1,3 +1,5 @@
+import { run_visible_command } from "./lib/repository_command"
+
 /** The all-features compile policy, including the headless host-library exception. */
 pub fn feature_check_arguments() -> list<list<string>> {
   return [
@@ -19,13 +21,12 @@ fn main(harness: Harness) {
   }
   for args in feature_check_arguments() {
     harness.stdio.eprintln("checking " + join(args, " "))
-    const result = harness.process.run(
-      {program: command[0], args: command[1:] + args, cwd: root, env: {ORT_SKIP_DOWNLOAD: "1"}},
+    const result = run_visible_command(
+      pick(harness, ["tools", "stdio"]),
+      {mode: "argv", argv: command + args, cwd: root, env: {ORT_SKIP_DOWNLOAD: "1"}},
     )
-    harness.stdio.println(result.stdout)
-    harness.stdio.eprintln(result.stderr)
     if !result.success {
-      harness.runtime.exit(result.exit_code)
+      harness.runtime.exit(result.exit_code ?? 1)
     }
   }
   harness.stdio.println("all-features compile gate ok")

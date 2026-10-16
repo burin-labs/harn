@@ -1,3 +1,5 @@
+import { run_visible_command } from "./lib/repository_command"
+
 pub type MicroOptions = {bench: string, target: string, filters: list<string>, help: bool}
 
 /** Parse controller options without interpreting Criterion's remaining argv. */
@@ -46,10 +48,12 @@ fn main(harness: Harness) {
   } else {
     options.target
   }
-  const result = harness.process.run(
+  const result = run_visible_command(
+    pick(harness, ["tools", "stdio"]),
     {
-      program: "cargo",
-      args: ["bench", "-p", "harn-vm-perf", "--bench", options.bench, "--"] + options.filters,
+      mode: "argv",
+      argv: ["cargo", "bench", "-p", "harn-vm-perf", "--bench", options.bench, "--"]
+        + options.filters,
       env: {
         CARGO_TARGET_DIR: target,
         CARGO_PROFILE_BENCH_LTO: harness.env.get("CARGO_PROFILE_BENCH_LTO") ?? "false",
@@ -58,9 +62,7 @@ fn main(harness: Harness) {
       },
     },
   )
-  harness.stdio.println(result.stdout)
-  harness.stdio.eprintln(result.stderr)
   if !result.success {
-    harness.runtime.exit(result.exit_code)
+    harness.runtime.exit(result.exit_code ?? 1)
   }
 }

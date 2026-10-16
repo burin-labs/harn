@@ -1,3 +1,4 @@
+import { command_cancel, command_run, command_wait, command_wait_for_output } from "std/command"
 import { micro_options } from "../bench_vm_micro"
 import { feature_check_arguments } from "../check_all_features"
 import { baseline_options, counted_rows, diagnostic_rows } from "../check_conformance_lint_baseline"
@@ -172,4 +173,52 @@ pipeline test_collector_cli_preserves_hidden_file_and_ignored_fixture_census(har
   assert_eq(ignored.exit_code, 0)
   assert(ignored.stdout.contains("sources=2"))
   assert_eq(harness.fs.read_text(baseline), first)
+}
+
+pipeline test_microbench_output_reaches_the_terminal_before_the_child_can_exit(harness: Harness) {
+  const repo = path_normalize(path_join(harness.fs.source_dir(), "../.."))
+  const target = harness.fs.mkdtemp_in_workspace("live-microbench-")
+  const fifo = path_join(target, "release.fifo")
+  assert(harness.process.run({program: "mkfifo", args: [fifo]}).success)
+  const binary = harness.env.get("HARN_BIN") ?? "harn"
+  const path = path_join(repo, "scripts/tests/fixtures/script-dogfood") + ":"
+    + (harness.env.get("PATH") ?? "")
+  const child = command_run(
+    harness.tools,
+    {
+      mode: "argv",
+      argv: [
+        binary,
+        "run",
+        "--no-sandbox",
+        path_join(repo, "scripts/bench_vm_micro.harn"),
+        "--",
+        "--target-dir",
+        target,
+      ],
+      cwd: repo,
+      env: {PATH: path, HARN_EXT_DOGFOOD_FIFO: fifo},
+      background: true,
+    },
+  )
+  defer {
+    command_cancel(harness.tools, child)
+  }
+  const observed = command_wait_for_output(
+    harness.tools,
+    child,
+    "live-before-exit",
+    {timeout_ms: 10000},
+  )
+  assert(observed.matched)
+  assert_eq(observed.result.status, "running")
+  assert(
+    harness.process.run(
+      {
+        program: "bash",
+        args: [path_join(repo, "scripts/tests/fixtures/script-dogfood/release_fifo.sh"), fifo],
+      },
+    ).success,
+  )
+  assert(command_wait(harness.tools, child, {timeout_ms: 10000}).success)
 }
