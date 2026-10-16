@@ -37,7 +37,8 @@
     "source_clean_before_and_after": true,
     "changed_generator_under_original_manifest": "refused even after outer checksums were recomputed",
     "absent_supplied_generator": "refused before invoking a tool",
-    "pipeline_missing_or_unsuccessful_producer": "refused for both package verification and release rehearsal"
+    "pipeline_missing_or_unsuccessful_producer": "refused for both package verification and release rehearsal",
+    "fresh_cargo_home": "Real frozen packaging refused missing sha2-const, then passed after the owning locked host-dependency fetch without compilation"
   },
   "decision": "Publish the generator alongside the shared CLI and let package verification and the release rehearsal consume the verified pair. Keep all archive checks and qualification gates.",
   "evidence": {
@@ -52,6 +53,7 @@
     "The first local-tool package audit includes transition compilation and is excluded from the warm comparison.",
     "Local dev tools and restored ci-cli tools have different optimization profiles. The comparison measures the actual proposed handoff, not only executable transfer.",
     "These sequential constrained-host samples are not GitHub merge-group measurements. Artifact transfer, delayed job setup, and the new dependency on the CLI producer still require real CI qualification.",
-    "The cache refresh writer retains its existing combined local build fallback; this experiment changes the consuming CI jobs."
+    "The cache refresh writer retains its existing combined local build fallback; this experiment changes the consuming CI jobs.",
+    "CI exposed the package job's previously implicit registry bootstrap. Its new explicit locked host fetch is covered by a real cold-cache refusal/recovery control; its hosted network cost is not included in the warm audit samples."
   ]
 }

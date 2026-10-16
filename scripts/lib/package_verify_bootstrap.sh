@@ -10,6 +10,20 @@
 # executable this helper is in the middle of running. Harn itself reaches the
 # same boundary through the stable copy release orchestration supplies.
 
+# Frozen packaging still resolves the workspace's registry dependencies. A
+# supplied toolset has not populated this job's Cargo home as a local tool
+# build would, so fetch the locked host graph before entering that boundary.
+package_verify_fetch_dependencies() {
+  local identity host
+  identity="$(rustc -vV)" || return $?
+  host="$(sed -n 's/^host: //p' <<<"$identity")" || return $?
+  if [[ -z "$host" ]]; then
+    echo 'error: rustc did not report a host for locked package dependency fetch' >&2
+    return 1
+  fi
+  cargo fetch --locked --target "$host" || return $?
+}
+
 package_verify_prepare_tools() {
   local root_dir="$1"
   local tool_dir="${2:-}"
