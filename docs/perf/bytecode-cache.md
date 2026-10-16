@@ -269,9 +269,10 @@ dependency graph is complete. Build tooling can query the exact compatibility
 token with `harn precompile --artifact-contract`; it must not infer artifact
 relocatability from a Harn version string.
 
-Builds embed LF stdlib sources on every platform. Git attributes preserve those
-bytes during checkout because the stdlib digest remains a byte-content proof;
-changing stdlib source still invalidates artifacts.
+Builds embed LF source text on every platform, including stdlib scripts and
+diagnostic explanations. Git attributes preserve those bytes during checkout
+because compiler fingerprints and the stdlib digest remain content proofs;
+changing those inputs still invalidates artifacts. Binary assets retain their bytes.
 
 ### Shipped module interfaces
 
