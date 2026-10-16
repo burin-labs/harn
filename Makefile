@@ -549,7 +549,7 @@ lint-harn: lint-harn-conformance lint-harn-scripts lint-harn-trees lint-harn-std
 lint-harn-conformance:
 	@echo "=== Linting Harn conformance tests ==="
 	@start=$$(date +%s); \
-	HARN_BIN="$$($(HARN_BIN_PRINT_CMD))" ./scripts/check-conformance-lint-baseline.sh; \
+	HARN_BIN="$$($(HARN_BIN_PRINT_CMD))" ./scripts/check-conformance-lint-baseline.sh --root conformance/tests; \
 	rc=$$?; echo "    $@ took $$(( $$(date +%s) - start ))s"; exit $$rc
 
 # Directories, not globs. `scripts/*.harn scripts/tests/*.harn` was flat, so a

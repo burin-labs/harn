@@ -1,9 +1,20 @@
 import { micro_options } from "../bench_vm_micro"
 import { feature_check_arguments } from "../check_all_features"
-import { counted_rows, diagnostic_rows } from "../check_conformance_lint_baseline"
+import { baseline_options, counted_rows, diagnostic_rows } from "../check_conformance_lint_baseline"
 import { normalize_feature_tree } from "../check_feature_drift"
 
 pipeline test_diagnostic_collection_requires_exact_complete_census() {
+  assert_eq(
+    baseline_options(["--root", "conformance/tests", "--update"]),
+    {root: "conformance/tests", update: true},
+  )
+  assert(
+    is_err(
+      try {
+        baseline_options(["--root"])
+      },
+    ),
+  )
   const clean = {
     schemaVersion: 1,
     ok: true,

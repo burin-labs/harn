@@ -41,12 +41,35 @@ pub fn counted_rows(rows: list<string>) -> list<string> {
   return keys(counts).sorted().map({ row -> to_string(counts[row]) + "\t" + row }).to_list()
 }
 
-fn main(harness: Harness) {
-  if argv != [] && argv != ["--update"] {
-    throw "usage: check-conformance-lint-baseline.sh [--update]"
+/** Keep the lint root visible at the Make call site as well as at execution. */
+pub fn baseline_options(args: list<string>) -> {root: string?, update: bool} {
+  let root: string? = nil
+  let update = false
+  let index = 0
+  while index < len(args) {
+    if args[index] == "--update" && !update {
+      update = true
+    } else if args[index] == "--root" && root == nil && index + 1 < len(args) {
+      index = index + 1
+      root = args[index]
+      if root == "" {
+        throw "--root requires a nonempty path"
+      }
+    } else {
+      throw "usage: check-conformance-lint-baseline.sh [--root DIR] [--update]"
+    }
+    index = index + 1
   }
+  return {root: root, update: update}
+}
+
+fn main(harness: Harness) {
+  const options = baseline_options(argv)
   const root = path_normalize(
-    harness.env.get("CONFORMANCE_LINT_ROOT") ?? path_join(harness.fs.cwd(), "conformance/tests"),
+    path_join(
+      harness.fs.cwd(),
+      harness.env.get("CONFORMANCE_LINT_ROOT") ?? options.root ?? "conformance/tests",
+    ),
   )
   const baseline = harness.env.get("CONFORMANCE_LINT_BASELINE") ?? "conformance/lint-baseline.tsv"
   const binary = harness.env.get("HARN_BIN") ?? ""
@@ -98,7 +121,7 @@ fn main(harness: Harness) {
   } else {
     join(actual, "\n") + "\n"
   }
-  if argv == ["--update"] {
+  if options.update {
     harness.fs.write_text(baseline, text)
   } else {
     const expected = harness.fs.read_text(baseline).split("\n").filter({ line -> line != "" })
