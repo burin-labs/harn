@@ -7,8 +7,11 @@ use super::*;
 fn callable_defaults_count_without_charging_nested_declarations_twice() {
     let source = r"
 fn outer(flag: bool) {
-  const local = { value: bool = flag and true -> value }
-  fn inner() { if true { return 1 } return 0 }
+  const local = { value: bool = (flag && true) -> value }
+  fn inner() {
+    if true { return 1 }
+    return 0
+  }
   return local()
 }
 ";
