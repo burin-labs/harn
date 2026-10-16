@@ -166,6 +166,33 @@ apply_external_publish_pins() {
   done <<<"$external_publish_pins_table"
 }
 
+package_verify_configure_target() {
+  package_check_target_dir="${HARN_PACKAGE_VERIFY_TARGET_DIR:-$1/package-check-target}"
+  # The cache action recognizes nested Cargo targets by root .rustc_info.json.
+  package_check_build_dir="${HARN_PACKAGE_VERIFY_BUILD_DIR:-$package_check_target_dir}"
+  mkdir -p "$package_check_target_dir" "$package_check_build_dir"
+}
+
+# Candidate archives normalize source timestamps. Never let those timestamps
+# certify a previous candidate's compiler outputs, even at a different path.
+# Cargo owns invalidation; retain registry dependencies in this private graph.
+package_verify_clean_candidates() {
+  local manifest="$1" target="$2" build_dir="$3" metadata members member
+  local packages=()
+  metadata="$(cargo metadata --locked --no-deps --format-version 1 --manifest-path "$manifest")" || return $?
+  if ! members="$(jq -er '.workspace_members | select(type == "array" and length > 0
+      and all(.[]; type == "string" and length > 0)) | .[]' <<<"$metadata")"; then
+    echo 'error: package candidate census is missing, empty, or invalid' >&2
+    return 1
+  fi
+  while IFS= read -r member; do
+    packages+=(--package "$member")
+  done <<<"$members"
+  echo "=== Invalidate $((${#packages[@]} / 2)) candidate packages; retain dependency outputs ==="
+  CARGO_TARGET_DIR="$target" CARGO_BUILD_BUILD_DIR="$build_dir" \
+    cargo clean --manifest-path "$manifest" "${packages[@]}"
+}
+
 # Own both builds over one frozen set of extracted archives. Only Cargo.lock
 # changes between them. A byte-identical minimum lockfile reuses the successful
 # latest build; the minimum metadata read and its contract assertions still run.
@@ -181,6 +208,7 @@ package_verify_check_resolutions() {
 
   cargo generate-lockfile --manifest-path "$manifest" || return $?
   apply_external_publish_pins "$manifest" || return $?
+  package_verify_clean_candidates "$manifest" "$target" "$build_dir" || return $?
   echo "=== Check all extracted publishable packages with resolver-latest dependencies ==="
   HARN_REQUIRE_CLI_AOT=1 CARGO_TARGET_DIR="$target" CARGO_BUILD_BUILD_DIR="$build_dir" \
     cargo check --locked --workspace --manifest-path "$manifest" || return $?
