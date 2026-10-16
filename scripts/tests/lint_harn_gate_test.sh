@@ -2,8 +2,17 @@
 set -eu
 
 repo_root=$(CDPATH='' cd -- "$(dirname -- "$0")/../.." && pwd)
+controller=$("$repo_root/scripts/harn_bin.sh" --no-build --print)
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/harn-lint-gate.XXXXXX")
-trap 'rm -rf "$tmp"' EXIT HUP INT TERM
+tmp=$(CDPATH='' cd -- "$tmp" && pwd -P)
+cleanup() {
+  status=$?
+  if [ "$status" -ne 0 ]; then
+    cat "$tmp"/*.log >&2 || true
+  fi
+  rm -rf "$tmp"
+}
+trap cleanup EXIT HUP INT TERM
 
 mkdir -p "$tmp/conformance/tests"
 printf 'fn main() {}\n' > "$tmp/conformance/tests/clean.harn"
@@ -64,7 +73,7 @@ if [ "${1:-}" = "check" ] && [ "${2:-}" = "--json" ] && [ "${3:-}" = "--independ
            then {path: ., status: "warning", diagnostics: [{source: "lint", severity: "warning", code: "HARN-LNT-999", message: "sentinel"}]}
            else {path: ., status: "ok", diagnostics: []}
            end)),
-           summary: {ok: 2, warnings: 1, errors: 0, diagnostics: 1}},
+           summary: {ok: 3, warnings: 1, errors: 0, diagnostics: 1}},
          error: null, warnings: []}
       ' "$@"
       exit 0
@@ -77,7 +86,7 @@ if [ "${1:-}" = "check" ] && [ "${2:-}" = "--json" ] && [ "${3:-}" = "--independ
            then {path: ., status: "error", diagnostics: [{source: "check", severity: "error", code: "HARN-CHK-999", message: "sentinel"}]}
            else {path: ., status: "ok", diagnostics: []}
            end)),
-           summary: {ok: 2, warnings: 0, errors: 1, diagnostics: 1}},
+           summary: {ok: 3, warnings: 0, errors: 1, diagnostics: 1}},
          error: {code: "check_failed", message: "sentinel", details: null}, warnings: []}
       ' "$@"
       exit 1
@@ -99,7 +108,7 @@ run_gate() {
     CONFORMANCE_LINT_ROOT="$tmp/conformance/tests" \
     CONFORMANCE_LINT_BASELINE="$baseline" \
     HARN_CHECK_JOBS=1 \
-    "$repo_root/scripts/check-conformance-lint-baseline.sh"
+    "$controller" run --no-sandbox "$repo_root/scripts/check_conformance_lint_baseline.harn"
 }
 
 run_update() {
@@ -110,7 +119,7 @@ run_update() {
     CONFORMANCE_LINT_ROOT="$tmp/conformance/tests" \
     CONFORMANCE_LINT_BASELINE="$baseline" \
     HARN_CHECK_JOBS=1 \
-    "$repo_root/scripts/check-conformance-lint-baseline.sh" --update
+    "$controller" run --no-sandbox "$repo_root/scripts/check_conformance_lint_baseline.harn" -- --update
 }
 
 printf '%s\n' clean > "$mode_file"
@@ -132,14 +141,14 @@ if run_gate > "$tmp/checker-failure.log" 2>&1; then
   echo "lint-harn passed after harn check exited nonzero" >&2
   exit 1
 fi
-grep -q '__CHECK_FAILED__' "$tmp/checker-failure.log"
+grep -q 'invalid check report' "$tmp/checker-failure.log"
 
 printf '%s\n' 'reviewed baseline' > "$baseline"
 if run_update > "$tmp/checker-failure-update.log" 2>&1; then
   echo "lint-harn update replaced its baseline after diagnostic collection failed" >&2
   exit 1
 fi
-grep -q 'Refusing to replace the reviewed conformance baseline' "$tmp/checker-failure-update.log"
+grep -q 'invalid check report' "$tmp/checker-failure-update.log"
 grep -Fxq 'reviewed baseline' "$baseline"
 
 printf '%s\n' warning > "$mode_file"
