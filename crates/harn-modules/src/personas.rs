@@ -615,12 +615,32 @@ fn entry_key(node: &SNode) -> Option<&str> {
 }
 
 fn collect_called_functions(body: &[SNode]) -> Vec<String> {
-    let mut calls = Vec::new();
-    harn_parser::visit::walk_program_unattributed(body, &mut |node| {
+    fn collect(node: &SNode, calls: &mut Vec<String>) {
+        let (_, node) = harn_parser::peel_attributes(node);
         if let Node::FunctionCall { name, .. } = &node.node {
             calls.push(name.clone());
         }
-    });
+        match &node.node {
+            // Persona steps follow callable bodies, not deferred parameter defaults.
+            Node::Pipeline { body, .. }
+            | Node::OverrideDecl { body, .. }
+            | Node::FnDecl { body, .. }
+            | Node::ToolDecl { body, .. }
+            | Node::Closure { body, .. } => {
+                for child in body {
+                    collect(child, calls);
+                }
+            }
+            _ => harn_parser::visit::for_each_immediate_child(node, &mut |child| {
+                collect(child, calls);
+            }),
+        }
+    }
+
+    let mut calls = Vec::new();
+    for node in body {
+        collect(node, &mut calls);
+    }
     calls
 }
 

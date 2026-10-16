@@ -269,7 +269,7 @@ fn source_persona_extracts_called_steps_in_order() {
 @persona(name: "merge_captain")
 fn merge_captain(ctx) {
   @step(name: "local", retry: unused(ctx))
-  fn local() { return nil }
+  fn local(value: dict = unused(ctx)) { return value }
   scope { plan(ctx) }
   verify(ctx)
 }
