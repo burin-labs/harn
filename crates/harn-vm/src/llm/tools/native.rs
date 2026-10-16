@@ -34,9 +34,9 @@ pub(crate) fn vm_tools_to_native(
         },
         VmValue::List(list) => list.as_ref().clone(),
         _ => {
-            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+            return Err(VmError::Thrown(VmValue::string(
                 "tools must be a tool_registry or a list of tool definition dicts",
-            ))));
+            )));
         }
     };
 
@@ -146,14 +146,14 @@ pub(crate) fn vm_tools_to_native(
                 }
             }
             VmValue::String(_) => {
-                return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+                return Err(VmError::Thrown(VmValue::string(
                     "tools must be declared as tool definition dicts or a tool_registry",
-                ))));
+                )));
             }
             _ => {
-                return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+                return Err(VmError::Thrown(VmValue::string(
                     "tools must contain only tool definition dicts",
-                ))));
+                )));
             }
         }
     }

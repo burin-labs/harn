@@ -56,6 +56,23 @@ pub(crate) fn register_event_log_builtins(vm: &mut Vm) {
     }
 }
 
+const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
+    &EVENT_LOG_DESCRIBE_IMPL_DEF,
+    &EVENT_LOG_EMIT_IMPL_DEF,
+    &EVENT_LOG_EMIT_IDEMPOTENT_IMPL_DEF,
+    &EVENT_LOG_EMIT_IDEMPOTENT_CHAINED_IMPL_DEF,
+    &HYPOTHESIS_EVENT_AUTHORITY_MINT_IMPL_DEF,
+    &hypothesis_host_attestation::HYPOTHESIS_EVENT_AUTHORITY_REQUEST_IMPL_DEF,
+    &hypothesis_host_attestation::HYPOTHESIS_OPERATION_REQUEST_IMPL_DEF,
+    &HYPOTHESIS_EVENT_APPEND_IMPL_DEF,
+    &HYPOTHESIS_EVENT_SNAPSHOT_IMPL_DEF,
+    &EVENT_LOG_LATEST_IMPL_DEF,
+    &EVENT_LOG_READ_IMPL_DEF,
+    &EVENT_LOG_SUBSCRIBE_IMPL_DEF,
+    &EVENT_LOG_TOPICS_IMPL_DEF,
+    &EVENT_LOG_VERIFY_IMPL_DEF,
+];
+
 #[harn_builtin(
     exposure = "harness.obs.event_log_describe",
     effects = ["state.read@dynamic"],
@@ -510,23 +527,6 @@ async fn event_log_topics_impl(
             .collect(),
     )))
 }
-
-pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
-    &EVENT_LOG_DESCRIBE_IMPL_DEF,
-    &EVENT_LOG_EMIT_IMPL_DEF,
-    &EVENT_LOG_EMIT_IDEMPOTENT_IMPL_DEF,
-    &EVENT_LOG_EMIT_IDEMPOTENT_CHAINED_IMPL_DEF,
-    &HYPOTHESIS_EVENT_AUTHORITY_MINT_IMPL_DEF,
-    &hypothesis_host_attestation::HYPOTHESIS_EVENT_AUTHORITY_REQUEST_IMPL_DEF,
-    &hypothesis_host_attestation::HYPOTHESIS_OPERATION_REQUEST_IMPL_DEF,
-    &HYPOTHESIS_EVENT_APPEND_IMPL_DEF,
-    &HYPOTHESIS_EVENT_SNAPSHOT_IMPL_DEF,
-    &EVENT_LOG_LATEST_IMPL_DEF,
-    &EVENT_LOG_READ_IMPL_DEF,
-    &EVENT_LOG_SUBSCRIBE_IMPL_DEF,
-    &EVENT_LOG_TOPICS_IMPL_DEF,
-    &EVENT_LOG_VERIFY_IMPL_DEF,
-];
 
 fn register_event_log_namespace(vm: &mut Vm) {
     let names = [

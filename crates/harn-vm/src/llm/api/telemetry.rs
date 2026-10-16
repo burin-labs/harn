@@ -674,10 +674,7 @@ impl ProviderTelemetry {
             dict.put_str("request_id", request_id.as_str());
         }
         if let Some(provider_cost_usd) = self.provider_cost_usd {
-            dict.insert(
-                crate::value::intern_key("provider_cost_usd"),
-                VmValue::Float(provider_cost_usd),
-            );
+            dict.put("provider_cost_usd", VmValue::Float(provider_cost_usd));
         }
         if let Some(ref provider_metadata) = self.provider_metadata {
             dict.insert(

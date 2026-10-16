@@ -1,4 +1,5 @@
 use super::*;
+use crate::value::VmDictExt;
 
 /// Truncate stored prompt history before acknowledging the host operation.
 /// The run writer lease refuses a still-active prompt instead of racing its
@@ -135,14 +136,8 @@ pub(super) fn truncate_state(
         };
         new_tip_turn_id = turn_event_id_for_count(&retained_events, kept_turn_count);
         let mut next = dict;
-        next.insert(
-            crate::value::intern_key("events"),
-            VmValue::List(std::sync::Arc::new(retained_events)),
-        );
-        next.insert(
-            crate::value::intern_key("messages"),
-            VmValue::List(std::sync::Arc::new(retained)),
-        );
+        next.put("events", VmValue::list(retained_events));
+        next.put("messages", VmValue::list(retained));
         next.remove("summary");
         apply_transcript_with_budget(state, VmValue::dict(next), "truncate")?;
     }
@@ -179,16 +174,13 @@ pub fn trim(id: &str, keep_last: usize) -> Result<Option<usize>, String> {
         let retained: Vec<VmValue> = messages.into_iter().skip(start).collect();
         let kept = retained.len();
         let mut next = dict;
-        next.insert(
-            crate::value::intern_key("events"),
-            VmValue::List(std::sync::Arc::new(
-                crate::llm::helpers::transcript_events_from_messages(&retained),
+        next.put(
+            "events",
+            VmValue::list(crate::llm::helpers::transcript_events_from_messages(
+                &retained,
             )),
         );
-        next.insert(
-            crate::value::intern_key("messages"),
-            VmValue::List(std::sync::Arc::new(retained)),
-        );
+        next.put("messages", VmValue::list(retained));
         apply_transcript_with_budget(state, VmValue::dict(next), "trim")?;
         Ok(Some((kept, start, dropped_bytes)))
     })?;

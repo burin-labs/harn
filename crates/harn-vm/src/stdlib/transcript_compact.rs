@@ -111,7 +111,7 @@ async fn compact_transcript_impl(
             .transpose()?
             .unwrap_or_default();
         Some(extract_llm_options(&[
-            VmValue::String(arcstr::ArcStr::from("")),
+            VmValue::string(""),
             VmValue::Nil,
             VmValue::dict(projected),
         ])?)

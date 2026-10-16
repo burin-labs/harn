@@ -59,15 +59,17 @@ warm_phase security-tests cargo-nextest nextest run --locked -p harn-vm -p harn-
 
 # Workspace-crate cache canary touch for #5003 hosted wall-time sampling.
 
-# Drop the linked test executables before the post step saves this target.
-# Every consumer relinks them anyway: a pull request that touches harn-vm or
-# anything below it (nearly all of them) rebuilds all 22 dependent workspace
-# crates and relinks every test binary, so the copies only cost space in the
-# 10 GB repository cache, where this family was the largest entry and its
-# size pushed other merge-gate families out (#9430). Compiled libraries and
-# build-script outputs stay, which is what a restore actually reuses.
+# Retain Native test executables: build stamps no longer invalidate Native,
+# and a revision-only control reused the exact unit binary instead of paying
+# another compile and link. Other linked test binaries still yield space to
+# the compiled libraries. Admission reserves replacement space before upload.
 target_dir="$(cargo metadata --format-version 1 --no-deps | jq -er '.target_directory')"
 before_kib="$(du -sk "$target_dir" | cut -f1)"
-find "$target_dir/debug/deps" -maxdepth 1 -type f -perm -u+x ! -name '*.*' -delete
+native_count="$(find "$target_dir/debug/deps" -maxdepth 1 -type f -perm -u+x ! -name '*.*' -name 'harn_vm-*' | wc -l | tr -d ' ')"
+if [[ ! "$native_count" =~ ^[1-9][0-9]*$ ]]; then
+  echo 'workspace cache: Native test executables were not observed; refusing to publish' >&2
+  exit 1
+fi
+find "$target_dir/debug/deps" -maxdepth 1 -type f -perm -u+x ! -name '*.*' ! -name 'harn_vm-*' -delete
 after_kib="$(du -sk "$target_dir" | cut -f1)"
-echo "workspace cache: dropped linked test executables, $((before_kib / 1024)) MiB -> $((after_kib / 1024)) MiB"
+echo "workspace cache: retained_native_executables=$native_count; pruned other linked tests, $((before_kib / 1024)) MiB -> $((after_kib / 1024)) MiB"

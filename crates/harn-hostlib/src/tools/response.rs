@@ -1,8 +1,6 @@
 //! Helpers for assembling [`VmValue::Dict`] response bodies that match the
 //! `schemas/tools/<method>.response.json` contracts.
 
-use std::sync::Arc;
-
 use harn_vm::VmValue;
 
 /// Type-erased builder for the dict that becomes a tool's response.
@@ -21,7 +19,7 @@ impl ResponseBuilder {
     pub(crate) fn str(mut self, key: &str, value: impl Into<String>) -> Self {
         self.inner.insert(
             harn_vm::value::intern_key(key),
-            VmValue::String(arcstr::ArcStr::from(value.into())),
+            VmValue::string(value.into()),
         );
         self
     }
@@ -41,10 +39,8 @@ impl ResponseBuilder {
     pub(crate) fn opt_str(mut self, key: &str, value: Option<impl Into<String>>) -> Self {
         match value {
             Some(v) => {
-                self.inner.insert(
-                    harn_vm::value::intern_key(key),
-                    VmValue::String(arcstr::ArcStr::from(v.into())),
-                );
+                self.inner
+                    .insert(harn_vm::value::intern_key(key), VmValue::string(v.into()));
             }
             None => {
                 self.inner
@@ -72,10 +68,8 @@ impl ResponseBuilder {
     }
 
     pub(crate) fn list(mut self, key: &str, value: Vec<VmValue>) -> Self {
-        self.inner.insert(
-            harn_vm::value::intern_key(key),
-            VmValue::List(Arc::new(value)),
-        );
+        self.inner
+            .insert(harn_vm::value::intern_key(key), VmValue::list(value));
         self
     }
 

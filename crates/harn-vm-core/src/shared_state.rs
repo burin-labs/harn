@@ -408,7 +408,7 @@ impl VmSharedStateRuntime {
                         mailbox_metrics_value(mailbox),
                     ));
                 }
-                VmValue::List(std::sync::Arc::new(values))
+                VmValue::list(values)
             }
         }
     }
@@ -426,7 +426,7 @@ fn snapshot_value(value: VmValue, version: u64) -> VmValue {
     let mut snapshot = BTreeMap::new();
     snapshot.put_str("_type", "shared_snapshot");
     snapshot.insert("value".to_string(), value);
-    snapshot.insert("version".to_string(), VmValue::Int(version as i64));
+    snapshot.put_int("version", version as i64);
     VmValue::dict(snapshot)
 }
 
@@ -452,27 +452,12 @@ fn snapshot_expected(value: &VmValue) -> (VmValue, Option<u64>) {
 
 fn shared_metrics_value(metrics: &SharedMetrics, version: u64) -> VmValue {
     let mut value = BTreeMap::new();
-    value.insert("version".to_string(), VmValue::Int(version as i64));
-    value.insert(
-        "read_count".to_string(),
-        VmValue::Int(metrics.read_count as i64),
-    );
-    value.insert(
-        "write_count".to_string(),
-        VmValue::Int(metrics.write_count as i64),
-    );
-    value.insert(
-        "cas_success_count".to_string(),
-        VmValue::Int(metrics.cas_success_count as i64),
-    );
-    value.insert(
-        "cas_failure_count".to_string(),
-        VmValue::Int(metrics.cas_failure_count as i64),
-    );
-    value.insert(
-        "stale_read_count".to_string(),
-        VmValue::Int(metrics.stale_read_count as i64),
-    );
+    value.put_int("version", version as i64);
+    value.put_int("read_count", metrics.read_count as i64);
+    value.put_int("write_count", metrics.write_count as i64);
+    value.put_int("cas_success_count", metrics.cas_success_count as i64);
+    value.put_int("cas_failure_count", metrics.cas_failure_count as i64);
+    value.put_int("stale_read_count", metrics.stale_read_count as i64);
     VmValue::dict(value)
 }
 
@@ -482,41 +467,32 @@ fn empty_shared_metrics() -> VmValue {
 
 fn mailbox_metrics_value(mailbox: &Mailbox) -> VmValue {
     let mut value = BTreeMap::new();
-    value.insert(
-        "capacity".to_string(),
-        VmValue::Int(mailbox.capacity as i64),
+    value.put_int("capacity", mailbox.capacity as i64);
+    value.put_int("depth", mailbox.depth.load(Ordering::SeqCst));
+    value.put_int(
+        "sent_count",
+        mailbox.sent_count.load(Ordering::SeqCst) as i64,
     );
-    value.insert(
-        "depth".to_string(),
-        VmValue::Int(mailbox.depth.load(Ordering::SeqCst)),
+    value.put_int(
+        "received_count",
+        mailbox.received_count.load(Ordering::SeqCst) as i64,
     );
-    value.insert(
-        "sent_count".to_string(),
-        VmValue::Int(mailbox.sent_count.load(Ordering::SeqCst) as i64),
+    value.put_int(
+        "failed_send_count",
+        mailbox.failed_send_count.load(Ordering::SeqCst) as i64,
     );
-    value.insert(
-        "received_count".to_string(),
-        VmValue::Int(mailbox.received_count.load(Ordering::SeqCst) as i64),
-    );
-    value.insert(
-        "failed_send_count".to_string(),
-        VmValue::Int(mailbox.failed_send_count.load(Ordering::SeqCst) as i64),
-    );
-    value.insert(
-        "closed".to_string(),
-        VmValue::Bool(mailbox.channel.is_closed()),
-    );
+    value.put_bool("closed", mailbox.channel.is_closed());
     VmValue::dict(value)
 }
 
 fn empty_mailbox_metrics() -> VmValue {
     let mut value = BTreeMap::new();
-    value.insert("capacity".to_string(), VmValue::Int(0));
-    value.insert("depth".to_string(), VmValue::Int(0));
-    value.insert("sent_count".to_string(), VmValue::Int(0));
-    value.insert("received_count".to_string(), VmValue::Int(0));
-    value.insert("failed_send_count".to_string(), VmValue::Int(0));
-    value.insert("closed".to_string(), VmValue::Bool(false));
+    value.put_int("capacity", 0);
+    value.put_int("depth", 0);
+    value.put_int("sent_count", 0);
+    value.put_int("received_count", 0);
+    value.put_int("failed_send_count", 0);
+    value.put_bool("closed", false);
     VmValue::dict(value)
 }
 

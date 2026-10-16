@@ -135,7 +135,7 @@ fn closed_event_with(code: Option<u16>, reason: Option<String>) -> VmValue {
     let mut dict = BTreeMap::new();
     dict.put_str("type", "close");
     if let Some(code) = code {
-        dict.insert("code".to_string(), VmValue::Int(i64::from(code)));
+        dict.put_int("code", i64::from(code));
     }
     if let Some(reason) = reason {
         dict.put_str("reason", reason);
@@ -385,12 +385,12 @@ fn register_accepted_websocket(event: WebSocketServerEvent) -> Result<VmValue, V
     metadata.put_str("id", id);
     metadata.put_str("path", path);
     metadata.put_str("peer", peer);
-    metadata.insert(
-        "headers".to_string(),
+    metadata.put(
+        "headers",
         VmValue::dict(
             headers
                 .into_iter()
-                .map(|(name, value)| (name, VmValue::String(arcstr::ArcStr::from(value))))
+                .map(|(name, value)| (name, VmValue::string(value)))
                 .collect::<crate::value::DictMap>(),
         ),
     );
@@ -643,7 +643,7 @@ pub(super) async fn vm_websocket_connect(
             message_type: None,
             data: None,
         });
-        return Ok(VmValue::String(arcstr::ArcStr::from(id)));
+        return Ok(VmValue::string(id));
     }
 
     if !url.starts_with("ws://") && !url.starts_with("wss://") {
@@ -677,7 +677,7 @@ pub(super) async fn vm_websocket_connect(
         handles.insert(id.clone(), handle);
         Ok(())
     })?;
-    Ok(VmValue::String(arcstr::ArcStr::from(id)))
+    Ok(VmValue::string(id))
 }
 
 /// `wss://` trusts the same OS certificate store as HTTPS requests, so a

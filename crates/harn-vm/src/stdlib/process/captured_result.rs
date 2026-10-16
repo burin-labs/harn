@@ -20,10 +20,10 @@ pub(super) fn captured_run_to_value(run: &CapturedRun) -> VmValue {
         "stderr",
         String::from_utf8_lossy(&run.output.stderr).as_ref(),
     );
-    result.insert("status".to_string(), VmValue::Int(status));
-    result.insert("success".to_string(), VmValue::Bool(success));
-    result.insert("timed_out".to_string(), VmValue::Bool(run.timed_out));
-    result.insert("duration_ms".to_string(), VmValue::Int(run.duration_ms));
+    result.put_int("status", status);
+    result.put_bool("success", success);
+    result.put_bool("timed_out", run.timed_out);
+    result.put_int("duration_ms", run.duration_ms);
     if let Some(receipt) = &run.verifier_receipt {
         result.insert(
             "verifier_receipt".into(),

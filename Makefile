@@ -822,6 +822,7 @@ test-pr-gate-scripts:
 	./scripts/tests/target_gc_maintenance_test.sh
 	./scripts/tests/report_ci_cache_budget_test.sh
 	./scripts/tests/cache_refresh_admission_test.sh
+	bash scripts/tests/cache_rotation_capacity_test.sh
 	node scripts/tests/cache_generation_retirement_test.cjs
 	node scripts/tests/workspace_warm_phase_test.cjs
 	./scripts/tests/loadgen_postgres_gate_test.sh

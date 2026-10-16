@@ -42,7 +42,7 @@ impl RandomOperation {
                 };
                 let mut shuffled = items.as_ref().clone();
                 shuffled.shuffle(rng);
-                Ok(VmValue::List(std::sync::Arc::new(shuffled)))
+                Ok(VmValue::list(shuffled))
             }
         }
     }

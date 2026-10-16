@@ -733,7 +733,7 @@ fn build_response(
     summary: SummaryCounts,
     op_outcomes: &[OpOutcome],
 ) -> VmValue {
-    let per_file_value = VmValue::List(Arc::new(
+    let per_file_value = VmValue::list(
         per_file
             .iter()
             .map(|entry| {
@@ -745,7 +745,7 @@ fn build_response(
                 ])
             })
             .collect(),
-    ));
+    );
     let summary_value = build_dict([
         ("files_touched", VmValue::Int(summary.files_touched as i64)),
         ("lines_added", VmValue::Int(summary.lines_added as i64)),
@@ -753,9 +753,7 @@ fn build_response(
         ("ops_applied", VmValue::Int(summary.ops_applied as i64)),
         ("ops_rejected", VmValue::Int(summary.ops_rejected as i64)),
     ]);
-    let ops_value = VmValue::List(Arc::new(
-        op_outcomes.iter().map(op_outcome_to_value).collect(),
-    ));
+    let ops_value = VmValue::list(op_outcomes.iter().map(op_outcome_to_value).collect());
 
     build_dict([
         ("result", str_value(result)),
@@ -783,7 +781,7 @@ fn op_outcome_to_value(outcome: &OpOutcome) -> VmValue {
                 ("applied", VmValue::Bool(true)),
                 ("result", str_value("applied")),
                 ("path", str_value(diff_path_label(&primary))),
-                ("paths", VmValue::List(Arc::new(path_values))),
+                ("paths", VmValue::list(path_values)),
                 ("details", str_value(details)),
                 ("match_count", VmValue::Int(*match_count as i64)),
             ])

@@ -9,6 +9,330 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.168
+
+### Breaking
+
+- **Machine spend ledgers and host quota contracts (#7167).** Ledgers upgrade to
+  schema version 3 for session budget audit receipts, preserving reservations
+  and approval history. Older Harn versions refuse the upgraded ledger.
+
+  Migration: upgrade every Harn runtime sharing the ledger before opening it
+  with the new version. Rust hosts using struct literals must supply the new
+  optional `AcpServerConfig::machine_spend_quota` and
+  `AcpPromptFailureFacts::machine_spend` fields; use `None` to retain an
+  unconfigured quota or absent exhaustion facts. Constructor and default-based
+  callers inherit those defaults. When configuring a machine quota, include the
+  target `sessionId` on `session/set_budget` frames.
+- Provider content-policy refusals retain a distinct, provider-owned terminal class
+  instead of appearing as generic harness failures. Saved destination-policy denials
+  remain local and retain their governing rule.
+
+  Migration: exhaustive Rust matches on `AgentTerminalClass` must handle
+  `ProviderContentPolicy` as a provider refusal. Generated host bindings expose the
+  same `provider_content_policy` wire value.
+- Rust callers constructing `harn_cli::cli::PrecompileArgs` must provide the new `warm_cache` field.
+
+  Migration: add `warm_cache: false` to existing struct literals. Set it to `true` to prepare the runtime's shared
+  caches instead of adjacent artifacts.
+- **User-test shard reports retain a complete source-bound plan (#9972).**
+  Verify a full matrix with
+  `harn test --verify-shards COMMIT --shard-total N REPORT...`; missing,
+  duplicate, skipped, failing, differently planned, or unconfirmed-source
+  results refuse complete coverage.
+
+  Migration: Rust callers constructing `harn_test_runner::ShardPlan` literals
+  must provide the new `matrix` field. Use `matrix: None` for manually built
+  diagnostic plans; complete-matrix qualification requires the measured plan
+  produced by the test runner. Existing CLI invocations remain valid.
+- Runtime module installers derive builtin membership from each declaration's owning module,
+  preserving registration groups and host overrides. Shared value builders own field construction,
+  explicit nulls, and string/list storage across runtime and host tools.
+
+  Migration: `VmValue::string` and string dictionary builders now accept `Into<HarnStr>`;
+  pass `.as_ref()` at generic `AsRef<str>` boundaries. Handwritten `BuiltinDef` literals must
+  set `module: module_path!()`; `#[harn_builtin]` supplies it automatically. Custom map adapters
+  implement `DictInsert::dict_insert(&str, VmValue)` and use the blanket `VmDictExt`
+  implementation, including its explicit-null field builders.
+- Reasoning receipts preserve each observed call's identity, semantic role, and stage
+  through provider task handoff and persisted session projections.
+
+  Migration: exhaustive Rust `ReasoningReceipt` literals must initialize the new
+  `call_id`, `call_role`, and `call_stage` fields. Use `None` for unobserved calls;
+  observed calls receive attribution from `LlmCallOptions` at request construction.
+- Generated builtin registrations now use the Core registry instead of a native
+  stdlib module path. Core also owns their distributed registration dependency.
+
+  Migration: Rust crates declaring builtins with `#[harn_builtin]` or
+  `harn_capability_method!` must add a direct `harn-vm-core` dependency matching
+  their Harn version. Existing native type imports remain available through
+  reexports; new code can import the owning `harn-llm` and `harn-orchestration`
+  contracts directly.
+- The bytecode interpreter and compiler now live in `harn-vm-core`, with native
+  execution services supplied by `harn-vm`. Script entry points retain their
+  interfaces.
+
+  Migration: Rust embedders must replace `Vm::new()` or `Vm::default()` with
+  `harn_vm::new_vm()`.
+  Import `harn_vm::NativeVmExt` when installing native bridges, connector clients,
+  or decision replay, or when reading native execution evidence. Custom execution
+  backends construct `harn_vm_core::Vm` with `Vm::with_runtime` and their required
+  runtime implementation.
+
+  Compiled artifacts now include builtin signature and authority contracts in
+  their identity. Artifacts from a compiler-only backend cannot be reused by the
+  native runtime; existing bytecode caches are rebuilt automatically.
+- The interpreter carries opaque runtime-owned Harness and MCP connection state.
+  Existing `Harness`, MCP connection constructors, and script behavior retain
+  their interfaces. `HarnessKind` is defined by
+  `harn-builtin-meta` and re-exported through its existing Harn VM paths.
+
+  Migration: Rust embedders must replace `handle.inner()` with
+  `handle.host_state::<harn_vm::harness::HarnessInner>()` and handle `None` when
+  the handle belongs to a different runtime backend.
+- Provider usage normalization and prompt-cache conformance types are now
+  defined in `harn-llm`. The existing `harn_vm::llm::cache_conformance` exports
+  and `harn_vm::llm::usage::ReportedCacheUsage` remain available, and serialized
+  receipts retain their existing shapes. Runtime adapters still resolve active
+  provider configuration and measurements before classifying saved runs.
+
+  Migration: Existing imports need no changes. Code that records Rust
+  `std::any::type_name()` output for these types must account for their new
+  `harn_llm` defining paths. New consumers can depend on the lower crate directly.
+
+  The public API check reports this relocation as missing items because Rustdoc
+  JSON omits foreign re-exports, a known
+  [cargo-semver-checks limitation](https://github.com/obi1kenobi/cargo-semver-checks/issues/355).
+  The existing native paths are retained and checked by a compiled consumer.
+- Rust embedders share capability ceilings, sandbox and stage policy, tool annotations,
+  and credential-path classification through `harn-execution-policy`. Existing
+  `harn-vm` public paths re-export the same types; serialized policy is unchanged.
+
+  Migration: add an exact-version `harn-execution-policy` dependency when naming
+  these types directly or updating code that relies on their defining crate.
+- Training-example projection and response-event tool-call resolution now live in the
+  orchestration and LLM crates. Existing Native Rust import paths and serialized records
+  remain compatible; Rust `type_name` and defining-crate paths change for the re-exported types.
+
+  Migration: Existing imports need no changes. Consumers that persist Rust
+  `std::any::type_name()` values must accept `harn_orchestration::training_example`
+  for training-example types and `harn_llm::response_tool_calls` for `ResolveError`.
+  New consumers can use those lower-crate modules directly.
+- Workflow verification contracts now normalize in `harn-orchestration`, with file resolution owned by the native runtime.
+  File, inline, and stage-field precedence, exact requirements, serialized shapes, and existing imports are preserved.
+
+  Migration: existing `harn_vm::orchestration` imports need no changes. Consumers that inspect Rust defining-crate paths
+  with `std::any::type_name` must accept `harn_orchestration::verification` for `VerificationContract` and
+  `VerificationRequirement`.
+
+### Added
+
+- Added a runnable actor/grader experiment that divides one initial allowance
+  into disjoint conservative process budgets and checks provider dispatch,
+  actual usage, settlement, and pre-transport refusal.
+- Smart Ship can assess original GitHub CI against signed stock-command results
+  and current independent reviews before issuing admission. Late review approval
+  preserves the original signed-scope execution request without enabling reuse.
+  Issuance loads trusted configuration separately from submitted evidence and
+  refreshes independent review after every CI network read.
+- Smart Ship can dispatch signed GitHub admissions through its fenced effect owner. Complete provider receipts survive
+  restart, duplicate submissions retain the original result, and uncertain mutations require reconciliation.
+  Current trusted reviews and threads are checked before dispatch, with measured policy refusals retained in the receipt.
+  Fresh observations must match the signed source and use the review rule named by its signed scope.
+  Reservation recovery retains its original provider configuration identity without storing credential values.
+  Destination branches are authenticated by the source, review census, scope and installation rule;
+  retargeting to an equal-commit branch cannot reuse the original admission.
+- Add grouped integration preparation contracts that retain signed changes and required verification,
+  and refuse standalone confirmation writes outside an atomic destination-and-controller transaction.
+  GitHub transaction plans retain complete reviews and exact destination, controller and source-branch guards.
+  State object uploads preserve the authority ref, reject competing prepared states, and expose uncertain
+  uploads for recovery. Forge transport binding refuses Git URL rewrites and conflicting remote settings.
+  Stock-Git group composition preserves divergent reviewed changes and newer destination work,
+  and candidate checks refuse omitted edits or a different parent without changing a worktree or ref.
+  The GitHub publisher couples destination, authority and source-head guards in one provider call,
+  confirms actual durable state, records definite refusals, reconstructs transactions after restart,
+  and cleans up only conclusively reconciled staging objects with exact-object comparisons.
+  Reviews are read again after object upload; changed approval refuses publication.
+  Preparation failures release their claims through durable refusal receipts, with restart-safe cleanup.
+  Recovery and cleanup retain the original provider and credential-reference binding.
+- Refresh hosted model routes with Muse Spark Open, Muse Wonder, Muse Glimmer,
+  Gemini 4 Argon, Nemotron 3.5 Super VL, and newer reasoning and decision models.
+  Add Jev 1.14 and preview routes while preserving each provider's current
+  selector target. Gateway decisions now pin their declared serving provider
+  instead of always routing to TypeSafe. Correct Gemini 2.5 Flash-Lite's withdrawn
+  shutdown notice and refresh Meta contributor rate limits. Resolve provider-native
+  wire IDs through their catalog route before generic provider inference.
+  Custom `vercel_evaluate` capability rules must declare `decision_upstream_provider`.
+- Smart Ship can reserve cumulative candidate preparation against an exact base,
+  measured tree and ordered signed admissions. Restart and uncertain signing
+  outcomes retain the existing single-dispatch and authority-transfer barriers.
+  An older reviewed base may precede the current destination, with stock Git
+  ancestry checks preserving both original-head and destination lineage.
+
+### Changed
+
+- Cost explanation and editor folding share the parser's AST traversal, including default arguments and nested scope blocks.
+  Capability field declarations also own their merge and empty-projection behavior. Remove duplicated model capability
+  configuration assertions while retaining resolver, override, provenance, and provider wire tests.
+- Language tooling shares the parser's AST traversal, so preflight checks and persona step discovery also reach calls
+  nested in scopes and callable defaults. Provider detection uses the parser's lexical scopes, including interpolation
+  and parameter shadowing.
+- Run conformance diagnostic collection, Cargo feature comparison, feature checks, agent guidance validation,
+  and VM microbenchmark setup in Harn. Diagnostic collection refuses incomplete reports before updating its
+  baseline; feature comparison refuses empty or failed Cargo snapshots. Compiler and benchmark output stays live
+  while each child runs.
+- Agent lifecycle transitions, worker lineage, tool denials, and suspension
+  contracts now compile in the orchestration crate. The LLM crate owns terminal
+  error classification. Native event delivery and host ingress use those owners.
+- The executable now attaches build provenance to the linked runtime receipt.
+  `harn version --json` retains its compiled source revision, while the embedding
+  library returns an unstamped content receipt that hosts can annotate explicitly.
+  Changing only the build revision no longer invalidates the native runtime crate.
+- The CI cache budget allows 20 GiB so a replacement workspace generation can
+  upload while all three current merge-gate generations remain available.
+  Repository and enterprise cache eviction limits must permit this capacity.
+  Native test executables are retained for unchanged-code reuse, and the
+  writer reserves space using measured generation size with growth margin.
+- Rust CI cache downloads abandon a stalled segment after two minutes and fall back to compiling from source.
+  The timeout applies to both the shared cache and its broad fallback, while all build and test checks remain required.
+- The shared CI CLI keeps the extracted interpreter optimized while compiling
+  native host orchestration without optimization. Paired four-core trials reduced
+  build plus proof time with existing semantic and performance gates unchanged.
+  CI Clippy downloads use HTTP/1.1 after repeated HTTP/2 transport failures.
+- Owned CI runners retain native compiler state for the shared CLI producer inside
+  their private, bounded build directories. Other producer and runner policies
+  remain unchanged.
+- CI compiles CLI unit tests separately from integration and binary tests, so the
+  remaining workspace test shares avoid rebuilding both CLI library forms.
+- Deterministic transcript reduction and repair ledgers now live in the
+  orchestration crate. Native adapters continue to execute compaction callbacks
+  and model calls with the existing cancellation and failure handling.
+- Owned Linux builds use Kache 1.2.2, including corrected build-script dependency tracking and compiler timing reports.
+- Provider-neutral multimodal content, reasoning history, message provenance,
+  tokenization, tool scoring, wire delimiters, and provider schema normalization
+  now compile in `harn-llm`. Schema projection produces one effective validation
+  contract and typed change receipts; native adapters deliver those audit events.
+  Native provider transport and session behavior continue to consume those shared
+  contracts through the existing Harn runtime interfaces.
+- The shared LLM crate now owns OpenAI-compatible request encoding, message
+  normalization, thinking splitting, and prompt-cache marker placement. Native
+  adapters retain catalog policy, request admission, transport, and audit delivery.
+- Native unit-test shards build only their test harness, while a separate required
+  share covers every integration and binary test target with the same workspace features.
+- Session inbox delivery and workflow policy contracts now compile in
+  `harn-orchestration`, sharing the extracted interpreter and LLM contracts.
+  Native runtime entry points use that owner for queued messages, selective
+  draining, wakeups, and workflow callback values.
+- Package verification reuses a successful resolver-latest build when declared dependency minimums produce the same lockfile.
+  Different minimum graphs still compile independently, and every declared minimum is verified from Cargo's resolved metadata.
+  Minimum versions that are already resolved avoid unnecessary dependency updates.
+- Interpreter execution services now use one required runtime owner across VM
+  construction, child execution, and baseline instantiation. Harness dispatch no
+  longer depends on a process-global installation slot; policy checks remain
+  mandatory on each builtin dispatch path.
+
+  Child interpreters retain pool, credential-provider, and tool-preparation
+  context, while independent sessions inherit restrictions without reusing
+  another invocation's authority. Native host access, evidence assembly, step
+  budget decisions, and timed-entry rollback live above interpreter mechanics.
+- The Linux security archive compiles only its two owning packages, preserving their workspace-resolved features.
+  Its producer compiles only the three tooling packages assigned to it; other workspace tests keep their existing partitions.
+- CI artifacts carry the Harn CLI and its AOT generator from one compilation graph.
+  Both executables are checked against the source manifest.
+  Package verification and the release rehearsal reuse this pair instead of compiling separate tool graphs.
+- Annotated-step hooks now run through the interpreter's required native runtime.
+  Ordinary function callbacks bypass the async hook adapters, while manifest and
+  registered hooks keep their existing order and effect accounting.
+- Tool-response byte scanning, heredoc handling, and argument syntax now compile
+  in `harn-llm`, with their lexical regression tests. Native host primitives call
+  that shared parser; Harn scripts continue to own dialect composition and policy.
+- Tooling tests run beside the security archive build, shortening the CI critical path
+  while retaining all eight required workspace test shares and the complete archive fallback.
+- The Linux workspace cache refresh now warms the test graph without first
+  building a separate development CLI graph. The shared CLI continues to use
+  its own cache and build profile.
+
+### Fixed
+
+- **Shared machine spend quotas (#7167).** ACP and embedded hosts retain the
+  durable quota across runtime threads and share it with CLI processes.
+  Authenticated session budget changes write audit receipts before applying;
+  audit failures preserve the prior ceiling. Prompt errors and generated host
+  bindings retain typed quota period and reset facts. Budget notifications never
+  receive unsolicited JSON-RPC responses.
+- Calls refused before provider transport no longer appear as unpriced attempts
+  in session usage. Dispatch measurements also follow transport into spawned
+  tasks, keeping session receipts consistent with the actual request count.
+  The declared LLM error type now exposes the runtime's admission reason and
+  provider-attempt count.
+- Provider option probes make one bounded recovery draw after a changing pool
+  rejects an option and its control identifies an available backend. Receipts
+  retain the first failure and account for every draw and control. Persistent
+  failures remain unavailable, and fixed-endpoint capability checks are unchanged.
+- Ship relocatable imported interfaces alongside precompiled bytecode, so a complete host tree can load without deriving
+  interfaces into the shared cache. Validate dependency content and resolution before using shipped contexts, and retain
+  the ordinary derivation fallback for missing, stale, or foreign artifacts.
+  Add `harn precompile --warm-cache` to prepare the runtime's exact entry, module, and interface keys for an installed
+  tree, including package imports under host authority, without executing source code or calling a model.
+  Preserve embedded crate text across build hosts so compiler and stdlib identities agree on Windows, macOS, and Linux.
+- User tests retain explicitly handed-off parent secrets in sequential and parallel execution,
+  including imported helpers, without falling back to ambient credential stores.
+- Test shards retain the same case ownership across runners with different worker capacities. Declared heavy weights now
+  remain source metadata until scheduling, where each host still bounds resource permits to its local capacity.
+- Keep reasoning receipts in their original session journal when provider work moves to another thread.
+  Correct the macOS sandbox probe's native temporary-directory initialization and report Foundation errors.
+  Verify CLI credential helper cleanup through reached child connections instead of short sleeps.
+- **Native sandbox qualification reserves its test capacity (#9985).** The
+  complete process-tool conformance aggregate runs with the configured test
+  pool reserved, keeping workspace contention from terminating its final
+  cases. All conformance assertions and the existing hang detector remain.
+- **Publication requires complete native qualification (#9987).** Promotion
+  and crate publication require the exact source's native workspace, CLI smoke
+  and performance steps to have executed successfully. Missing, partial,
+  skipped or failed proof refuses publication. Hosted audit receipts use the
+  same checked platform policy; Windows qualification remains advisory.
+- Hosted macOS product checks now verify an actual refusal when confinement prerequisites are unavailable.
+  Release qualification retains the CI inventory and budgets and requires actual confinement on its host.
+- Preserve numeric `const` and `enum` intersections in strict structured-output requests,
+  including equivalent integer and floating-point representations, without merging distinct large integers.
+- Smart Ship's admission issuer uses the review connector's supported inventory bounds so a completed original test run
+  can reach current-review qualification.
+- **LLM admission now accepts native tool history and accounts for pre-dispatch denials accurately (#10013).**
+  Harn-owned pairing metadata stays in the durable transcript but is removed
+  from the normalized provider request, so admission and transport evaluate
+  the same message shape. Typed denials before provider dispatch are recorded
+  as measured zero usage; failures after possible dispatch remain unknown
+  unless the provider reports usage.
+- Correct portable generation-option support for 20 OpenRouter model routes using strict live probes:
+  enable 14 measured `top_k` routes and reject 25 options that no compatible endpoint serves.
+- Credential capture on Windows now removes descendants when its private stdout closes,
+  allowing the parent to finish normally instead of waiting until the capture deadline.
+- Keep Smart Ship policy identity stable when JSON transport represents an integral
+  repair budget as an integer or a floating-point value. Existing positive-zero and
+  positive-budget floating-point signing bytes are preserved; signed zero is
+  canonicalized. Changing the budget still invalidates the prior policy signature.
+- CI retries bounded GitHub reads when the CLI reports a bare HTTP 502, 503, or
+  504 status, while other failures still stop immediately.
+- Package verification generates missing CLI bytecode before certifying its Harn
+  binary, and uses one feature graph for Harn, its freshness checker, and the AOT
+  generator. Repeated preparation preserves provenance and honors no-build mode.
+- Compiler and check-cache fingerprints use source contributions from the linked
+  crates instead of scanning workspace sibling directories. Published packages
+  retain their source identities and stop rebuilding on absent workspace paths.
+  CLI bytecode generation still refuses a compiler that does not match the requested
+  source checkout. The first build with the corrected identity refreshes older
+  compiler cache entries.
+- Compiler-cache wrapper probes keep Cargo intermediates inside their private scratch
+  directory, including when the caller configures a separate Cargo build directory.
+- Restored fresh dependency resolution for published Harn crates after all ZIP 8 releases were yanked
+  by upgrading the compression dependency to ZIP 9.
+
+### Security
+
+- Nested execution policies preserve outer host-process confinement when a child
+  requests the WASI profile. Flattened stage policies also preserve host read
+  denials and cannot replace or remove the host-selected namespace launcher.
+
 ## v0.10.167
 
 ### Breaking

@@ -5,7 +5,7 @@ use serde::Deserialize;
 use crate::runtime_limits::RuntimeLimits;
 use crate::schema;
 use crate::stdlib::json_query;
-use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
+use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmDictExt, VmError, VmValue};
 use crate::vm::Vm;
 
@@ -34,11 +34,9 @@ fn ensure_serializable_depth(value: &VmValue, builtin: &str) -> Result<(), VmErr
     if crate::value::recursion::depth_within(value, MAX_SERIALIZE_DEPTH) {
         Ok(())
     } else {
-        Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-            format!(
+        Err(VmError::Thrown(VmValue::string(format!(
                 "{builtin}: value nesting exceeds the maximum serialization depth ({MAX_SERIALIZE_DEPTH})"
-            ),
-        ))))
+            ))))
     }
 }
 
@@ -55,8 +53,8 @@ pub(crate) fn reset_json_state() {
 
 fn require_args(args: &[VmValue], min: usize, name: &str) -> Result<(), VmError> {
     if args.len() < min {
-        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-            format!("{name} requires {min} arguments"),
+        return Err(VmError::Thrown(VmValue::string(format!(
+            "{name} requires {min} arguments"
         ))));
     }
     Ok(())
@@ -66,8 +64,8 @@ fn schema_key_list(value: &VmValue, builtin_name: &str) -> Result<Vec<String>, V
     let list = match value {
         VmValue::List(list) => list,
         _ => {
-            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-                format!("{builtin_name}: keys must be a list"),
+            return Err(VmError::Thrown(VmValue::string(format!(
+                "{builtin_name}: keys must be a list"
             ))));
         }
     };
@@ -153,7 +151,7 @@ fn structured_parse_error_value(
     fields.put_str("error", "structured_parse_error");
     fields.put_str("format", format);
     fields.put_str("kind", kind);
-    fields.put_str("message", message);
+    fields.put_str("message", message.as_ref());
     if let Some((line, column)) = location {
         fields.put_int("line", line as i64);
         fields.put_int("column", column as i64);
@@ -184,9 +182,7 @@ fn byte_offset_location(text: &str, byte_offset: usize) -> (usize, usize) {
 }
 
 pub(crate) fn register_json_builtins(vm: &mut Vm) {
-    for def in MODULE_BUILTINS {
-        vm.register_builtin_def(def);
-    }
+    crate::stdlib::macros::register_module_builtins(vm, module_path!());
     schema_witness::register_builtins(vm);
 }
 
@@ -199,7 +195,7 @@ pub(crate) fn register_json_builtins(vm: &mut Vm) {
 fn json_stringify_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let val = args.first().unwrap_or(&VmValue::Nil);
     reject_harness_serialization(val, "json_stringify")?;
-    Ok(VmValue::String(arcstr::ArcStr::from(vm_value_to_json(val))))
+    Ok(VmValue::string(vm_value_to_json(val)))
 }
 
 #[harn_builtin(
@@ -212,11 +208,9 @@ fn json_stringify_pretty_impl(args: &[VmValue], _out: &mut String) -> Result<VmV
     reject_harness_serialization(val, "json_stringify_pretty")?;
     ensure_serializable_depth(val, "json_stringify_pretty")?;
     serde_json::to_string_pretty(&vm_value_to_data_value(val))
-        .map(|text| VmValue::String(arcstr::ArcStr::from(text)))
+        .map(VmValue::string)
         .map_err(|error| {
-            VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
-                "json_stringify_pretty: {error}"
-            ))))
+            VmError::Thrown(VmValue::string(format!("json_stringify_pretty: {error}")))
         })
 }
 
@@ -322,12 +316,8 @@ fn yaml_stringify_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
     ensure_serializable_depth(value, "yaml_stringify")?;
     let data_value = vm_value_to_data_value(value);
     crate::yaml::to_string(&data_value)
-        .map(|text| VmValue::String(arcstr::ArcStr::from(text)))
-        .map_err(|error| {
-            VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
-                "yaml_stringify: {error}"
-            ))))
-        })
+        .map(VmValue::string)
+        .map_err(|error| VmError::Thrown(VmValue::string(format!("yaml_stringify: {error}"))))
 }
 
 #[harn_builtin(
@@ -369,18 +359,11 @@ fn toml_parse_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
 fn toml_stringify_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let value = args.first().unwrap_or(&VmValue::Nil);
     let data_value = vm_value_to_data_value(value);
-    let toml_value = toml::Value::try_from(data_value).map_err(|error| {
-        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
-            "toml_stringify: {error}"
-        ))))
-    })?;
+    let toml_value = toml::Value::try_from(data_value)
+        .map_err(|error| VmError::Thrown(VmValue::string(format!("toml_stringify: {error}"))))?;
     toml::to_string(&toml_value)
-        .map(|text| VmValue::String(arcstr::ArcStr::from(text)))
-        .map_err(|error| {
-            VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
-                "toml_stringify: {error}"
-            ))))
-        })
+        .map(VmValue::string)
+        .map_err(|error| VmError::Thrown(VmValue::string(format!("toml_stringify: {error}"))))
 }
 
 #[harn_builtin(
@@ -486,11 +469,9 @@ fn schema_of_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
     require_args(args, 1, "schema_of")?;
     match &args[0] {
         VmValue::Dict(_) => Ok(args[0].clone()),
-        other => Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-            format!(
-                "schema_of: expected a type alias or schema dict, got {}",
-                other.type_name()
-            ),
+        other => Err(VmError::Thrown(VmValue::string(format!(
+            "schema_of: expected a type alias or schema dict, got {}",
+            other.type_name()
         )))),
     }
 }
@@ -616,9 +597,9 @@ fn schema_omit_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
 )]
 fn json_extract_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     if args.is_empty() {
-        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+        return Err(VmError::Thrown(VmValue::string(
             "json_extract requires at least 1 argument: text",
-        ))));
+        )));
     }
     let text = args[0].display();
     let key = args.get(1).map(|a| a.display());
@@ -627,8 +608,8 @@ fn json_extract_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
     let parsed = match serde_json::from_str::<serde_json::Value>(&json_str) {
         Ok(jv) => schema::json_to_vm_value(&jv),
         Err(e) => {
-            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-                format!("json_extract: failed to parse JSON: {e}"),
+            return Err(VmError::Thrown(VmValue::string(format!(
+                "json_extract: failed to parse JSON: {e}"
             ))));
         }
     };
@@ -637,13 +618,13 @@ fn json_extract_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
         Some(k) => match &parsed {
             VmValue::Dict(map) => match map.get(k.as_str()) {
                 Some(val) => Ok(val.clone()),
-                None => Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-                    format!("json_extract: key '{k}' not found"),
+                None => Err(VmError::Thrown(VmValue::string(format!(
+                    "json_extract: key '{k}' not found"
                 )))),
             },
-            _ => Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+            _ => Err(VmError::Thrown(VmValue::string(
                 "json_extract: parsed value is not a dict, cannot extract key",
-            )))),
+            ))),
         },
         None => Ok(parsed),
     }
@@ -694,8 +675,8 @@ fn jq_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     require_args(args, 2, "jq")?;
     let expr = args[1].display();
     json_query::eval_jq(&args[0], &expr)
-        .map(|values| VmValue::List(std::sync::Arc::new(values)))
-        .map_err(|error| VmError::Thrown(VmValue::String(arcstr::ArcStr::from(error))))
+        .map(VmValue::list)
+        .map_err(|error| VmError::Thrown(VmValue::string(error)))
 }
 
 #[harn_builtin(
@@ -709,49 +690,16 @@ fn jq_first_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError
     let expr = args[1].display();
     json_query::eval_jq(&args[0], &expr)
         .map(|values| values.into_iter().next().unwrap_or(VmValue::Nil))
-        .map_err(|error| VmError::Thrown(VmValue::String(arcstr::ArcStr::from(error))))
+        .map_err(|error| VmError::Thrown(VmValue::string(error)))
 }
-
-pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
-    &JSON_STRINGIFY_IMPL_DEF,
-    &JSON_STRINGIFY_PRETTY_IMPL_DEF,
-    &JSON_PARSE_IMPL_DEF,
-    &YAML_PARSE_IMPL_DEF,
-    &YAML_STRINGIFY_IMPL_DEF,
-    &TOML_PARSE_IMPL_DEF,
-    &TOML_STRINGIFY_IMPL_DEF,
-    &JSON_VALIDATE_IMPL_DEF,
-    &SCHEMA_CHECK_IMPL_DEF,
-    &SCHEMA_PARSE_IMPL_DEF,
-    &JSON_DECODE_IMPL_DEF,
-    &SCHEMA_REPORT_IMPL_DEF,
-    &SCHEMA_IS_IMPL_DEF,
-    &SCHEMA_OF_IMPL_DEF,
-    &IS_TYPE_IMPL_DEF,
-    &SCHEMA_EXPECT_IMPL_DEF,
-    &SCHEMA_TO_JSON_SCHEMA_IMPL_DEF,
-    &SCHEMA_FROM_JSON_SCHEMA_IMPL_DEF,
-    &SCHEMA_TO_OPENAPI_SCHEMA_IMPL_DEF,
-    &SCHEMA_FROM_OPENAPI_SCHEMA_IMPL_DEF,
-    &SCHEMA_EXTEND_IMPL_DEF,
-    &SCHEMA_PARTIAL_IMPL_DEF,
-    &SCHEMA_PICK_IMPL_DEF,
-    &SCHEMA_OMIT_IMPL_DEF,
-    &JSON_EXTRACT_IMPL_DEF,
-    &JSON_POINTER_IMPL_DEF,
-    &JSON_POINTER_SET_IMPL_DEF,
-    &JSON_POINTER_DELETE_IMPL_DEF,
-    &JQ_IMPL_DEF,
-    &JQ_FIRST_IMPL_DEF,
-];
 
 fn json_pointer_tokens(ptr: &str, builtin: &str) -> Result<Vec<String>, VmError> {
     if ptr.is_empty() {
         return Ok(Vec::new());
     }
     let Some(rest) = ptr.strip_prefix('/') else {
-        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-            format!("{builtin}: pointer must be empty or start with '/'"),
+        return Err(VmError::Thrown(VmValue::string(format!(
+            "{builtin}: pointer must be empty or start with '/'"
         ))));
     };
     rest.split('/')
@@ -764,13 +712,13 @@ fn json_pointer_tokens(ptr: &str, builtin: &str) -> Result<Vec<String>, VmError>
                         Some('0') => decoded.push('~'),
                         Some('1') => decoded.push('/'),
                         Some(other) => {
-                            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-                                format!("{builtin}: invalid escape '~{other}' in pointer"),
+                            return Err(VmError::Thrown(VmValue::string(format!(
+                                "{builtin}: invalid escape '~{other}' in pointer"
                             ))));
                         }
                         None => {
-                            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-                                format!("{builtin}: dangling '~' in pointer"),
+                            return Err(VmError::Thrown(VmValue::string(format!(
+                                "{builtin}: dangling '~' in pointer"
                             ))));
                         }
                     }
@@ -842,19 +790,19 @@ fn pointer_set_at(value: &VmValue, tokens: &[String], replacement: VmValue) -> V
             if tail.is_empty() {
                 if head == "-" || parse_pointer_index(head) == Some(next.len()) {
                     next.push(replacement);
-                    return VmValue::List(std::sync::Arc::new(next));
+                    return VmValue::list(next);
                 }
                 if let Some(index) = parse_pointer_index(head) {
                     if let Some(slot) = next.get_mut(index) {
                         *slot = replacement;
-                        return VmValue::List(std::sync::Arc::new(next));
+                        return VmValue::list(next);
                     }
                 }
                 value.clone()
             } else if let Some(index) = parse_pointer_index(head) {
                 if let Some(child) = items.get(index) {
                     next[index] = pointer_set_at(child, tail, replacement);
-                    VmValue::List(std::sync::Arc::new(next))
+                    VmValue::list(next)
                 } else {
                     value.clone()
                 }
@@ -905,7 +853,7 @@ fn pointer_delete_at(value: &VmValue, tokens: &[String]) -> VmValue {
                 } else {
                     next[index] = pointer_delete_at(&next[index], tail);
                 }
-                VmValue::List(std::sync::Arc::new(next))
+                VmValue::list(next)
             } else {
                 value.clone()
             }

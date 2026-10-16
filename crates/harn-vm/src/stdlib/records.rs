@@ -351,9 +351,7 @@ fn handoff_context_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
     let handoff = handoff_from_json_value(&json)
         .or_else(|| normalize_handoff_artifact_json(json.clone()).ok())
         .ok_or_else(|| VmError::Runtime("handoff_context: invalid handoff payload".to_string()))?;
-    Ok(VmValue::String(arcstr::ArcStr::from(handoff_context_text(
-        &handoff,
-    ))))
+    Ok(VmValue::string(handoff_context_text(&handoff)))
 }
 
 #[harn_builtin(
@@ -451,8 +449,9 @@ fn artifact_select_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
 fn artifact_context_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let artifacts = parse_artifact_list(args.first())?;
     let policy = parse_context_policy(args.get(1))?;
-    Ok(VmValue::String(arcstr::ArcStr::from(
-        render_artifacts_context(&select_artifacts(artifacts, &policy), &policy),
+    Ok(VmValue::string(render_artifacts_context(
+        &select_artifacts(artifacts, &policy),
+        &policy,
     )))
 }
 

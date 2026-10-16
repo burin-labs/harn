@@ -1,16 +1,14 @@
+use crate::value::VmDictExt;
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 use harn_builtin_macros::harn_builtin;
-use harn_vm_core::builtin_support::{register_builtin_defs, VmBuiltinDef};
 
 const SELF_CERTAINTY_PROMPT_PREFIX: &str = "Repeat exactly the text between <text> tags. Do not add, omit, or alter any characters.\n<text>\n";
 const SELF_CERTAINTY_PROMPT_SUFFIX: &str = "\n</text>";
 
 pub(crate) fn register_rerank_builtins(vm: &mut Vm) {
-    register_builtin_defs(vm, RERANK_BUILTINS);
+    harn_vm_core::builtin_support::register_module_builtins(vm, module_path!());
 }
-
-const RERANK_BUILTINS: &[&VmBuiltinDef] = &[&SELF_CERTAINTY_BUILTIN_DEF];
 
 /// Return length-normalized confidence from token log probabilities.
 #[harn_builtin(
@@ -65,7 +63,7 @@ async fn self_certainty_builtin(
     }
 
     let mut call_options = options;
-    call_options.insert(crate::value::intern_key("logprobs"), VmValue::Bool(true));
+    call_options.put_bool("logprobs", true);
     call_options
         .entry(crate::value::intern_key("stream"))
         .or_insert(VmValue::Bool(false));
@@ -78,7 +76,7 @@ async fn self_certainty_builtin(
 
     let prompt = format!("{SELF_CERTAINTY_PROMPT_PREFIX}{text}{SELF_CERTAINTY_PROMPT_SUFFIX}");
     let opts = super::helpers::extract_llm_options(&[
-        VmValue::String(arcstr::ArcStr::from(prompt)),
+        VmValue::string(prompt),
         VmValue::Nil,
         VmValue::dict(call_options),
     ])?;

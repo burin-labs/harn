@@ -22,6 +22,7 @@ for name in leaf consumer unrelated; do
   printf 'pub fn value() {}\n' > "$name/src/lib.rs"
 done
 printf '\n[dependencies]\nleaf = { path = "../leaf" }\n' >> consumer/Cargo.toml
+cargo generate-lockfile --offline
 git add .
 git commit -qm base
 base=$(git rev-parse HEAD)
@@ -57,7 +58,7 @@ case "$*" in
 esac
 SH
 chmod +x "$scratch/bin/cargo-nextest"
-# The vm group reads harn-vm's workspace-resolved features from cargo metadata.
+# Narrowed groups read workspace-resolved features from cargo metadata.
 # Other callers (the affected-crate graph) keep the real cargo.
 REAL_CARGO=$(command -v cargo)
 export REAL_CARGO
@@ -65,11 +66,15 @@ cat > "$scratch/bin/cargo" <<'SH'
 #!/usr/bin/env bash
 [[ "${FAKE_VM_METADATA:-}" == 1 && "$1" == metadata ]] || exec "$REAL_CARGO" "$@"
 jq -n --arg missing "${FAKE_MISSING_NODE:-false}" '{
-  workspace_members: ["vm-id", "fmt-id", "lsp-id", "package-id"],
+  workspace_members: ["vm-id", "cli-id", "fmt-id", "lsp-id", "package-id", "serve-id"],
   packages: [{name: "harn-vm", source: null, id: "vm-id"}, {name: "harn-vm", source: "registry", id: "other"},
     {name: "harn-fmt", source: null, id: "fmt-id"}, {name: "harn-lsp", source: null, id: "lsp-id"},
-    {name: "harn-package", source: null, id: "package-id"}],
+    {name: "harn-package", source: null, id: "package-id"},
+    {name: "harn-cli", source: null, id: "cli-id"},
+    {name: "harn-serve", source: null, id: "serve-id"}],
   resolve: {nodes: ([{id: "vm-id", features: ["default", "otel"]}, {id: "other", features: ["wrong"]},
+    {id: "cli-id", features: ["default", "hostlib"]},
+    {id: "serve-id", features: ["default", "hostlib-full"]},
     {id: "fmt-id", features: []}, {id: "lsp-id", features: []}, {id: "package-id", features: []}]
     | if $missing == "true" then map(select(.id != "vm-id")) else . end)}}'
 SH
@@ -84,12 +89,30 @@ fi
 if FAKE_VM_METADATA=1 bash "$root/scripts/ci/workspace_features.sh" missing > "$scratch/log" 2>&1; then
   echo 'A missing workspace member was accepted' >&2; exit 1
 fi
-FAKE_VM_METADATA=1 GITHUB_EVENT_NAME=push bash "$root/scripts/ci/run_workspace_tests.sh" vm:3/3 > "$scratch/log"
+FAKE_VM_METADATA=1 GITHUB_EVENT_NAME=push bash "$root/scripts/ci/run_workspace_tests.sh" vm-unit:3/3 > "$scratch/log"
 jq -e '.["rust-suites"].fixture.testcases.case["filter-match"].status == "matches"' "$RUNNER_TEMP/harn-nextest-inventory.json" > /dev/null
 grep -q 'eligible=1' "$scratch/log"
-grep -q -- '--locked -p harn-vm --features harn-vm/default,harn-vm/otel --partition count:3/3 --no-tests pass' "$scratch/ran"
-GITHUB_EVENT_NAME=push bash "$root/scripts/ci/run_workspace_tests.sh" rest:1/4 > "$scratch/log"
-grep -q -- '--locked --workspace --exclude harn-vm --exclude harn-fmt --exclude harn-lsp --exclude harn-package --partition count:1/4 --no-tests pass' "$scratch/ran"
+grep -Fq -- '--locked -p harn-vm --features harn-vm/default,harn-vm/otel --lib --partition count:3/3 --no-tests pass' "$scratch/ran"
+FAKE_VM_METADATA=1 GITHUB_EVENT_NAME=push bash "$root/scripts/ci/run_workspace_tests.sh" vm-integration > "$scratch/log"
+grep -Fq -- '--locked -p harn-vm --features harn-vm/default,harn-vm/otel --test * --bins --no-tests fail' "$scratch/ran"
+if grep -Eq -- '--lib|--partition|--tests' "$scratch/ran"; then
+  echo 'Native integration tests also selected or partitioned the unit harness' >&2; exit 1
+fi
+FAKE_VM_METADATA=1 GITHUB_EVENT_NAME=push bash "$root/scripts/ci/run_workspace_tests.sh" rest:1/4 > "$scratch/log"
+grep -q -- '--locked --workspace --exclude harn-vm --exclude harn-cli --exclude harn-fmt --exclude harn-lsp --exclude harn-package --features harn-serve/default,harn-serve/hostlib-full --partition count:1/4 --no-tests pass' "$scratch/ran"
+if FAKE_VM_METADATA=1 bash "$root/scripts/ci/workspace_features.sh" --workspace-except absent > "$scratch/log" 2>&1; then
+  echo 'An unmeasured excluded workspace member was accepted' >&2; exit 1
+fi
+FAKE_VM_METADATA=1 GITHUB_EVENT_NAME=push bash "$root/scripts/ci/run_workspace_tests.sh" cli-unit > "$scratch/log"
+grep -Fq -- '--locked -p harn-cli --features harn-cli/default,harn-cli/hostlib,harn-vm/default,harn-vm/otel --lib --no-tests fail' "$scratch/ran"
+if grep -Eq -- '--test|--bins|--partition' "$scratch/ran"; then
+  echo 'CLI unit tests selected additional targets or a partition' >&2; exit 1
+fi
+FAKE_VM_METADATA=1 GITHUB_EVENT_NAME=push bash "$root/scripts/ci/run_workspace_tests.sh" cli-integration > "$scratch/log"
+grep -Fq -- '--locked -p harn-cli --features harn-cli/default,harn-cli/hostlib,harn-vm/default,harn-vm/otel --test * --bins --no-tests fail' "$scratch/ran"
+if grep -Eq -- '--lib|--partition|--tests' "$scratch/ran"; then
+  echo 'CLI integration tests also selected or partitioned the unit harness' >&2; exit 1
+fi
 # The producer compiles only its three tooling packages, with workspace features.
 FAKE_VM_METADATA=1 GITHUB_EVENT_NAME=push bash "$root/scripts/ci/run_workspace_tests.sh" tooling > "$scratch/log"
 grep -q -- 'and (package(harn-fmt) or package(harn-lsp) or package(harn-package)) --locked -p harn-fmt -p harn-lsp -p harn-package --no-tests fail' "$scratch/ran"
@@ -99,10 +122,13 @@ fi
 # An affected selection without harn-vm leaves the vm group nothing to build.
 jq -n --arg base "$base" '{pull_request: {base: {sha: $base}}}' > "$scratch/event"
 rm "$scratch/ran"
-GITHUB_EVENT_NAME=pull_request POST_MERGE_TIER_ACTIVE=true bash "$root/scripts/ci/run_workspace_tests.sh" vm:1/3 > "$scratch/log"
-grep -q 'group=vm selects nothing' "$scratch/log"
+GITHUB_EVENT_NAME=pull_request POST_MERGE_TIER_ACTIVE=true bash "$root/scripts/ci/run_workspace_tests.sh" vm-unit:1/3 > "$scratch/log"
+grep -q 'group=vm-unit selects nothing' "$scratch/log"
 [[ ! -e "$scratch/ran" ]]
 rm -f "$scratch/ran"
+GITHUB_EVENT_NAME=pull_request POST_MERGE_TIER_ACTIVE=true bash "$root/scripts/ci/run_workspace_tests.sh" cli-unit > "$scratch/log"
+grep -q 'group=cli-unit selects nothing' "$scratch/log"
+[[ ! -e "$scratch/ran" ]]
 GITHUB_EVENT_NAME=pull_request POST_MERGE_TIER_ACTIVE=true bash "$root/scripts/ci/run_workspace_tests.sh" tooling > "$scratch/log"
 grep -q 'group=tooling selects nothing' "$scratch/log"
 [[ ! -e "$scratch/ran" ]]
@@ -112,7 +138,7 @@ if bash "$root/scripts/ci/run_workspace_tests.sh" count:1/3 > "$scratch/log" 2>&
   echo 'An ungrouped partition was accepted' >&2; exit 1
 fi
 rm "$scratch/ran"
-if FAKE_VM_METADATA=1 MATCH_STATUS=mismatch GITHUB_EVENT_NAME=push bash "$root/scripts/ci/run_workspace_tests.sh" vm:3/3 > "$scratch/log" 2>&1; then
+if FAKE_VM_METADATA=1 MATCH_STATUS=mismatch GITHUB_EVENT_NAME=push bash "$root/scripts/ci/run_workspace_tests.sh" vm-unit:3/3 > "$scratch/log" 2>&1; then
   echo 'An empty eligible suite was accepted' >&2; exit 1
 fi
 [[ ! -e "$scratch/ran" ]]

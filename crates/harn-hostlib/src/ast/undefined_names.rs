@@ -22,7 +22,6 @@
 
 use std::collections::HashSet;
 use std::path::PathBuf;
-use std::sync::Arc;
 
 use harn_vm::VmValue;
 use tree_sitter::{Node, Tree};
@@ -88,7 +87,7 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
         ("language", str_value(language.name())),
         ("supported", VmValue::Bool(true)),
         ("resolution", resolution.to_vm_value()),
-        ("diagnostics", VmValue::List(Arc::new(dlist))),
+        ("diagnostics", VmValue::list(dlist)),
     ]))
 }
 
@@ -101,7 +100,7 @@ fn unsupported_response(path: Option<&str>, language: Language) -> VmValue {
             "resolution",
             name_resolution::Resolution::unanalysed(language).to_vm_value(),
         ),
-        ("diagnostics", VmValue::List(Arc::new(Vec::new()))),
+        ("diagnostics", VmValue::list(Vec::new())),
     ])
 }
 
@@ -117,7 +116,7 @@ fn empty_response(path: Option<&str>, language: Language) -> VmValue {
             "resolution",
             name_resolution::Resolution::unanalysed(language).to_vm_value(),
         ),
-        ("diagnostics", VmValue::List(Arc::new(Vec::new()))),
+        ("diagnostics", VmValue::list(Vec::new())),
     ])
 }
 

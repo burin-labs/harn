@@ -1066,17 +1066,15 @@ fn breaker_open_error(
                 std::collections::BTreeMap::from([
                     (
                         "category".to_string(),
-                        crate::value::VmValue::String(arcstr::ArcStr::from("circuit_open")),
+                        crate::value::VmValue::string("circuit_open"),
                     ),
                     (
                         "code".to_string(),
-                        crate::value::VmValue::String(arcstr::ArcStr::from("route_quarantined")),
+                        crate::value::VmValue::string("route_quarantined"),
                     ),
                     (
                         "reason".to_string(),
-                        crate::value::VmValue::String(arcstr::ArcStr::from(
-                            "unproductive_completion",
-                        )),
+                        crate::value::VmValue::string("unproductive_completion"),
                     ),
                     ("attempt_count".to_string(), crate::value::VmValue::Int(0)),
                     (
@@ -1087,7 +1085,7 @@ fn breaker_open_error(
                     ),
                     (
                         "message".to_string(),
-                        crate::value::VmValue::String(arcstr::ArcStr::from(message)),
+                        crate::value::VmValue::string(message),
                     ),
                 ]),
             ))

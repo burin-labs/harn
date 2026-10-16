@@ -32,6 +32,7 @@
 //! write, and atomic writes go through a sibling `.tmp` file plus
 //! rename.
 
+use crate::value::VmDictExt;
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
 use std::fs::{self, File, OpenOptions, TryLockError};
@@ -427,11 +428,8 @@ impl OAuthStorageRefreshLockGuard {
             return Ok(());
         };
         let mut params = crate::value::DictMap::new();
-        params.insert(
-            crate::value::intern_key("scope"),
-            VmValue::string(&lock.scope),
-        );
-        params.insert(crate::value::intern_key("key"), VmValue::string(&lock.key));
+        params.put("scope", VmValue::string(&lock.scope));
+        params.put("key", VmValue::string(&lock.key));
         params.insert(crate::value::intern_key("lock"), lock.lease);
         dispatch_host_operation("oauth_storage", "cloud_release_refresh_lock", &params).await?;
         Ok(())
@@ -582,12 +580,9 @@ fn file_refresh_lock_path(handle: &crate::value::DictMap, key: &str) -> Result<P
 
 async fn acquire_cloud_refresh_lock(scope: &str, key: &str) -> Result<CloudRefreshLock, VmError> {
     let mut params = crate::value::DictMap::new();
-    params.insert(crate::value::intern_key("scope"), VmValue::string(scope));
-    params.insert(crate::value::intern_key("key"), VmValue::string(key));
-    params.insert(
-        crate::value::intern_key("timeout_seconds"),
-        VmValue::Int(REFRESH_LOCK_TIMEOUT.as_secs() as i64),
-    );
+    params.put("scope", VmValue::string(scope));
+    params.put("key", VmValue::string(key));
+    params.put_int("timeout_seconds", REFRESH_LOCK_TIMEOUT.as_secs() as i64);
     let lease =
         dispatch_host_operation("oauth_storage", "cloud_acquire_refresh_lock", &params).await?;
     Ok(CloudRefreshLock {
@@ -892,8 +887,8 @@ fn cloud_scope(handle: &crate::value::DictMap) -> Result<String, VmError> {
 async fn cloud_get(handle: &crate::value::DictMap, key: &str) -> Result<VmValue, VmError> {
     let scope = cloud_scope(handle)?;
     let mut params = crate::value::DictMap::new();
-    params.insert(crate::value::intern_key("scope"), VmValue::string(&scope));
-    params.insert(crate::value::intern_key("key"), VmValue::string(key));
+    params.put("scope", VmValue::string(&scope));
+    params.put("key", VmValue::string(key));
     dispatch_host_operation("oauth_storage", "cloud_get", &params).await
 }
 
@@ -905,11 +900,11 @@ async fn cloud_set(
 ) -> Result<(), VmError> {
     let scope = cloud_scope(handle)?;
     let mut params = crate::value::DictMap::new();
-    params.insert(crate::value::intern_key("scope"), VmValue::string(&scope));
-    params.insert(crate::value::intern_key("key"), VmValue::string(key));
+    params.put("scope", VmValue::string(&scope));
+    params.put("key", VmValue::string(key));
     params.insert(crate::value::intern_key("token"), json_to_vm_dict(&token));
     if let Some(ttl) = ttl_seconds {
-        params.insert(crate::value::intern_key("ttl_seconds"), VmValue::Int(ttl));
+        params.put_int("ttl_seconds", ttl);
     }
     dispatch_host_operation("oauth_storage", "cloud_set", &params).await?;
     Ok(())
@@ -918,8 +913,8 @@ async fn cloud_set(
 async fn cloud_delete(handle: &crate::value::DictMap, key: &str) -> Result<(), VmError> {
     let scope = cloud_scope(handle)?;
     let mut params = crate::value::DictMap::new();
-    params.insert(crate::value::intern_key("scope"), VmValue::string(&scope));
-    params.insert(crate::value::intern_key("key"), VmValue::string(key));
+    params.put("scope", VmValue::string(&scope));
+    params.put("key", VmValue::string(key));
     dispatch_host_operation("oauth_storage", "cloud_delete", &params).await?;
     Ok(())
 }

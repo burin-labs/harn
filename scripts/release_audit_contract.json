@@ -197,6 +197,48 @@
       ]
     },
     {
+      "name": "Rust workspace tests (vm integration)",
+      "job_id": "rust-test-partitions",
+      "matrix_kind": "partition-9",
+      "proofs": ["rust-audit"],
+      "steps": [
+        {
+          "id": "release-audit-rust-test",
+          "condition": "",
+          "required_env": {"HARN_LLM_CALLS_DISABLED": "1"},
+          "run": "scripts/ci/run_rust_test_lane.sh bash scripts/ci/run_workspace_tests.sh \"$HARN_EXT_TEST_PARTITION\""
+        }
+      ]
+    },
+    {
+      "name": "Rust workspace tests (cli unit)",
+      "job_id": "rust-test-partitions",
+      "matrix_kind": "partition-10",
+      "proofs": ["rust-audit"],
+      "steps": [
+        {
+          "id": "release-audit-rust-test",
+          "condition": "",
+          "required_env": {"HARN_LLM_CALLS_DISABLED": "1"},
+          "run": "scripts/ci/run_rust_test_lane.sh bash scripts/ci/run_workspace_tests.sh \"$HARN_EXT_TEST_PARTITION\""
+        }
+      ]
+    },
+    {
+      "name": "Rust workspace tests (cli integration)",
+      "job_id": "rust-test-partitions",
+      "matrix_kind": "partition-11",
+      "proofs": ["rust-audit"],
+      "steps": [
+        {
+          "id": "release-audit-rust-test",
+          "condition": "",
+          "required_env": {"HARN_LLM_CALLS_DISABLED": "1"},
+          "run": "scripts/ci/run_rust_test_lane.sh bash scripts/ci/run_workspace_tests.sh \"$HARN_EXT_TEST_PARTITION\""
+        }
+      ]
+    },
+    {
       "name": "Run Linux sandbox tests",
       "job_id": "rust-security",
       "matrix_kind": "",

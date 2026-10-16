@@ -13,17 +13,16 @@
 //! DNS) and lets the dispatcher resolve rules lazily on each
 //! `harness.net.*` call.
 
+use crate::value::VmDictExt;
 use std::collections::BTreeMap;
 
 use crate::harness_net::parse::{POLICY_TAG_KEY, RULE_TAG_KEY};
-use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
+use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
 pub fn register_net_policy_builtins(vm: &mut Vm) {
-    for def in MODULE_BUILTINS {
-        vm.register_builtin_def(def);
-    }
+    crate::stdlib::macros::register_module_builtins(vm, module_path!());
 }
 
 #[harn_builtin(
@@ -34,10 +33,7 @@ pub fn register_net_policy_builtins(vm: &mut Vm) {
 )]
 fn net_policy_domain_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let host = require_string(args, 0, "NetPolicy.domain")?;
-    Ok(rule_dict(
-        "domain",
-        &[("host", VmValue::String(arcstr::ArcStr::from(host)))],
-    ))
+    Ok(rule_dict("domain", &[("host", VmValue::string(host))]))
 }
 
 #[harn_builtin(
@@ -58,7 +54,7 @@ fn net_policy_domain_wildcard_impl(
     }
     Ok(rule_dict(
         "domain_wildcard",
-        &[("pattern", VmValue::String(arcstr::ArcStr::from(pattern)))],
+        &[("pattern", VmValue::string(pattern))],
     ))
 }
 
@@ -73,10 +69,7 @@ fn net_policy_cidr_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
     // Validate eagerly so authoring errors surface at construction
     // rather than on the first denied request.
     crate::harness_net::NetPolicyRule::parse_cidr(&range)?;
-    Ok(rule_dict(
-        "cidr",
-        &[("range", VmValue::String(arcstr::ArcStr::from(range)))],
-    ))
+    Ok(rule_dict("cidr", &[("range", VmValue::string(range))]))
 }
 
 #[harn_builtin(
@@ -109,10 +102,7 @@ fn net_policy_host_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
     }
     Ok(rule_dict(
         "host",
-        &[
-            ("host", VmValue::String(arcstr::ArcStr::from(host))),
-            ("ports", ports_value),
-        ],
+        &[("host", VmValue::string(host)), ("ports", ports_value)],
     ))
 }
 
@@ -136,46 +126,29 @@ fn net_policy_create_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue
     if let Some(allow) = config.get("allow") {
         policy.insert("allow".to_string(), allow.clone());
     } else {
-        policy.insert(
-            "allow".to_string(),
-            VmValue::List(std::sync::Arc::new(Vec::new())),
-        );
+        policy.put("allow", VmValue::list(Vec::new()));
     }
     if let Some(deny) = config.get("deny") {
         policy.insert("deny".to_string(), deny.clone());
     } else {
-        policy.insert(
-            "deny".to_string(),
-            VmValue::List(std::sync::Arc::new(Vec::new())),
-        );
+        policy.put("deny", VmValue::list(Vec::new()));
     }
     let default = config
         .get("default")
         .cloned()
-        .unwrap_or_else(|| VmValue::String(arcstr::ArcStr::from("deny")));
+        .unwrap_or_else(|| VmValue::string("deny"));
     policy.insert("default".to_string(), default);
     let on_violation = config
         .get("on_violation")
         .cloned()
-        .unwrap_or_else(|| VmValue::String(arcstr::ArcStr::from("error")));
+        .unwrap_or_else(|| VmValue::string("error"));
     policy.insert("on_violation".to_string(), on_violation);
     Ok(VmValue::dict(policy))
 }
 
-pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
-    &NET_POLICY_DOMAIN_IMPL_DEF,
-    &NET_POLICY_DOMAIN_WILDCARD_IMPL_DEF,
-    &NET_POLICY_CIDR_IMPL_DEF,
-    &NET_POLICY_HOST_IMPL_DEF,
-    &NET_POLICY_CREATE_IMPL_DEF,
-];
-
 fn rule_dict(kind: &'static str, fields: &[(&str, VmValue)]) -> VmValue {
     let mut dict = BTreeMap::new();
-    dict.insert(
-        RULE_TAG_KEY.to_string(),
-        VmValue::String(arcstr::ArcStr::from(kind)),
-    );
+    dict.insert(RULE_TAG_KEY.to_string(), VmValue::string(kind));
     for (key, value) in fields {
         dict.insert((*key).to_string(), value.clone());
     }
@@ -194,5 +167,5 @@ fn require_string(args: &[VmValue], index: usize, callee: &str) -> Result<String
 }
 
 fn thrown(message: impl Into<String>) -> VmError {
-    VmError::Thrown(VmValue::String(arcstr::ArcStr::from(message.into())))
+    VmError::Thrown(VmValue::string(message.into()))
 }

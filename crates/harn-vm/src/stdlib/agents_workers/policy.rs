@@ -1,5 +1,4 @@
 use crate::value::VmDictExt;
-use std::collections::BTreeMap;
 
 use super::super::parse_context_policy;
 use super::WorkerCarryPolicy;
@@ -226,10 +225,7 @@ fn fork_worker_transcript(transcript: VmValue) -> VmValue {
                 metadata.put_str("parent_transcript_id", parent_id);
                 VmValue::dict(metadata)
             }
-            _ => VmValue::dict(BTreeMap::from([(
-                "parent_transcript_id".to_string(),
-                VmValue::String(arcstr::ArcStr::from(parent_id)),
-            )])),
+            _ => VmValue::dict([("parent_transcript_id", VmValue::string(parent_id))]),
         };
         next.insert(crate::value::intern_key("metadata"), metadata);
     }
@@ -285,14 +281,8 @@ pub(in super::super) async fn compact_worker_transcript(
     let mut events = crate::llm::helpers::transcript_events_from_messages(&vm_messages);
     events.extend(outcome.reminder_report.preserved_events);
     let mut next = dict.clone();
-    next.insert(
-        crate::value::intern_key("messages"),
-        VmValue::List(std::sync::Arc::new(vm_messages)),
-    );
-    next.insert(
-        crate::value::intern_key("events"),
-        VmValue::List(std::sync::Arc::new(events)),
-    );
+    next.put("messages", VmValue::list(vm_messages));
+    next.put("events", VmValue::list(events));
     next.put_str("summary", outcome.summary);
     Ok(VmValue::dict(next))
 }

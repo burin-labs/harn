@@ -713,10 +713,10 @@ fn rust_cache_refresh_errors(workflow: dict) -> list<string> {
   for entry in profiles {
     const cache_key = trim(entry?.cache_key ?? "")
     matrix_keys = matrix_keys + [cache_key]
-    const expected_headroom = if cache_key == "workspace-tests" || cache_key == "package-audit" {
+    const expected_headroom = if cache_key == "workspace-tests" {
+      "8589934592"
+    } else if cache_key == "harn-ci-cli" || cache_key == "package-audit" {
       "4294967296"
-    } else if cache_key == "harn-ci-cli" {
-      "2147483648"
     } else {
       ""
     }
@@ -1102,7 +1102,19 @@ fn parallel_rust_proof_errors(workflow: dict) -> list<string> {
   const rows = partitions?.strategy?.matrix?.include ?? []
   const shares = rows.map({ row -> to_string(row?.partition ?? "") }).to_list().sorted()
   if shares
-    != ["rest:1/4", "rest:2/4", "rest:3/4", "rest:4/4", "tooling", "vm:1/3", "vm:2/3", "vm:3/3"]
+    != [
+      "cli-integration",
+      "cli-unit",
+      "rest:1/4",
+      "rest:2/4",
+      "rest:3/4",
+      "rest:4/4",
+      "tooling",
+      "vm-integration",
+      "vm-unit:1/3",
+      "vm-unit:2/3",
+      "vm-unit:3/3",
+    ]
     || strings_of(partitions?.needs) != ["changes"]
     || !contains(trim(partitions?.if ?? ""), "needs.changes.outputs.rust == 'true'")
     || !contains(trim(partitions?.if ?? ""), "vars.${COLOCATED_TESTS_DISABLE_VAR} != 'true'")
@@ -1115,9 +1127,7 @@ fn parallel_rust_proof_errors(workflow: dict) -> list<string> {
     || trim(test_step?.run ?? "")
       != "scripts/ci/run_rust_test_lane.sh bash scripts/ci/run_workspace_tests.sh \"$HARN_EXT_TEST_PARTITION\"" {
     errors = errors
-      + [
-        "ci.yml:rust-test-partitions must execute all eight exact workspace test shares independently",
-      ]
+      + ["ci.yml:rust-test-partitions must execute every exact workspace test share independently"]
   }
   const security_job = workflow?.jobs?.["rust-security"]
   const security_step = step_by_name(security_job?.steps ?? [], "Run Linux sandbox tests")

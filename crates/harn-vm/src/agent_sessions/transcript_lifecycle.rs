@@ -1,4 +1,5 @@
 use super::*;
+use crate::value::VmDictExt;
 
 /// Append a transcript event to the session without mutating its message list.
 /// Used for orchestration-side lineage events (sub-agent spawn/completion,
@@ -111,10 +112,7 @@ pub(crate) fn append_event_to_state(
     };
     events.push(event);
     let mut next = dict;
-    next.insert(
-        crate::value::intern_key("events"),
-        VmValue::List(std::sync::Arc::new(events)),
-    );
+    next.put("events", VmValue::list(events));
     apply_transcript_with_budget(state, VmValue::dict(next), action)?;
     crate::agent_session_journal::enqueue_audit_event(&mut state.transcript_journal, journal_event);
     Ok(())
@@ -248,10 +246,7 @@ pub(crate) fn settle_assistant_publication(
             _ => Vec::new(),
         };
         events.push(event.clone());
-        next.insert(
-            crate::value::intern_key("events"),
-            VmValue::List(Arc::new(events)),
-        );
+        next.put("events", VmValue::list(events));
         apply_transcript_with_budget(state, VmValue::dict(next), "assistant_publication")?;
         crate::agent_session_journal::enqueue_audit_event(
             &mut state.transcript_journal,
@@ -467,10 +462,7 @@ pub fn prune_invalid_reminder_events(id: &str) -> usize {
         }
         if pruned > 0 {
             let mut next = dict;
-            next.insert(
-                crate::value::intern_key("events"),
-                VmValue::List(std::sync::Arc::new(kept)),
-            );
+            next.put("events", VmValue::list(kept));
             if apply_transcript_with_budget(
                 state,
                 VmValue::dict(next),
@@ -618,10 +610,7 @@ fn inject_reminder_with_policy(
         }
         events.push(crate::llm::helpers::transcript_reminder_event(&reminder));
         let mut next = dict;
-        next.insert(
-            crate::value::intern_key("events"),
-            VmValue::List(std::sync::Arc::new(events)),
-        );
+        next.put("events", VmValue::list(events));
         apply_transcript_with_budget(state, VmValue::dict(next), "inject_reminder")?;
         state.touch();
         Ok(true)
@@ -723,10 +712,7 @@ pub fn revoke_reminder(id: &str, reminder_id: &str) -> Result<&'static str, Stri
         });
         if events.len() != before {
             let mut next = dict;
-            next.insert(
-                crate::value::intern_key("events"),
-                VmValue::List(std::sync::Arc::new(events)),
-            );
+            next.put("events", VmValue::list(events));
             apply_transcript_with_budget(state, VmValue::dict(next), "revoke_reminder")?;
             state.revoked_reminder_ids.insert(reminder_id.to_string());
             state.touch();

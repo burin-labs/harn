@@ -933,14 +933,8 @@ impl LlmUsage {
                 }
             }
         }
-        usage.insert(
-            crate::value::intern_key("input_tokens"),
-            VmValue::Int(self.input_tokens),
-        );
-        usage.insert(
-            crate::value::intern_key("output_tokens"),
-            VmValue::Int(self.output_tokens),
-        );
+        usage.put_int("input_tokens", self.input_tokens);
+        usage.put_int("output_tokens", self.output_tokens);
         usage.insert(
             crate::value::intern_key("reported_total_tokens"),
             self.reported_total_tokens
@@ -950,31 +944,16 @@ impl LlmUsage {
             crate::value::intern_key("cost_usd"),
             self.cost_usd.map_or(VmValue::Nil, VmValue::Float),
         );
-        usage.insert(
-            crate::value::intern_key("known_cost_usd"),
-            VmValue::Float(self.known_cost_usd),
-        );
+        usage.put("known_cost_usd", VmValue::Float(self.known_cost_usd));
         // An unmeasured count is absent, never null: a consumer that keys
         // "stamped" on the field's presence must not read a legacy ledger as
         // one that measured and found nothing.
         if let Some(provider_call_count) = self.provider_call_count {
-            usage.insert(
-                crate::value::intern_key("provider_call_count"),
-                VmValue::Int(provider_call_count),
-            );
+            usage.put_int("provider_call_count", provider_call_count);
         }
-        usage.insert(
-            crate::value::intern_key("unpriced_calls"),
-            VmValue::Int(self.unpriced_calls),
-        );
-        usage.insert(
-            crate::value::intern_key("usage_unknown_calls"),
-            VmValue::Int(self.usage_unknown_calls),
-        );
-        usage.insert(
-            crate::value::intern_key("unpriced_tokens"),
-            VmValue::Int(self.unpriced_tokens()),
-        );
+        usage.put_int("unpriced_calls", self.unpriced_calls);
+        usage.put_int("usage_unknown_calls", self.usage_unknown_calls);
+        usage.put_int("unpriced_tokens", self.unpriced_tokens());
         usage.insert(
             crate::value::intern_key("unpriced_reason"),
             self.unpriced_reason()
@@ -989,8 +968,8 @@ impl LlmUsage {
         // tell "no card applied" from "a base card applied".
         if let Some(pricing) = self.pricing.as_deref() {
             let mut card = crate::value::DictMap::new();
-            card.insert(
-                "platform_fee_estimate_usd".into(),
+            card.put(
+                "platform_fee_estimate_usd",
                 VmValue::Float(pricing.platform_fee_estimate_usd),
             );
             card.insert(
@@ -1014,14 +993,8 @@ impl LlmUsage {
                     pricing.monthly_allowance_unapplied
                 )),
             );
-            card.insert(
-                crate::value::intern_key("rate_card"),
-                VmValue::string(pricing.rate_card.as_str()),
-            );
-            card.insert(
-                crate::value::intern_key("settled_at_ms"),
-                VmValue::Int(pricing.settled_at_ms),
-            );
+            card.put("rate_card", VmValue::string(pricing.rate_card.as_str()));
+            card.put_int("settled_at_ms", pricing.settled_at_ms);
             card.insert(
                 crate::value::intern_key("input_band_minimum"),
                 pricing
@@ -1035,27 +1008,12 @@ impl LlmUsage {
                     .as_deref()
                     .map_or(VmValue::Nil, VmValue::string),
             );
-            card.insert(
-                crate::value::intern_key("cache_ttl_unpriced"),
-                VmValue::Bool(pricing.cache_ttl_unpriced),
-            );
-            usage.insert(
-                crate::value::intern_key("pricing"),
-                VmValue::Dict(std::sync::Arc::new(card)),
-            );
+            card.put_bool("cache_ttl_unpriced", pricing.cache_ttl_unpriced);
+            usage.put("pricing", VmValue::Dict(std::sync::Arc::new(card)));
         }
-        usage.insert(
-            crate::value::intern_key("cache_read_tokens"),
-            VmValue::Int(self.cache_read_tokens),
-        );
-        usage.insert(
-            crate::value::intern_key("cache_write_tokens"),
-            VmValue::Int(self.cache_write_tokens),
-        );
-        usage.insert(
-            crate::value::intern_key("cache_supported"),
-            VmValue::Bool(self.cache_supported),
-        );
+        usage.put_int("cache_read_tokens", self.cache_read_tokens);
+        usage.put_int("cache_write_tokens", self.cache_write_tokens);
+        usage.put_bool("cache_supported", self.cache_supported);
         usage.insert(
             crate::value::intern_key("cache_hit_ratio"),
             self.cache_hit_ratio.map_or(VmValue::Nil, VmValue::Float),
@@ -1066,18 +1024,12 @@ impl LlmUsage {
             }
             Some(state) => usage.put_str("cache_visibility", state),
         }
-        usage.insert(
-            crate::value::intern_key("cache_savings_usd"),
-            VmValue::Float(self.cache_savings_usd),
-        );
-        usage.insert(
-            crate::value::intern_key("provider_attempts"),
+        usage.put("cache_savings_usd", VmValue::Float(self.cache_savings_usd));
+        usage.put(
+            "provider_attempts",
             VmValue::dict(provider_attempts_vm_dict(attempts)),
         );
-        usage.insert(
-            crate::value::intern_key("served_fast"),
-            VmValue::Bool(self.served_fast),
-        );
+        usage.put_bool("served_fast", self.served_fast);
         usage.put_str("accounting_status", self.accounting_status.as_str());
         usage
     }
@@ -1280,26 +1232,11 @@ impl LlmUsage {
 
 fn provider_attempts_vm_dict(attempts: &ProviderAttempts) -> crate::value::DictMap {
     let mut fields = crate::value::DictMap::new();
-    fields.insert(
-        crate::value::intern_key("total"),
-        VmValue::Int(i64::from(attempts.total)),
-    );
-    fields.insert(
-        crate::value::intern_key("retries"),
-        VmValue::Int(i64::from(attempts.retries())),
-    );
-    fields.insert(
-        crate::value::intern_key("rate_limited"),
-        VmValue::Int(i64::from(attempts.rate_limited)),
-    );
-    fields.insert(
-        crate::value::intern_key("empty_completion"),
-        VmValue::Int(i64::from(attempts.empty_completion)),
-    );
-    fields.insert(
-        crate::value::intern_key("other"),
-        VmValue::Int(i64::from(attempts.other)),
-    );
+    fields.put_int("total", i64::from(attempts.total));
+    fields.put_int("retries", i64::from(attempts.retries()));
+    fields.put_int("rate_limited", i64::from(attempts.rate_limited));
+    fields.put_int("empty_completion", i64::from(attempts.empty_completion));
+    fields.put_int("other", i64::from(attempts.other));
     fields
 }
 

@@ -1076,7 +1076,7 @@ jobs:
         uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2.87.22
         with:
           tool: nextest@0.9.132
-      # Compile only the security packages. All eight ordinary test shares
+      # Compile only the security packages. All eleven ordinary test shares
       # compile and execute independently in rust-test-partitions.
       - name: Build security test archive
         if: needs.changes.outputs.post_merge_tier != 'true'
@@ -1156,7 +1156,7 @@ jobs:
         if: always()
         run: ./scripts/ci/finalize_sccache.sh
 
-  # Eight complete test shares run beside the security producer. Tooling
+  # Nine complete test shares run beside the security producer. Tooling
   # previously added 260 seconds after its 402-second security build
   # (run 38886757958). With package-scoped builds there is no shared compile
   # to justify that serial dependency. Each leg restores the same read-only
@@ -1196,13 +1196,22 @@ jobs:
             partition: rest:4/4
           - kind: partition-6
             name: Rust workspace tests (vm 1/3)
-            partition: vm:1/3
+            partition: vm-unit:1/3
           - kind: partition-7
             name: Rust workspace tests (vm 2/3)
-            partition: vm:2/3
+            partition: vm-unit:2/3
           - kind: partition-8
             name: Rust workspace tests (vm 3/3)
-            partition: vm:3/3
+            partition: vm-unit:3/3
+          - kind: partition-9
+            name: Rust workspace tests (vm integration)
+            partition: vm-integration
+          - kind: partition-10
+            name: Rust workspace tests (cli unit)
+            partition: cli-unit
+          - kind: partition-11
+            name: Rust workspace tests (cli integration)
+            partition: cli-integration
     env:
       # Match rust-check-inputs, so the workspace-tests cache key restores.
       RUSTFLAGS: "-D warnings -Clink-arg=-fuse-ld=mold"

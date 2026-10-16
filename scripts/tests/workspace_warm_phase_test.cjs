@@ -42,6 +42,8 @@ if(name==='cargo' && args[0]==='metadata') {
 `;
   for (const name of ['cargo', 'cargo-nextest']) fs.writeFileSync(path.join(bin, name), command, { mode: 0o755 });
   fs.writeFileSync(path.join(deps, 'test-binary'), 'executable fixture', { mode: 0o755 });
+  fs.writeFileSync(path.join(deps, 'harn_vm-0123456789abcdef'), 'native executable fixture', { mode: 0o755 });
+  fs.writeFileSync(path.join(deps, 'harn_vm_core-0123456789abcdef'), 'core executable fixture', { mode: 0o755 });
   fs.writeFileSync(path.join(deps, 'libfixture.rlib'), 'retained library');
   return { root, deps, env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, TMPDIR: root,
     PROBE_TARGET: path.join(root, 'target'), PROBE_CALLS: path.join(root, 'calls.jsonl') } };
@@ -64,6 +66,9 @@ test('the real warm owner measures the two consumer compiler phases and retains 
       {name:'cargo', args:['metadata','--format-version','1','--no-deps']},
     ]);
     assert.equal(fs.existsSync(path.join(f.deps, 'test-binary')), false);
+    assert.equal(fs.existsSync(path.join(f.deps, 'harn_vm_core-0123456789abcdef')), false);
+    assert.equal(fs.readFileSync(path.join(f.deps, 'harn_vm-0123456789abcdef'), 'utf8'), 'native executable fixture');
+    assert.match(run.stdout, /retained_native_executables=1/);
     assert.equal(fs.readFileSync(path.join(f.deps, 'libfixture.rlib'), 'utf8'), 'retained library');
     assert.equal(fs.readdirSync(f.root).some(name => name.startsWith('harn-workspace-warm.')), false);
   } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
@@ -82,6 +87,18 @@ for (const phase of ['workspace-tests', 'security-tests']) {
     } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
   });
 }
+
+test('a completed warm without Native test executables refuses before pruning', { skip: !linux }, () => {
+  const f = fixture();
+  try {
+    fs.rmSync(path.join(f.deps, 'harn_vm-0123456789abcdef'));
+    const run = spawnSync('bash', [owner], {cwd:f.root, env:f.env, encoding:'utf8', timeout:10000});
+    assert.equal(run.status, 1, run.stderr);
+    assert.match(run.stdout, /phase=security-tests state=end compiler_exit=0/);
+    assert.match(run.stderr, /Native test executables were not observed/);
+    assert.equal(fs.existsSync(path.join(f.deps, 'test-binary')), true);
+  } finally { fs.rmSync(f.root, {recursive:true,force:true}); }
+});
 
 test('successful compiler execution without metrics refuses instead of certifying a phase', { skip: !linux }, () => {
   const f = fixture();

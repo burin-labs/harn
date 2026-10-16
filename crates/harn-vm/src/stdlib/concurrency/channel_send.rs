@@ -5,9 +5,9 @@ pub(super) async fn send(
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
     if args.len() < 2 {
-        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+        return Err(VmError::Thrown(VmValue::string(
             "send: requires channel and value",
-        ))));
+        )));
     }
     if let VmValue::Channel(ch) = &args[0] {
         let vm = current_async_vm(&ctx, "send");
@@ -50,8 +50,8 @@ pub(super) async fn send(
             };
         }
     } else {
-        Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+        Err(VmError::Thrown(VmValue::string(
             "send: first argument must be a channel",
-        ))))
+        )))
     }
 }

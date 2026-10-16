@@ -7,7 +7,7 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 policy_path="${HARN_CACHE_POLICY_PATH:-$repo_root/.github/cache-policy.json}"
 mode="${1:-}"
 
-# Release artifacts and the Linux merge-gate compile caches share the 10 GiB
+# Release artifacts and the Linux merge-gate compile caches share the bounded
 # GitHub Actions cache pool. Windows/macOS workspace test graphs are valuable but must
 # yield when the pool is full — otherwise the #5003 workspace-tests writer is
 # evicted before the next merge_group can restore it. The shared CLI family

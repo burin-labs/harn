@@ -68,9 +68,7 @@ pub(crate) fn request_input(
         .try_with(|cell| {
             let mut context = cell.borrow_mut();
             if !supports_input(&context.client_capabilities, method, &params) {
-                return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-                    format!("{error_prefix}: the MCP client did not advertise support for {method}"),
-                ))));
+                return Err(VmError::Thrown(VmValue::string(format!("{error_prefix}: the MCP client did not advertise support for {method}"))));
             }
 
             let key = format!("harn-input-{}", context.next_request);
@@ -88,11 +86,9 @@ pub(crate) fn request_input(
             })))
         })
         .unwrap_or_else(|_| {
-            Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-                format!(
+            Err(VmError::Thrown(VmValue::string(format!(
                     "{error_prefix}: no active MCP request; this builtin is only valid inside a served MCP handler"
-                ),
-            ))))
+                ))))
         })
 }
 

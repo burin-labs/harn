@@ -44,6 +44,7 @@
 //! after_sha256, changed, preview, details? }`.
 
 use std::path::PathBuf;
+#[cfg(test)]
 use std::sync::Arc;
 
 use harn_vm::process_sandbox::FsAccess;
@@ -159,7 +160,7 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
         ("result", str_value("ok")),
         ("dry_run", VmValue::Bool(dry_run)),
         ("summary", summary.into_value()),
-        ("files", VmValue::List(Arc::new(file_values))),
+        ("files", VmValue::list(file_values)),
     ]))
 }
 

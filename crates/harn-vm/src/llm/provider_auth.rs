@@ -434,7 +434,7 @@ fn probe_api_key(
 }
 
 fn missing_key_error(message: String) -> VmError {
-    VmError::Thrown(VmValue::String(arcstr::ArcStr::from(message)))
+    VmError::Thrown(VmValue::string(message))
 }
 
 fn resolve_auth_env_value(env_name: &str, raw: &str) -> Result<String, VmError> {

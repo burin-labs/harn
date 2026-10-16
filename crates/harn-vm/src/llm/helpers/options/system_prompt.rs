@@ -8,7 +8,7 @@ pub(super) enum SystemPromptPosition {
 }
 
 pub(super) fn system_prompt_error(message: impl Into<String>) -> VmError {
-    VmError::Thrown(VmValue::String(arcstr::ArcStr::from(message.into())))
+    VmError::Thrown(VmValue::string(message.into()))
 }
 
 /// Parse a fragment's `position`. Canonical spellings only: `"before"`

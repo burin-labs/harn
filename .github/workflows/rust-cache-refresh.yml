@@ -47,7 +47,7 @@ jobs:
   rust-cache-refresh-cli:
     name: Refresh Rust cache (${{ matrix.cache_key }})
     runs-on: ubuntu-24.04
-    # Serial legs: each save needs its own headroom under the 10 GiB ceiling.
+    # Serial legs: each save needs its own headroom under the policy ceiling.
     timeout-minutes: 45
     strategy:
       fail-fast: false
@@ -62,7 +62,7 @@ jobs:
             install_mold: true
             install_nextest: false
             warm_script: ./scripts/ci/warm_harn_cli_cache.sh
-            save_headroom_bytes: 2147483648
+            save_headroom_bytes: 4294967296
     permissions: &cache-writer-permissions
       contents: read
       actions: write
@@ -171,7 +171,7 @@ jobs:
             install_mold: true
             install_nextest: true
             warm_script: ./scripts/ci/warm_rust_cache.sh
-            save_headroom_bytes: 4294967296
+            save_headroom_bytes: 8589934592
           # save_headroom_bytes caps the reservation. Admission reserves 1.5x
           # the family's newest main generation when one exists, and refuses
           # insufficient replacement space while retaining that generation.

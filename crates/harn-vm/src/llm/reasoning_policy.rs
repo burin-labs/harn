@@ -7,6 +7,7 @@
 
 use crate::llm::api::{ReasoningEffort, ThinkingConfig};
 use crate::llm::capabilities::Capabilities;
+use crate::value::VmDictExt;
 use crate::value::{VmError, VmValue};
 
 pub const INHERIT_POLICY_VALUE: &str = "@inherit";
@@ -478,33 +479,27 @@ fn thinking_to_vm_value(thinking: &ThinkingConfig) -> VmValue {
     match thinking {
         ThinkingConfig::Disabled => VmValue::dict(crate::value::DictMap::from_iter([(
             crate::value::intern_key("mode"),
-            VmValue::String(arcstr::ArcStr::from("disabled")),
+            VmValue::string("disabled"),
         )])),
         ThinkingConfig::Enabled { budget_tokens } => {
             let mut dict = crate::value::DictMap::from_iter([(
                 crate::value::intern_key("mode"),
-                VmValue::String(arcstr::ArcStr::from("enabled")),
+                VmValue::string("enabled"),
             )]);
             if let Some(budget_tokens) = budget_tokens {
-                dict.insert(
-                    crate::value::intern_key("budget_tokens"),
-                    VmValue::Int(*budget_tokens as i64),
-                );
+                dict.put_int("budget_tokens", *budget_tokens as i64);
             }
             VmValue::dict(dict)
         }
         ThinkingConfig::Adaptive => VmValue::dict(crate::value::DictMap::from_iter([(
             crate::value::intern_key("mode"),
-            VmValue::String(arcstr::ArcStr::from("adaptive")),
+            VmValue::string("adaptive"),
         )])),
         ThinkingConfig::Effort { level } => VmValue::dict(crate::value::DictMap::from_iter([
-            (
-                crate::value::intern_key("mode"),
-                VmValue::String(arcstr::ArcStr::from("effort")),
-            ),
+            (crate::value::intern_key("mode"), VmValue::string("effort")),
             (
                 crate::value::intern_key("level"),
-                VmValue::String(arcstr::ArcStr::from(level.as_str())),
+                VmValue::string(level.as_str()),
             ),
         ])),
     }
@@ -514,27 +509,27 @@ fn application_metadata_to_vm_value(application: &ReasoningPolicyApplication) ->
     VmValue::dict(crate::value::DictMap::from_iter([
         (
             crate::value::intern_key("policy"),
-            VmValue::String(arcstr::ArcStr::from(application.policy.clone())),
+            VmValue::string(application.policy.clone()),
         ),
         (
             crate::value::intern_key("task"),
-            VmValue::String(arcstr::ArcStr::from(application.task.clone())),
+            VmValue::string(application.task.clone()),
         ),
         (
             crate::value::intern_key("scale"),
-            VmValue::String(arcstr::ArcStr::from(application.scale.clone())),
+            VmValue::string(application.scale.clone()),
         ),
         (
             crate::value::intern_key("level"),
-            VmValue::String(arcstr::ArcStr::from(application.level.clone())),
+            VmValue::string(application.level.clone()),
         ),
         (
             crate::value::intern_key("provider"),
-            VmValue::String(arcstr::ArcStr::from(application.provider.clone())),
+            VmValue::string(application.provider.clone()),
         ),
         (
             crate::value::intern_key("model"),
-            VmValue::String(arcstr::ArcStr::from(application.model.clone())),
+            VmValue::string(application.model.clone()),
         ),
     ]))
 }

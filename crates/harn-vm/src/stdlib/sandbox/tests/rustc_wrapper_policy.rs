@@ -34,6 +34,10 @@ fn git_inventory_defers_wrapper_probe_and_cargo_reuses_it_across_tool_policies()
                 "CARGO_TARGET_DIR".into(),
                 cwd.join("target").display().to_string(),
             ),
+            (
+                "CARGO_BUILD_BUILD_DIR".into(),
+                cwd.join("target/build").display().to_string(),
+            ),
         ],
         ..ProcessCommandConfig::default()
     };
@@ -144,12 +148,21 @@ fn sandboxed_process_config_switches_off_a_wrapper_that_cannot_run() {
         workspace_roots: vec![cwd.to_string_lossy().into_owned()],
         ..CapabilityPolicy::default()
     };
+    let caller_target = cwd.join("caller-target");
+    let caller_build = cwd.join("caller-build");
     let config = ProcessCommandConfig {
         cwd: Some(cwd.clone()),
-        env: vec![(
-            "RUSTC_WRAPPER".to_string(),
-            "/definitely/missing/wrapper".to_string(),
-        )],
+        env: vec![
+            ("RUSTC_WRAPPER".into(), "/definitely/missing/wrapper".into()),
+            (
+                "CARGO_TARGET_DIR".into(),
+                caller_target.display().to_string(),
+            ),
+            (
+                "CARGO_BUILD_BUILD_DIR".into(),
+                caller_build.display().to_string(),
+            ),
+        ],
         ..ProcessCommandConfig::default()
     };
 
@@ -177,6 +190,14 @@ fn sandboxed_process_config_switches_off_a_wrapper_that_cannot_run() {
     for key in WRAPPER_KEYS {
         assert_eq!(env.get(key).map(String::as_str), Some(""), "{key}");
     }
+    assert!(
+        !caller_target.exists(),
+        "the probe wrote its caller's target directory"
+    );
+    assert!(
+        !caller_build.exists(),
+        "the probe wrote its caller's build directory"
+    );
 }
 
 #[test]

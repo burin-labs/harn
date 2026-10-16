@@ -1,14 +1,12 @@
 use crate::value::VmDictExt;
 use std::collections::BTreeMap;
 
-use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
+use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
 fn regex_error(error: String) -> VmError {
-    VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
-        "Invalid regex: {error}"
-    ))))
+    VmError::Thrown(VmValue::string(format!("Invalid regex: {error}")))
 }
 
 /// Read an optional trailing `flags` argument. An absent arg *and* an explicit
@@ -37,17 +35,8 @@ fn required_str(args: &[VmValue], idx: usize) -> Option<std::borrow::Cow<'_, str
 }
 
 pub(crate) fn register_regex_builtins(vm: &mut Vm) {
-    for def in MODULE_BUILTINS {
-        vm.register_builtin_def(def);
-    }
+    crate::stdlib::macros::register_module_builtins(vm, module_path!());
 }
-
-pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
-    &REGEX_MATCH_IMPL_DEF,
-    &REGEX_REPLACE_IMPL_DEF,
-    &REGEX_CAPTURES_IMPL_DEF,
-    &REGEX_SPLIT_IMPL_DEF,
-];
 
 #[harn_builtin(
     exposure = "pure",
@@ -63,12 +52,12 @@ fn regex_match_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
     let matches: Vec<VmValue> = harn_kernel::pure::regex_matches(&pattern, &text, &flags)
         .map_err(regex_error)?
         .into_iter()
-        .map(|matched| VmValue::String(arcstr::ArcStr::from(matched)))
+        .map(VmValue::string)
         .collect();
     if matches.is_empty() {
         return Ok(VmValue::Nil);
     }
-    Ok(VmValue::List(std::sync::Arc::new(matches)))
+    Ok(VmValue::list(matches))
 }
 
 // Replace every match via the `regex` crate (supports `$1` and `${name}`
@@ -90,7 +79,7 @@ fn regex_replace_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
     let flags = optional_flags(args, 3);
     let replaced = harn_kernel::pure::regex_replace(&pattern, &replacement, &text, &flags)
         .map_err(regex_error)?;
-    Ok(VmValue::String(arcstr::ArcStr::from(replaced)))
+    Ok(VmValue::string(replaced))
 }
 
 #[harn_builtin(
@@ -101,7 +90,7 @@ fn regex_replace_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
 )]
 fn regex_captures_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let (Some(pattern), Some(text)) = (required_str(args, 0), required_str(args, 1)) else {
-        return Ok(VmValue::List(std::sync::Arc::new(Vec::new())));
+        return Ok(VmValue::list(Vec::new()));
     };
     let flags = optional_flags(args, 2);
     let captures =
@@ -113,28 +102,21 @@ fn regex_captures_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
         let groups: Vec<VmValue> = capture
             .groups
             .into_iter()
-            .map(|value| {
-                value.map_or(VmValue::Nil, |value| {
-                    VmValue::String(arcstr::ArcStr::from(value))
-                })
-            })
+            .map(|value| value.map_or(VmValue::Nil, VmValue::string))
             .collect();
-        dict.insert(
-            "groups".to_string(),
-            VmValue::List(std::sync::Arc::new(groups)),
-        );
-        dict.insert("start".to_string(), VmValue::Int(capture.start as i64));
-        dict.insert("end".to_string(), VmValue::Int(capture.end as i64));
-        dict.insert("line".to_string(), VmValue::Int(capture.line as i64));
+        dict.put("groups", VmValue::list(groups));
+        dict.put_int("start", capture.start as i64);
+        dict.put_int("end", capture.end as i64);
+        dict.put_int("line", capture.line as i64);
         dict.extend(
             capture
                 .named
                 .into_iter()
-                .map(|(name, value)| (name, VmValue::String(arcstr::ArcStr::from(value)))),
+                .map(|(name, value)| (name, VmValue::string(value))),
         );
         results.push(VmValue::dict(dict));
     }
-    Ok(VmValue::List(std::sync::Arc::new(results)))
+    Ok(VmValue::list(results))
 }
 
 #[harn_builtin(
@@ -149,12 +131,9 @@ fn regex_split_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
     };
     let flags = optional_flags(args, 2);
     let parts = harn_kernel::pure::regex_split(&pattern, &text, &flags).map_err(regex_error)?;
-    Ok(VmValue::List(std::sync::Arc::new(
-        parts
-            .into_iter()
-            .map(|part| VmValue::String(arcstr::ArcStr::from(part)))
-            .collect(),
-    )))
+    Ok(VmValue::list(
+        parts.into_iter().map(VmValue::string).collect(),
+    ))
 }
 
 #[cfg(test)]

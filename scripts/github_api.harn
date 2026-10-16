@@ -38,12 +38,15 @@ pub fn github_api_failure_kind(attempt: GitHubApiAttempt) -> GitHubApiFailureKin
     || detail.contains("504 gateway timeout")
     || detail.contains("(http 502)")
     || detail.contains("(http 503)")
-    || detail.contains("(http 504)") {
+    || detail.contains("(http 504)")
+    || regex_match("(?m)^gh: http (502|503|504)\\r?$", detail.trim()) != nil {
     return "transient_transport"
   }
   return "command"
 }
 
+// gh can omit the reason phrase and parentheses. Match the complete
+// status line so a neighbouring status such as 5030 is not retryable.
 /** Run one read-only GitHub API request with bounded transport recovery. */
 pub fn github_api_json_with_retry(
   adapters: GitHubApiAdapters,
