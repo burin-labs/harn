@@ -23,17 +23,17 @@ chmod +x "$scratch/bin/gh"
 export PATH="$scratch/bin:$PATH" GITHUB_REPOSITORY=burin-labs/harn
 jq '.storage_limit_bytes = 10737418240' "$root/.github/cache-policy.json" > "$scratch/ten.json"
 if PROBE_LOG="$scratch/ten.log" HARN_CACHE_POLICY_PATH="$scratch/ten.json" \
-  "$root/scripts/prune_ci_cache_generations.sh" --ensure-headroom 4294967296 \
+  "$root/scripts/prune_ci_cache_generations.sh" --ensure-headroom 8589934592 \
   --replacing v0-rust-workspace-tests- > "$scratch/ten.out" 2> "$scratch/ten.err"; then
   echo 'the measured 10 GiB capacity must refuse rotation' >&2
   exit 1
 fi
 grep -q 'without deleting protected CI caches' "$scratch/ten.err"
 PROBE_LOG="$scratch/twenty.log" HARN_CACHE_POLICY_PATH="$root/.github/cache-policy.json" \
-  "$root/scripts/prune_ci_cache_generations.sh" --ensure-headroom 4294967296 \
+  "$root/scripts/prune_ci_cache_generations.sh" --ensure-headroom 8589934592 \
   --replacing v0-rust-workspace-tests- > "$scratch/twenty.json"
 jq -e '.configured_limit_bytes == 21474836480 and .listed_bytes_before == 8310582044 and
-  .headroom_bytes == 4294967296 and .deficit_bytes == 0 and .deleted == [] and
+  .headroom_bytes == 6818383469 and .deficit_bytes == 0 and .deleted == [] and
   (.protected_generations | map(.id) | sort) == [1,2,3]' "$scratch/twenty.json" > /dev/null
 if grep -q '^cache delete ' "$scratch/ten.log" "$scratch/twenty.log"; then
   echo 'the current generations must remain available in both controls' >&2

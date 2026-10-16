@@ -550,12 +550,12 @@ fn workflow() {
               {
                 cache_key: "workspace-tests",
                 warm_script: "./scripts/ci/warm_rust_cache.sh",
-                save_headroom_bytes: 4294967296,
+                save_headroom_bytes: 8589934592,
               },
               {
                 cache_key: "package-audit",
                 warm_script: "./scripts/ci/warm_package_audit_cache.sh",
-                save_headroom_bytes: 2147483648,
+                save_headroom_bytes: 4294967296,
               },
             ],
           },

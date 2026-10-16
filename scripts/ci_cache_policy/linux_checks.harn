@@ -711,10 +711,10 @@ fn rust_cache_refresh_errors(workflow: dict) -> list<string> {
   for entry in profiles {
     const cache_key = trim(entry?.cache_key ?? "")
     matrix_keys = matrix_keys + [cache_key]
-    const expected_headroom = if cache_key == "workspace-tests" || cache_key == "package-audit" {
+    const expected_headroom = if cache_key == "workspace-tests" {
+      "8589934592"
+    } else if cache_key == "harn-ci-cli" || cache_key == "package-audit" {
       "4294967296"
-    } else if cache_key == "harn-ci-cli" {
-      "2147483648"
     } else {
       ""
     }
