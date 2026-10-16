@@ -1127,9 +1127,7 @@ fn parallel_rust_proof_errors(workflow: dict) -> list<string> {
     || trim(test_step?.run ?? "")
       != "scripts/ci/run_rust_test_lane.sh bash scripts/ci/run_workspace_tests.sh \"$HARN_EXT_TEST_PARTITION\"" {
     errors = errors
-      + [
-        "ci.yml:rust-test-partitions must execute every exact workspace test share independently",
-      ]
+      + ["ci.yml:rust-test-partitions must execute every exact workspace test share independently"]
   }
   const security_job = workflow?.jobs?.["rust-security"]
   const security_step = step_by_name(security_job?.steps ?? [], "Run Linux sandbox tests")
