@@ -17,7 +17,7 @@
 //! run` that doesn't actually exist in the current codebase; the
 //! preconditions for porting each are filed as #2348 (`harn bench` →
 //! `--emit-summary-json`) and #2350 (`harn time` → `--emit-phase-json`).
-use harn_vm::bytecode_cache::{CACHE_EXTENSION, MODULE_CACHE_EXTENSION};
+use harn_vm::bytecode_cache::{CACHE_EXTENSION, INTERFACE_CACHE_EXTENSION, MODULE_CACHE_EXTENSION};
 use std::path::Path;
 
 use harn_parser::DiagnosticSeverity;
@@ -215,10 +215,31 @@ fn precompile_one(
 
     // Recompiling a source whose artifacts already carry its keys reproduces
     // them byte for byte, so everything below this point would be dead work.
-    let (keys, compilation_context) = artifact_keys(source_path, &source, source_root, &authority);
+    let interface_dest = output_path(
+        source_path,
+        source_root,
+        out_root,
+        INTERFACE_CACHE_EXTENSION,
+    )?;
+    let interface = harn_vm::bytecode_cache::prepare_precompiled_interface(
+        &interface_dest,
+        source_path,
+        &source,
+    )
+    .map_err(|e| format!("write {}: {e}", interface_dest.display()))?;
+    let keys = artifact_keys(
+        source_path,
+        &source,
+        source_root,
+        &authority,
+        interface.context(),
+    );
     let entry_dest = output_path(source_path, source_root, out_root, CACHE_EXTENSION)?;
     let module_dest = output_path(source_path, source_root, out_root, MODULE_CACHE_EXTENSION)?;
     if keys.match_artifacts_at(&entry_dest, &module_dest) {
+        interface
+            .store_at(&interface_dest)
+            .map_err(|e| format!("write {}: {e}", interface_dest.display()))?;
         return Ok(Outcome::Reused(entry_dest));
     }
 
@@ -253,8 +274,12 @@ fn precompile_one(
         &source,
         &program,
         authority,
-        compilation_context,
+        interface.context(),
     )?;
+
+    interface
+        .store_at(&interface_dest)
+        .map_err(|e| format!("write {}: {e}", interface_dest.display()))?;
 
     harn_vm::bytecode_cache::store_at(&entry_dest, &keys.entry, &artifacts.entry_chunk)
         .map_err(|e| format!("write {}: {e}", entry_dest.display()))?;
@@ -277,14 +302,14 @@ fn compile_artifacts(
     source: &str,
     program: &[harn_parser::SNode],
     authority: SourceCompilerAuthority,
-    imported: ModuleCompilationContext,
+    imported: &ModuleCompilationContext,
 ) -> Result<PrecompileArtifacts, String> {
     let entry_chunk = authority
-        .compiler_with_imported_symbols(&imported)
+        .compiler_with_imported_symbols(imported)
         .compile(program)
         .map_err(|e| format!("compile error: {e}"))?;
     let module_artifact = authority
-        .compile_module_with_imported_symbols(source_path, source, &imported)
+        .compile_module_with_imported_symbols(source_path, source, imported)
         .map_err(|e| format!("module compile error: {e}"))
         .ok();
     Ok(PrecompileArtifacts {

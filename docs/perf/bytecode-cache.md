@@ -246,16 +246,17 @@ The digest doing this work is the same SHA-256 that keys the entry chunk,
 the module artifact, and the prepared-module cache. Converging them means a
 warm module load hashes its source once rather than twice.
 
-`harn precompile <path>` runs the same compile path and writes both
-artifact families directly to disk: `<name>.harnbc` (entry chunk) and
-`<name>.harnmod` (module artifact). Shipping both means the same file
+`harn precompile <path>` runs the same compile path and writes three
+artifact families directly to disk: `<name>.harnbc` (entry chunk),
+`<name>.harnmod` (module artifact), and `<name>.harnifc` (imported interfaces).
+Shipping these means the same file
 hits the cache whether the user runs it (`harn run lib.harn`) or
 imports it from another script. Pass a directory to walk it; otherwise
 it compiles a single file. `--out DIR` mirrors the input layout under
 `DIR`; without `--out`, artifacts land adjacent to each source. Burin
 Code's release pipeline runs `harn precompile` against its bundled
 `Sources/BurinCore/Resources/pipelines/` so the shipped DMG already
-contains both artifact files for every script the user might run.
+contains the artifacts for every script the user might run.
 
 Directory precompile treats the walked tree as a relocatable artifact set:
 entry keys identify imported files by their path relative to each entrypoint,
@@ -267,6 +268,26 @@ host-path-anchored key because Harn cannot prove that an independently moved
 dependency graph is complete. Build tooling can query the exact compatibility
 token with `harn precompile --artifact-contract`; it must not infer artifact
 relocatability from a Harn version string.
+
+### Shipped module interfaces
+
+The adjacent `.harnifc` stores the entry's imported names and kinds and those
+of every dependency in its graph. Dependency labels are relative to the entry,
+with `/` separators. The payload contains no absolute paths or timestamps.
+The header uses the same relocatable graph identity as an adjacent entry chunk,
+including source content, resolution, embedded stdlib, compiler build, and options.
+
+Entry loading and module preparation read valid adjacent interfaces before the
+shared interface cache. Validation scans and hashes the import closure without
+parsing it, then attaches the stored typed contexts to a fresh local manifest.
+The manifest can supply module keys and validate later in-process reuse. Shipped
+interfaces are never refreshed or copied into the shared cache during loading.
+Missing, stale, or foreign artifacts fall back to ordinary interface derivation.
+
+An unchanged complete precompiled host tree therefore needs no shared cache
+write for its user modules. A host also needs matching embedded stdlib artifacts
+to avoid shared writes for stdlib imports. This is a cache-artifact guarantee;
+sessions and other runtime state have their own persistence contracts.
 
 ## Toggles and environment
 
@@ -288,7 +309,7 @@ it if you need every warning every time, or set
 
 ## What gets cached
 
-Three artifact families share the same header but use distinct file
+Three disk artifact families share the same header but use distinct file
 extensions so they coexist in one directory:
 
 - **Entry chunks (`.harnbc`)** — the compiled [`Chunk`] for the script
@@ -300,13 +321,15 @@ extensions so they coexist in one directory:
   has to run the module's `init` chunk and mint per-process closures.
   Module caching is what closes the cold-start gap for pipelines whose
   cost is dominated by `import`s rather than the entry source itself.
-- **Stdlib modules** — same artifact format as user modules; the
-  `STDLIB_MODULE_ARTIFACT_CACHE` in-memory layer remains the L1 cache
-  per process, with the on-disk artifact as L2 across processes.
+- **Imported interfaces (`.harnifc`)**: typed imported names and kinds with
+  graph validation. Precompile emits relocatable adjacent payloads; ordinary
+  execution stores host-anchored manifests in the shared cache.
 
-A single `.harn` source can therefore produce up to two cached files —
-a `.harnbc` if anyone runs it as an entry, and a `.harnmod` if anyone
-imports it.
+Stdlib modules use the same artifact format as user modules; the
+`STDLIB_MODULE_ARTIFACT_CACHE` runs per process, with the on-disk artifact
+across processes.
+
+A single precompiled `.harn` source produces three adjacent files.
 
 ## Out of scope
 

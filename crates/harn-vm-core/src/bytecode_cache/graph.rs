@@ -42,6 +42,14 @@ pub(crate) fn derive_interface(
     source_path: &Path,
     source: &str,
 ) -> Result<(ModuleCompilationContext, Option<ContextManifest>), VmError> {
+    if let Some(result) = super::shipped_interface::recall(source_path, source) {
+        return Ok((
+            result
+                .entry_compilation_context
+                .expect("validated shipped interface"),
+            result.manifest,
+        ));
+    }
     let slot = super::InterfaceSlot::open(source_path, source);
     if let Some((context, manifest)) = slot.as_ref().and_then(super::InterfaceSlot::recall) {
         return Ok((context, Some(manifest)));
@@ -67,7 +75,7 @@ pub(crate) fn derive_interface(
 }
 
 /// Render `target` relative to `base` with `/` separators.
-fn relative_path_label(base: &Path, target: &Path) -> Option<String> {
+pub(super) fn relative_path_label(base: &Path, target: &Path) -> Option<String> {
     let base_components = base.components().collect::<Vec<_>>();
     let target_components = target.components().collect::<Vec<_>>();
     let common = base_components

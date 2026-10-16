@@ -19,7 +19,7 @@ pub struct PrecompileArgs {
     /// with its complete source tree. Used by the directory-walk child.
     #[arg(long, hide = true)]
     pub relocatable: bool,
-    /// Output directory for compiled `.harnbc` artifacts. When omitted,
+    /// Output directory for `.harnbc`, `.harnmod`, and `.harnifc` artifacts. When omitted,
     /// each artifact is written next to its source. The directory tree
     /// under `target` is mirrored under `--out` so per-source pathing is
     /// preserved.
