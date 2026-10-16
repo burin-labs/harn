@@ -126,6 +126,38 @@ pub(super) fn recall(source_path: &Path, source: &str) -> Option<GraphHashes> {
     result
 }
 
+fn recall_at(destination: &Path, source_path: &Path, source: &str) -> Option<GraphHashes> {
+    // Missing output must not make the ordinary warm shared-cache path walk.
+    if !destination.is_file() {
+        return None;
+    }
+    let mut result = walk_import_graph_fingerprinted(
+        source_path,
+        source,
+        CODEGEN_FINGERPRINT,
+        GraphOutputs::InterfaceProof,
+    );
+    let key = key(source, result.relocatable);
+    let header = read_header_if_matches(destination, &key, Some(&key.context_hash)).ok()??;
+    if header.kind != KIND_MODULE_INTERFACE {
+        return None;
+    }
+    let payload: ShippedInterface = deserialize_cache_payload(&header.payload).ok()?;
+    let manifest = result.manifest.as_mut()?;
+    if payload.files.len() != manifest.files.len() {
+        return None;
+    }
+    for file in &mut manifest.files {
+        file.compilation_context = payload
+            .files
+            .get(&label(&manifest.entry, &file.path)?)?
+            .clone();
+    }
+    manifest.package_import_aliases = payload.package_import_aliases;
+    result.entry_compilation_context = Some(payload.entry);
+    Some(result)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -220,36 +252,4 @@ mod tests {
             "root and timestamps must not enter shipped bytes"
         );
     }
-}
-
-fn recall_at(destination: &Path, source_path: &Path, source: &str) -> Option<GraphHashes> {
-    // Missing output must not make the ordinary warm shared-cache path walk.
-    if !destination.is_file() {
-        return None;
-    }
-    let mut result = walk_import_graph_fingerprinted(
-        source_path,
-        source,
-        CODEGEN_FINGERPRINT,
-        GraphOutputs::InterfaceProof,
-    );
-    let key = key(source, result.relocatable);
-    let header = read_header_if_matches(destination, &key, Some(&key.context_hash)).ok()??;
-    if header.kind != KIND_MODULE_INTERFACE {
-        return None;
-    }
-    let payload: ShippedInterface = deserialize_cache_payload(&header.payload).ok()?;
-    let manifest = result.manifest.as_mut()?;
-    if payload.files.len() != manifest.files.len() {
-        return None;
-    }
-    for file in &mut manifest.files {
-        file.compilation_context = payload
-            .files
-            .get(&label(&manifest.entry, &file.path)?)?
-            .clone();
-    }
-    manifest.package_import_aliases = payload.package_import_aliases;
-    result.entry_compilation_context = Some(payload.entry);
-    Some(result)
 }
