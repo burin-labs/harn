@@ -706,6 +706,20 @@
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/loop_run.harn",
+    "expression": "__agent_loop_output_contract(opts)",
+    "owner": "__agent_loop_output_contract",
+    "evidence": "Context-overflow recovery derives the terminal output contract from the original options before transport projection removes it.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__agent_loop_output_contract",
+        "parameter": "opts"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop_run.harn",
     "expression": "__agent_stall_verification_dispatch(dispatch, turn_opts)",
     "owner": "__agent_stall_verification_dispatch",
     "evidence": "Consumer __agent_stall_verification_dispatch.opts in crates/harn-stdlib/src/stdlib/agent/stall_checkpoint.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
