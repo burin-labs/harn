@@ -3,9 +3,8 @@
 #[cfg(windows)]
 use std::{fs::File, io, io::BufWriter, path::Path};
 
-pub use harn_vm_core::atomic_io::{
-    atomic_write_with_durability_unlocked, AtomicWriteDurability, AtomicWriteReceipt,
-};
+pub(crate) use harn_vm_core::atomic_io::atomic_write_with_durability_unlocked;
+pub use harn_vm_core::atomic_io::{AtomicWriteDurability, AtomicWriteReceipt};
 
 #[cfg(not(windows))]
 pub use harn_vm_core::atomic_io::{
