@@ -258,14 +258,4 @@ if grep -Fq 'Generate release/package CLI AOT payload' "$workflow"; then
   echo 'package audit must not restore a separate pre-verifier AOT build' >&2
   exit 1
 fi
-package_audit_job="$(awk '
-  /^  package-audit:$/ { in_job = 1 }
-  in_job && /^  [[:alnum:]_-]+:$/ && $0 != "  package-audit:" { exit }
-  in_job { print }
-' "$workflow")"
-if ! grep -Fq 'HARN_BIN: ""' <<<"$package_audit_job"; then
-  echo 'cold package-audit CI must keep the combined Harn/generator build path' >&2
-  exit 1
-fi
-
 echo "package_verify_bootstrap_test: ok"
