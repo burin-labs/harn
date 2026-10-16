@@ -104,8 +104,8 @@ fn export_report(args: &ModelsLoraExportArgs) -> Result<LoraExportReport, String
         &tool_catalog,
     )?;
     let target = ExportTarget {
-        base_model: resolved.id.clone(),
-        provider: provider.clone(),
+        base_model: resolved.id,
+        provider,
         adapter_name: args.adapter_name.clone(),
         harn_tool_format: decision.effective.clone(),
         chat_template: args.chat_template.clone(),
