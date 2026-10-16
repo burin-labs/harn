@@ -322,6 +322,7 @@ pub fn action() {
           id: "cache",
           uses: "Swatinem/rust-cache@exact-pin",
           "continue-on-error": true,
+          env: {SEGMENT_DOWNLOAD_TIMEOUT_MINS: "2"},
           with: {
             "shared-key": gha_expression("steps.cache-paths.outputs.shared-key"),
             "cache-workspace-crates": gha_expression("inputs.cache-workspace-crates"),
@@ -338,6 +339,7 @@ pub fn action() {
           if:
             "steps.cache-paths.outputs.restore-prefix != '' && steps.cache.outputs.cache-hit != 'true'",
           "continue-on-error": true,
+          env: {SEGMENT_DOWNLOAD_TIMEOUT_MINS: "2"},
           with: {
             path: gha_expression("steps.cache-paths.outputs.paths"),
             key: gha_expression("steps.cache-paths.outputs.restore-prefix")
