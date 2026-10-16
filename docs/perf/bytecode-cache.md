@@ -277,6 +277,8 @@ with `/` separators; package dependencies use their place within the package,
 independent of install generation. The payload contains no absolute paths or timestamps.
 The header uses the same relocatable graph identity as an adjacent entry chunk,
 including source content, resolution, embedded stdlib, compiler build, and options.
+The package manager attaches declared root aliases and the reachable lock digest;
+entry hits revalidate both against the current project before using bytecode.
 
 Entry loading and module preparation read valid adjacent interfaces before the
 shared interface cache. Validation scans and hashes the import closure without
@@ -289,6 +291,21 @@ An unchanged complete precompiled host tree therefore needs no shared cache
 write for its user modules. A host also needs matching embedded stdlib artifacts
 to avoid shared writes for stdlib imports. This is a cache-artifact guarantee;
 sessions and other runtime state have their own persistence contracts.
+
+### Preparing an installed tree
+
+`harn precompile --warm-cache main.harn` fills the runtime's shared entry,
+module, and interface caches without executing the program. It follows the
+complete import graph, including installed packages and stdlib. Module keys use
+the entrypoint's compiler authority, as runtime imports do. Package sources stay
+untouched, including sealed installed generations. A failed write fails the
+command instead of reporting successful preparation.
+
+Use this mode after installing or relocating a host tree when its dependencies
+are outside the directory walked for adjacent artifacts, or when it imports a
+package under another compiler authority. Set `HARN_CACHE_DIR` to the host's
+cache, and repeat after source, package, or compiler changes. These keys belong
+to the installed paths; adjacent artifacts remain the portable packaging form.
 
 ## Toggles and environment
 

@@ -19,25 +19,19 @@ use crate::typecheck_imports::checker_with_resolved_imports;
 
 mod artifact_path;
 mod reuse;
+mod warm_cache;
 use artifact_path::output_path;
 use reuse::{artifact_keys, Outcome};
 
-/// Machine-readable per-source result the inner compiler writes to stdout for
-/// the `.harn` driver that spawned it. The driver's only other channel is the
-/// child's exit status, which already means succeeded-or-failed and cannot
-/// carry a third state without redefining a nonzero exit. A line on a stream
-/// the driver captures and never forwards adds it without a flag.
+/// Per-source result consumed by the embedded directory driver. Successful
+/// children distinguish compiled output from reused output on this stream.
 pub const PRECOMPILE_OUTCOME_PREFIX: &str = "precompile-outcome:";
 
-/// Env var the embedded `cli/precompile` script reads to find the
-/// running `harn` binary path. Set from `std::env::current_exe()` so
-/// the child invocation is robust to $PATH ordering / test sandboxes.
+/// The embedded driver invokes this exact executable for each source.
 pub const PRECOMPILE_BIN_ENV: &str = "HARN_CLI_SELF_EXE";
 pub const PRECOMPILE_ARTIFACT_CONTRACT: &str = "harn.precompile.artifacts/relocatable-v1";
 
-/// Output directory the script forwards to its per-file child via
-/// `--out`. Cleared on drop so a follow-on invocation in the same
-/// process sees a clean env.
+/// Output directory forwarded to each child; cleared after dispatch.
 const PRECOMPILE_OUT_ENV: &str = "HARN_PRECOMPILE_OUT";
 const PRECOMPILE_KEEP_GOING_ENV: &str = "HARN_PRECOMPILE_KEEP_GOING";
 const PRECOMPILE_QUIET_ENV: &str = "HARN_PRECOMPILE_QUIET";
@@ -46,6 +40,10 @@ pub const PRECOMPILE_INNER_ENV: &str = "HARN_PRECOMPILE_INNER";
 pub async fn run(args: PrecompileArgs) {
     if args.artifact_contract {
         println!("{PRECOMPILE_ARTIFACT_CONTRACT}");
+        return;
+    }
+    if args.warm_cache {
+        warm_cache::run(&args);
         return;
     }
     if std::env::var(PRECOMPILE_INNER_ENV).as_deref() == Ok("1") {
