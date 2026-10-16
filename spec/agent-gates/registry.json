@@ -259,6 +259,24 @@
       "key_form": "literal"
     },
     {
+      "id": "shared-model-environment",
+      "kind": "environment",
+      "glob": "crates/harn-llm/src/**/*.rs",
+      "language": "rust",
+      "query": "((call_expression function: (_) @callee arguments: (arguments . (_) @key)) (#match? @callee \"(^|::)(var|var_os|env_var_seamed|env_var_os_seamed|non_empty_env|env_bool|env_usize|env_u64|env_flag_enabled)$\"))",
+      "prefix": "",
+      "key_form": "literal"
+    },
+    {
+      "id": "shared-model-environment-constants",
+      "kind": "environment",
+      "glob": "crates/harn-llm/src/**/*.rs",
+      "language": "rust",
+      "query": "((const_item name: (identifier) @constant value: (string_literal) @key) (#match? @constant \"(_ENV|_ENV_VAR)$\"))",
+      "prefix": "",
+      "key_form": "literal"
+    },
+    {
       "id": "runner-stdlib-environment",
       "kind": "environment",
       "glob": "crates/harn-stdlib/src/stdlib/agent/**/*.harn",
