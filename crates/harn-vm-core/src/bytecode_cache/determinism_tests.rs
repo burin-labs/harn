@@ -129,6 +129,32 @@ fn relocatable_keys_ignore_root_spelling_and_install_generation() {
     );
 }
 
+#[test]
+fn shipped_interfaces_ignore_package_install_generation() {
+    use crate::bytecode_cache::{prepare_precompiled_interface, INTERFACE_CACHE_EXTENSION};
+    let first = tempfile::tempdir().unwrap();
+    let second = tempfile::tempdir().unwrap();
+    build_tree(first.path(), "generation-0001", HELPER);
+    build_tree(second.path(), "generation-0002", HELPER);
+    let entry = first.path().join("entry.harn");
+    let destination = entry.with_extension(INTERFACE_CACHE_EXTENSION);
+    let artifact = prepare_precompiled_interface(&destination, &entry, ENTRY).unwrap();
+    assert_ne!(*artifact.context(), ModuleCompilationContext::default());
+    artifact.store().unwrap();
+    let moved = second.path().join("entry.harn");
+    let moved_destination = moved.with_extension(INTERFACE_CACHE_EXTENSION);
+    std::fs::copy(destination, &moved_destination).unwrap();
+    let parses = || crate::module_artifact::MODULE_PARSES.with(std::cell::Cell::get);
+    let before = parses();
+    let reused = prepare_precompiled_interface(&moved_destination, &moved, ENTRY).unwrap();
+    assert_eq!(reused.context(), artifact.context());
+    assert_eq!(
+        parses(),
+        before,
+        "an equal package in a new install generation must reuse the shipped interface"
+    );
+}
+
 /// harn#9652: a release precompiles once on macOS or Linux and copies the tree
 /// into its Windows archive. A relocatable label is part of the entry key, so
 /// one spelled with `\` on Windows would miss every shipped artifact there.

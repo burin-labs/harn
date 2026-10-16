@@ -98,6 +98,9 @@ pub struct RuntimeContentFingerprint {
 }
 
 /// Return the content fingerprint of the Harn VM linked into this process.
+///
+/// The owning executable may attach its measured source revision to a clone
+/// of this receipt. Build provenance is not an input to the runtime library.
 #[must_use]
 pub fn runtime_content_fingerprint() -> &'static RuntimeContentFingerprint {
     static FINGERPRINT: OnceLock<RuntimeContentFingerprint> = OnceLock::new();
@@ -113,7 +116,7 @@ pub fn runtime_content_fingerprint() -> &'static RuntimeContentFingerprint {
             crate::bytecode_cache::HARN_VERSION,
             embedded_stdlib_digest_bytes(),
             compatibility,
-            linked_source_revision(),
+            None,
         )
     })
 }
@@ -176,23 +179,6 @@ fn update_field(hasher: &mut Sha256, name: &str, value: &[u8]) {
     hasher.update(b"\0");
     hasher.update((value.len() as u64).to_le_bytes());
     hasher.update(value);
-}
-
-fn linked_source_revision() -> Option<String> {
-    normalize_source_revision(option_env!("HARN_BUILD_REVISION")).map(str::to_string)
-}
-
-fn normalize_source_revision(raw: Option<&str>) -> Option<&str> {
-    let revision = raw?.trim();
-    if matches!(revision.len(), 40 | 64)
-        && revision
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
-    {
-        Some(revision)
-    } else {
-        None
-    }
 }
 
 fn hex(bytes: &[u8]) -> String {
@@ -319,8 +305,6 @@ mod tests {
         let stdlib = embedded_stdlib_digest_from_sources([("agent", "source")]);
         let fingerprint = fingerprint_from_parts("0.10.123-dev", &stdlib, compatibility(), None);
         assert_eq!(fingerprint.source_revision, None);
-        assert_eq!(normalize_source_revision(Some("")), None);
-        assert_eq!(normalize_source_revision(Some("not-a-revision")), None);
     }
 
     #[test]
@@ -341,5 +325,6 @@ mod tests {
             RuntimeBuildFeatures::linked()
         );
         assert_eq!(actual.content_sha256.len(), 64);
+        assert_eq!(actual.source_revision, None);
     }
 }

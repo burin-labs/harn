@@ -1367,6 +1367,7 @@ harn precompile --keep-going
 harn precompile --out
 harn precompile --quiet
 harn precompile --relocatable
+harn precompile --warm-cache
 harn precompile -j
 harn precompile -q
 harn precompile <positional 1>

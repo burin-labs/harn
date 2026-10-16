@@ -1,0 +1,163 @@
+import { check_files } from "./lib/stdlib_diagnostics"
+import { baseline_delta } from "./lib/text_baseline"
+
+type RejectedEnvelope = {
+  schemaVersion: int,
+  ok: bool,
+  data: unknown,
+  error: {code: string, message: string},
+}
+
+/** Collect the complete checker census before accepting or updating a baseline. */
+pub fn diagnostic_rows(
+  stdout: string,
+  exit_code: int,
+  requested: list<string>,
+  root: string,
+) -> list<string> {
+  const files = check_files(stdout, exit_code)
+  let reported: list<string> = []
+  let rows: list<string> = []
+  for file in files {
+    const relative = path_relative_to(file.path, root) ?? file.path
+    if !requested.contains(relative) || reported.contains(relative) {
+      throw "unexpected or duplicate checker result: " + relative
+    }
+    reported = reported + [relative]
+    for diagnostic in file.diagnostics {
+      if ["warning", "error"].contains(diagnostic.severity) && diagnostic.code != nil {
+        rows = rows + [relative + "\t" + diagnostic.code]
+      }
+    }
+    if file.status == "error" {
+      rows = rows + [relative + "\t__CHECK_FAILED__"]
+    }
+  }
+  if reported.sorted() != requested.sorted() {
+    throw "checker census is incomplete"
+  }
+  return rows
+}
+
+/** Keep duplicate findings visible in the reviewed TSV contract. */
+pub fn counted_rows(rows: list<string>) -> list<string> {
+  let counts: dict<string, int> = {}
+  for row in rows {
+    counts[row] = (counts[row] ?? 0) + 1
+  }
+  return keys(counts).sorted().map({ row -> to_string(counts[row]) + "\t" + row }).to_list()
+}
+
+/** Keep the lint root visible at the Make call site as well as at execution. */
+pub fn baseline_options(args: list<string>) -> {root: string?, update: bool} {
+  let root: string? = nil
+  let update = false
+  let index = 0
+  while index < len(args) {
+    if args[index] == "--update" && !update {
+      update = true
+    } else if args[index] == "--root" && root == nil && index + 1 < len(args) {
+      index = index + 1
+      root = args[index]
+      if root == "" {
+        throw "--root requires a nonempty path"
+      }
+    } else {
+      throw "usage: check-conformance-lint-baseline.sh [--root DIR] [--update]"
+    }
+    index = index + 1
+  }
+  return {root: root, update: update}
+}
+
+fn main(harness: Harness) {
+  const options = baseline_options(argv)
+  const root = path_normalize(
+    path_join(
+      harness.fs.cwd(),
+      harness.env.get("CONFORMANCE_LINT_ROOT") ?? options.root ?? "conformance/tests",
+    ),
+  )
+  const baseline = harness.env.get("CONFORMANCE_LINT_BASELINE") ?? "conformance/lint-baseline.tsv"
+  const binary = harness.env.get("HARN_BIN") ?? ""
+  if binary == "" {
+    throw "HARN_BIN must name the Harn binary under test"
+  }
+  let files: list<string> = []
+  let hidden: list<string> = []
+  // Match find's raw file census, including a literal .harn file and ignored fixtures.
+  // scan-refused: the filtered source census below throws when both lists are empty.
+  for entry in harness.fs.walk(root, {follow_symlinks: false, ignore_policy: "none"}) {
+    if !entry.is_file || !entry.path.ends_with(".harn") {
+      continue
+    }
+    const stem = entry.path[:len(entry.path) - 5]
+    if harness.fs.exists(stem + ".error") || harness.fs.exists(stem + ".lint") {
+      continue
+    }
+    if basename(entry.path) == ".harn" {
+      hidden = hidden + [entry.path]
+    } else {
+      files = files + [entry.path]
+    }
+  }
+  if len(files) + len(hidden) == 0 {
+    throw "conformance diagnostic census found no source fixtures"
+  }
+  let rows: list<string> = []
+  if len(files) > 0 {
+    const result = harness.process.run(
+      {program: binary, args: ["check", "--json", "--independent"] + files.sorted()},
+    )
+    const requested = files.map({ path -> path_relative_to(path, root) ?? path }).to_list()
+    rows = diagnostic_rows(result.stdout, result.exit_code, requested, root)
+  }
+  // Some compiler versions reject a literal .harn before collection. Accepted
+  // files still require the same complete report as every ordinary fixture.
+  for path in hidden {
+    const result = harness.process.run(
+      {program: binary, args: ["check", "--json", "--independent", path]},
+    )
+    const relative = path_relative_to(path, root) ?? path
+    match try {
+      diagnostic_rows(result.stdout, result.exit_code, [relative], root)
+    } {
+      Ok(reported) -> { rows = rows + reported }
+      Err(failure) -> {
+        const envelope = json_decode(result.stdout, schema_of(RejectedEnvelope))?
+        if result.exit_code != 1 || envelope.ok || envelope.schemaVersion != 1
+          || envelope.data != nil
+          || envelope.error.code != "no_harn_files" {
+          throw failure
+        }
+        rows = rows + [relative + "\t__CHECK_FAILED__"]
+      }
+    }
+  }
+  const actual = counted_rows(rows)
+  const text = if len(actual) == 0 {
+    ""
+  } else {
+    join(actual, "\n") + "\n"
+  }
+  if options.update {
+    harness.fs.write_text(baseline, text)
+  } else {
+    const expected = harness.fs.read_text(baseline).split("\n").filter({ line -> line != "" })
+      .to_list()
+    const delta = baseline_delta(expected, actual)
+    if delta.added.count + delta.removed.count > 0 {
+      for line in delta.added {
+        harness.stdio.eprintln("unreviewed: " + line)
+      }
+      for line in delta.removed {
+        harness.stdio.eprintln("stale: " + line)
+      }
+      throw "Conformance diagnostics changed; review before --update"
+    }
+  }
+  harness.stdio.println(
+    "Conformance baseline: sources=" + to_string(len(files) + len(hidden)) + " reviewed rows="
+      + to_string(len(actual)),
+  )
+}

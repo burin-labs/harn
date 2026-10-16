@@ -73,6 +73,41 @@ fn billed_noncommittal_turn() -> FakeLlmTurn {
 }
 
 #[test]
+fn typed_admission_refusal_measures_zero_before_provider_dispatch() {
+    let _env = crate::llm::env_guard();
+    let previous_admission =
+        crate::llm::admission::swap_scope(crate::llm::admission::AdmissionScope::default());
+    current_thread_runtime().block_on(async {
+        let denied_transcript = tempfile::tempdir().expect("transcript tempdir");
+        push_llm_transcript_dir(denied_transcript.path().to_str().expect("utf8 tempdir"));
+        let mut denied = crate::llm::api::options::base_opts("openai");
+        denied.model = "gpt-5.6-luna".into();
+        denied.provider_tools = vec![serde_json::json!({"type":"web_search"})];
+        denied.budget = Some(crate::llm::cost::LlmBudgetEnvelope {
+            admission: Some(crate::llm::admission::AdmissionMode::Conservative),
+            total_budget_usd: Some(1.0),
+            ..Default::default()
+        });
+        let error = observed_llm_call(&denied, None, None, None, false, false, None, None)
+            .await
+            .expect_err("unsupported billing shape must fail before dispatch");
+        pop_llm_transcript_dir();
+        assert_eq!(
+            crate::llm::admission::denial_reason(&error).as_deref(),
+            Some("unsupported_billing_shape")
+        );
+        let denial = provider_call_errors(denied_transcript.path())
+            .pop()
+            .expect("typed admission error observation");
+        assert_eq!(denial["provider_call_count"], 0);
+        assert_eq!(denial["unpriced_calls"], 0);
+        assert_eq!(denial["usage_unknown_calls"], 0);
+        assert_eq!(denial["cost_usd"], 0.0);
+    });
+    crate::llm::admission::swap_scope(previous_admission);
+}
+
+#[test]
 fn parent_call_waits_for_network_recovery_after_child_failures() {
     let _env = crate::llm::env_guard();
     let clock = crate::clock_mock::MockClock::at_wall_ms(1_000);

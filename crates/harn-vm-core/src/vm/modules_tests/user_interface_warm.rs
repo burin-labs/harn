@@ -129,6 +129,77 @@ fn runtime() -> tokio::runtime::Runtime {
 }
 
 #[test]
+fn cache_preparation_reuses_graph_projections_and_keeps_module_proofs_local() {
+    let _guard = cache_test_guard();
+    let _cache = CacheDir::install();
+    let dir = tempfile::tempdir().unwrap();
+    const MODULES: usize = 16;
+    for index in 0..MODULES {
+        let body = if index + 1 == MODULES {
+            format!("pub fn value_{index}() -> int {{ return 42 }}\n")
+        } else {
+            let next = index + 1;
+            format!(
+                "import \"./m{next}\"\npub fn value_{index}() -> int {{ return value_{next}() }}\n"
+            )
+        };
+        std::fs::write(dir.path().join(format!("m{index}.harn")), body).unwrap();
+    }
+    let root = dir.path().join("m0.harn");
+    let source = std::fs::read_to_string(&root).unwrap();
+    let mut compiler = crate::bytecode_cache::CachePrecompiler::default();
+    for provenance in [
+        ModuleProvenance::EmbeddedStdlib,
+        ModuleProvenance::PrivilegedWire,
+    ] {
+        assert!(compiler.prepare(&root, &source, provenance).is_err());
+    }
+    assert_eq!(
+        compiler.module_count(),
+        0,
+        "unsupported authority must not prepare files"
+    );
+    let (walks, parses) = parse_work_during(|| {
+        compiler
+            .prepare(&root, &source, ModuleProvenance::User)
+            .unwrap();
+    });
+    assert_eq!(compiler.module_count(), MODULES);
+    assert!(
+        walks > 0 && parses > 0,
+        "cold preparation must reach the graph and compiler"
+    );
+    assert!(
+        parses <= 3 * MODULES as u64,
+        "preparation re-derived every module's closure: {parses} parses"
+    );
+    let (_, repeated_parses) = parse_work_during(|| {
+        compiler
+            .prepare(&root, &source, ModuleProvenance::User)
+            .unwrap();
+    });
+    assert_eq!(
+        repeated_parses, 0,
+        "overlapping entries must reuse their saved typed projection"
+    );
+
+    // A module's proof must exclude unrelated importers. Copying the root's
+    // whole manifest into every slot would pass a warm read but fail here.
+    std::fs::write(&root, format!("{source}\n// Unrelated importer edit.\n")).unwrap();
+    let runtime = runtime();
+    let (warm_walks, warm_parses) = parse_work_during(|| {
+        assert!(
+            import_fresh(&runtime, &dir.path().join("m8.harn")).contains(&"value_8".to_string())
+        );
+    });
+    assert_eq!(
+        (warm_walks, warm_parses),
+        (0, 0),
+        "prepared module must keep its own closure proof"
+    );
+}
+
+#[test]
 fn a_warm_import_of_an_unchanged_graph_parses_nothing() {
     // harn#9403: a warm process loaded every module's bytecode from disk, but
     // first re-walked and re-parsed the whole import graph to rebuild the
@@ -155,6 +226,70 @@ fn a_warm_import_of_an_unchanged_graph_parses_nothing() {
         (warm_walks, warm_parses),
         (0, 0),
         "a warm import of an unchanged graph must not walk or parse any module"
+    );
+}
+
+#[test]
+fn shipped_interfaces_survive_relocation_without_parsing() {
+    use crate::bytecode_cache::{
+        prepare_precompiled_interface, CacheKey, INTERFACE_CACHE_EXTENSION,
+    };
+    use crate::module_artifact::{
+        compile_module_artifact_from_source_with_context, ModuleProvenance,
+    };
+    use crate::module_source::ModuleSource;
+
+    let _guard = cache_test_guard();
+    let _cache = CacheDir::install();
+    let tree = Tree::new();
+    for path in [&tree.root, &tree.mid, &tree.leaf] {
+        let source = std::fs::read_to_string(path).unwrap();
+        let dest = path.with_extension(INTERFACE_CACHE_EXTENSION);
+        let interface = prepare_precompiled_interface(&dest, path, &source).unwrap();
+        interface.store().unwrap();
+        let artifact =
+            compile_module_artifact_from_source_with_context(path, &source, interface.context())
+                .unwrap();
+        let key = CacheKey::from_module_source(
+            &ModuleSource::from_text(source.as_str()),
+            interface.context(),
+            ModuleProvenance::User,
+        );
+        crate::bytecode_cache::store_module_at(&path.with_extension("harnmod"), &key, &artifact)
+            .unwrap();
+    }
+    let relocated = tempfile::tempdir().unwrap();
+    for entry in std::fs::read_dir(tree._dir.path()).unwrap() {
+        let entry = entry.unwrap();
+        std::fs::rename(entry.path(), relocated.path().join(entry.file_name())).unwrap();
+    }
+    let root = relocated.path().join("root.harn");
+    let (walks, parses) = parse_work_during(|| {
+        assert!(import_fresh(&runtime(), &root).contains(&"describe".to_string()));
+    });
+    assert!(
+        walks > 0,
+        "shipped graph identity must actually be validated"
+    );
+    assert_eq!(
+        parses, 0,
+        "a shipped interface must supply every module projection"
+    );
+
+    // A changed export changes the lowering interface even though root's bytes
+    // and all shipped artifacts remain untouched.
+    std::fs::write(
+        relocated.path().join("leaf.harn"),
+        "pub enum Shade { Ready(message: string) Empty }\n",
+    )
+    .unwrap();
+    let (_, parses) = parse_work_during(|| {
+        let context = derived_interface(&root);
+        assert!(!context.enum_candidates().contains(&"Color".to_string()));
+    });
+    assert!(
+        parses > 0,
+        "stale shipped interfaces must rederive, not suppress preparation"
     );
 }
 

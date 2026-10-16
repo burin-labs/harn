@@ -7,6 +7,7 @@ import {
   actions_cache_capacity_errors,
   ci_cache_policy_errors,
   ci_cache_policy_parse,
+  ci_linux_lane_policy_errors,
   ci_workflow_concurrency_errors,
   e2e_workflow_concurrency_errors,
   event_skip_propagation_errors,
@@ -39,6 +40,25 @@ import {
 import { RUST_LINT_LEGS } from "../ci_cache_policy/linux_checks.harn"
 import "./ci_cache_policy/fixtures.harn"
 import "./ci_cache_policy/policy_integration_test.harn"
+
+@test
+pipeline test_package_and_release_tools_require_a_successful_shared_producer(harness: Harness) {
+  const ci = read_yaml(harness.fs, "../../.github/workflows/ci.yml")
+  assert_eq(ci_linux_lane_policy_errors(ci), [])
+  for consumer in ["package-audit", "release-residual-audit"] {
+    const refusal =
+      "ci.yml:${consumer} must need rust-cli, require its success under !cancelled(), and not wait on the workspace producer"
+    let missing_producer = ci
+    missing_producer.jobs[consumer].needs = ["changes"]
+    assert(ci_linux_lane_policy_errors(missing_producer).contains(refusal))
+    const condition = ci.jobs[consumer].if
+    const required = " && needs.rust-cli.result == 'success'"
+    assert(condition.contains(required))
+    let unproved_producer = ci
+    unproved_producer.jobs[consumer].if = condition.replace(required, "")
+    assert(ci_linux_lane_policy_errors(unproved_producer).contains(refusal))
+  }
+}
 
 @test
 pipeline test_linux_build_cache_environments_match_the_actual_writer(harness: Harness) {

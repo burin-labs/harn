@@ -5,8 +5,13 @@ use serde_json::{json, Map, Value};
 use super::records::{FieldKind, Target};
 use super::schema_records::SchemaRecords;
 
-pub(super) fn schemas() -> [(&'static str, Value); 2] {
-    harn_vm::llm::api::inference_admission_schemas()
+pub(super) fn schemas() -> Vec<(&'static str, Value)> {
+    let mut schemas = harn_vm::llm::api::inference_admission_schemas().to_vec();
+    schemas.push((
+        "MachineSpendExhaustion",
+        harn_vm::llm::MachineSpendExhaustion::json_schema(),
+    ));
+    schemas
 }
 
 pub(super) fn append(out: &mut String, target: Target) {
@@ -22,6 +27,7 @@ pub(super) fn append(out: &mut String, target: Target) {
         definitions.insert(name.to_owned(), schema);
     }
     for (key, name) in [
+        ("MachineSpendPeriod", "HarnMachineSpendPeriod"),
         ("InferenceAdmissionStatus", "HarnInferenceAdmissionStatus"),
         ("InferenceReach", "HarnInferenceAdmissionReach"),
         ("DataPosture", "HarnInferenceAdmissionDataPosture"),
@@ -77,6 +83,10 @@ pub(super) fn append(out: &mut String, target: Target) {
         }
     }
     let names = [
+        (
+            "MachineSpendExhaustion",
+            "HarnMachineSpendExhaustion".into(),
+        ),
         ("InferenceBoundary", "HarnInferenceAdmissionBoundary".into()),
         (
             "InferenceAdmissionRequest",
@@ -95,6 +105,7 @@ pub(super) fn append(out: &mut String, target: Target) {
         require_all: false,
         metadata: |_, field, _| {
             Ok(match field {
+                "period" => Some(FieldKind::Named("HarnMachineSpendPeriod".into())),
                 "status" => Some(FieldKind::Named("HarnInferenceAdmissionStatus".into())),
                 "reach" => Some(FieldKind::Named("HarnInferenceAdmissionReach".into())),
                 "data_controls" | "data_posture" => {

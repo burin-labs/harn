@@ -13,19 +13,16 @@
 //! an identity the runtime recorded, and a binding that does not check out is
 //! a structured failure rather than a best guess.
 
-use std::collections::{BTreeMap, BTreeSet};
-use std::path::Path;
-
 use serde_json::Value as JsonValue;
+use std::collections::{BTreeMap, BTreeSet};
 
 use super::source::{SourceEvent, SourceEventKind};
 use super::validate::validate_training_example_pairing;
 use super::{
-    AgentTrainingExample, TrainingExampleError, TrainingExampleRequest, TrainingMessage,
+    AgentTrainingExample, TrainingExampleError, TrainingMessage, TrainingProjectionSource,
     TrainingProvenance, TrainingSource, TrainingToolCall, TrainingToolFunction, TrainingUsage,
     TRAINING_EXAMPLE_SCHEMA_VERSION,
 };
-use crate::orchestration::{RunRecord, RunTranscriptArtifactDescriptor};
 
 /// Schema of the `tool_result` pairing receipt this projector requires.
 /// The runtime stamps this exact string on every receipt it writes.
@@ -293,7 +290,7 @@ struct ToolCatalog {
 }
 
 struct Walk<'a> {
-    request: &'a TrainingExampleRequest,
+    requested_session_id: Option<&'a str>,
     messages: Vec<TrainingMessage>,
     catalog: ToolCatalog,
     catalog_event_index: Option<usize>,
@@ -315,14 +312,12 @@ struct Walk<'a> {
 }
 
 pub(crate) fn project(
-    run: &RunRecord,
-    descriptor: &RunTranscriptArtifactDescriptor,
-    transcript_path: &Path,
+    source: &TrainingProjectionSource,
     events: &[SourceEvent],
-    request: &TrainingExampleRequest,
+    requested_session_id: Option<&str>,
 ) -> Result<AgentTrainingExample, TrainingExampleError> {
     let mut walk = Walk {
-        request,
+        requested_session_id,
         messages: Vec::new(),
         catalog: ToolCatalog::default(),
         catalog_event_index: None,
@@ -346,7 +341,7 @@ pub(crate) fn project(
     for event in events {
         walk.ingest(event)?;
     }
-    walk.finish(run, descriptor, transcript_path, events)
+    walk.finish(source, events)
 }
 
 impl Walk<'_> {
@@ -440,7 +435,7 @@ impl Walk<'_> {
         self.output_tokens += event.u64_field("output_tokens").unwrap_or_default();
         let native_calls = tool_calls_from_array(event, "tool_calls")?;
         let merged_calls = {
-            let merged = crate::llm::response_tool_calls::resolve(&event.value)
+            let merged = harn_llm::response_tool_calls::resolve(&event.value)
                 .map_err(|error| {
                     TrainingExampleError::at(
                         "malformed_tool_call_projection",
@@ -738,9 +733,7 @@ impl Walk<'_> {
 
     fn finish(
         mut self,
-        run: &RunRecord,
-        descriptor: &RunTranscriptArtifactDescriptor,
-        transcript_path: &Path,
+        source: &TrainingProjectionSource,
         events: &[SourceEvent],
     ) -> Result<AgentTrainingExample, TrainingExampleError> {
         if let Some(open) = self.open_calls.first() {
@@ -786,7 +779,7 @@ impl Walk<'_> {
             ));
         }
         let session_id = self.session.require("missing_session_id")?;
-        if let Some(expected) = self.request.session_id.as_deref() {
+        if let Some(expected) = self.requested_session_id {
             if session_id != expected {
                 return Err(TrainingExampleError::new(
                     "session_id_mismatch",
@@ -794,7 +787,7 @@ impl Walk<'_> {
                 ));
             }
         }
-        if let Some(recorded) = descriptor.session_id.as_deref() {
+        if let Some(recorded) = source.recorded_session_id.as_deref() {
             if !recorded.is_empty() && recorded != session_id {
                 return Err(TrainingExampleError::new(
                     "session_id_mismatch",
@@ -836,14 +829,14 @@ impl Walk<'_> {
             messages: self.messages,
             tools: self.catalog.schemas,
             provenance: TrainingProvenance {
-                run_id: run.id.clone(),
-                execution_id: run.evidence.execution_id.clone(),
+                run_id: source.run_id.clone(),
+                execution_id: source.execution_id.clone(),
                 session_id,
                 // Only an unambiguous single-stage run can name its stage; a
                 // multi-stage run's sidecar does not attribute provider calls
                 // to a stage, and guessing one would be provenance fiction.
-                stage_id: match run.stages.as_slice() {
-                    [stage] => Some(stage.id.clone()),
+                stage_id: match source.stage_ids.as_slice() {
+                    [stage_id] => Some(stage_id.clone()),
                     _ => None,
                 },
                 provider: self.provider.require("missing_route")?,
@@ -853,17 +846,17 @@ impl Walk<'_> {
                 effective_tool_format: self.effective_tool_format.require("missing_tool_format")?,
                 tool_catalog_hash: self.catalog.hash.unwrap_or_default(),
                 tool_catalog_content_hash: self.catalog.content_hash,
-                terminal_status: descriptor.terminal_status.clone().unwrap_or_default(),
+                terminal_status: source.terminal_status.clone(),
                 usage: TrainingUsage {
                     provider_calls: self.provider_calls,
                     input_tokens: self.input_tokens,
                     output_tokens: self.output_tokens,
                 },
                 source: TrainingSource {
-                    descriptor_schema_version: descriptor.schema_version.clone(),
-                    transcript_path: transcript_path.to_string_lossy().into_owned(),
-                    transcript_sha256: descriptor.sha256.clone(),
-                    transcript_byte_len: descriptor.byte_len,
+                    descriptor_schema_version: source.descriptor_schema_version.clone(),
+                    transcript_path: source.transcript_path.to_string_lossy().into_owned(),
+                    transcript_sha256: source.transcript_sha256.clone(),
+                    transcript_byte_len: source.transcript_byte_len,
                     event_count: events.len(),
                     first_event_index: first.index,
                     last_event_index: last.index,

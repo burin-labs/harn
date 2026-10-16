@@ -118,7 +118,7 @@ impl InterfaceSlot {
         }
     }
 
-    fn write(
+    pub(super) fn write(
         &self,
         context: &ModuleCompilationContext,
         manifest: &ContextManifest,

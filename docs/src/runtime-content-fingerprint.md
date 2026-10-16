@@ -27,7 +27,11 @@ The function returns `&'static RuntimeContentFingerprint` with these fields:
 compatibility field. It excludes the receipt schema, its own digest, and
 `source_revision`. A build stamp alone therefore cannot claim different linked
 content. The optional revision remains useful provenance, but consumers must
-keep `null` distinct from an observed revision.
+keep `null` distinct from an observed revision. The library returns `null` for
+this field. An embedding executable can clone the receipt and attach its own
+measured Harn source revision; it must keep the field `null` when that revision
+is unavailable. Build stamps belong to the executable so a new stamp does not
+invalidate the runtime library and its unit-test binary.
 
 The embedded standard-library digest has one owner. Bytecode cache invalidation
 and this public receipt consume the same VM function, so they cannot drift into
@@ -40,6 +44,8 @@ An owning test compares the record with every feature declared in
 receipt fails closed.
 
 `harn version --json` projects this receipt at
-`data.runtime_content_fingerprint`. Embedding hosts should project the typed VM
+`data.runtime_content_fingerprint`, with the CLI's compiled source revision.
+The CLI ignores caller-supplied environment values for this provenance.
+Embedding hosts should project the typed VM
 value through their existing version or diagnostic surface instead of hashing
 files or reconstructing compatibility fields themselves.

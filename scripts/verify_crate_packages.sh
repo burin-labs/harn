@@ -52,6 +52,7 @@ printf '%s\n' "$metadata" >"$metadata_file"
 # generate/check the payload directly, and export the exact Harn executable.
 # `$tmp` is trapped above, so it bounds the generator snapshot's lifetime.
 package_verify_prepare_tools "$ROOT_DIR" "$tmp/aot-tools"
+package_verify_fetch_dependencies
 plan_rows="$("$HARN_BIN" run "$ROOT_DIR/scripts/verify_crate_packages_plan.harn" -- --metadata "$metadata_file" --root "$ROOT_DIR")"
 target_dir=""
 publishable_crates=()

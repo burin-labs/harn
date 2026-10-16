@@ -513,15 +513,14 @@ SCRIPTING
     Repl,
     /// Benchmark Harn execution, portable-kernel paths, or deterministic replay.
     Bench(BenchArgs),
-    /// Pre-compile `.harn` sources into the content-addressed bytecode
-    /// cache so cold-start `harn run` for the same source skips parse
-    /// and compile and goes straight to bytecode load.
+    /// Compile `.harn` sources and imported interfaces before execution.
     ///
     /// `harn precompile path/` walks the directory and compiles every
     /// `.harn` file; `harn precompile script.harn` compiles a single
-    /// file. Artifacts are written adjacent to each source as
-    /// `<name>.harnbc` by default; pass `--out DIR` to redirect them
-    /// into a sibling tree.
+    /// file. Entry bytecode (`.harnbc`), module bytecode (`.harnmod`),
+    /// and imported interfaces (`.harnifc`) are written beside each source;
+    /// pass `--out DIR` to redirect them into a sibling tree. Use
+    /// `--warm-cache` to prepare shared runtime caches for an installed tree.
     Precompile(PrecompileArgs),
     /// Build or verify a `.harnpack` content-addressed run bundle.
     ///

@@ -72,6 +72,59 @@ pub fn is_signed_anthropic_block(block: &serde_json::Value) -> bool {
     }
 }
 
+/// Whether this stored envelope is exactly the Anthropic continuation shape
+/// captured by this module. Conservative admission may account for this
+/// metadata only when egress can restore known signed thinking blocks without
+/// accepting arbitrary provider or multimodal payloads.
+pub fn is_supported_anthropic_continuation(value: &serde_json::Value) -> bool {
+    let Some(provider) = value.as_object() else {
+        return false;
+    };
+    if provider.len() != 1 || !provider.contains_key("anthropic") {
+        return false;
+    }
+    let Some(anthropic) = provider["anthropic"].as_object() else {
+        return false;
+    };
+    if anthropic.len() != 1 || !anthropic.contains_key("content_blocks") {
+        return false;
+    }
+    let Some(blocks) = anthropic["content_blocks"].as_array() else {
+        return false;
+    };
+    !blocks.is_empty() && blocks.iter().all(supported_signed_anthropic_block)
+}
+
+fn supported_signed_anthropic_block(block: &serde_json::Value) -> bool {
+    let Some(fields) = block.as_object() else {
+        return false;
+    };
+    match block.get("type").and_then(serde_json::Value::as_str) {
+        Some("thinking") => {
+            fields.len() == 3
+                && fields.contains_key("thinking")
+                && fields.contains_key("signature")
+                && block
+                    .get("thinking")
+                    .and_then(serde_json::Value::as_str)
+                    .is_some()
+                && block
+                    .get("signature")
+                    .and_then(serde_json::Value::as_str)
+                    .is_some_and(|signature| !signature.is_empty())
+        }
+        Some("redacted_thinking") => {
+            fields.len() == 2
+                && fields.contains_key("data")
+                && block
+                    .get("data")
+                    .and_then(serde_json::Value::as_str)
+                    .is_some_and(|data| !data.is_empty())
+        }
+        _ => false,
+    }
+}
+
 pub fn should_replay_anthropic_block(
     block: &serde_json::Value,
     policy: ReasoningRoundTripPolicy,

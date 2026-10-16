@@ -16,6 +16,7 @@ function fixture() {
   fs.mkdirSync(deps, { recursive: true });
   fs.mkdirSync(path.join(root, 'scripts/ci'), { recursive: true });
   fs.writeFileSync(path.join(root, 'scripts/ci/host_bound_rust_test_filter.sh'), '#!/bin/sh\nprintf "test(host_bound)\\n"\n', { mode: 0o755 });
+  fs.copyFileSync(path.resolve(__dirname, '../ci/workspace_features.sh'), path.join(root, 'scripts/ci/workspace_features.sh'));
   const command = `#!${process.execPath}
 const fs=require('node:fs');
 const path=require('node:path');
@@ -23,7 +24,9 @@ const args=process.argv.slice(2);
 const name=path.basename(process.argv[1]);
 fs.appendFileSync(process.env.PROBE_CALLS,JSON.stringify({name,args})+'\\n');
 if(name==='cargo' && args[0]==='metadata') {
-  console.log(JSON.stringify({target_directory:process.env.PROBE_TARGET}));
+  console.log(JSON.stringify({target_directory:process.env.PROBE_TARGET,
+    workspace_members:['vm','hostlib'], packages:[{name:'harn-vm',source:null,id:'vm'},{name:'harn-hostlib',source:null,id:'hostlib'}],
+    resolve:{nodes:[{id:'vm',features:['default','otel']},{id:'hostlib',features:['full']}]}}));
 } else {
   let phase=name==='cargo'?'harn-build':args.at(-1).includes('not (')?'workspace-tests':'security-tests';
   if(process.env.PROBE_FAIL===phase) process.exit(23);
@@ -39,34 +42,39 @@ if(name==='cargo' && args[0]==='metadata') {
 `;
   for (const name of ['cargo', 'cargo-nextest']) fs.writeFileSync(path.join(bin, name), command, { mode: 0o755 });
   fs.writeFileSync(path.join(deps, 'test-binary'), 'executable fixture', { mode: 0o755 });
+  fs.writeFileSync(path.join(deps, 'harn_vm-0123456789abcdef'), 'native executable fixture', { mode: 0o755 });
+  fs.writeFileSync(path.join(deps, 'harn_vm_core-0123456789abcdef'), 'core executable fixture', { mode: 0o755 });
   fs.writeFileSync(path.join(deps, 'libfixture.rlib'), 'retained library');
   return { root, deps, env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, TMPDIR: root,
     PROBE_TARGET: path.join(root, 'target'), PROBE_CALLS: path.join(root, 'calls.jsonl') } };
 }
 
-test('the real warm owner measures all three exact compiler phases and retains cache pruning', { skip: !linux }, () => {
+test('the real warm owner measures the two consumer compiler phases and retains cache pruning', { skip: !linux }, () => {
   const f = fixture();
   try {
     const run = spawnSync('bash', [owner], { cwd: f.root, env: f.env, encoding: 'utf8', timeout: 10000 });
     assert.equal(run.status, 0, run.stderr);
-    for (const phase of ['harn-build', 'workspace-tests', 'security-tests']) {
+    for (const phase of ['workspace-tests', 'security-tests']) {
       assert.match(run.stdout, new RegExp(`phase=${phase} state=begin disk_available_kib=[1-9][0-9]* memory_available_kib=[1-9][0-9]*`));
       assert.match(run.stdout, new RegExp(`phase=${phase} state=end compiler_exit=0 elapsed_seconds=[0-9.]+ peak_rss_kib=[1-9][0-9]*`));
     }
     const calls = fs.readFileSync(f.env.PROBE_CALLS, 'utf8').trim().split('\n').map(JSON.parse);
     assert.deepEqual(calls, [
-      {name:'cargo', args:['build','--locked','--bin','harn']},
       {name:'cargo-nextest', args:['nextest','run','--locked','--workspace','--profile','ci','--no-run','-E','not (test(host_bound))']},
-      {name:'cargo-nextest', args:['nextest','run','--locked','--workspace','--profile','ci','--no-run','-E','(package(harn-vm) and binary(harn_vm)) or (package(harn-hostlib) and binary(harn_hostlib))']},
+      {name:'cargo', args:['metadata','--locked','--format-version','1']},
+      {name:'cargo-nextest', args:['nextest','run','--locked','-p','harn-vm','-p','harn-hostlib','--features','harn-hostlib/full,harn-vm/default,harn-vm/otel','--profile','ci','--no-run','-E','(package(harn-vm) and binary(harn_vm)) or (package(harn-hostlib) and binary(harn_hostlib))']},
       {name:'cargo', args:['metadata','--format-version','1','--no-deps']},
     ]);
     assert.equal(fs.existsSync(path.join(f.deps, 'test-binary')), false);
+    assert.equal(fs.existsSync(path.join(f.deps, 'harn_vm_core-0123456789abcdef')), false);
+    assert.equal(fs.readFileSync(path.join(f.deps, 'harn_vm-0123456789abcdef'), 'utf8'), 'native executable fixture');
+    assert.match(run.stdout, /retained_native_executables=1/);
     assert.equal(fs.readFileSync(path.join(f.deps, 'libfixture.rlib'), 'utf8'), 'retained library');
     assert.equal(fs.readdirSync(f.root).some(name => name.startsWith('harn-workspace-warm.')), false);
   } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
 });
 
-for (const phase of ['harn-build', 'workspace-tests', 'security-tests']) {
+for (const phase of ['workspace-tests', 'security-tests']) {
   test(`the real warm owner preserves ${phase} compiler refusal without certifying later phases`, { skip: !linux }, () => {
     const f = fixture();
     try {
@@ -80,6 +88,18 @@ for (const phase of ['harn-build', 'workspace-tests', 'security-tests']) {
   });
 }
 
+test('a completed warm without Native test executables refuses before pruning', { skip: !linux }, () => {
+  const f = fixture();
+  try {
+    fs.rmSync(path.join(f.deps, 'harn_vm-0123456789abcdef'));
+    const run = spawnSync('bash', [owner], {cwd:f.root, env:f.env, encoding:'utf8', timeout:10000});
+    assert.equal(run.status, 1, run.stderr);
+    assert.match(run.stdout, /phase=security-tests state=end compiler_exit=0/);
+    assert.match(run.stderr, /Native test executables were not observed/);
+    assert.equal(fs.existsSync(path.join(f.deps, 'test-binary')), true);
+  } finally { fs.rmSync(f.root, {recursive:true,force:true}); }
+});
+
 test('successful compiler execution without metrics refuses instead of certifying a phase', { skip: !linux }, () => {
   const f = fixture();
   try {
@@ -91,11 +111,11 @@ test('successful compiler execution without metrics refuses instead of certifyin
     fs.writeFileSync(copiedOwner, source.replaceAll('/usr/bin/time', transport));
     const run = spawnSync('bash', [copiedOwner], {cwd:f.root, env:f.env, encoding:'utf8', timeout:10000});
     assert.equal(run.status, 1);
-    assert.match(run.stderr, /harn-build compiler metrics are unmeasured/);
-    assert.match(run.stdout, /phase=harn-build state=begin/);
-    assert.doesNotMatch(run.stdout, /phase=harn-build state=end/);
+    assert.match(run.stderr, /workspace-tests compiler metrics are unmeasured/);
+    assert.match(run.stdout, /phase=workspace-tests state=begin/);
+    assert.doesNotMatch(run.stdout, /phase=workspace-tests state=end/);
     const calls = fs.readFileSync(f.env.PROBE_CALLS,'utf8').trim().split('\n').map(JSON.parse);
-    assert.deepEqual(calls, [{name:'cargo',args:['build','--locked','--bin','harn']}], 'the compiler actually fired before absent metrics refused');
+    assert.deepEqual(calls, [{name:'cargo-nextest',args:['nextest','run','--locked','--workspace','--profile','ci','--no-run','-E','not (test(host_bound))']}], 'the compiler actually fired before absent metrics refused');
     assert.equal(fs.existsSync(path.join(f.deps,'test-binary')), true);
   } finally { fs.rmSync(f.root,{recursive:true,force:true}); }
 });
@@ -120,7 +140,6 @@ test('a killed foreground warm process leaves an actual compiler begin witness w
     });
     assert.equal(interrupted, true, 'the control must reach the actual foreground compiler');
     assert.equal(result.signal, 'SIGKILL');
-    assert.match(output, /phase=harn-build state=end compiler_exit=0/);
     assert.match(output, /phase=workspace-tests state=begin/);
     assert.doesNotMatch(output, /phase=workspace-tests state=end/);
     assert.doesNotMatch(output, /phase=security-tests state=begin/);

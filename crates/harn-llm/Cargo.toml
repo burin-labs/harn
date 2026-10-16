@@ -16,6 +16,7 @@ harn-provider-catalog = { path = "../harn-provider-catalog", version = "=0.10.16
 harn-vm-core = { path = "../harn-vm-core", version = "=0.10.167" }
 arcstr = "1"
 regex = "1"
+jsonschema.workspace = true
 schemars = "=1.2.2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

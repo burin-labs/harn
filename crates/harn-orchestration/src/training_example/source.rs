@@ -5,8 +5,6 @@
 //! downstream can tell that apart from a run that genuinely had fewer turns.
 //! Every row either parses into a typed event or the whole projection fails.
 
-use std::path::Path;
-
 use serde_json::Value as JsonValue;
 
 use super::TrainingExampleError;
@@ -80,16 +78,6 @@ fn classify(type_name: &str) -> SourceEventKind {
         "tool_result" => SourceEventKind::ToolResult,
         _ => SourceEventKind::Other,
     }
-}
-
-pub(crate) fn load_events(path: &Path) -> Result<Vec<SourceEvent>, TrainingExampleError> {
-    let text = std::fs::read_to_string(path).map_err(|error| {
-        TrainingExampleError::new(
-            "unavailable",
-            format!("failed to read {}: {error}", path.display()),
-        )
-    })?;
-    parse_events(&text, &path.display().to_string())
 }
 
 pub(crate) fn parse_events(

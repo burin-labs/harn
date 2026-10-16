@@ -9,18 +9,18 @@ pub struct ReportedCacheUsage {
 }
 
 impl ReportedCacheUsage {
-    pub(crate) fn from_value(value: &serde_json::Value) -> Result<Self, &'static str> {
+    pub fn from_value(value: &serde_json::Value) -> Result<Self, &'static str> {
         Ok(Self {
             read_tokens: super::reported_cache_read_tokens(value)?,
             write_tokens: super::reported_cache_write_tokens(value)?,
         })
     }
 
-    pub(crate) fn has_any(&self) -> bool {
+    pub fn has_any(&self) -> bool {
         self.read_tokens.is_some() || self.write_tokens.is_some()
     }
 
-    pub(crate) fn complete_prompt_tokens(&self, fresh: i64) -> Option<i64> {
+    pub fn complete_prompt_tokens(&self, fresh: i64) -> Option<i64> {
         super::PromptTokenCounts::from_reported(
             fresh,
             self.read_tokens?,

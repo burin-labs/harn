@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use harn_parser::{Attribute, DictEntry, Node, SNode};
+use harn_parser::{Attribute, Node, SNode};
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 
@@ -615,206 +615,33 @@ fn entry_key(node: &SNode) -> Option<&str> {
 }
 
 fn collect_called_functions(body: &[SNode]) -> Vec<String> {
+    fn collect(node: &SNode, calls: &mut Vec<String>) {
+        let (_, node) = harn_parser::peel_attributes(node);
+        if let Node::FunctionCall { name, .. } = &node.node {
+            calls.push(name.clone());
+        }
+        match &node.node {
+            // Persona steps follow callable bodies, not deferred parameter defaults.
+            Node::Pipeline { body, .. }
+            | Node::OverrideDecl { body, .. }
+            | Node::FnDecl { body, .. }
+            | Node::ToolDecl { body, .. }
+            | Node::Closure { body, .. } => {
+                for child in body {
+                    collect(child, calls);
+                }
+            }
+            _ => harn_parser::visit::for_each_immediate_child(node, &mut |child| {
+                collect(child, calls);
+            }),
+        }
+    }
+
     let mut calls = Vec::new();
     for node in body {
-        collect_called_functions_node(node, &mut calls);
+        collect(node, &mut calls);
     }
     calls
-}
-
-fn collect_called_functions_node(node: &SNode, calls: &mut Vec<String>) {
-    match &node.node {
-        Node::FunctionCall { name, args, .. } => {
-            calls.push(name.clone());
-            collect_many(args, calls);
-        }
-        Node::ValueCall { callee, args } => {
-            collect_called_functions_node(callee, calls);
-            collect_many(args, calls);
-        }
-        Node::LetBinding { value, .. }
-        | Node::ConstBinding { value, .. }
-        | Node::ReturnStmt { value: Some(value) }
-        | Node::YieldExpr { value: Some(value) }
-        | Node::EmitExpr { value }
-        | Node::ThrowStmt { value }
-        | Node::Spread(value)
-        | Node::TryOperator { operand: value }
-        | Node::TryStar { operand: value }
-        | Node::UnaryOp { operand: value, .. } => collect_called_functions_node(value, calls),
-        Node::IfElse {
-            condition,
-            then_body,
-            else_body,
-            ..
-        } => {
-            collect_called_functions_node(condition, calls);
-            collect_many(then_body, calls);
-            if let Some(else_body) = else_body {
-                collect_many(else_body, calls);
-            }
-        }
-        Node::ForIn { iterable, body, .. } => {
-            collect_called_functions_node(iterable, calls);
-            collect_many(body, calls);
-        }
-        Node::MatchExpr { value, arms } => {
-            collect_called_functions_node(value, calls);
-            for arm in arms {
-                collect_called_functions_node(&arm.pattern, calls);
-                if let Some(guard) = &arm.guard {
-                    collect_called_functions_node(guard, calls);
-                }
-                collect_many(&arm.body, calls);
-            }
-        }
-        Node::WhileLoop { condition, body } => {
-            collect_called_functions_node(condition, calls);
-            collect_many(body, calls);
-        }
-        Node::Retry { count, body } => {
-            collect_called_functions_node(count, calls);
-            collect_many(body, calls);
-        }
-        Node::CostRoute { options, body } => {
-            for (_, value) in options {
-                collect_called_functions_node(value, calls);
-            }
-            collect_many(body, calls);
-        }
-        Node::TryCatch {
-            has_catch: _,
-            body,
-            catch_body,
-            finally_body,
-            ..
-        } => {
-            collect_many(body, calls);
-            collect_many(catch_body, calls);
-            if let Some(finally_body) = finally_body {
-                collect_many(finally_body, calls);
-            }
-        }
-        Node::TryExpr { body }
-        | Node::SpawnExpr { body }
-        | Node::DeferStmt { body }
-        | Node::MutexBlock { body, .. }
-        | Node::Block(body)
-        | Node::Closure { body, .. } => collect_many(body, calls),
-        Node::DeadlineBlock { duration, body } => {
-            collect_called_functions_node(duration, calls);
-            collect_many(body, calls);
-        }
-        Node::GuardStmt {
-            condition,
-            else_body,
-        } => {
-            collect_called_functions_node(condition, calls);
-            collect_many(else_body, calls);
-        }
-        Node::RequireStmt { condition, message } => {
-            collect_called_functions_node(condition, calls);
-            if let Some(message) = message {
-                collect_called_functions_node(message, calls);
-            }
-        }
-        Node::Parallel {
-            expr,
-            body,
-            options,
-            ..
-        } => {
-            collect_called_functions_node(expr, calls);
-            for (_, value) in options {
-                collect_called_functions_node(value, calls);
-            }
-            collect_many(body, calls);
-        }
-        Node::SelectExpr {
-            cases,
-            timeout,
-            default_body,
-        } => {
-            for case in cases {
-                collect_called_functions_node(&case.channel, calls);
-                collect_many(&case.body, calls);
-            }
-            if let Some((duration, body)) = timeout {
-                collect_called_functions_node(duration, calls);
-                collect_many(body, calls);
-            }
-            if let Some(body) = default_body {
-                collect_many(body, calls);
-            }
-        }
-        Node::MethodCall { object, args, .. } | Node::OptionalMethodCall { object, args, .. } => {
-            collect_called_functions_node(object, calls);
-            collect_many(args, calls);
-        }
-        Node::PropertyAccess { object, .. } | Node::OptionalPropertyAccess { object, .. } => {
-            collect_called_functions_node(object, calls);
-        }
-        Node::SubscriptAccess { object, index }
-        | Node::OptionalSubscriptAccess { object, index } => {
-            collect_called_functions_node(object, calls);
-            collect_called_functions_node(index, calls);
-        }
-        Node::SliceAccess { object, start, end } => {
-            collect_called_functions_node(object, calls);
-            if let Some(start) = start {
-                collect_called_functions_node(start, calls);
-            }
-            if let Some(end) = end {
-                collect_called_functions_node(end, calls);
-            }
-        }
-        Node::BinaryOp { left, right, .. } => {
-            collect_called_functions_node(left, calls);
-            collect_called_functions_node(right, calls);
-        }
-        Node::Ternary {
-            condition,
-            true_expr,
-            false_expr,
-        } => {
-            collect_called_functions_node(condition, calls);
-            collect_called_functions_node(true_expr, calls);
-            collect_called_functions_node(false_expr, calls);
-        }
-        Node::Assignment { target, value, .. } => {
-            collect_called_functions_node(target, calls);
-            collect_called_functions_node(value, calls);
-        }
-        Node::EnumConstruct { args, .. } => collect_many(args, calls),
-        Node::StructConstruct { fields, .. } | Node::DictLiteral(fields) => {
-            collect_dict_calls(fields, calls);
-        }
-        Node::ListLiteral(items) | Node::OrPattern(items) => collect_many(items, calls),
-        Node::AttributedDecl { inner, .. } => collect_called_functions_node(inner, calls),
-        Node::Pipeline { body, .. }
-        | Node::OverrideDecl { body, .. }
-        | Node::FnDecl { body, .. }
-        | Node::ToolDecl { body, .. } => collect_many(body, calls),
-        Node::SkillDecl { fields, .. } | Node::EvalPackDecl { fields, .. } => {
-            for (_, value) in fields {
-                collect_called_functions_node(value, calls);
-            }
-        }
-        _ => {}
-    }
-}
-
-fn collect_many(nodes: &[SNode], calls: &mut Vec<String>) {
-    for node in nodes {
-        collect_called_functions_node(node, calls);
-    }
-}
-
-fn collect_dict_calls(entries: &[DictEntry], calls: &mut Vec<String>) {
-    for entry in entries {
-        collect_called_functions_node(&entry.key, calls);
-        collect_called_functions_node(&entry.value, calls);
-    }
 }
 
 pub fn validate_persona_manifests(

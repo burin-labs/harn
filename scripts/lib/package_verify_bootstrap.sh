@@ -10,11 +10,26 @@
 # executable this helper is in the middle of running. Harn itself reaches the
 # same boundary through the stable copy release orchestration supplies.
 
+# Frozen packaging still resolves the workspace's registry dependencies. A
+# supplied toolset has not populated this job's Cargo home as a local tool
+# build would, so fetch the locked host graph before entering that boundary.
+package_verify_fetch_dependencies() {
+  local identity host
+  identity="$(rustc -vV)" || return $?
+  host="$(sed -n 's/^host: //p' <<<"$identity")" || return $?
+  if [[ -z "$host" ]]; then
+    echo 'error: rustc did not report a host for locked package dependency fetch' >&2
+    return 1
+  fi
+  cargo fetch --locked --target "$host" || return $?
+}
+
 package_verify_prepare_tools() {
   local root_dir="$1"
   local tool_dir="${2:-}"
   local aot_generator
   local explicit_harn="${HARN_BIN:-}"
+  local supplied_generator="${HARN_RELEASE_CLI_AOT_GEN_BIN:-}"
   local generated_dir="$root_dir/crates/harn-cli/generated"
   local no_build="${HARN_BIN_NO_BUILD:-0}"
   local resolved
@@ -43,13 +58,18 @@ package_verify_prepare_tools() {
   if [[ -z "$target_dir" ]]; then
     target_dir="$(cd "$root_dir" && harn_cargo_metadata_target_dir)"
   fi
-  aot_generator="$(CARGO_TARGET_DIR="$target_dir" harn_debug_named_binary_path harn-cli-aot-gen)"
+  aot_generator="$supplied_generator"
+  if [[ -z "$aot_generator" ]]; then
+    aot_generator="$(CARGO_TARGET_DIR="$target_dir" harn_debug_named_binary_path harn-cli-aot-gen)"
+  fi
   if [[ ! -f "$generated_dir/cli-bytecode-manifest.json" || \
         ! -d "$generated_dir/cli-bytecode" ]]; then
     generate_payload=1
   fi
 
-  if [[ "$no_build" == "1" ]]; then
+  if [[ -n "$supplied_generator" ]]; then
+    harn_require_executable_bin "$supplied_generator" || return $?
+  elif [[ "$no_build" == "1" ]]; then
     if [[ ! -x "$aot_generator" ]]; then
       echo "error: HARN_BIN_NO_BUILD=1 but the package verification AOT generator is not built: $aot_generator" >&2
       return 1

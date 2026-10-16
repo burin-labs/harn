@@ -586,6 +586,20 @@ fn build(
 ) -> Result<BuildOutcome, String> {
     let manifest = scratch.join("Cargo.toml");
     let target = scratch.join("target");
+    // Cargo's separate build directory can override --target-dir for mutable
+    // intermediates. The probe owns both outputs, including when its caller
+    // builds into a different worktree or a root this sandbox cannot write.
+    env.retain(|(key, _)| {
+        if cfg!(windows) {
+            !key.eq_ignore_ascii_case("CARGO_BUILD_BUILD_DIR")
+        } else {
+            key != "CARGO_BUILD_BUILD_DIR"
+        }
+    });
+    env.push((
+        "CARGO_BUILD_BUILD_DIR".to_string(),
+        target.display().to_string(),
+    ));
     // Every reader below parses Cargo's plain words (`error`, `Running \``), so
     // a caller's `CARGO_TERM_COLOR=always` must not reach the probe's output.
     let args = vec![

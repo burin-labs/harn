@@ -71,6 +71,7 @@ pub(super) fn append_prompt_terminal_types(out: &mut String, prompt_error_schema
     public var code: String?
     public var retryable: Bool?
     public var retryAfterMs: Int?
+    public var machineSpend: HarnMachineSpendExhaustion?
     public var provider: String?
     public var model: String?
 }

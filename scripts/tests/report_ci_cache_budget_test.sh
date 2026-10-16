@@ -5,6 +5,11 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
+# Threshold controls use an explicit 10 GiB fixture, independently of the
+# repository's chosen capacity. Each owning script still reads its policy.
+jq '.storage_limit_bytes = 10737418240' "$repo_root/.github/cache-policy.json" > "$tmp/policy.json"
+export HARN_CACHE_POLICY_PATH="$tmp/policy.json"
+
 mkdir -p "$tmp/bin"
 cat >"$tmp/bin/gh" <<'MOCK'
 #!/usr/bin/env bash
