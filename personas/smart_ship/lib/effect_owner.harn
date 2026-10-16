@@ -70,6 +70,9 @@ pub fn dispatch_reserved_effect(
   dispatch: fn(EffectRequest) -> EffectOutcome,
   dispatch_binding: string? = nil,
 ) -> EffectDispatch {
+  if request.kind == "integration" {
+    return {status: "not_started", dispatch_started: false, state_commit: nil, outcome: nil}
+  }
   const process = host.process
   const claimed = claim_reserved_effect(host, store, fence, request, dispatch_binding)
   if is_err(claimed) {

@@ -11,9 +11,11 @@ import {
   begin_effect,
   claim_reserved_effect,
   commit_state,
+  confirm_integration,
   control,
   dispatch_reserved_effect,
   effect_receipt,
+  integration_effect,
   prepare_state,
   read_state,
   reserve_effect,
@@ -64,6 +66,47 @@ pipeline test_atomic_adapter_claim_is_unique_durable_and_invalidated_by_stop(har
   assert(after.commit != claim.commit, "accepted stop must invalidate the atomic ref guard")
   assert_eq(after.state!.effects[0]?.status, "unknown")
   assert(is_err(transfer(after.state!, fence(after.state!), "replacement")))
+}
+
+pipeline test_prepared_group_state_keeps_the_remote_unchanged_until_commit(harness: Harness) {
+  const s = setup(harness)
+  defer {
+    harness.fs.delete(s.root)
+  }
+  // Use another bare owner so the fixture's unrelated admission claim cannot authorize a group.
+  const store = s.store + {ref: "refs/heads/group-authority"}
+  const initial = s.state + {effects: [], authority: s.f.authority}
+  const request = integration_effect(s.f.snapshot)
+  const reserved = unwrap(reserve_effect(initial, fence(initial), request, s.f.policy, nil, 1000))
+  const reservation = prepare_state(harness.process, store, {commit: nil, state: nil}, reserved)
+  assert_eq(commit_state(harness.process, store, reservation).status, "committed")
+  const claim = unwrap(
+    claim_reserved_effect(pick(harness, ["process", "random"]), store, fence(reserved), request),
+  )
+  const receipt = effect_receipt(json_stringify(pick(request, ["source", "input_digest"])))
+  const next = unwrap(
+    confirm_integration(claim.state, fence(claim.state), request, s.f.policy, 1000, receipt),
+  )
+  const prepared = prepare_state(
+    harness.process,
+    store,
+    {commit: claim.commit, state: claim.state},
+    next,
+  )
+  const before = read_state(harness.process, store)
+  assert_eq(before.commit, claim.commit)
+  assert_eq(before.state!.pending, nil)
+  assert_eq(before.state!.effects[0]!.status, "dispatching")
+  assert(prepared.commit != before.commit)
+  assert_eq(prepared.state.pending, s.f.snapshot)
+  assert_error_contains(
+    fn() { commit_state(harness.process, store, prepared) },
+    "integration confirmation requires the atomic destination transaction",
+  )
+  const after = read_state(harness.process, store)
+  assert_eq(after.commit, claim.commit, "ordinary state writes cannot publish a fake integration")
+  assert_eq(after.state!.pending, nil)
+  assert_eq(after.state!.effects[0]!.status, "dispatching")
 }
 
 fn setup(harness: Harness) -> Setup {

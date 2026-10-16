@@ -82,6 +82,17 @@ the provider. The adapter keeps mutation credentials away from repair workers.
 Every mutation owner must use this protocol before authority can transfer.
 A prior read of a lease is insufficient.
 
+`integration_effect` retains a complete cumulative snapshot for one repository.
+Reservation reuses the snapshot verifier and admission budgets with a measured
+current time. It does not mark the group integrated. After a durable dispatch
+claim, `confirm_integration` prepares one state revision containing both the
+confirmed effect and its pending verification work. The atomic forge adapter
+must publish that state together with the destination change. Ordinary provider
+callbacks, ordinary effect settlement and the ordinary Git state writer refuse
+new integration confirmation, so
+they cannot silently lose the verification obligation. Preparing the state is
+not evidence that a forge transaction happened; that adapter remains in progress.
+
 `checkpoint_valid` verifies both the original execution signatures and the
 checkpoint publisher's signature. Consumers use `release_identity` to obtain
 the exact proven manifest identity. A moving branch is a convenience projection.

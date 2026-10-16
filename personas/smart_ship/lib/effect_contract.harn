@@ -1,5 +1,5 @@
-import { admission_bytes } from "./identity"
-import { AdmissionVerification, Policy, SignedAdmission, Verification } from "./types"
+import { admission_bytes, snapshot_id } from "./identity"
+import { AdmissionVerification, Policy, SignedAdmission, Snapshot, Verification } from "./types"
 import { verify_admission } from "./verification"
 
 /** An exact external target and its immutable input identity. */
@@ -8,6 +8,9 @@ pub type EffectTarget = {repository: string, source: string, input_digest: strin
 /** Admission effects retain the complete independently qualified witness. */
 pub type AdmissionEffect = EffectTarget & {kind: "admission", admission: SignedAdmission}
 
+/** One repository's cumulative frontier retains every signed change and required job. */
+pub type IntegrationEffect = EffectTarget & {kind: "integration", snapshot: Snapshot}
+
 /** Release input identity names the exact proven checkpoint. */
 pub type ReleaseEffect = EffectTarget & {kind: "release"}
 
@@ -15,7 +18,7 @@ pub type ReleaseEffect = EffectTarget & {kind: "release"}
 pub type RerunEffect = EffectTarget & {kind: "rerun"}
 
 /** A digest cannot stand in for an admission record at the mutation boundary. */
-pub type EffectRequest = AdmissionEffect | ReleaseEffect | RerunEffect
+pub type EffectRequest = AdmissionEffect | IntegrationEffect | ReleaseEffect | RerunEffect
 
 /** Provider evidence travels with durable state rather than an unavailable hash alone. */
 pub type EffectReceipt = {schema: "smart-ship.effect-receipt.v1", body: string, digest: string}
@@ -59,6 +62,22 @@ pub fn admission_effect(signed: SignedAdmission) -> AdmissionEffect {
         json_stringify([admission_bytes(signed.record), signed.signer, signed.signature]),
       ),
     admission: signed,
+  }
+}
+
+/** Derive the mutation identity from the complete immutable single-repository frontier. */
+pub fn integration_effect(snapshot: Snapshot) -> IntegrationEffect {
+  require len(snapshot.sources) == 1 && len(snapshot.changes) > 0,
+    "integration requires a nonempty single-repository frontier"
+  const source = snapshot.sources[0]!
+  require snapshot.changes.all({ change -> change.repository == source.repository }),
+    "one atomic integration cannot span repositories"
+  return {
+    kind: "integration",
+    repository: source.repository,
+    source: source.commit,
+    input_digest: snapshot_id(snapshot),
+    snapshot: snapshot,
   }
 }
 

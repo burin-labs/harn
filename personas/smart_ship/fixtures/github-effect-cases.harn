@@ -204,6 +204,7 @@ fn mock_merge(
   const identity = {
     number: 7,
     headRefOid: source.head,
+    headRefName: "feature/reviewed",
     baseRefName: if review_mode == "changed-target" {
       "release"
     } else {

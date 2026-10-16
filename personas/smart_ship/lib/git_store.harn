@@ -166,7 +166,10 @@ pub fn prepare_state(
   return {expected: parent, commit: commit, state: next}
 }
 
-/** A non-force push of a single-parent commit atomically rejects competing remote writers. */
+/**
+ * A non-force push of a single-parent commit atomically rejects competing remote writers.
+ * New integration confirmations belong to the atomic destination-and-state publisher.
+ */
 pub fn commit_state(process: HarnessProcess, store: GitStore, write: StateWrite) -> CommitResult {
   check_store(process, store)
   require is_git_id(write.commit) && (write.expected == nil || is_git_id(write.expected)),
@@ -192,6 +195,13 @@ pub fn commit_state(process: HarnessProcess, store: GitStore, write: StateWrite)
     )
   }
   check_transition(previous, write.state)
+  require write.state.effects.all(
+    { effect ->
+      effect.request.kind != "integration" || effect.status != "confirmed"
+        || (previous != nil && previous.effects.contains(effect))
+    },
+  ),
+    "integration confirmation requires the atomic destination transaction"
   const before = try {
     remote_commit(process, store)
   }

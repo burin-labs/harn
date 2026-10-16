@@ -549,6 +549,22 @@ pub type Effect = {
 }
 ```
 
+### type `EffectClaim`
+
+Only the actor whose distinct state commit reached the remote owns this dispatch.
+
+```harn
+pub type EffectClaim = {commit: string, state: Controller}
+```
+
+### type `EffectClaimRefusal`
+
+A refused or uncertain claim grants no provider authority; retain the measured revision.
+
+```harn
+pub type EffectClaimRefusal = {observed: string?}
+```
+
 ### type `EffectDispatch`
 
 A started dispatch is never retried from its reservation, even if settlement is uncertain.
@@ -603,7 +619,7 @@ pub type EffectRefusal = {
 A digest cannot stand in for an admission record at the mutation boundary.
 
 ```harn
-pub type EffectRequest = AdmissionEffect | ReleaseEffect | RerunEffect
+pub type EffectRequest = AdmissionEffect | IntegrationEffect | ReleaseEffect | RerunEffect
 ```
 
 ### type `EffectTarget`
@@ -702,6 +718,14 @@ pub type Installation = {
   store: GitStore,
   controller: string,
 }
+```
+
+### type `IntegrationEffect`
+
+One repository's cumulative frontier retains every signed change and required job.
+
+```harn
+pub type IntegrationEffect = EffectTarget & {kind: "integration", snapshot: Snapshot}
 ```
 
 ### type `JobInputs`
@@ -1318,9 +1342,28 @@ pub fn claim_repair(
 }
 ```
 
+### fn `claim_reserved_effect`
+
+Run only in the privileged effect owner; workers submit requests and fences.
+The remote CAS is shared by ordinary callbacks and prepared atomic transactions.
+A prior stop refuses the claim. A later control changes the returned commit's guard.
+Transfer stays barred until the claimed effect has a measured terminal outcome.
+
+```harn
+pub fn claim_reserved_effect(
+  host: EffectOwnerHost,
+  store: GitStore,
+  fence: Fence,
+  request: EffectRequest,
+  dispatch_binding: string? = nil,
+) -> Result<EffectClaim, EffectClaimRefusal> {
+}
+```
+
 ### fn `commit_state`
 
 A non-force push of a single-parent commit atomically rejects competing remote writers.
+New integration confirmations belong to the atomic destination-and-state publisher.
 
 ```harn
 pub fn commit_state(process: HarnessProcess, store: GitStore, write: StateWrite) -> CommitResult {
@@ -1338,6 +1381,24 @@ pub fn complete(
   completed: Snapshot,
   proofs: list<Proof>,
   policy: Policy,
+) -> Result<Controller, string> {
+}
+```
+
+### fn `confirm_integration`
+
+Prepare the state that must move atomically with the destination ref.
+A durable dispatch claim is required; preparing this value does not confirm a provider write.
+Reuse offer's complete census, cumulative retention and debt limits at the final boundary.
+
+```harn
+pub fn confirm_integration(
+  state: Controller,
+  fence: Fence,
+  request: IntegrationEffect,
+  policy: Policy,
+  now_ms: int,
+  receipt: EffectReceipt,
 ) -> Result<Controller, string> {
 }
 ```
@@ -1375,10 +1436,7 @@ pub fn decode_reviewed_change(value: unknown) -> ReviewedChangeObservation {
 
 ### fn `dispatch_reserved_effect`
 
-Run only in the privileged effect owner. The callback retains provider credentials there;
-workers submit requests and fences. The remote CAS is the dispatch commitment boundary.
-Stop before commitment refuses dispatch; an already committed provider action requires a
-measured terminal receipt. Transfer is barred throughout dispatch and uncertain recovery.
+Claim once, call the provider once, and settle its measured result through the same owner.
 
 ```harn
 pub fn dispatch_reserved_effect(
@@ -1477,6 +1535,15 @@ Project durable state without claiming readiness when no job census has been fro
 
 ```harn
 pub fn inspect_installation(process: HarnessProcess, config: Installation) -> Inspection {
+}
+```
+
+### fn `integration_effect`
+
+Derive the mutation identity from the complete immutable single-repository frontier.
+
+```harn
+pub fn integration_effect(snapshot: Snapshot) -> IntegrationEffect {
 }
 ```
 
@@ -1703,6 +1770,7 @@ pub fn reserve_effect(
   request: EffectRequest,
   policy: Policy,
   dispatch_binding: string? = nil,
+  now_ms: int? = nil,
 ) -> Result<Controller, EffectRefusal> {
 }
 ```

@@ -6,6 +6,7 @@ const census: GithubPullRequestReviewCensus = {
   repository: "example/project",
   number: 17,
   head_oid: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  head_branch: "feature/reviewed",
   base_oid: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
   base_branch: "main",
   author: {id: "author-id", login: "author", type: "User"},
