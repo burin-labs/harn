@@ -698,6 +698,7 @@ fn workflow() {
       },
       "ci-walltime-report": {
         "runs-on": "ubuntu-24.04",
+        permissions: {actions: "read", checks: "read", contents: "read"},
         needs: artifact_consumer_needs,
         if: artifact_consumer_if,
         steps: [
@@ -1139,6 +1140,28 @@ pipeline test_rejects_serialized_live_artifact_handoff(harness: Harness, task: u
       "ci.yml:ci-walltime-report must publish a non-empty fail-closed timing report off the conformance tail",
     ),
   )
+}
+
+@test
+pipeline test_timing_report_requires_read_only_terminal_check_access() {
+  const valid = workflow()
+  for permissions in [
+    {actions: "read", contents: "read"},
+    {actions: "read", checks: "write", contents: "read"},
+  ] {
+    const invalid = {
+      ...valid,
+      jobs: {
+        ...valid.jobs,
+        "ci-walltime-report": {...valid.jobs["ci-walltime-report"], permissions: permissions},
+      },
+    }
+    assert(
+      ci_linux_lane_policy_errors(invalid).contains(
+        "ci.yml:ci-walltime-report requires read-only Checks access for terminal job evidence",
+      ),
+    )
+  }
 }
 
 @test
