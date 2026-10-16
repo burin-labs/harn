@@ -25,6 +25,16 @@ pub(crate) fn diagnostic_disposition(message: &serde_json::Value) -> (bool, Opti
     }
 }
 
+/// Publication is private transcript state, not part of a provider message.
+/// Leave malformed or misplaced markers intact so strict admission refuses them.
+pub(crate) fn strip_provider_metadata(message: &mut serde_json::Value) {
+    if message["role"] == "assistant" && diagnostic_disposition(message).1.is_some() {
+        if let Some(object) = message.as_object_mut() {
+            object.remove(KEY);
+        }
+    }
+}
+
 #[derive(serde::Serialize, serde::Deserialize)]
 struct Change {
     message_index: usize,
