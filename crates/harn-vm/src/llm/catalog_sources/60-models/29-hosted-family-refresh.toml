@@ -1,0 +1,175 @@
+# Latest hosted family releases from https://openrouter.ai/api/v1/models,
+# read October 15, 2026. Native tool claims are backed by the refresh report at
+# docs/llm/provider-evidence/2026-10-15-catalog-refresh.md.
+
+[models."unbiased/pareto-26.9"]
+name = "Pareto 26.9 (OpenRouter)"
+provider = "openrouter"
+context_window = 262144
+capabilities = ["tools", "streaming", "vision", "prompt_caching"]
+pricing = { input_per_mtok = 2.50, output_per_mtok = 7.50, cache_read_per_mtok = 0.25 }
+family = "unbiased-pareto"
+lineage = "unbiased-pareto-26"
+tier = "frontier"
+
+[models."perceptron/perceptron-mk1.5"]
+name = "Perceptron Mk1.5 (OpenRouter)"
+provider = "openrouter"
+context_window = 36864
+capabilities = ["tools", "streaming", "thinking", "vision"]
+pricing = { input_per_mtok = 0.15, output_per_mtok = 1.50 }
+family = "perceptron"
+lineage = "perceptron-mk1"
+tier = "mid"
+
+[models."aion-labs/aion-3.5"]
+name = "Aion 3.5 (OpenRouter)"
+provider = "openrouter"
+context_window = 262144
+capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 3.00, output_per_mtok = 6.00, cache_read_per_mtok = 0.75 }
+family = "aion"
+lineage = "aion-3"
+tier = "frontier"
+
+[models."aion-labs/aion-3.5-mini"]
+name = "Aion 3.5 Mini (OpenRouter)"
+provider = "openrouter"
+context_window = 262144
+capabilities = ["streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 0.70, output_per_mtok = 1.40, cache_read_per_mtok = 0.18 }
+family = "aion"
+lineage = "aion-3"
+tier = "mid"
+
+[models."upstage/solar-mini4"]
+name = "Solar Mini 4 (OpenRouter)"
+provider = "openrouter"
+context_window = 524288
+capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 0.05, output_per_mtok = 0.20, cache_read_per_mtok = 0.005 }
+family = "upstage-solar"
+lineage = "upstage-solar-4"
+tier = "small"
+
+[models."upstage/solar-pro4"]
+name = "Solar Pro 4 (OpenRouter)"
+provider = "openrouter"
+context_window = 524288
+capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 0.09, output_per_mtok = 0.36, cache_read_per_mtok = 0.018 }
+family = "upstage-solar"
+lineage = "upstage-solar-4"
+tier = "mid"
+
+[models."xiaomi/mimo-v2.6-pro-ultraspeed"]
+name = "MiMo V2.6 Pro UltraSpeed (OpenRouter)"
+provider = "openrouter"
+context_window = 1048576
+capabilities = ["tools", "streaming", "thinking", "vision", "prompt_caching"]
+pricing = { input_per_mtok = 4.35, output_per_mtok = 8.70, cache_read_per_mtok = 0.036 }
+family = "xiaomi-mimo"
+lineage = "xiaomi-mimo-v2"
+tier = "frontier"
+
+[models."qwen/qwen3.8-omni-flash"]
+name = "Qwen 3.8 Omni Flash (OpenRouter)"
+provider = "openrouter"
+context_window = 1000000
+capabilities = ["tools", "streaming", "thinking", "vision", "prompt_caching"]
+pricing = { input_per_mtok = 0.15, output_per_mtok = 0.47, cache_read_per_mtok = 0.016 }
+family = "qwen"
+lineage = "qwen-3-8"
+tier = "mid"
+
+[models."qwen/qwen3.8-flash"]
+name = "Qwen 3.8 Flash (OpenRouter)"
+provider = "openrouter"
+context_window = 1000000
+capabilities = ["tools", "streaming", "thinking", "vision", "prompt_caching"]
+pricing = { input_per_mtok = 0.15, output_per_mtok = 0.47, cache_read_per_mtok = 0.016 }
+family = "qwen"
+lineage = "qwen-3-8"
+tier = "mid"
+
+[models."qwen/qwen3.8-2.4t-a95b"]
+name = "Qwen 3.8 2.4T A95B (OpenRouter)"
+provider = "openrouter"
+context_window = 1048576
+capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 2.00, output_per_mtok = 6.00, cache_read_per_mtok = 0.25 }
+family = "qwen"
+lineage = "qwen-3-8"
+tier = "frontier"
+open_weight = true
+
+[models."tencent/hy4-preview"]
+name = "Tencent Hy4 Preview (OpenRouter)"
+provider = "openrouter"
+context_window = 1048576
+capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
+# Daytime route rate. The index also advertises a cheaper UTC night rate.
+pricing = { input_per_mtok = 0.834, output_per_mtok = 2.501, cache_read_per_mtok = 0.042 }
+family = "tencent-hunyuan"
+lineage = "tencent-hy4"
+tier = "frontier"
+open_weight = true
+
+[models."nex-agi/nex-n2.5-pro"]
+name = "Nex N2.5 Pro (OpenRouter)"
+provider = "openrouter"
+context_window = 262144
+capabilities = ["tools", "streaming", "thinking", "vision", "prompt_caching"]
+pricing = { input_per_mtok = 0.075, output_per_mtok = 0.25, cache_read_per_mtok = 0.015 }
+family = "nex-agi"
+lineage = "nex-n2"
+tier = "mid"
+
+[models."ibm-granite/granite-4.2-8b"]
+name = "Granite 4.2 8B (OpenRouter)"
+provider = "openrouter"
+context_window = 131072
+capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 0.06, output_per_mtok = 0.25, cache_read_per_mtok = 0.015 }
+family = "ibm-granite"
+lineage = "ibm-granite-4"
+tier = "small"
+open_weight = true
+
+[models."meta/muse-spark-1.3"]
+name = "Muse Spark 1.3 (OpenRouter)"
+provider = "openrouter"
+context_window = 1048576
+capabilities = ["tools", "streaming", "thinking", "vision", "prompt_caching"]
+pricing = { input_per_mtok = 1.25, output_per_mtok = 4.25, cache_read_per_mtok = 0.15 }
+family = "meta-muse"
+lineage = "meta-muse-spark"
+tier = "frontier"
+
+[models."meta/muse-spark-1.3-contributor"]
+name = "Muse Spark 1.3 Contributor (OpenRouter)"
+provider = "openrouter"
+# The only upstream trains on requests; this account's privacy guard refuses it.
+availability = "unknown"
+context_window = 1048576
+capabilities = ["tools", "streaming", "thinking", "vision", "prompt_caching"]
+pricing = { input_per_mtok = 0.10, output_per_mtok = 0.20, cache_read_per_mtok = 0.002 }
+family = "meta-muse"
+lineage = "meta-muse-spark"
+tier = "mid"
+
+[models."meta/muse-spark-1.3-contributor".data_controls]
+training_default = "trains"
+note = "Meta's contributor tier trains on requests. OpenRouter account privacy settings can exclude this route."
+checked_on = "2026-10-15"
+sources = ["https://developer.meta.com/ai/products/meta-model-api/"]
+
+[models."bytedance-seed/seed-2-1-turbo"]
+name = "Seed 2.1 Turbo (OpenRouter)"
+provider = "openrouter"
+context_window = 262144
+capabilities = ["tools", "streaming", "thinking", "vision"]
+pricing = { input_per_mtok = 0.50, output_per_mtok = 2.50 }
+family = "bytedance-seed"
+lineage = "bytedance-seed-2"
+tier = "mid"

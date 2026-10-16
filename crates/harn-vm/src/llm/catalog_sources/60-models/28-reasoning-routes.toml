@@ -1,0 +1,98 @@
+# Additional current reasoning routes from provider indexes, 2026-10-15.
+# https://openrouter.ai/api/v1/models
+# https://api.together.xyz/v1/models
+# https://api.deepinfra.com/v1/openai/models
+# https://fireworks.ai/models/fireworks/inkling
+
+[models."thinkingmachines/inkling"]
+name = "Inkling (OpenRouter)"
+provider = "openrouter"
+context_window = 524288
+capabilities = ["tools", "streaming", "thinking", "vision", "prompt_caching"]
+pricing = { input_per_mtok = 1.00, output_per_mtok = 4.05, cache_read_per_mtok = 0.17 }
+tier = "frontier"
+open_weight = true
+family = "thinkingmachines-inkling"
+strengths = ["coding", "reasoning", "tool_use", "long_context"]
+
+[models."thinkingmachines/inkling-small"]
+name = "Inkling Small (OpenRouter)"
+provider = "openrouter"
+context_window = 524288
+capabilities = ["tools", "streaming", "thinking", "vision", "prompt_caching"]
+pricing = { input_per_mtok = 0.45, output_per_mtok = 1.20, cache_read_per_mtok = 0.10 }
+tier = "mid"
+open_weight = true
+family = "thinkingmachines-inkling"
+strengths = ["speed", "reasoning", "tool_use", "long_context"]
+
+[models."together/thinkingmachines/Inkling"]
+name = "Inkling (Together)"
+provider = "together"
+wire_model = "thinkingmachines/Inkling"
+context_window = 524288
+capabilities = ["tools", "streaming", "thinking", "vision", "prompt_caching"]
+pricing = { input_per_mtok = 1.00, output_per_mtok = 4.05, cache_read_per_mtok = 0.17 }
+tier = "frontier"
+open_weight = true
+family = "thinkingmachines-inkling"
+strengths = ["coding", "reasoning", "tool_use", "long_context"]
+
+[models."accounts/fireworks/models/inkling"]
+name = "Inkling (Fireworks)"
+provider = "fireworks"
+context_window = 1048576
+capabilities = ["tools", "streaming", "thinking", "vision"]
+tier = "frontier"
+open_weight = true
+family = "thinkingmachines-inkling"
+strengths = ["coding", "reasoning", "tool_use", "long_context"]
+
+[models."deepinfra/thinkingmachines/Inkling-Small"]
+name = "Inkling Small (DeepInfra)"
+provider = "deepinfra"
+wire_model = "thinkingmachines/Inkling-Small"
+context_window = 524288
+capabilities = ["tools", "streaming", "thinking", "vision", "prompt_caching"]
+pricing = { input_per_mtok = 0.45, output_per_mtok = 1.20, cache_read_per_mtok = 0.10 }
+tier = "mid"
+open_weight = true
+family = "thinkingmachines-inkling"
+strengths = ["speed", "reasoning", "tool_use", "long_context"]
+
+[models."nvidia/nemotron-3.5-lightning"]
+name = "Nemotron 3.5 Lightning (OpenRouter)"
+provider = "openrouter"
+context_window = 262144
+capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 0.07, output_per_mtok = 0.20, cache_read_per_mtok = 0.04 }
+tier = "mid"
+open_weight = true
+family = "nvidia-nemotron"
+lineage = "nvidia-nemotron-3-5"
+strengths = ["speed", "cheap", "tool_use"]
+
+[models."deepinfra/nvidia/NVIDIA-Nemotron-3.5-Lightning"]
+name = "Nemotron 3.5 Lightning (DeepInfra)"
+provider = "deepinfra"
+wire_model = "nvidia/NVIDIA-Nemotron-3.5-Lightning"
+context_window = 262144
+capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 0.06, output_per_mtok = 0.16, cache_read_per_mtok = 0.03 }
+tier = "mid"
+open_weight = true
+family = "nvidia-nemotron"
+lineage = "nvidia-nemotron-3-5"
+strengths = ["speed", "cheap", "tool_use"]
+
+[models."qwen/qwen3.8-max-prime"]
+name = "Qwen 3.8 Max Prime (OpenRouter)"
+provider = "openrouter"
+context_window = 1000000
+capabilities = ["tools", "streaming", "thinking", "vision", "prompt_caching"]
+pricing = { input_per_mtok = 4.00, output_per_mtok = 12.00, cache_read_per_mtok = 0.50 }
+tier = "reasoning"
+open_weight = false
+family = "qwen"
+lineage = "qwen-3-8"
+strengths = ["coding", "reasoning", "tool_use", "long_context"]
