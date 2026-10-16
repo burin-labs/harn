@@ -1911,7 +1911,7 @@ pipeline test_rejects_masked_workspace_test_failure() {
           { step ->
             return {
               ...step,
-              run: to_string(step?.run ?? "").replace(
+              run: to_string(step.run ?? "").replace(
                 "run_workspace_tests.sh \"$HARN_EXT_TEST_PARTITION\"",
                 "run_workspace_tests.sh \"$HARN_EXT_TEST_PARTITION\" || true",
               ),
@@ -1942,7 +1942,7 @@ pipeline test_rejects_host_bound_sandbox_coverage_drift() {
         ...partitions,
         steps: partitions.steps.map(
           { step ->
-            if step?.name != "Run Rust workspace tests" {
+            if step.name != "Run Rust workspace tests" {
               return step
             }
             return {...step, run: "cargo-nextest nextest run --locked --workspace --profile ci"}

@@ -59,7 +59,8 @@ const TEST_PRODUCER_STEP_BUDGETS: list<StepBudget> = [
   // 720s cold on 8 vCPU; the free 4 vCPU rung (harn#9370) takes the owned
   // rung's 24 minutes for the same reason as the CLI build above.
   {name: "Build security test archive", minutes: 24, cold_seconds: 720},
-  // Retain the former whole-suite allowance for the kill-switch archive.
+  // Retain the former whole-workspace compile-and-test allowance as the
+  // archive fallback's conservative reference; archive-only cold time is unmeasured.
   {name: "Build portable workspace test archive", minutes: 26, cold_seconds: 496},
 ]
 
@@ -1136,6 +1137,11 @@ fn parallel_rust_proof_errors(workflow: dict) -> list<string> {
     errors = errors
       + ["ci.yml:rust-test must run only as the co-location kill-switch fallback"]
   }
+  return errors + rust_test_aggregate_errors(workflow)
+}
+
+fn rust_test_aggregate_errors(workflow: dict) -> list<string> {
+  let errors: list<string> = []
   const aggregate = workflow?.jobs?.["rust-test-status"]
   const aggregate_step = step_by_name(aggregate?.steps ?? [], "Verify complete Rust test results")
   const required_env = {
