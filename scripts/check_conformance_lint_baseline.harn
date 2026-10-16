@@ -1,6 +1,13 @@
 import { check_files } from "./lib/stdlib_diagnostics"
 import { baseline_delta } from "./lib/text_baseline"
 
+type RejectedEnvelope = {
+  schemaVersion: int,
+  ok: bool,
+  data: unknown,
+  error: {code: string, message: string},
+}
+
 /** Collect the complete checker census before accepting or updating a baseline. */
 pub fn diagnostic_rows(
   stdout: string,
@@ -78,8 +85,9 @@ fn main(harness: Harness) {
   }
   let files: list<string> = []
   let hidden: list<string> = []
-  // scan-refused: the filtered source census below throws when files is empty.
-  for entry in harness.fs.walk(root, {follow_symlinks: false}) {
+  // Match find's raw file census, including a literal .harn file and ignored fixtures.
+  // scan-refused: the filtered source census below throws when both lists are empty.
+  for entry in harness.fs.walk(root, {follow_symlinks: false, ignore_policy: "none"}) {
     if !entry.is_file || !entry.path.ends_with(".harn") {
       continue
     }
@@ -93,27 +101,36 @@ fn main(harness: Harness) {
       files = files + [entry.path]
     }
   }
-  if len(files) == 0 {
+  if len(files) + len(hidden) == 0 {
     throw "conformance diagnostic census found no source fixtures"
   }
-  const result = harness.process.run(
-    {program: binary, args: ["check", "--json", "--independent"] + files.sorted()},
-  )
-  const requested = files.map({ path -> path_relative_to(path, root) ?? path }).to_list()
-  let rows = diagnostic_rows(result.stdout, result.exit_code, requested, root)
-  // A literal .harn file is not a valid CLI target; keep its reviewed rejection explicit.
+  let rows: list<string> = []
+  if len(files) > 0 {
+    const result = harness.process.run(
+      {program: binary, args: ["check", "--json", "--independent"] + files.sorted()},
+    )
+    const requested = files.map({ path -> path_relative_to(path, root) ?? path }).to_list()
+    rows = diagnostic_rows(result.stdout, result.exit_code, requested, root)
+  }
+  // Some compiler versions reject a literal .harn before collection. Accepted
+  // files still require the same complete report as every ordinary fixture.
   for path in hidden {
-    const rejected = harness.process.run(
+    const result = harness.process.run(
       {program: binary, args: ["check", "--json", "--independent", path]},
     )
-    if rejected.success {
-      throw "hidden source unexpectedly accepted: " + path
+    const relative = path_relative_to(path, root) ?? path
+    match try {
+      diagnostic_rows(result.stdout, result.exit_code, [relative], root)
+    } {
+      Ok(reported) -> { rows = rows + reported }
+      Err(failure) -> {
+        const envelope = json_decode(result.stdout, schema_of(RejectedEnvelope))?
+        if result.success || envelope.ok || envelope.schemaVersion != 1 || envelope.data != nil {
+          throw failure
+        }
+        rows = rows + [relative + "\t__CHECK_FAILED__"]
+      }
     }
-    const envelope = json_parse(rejected.stdout)
-    if envelope.schemaVersion != 1 || envelope.data != nil || type_of(envelope.error) != "dict" {
-      throw "invalid hidden-source rejection"
-    }
-    rows = rows + [(path_relative_to(path, root) ?? path) + "\t__CHECK_FAILED__"]
   }
   const actual = counted_rows(rows)
   const text = if len(actual) == 0 {
