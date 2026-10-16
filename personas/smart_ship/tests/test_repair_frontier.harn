@@ -1,4 +1,4 @@
-import { execution, fixture, proof } from "../fixtures/support"
+import { execution, fixture, proof, reviewed_admission } from "../fixtures/support"
 import {
   Controller,
   RepairPermit,
@@ -57,10 +57,35 @@ pipeline test_new_source_revokes_the_old_incident_worker_and_prevents_reclaim(ha
     repair_authorized(rerun, permit, 3000),
     "same-source verification does not change the repair basis",
   )
+  const incoming = execution(f)
+    + {
+      source: {
+        repository: "project",
+        commit: sha256_hex("new reviewed head"),
+        tree: sha256_hex("reviewed tree"),
+      },
+    }
+  const admission = reviewed_admission(
+    f.policy,
+    f.private_key,
+    {id: "new change", base: f.snapshot.sources[0]!.commit},
+    incoming,
+  )
   const changed = freeze_snapshot(
     f.snapshot
       + {
         sequence: 3,
+        created_at_ms: 3000,
+        changes: f.snapshot.changes
+          + [
+            {
+              id: "new change",
+              repository: "project",
+              head: incoming.source.commit,
+              integrated_commit: sha256_hex("newer commit"),
+              admission: admission,
+            },
+          ],
         sources: f.snapshot.sources.map(
           { source ->
             source + {commit: sha256_hex("newer commit"), tree: sha256_hex("newer tree")}
@@ -99,12 +124,19 @@ pipeline test_new_source_revokes_the_old_incident_worker_and_prevents_reclaim(ha
         proof(
           f,
           execution(f)
-            + {source: changed.sources[0]!, requirement: changed.requirements[0]!, result: "failed"},
+            + {
+              source: changed.sources[0]!,
+              requirement: changed.requirements[0]!,
+              result: "failed",
+              started_at_ms: 4000,
+              completed_at_ms: 4500,
+            },
         ),
       ],
       f.policy,
     ),
   )
   assert_eq(len(newer_failed.incidents), 2, "the newer failure must reach completion")
+  assert_eq(newer_failed.incidents[1]!.verification.failed, ["tests"])
   assert(!repair_authorized(newer_failed, permit, 4000), "failure must not revive the old worker")
 }

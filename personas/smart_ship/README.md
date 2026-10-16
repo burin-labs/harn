@@ -199,11 +199,23 @@ completion returns the unused allowance; expiry, stop, or missing usage retains
 the full charge. `repair_spend` reports `spent_usd` as nil when actual spend is
 unknown, lists every unreported attempt, and reports the conservative charge in
 `committed_usd` to limit further attempts.
+Snapshots declare either reviewed-change origin or repair origin. Repair origin
+binds the incident, controller generation, worker, and reserved attempt into the
+snapshot and verification-request identity. `repair_publication_authorized`
+requires completely measured spend within the reservation before the privileged
+publication owner can accept the proposal. Settled workers cannot keep making
+effects. Unknown usage and overruns hold publication.
+`complete` records repair verification in that attempt's ledger. Another failed
+repair keeps the original incident and remaining budget; `repair_snapshot`
+selects the latest measured repair source for the next attempt. Only independent
+passing verification can resolve the incident and advance its checkpoint.
 `repair_authorized` checks a generation-bound permit against freshly read state
 before a worker effect. A newer source for an incident's repository revokes the
 old worker and prevents reclaiming the obsolete incident, even if the newer
 verification fails. A same-source rerun leaves the repair claim usable.
-Stop revokes claims, including after resume. Transfer
+Stop revokes claims, including after resume. It
+also retains measured spend when revoking a priced proposal; resume cannot
+restore that proposal's publication authority. Transfer
 requires drained workers and moves authority to a new generation in shadow mode.
 The Git state adapter commits transitions with remote compare-and-swap. Stop
 before dispatch commitment refuses the provider callback. An action already

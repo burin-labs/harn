@@ -35,18 +35,24 @@ import {
   Fence,
   Policy,
   Proof,
+  RepairOrigin,
   Snapshot,
   Verification,
 } from "./types"
+pub import { RepairPermit } from "./types"
 import { policy_errors, verify } from "./verification"
 
-/** An unreported attempt retains its full allowance, even after revocation or expiry. */
+/** Independent verification retains repaired source, original proofs and the complete verdict. */
+pub type RepairVerification = {snapshot: Snapshot, proofs: list<Proof>, verification: Verification}
+
+/** Attempt spend and independently measured repair verification share one ledger. */
 pub type RepairAttempt = {
   owner: string,
   lease_until_ms: int,
   max_usd: float,
   spent_usd: float?,
-  status: "active" | "unknown" | "settled",
+  status: "active" | "unknown" | "settled" | "revoked",
+  verification: RepairVerification?,
 }
 
 /** One incident retains the failed immutable source, original evidence, and all repair attempts. */
@@ -57,6 +63,16 @@ pub type Incident = {
   verification: Verification,
   attempts: list<RepairAttempt>,
   resolved: bool,
+}
+
+/** The next attempt repairs the latest measured source while retaining the original incident. */
+pub fn repair_snapshot(incident: Incident) -> Snapshot {
+  for attempt in incident.attempts.reversed() {
+    if attempt.verification != nil {
+      return attempt.verification.snapshot
+    }
+  }
+  return incident.snapshot
 }
 
 /** Charged allowances are distinct from completely measured actual spend. */
@@ -89,13 +105,15 @@ pub fn repair_spend(incident: Incident) -> RepairSpend {
   }
 }
 
-fn revoke_attempts(incident: Incident) -> Incident {
+fn revoke_attempts(incident: Incident, revoke_settled: bool = false) -> Incident {
   return incident
     + {
       attempts: incident.attempts.map(
         { attempt ->
           if attempt.status == "active" {
             attempt + {status: "unknown"}
+          } else if revoke_settled && attempt.status == "settled" && attempt.verification == nil {
+            attempt + {status: "revoked"}
           } else {
             attempt
           }
@@ -155,18 +173,9 @@ pub fn retained_repository_snapshot(state: Controller, repository: string) -> Sn
   return nil
 }
 
-/** A repair worker's claim is bound to the controller that issued it. */
-pub type RepairPermit = {
-  installation: string,
-  generation: int,
-  controller: string,
-  incident: string,
-  owner: string,
-  attempt: int,
-}
-
 fn repair_basis_current(state: Controller, incident: Incident) -> bool {
-  let observed = state.incidents.map({ item -> item.snapshot })
+  const basis = repair_snapshot(incident)
+  let observed = state.incidents.map(repair_snapshot)
   for snapshot in [state.pending, state.active, state.checkpoint?.snapshot] {
     if snapshot != nil {
       observed.push(snapshot)
@@ -180,20 +189,13 @@ fn repair_basis_current(state: Controller, incident: Incident) -> bool {
   }
   return !observed.any(
     { snapshot ->
-      snapshot.sequence > incident.snapshot.sequence
-        && snapshot.sources.any(
-          { source ->
-            incident.snapshot.sources.any(
-              { original -> original.repository == source.repository && original != source },
-            )
-          },
-        )
+      snapshot.sequence > basis.sequence
+        && source_changed(snapshot, basis)
     },
   )
 }
 
-/** Check against freshly read durable state immediately before a repair effect. */
-pub fn repair_authorized(state: Controller, permit: RepairPermit, now_ms: int) -> bool {
+fn repair_claim_current(state: Controller, permit: RepairPermit, now_ms: int) -> bool {
   const incident = state.incidents.find({ item -> item.id == permit.incident })
   if incident == nil || len(incident.attempts) == 0 {
     return false
@@ -206,7 +208,6 @@ pub fn repair_authorized(state: Controller, permit: RepairPermit, now_ms: int) -
     && !incident.resolved
     && repair_basis_current(state, incident)
     && attempt != nil
-    && attempt.status == "active"
     && attempt.owner == permit.owner
     && len(incident.attempts) == permit.attempt
     && attempt.max_usd > 0.0
@@ -216,6 +217,28 @@ pub fn repair_authorized(state: Controller, permit: RepairPermit, now_ms: int) -
         incident.snapshot.sources.any({ source -> source.repository == repository })
       },
     )
+}
+
+/** Check against freshly read durable state immediately before a worker effect. */
+pub fn repair_authorized(state: Controller, permit: RepairPermit, now_ms: int) -> bool {
+  if !repair_claim_current(state, permit, now_ms) {
+    return false
+  }
+  const incident = state.incidents.find({ item -> item.id == permit.incident })!
+  return incident.attempts[permit.attempt - 1]!.status == "active"
+}
+
+/** Only a completely priced, current proposal can reach the privileged publication owner. */
+pub fn repair_publication_authorized(state: Controller, permit: RepairPermit, now_ms: int) -> bool {
+  if !repair_claim_current(state, permit, now_ms) {
+    return false
+  }
+  const incident = state.incidents.find({ item -> item.id == permit.incident })!
+  const attempt = incident.attempts[permit.attempt - 1]!
+  return attempt.status == "settled" && attempt.verification == nil
+    && attempt.spent_usd != nil
+    && attempt.spent_usd <= attempt.max_usd
+    && repair_spend(incident).committed_usd <= state.authority.policy.max_repair_usd
 }
 
 /** Fresh authority exposes only the spend already reserved for this exact attempt. */
@@ -228,6 +251,79 @@ pub fn repair_allowance(state: Controller, permit: RepairPermit, now_ms: int) ->
     return nil
   }
   return incident.attempts[permit.attempt - 1]?.max_usd
+}
+
+fn preserves_work(snapshot: Snapshot, basis: Snapshot) -> bool {
+  return basis.changes.all({ change -> snapshot.changes.contains(change) })
+    && basis.requirements.all(
+      { required ->
+        snapshot.requirements.any(
+          { job ->
+            requirement_identity(job)
+              == requirement_identity(required + {input_digest: job.input_digest})
+          },
+        )
+      },
+    )
+}
+
+fn source_changed(snapshot: Snapshot, basis: Snapshot) -> bool {
+  return snapshot.sources.any(
+    { source ->
+      basis.sources.any(
+        { original -> original.repository == source.repository && original != source },
+      )
+    },
+  )
+}
+
+fn qualify_snapshot_origin(
+  state: Controller,
+  snapshot: Snapshot,
+  now_ms: int,
+) -> Result<RepairOrigin?, string> {
+  if snapshot.origin.kind != "repair" {
+    for incident in state.incidents {
+      const basis = repair_snapshot(incident)
+      const unclaimed = basis.sources.any(
+        { original_source ->
+          const source = snapshot.sources.find(
+            { row -> row.repository == original_source.repository },
+          )
+          source != nil && source != original_source
+            && !snapshot.changes.any(
+              { change ->
+                change.repository == original_source.repository
+                  && !basis.changes.any(
+                    { original ->
+                      original.id == change.id && original.head == change.head
+                        && original.repository == change.repository
+                    },
+                  )
+              },
+            )
+        },
+      )
+      if !incident.resolved && unclaimed {
+        return Err("changed incident source requires its bounded repair origin")
+      }
+    }
+    return Ok(nil)
+  }
+  const origin: RepairOrigin = schema_expect(snapshot.origin, schema_of(RepairOrigin))
+  if !repair_publication_authorized(state, origin.permit, now_ms) {
+    return Err("repair source authority is absent, revoked, expired, or superseded")
+  }
+  const incident = state.incidents.find({ item -> item.id == origin.permit.incident })!
+  const basis = repair_snapshot(incident)
+  if snapshot.sequence <= basis.sequence || !preserves_work(snapshot, basis)
+    || snapshot.sources.map({ source -> source.repository }).sorted()
+      != basis.sources.map({ source -> source.repository }).sorted() {
+    return Err(
+      "repair source must preserve its incident's repositories, admitted work, and required jobs",
+    )
+  }
+  return Ok(origin)
 }
 
 fn authorized(state: Controller, fence: Fence) -> bool {
@@ -550,7 +646,9 @@ pub fn offer(
   policy: Policy,
   now_ms: int,
 ) -> Result<Controller, string> {
-  if !authorized(state, fence) || state.authority.mode != "active"
+  const admission_mode = state.authority.mode == "active"
+    || (state.authority.mode == "draining" && snapshot.origin.kind == "repair")
+  if !authorized(state, fence) || !admission_mode
     || !policy_matches(state, policy) {
     return Err("admission authority unavailable")
   }
@@ -568,6 +666,10 @@ pub fn offer(
     ) {
     return Err("snapshot policy is invalid or a repository is held")
   }
+  const origin = qualify_snapshot_origin(state, snapshot, now_ms)
+  if is_err(origin) {
+    return Err(unwrap_err(origin))
+  }
   if snapshot.sequence <= (latest?.sequence ?? state.authority.promoted_sequence) {
     return Err("snapshot is duplicate or obsolete")
   }
@@ -582,7 +684,7 @@ pub fn offer(
     }
   }
   const since = state.unverified_since_ms ?? now_ms
-  if now_ms < since || now_ms - since >= policy.max_unverified_ms
+  if now_ms < since || (unwrap(origin) == nil && now_ms - since >= policy.max_unverified_ms)
     || len(snapshot.changes) > policy.max_changes {
     return Err("unverified work budget exhausted")
   }
@@ -629,6 +731,20 @@ pub fn complete(
   if decision.verification.status == "verified" && decision.status != "promote" {
     return Err(decision.reason)
   }
+  let repaired: RepairOrigin? = nil
+  if completed.origin.kind == "repair" {
+    repaired = schema_expect(completed.origin, schema_of(RepairOrigin))
+    const incident = state.incidents.find({ item -> item.id == repaired.permit.incident })
+    if incident == nil || repaired.permit.attempt <= 0 {
+      return Err("repair verification incident or attempt is absent")
+    }
+    const attempt = incident.attempts[repaired.permit.attempt - 1]
+    if attempt == nil || attempt.owner != repaired.permit.owner
+      || repaired.permit.attempt != len(incident.attempts)
+      || attempt.verification != nil {
+      return Err("repair verification belongs to an absent, stale, or already measured attempt")
+    }
+  }
   let next = advance(state)
   next.active = nil
   if decision.status == "promote" && decision.checkpoint != nil {
@@ -639,17 +755,8 @@ pub fn complete(
     // this independently verified checkpoint. A newer sequence alone is not proof.
     next.incidents = next.incidents.map(
       { incident ->
-        if incident.snapshot.changes.all({ change -> completed.changes.contains(change) })
-          && incident.snapshot.requirements.all(
-            { required ->
-              completed.requirements.any(
-                { job ->
-                  requirement_identity(job)
-                    == requirement_identity(required + {input_digest: job.input_digest})
-                },
-              )
-            },
-          ) {
+        if preserves_work(completed, incident.snapshot)
+          && preserves_work(completed, repair_snapshot(incident)) {
           revoke_attempts(incident) + {resolved: true}
         } else {
           incident
@@ -663,7 +770,7 @@ pub fn complete(
     } else {
       next.unverified_since_ms
     }
-  } else {
+  } else if repaired == nil {
     const id = snapshot_id(completed)
     if !next.incidents.any({ incident -> incident.id == id }) {
       next.incidents = next.incidents
@@ -678,6 +785,27 @@ pub fn complete(
           },
         ]
     }
+  }
+  if repaired != nil {
+    next.incidents = next.incidents.map(
+      { incident ->
+        if incident.id != repaired.permit.incident {
+          incident
+        } else {
+          let attempts = incident.attempts
+          const index = repaired.permit.attempt - 1
+          attempts[index] = attempts[index]!
+            + {
+              verification: {
+                snapshot: completed,
+                proofs: proofs,
+                verification: decision.verification,
+              },
+            }
+          incident + {attempts: attempts}
+        }
+      },
+    )
   }
   return Ok(next)
 }
@@ -731,6 +859,7 @@ pub fn claim_repair(
                   max_usd: max_usd,
                   spent_usd: nil,
                   status: "active",
+                  verification: nil,
                 },
               ],
           }
@@ -752,7 +881,7 @@ pub fn control(
   let next = advance(state)
   next.authority.mode = mode
   if mode == "stopped" || mode == "shadow" {
-    next.incidents = next.incidents.map(revoke_attempts)
+    next.incidents = next.incidents.map({ incident -> revoke_attempts(incident, true) })
     next.effects = next.effects.map(
       { effect ->
         if effect.status == "reserved" && effect.dispatch_id == nil {

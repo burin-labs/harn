@@ -1226,7 +1226,7 @@ pub type ReleaseRequest = {checkpoint: string, source: Source, artifacts: list<A
 
 ### type `RepairAttempt`
 
-An unreported attempt retains its full allowance, even after revocation or expiry.
+Attempt spend and independently measured repair verification share one ledger.
 
 ```harn
 pub type RepairAttempt = {
@@ -1234,7 +1234,8 @@ pub type RepairAttempt = {
   lease_until_ms: int,
   max_usd: float,
   spent_usd: float?,
-  status: "active" | "unknown" | "settled",
+  status: "active" | "unknown" | "settled" | "revoked",
+  verification: RepairVerification?,
 }
 ```
 
@@ -1268,9 +1269,17 @@ pub type RepairModel = {
 }
 ```
 
+### type `RepairOrigin`
+
+Repaired source retains the exact incident and spend reservation that authorized it.
+
+```harn
+pub type RepairOrigin = {kind: "repair", permit: RepairPermit}
+```
+
 ### type `RepairPermit`
 
-A repair worker's claim is bound to the controller that issued it.
+A repair claim names the controller, incident, worker and reserved attempt.
 
 ```harn
 pub type RepairPermit = {
@@ -1311,6 +1320,14 @@ Charged allowances are distinct from completely measured actual spend.
 
 ```harn
 pub type RepairSpend = {committed_usd: float, spent_usd: float?, unreported_attempts: list<int>}
+```
+
+### type `RepairVerification`
+
+Independent verification retains repaired source, original proofs and the complete verdict.
+
+```harn
+pub type RepairVerification = {snapshot: Snapshot, proofs: list<Proof>, verification: Verification}
 ```
 
 ### type `Requirement`
@@ -1479,11 +1496,20 @@ pub type Snapshot = {
   policy_digest: string,
   previous_checkpoint: string,
   created_at_ms: int,
+  origin: SnapshotOrigin,
   sources: list<Source>,
   changes: list<Change>,
   requirements: list<Requirement>,
   inventory_complete: bool,
 }
+```
+
+### type `SnapshotOrigin`
+
+Ordinary reviewed admission and bounded repair have distinct source authority.
+
+```harn
+pub type SnapshotOrigin = {kind: "changes"} | RepairOrigin
 ```
 
 ### type `Source`
@@ -2111,10 +2137,28 @@ pub fn repair_allowance(state: Controller, permit: RepairPermit, now_ms: int) ->
 
 ### fn `repair_authorized`
 
-Check against freshly read durable state immediately before a repair effect.
+Check against freshly read durable state immediately before a worker effect.
 
 ```harn
 pub fn repair_authorized(state: Controller, permit: RepairPermit, now_ms: int) -> bool {
+}
+```
+
+### fn `repair_publication_authorized`
+
+Only a completely priced, current proposal can reach the privileged publication owner.
+
+```harn
+pub fn repair_publication_authorized(state: Controller, permit: RepairPermit, now_ms: int) -> bool {
+}
+```
+
+### fn `repair_snapshot`
+
+The next attempt repairs the latest measured source while retaining the original incident.
+
+```harn
+pub fn repair_snapshot(incident: Incident) -> Snapshot {
 }
 ```
 

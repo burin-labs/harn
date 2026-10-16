@@ -51,6 +51,22 @@ pub type Policy = {
   max_repair_usd: float,
 }
 
+/** A repair claim names the controller, incident, worker and reserved attempt. */
+pub type RepairPermit = {
+  installation: string,
+  generation: int,
+  controller: string,
+  incident: string,
+  owner: string,
+  attempt: int,
+}
+
+/** Repaired source retains the exact incident and spend reservation that authorized it. */
+pub type RepairOrigin = {kind: "repair", permit: RepairPermit}
+
+/** Ordinary reviewed admission and bounded repair have distinct source authority. */
+pub type SnapshotOrigin = {kind: "changes"} | RepairOrigin
+
 /** A frozen frontier and the complete job census derived by the owning scope adapter. */
 pub type Snapshot = {
   schema: "smart-ship.snapshot.v1",
@@ -60,6 +76,7 @@ pub type Snapshot = {
   policy_digest: string,
   previous_checkpoint: string,
   created_at_ms: int,
+  origin: SnapshotOrigin,
   sources: list<Source>,
   changes: list<Change>,
   requirements: list<Requirement>,
