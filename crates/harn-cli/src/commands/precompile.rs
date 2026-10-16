@@ -1,22 +1,7 @@
-//! `harn precompile` — dispatches the directory-walk + per-file fanout
-//! to the embedded `cli/precompile.harn` script.
+//! Compile adjacent bytecode and imported interfaces for `harn precompile`.
 //!
-//! The .harn port owns argv parsing, walking, --out path mirroring, and
-//! the per-file progress and summary render. The actual parse, typecheck,
-//! and compile work stays in Rust behind a command-specific internal mode:
-//! the script spawns `harn precompile <single-file>` per source with
-//! `HARN_PRECOMPILE_INNER=1` so the child compiles one source instead of
-//! recursing back into the directory walker.
-//!
-//! Phase deferrals: `harn time` and `harn bench` (the other two W13
-//! commands) stay Rust-only in this PR — both depend on in-process VM
-//! thread-locals (LLM trace summary, profile spans, `getrusage` CPU
-//! samples) that don't survive a `harness.process.run` subprocess boundary
-//! without inventing a new child-binary emit protocol. The W13 ticket
-//! description presumed an `--internal-phase-emit` protocol on `harn
-//! run` that doesn't actually exist in the current codebase; the
-//! preconditions for porting each are filed as #2348 (`harn bench` →
-//! `--emit-summary-json`) and #2350 (`harn time` → `--emit-phase-json`).
+//! The embedded driver owns the directory walk and bounded subprocess fanout.
+//! Its inner compiler validates each source and emits or reuses all artifacts.
 use harn_vm::bytecode_cache::{CACHE_EXTENSION, INTERFACE_CACHE_EXTENSION, MODULE_CACHE_EXTENSION};
 use std::path::Path;
 
@@ -221,19 +206,13 @@ fn precompile_one(
         out_root,
         INTERFACE_CACHE_EXTENSION,
     )?;
-    let interface = harn_vm::bytecode_cache::prepare_precompiled_interface(
-        &interface_dest,
-        source_path,
-        &source,
-    )
-    .map_err(|e| format!("write {}: {e}", interface_dest.display()))?;
-    let keys = artifact_keys(
+    let (keys, interface) = artifact_keys(
         source_path,
         &source,
         source_root,
         &authority,
-        interface.context(),
-    );
+        &interface_dest,
+    )?;
     let entry_dest = output_path(source_path, source_root, out_root, CACHE_EXTENSION)?;
     let module_dest = output_path(source_path, source_root, out_root, MODULE_CACHE_EXTENSION)?;
     if keys.match_artifacts_at(&entry_dest, &module_dest) {
@@ -243,9 +222,8 @@ fn precompile_one(
         return Ok(Outcome::Reused(entry_dest));
     }
 
-    // Parsed only once reuse has been ruled out. A source whose stored
-    // artifacts carry its own hash parsed cleanly when they were written, so on
-    // the hit path this is the largest cost there was left to skip.
+    // Valid artifacts already proved these bytes parse; only misses need syntax.
+    // Typechecking and compilation use the same prepared interface.
     let (parsed_source, program) = parse_source_file(&path_str);
     debug_assert_eq!(parsed_source, source);
 
