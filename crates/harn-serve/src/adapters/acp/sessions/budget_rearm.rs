@@ -23,6 +23,12 @@ impl ConcurrentSessionControls {
                 .get(session_id)
                 .cloned()
         });
+        if self.machine_spend_quota.is_some() && control.is_none() {
+            return Err(harn_vm::VmError::TypeError(
+                "session/set_budget requires a known sessionId when a machine spend quota is configured"
+                    .into(),
+            ));
+        }
         if let Some(control) = control {
             if let Some(quota) = &self.machine_spend_quota {
                 quota.record_session_budget_update(
@@ -70,12 +76,16 @@ impl ConcurrentSessionControls {
         match self.try_apply_budget_rearm(msg) {
             Ok(applied) => applied,
             Err(error) => {
-                send_routed_error(
-                    output,
-                    msg.get("id").unwrap_or(&serde_json::Value::Null),
-                    -32000,
-                    &error.to_string(),
-                );
+                if let Some(id) = msg.get("id") {
+                    let code = if matches!(&error, harn_vm::VmError::TypeError(_)) {
+                        -32602
+                    } else {
+                        -32000
+                    };
+                    send_routed_error(output, id, code, &error.to_string());
+                } else {
+                    tracing::warn!(%error, "Refused session budget notification");
+                }
                 true
             }
         }
@@ -134,5 +144,88 @@ mod tests {
             control.llm_spend.lock().unwrap().llm_cost_usd,
             Some(CeilingRearm::Set(2.0))
         );
+        let messages = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+        let captured = messages.clone();
+        let output = AcpOutput::callback(move |line| {
+            captured.lock().unwrap().push(line.to_string());
+        });
+        assert!(controls.apply_budget_rearm_with_output(&refused, &output));
+        assert!(
+            messages.lock().unwrap().is_empty(),
+            "notifications have no response"
+        );
+        let mut request = refused;
+        request["id"] = json!(42);
+        assert!(controls.apply_budget_rearm_with_output(&request, &output));
+        let messages = messages.lock().unwrap();
+        assert_eq!(
+            messages.len(),
+            1,
+            "the same failure must respond to a request"
+        );
+        let response: serde_json::Value = serde_json::from_str(&messages[0]).unwrap();
+        assert_eq!(response["id"], 42);
+        assert_eq!(response["error"]["code"], -32000);
+        assert_eq!(
+            control.llm_spend.lock().unwrap().llm_cost_usd,
+            Some(CeilingRearm::Set(2.0))
+        );
+    }
+
+    #[test]
+    fn machine_quota_rearm_requires_a_known_session() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("spend.sqlite");
+        let mut controls = ConcurrentSessionControls::default();
+        controls.machine_spend_quota = Some(
+            harn_vm::llm::MachineSpendQuota::open(
+                &path,
+                "person",
+                harn_vm::llm::MachineSpendPolicy {
+                    daily_limit_microusd: None,
+                    monthly_limit_microusd: Some(1_000_000),
+                    lifetime_limit_microusd: None,
+                },
+            )
+            .unwrap(),
+        );
+        let control = ConcurrentSessionControl::new();
+        controls.register("target", control.clone());
+        let _ambient = harn_vm::install_llm_cost_budget_seeded(Some(5.0), 0.0);
+        for mut params in [
+            json!({}),
+            json!({"sessionId":null}),
+            json!({"sessionId":"missing"}),
+        ] {
+            params["llm_cost_usd"] = json!(9.0);
+            let frame =
+                json!({"jsonrpc":"2.0", "id":7, "method":"session/set_budget", "params":params});
+            assert!(matches!(
+                controls.try_apply_budget_rearm(&frame),
+                Err(harn_vm::VmError::TypeError(_))
+            ));
+            let messages = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+            let captured = messages.clone();
+            let output = AcpOutput::callback(move |line| {
+                captured.lock().unwrap().push(line.to_string());
+            });
+            assert!(controls.apply_budget_rearm_with_output(&frame, &output));
+            let messages = messages.lock().unwrap();
+            assert_eq!(messages.len(), 1);
+            let response: serde_json::Value = serde_json::from_str(&messages[0]).unwrap();
+            assert_eq!(response["id"], 7);
+            assert_eq!(response["error"]["code"], -32602);
+            assert_eq!(harn_vm::peek_llm_cost_budget(), Some(5.0));
+            assert_eq!(control.llm_spend.lock().unwrap().llm_cost_usd, None);
+        }
+        let count: i64 = rusqlite::Connection::open(&path)
+            .unwrap()
+            .query_row(
+                "SELECT COUNT(*) FROM spend_session_budget_audit",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 0, "no session was approved");
     }
 }

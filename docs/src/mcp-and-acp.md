@@ -1322,7 +1322,10 @@ reservation, recovery, and pricing rules.
 
 When a machine quota is configured, both session-budget update methods write
 an audit receipt before applying a change. Only authenticated clients can re-arm
-a session. An audit failure refuses the change; a session raise can't override
+a session, and `session/set_budget` requires a known `sessionId` when a machine
+quota is configured. Invalid requests receive a parameter error. Notifications
+never receive a JSON-RPC response, including when the audit write fails.
+An audit failure refuses the change; a session raise can't override
 the machine limit. Machine-policy raises use the host-only
 `MachineSpendQuota::update_policy` API and retain their own approval receipts.
 
