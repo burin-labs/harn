@@ -42,6 +42,17 @@ fn macos_artifacts_execute_on_windows_without_shared_cache_writes() {
     }
     let cache = TempDir::new().unwrap();
     let outcome = run_harn(cache.path(), &root.path().join("main.harn"));
+    eprintln!(
+        "consumer codegen={} stdlib={:?} key={:?}",
+        harn_vm::bytecode_cache::CODEGEN_FINGERPRINT,
+        harn_vm::bytecode_cache::embedded_stdlib_digest_bytes(),
+        harn_vm::bytecode_cache::CacheKey::from_relocatable_source(
+            &root.path().join("main.harn"),
+            MAIN
+        )
+    );
+    let producer = fs::read(root.path().join("main.harnbc")).unwrap();
+    eprintln!("producer header={:?}", &producer[..256.min(producer.len())]);
     assert_eq!(outcome.exit_code, 0, "{}", outcome.stderr);
     assert!(
         outcome.stdout.contains("cross-host-cache-reached"),
