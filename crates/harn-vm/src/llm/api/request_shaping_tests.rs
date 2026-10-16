@@ -314,12 +314,24 @@ fn streaming_entry_projects_harn_metadata_before_fake_provider_dispatch() {
     ]));
     let mut opts = base_opts("fake");
     opts.model = "fake-stream".into();
-    opts.messages = vec![serde_json::json!({
-        "role": "tool",
-        "tool_call_id": "call_1",
-        "content": "inspected",
-        "_harn": {"result_source": "host_tool"}
-    })];
+    opts.messages = vec![
+        serde_json::json!({
+            "role": "assistant",
+            "content": null,
+            "tool_calls": [{
+                "id": "call_1",
+                "type": "function",
+                "function": {"name": "inspect", "arguments": "{}"}
+            }],
+            "_harn": {"tool_calls": [{"id": "call_1", "name": "inspect"}]}
+        }),
+        serde_json::json!({
+            "role": "tool",
+            "tool_call_id": "call_1",
+            "content": "inspected",
+            "_harn": {"result_source": "host_tool"}
+        }),
+    ];
 
     runtime.block_on(async {
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
@@ -329,12 +341,19 @@ fn streaming_entry_projects_harn_metadata_before_fake_provider_dispatch() {
         assert_eq!(result.text, "finished");
         assert_eq!(rx.try_recv().expect("streamed content"), "finished");
     });
-    assert!(opts.messages[0].get("_harn").is_some());
+    assert!(opts
+        .messages
+        .iter()
+        .any(|message| message.get("_harn").is_some()));
     let calls = fake_llm_captured_calls();
     assert_eq!(calls.len(), 1);
     assert!(calls[0].stream);
-    assert!(calls[0].messages[0].get("_harn").is_none());
-    assert_eq!(calls[0].messages[0]["tool_call_id"], "call_1");
+    assert!(calls[0]
+        .messages
+        .iter()
+        .all(|message| message.get("_harn").is_none()));
+    assert_eq!(calls[0].messages[0]["tool_calls"][0]["id"], "call_1");
+    assert_eq!(calls[0].messages[1]["tool_call_id"], "call_1");
 }
 
 #[test]

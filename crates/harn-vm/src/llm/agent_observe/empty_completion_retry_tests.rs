@@ -73,7 +73,7 @@ fn billed_noncommittal_turn() -> FakeLlmTurn {
 }
 
 #[test]
-fn typed_admission_refusal_measures_zero_while_post_dispatch_failure_stays_unknown() {
+fn typed_admission_refusal_measures_zero_before_provider_dispatch() {
     let _env = crate::llm::env_guard();
     let previous_admission =
         crate::llm::admission::swap_scope(crate::llm::admission::AdmissionScope::default());
@@ -103,30 +103,6 @@ fn typed_admission_refusal_measures_zero_while_post_dispatch_failure_stays_unkno
         assert_eq!(denial["unpriced_calls"], 0);
         assert_eq!(denial["usage_unknown_calls"], 0);
         assert_eq!(denial["cost_usd"], 0.0);
-
-        let possible_transport_transcript = tempfile::tempdir().expect("transcript tempdir");
-        push_llm_transcript_dir(
-            possible_transport_transcript
-                .path()
-                .to_str()
-                .expect("utf8 tempdir"),
-        );
-        let _script = install_fake_llm_script(FakeLlmScript::new().push(FakeLlmTurn::error(
-            crate::value::ErrorCategory::Generic,
-            "connection closed after request bytes were sent",
-        )));
-        let error = observed_llm_call(&fake_opts(), None, None, None, false, false, None, None)
-            .await
-            .expect_err("post-dispatch failure must surface");
-        pop_llm_transcript_dir();
-        assert!(error.to_string().contains("connection closed"));
-        let transport = provider_call_errors(possible_transport_transcript.path())
-            .pop()
-            .expect("post-dispatch error observation");
-        assert_eq!(transport["provider_call_count"], 1);
-        assert_eq!(transport["unpriced_calls"], 1);
-        assert_eq!(transport["usage_unknown_calls"], 1);
-        assert!(transport["cost_usd"].is_null());
     });
     crate::llm::admission::swap_scope(previous_admission);
 }

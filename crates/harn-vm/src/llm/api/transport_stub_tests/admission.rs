@@ -50,6 +50,18 @@ fn stub(count: Arc<AtomicUsize>, stream_response: bool, empty: bool) -> LlmStub 
     })
 }
 
+fn rejected_stub(count: Arc<AtomicUsize>) -> LlmStub {
+    spawn_llm_stub_many("provider rejection after dispatch", 1, move |_, stream| {
+        use std::io::{Read, Write};
+        count.fetch_add(1, Ordering::SeqCst);
+        let mut bytes = [0u8; 16_384];
+        let n = stream.read(&mut bytes).unwrap();
+        assert!(String::from_utf8_lossy(&bytes[..n]).starts_with("POST /v1/chat/completions "));
+        let body = r#"{"error":{"message":"provider rejected the dispatched request"}}"#;
+        write!(stream, "HTTP/1.1 400 Bad Request\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}", body.len()).unwrap();
+    })
+}
+
 fn install(addr: std::net::SocketAddr) {
     install_openai_stub_provider("openai", addr);
     crate::llm_config::set_runtime_provider_endpoint_overrides(
@@ -186,6 +198,50 @@ fn conservative_admission_does_not_recycle_an_empty_attempt_for_retry() {
         assert_eq!(denial["known_cost_usd"], first_cost);
         assert_eq!(denial["usage_unknown_calls"], 0);
         assert_eq!(denial["unpriced_calls"], 0);
+    });
+}
+
+#[test]
+fn provider_error_after_http_dispatch_keeps_usage_unknown() {
+    let _env = env_guard();
+    let _transport = allow_stubbed_llm_transport();
+    let _cleanup = Cleanup;
+    crate::llm::cost::reset_cost_state();
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    runtime.block_on(async {
+        let count = Arc::new(AtomicUsize::new(0));
+        let server = rejected_stub(count.clone());
+        install(server.addr());
+        let transcript_dir = tempfile::tempdir().expect("transcript tempdir");
+        crate::llm::push_llm_transcript_dir(
+            transcript_dir
+                .path()
+                .to_str()
+                .expect("utf8 transcript path"),
+        );
+        let error = vm_call_llm_full(&options(0.6, false))
+            .await
+            .expect_err("HTTP error after dispatch surfaces");
+        crate::llm::pop_llm_transcript_dir();
+        assert!(!error.to_string().is_empty());
+        assert_eq!(count.load(Ordering::SeqCst), 1, "request reached HTTP stub");
+        let events: Vec<serde_json::Value> =
+            std::fs::read_to_string(transcript_dir.path().join("llm_transcript.jsonl"))
+                .expect("provider error transcript")
+                .lines()
+                .map(|line| serde_json::from_str(line).expect("valid transcript event"))
+                .collect();
+        let error = events
+            .iter()
+            .find(|event| event["type"] == "provider_call_error")
+            .expect("terminal provider error observation");
+        assert_eq!(error["provider_call_count"], 1);
+        assert_eq!(error["usage_unknown_calls"], 1);
+        assert_eq!(error["unpriced_calls"], 1);
+        assert!(error["cost_usd"].is_null());
     });
 }
 
