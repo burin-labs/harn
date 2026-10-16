@@ -226,6 +226,9 @@ const E2E_SUBPROCESS_PATHS: list<string> = [
   "crates/harn-cli/tests/harn_cli_e2e/in_process_grant.rs",
   // Recording and replay admission cross CLI flags, provider selection and worker threads.
   "crates/harn-cli/tests/harn_cli_e2e/llm_fixture_policy.rs",
+  // The documented allocation example launches independent processes, whose
+  // provider dispatch and refusal counts must be measured through the CLI.
+  "crates/harn-cli/tests/harn_cli_e2e/conservative_experiment.rs",
   // Option qualification must retain served backend identity across real CLI and HTTP requests.
   "crates/harn-cli/tests/harn_cli_e2e/provider_option_qualification.rs",
   // A missing secret's category and provider-chain message are built from
