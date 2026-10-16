@@ -15,19 +15,35 @@ build = "build.rs"
 # `harn` build took 337 s -> 390 s (dev) and 625 s -> 664 s (release), with
 # about 40% more compiler CPU. Hosts enable it for the binaries they ship.
 # Without it the table is empty and every import behaves as it always has.
-embed = ["dep:harn-vm", "dep:harn-stdlib"]
+# Embedded bytecode carries the complete builtin contract, so both the host
+# and the build-script compiler select the native product surface. Cargo
+# forwards this feature to both dependencies named harn-vm under resolver v2.
+embed = ["dep:harn-vm", "dep:harn-stdlib", "harn-vm/full"]
 
 [dependencies]
 harn-vm = { path = "../harn-vm", version = "=0.10.168", default-features = false }
 
 # The compiler the build script runs: the same harn-vm source the host links.
-# Stdlib bytecode does not depend on harn-vm's capability features (they only
-# decide which builtins exist, and naming a missing one is a compile error,
-# not different code), so the lean feature set keeps this second build small.
+# The embed feature selects the same full builtin contract on this compiler
+# and on the runtime dependency. A lean compiler produces different artifact
+# keys even for modules that do not call a feature-gated builtin.
 [build-dependencies]
 harn-vm = { path = "../harn-vm", version = "=0.10.168", default-features = false, optional = true }
 # The sources the build script compiles; a stdlib edit reruns the script.
 harn-stdlib = { path = "../harn-stdlib", version = "=0.10.168", optional = true }
+
+[dev-dependencies]
+harn-stdlib = { path = "../harn-stdlib", version = "=0.10.167" }
+# Exercise the actual distributed CLI's consumer surface. Resolver v2 keeps
+# these target features separate from the build-script compiler's features.
+harn-vm = { path = "../harn-vm", version = "=0.10.167", default-features = false, features = ["full", "otel"] }
+tempfile = "3"
+tokio = { version = "1", features = ["rt", "time", "net"] }
+
+[[test]]
+name = "embedded_runtime"
+path = "tests/embedded_runtime.rs"
+required-features = ["embed"]
 
 [lints]
 workspace = true
