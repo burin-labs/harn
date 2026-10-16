@@ -588,6 +588,20 @@ pub fn exercise_publisher(harness: Harness, mode: string) {
     "recovery must reconstruct the complete transaction without saved local preparation",
   )
   assert_eq(reconcile_github_integration(harness.process, config, from_remote), recovered)
+  if mode == "normal" {
+    const changed_provider = config + {token_reference: config.token_reference + "-changed"}
+    const rebound = try {
+      reconcile_github_integration(harness.process, changed_provider, from_remote)
+    }
+    assert(is_err(rebound), "reconciliation must preserve the dispatch's provider binding")
+    const restarted = try {
+      recover_github_integration(harness.process, changed_provider, request)
+    }
+    assert(is_err(restarted), "restart must preserve the dispatch's provider binding")
+    const before_cleanup = harness.testing.http_mock_calls()
+    assert_eq(cleanup_github_integration(harness, changed_provider, from_remote).status, "retained")
+    assert_eq(harness.testing.http_mock_calls(), before_cleanup)
+  }
   const repeated = dispatch_github_integration(
     harness,
     config,

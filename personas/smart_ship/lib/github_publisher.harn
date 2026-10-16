@@ -126,6 +126,18 @@ pub fn github_integration_binding(configuration: GithubIntegrationConfiguration)
     )
 }
 
+fn require_provider_claim(
+  configuration: GithubIntegrationConfiguration,
+  claim: EffectClaim,
+  request: IntegrationEffect,
+) {
+  const effect = claim.state.effects.find({ item -> item.request == request })
+  require claim.state.authority.installation == configuration.installation.policy.installation
+    && effect != nil
+    && effect.dispatch_binding == github_integration_binding(configuration),
+    "recovery configuration differs from the dispatch's recorded provider binding"
+}
+
 fn read_reviews(
   harness: Harness,
   configuration: GithubIntegrationConfiguration,
@@ -531,6 +543,13 @@ pub fn reconcile_github_integration(
   require observed == nil
     || observed.authority.installation == configuration.installation.policy.installation,
     "reconciliation authority belongs to another installation"
+  const claim: EffectClaim = {
+    remote: store.remote,
+    ref: store.ref,
+    commit: witness.authority_before,
+    state: read_state_object(process, store, witness.authority_before),
+  }
+  require_provider_claim(configuration, claim, witness.request)
   // A terminal refusal retains the exact transaction in current authority. Its
   // temporary prepared object may already have been collected after safe cleanup.
   if observed != nil {
@@ -572,12 +591,6 @@ pub fn reconcile_github_integration(
         }
       }
     }
-  }
-  const claim: EffectClaim = {
-    remote: store.remote,
-    ref: store.ref,
-    commit: witness.authority_before,
-    state: read_state_object(process, store, witness.authority_before),
   }
   const write: StateWrite = {
     expected: claim.commit,
@@ -633,6 +646,7 @@ pub fn recover_github_integration(
     commit: original.commit!,
     state: original.state!,
   }
+  require_provider_claim(configuration, claim, request)
   if effect.status == "refused" && effect.receipt != nil {
     const parsed = json_parse(effect.receipt.body)
     if schema_is(parsed, GithubIntegrationRefusal) {

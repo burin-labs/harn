@@ -139,6 +139,8 @@ prepared transaction. `reconcile_github_integration` reads the
 actual outcome. `cleanup_github_integration` deletes only the exact staged object
 after conclusive confirmation or refusal, using another provider comparison.
 Unresolved objects remain available for recovery.
+Recovery and cleanup require the original dispatch's provider binding, including
+its credential reference. A different reference cannot reconcile or delete its objects.
 
 The adapter requires an already accessible signed GitHub candidate. Automated
 signed candidate preparation and live GitHub qualification are still in progress.
