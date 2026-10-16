@@ -30,7 +30,7 @@ function digest(file) { return crypto.createHash('sha256').update(fs.readFileSyn
 try {
   write('Cargo.toml','[workspace]\nmembers=["lower","native"]\nresolver="2"\n');
   write('rust-toolchain.toml',fs.readFileSync(path.join(repository,'rust-toolchain.toml'),'utf8'));
-  write('lower/Cargo.toml','[package]\nname="retention-lower"\nversion="0.1.0"\nedition="2021"\n');
+  write('lower/Cargo.toml','[package]\nname="retention-lower"\nversion="0.1.0"\nedition="2021"\n[lib]\ncrate-type=["cdylib","rlib"]\n');
   write('lower/build.rs','fn main() { let out=std::path::PathBuf::from(std::env::var_os("OUT_DIR").unwrap()); std::fs::write(out.join("value.rs"),"pub const VALUE: u32 = 42;").unwrap(); }\n');
   write('lower/src/lib.rs','include!(concat!(env!("OUT_DIR"),"/value.rs"));\n');
   write('native/Cargo.toml','[package]\nname="harn-vm"\nversion="0.1.0"\nedition="2021"\n[dependencies]\nretention-lower={path="../lower"}\n[features]\ncurrent=[]\nsecond=[]\nretired=[]\n');
@@ -46,6 +46,8 @@ try {
   const workspace = fs.readFileSync(path.join(root,'current.jsonl'),'utf8');
   const security = fs.readFileSync(path.join(root,'second.jsonl'),'utf8');
   const current = new Set([...artifacts('current'),...artifacts('second')].flatMap(a => a.filenames));
+  assert.ok([...current].some(file => /(?:libretention_lower\.(?:so|dylib)|retention_lower\.dll)$/.test(file)),
+    'a real unhashed shared library must reach retention qualification');
   const stale = artifacts('retired').flatMap(a => a.filenames).filter(file => !current.has(file));
   assert.ok(stale.some(file => /harn_vm-[a-f0-9]{16}$/.test(file)), 'a real obsolete Native executable must exist');
   assert.ok(stale.some(file => file.endsWith('.rlib')), 'a real obsolete library must exist');

@@ -129,6 +129,29 @@ test('a current dependency with a workspace target name remains protected', () =
   } finally { f.cleanup(); }
 });
 
+test('an unhashed shared library requires the matching Cargo crate type and exact target name', () => {
+  const f = fixture();
+  try {
+    const target = {...f.metadata.packages[1].targets[0],crate_types:['cdylib','rlib']};
+    f.metadata.packages[1].targets[0] = target;
+    const file = path.join(f.root,'debug/deps/libharn_hostlib.so');
+    fs.writeFileSync(file,'current shared library');
+    const record = {...f.first[3],target,profile:{test:false},filenames:[file],executable:null};
+    applyRetention(f.plan([...f.first,record]));
+    assert.equal(fs.readFileSync(file,'utf8'),'current shared library');
+    const rlib = path.join(f.root,'debug/deps/libharn_hostlib.rlib');
+    fs.writeFileSync(rlib,'current companion library');
+    assert.doesNotThrow(() => f.plan([...f.first,{...record,filenames:[rlib]}]));
+    target.crate_types = ['cdylib'];
+    assert.throws(() => f.plan([...f.first,{...record,filenames:[rlib]}]), /unsupported dependency artifact/);
+    target.crate_types = ['rlib'];
+    assert.throws(() => f.plan([...f.first,record]), /unsupported dependency artifact/);
+    target.crate_types = ['cdylib','rlib'];
+    record.filenames = [f.foreign];
+    assert.throws(() => f.plan([...f.first,record]), /unsupported dependency artifact/);
+  } finally { f.cleanup(); }
+});
+
 test('a foreign output path and a missing current artifact refuse before pruning', () => {
   const f = fixture();
   try {

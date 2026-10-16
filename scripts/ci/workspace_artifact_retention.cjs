@@ -120,8 +120,16 @@ function qualifyGraph(ctx, text, name, completeWorkspace) {
       if (parts[1] === 'deps') {
         const match = new RegExp(`^(?:lib)?${escape(target.name.replace(/-/g, '_'))}-([a-f0-9]{16})(?:\\..+)?$`)
           .exec(parts[2]);
-        requireValue(parts.length === 3 && match, `${name} has an unsupported dependency artifact: ${file}`);
-        keep.add(`${pkg.name}-${match[1]}`);
+        // Mixed cdylib/rlib targets also emit unhashed library outputs.
+        // Exact current filenames are protected above; only hashed outputs
+        // identify build directories or obsolete dependency generations.
+        const stem = target.name.replace(/-/g, '_');
+        const unhashed = (target.crate_types || []).some(kind =>
+          (kind === 'rlib' && parts[2] === `lib${stem}.rlib`)
+          || (['cdylib', 'dylib'].includes(kind)
+            && [`lib${stem}.so`, `lib${stem}.dylib`, `${stem}.dll`].includes(parts[2])));
+        requireValue(parts.length === 3 && (match || unhashed), `${name} has an unsupported dependency artifact: ${file}`);
+        if (match) keep.add(`${pkg.name}-${match[1]}`);
         if (pkg.name === 'harn-vm' && target.name === 'harn_vm' && record.profile.test) {
           requireValue(record.executable === file, `${name} Native executable is not bound to its artifact`);
           requireValue((fs.lstatSync(file).mode & 0o111) !== 0, `${name} Native artifact is not executable: ${file}`);
