@@ -128,6 +128,8 @@ pub(crate) enum TranscriptKind {
     ToolResult,
     AgentRunStarted,
     AgentRunTerminal,
+    IterationStart,
+    IterationEnd,
     LoopCheckpoint,
     SubAgentStart,
     ReasoningReceipt,
@@ -140,7 +142,7 @@ pub(crate) enum TranscriptKind {
 }
 
 impl TranscriptKind {
-    const NAMED: [(Self, &'static str); 15] = [
+    const NAMED: [(Self, &'static str); 17] = [
         (Self::Message, "message"),
         (Self::LlmCall, "llm_call"),
         (Self::ToolCall, "tool_call"),
@@ -148,6 +150,8 @@ impl TranscriptKind {
         (Self::ToolResult, "tool_result"),
         (Self::AgentRunStarted, "agent_run_started"),
         (Self::AgentRunTerminal, "agent_run_terminal"),
+        (Self::IterationStart, "iteration_start"),
+        (Self::IterationEnd, "iteration_end"),
         (Self::LoopCheckpoint, "loop_checkpoint"),
         (Self::SubAgentStart, "sub_agent_start"),
         (Self::ReasoningReceipt, "reasoning_receipt"),

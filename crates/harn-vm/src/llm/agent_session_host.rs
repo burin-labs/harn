@@ -399,51 +399,47 @@ pub(crate) fn record_provider_dispatch(session_id: &str) {
     });
 }
 
-/// Bill an auxiliary call (a judge, classifier, or other Harn-assigned purpose
-/// that is not the agent turn) to its session's run record.
-///
-/// The agent turn records its accepted result through
-/// `__host_agent_session_record_usage`. An auxiliary call never passes that
-/// way, so its spend was missing from the run's `usage`. The accepted-turn
-/// counters behind `result.llm` stay untouched and keep their declared scope.
-pub(crate) fn record_auxiliary_call_usage(
+/// Persist completed-call usage at its observed boundary, independently of
+/// purpose labels or acceptance by an agent turn. The accepted-turn counters
+/// behind `result.llm` remain separate and keep their declared scope.
+#[inline(never)]
+pub(crate) fn record_completed_call_usage(
     opts: &super::api::LlmCallOptions,
     result: &super::api::LlmResult,
+    call_id: &str,
 ) {
-    let call_role = opts.context_manifest.call_role();
-    if !super::mock::is_auxiliary_call_role(call_role) {
-        return;
-    }
     let Some(session_id) = opts.session_id.as_deref() else {
         return;
     };
-    let usage = result.usage();
-    let usage_unknown = matches!(
-        usage.accounting_status,
-        crate::llm::usage::UsageAccountingStatus::Unknown
+    let mut metadata = result.usage().to_vm_dict(&result.attempts);
+    metadata.put_str("call_id", call_id);
+    metadata.put_str("call_role", opts.context_manifest.call_role());
+    metadata.put_str("provider", &result.provider);
+    metadata.put_str("model", &result.model);
+    metadata.put(
+        "provider_stop_reason",
+        result
+            .stop_reason
+            .as_deref()
+            .map_or(VmValue::Nil, VmValue::string),
     );
+    metadata.put_str(
+        "canonical_stop_reason",
+        canonical_provider_stop_reason(result.stop_reason.as_deref()),
+    );
+    // Accounting durability must survive a full or trimmed transcript. The
+    // session owner also retains its existing bounded snapshot projection.
     // The session owner admits the append and refuses unknown IDs atomically.
-    // This best-effort observation needs no separate existence preflight.
-    let _ = crate::agent_sessions::append_event(
+    let _ = crate::agent_sessions::append_usage_event(
         session_id,
         crate::llm::helpers::transcript_event(
             "llm_call",
             "assistant",
             "internal",
             "LLM call completed",
-            Some(serde_json::json!({
-                "call_role": call_role,
-                "input_tokens": usage.input_tokens,
-                "output_tokens": usage.output_tokens,
-                "cache_read_tokens": usage.cache_read_tokens,
-                "cache_write_tokens": usage.cache_write_tokens,
-                "provider": result.provider,
-                "model": result.model,
-                "cost_usd": usage.cost_usd,
-                "accounting_status": if usage_unknown { "unknown" } else { "reported" },
-                "provider_stop_reason": result.stop_reason,
-                "canonical_stop_reason": canonical_provider_stop_reason(result.stop_reason.as_deref()),
-            })),
+            Some(crate::stdlib::observability::vm_value_to_json(
+                &VmValue::dict(metadata),
+            )),
         ),
     );
 }
@@ -1020,11 +1016,6 @@ fn host_agent_session_record_usage_builtin(
         cache_read_tokens,
         cache_write_tokens,
     );
-    // Provider-request accounting, read from the same `usage` block that owns
-    // every other accounting fact for this call. Absent for a recording made
-    // before the field existed, which is why it is folded in conditionally
-    // rather than defaulting to a zero that would read as "no retries".
-    let provider_attempts = dict_get(&usage_block, "provider_attempts").cloned();
     let stop_reason = match dict_get(&llm_result, "stop_reason") {
         Some(VmValue::String(s)) if !s.is_empty() => Some(s.to_string()),
         _ => None,
@@ -1061,35 +1052,6 @@ fn host_agent_session_record_usage_builtin(
         }
         Ok(SessionUsageTotals::from(&*session))
     })?;
-    let mut llm_call_metadata = serde_json::json!({
-        "input_tokens": input_tokens,
-        "output_tokens": output_tokens,
-        "cache_read_tokens": cache_read_tokens,
-        "cache_write_tokens": cache_write_tokens,
-        "provider": provider,
-        "model": model,
-        "cost_usd": accounting.cost_usd,
-        "accounting_status": if accounting.usage_unknown { "unknown" } else { "reported" },
-        "provider_stop_reason": stop_reason,
-        "canonical_stop_reason": canonical_provider_stop_reason(stop_reason.as_deref()),
-    });
-    if let (Some(object), Some(attempts)) = (
-        llm_call_metadata.as_object_mut(),
-        provider_attempts.map(|attempts| crate::stdlib::observability::vm_value_to_json(&attempts)),
-    ) {
-        object.insert("provider_attempts".to_string(), attempts);
-    }
-    crate::agent_sessions::append_event(
-        &session_id,
-        crate::llm::helpers::transcript_event(
-            "llm_call",
-            "assistant",
-            "internal",
-            "LLM call completed",
-            Some(llm_call_metadata),
-        ),
-    )
-    .map_err(VmError::Runtime)?;
     Ok(totals.to_vm(false))
 }
 

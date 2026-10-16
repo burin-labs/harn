@@ -547,6 +547,117 @@ fn plan_document_event_uses_the_canonical_plan_kind() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn completed_session_calls_are_billed_once_for_every_purpose() {
+    crate::agent_sessions::reset_session_store();
+    crate::reset_thread_local_state();
+    let root = tempfile::tempdir().expect("temporary journal root");
+    let session = "application-auxiliary-usage";
+    let (_, mut journal) =
+        prepare_test_journal(session, &options(root.path()), "run-aux", "turn-aux").await;
+    install_test_journal(session, &mut journal);
+    crate::agent_sessions::set_transcript_budget_policy(
+        session,
+        crate::agent_sessions::SessionTranscriptBudgetPolicy::reject(32, 1),
+    )
+    .expect("set a bounded conversation buffer");
+    let source = r#"
+import { agent_session_inject_reminder } from "std/agent/state"
+import { with_llm_script } from "std/testing"
+
+pipeline main(harness: Harness) {
+  const session = "application-auxiliary-usage"
+  agent_session_inject_reminder(
+    harness.agent, session,
+    {body: "Primary conversation contract", authority: "contract"},
+  )
+  with_llm_script(harness.llm, [
+    {text: "classified", input_tokens: 10, output_tokens: 2, simulated_cost_usd: 0.018376},
+    {text: "judged", input_tokens: 10, output_tokens: 2, simulated_cost_usd: 0.002},
+    {text: "ready", input_tokens: 10, output_tokens: 2, simulated_cost_usd: 0.003},
+  ], { ->
+    for role in ["application.classifier", "completion.judge", "agent.main"] {
+      harness.llm.call("Reply briefly.", nil, {provider: "mock", session_id: session, call_role: role})
+    }
+    const calls = harness.llm.mock_calls()
+    assert(len(calls) == 3)
+    for index in [0, 1, 2] {
+      const request = json_stringify(calls[index].messages) + to_string(calls[index]?.system ?? "")
+      harness.stdio.println("directed:" + to_string(contains(request, "Primary conversation contract")))
+    }
+  })
+}
+"#;
+    let chunk = crate::compile_source(source).expect("compile application auxiliary calls");
+    let output = tokio::task::LocalSet::new()
+        .run_until(async {
+            let mut vm = crate::new_vm();
+            crate::register_vm_stdlib(&mut vm);
+            vm.execute(&chunk)
+                .await
+                .expect("execute three declared call roles");
+            vm.output().to_string()
+        })
+        .await;
+    flush(session).await.expect("flush observed usage");
+    let store = session_store::open_canonical_agent_session(
+        &session_store::SessionStoreDir::under_root(root.path()),
+        session,
+        None,
+        SessionType::User,
+    )
+    .await
+    .expect("open durable usage");
+    let events = session_store::read_all_events(&store, session)
+        .await
+        .expect("read observed usage");
+    let roles = events
+        .iter()
+        .filter(|event| event.payload["transcript_event"]["kind"] == "llm_call")
+        .map(|event| event.payload["transcript_event"]["metadata"]["call_role"].clone())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        roles,
+        vec![
+            serde_json::json!("application.classifier"),
+            serde_json::json!("completion.judge"),
+            serde_json::json!("agent.main")
+        ],
+        "every completed call must be billed independently of its purpose label"
+    );
+    assert_eq!(
+        output
+            .lines()
+            .filter(|line| line.starts_with("directed:"))
+            .collect::<Vec<_>>(),
+        vec!["directed:true", "directed:false", "directed:true"],
+        "usage observation must not redefine the existing directive scopes"
+    );
+    let run = crate::orchestration::project_run_record_from_session(&store, session)
+        .await
+        .expect("project observed helper usage");
+    let usage = run.usage.expect("known nonzero usage must be present");
+    assert_eq!(usage.call_count, 3);
+    let cost = usage.cost_usd.expect("both helper prices must be known");
+    assert!((cost - 0.023376).abs() < 1e-12, "{usage:?}");
+    assert_eq!(
+        crate::agent_sessions::transcript_budget_policy(session)
+            .expect("conversation policy retained")
+            .max_events,
+        1,
+        "recording audit evidence must not weaken the conversation limit"
+    );
+    let snapshot = crate::llm::helpers::vm_value_to_json(
+        &crate::agent_sessions::snapshot(session).expect("live bounded session"),
+    );
+    assert!(
+        snapshot["events"].as_array().expect("bounded events").len() <= 1,
+        "durable accounting must not overflow the bounded snapshot: {snapshot}"
+    );
+    crate::agent_sessions::reset_session_store();
+    crate::reset_thread_local_state();
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn generic_agent_loop_projects_the_current_run_after_a_long_session_history() {
     generic_agent_loop_projects_the_current_run_for_format("native").await;
 }
@@ -593,7 +704,7 @@ async fn generic_agent_loop_projects_the_current_run_for_format(tool_format: &st
             .expect("append prior history");
     }
     let source = format!(
-        r###"
+        r#"
 import {{ agent_loop }} from "std/agent/loop"
 
 pipeline main(harness: Harness, task: unknown) {{
@@ -611,7 +722,7 @@ pipeline main(harness: Harness, task: unknown) {{
   harness.llm.mock_enqueue({{text: "", tool_calls: [{{
     id: "known-result-two", name: "noop", arguments: {{query: "second"}},
   }}]}})
-  harness.llm.mock_enqueue({{text: "##DONE##"}})
+  harness.llm.mock_enqueue({{text: "Completed the deterministic work.\n##DONE##"}})
   let tools = tool_registry()
   tools = tool_define(
     tools,
@@ -631,6 +742,7 @@ pipeline main(harness: Harness, task: unknown) {{
     {{
       provider: "mock",
       model: "mock",
+      call_role: "application.primary",
       root: {root_literal},
       session_id: "live-journal-agent-loop",
       tools: tools,
@@ -653,7 +765,7 @@ pipeline main(harness: Harness, task: unknown) {{
   harness.stdio.println("budget:" + json_stringify(result.adaptive_budget))
   harness.stdio.println("recap:" + json_stringify(result.recap.snapshot))
 }}
-"###,
+"#,
     );
     let chunk = crate::compile_source(&source).expect("compile agent loop");
     let local = tokio::task::LocalSet::new();
@@ -705,6 +817,18 @@ pipeline main(harness: Harness, task: unknown) {{
             .expect("returned recap"),
     )
     .expect("typed recap snapshot");
+    assert_eq!(
+        recap.coverage.unassigned, 0,
+        "completed {tool_format} loop left unassigned facts: {recap:?}"
+    );
+    assert!(!recap.turns.is_empty());
+    assert!(
+        recap
+            .turns
+            .iter()
+            .all(|turn| turn.state == crate::session_recap::RecapCompletionState::Complete),
+        "a completed real loop must close its recap: {recap:?}"
+    );
     let tools = recap
         .turns
         .iter()
@@ -740,6 +864,62 @@ pipeline main(harness: Harness, task: unknown) {{
     let events = session_store::read_all_events(&store, session_id)
         .await
         .expect("read canonical events");
+    let calls = events
+        .iter()
+        .filter(|event| event.payload["transcript_event"]["kind"] == "llm_call")
+        .collect::<Vec<_>>();
+    assert_eq!(
+        calls.len(),
+        4,
+        "accepting the four primary turns must not duplicate observed usage"
+    );
+    assert!(calls.iter().all(
+        |event| event.payload["transcript_event"]["metadata"]["call_role"] == "application.primary"
+    ));
+    let call_ids = calls
+        .iter()
+        .map(|event| {
+            event.payload["transcript_event"]["metadata"]["call_id"]
+                .as_str()
+                .expect("correlated call ID")
+        })
+        .collect::<std::collections::HashSet<_>>();
+    assert_eq!(
+        call_ids.len(),
+        4,
+        "each completed call must be correlated exactly once"
+    );
+    let publication = events
+        .iter()
+        .find(|event| event.payload["transcript_event"]["kind"] == "assistant_publication")
+        .expect("the real loop must publish its final answer");
+    assert_eq!(
+        publication.payload["transcript_event"]["visibility"],
+        "public"
+    );
+    assert_eq!(
+        publication.payload["transcript_event"]["text"]
+            .as_str()
+            .map(str::trim),
+        Some("Completed the deterministic work.")
+    );
+    assert!(
+        recap
+            .source
+            .events
+            .iter()
+            .any(|source| source.event_id == publication.event_id),
+        "the recap's source bound must include the published answer"
+    );
+    assert!(
+        recap.turns.iter().flat_map(|turn| &turn.iterations).any(|iteration| {
+            iteration.assistant_text.iter().any(|fact| {
+                fact.source_event_id == publication.event_id
+                    && fact.text.trim() == "Completed the deterministic work."
+            })
+        }),
+        "the recap must project the final answer itself, not only cover its source event: {recap:?}"
+    );
 
     let run_started = events
         .iter()

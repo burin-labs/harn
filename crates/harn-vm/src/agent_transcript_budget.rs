@@ -88,6 +88,19 @@ fn transcript_budget_exceeded_reason(
     None
 }
 
+/// Whether a read-side audit projection fits without recovery or mutation.
+pub(crate) fn transcript_fits_budget(
+    transcript: &VmValue,
+    policy: &SessionTranscriptBudgetPolicy,
+) -> bool {
+    let policy = policy.normalized();
+    transcript_budget_exceeded_reason(
+        &transcript_usage(transcript, policy.max_approx_bytes.is_some()),
+        &policy,
+    )
+    .is_none()
+}
+
 pub(crate) fn transcript_budget_usage_json(usage: &TranscriptBudgetUsage) -> serde_json::Value {
     serde_json::json!({
         "messages": usage.message_count,

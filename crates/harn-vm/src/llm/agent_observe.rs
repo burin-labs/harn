@@ -873,6 +873,7 @@ pub(crate) async fn observed_llm_call(
                     other: other_retries,
                     completed_retry_usage: completed_retry_usage.clone(),
                 };
+                super::agent_session_host::record_completed_call_usage(opts, &result, &call_id);
                 if let Some(projection) = result.text_projection.as_mut() {
                     projection.effective_tool_format = Some(effective_tool_format.clone());
                 }
