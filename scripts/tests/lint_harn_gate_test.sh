@@ -44,11 +44,15 @@ if [ "${1:-}" = "check" ] && [ "${2:-}" = "--json" ] && [ "${3:-}" = "--independ
   printf 'call\n' >> "$FAKE_HARN_CALLS"
   printf '%s\n' "$@" >> "$FAKE_HARN_CALLS"
   if [ "$#" -eq 1 ] && [ "${1##*/}" = ".harn" ]; then
+    if [ "$(cat "$FAKE_HARN_MODE")" = hidden-checker-failure ]; then
+      printf '%s\n' '{"schemaVersion":1,"ok":false,"data":null,"error":{"code":"io_error","message":"sentinel","details":null},"warnings":[]}'
+      exit 1
+    fi
     printf '%s\n' '{"schemaVersion":1,"ok":false,"data":null,"error":{"code":"no_harn_files","message":"sentinel","details":null},"warnings":[]}'
     exit 1
   fi
   case "$(cat "$FAKE_HARN_MODE")" in
-    clean)
+    clean|hidden-checker-failure)
       jq -n --args '
         {schemaVersion: 1, ok: true,
          data: {files: ($ARGS.positional | map(
@@ -135,6 +139,13 @@ if grep -Fq "$tmp/conformance/tests/excluded.harn" "$calls_file"; then
   echo "lint-harn included a paired negative fixture" >&2
   exit 1
 fi
+
+printf '%s\n' hidden-checker-failure > "$mode_file"
+if run_gate > "$tmp/hidden-checker-failure.log" 2>&1; then
+  echo "lint-harn mistook an unreadable hidden fixture for a reviewed diagnostic" >&2
+  exit 1
+fi
+grep -q 'check report unavailable' "$tmp/hidden-checker-failure.log"
 
 printf '%s\n' checker-failure > "$mode_file"
 if run_gate > "$tmp/checker-failure.log" 2>&1; then

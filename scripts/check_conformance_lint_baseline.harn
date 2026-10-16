@@ -125,7 +125,9 @@ fn main(harness: Harness) {
       Ok(reported) -> { rows = rows + reported }
       Err(failure) -> {
         const envelope = json_decode(result.stdout, schema_of(RejectedEnvelope))?
-        if result.success || envelope.ok || envelope.schemaVersion != 1 || envelope.data != nil {
+        if result.exit_code != 1 || envelope.ok || envelope.schemaVersion != 1
+          || envelope.data != nil
+          || envelope.error.code != "no_harn_files" {
           throw failure
         }
         rows = rows + [relative + "\t__CHECK_FAILED__"]
