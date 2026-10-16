@@ -828,7 +828,7 @@ pipeline main(harness: Harness, task: unknown) {
 fn sub_agent_returns_schema_is_projected_to_the_child_terminal_contract() {
     let raw = run_with_bridge(
         r#"
-import { sub_agent_request } from "std/agent/workers"
+import { sub_agent_request, sub_agent_run } from "std/agent/workers"
 
 pipeline main(harness: Harness, task: unknown) {
   const schema = {
@@ -838,6 +838,7 @@ pipeline main(harness: Harness, task: unknown) {
   }
   const request = sub_agent_request(harness, "review the changes", {
     provider: "mock",
+    output: "json",
     returns: {schema: schema},
   })
   const conflict = try {
@@ -847,14 +848,85 @@ pipeline main(harness: Harness, task: unknown) {
       output: {schema: {type: "string"}},
     })
   }
+  const text_conflict = try {
+    sub_agent_request(harness, "review the changes", {
+      provider: "mock",
+      output: "text",
+      returns: {schema: schema},
+    })
+  }
+  const llm_calls = harness.runtime.shared_cell(
+    {scope: "task_group", key: "sub-agent-output-conflict-calls", initial: 0},
+  )
+  const caller = {call ->
+    const snapshot = harness.runtime.shared_snapshot(llm_calls)
+    harness.runtime.shared_cas(llm_calls, snapshot, snapshot.value + 1)
+    return {ok: true, value: {text: json_stringify({decisions: []}) + "\n<done>FINISHED</done>"}}
+  }
+  const valid_result = sub_agent_run(harness, "review the changes", {
+    provider: "mock",
+    model: "mock",
+    session_id: "sub-agent-output-json-valid",
+    max_iterations: 1,
+    loop_until_done: true,
+    done_sentinel: "FINISHED",
+    output: "json",
+    returns: {schema: schema},
+    llm_caller: caller,
+  })
+  const valid_call_count = harness.runtime.shared_get(llm_calls)
+  const schema_run_conflict = try {
+    sub_agent_run(harness, "review the changes", {
+      provider: "mock",
+      model: "mock",
+      session_id: "sub-agent-output-schema-conflict",
+      returns: {schema: schema},
+      output: {schema: {type: "string"}},
+      llm_caller: caller,
+    })
+  }
+  const text_run_conflict = try {
+    sub_agent_run(harness, "review the changes", {
+      provider: "mock",
+      model: "mock",
+      session_id: "sub-agent-output-text-conflict",
+      returns: {schema: schema},
+      output: "text",
+      llm_caller: caller,
+    })
+  }
   harness.stdio.log(request.returns_schema.required[0])
   harness.stdio.log(request.options.output.schema.required[0])
   harness.stdio.log(request.options.output.schema.properties.decisions.type)
   harness.stdio.log(is_err(conflict))
+  harness.stdio.log(is_err(text_conflict))
+  harness.stdio.log(valid_call_count)
+  harness.stdio.log(valid_result.status)
+  harness.stdio.log(valid_result.ok)
+  harness.stdio.log(len(valid_result.data.decisions))
+  harness.stdio.log(is_err(schema_run_conflict))
+  harness.stdio.log(is_err(text_run_conflict))
+  harness.stdio.log(harness.runtime.shared_get(llm_calls))
 }
 "#,
     )
     .expect("script must run");
     let lines = out_lines(&raw);
-    assert_eq!(lines, ["decisions", "decisions", "array", "true"]);
+    assert_eq!(
+        lines,
+        [
+            "decisions",
+            "decisions",
+            "array",
+            "true",
+            "true",
+            "1",
+            "done",
+            "true",
+            "0",
+            "true",
+            "true",
+            "1",
+        ]
+    );
 }

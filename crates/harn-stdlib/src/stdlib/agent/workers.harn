@@ -771,7 +771,9 @@ fn __sub_agent_returns(opts: dict) -> dict {
 }
 
 fn __sub_agent_validate_output_contract(opts: dict, returns: dict) {
-  if returns.schema == nil || opts.output == nil {
+  // A generic JSON format request does not compete with the worker's declared
+  // result schema. `__sub_agent_options` replaces it with the owning schema.
+  if returns.schema == nil || opts.output == nil || opts.output == "json" {
     return nil
   }
   const option_schema = if type_of(opts.output) == "dict" && opts.output?.schema != nil {

@@ -551,6 +551,7 @@ pipeline main(harness: Harness, task: unknown) {
     tool_format: "native",
     max_iterations: 1,
     loop_until_done: true,
+    output: "json",
     returns: {schema: schema},
     llm_caller: caller,
   })
