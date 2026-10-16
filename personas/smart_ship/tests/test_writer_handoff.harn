@@ -178,6 +178,22 @@ pipeline test_grouped_activation_waits_for_former_writer_retirement(harness: Har
   assert(is_err(active), "a still-authorized former writer must prevent grouped activation")
 }
 
+pipeline test_stop_revokes_a_former_writer_permit_after_resume(harness: Harness) {
+  const f = fixture(harness.random)
+  const state = enrolled(initial(f.authority + {mode: "shadow"}))
+  const writer = state.authority.writer_handoff!.writers[0]!
+  const permit = unwrap(capture_former_writer(state.authority, writer))
+  const stopped = unwrap(control(state, fence(state), "stopped"))
+  assert(!former_writer_authorized(stopped.authority, permit))
+  const resumed = unwrap(control(stopped, fence(stopped), "shadow"))
+  assert(
+    !former_writer_authorized(resumed.authority, permit),
+    "resume must not resurrect a stopped permit",
+  )
+  const fresh = unwrap(capture_former_writer(resumed.authority, writer))
+  assert(former_writer_authorized(resumed.authority, fresh))
+}
+
 pipeline test_retirement_survives_pause_and_rollback_requires_a_fresh_generation(harness: Harness) {
   const f = fixture(harness.random)
   const state = enrolled(initial(f.authority + {mode: "shadow"}))
@@ -409,4 +425,41 @@ pipeline test_remote_handoff_cas_restart_and_missing_retirement_refuse(harness: 
   assert_eq(restarted.commit, activated.commit)
   assert_eq(restarted.state!.authority.writer_handoff, accepted.state!.authority.writer_handoff)
   assert(!former_writer_authorized(restarted.state!.authority, permit))
+  harness.testing.clock_set(7000)
+  run_installation_command(
+    harness,
+    [json_stringify({action: "control", configuration: configuration, mode: "draining"})],
+  )
+  run_installation_command(
+    harness,
+    [
+      json_stringify(
+        {action: "transfer", configuration: configuration, target_controller: config.controller},
+      ),
+    ],
+  )
+  const transferred = read_state(harness.process, store)
+  assert_eq(transferred.state!.authority.generation, recorded.state!.authority.generation + 1)
+  assert_eq(transferred.state!.authority.writer_handoff, accepted.state!.authority.writer_handoff)
+  assert(!former_writer_authorized(transferred.state!.authority, permit))
+  run_installation_command(
+    harness,
+    [
+      json_stringify(
+        {
+          action: "enroll-writers",
+          configuration: configuration,
+          writer_enrollment: {
+            writers: [permit.writer],
+            scope_trust_domain: "fixture-scope",
+            max_drain_age_ms: 60000,
+          },
+        },
+      ),
+    ],
+  )
+  const rollback = read_state(harness.process, store)
+  assert(!former_writer_authorized(rollback.state!.authority, permit))
+  const new_permit = unwrap(capture_former_writer(rollback.state!.authority, permit.writer))
+  assert(former_writer_authorized(rollback.state!.authority, new_permit))
 }

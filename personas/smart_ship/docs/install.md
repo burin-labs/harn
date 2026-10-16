@@ -79,6 +79,8 @@ An existing writer captures a `FormerWriterPermit` once with
 `capture_former_writer`; it checks `former_writer_authorized` against freshly
 read authority before every mutation. A delayed process must retain its original
 permit rather than capturing a replacement generation.
+The permit also binds the control revision. Stop and resume cannot restore a
+stopped process's authority; a fresh process must capture a new permit.
 
 Invoke `drain-writers` before collecting provider observations. This commits the
 old route's admission stop. Wait for already-started effects and queued work to

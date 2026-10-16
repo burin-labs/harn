@@ -244,8 +244,8 @@ pub type WriterHandoff = {
   retirement: WriterRetirement?,
 }
 
-/** A running former writer captures this generation once instead of adopting a later one. */
-pub type FormerWriterPermit = {installation: string, generation: int, writer: FormerWriter}
+/** A running former writer captures this authority fence once, including its control revision. */
+pub type FormerWriterPermit = Fence & {writer: FormerWriter}
 
 /** Counts and named refusals distinguish a measured drain from missing observations. */
 pub type WriterDrainQualification = {

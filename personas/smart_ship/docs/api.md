@@ -1018,10 +1018,10 @@ pub type FormerWriter = {id: string, repository: string, source: string}
 
 ### type `FormerWriterPermit`
 
-A running former writer captures this generation once instead of adopting a later one.
+A running former writer captures this authority fence once, including its control revision.
 
 ```harn
-pub type FormerWriterPermit = {installation: string, generation: int, writer: FormerWriter}
+pub type FormerWriterPermit = Fence & {writer: FormerWriter}
 ```
 
 ### type `GitStore`

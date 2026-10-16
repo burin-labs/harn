@@ -155,8 +155,7 @@ pub fn former_writer_authorized(authority: Authority, permit: FormerWriterPermit
   return handoff != nil && len(writer_handoff_errors(authority)) == 0
     && authority.mode == "shadow"
     && handoff.phase == "observing"
-    && authority.installation == permit.installation
-    && authority.generation == permit.generation
+    && fence_matches(authority, permit)
     && handoff.generation == permit.generation
     && handoff.writers.contains(permit.writer)
 }
@@ -166,11 +165,11 @@ pub fn capture_former_writer(
   authority: Authority,
   writer: FormerWriter,
 ) -> Result<FormerWriterPermit, string> {
-  const permit: FormerWriterPermit = {
-    installation: authority.installation,
-    generation: authority.generation,
-    writer: writer,
-  }
+  const permit: FormerWriterPermit = pick(
+    authority,
+    ["installation", "generation", "revision", "controller"],
+  )
+    + {writer: writer}
   return former_writer_authorized(authority, permit) ? Ok(permit) : Err(
     "former writer does not own this installation generation",
   )
