@@ -10,6 +10,7 @@ pub(super) struct ConcurrentSessionControl {
     /// Shared with the transport router, which records `session/set_budget`
     /// re-arms here while a prompt may be running.
     pub(super) llm_spend: Arc<std::sync::Mutex<SessionLlmSpend>>,
+    cancellation: SessionCancellation,
     prompt_active: Arc<AtomicBool>,
     /// The live prompt's client event transport. Controls are answered by
     /// dispatch handlers and router preemption, outside the prompt's execution
@@ -129,13 +130,19 @@ impl Drop for SessionSpendRecorder<'_> {
 }
 
 impl ConcurrentSessionControl {
+    #[cfg(test)]
     pub(super) fn new() -> Self {
+        Self::for_session(SessionCancellation::default())
+    }
+
+    pub(super) fn for_session(cancellation: SessionCancellation) -> Self {
         Self {
             inject_state: harn_vm::bridge::HostBridgeInjectionState::default(),
             tool_call_cancellations: Arc::new(
                 harn_vm::tool_call_cancellations::CancellationRegistry::default(),
             ),
             llm_spend: Arc::default(),
+            cancellation,
             prompt_active: Arc::new(AtomicBool::new(false)),
             prompt_transport: Arc::default(),
             prompt_owner: Arc::default(),
@@ -319,13 +326,16 @@ impl ConcurrentSessionControls {
         let Some(session_id) = session_id_param(params) else {
             return false;
         };
-        let active = self
+        let control = self
             .sessions
             .lock()
             .unwrap_or_else(|error| error.into_inner())
             .get(&session_id)
-            .is_some_and(ConcurrentSessionControl::prompt_is_active);
-        if !active {
+            .cloned();
+        let Some(control) = control else {
+            return false;
+        };
+        if !control.prompt_is_active() && !control.cancellation.has_admitted_prompt() {
             return false;
         }
         match apply_live_client_operation(method, &session_id, params) {
@@ -672,6 +682,17 @@ pub(super) struct SessionCancellation {
 }
 
 impl SessionCancellation {
+    /// The ingress-owned scope also covers queued prompts and host preparation.
+    /// Dropped or stopped requests must not make an idle control preemptive.
+    fn has_admitted_prompt(&self) -> bool {
+        let state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+        state.prompts.iter().any(|prompt| {
+            prompt
+                .upgrade()
+                .is_some_and(|prompt| !prompt.cancelled.load(Ordering::SeqCst))
+        })
+    }
+
     pub(super) fn cancel(&self) -> bool {
         let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
         let already_cancelled = state.cancelled;

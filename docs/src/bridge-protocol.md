@@ -830,6 +830,11 @@ to observer. `session/detach` removes the client and releases control when the
 detaching client was the controller. `session/heartbeat` refreshes the client's
 last-seen marker and optional metadata without changing ownership.
 
+Live-client operations remain responsive while an admitted prompt prepares or
+executes, including while it waits for the host capability handshake. On an idle
+session they follow normal request order, so a takeover after a close cannot
+reopen the session. Channel and stdio transports use the same control handler.
+
 Responses share this shape:
 
 ```json

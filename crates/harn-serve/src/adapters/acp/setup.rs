@@ -506,7 +506,7 @@ impl AcpServer {
             self.actor_chain(),
         )?;
         let cancellation = self.register_session_cancellation(&session_id);
-        let concurrent_control = ConcurrentSessionControl::new();
+        let concurrent_control = ConcurrentSessionControl::for_session(cancellation.clone());
         self.concurrent_controls
             .register(&session_id, concurrent_control.clone());
         let project_root = session_project_root_for_cwd(&cwd);

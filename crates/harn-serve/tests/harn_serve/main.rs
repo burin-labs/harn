@@ -7,6 +7,7 @@
 //! target named `harn_serve`; files under `tests/harn_serve/` are not built as separate
 //! binaries. Fixtures resolve via `CARGO_MANIFEST_DIR`, unaffected by the move.
 
+mod control_ingress;
 mod embedded_stdlib;
 mod limits_loadgen;
 mod site_auth;
