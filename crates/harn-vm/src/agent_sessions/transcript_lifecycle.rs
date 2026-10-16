@@ -78,6 +78,32 @@ pub(crate) fn append_journal_event(id: &str, event: VmValue) -> Result<(), Strin
     })
 }
 
+/// Persist completed usage independently of transcript capacity. Retain the
+/// existing bounded transcript projection for worker budgets and portable
+/// snapshots when it fits; projection failure never discards the audit fact.
+pub(crate) fn append_usage_event(id: &str, event: VmValue) -> Result<(), String> {
+    validate_session_event(&event, "agent_session_append_usage_event")?;
+    SESSIONS.with(|sessions| {
+        let mut sessions = sessions.borrow_mut();
+        let state = sessions.get_mut(id).ok_or_else(|| {
+            format!("agent_session_append_usage_event: unknown session id '{id}'")
+        })?;
+        state.ensure_run_accepts_mutation("append_usage_event")?;
+        let candidate = transcript_with_appended_event(&state.transcript, event.clone());
+        if crate::agent_transcript_budget::transcript_fits_budget(
+            &candidate,
+            &state.transcript_budget_policy,
+        ) {
+            state.replace_transcript(candidate)?;
+        }
+        crate::agent_session_journal::enqueue_audit_event(
+            &mut state.transcript_journal,
+            crate::llm::helpers::vm_value_to_json(&event),
+        );
+        Ok(())
+    })
+}
+
 pub(super) fn validate_session_event(event: &VmValue, action: &str) -> Result<(), String> {
     let Some(event_dict) = event.as_dict() else {
         return Err(format!("{action}: event must be a dict"));
@@ -94,8 +120,14 @@ pub(crate) fn append_event_to_state(
     action: &str,
 ) -> Result<(), String> {
     let journal_event = crate::llm::helpers::vm_value_to_json(&event);
-    let dict = state
-        .transcript
+    let candidate = transcript_with_appended_event(&state.transcript, event);
+    apply_transcript_with_budget(state, candidate, action)?;
+    crate::agent_session_journal::enqueue_audit_event(&mut state.transcript_journal, journal_event);
+    Ok(())
+}
+
+fn transcript_with_appended_event(transcript: &VmValue, event: VmValue) -> VmValue {
+    let dict = transcript
         .as_dict()
         .cloned()
         .unwrap_or_else(crate::value::DictMap::new);
@@ -113,9 +145,7 @@ pub(crate) fn append_event_to_state(
     events.push(event);
     let mut next = dict;
     next.put("events", VmValue::list(events));
-    apply_transcript_with_budget(state, VmValue::dict(next), action)?;
-    crate::agent_session_journal::enqueue_audit_event(&mut state.transcript_journal, journal_event);
-    Ok(())
+    VmValue::dict(next)
 }
 
 pub fn messages_json(id: &str) -> Vec<serde_json::Value> {

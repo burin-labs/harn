@@ -214,8 +214,10 @@ ID in its saved run record, independently of their purpose label. Primary agent
 turns may declare custom purposes too. Accepted-turn budget counters remain
 separate from this completed-call ledger; accepting a turn does not record the
 same provider usage twice.
-Usage is journal-only evidence, so a full conversation buffer cannot reject or
-trim it, and recording usage does not consume conversation capacity.
+Usage durability is independent of transcript capacity: a full or trimmed
+conversation cannot discard the saved ledger. The existing bounded transcript
+projection still supplies usage facts to worker budgets and portable snapshots
+when capacity permits, without duplicate journal records or budget recovery.
 
 ## Relationship to other primitives
 

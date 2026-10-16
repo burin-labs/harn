@@ -646,6 +646,13 @@ pipeline main(harness: Harness) {
         1,
         "recording audit evidence must not weaken the conversation limit"
     );
+    let snapshot = crate::llm::helpers::vm_value_to_json(
+        &crate::agent_sessions::snapshot(session).expect("live bounded session"),
+    );
+    assert!(
+        snapshot["events"].as_array().expect("bounded events").len() <= 1,
+        "durable accounting must not overflow the bounded snapshot: {snapshot}"
+    );
     crate::agent_sessions::reset_session_store();
     crate::reset_thread_local_state();
 }
