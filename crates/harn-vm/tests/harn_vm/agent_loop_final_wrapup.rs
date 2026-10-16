@@ -243,6 +243,7 @@ pipeline main(harness: Harness, task: unknown) {{
   harness.stdio.log(len(evidence.diagnostics))
   harness.stdio.log(contains(evidence.evidence_line, "final summary contained an unconsumed tool call"))
   harness.stdio.log(contains(captured.result.text, "Stopped after the hard cap"))
+  harness.stdio.log(captured.result.publication_admitted)
 }}
 "#
     )
@@ -364,6 +365,10 @@ keep_exploring({})
         lines[10], "false",
         "unconsumed tool prose must stay provisional; lines: {lines:?}"
     );
+    assert_eq!(
+        lines[11], "false",
+        "unconsumed calls deny publication; lines: {lines:?}"
+    );
 }
 
 #[test]
@@ -415,6 +420,10 @@ fn final_wrapup_surfaces_a_malformed_unconsumed_tool_call_diagnostic() {
     assert_eq!(
         lines[10], "false",
         "malformed tool prose must stay provisional; lines: {lines:?}"
+    );
+    assert_eq!(
+        lines[11], "false",
+        "malformed calls deny publication; lines: {lines:?}"
     );
 }
 
@@ -616,11 +625,18 @@ pipeline main(harness: Harness, task: unknown) {{
       session_id: "{session_id}",
       llm_caller: mock_llm,
       wrapup_directive: "PRODUCT_SADPATH_DIRECTIVE_XYZ",
+      output: {{
+        type: "object",
+        properties: {{answer: {{type: "int"}}}},
+        required: ["answer"],
+      }},
     }},
   )
   harness.stdio.log(result.status)
   harness.stdio.log(harness.runtime.shared_get(wrapup_counter))
   harness.stdio.log(contains(result.text, "PRODUCT_SADPATH_DIRECTIVE_XYZ"))
+  harness.stdio.log(result.output_valid == nil)
+  harness.stdio.log(result.publication_admitted)
 }}
 "#
     )
@@ -706,6 +722,14 @@ fn host_directive_wrapup_failure_degrades_silently() {
         lines[2], "false",
         "a failed wrap-up must not surface the directive or any summary; lines: {lines:?}"
     );
+    assert_eq!(
+        lines[3], "true",
+        "failed wrap-up must not validate or retain terminal output; lines: {lines:?}"
+    );
+    assert_eq!(
+        lines[4], "false",
+        "failed wrap-up must not admit publication; lines: {lines:?}"
+    );
 }
 
 #[test]
@@ -735,4 +759,39 @@ fn final_wrapup_false_disables_the_wrapup_turn() {
         lines[3], "false",
         "expected no wrap-up summary in surfaced text when disabled; lines: {lines:?}"
     );
+}
+
+#[test]
+fn sub_agent_returns_schema_is_projected_to_the_child_terminal_contract() {
+    let raw = run_with_bridge(
+        r#"
+import { sub_agent_request } from "std/agent/workers"
+
+pipeline main(harness: Harness, task: unknown) {
+  const schema = {
+    type: "object",
+    properties: {decisions: {type: "array", items: {type: "string"}}},
+    required: ["decisions"],
+  }
+  const request = sub_agent_request(harness, "review the changes", {
+    provider: "mock",
+    returns: {schema: schema},
+  })
+  const conflict = try {
+    sub_agent_request(harness, "review the changes", {
+      provider: "mock",
+      returns: {schema: schema},
+      output: {schema: {type: "string"}},
+    })
+  }
+  harness.stdio.log(request.returns_schema.required[0])
+  harness.stdio.log(request.options.output.schema.required[0])
+  harness.stdio.log(request.options.output.schema.properties.decisions.type)
+  harness.stdio.log(is_err(conflict))
+}
+"#,
+    )
+    .expect("script must run");
+    let lines = out_lines(&raw);
+    assert_eq!(lines, ["decisions", "decisions", "array", "true"]);
 }

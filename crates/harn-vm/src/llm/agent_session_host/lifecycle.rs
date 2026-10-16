@@ -765,6 +765,7 @@ pub(super) async fn host_agent_session_finalize(
     );
     let mut result = serde_json::json!({
         "status": if final_status.is_empty() { "done" } else { final_status.as_str() },
+        "publication_admitted": publication_admitted,
         "final_status": final_status,
         "stop_reason": stop_reason,
         "acp_stop_reason": acp_stop_reason,

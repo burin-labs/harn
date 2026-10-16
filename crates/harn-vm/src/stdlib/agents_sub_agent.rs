@@ -428,6 +428,13 @@ fn wrap_sub_agent_error(
         session_id,
     );
     envelope.insert(crate::value::intern_key("ok"), VmValue::Bool(false));
+    let status = error
+        .as_dict()
+        .and_then(|dict| dict.get("category"))
+        .map(VmValue::display)
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "failed".to_string());
+    envelope.put_str("status", status);
     envelope.insert(crate::value::intern_key("error"), error);
     if let Some(transcript) = transcript {
         envelope.insert(crate::value::intern_key("transcript"), transcript);
@@ -757,28 +764,40 @@ fn synthesize_sub_agent_result(
     }
 }
 
-fn parse_structured_sub_agent_data(
-    candidate: Option<&JsonCandidate>,
-    schema: &VmValue,
-) -> Result<VmValue, VmError> {
-    let Some(candidate) = candidate else {
-        return Err(VmError::CategorizedError {
-            message: "sub_agent_run: child transcript did not contain valid JSON".to_string(),
-            category: crate::value::ErrorCategory::SchemaValidation,
-        });
-    };
-    crate::schema::schema_expect_value(
-        &crate::stdlib::json_to_vm_value(&candidate.value),
-        schema,
-        false,
-    )
-    .map_err(|error| match error {
-        VmError::Thrown(VmValue::String(message)) => VmError::CategorizedError {
-            message: format!("sub_agent_run: return schema validation failed: {message}"),
-            category: crate::value::ErrorCategory::SchemaValidation,
-        },
-        other => other,
-    })
+fn synthesize_sub_agent_declared_output(
+    result: &serde_json::Value,
+    transcript: &VmValue,
+) -> SynthesizedSubAgentResult {
+    // A declared schema describes the terminal output contract. Once that
+    // contract was attempted, an earlier assistant JSON fragment is not a
+    // substitute for its result. In particular, exhausted wrap-up output is
+    // eligible only when the loop reports that its terminal schema check passed.
+    let summary = synthesize_sub_agent_result(result, transcript, false).summary;
+    let structured_json =
+        if result.get("output_valid").and_then(|value| value.as_bool()) == Some(true) {
+            result.get("output").map(|value| JsonCandidate {
+                text: value.to_string(),
+                value: value.clone(),
+            })
+        } else {
+            None
+        };
+    let summary = structured_json
+        .as_ref()
+        .map(|candidate| candidate.text.clone())
+        .unwrap_or(summary);
+    SynthesizedSubAgentResult {
+        summary,
+        structured_json,
+    }
+}
+
+fn declared_output_invalid(result: &serde_json::Value, wants_structured_output: bool) -> bool {
+    wants_structured_output
+        && result
+            .get("output_valid")
+            .and_then(serde_json::Value::as_bool)
+            != Some(true)
 }
 
 pub(super) async fn execute_sub_agent(
@@ -851,11 +870,31 @@ pub(super) async fn execute_sub_agent(
             },
         });
     }
-    let terminal_details = stop_details_for_result(&result);
-
     let wants_structured_output =
         spec.returns_schema.is_some() || option_requests_structured_output(&spec.options);
-    let synthesized = synthesize_sub_agent_result(&result, &transcript, wants_structured_output);
+    let synthesized = if wants_structured_output {
+        synthesize_sub_agent_declared_output(&result, &transcript)
+    } else {
+        synthesize_sub_agent_result(&result, &transcript, false)
+    };
+    let mut terminal_details = stop_details_for_result(&result);
+    if terminal_details.status == crate::agent_events::SubagentTerminalStatus::Success {
+        if declared_output_invalid(&result, wants_structured_output) {
+            terminal_details = SubagentStopDetails::failure(
+                "schema_validation",
+                "sub-agent terminal output did not satisfy its declared output contract",
+            );
+        } else if result
+            .get("publication_admitted")
+            .and_then(serde_json::Value::as_bool)
+            != Some(true)
+        {
+            terminal_details = SubagentStopDetails::failure(
+                "publication_denied",
+                "sub-agent terminal result was not admitted for publication",
+            );
+        }
+    }
     let summary = synthesized.summary.clone();
     let artifacts = transcript
         .as_dict()
@@ -925,57 +964,12 @@ pub(super) async fn execute_sub_agent(
         })),
     );
 
-    if spec.returns_schema.is_none() && option_requests_structured_output(&spec.options) {
+    if wants_structured_output {
         if let Some(candidate) = synthesized.structured_json.as_ref() {
             envelope.insert(
                 crate::value::intern_key("data"),
                 crate::stdlib::json_to_vm_value(&candidate.value),
             );
-        }
-    }
-
-    if let Some(schema) = spec.returns_schema.as_ref() {
-        match parse_structured_sub_agent_data(synthesized.structured_json.as_ref(), schema) {
-            Ok(data) => {
-                envelope.insert(crate::value::intern_key("data"), data);
-            }
-            Err(error) => {
-                let message = error.to_string();
-                append_parent_sub_agent_event(
-                    spec.parent_session_id.as_deref(),
-                    sub_agent_result_event(
-                        &spec,
-                        false,
-                        &summary,
-                        evidence_added,
-                        budget_exceeded,
-                        Some(crate::llm::vm_value_to_json(&sub_agent_error_dict(
-                            crate::value::error_to_category(&error).as_str(),
-                            message.clone(),
-                            None,
-                        ))),
-                    ),
-                );
-                return Ok(finish_sub_agent(
-                    &spec,
-                    crate::llm::vm_value_to_json(&wrap_sub_agent_error(
-                        summary,
-                        artifacts,
-                        evidence_added,
-                        tokens_used,
-                        budget_exceeded,
-                        &spec.session_id,
-                        sub_agent_error_dict(
-                            crate::value::error_to_category(&error).as_str(),
-                            message.clone(),
-                            None,
-                        ),
-                        Some(transcript.clone()),
-                    )),
-                    transcript,
-                    SubagentStopDetails::failure("schema_validation", message),
-                ));
-            }
         }
     }
 
@@ -1012,15 +1006,47 @@ pub(super) async fn execute_sub_agent(
         ));
     }
 
+    let terminal_ok =
+        terminal_details.status == crate::agent_events::SubagentTerminalStatus::Success;
+    let terminal_error = if terminal_ok {
+        None
+    } else {
+        Some(sub_agent_error_dict(
+            &terminal_details.terminal_class,
+            terminal_details.reason.clone(),
+            None,
+        ))
+    };
+    envelope.insert(crate::value::intern_key("ok"), VmValue::Bool(terminal_ok));
+    envelope.put_str(
+        "status",
+        if terminal_ok
+            || result
+                .get("status")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|status| status != "" && status != "done")
+        {
+            result
+                .get("status")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("done")
+        } else {
+            terminal_details.terminal_class.as_str()
+        },
+    );
+    if let Some(error) = terminal_error.as_ref() {
+        envelope.insert(crate::value::intern_key("error"), error.clone());
+    }
+
     append_parent_sub_agent_event(
         spec.parent_session_id.as_deref(),
         sub_agent_result_event(
             &spec,
-            true,
+            terminal_ok,
             &synthesized.summary,
             evidence_added,
             budget_exceeded,
-            None,
+            terminal_error.as_ref().map(crate::llm::vm_value_to_json),
         ),
     );
 
@@ -1035,8 +1061,35 @@ pub(super) async fn execute_sub_agent(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::llm::mock::reset_llm_mock_state;
+    use crate::llm::mock::{get_llm_mock_calls, push_llm_mock, reset_llm_mock_state, LlmMock};
     use crate::NativeBuiltinCtxExt;
+
+    fn text_mock(text: &str) -> LlmMock {
+        LlmMock {
+            effective_reasoning_effort: Default::default(),
+            text: text.to_string(),
+            tool_calls: Vec::new(),
+            raw_tool_calls: Vec::new(),
+            match_pattern: None,
+            scope: crate::llm::mock::DEFAULT_MOCK_SCOPE.to_string(),
+            entry_id: String::new(),
+            sticky: false,
+            input_tokens: None,
+            output_tokens: None,
+            cache_read_tokens: None,
+            cache_write_tokens: None,
+            simulated_cost_usd: None,
+            thinking: None,
+            thinking_summary: None,
+            stop_reason: None,
+            model: "mock".to_string(),
+            provider: None,
+            blocks: None,
+            logprobs: Vec::new(),
+            error: None,
+            stream_chunks: Vec::new(),
+        }
+    }
 
     struct ExecutionPolicyGuard;
 
@@ -1498,6 +1551,171 @@ mod tests {
                 .map(Vec::len),
             Some(1)
         );
+    }
+
+    #[test]
+    fn declared_output_never_falls_back_to_an_earlier_transcript_json() {
+        let transcript = crate::llm::helpers::new_transcript_with(
+            None,
+            vec![assistant_message("{\"answer\":42}")],
+            None,
+            None,
+        );
+        let synthesized = synthesize_sub_agent_declared_output(
+            &serde_json::json!({
+                "visible_text": "{\"answer\":\"wrong\"}",
+                "output_valid": false,
+            }),
+            &transcript,
+        );
+
+        assert!(
+            synthesized.structured_json.is_none(),
+            "an invalid declared terminal output must not borrow transcript JSON"
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn exhausted_wrapup_returns_typed_partial_data_and_failed_status_once() {
+        crate::agent_sessions::reset_session_store();
+        reset_llm_mock_state();
+        push_llm_mock(text_mock("Still working."));
+        push_llm_mock(text_mock("{\"answer\":42}"));
+
+        let schema_json = serde_json::json!({
+            "type": "object",
+            "properties": {"answer": {"type": "integer"}},
+            "required": ["answer"],
+        });
+        let schema = crate::stdlib::json_to_vm_value(&schema_json);
+        let output = VmValue::dict(crate::value::DictMap::from_iter([(
+            crate::value::intern_key("schema"),
+            schema.clone(),
+        )]));
+        let options = crate::value::DictMap::from_iter([
+            (
+                crate::value::intern_key("provider"),
+                VmValue::String(arcstr::ArcStr::from("mock")),
+            ),
+            (
+                crate::value::intern_key("model"),
+                VmValue::String(arcstr::ArcStr::from("mock")),
+            ),
+            (crate::value::intern_key("max_iterations"), VmValue::Int(1)),
+            (
+                crate::value::intern_key("loop_until_done"),
+                VmValue::Bool(true),
+            ),
+            (
+                crate::value::intern_key("wrapup_directive"),
+                VmValue::String(arcstr::ArcStr::from("Return the final result as JSON.")),
+            ),
+            (crate::value::intern_key("output"), output),
+        ]);
+        let spec = SubAgentRunSpec {
+            name: "schema-worker".to_string(),
+            task: "return one answer".to_string(),
+            system: None,
+            options,
+            returns_schema: Some(schema),
+            session_id: "child-exhausted-schema-output".to_string(),
+            run_id: "agent_run_child_exhausted_schema_output".to_string(),
+            parent_session_id: None,
+            parent_run_id: None,
+            reminder_propagation: Vec::new(),
+            workspace_anchor: None,
+            stop_emitted: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        };
+
+        let mut vm = crate::new_vm();
+        crate::register_vm_stdlib(&mut vm);
+        let ctx = crate::vm::AsyncBuiltinCtx::for_test(vm);
+        let result = execute_sub_agent(&ctx, spec).await.unwrap();
+
+        assert_eq!(result.payload["status"].as_str(), Some("budget_exhausted"));
+        assert_eq!(result.payload["ok"].as_bool(), Some(false));
+        assert_eq!(
+            result.payload["error"]["category"].as_str(),
+            Some("policy_budget")
+        );
+        assert_eq!(result.payload["data"]["answer"].as_i64(), Some(42));
+        let calls = get_llm_mock_calls();
+        assert_eq!(calls.len(), 2, "one main turn and one wrap-up only");
+        assert_eq!(calls[0].output_format, serde_json::json!({"kind": "text"}));
+        assert_ne!(
+            calls[1].output_format,
+            serde_json::json!({"kind": "text"}),
+            "the wrap-up request must carry the declared output schema"
+        );
+
+        reset_llm_mock_state();
+        crate::agent_sessions::reset_session_store();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn natural_done_with_declared_output_remains_successful() {
+        crate::agent_sessions::reset_session_store();
+        reset_llm_mock_state();
+        push_llm_mock(text_mock("{\"answer\":42}\n<done>FINISHED</done>"));
+
+        let schema_json = serde_json::json!({
+            "type": "object",
+            "properties": {"answer": {"type": "integer"}},
+            "required": ["answer"],
+        });
+        let schema = crate::stdlib::json_to_vm_value(&schema_json);
+        let output = VmValue::dict(crate::value::DictMap::from_iter([(
+            crate::value::intern_key("schema"),
+            schema.clone(),
+        )]));
+        let options = crate::value::DictMap::from_iter([
+            (
+                crate::value::intern_key("provider"),
+                VmValue::String(arcstr::ArcStr::from("mock")),
+            ),
+            (
+                crate::value::intern_key("model"),
+                VmValue::String(arcstr::ArcStr::from("mock")),
+            ),
+            (crate::value::intern_key("max_iterations"), VmValue::Int(1)),
+            (
+                crate::value::intern_key("loop_until_done"),
+                VmValue::Bool(true),
+            ),
+            (
+                crate::value::intern_key("done_sentinel"),
+                VmValue::String(arcstr::ArcStr::from("FINISHED")),
+            ),
+            (crate::value::intern_key("output"), output),
+        ]);
+        let spec = SubAgentRunSpec {
+            name: "schema-worker".to_string(),
+            task: "return one answer".to_string(),
+            system: None,
+            options,
+            returns_schema: Some(schema),
+            session_id: "child-natural-schema-output".to_string(),
+            run_id: "agent_run_child_natural_schema_output".to_string(),
+            parent_session_id: None,
+            parent_run_id: None,
+            reminder_propagation: Vec::new(),
+            workspace_anchor: None,
+            stop_emitted: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        };
+
+        let mut vm = crate::new_vm();
+        crate::register_vm_stdlib(&mut vm);
+        let ctx = crate::vm::AsyncBuiltinCtx::for_test(vm);
+        let result = execute_sub_agent(&ctx, spec).await.unwrap();
+
+        assert_eq!(result.payload["status"].as_str(), Some("done"));
+        assert_eq!(result.payload["ok"].as_bool(), Some(true));
+        assert_eq!(result.payload["error"], serde_json::Value::Null);
+        assert_eq!(result.payload["data"]["answer"].as_i64(), Some(42));
+        assert_eq!(get_llm_mock_calls().len(), 1);
+
+        reset_llm_mock_state();
+        crate::agent_sessions::reset_session_store();
     }
 
     #[tokio::test(flavor = "current_thread")]

@@ -1646,7 +1646,13 @@ the child transcript with `source: "inherited"` and `originating_agent_id`.
 - `budget_exceeded`
 - `session_id`
 - `transcript`
-- `data` when the child requests JSON mode or `returns.schema` succeeds
+- `status`, preserving exhaustion and other terminal outcomes; a schema or
+  publication failure on an otherwise completed result becomes that failure
+  status with a matching `error`
+- `data` when the child requests JSON mode or declares `returns.schema` and the
+  terminal output passes its contract. Valid output from an exhausted child
+  remains inspectable alongside `ok: false`, its exhaustion `status`, and
+  `error`.
 - `error: {category, message, tool?}` when the child fails or a narrowed tool
   policy rejects a call
 
