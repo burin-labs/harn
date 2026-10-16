@@ -154,6 +154,7 @@ pub fn former_writer_authorized(authority: Authority, permit: FormerWriterPermit
   const handoff = authority.writer_handoff
   return handoff != nil && len(writer_handoff_errors(authority)) == 0
     && authority.mode == "shadow"
+    && !authority.held_repositories.contains(permit.writer.repository)
     && handoff.phase == "observing"
     && fence_matches(authority, permit)
     && handoff.generation == permit.generation

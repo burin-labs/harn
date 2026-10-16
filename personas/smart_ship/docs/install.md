@@ -91,7 +91,7 @@ the measured `state_commit` and returns an explicit `authorized` or `denied`
 status. Proceed only on `authorized`; checking never captures a replacement
 permit. These reads do not change authority or create an effect reservation.
 
-Missing state, an unenrolled writer, stale policy, drain, and a changed
+Missing state, an unenrolled writer, stale policy, a repository hold, drain, and a changed
 generation deny authorization. Invalid or unreadable configuration or state
 fails the command. Neither result permits a fallback to the old route. Keep
 the installation location mandatory for an enrolled repository, including when

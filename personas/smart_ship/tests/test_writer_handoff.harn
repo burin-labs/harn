@@ -201,6 +201,42 @@ pipeline test_stop_revokes_a_former_writer_permit_after_resume(harness: Harness)
   assert(former_writer_authorized(resumed.authority, fresh))
 }
 
+@test(cases: [{name: "held_writer", args: ["project", false]}, {name: "unrelated_hold", args: ["other", true]}])
+pipeline test_former_writer_respects_repository_holds(
+  harness: Harness,
+  held: string,
+  allowed: bool,
+) {
+  const f = fixture(harness.random)
+  const policy = f.policy
+    + {
+      repositories: ["project", "other"],
+      admission_rules: f.policy.admission_rules
+        + [f.policy.admission_rules[0]! + {id: "other-default", repository: "other"}],
+    }
+  const state = enrolled(
+    initial(
+      f.authority
+        + {
+          mode: "shadow",
+          policy: policy,
+          policy_digest: policy_digest(policy),
+          held_repositories: [held],
+        },
+    ),
+  )
+  const writer = state.authority.writer_handoff!.writers[0]!
+  const captured = capture_former_writer(state.authority, writer)
+  assert_eq(
+    is_ok(captured),
+    allowed,
+    "a fresh former writer must respect its own repository's explicit hold",
+  )
+  if is_ok(captured) {
+    assert(former_writer_authorized(state.authority, unwrap(captured)))
+  }
+}
+
 pipeline test_retirement_survives_pause_and_rollback_requires_a_fresh_generation(harness: Harness) {
   const f = fixture(harness.random)
   const state = enrolled(initial(f.authority + {mode: "shadow"}))
