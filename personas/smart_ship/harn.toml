@@ -12,6 +12,7 @@ host_requirements = []
 
 [exports]
 lib = "lib/main.harn"
+cli = "cli.harn"
 github = "lib/github.harn"
 
 [tests]
@@ -19,6 +20,6 @@ roots = ["tests"]
 
 [dependencies]
 burin-ci-checks = { git = "https://github.com/burin-labs/.github", rev = "a4da07f69b45a057dc46465bea10948f7bf3e0a3" }
-# Development-only for candidate recovery. Replace with the indexed 0.15.0 release
-# before this adapter lands; connector PR462 is not yet integrated or published.
+# Development-only for candidate recovery. Release 0.15.0 is published; replace
+# this pin with its indexed release after harn-packages PR118 lands.
 harn-github-connector = { git = "https://github.com/burin-labs/harn-github-connector", rev = "931f321384001042101c472a644ea9f3f5949d10" }

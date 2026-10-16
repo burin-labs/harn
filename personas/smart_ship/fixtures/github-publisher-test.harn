@@ -27,6 +27,7 @@ import {
 import { exercise_candidate_cleanup } from "./github-candidate-cleanup-test"
 import { exercise_candidate } from "./github-candidate-test"
 import { prepare_cleanup_stop } from "./github-cleanup-control"
+import { exercise_repair_publication } from "./github-repair-test"
 import { git } from "./neutral"
 import { digest, execution, finish_reviewed_admission, fixture, reviewed_request } from "./support"
 import { GithubRefUpdate } from "harn-github-connector/default"
@@ -302,6 +303,7 @@ pub fn exercise_publisher(harness: Harness, mode: string) {
   const binary = harness.env.get("HARN_BIN") ?? "harn"
   // Production code still validates the canonical URL. The test host redirects only
   // actual network Git commands to its private provider, after policy validation.
+  let policy_active = true
   harness.runtime.command_policy_push(
     command_policy(
       {
@@ -333,7 +335,11 @@ pub fn exercise_publisher(harness: Harness, mode: string) {
                     path_join(assets, "github-publisher-provider.mjs"),
                     remote,
                     call.body,
-                    mode,
+                    if mode.starts_with("repair:") {
+                      "normal"
+                    } else {
+                      mode
+                    },
                     report_path,
                     binary,
                     path_join(assets, "github-publisher-stop.harn"),
@@ -443,7 +449,9 @@ pub fn exercise_publisher(harness: Harness, mode: string) {
     ),
   )
   defer {
-    harness.runtime.command_policy_pop()
+    if policy_active {
+      harness.runtime.command_policy_pop()
+    }
   }
   assert_eq(
     commit_state(
@@ -595,6 +603,7 @@ pub fn exercise_publisher(harness: Harness, mode: string) {
   )
   assert(!transport.timed_out, "provider transport timed out: " + json_stringify(transport))
   const success = ["normal", "lost_ack", "lost_readback", "command", "cleanup_stop"].contains(mode)
+    || mode.starts_with("repair:")
   const refused = ["stop", "head_change"].contains(mode)
   require harness.fs.exists(report_path),
     "fixture provider did not report: "
@@ -654,6 +663,12 @@ pub fn exercise_publisher(harness: Harness, mode: string) {
         "active"
       },
     )
+  }
+  if mode.starts_with("repair:") {
+    harness.runtime.command_policy_pop()
+    policy_active = false
+    exercise_repair_publication(harness, candidate_fixture, f, snapshot, mode[7:])
+    return
   }
   const calls = harness.testing.http_mock_calls()
   const mutations = calls.filter(

@@ -14,7 +14,10 @@ const authorityRef = JSON.parse(readFileSync(store, 'utf8')).ref;
 const cleanup = deletions.length === 1 && (updates.length === 1 ||
   ([2, 3].includes(updates.length) && updates.some(row => row.name === authorityRef &&
     row.beforeOid === row.afterOid)));
-if ((!cleanup && updates.length !== 4) || updates.some(row => row.force ||
+const repair = mode === 'repair' && updates.length === 2 &&
+  updates.some(row => row.name === 'refs/heads/main') &&
+  updates.some(row => row.name === authorityRef);
+if ((!cleanup && !repair && updates.length !== 4) || updates.some(row => row.force ||
     !/^refs\/heads\/[A-Za-z0-9/-]+$/.test(row.name) ||
     !/^[a-f0-9]{40}$/.test(row.beforeOid) || !/^[a-f0-9]{40}$/.test(row.afterOid))) {
   throw new Error('invalid fixture atomic request');

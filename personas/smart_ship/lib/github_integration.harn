@@ -2,7 +2,11 @@ import { IntegrationEffect, confirm_integration, retained_repository_snapshot } 
 import { effect_receipt } from "./effect_contract"
 import { EffectClaim } from "./effect_owner"
 import { StateWrite } from "./git_store"
-import { github_repair_basis, github_repair_destination } from "./github_repair"
+import {
+  github_repair_basis,
+  github_repair_destination,
+  require_github_repair_candidate,
+} from "./github_repair"
 import { qualify_github_heads } from "./github_review"
 import { is_git_id } from "./identity"
 import { Change, Fence, RepairOrigin } from "./types"
@@ -92,6 +96,7 @@ fn build_witness(
     require request.snapshot.changes == basis.changes && len(incoming) == 0
       && len(observations) == 0,
       "repair publication must retain its original work without new admission or PR observations"
+    require_github_repair_candidate(claim, request.snapshot, expected_base)
     github_repair_destination(claim, basis, request.repository, authority_ref)
   } else {
     qualify_github_heads(

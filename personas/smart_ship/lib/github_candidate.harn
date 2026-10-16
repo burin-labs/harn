@@ -1,10 +1,5 @@
 import { git_env_remove, git_noninteractive_env } from "std/git"
-import {
-  CandidateEffect,
-  EffectTarget,
-  IntegrationEffect,
-  qualify_group_effect,
-} from "./controller"
+import { CandidateEffect, IntegrationEffect, qualify_group_effect } from "./controller"
 import { effect_receipt } from "./effect_contract"
 import { EffectClaim, claim_reserved_effect, settle_owned_effect } from "./effect_owner"
 import { prepare_group_tree, require_group_ancestry } from "./git_group"
@@ -16,6 +11,7 @@ import {
   require_git_transport,
 } from "./git_store"
 import { GithubObjectCleanup, cleanup_github_object } from "./github_cleanup"
+pub import { GithubCandidate } from "./github_owner"
 import {
   GithubIntegrationConfiguration,
   github_authority_owned,
@@ -34,17 +30,6 @@ import {
   github_read_signed_commit,
 } from "harn-github-connector/default"
 import { github_commit_worktree, github_worktree_delta } from "harn-github-connector/worktree"
-
-/**
- * The complete ordered admissions remain in the durable effect; this binds their signed candidate.
- */
-pub type GithubCandidate = {
-  schema: "smart-ship.github-candidate.v1",
-  request: EffectTarget,
-  claim_commit: string,
-  branch: string,
-  commit: GithubSignedCommitObservation,
-}
 
 /** A lost creation or settlement response never authorizes another signing attempt. */
 pub type GithubCandidateResult = {
@@ -100,7 +85,7 @@ fn git(process: HarnessProcess, cwd: string, args: list<string>, timeout_ms: int
   )
   require result.success && result.exit_code == 0,
     "candidate workspace preparation failed: "
-    + result.stderr
+    + json_stringify(pick(result, ["exit_code", "timed_out", "stderr"]))
 }
 
 fn require_composition(

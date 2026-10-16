@@ -114,6 +114,12 @@ fn read_reviews(
   request: IntegrationEffect,
 ) -> list<GithubPullRequestReviewCensus> {
   const incoming = github_incoming_changes(claim, request)
+  if request.snapshot.origin.kind == "repair" {
+    require len(incoming) == 0, "repair cannot introduce new reviewed admissions"
+    // Preparation validates the failed integration and its exact signed repair
+    // proposal. Retained work does not depend on live PR branches or reviews.
+    return []
+  }
   return read_github_reviews(harness, configuration, incoming.map({ change -> change.admission }))
 }
 

@@ -1,8 +1,44 @@
-import { IntegrationEffect, repair_snapshot } from "./controller"
+import { CandidateEffect, IntegrationEffect, repair_snapshot } from "./controller"
 import { EffectClaim } from "./effect_owner"
+import { GithubCandidate } from "./github_owner"
 import { GithubReviewedHeads } from "./github_review"
 import { snapshot_id } from "./identity"
-import { RepairPermit, Snapshot } from "./types"
+import { RepairOrigin, RepairPermit, Snapshot } from "./types"
+
+/** Publication consumes the same signed proposal, never another tree under its repair allowance. */
+pub fn require_github_repair_candidate(claim: EffectClaim, snapshot: Snapshot, base: string) {
+  const origin: RepairOrigin = schema_expect(snapshot.origin, schema_of(RepairOrigin))
+  const source = snapshot.sources[0]!
+  const effect = claim.state.effects.find(
+    { item ->
+      if item.status != "confirmed" || item.request.kind != "candidate" {
+        false
+      } else {
+        const candidate: CandidateEffect = schema_expect(item.request, schema_of(CandidateEffect))
+        candidate.origin == origin && candidate.repository == source.repository
+          && candidate.source == base
+          && candidate.tree == source.tree
+          && candidate.admissions == snapshot.changes.map({ change -> change.admission })
+      }
+    },
+  )
+  require effect != nil && effect.receipt != nil,
+    "repair publication requires its uniquely confirmed signed candidate"
+  const candidate: GithubCandidate = schema_expect(
+    json_parse(effect.receipt.body),
+    schema_of(GithubCandidate),
+  )
+  require candidate.request == pick(effect.request, ["repository", "source", "input_digest"])
+    && candidate.commit.repository == source.repository
+    && candidate.commit.oid == source.commit
+    && candidate.commit.tree_oid == source.tree
+    && candidate.commit.parent_oids == [base]
+    && candidate.commit.signature_valid
+    && candidate.commit.signed_by_github
+    && candidate.commit.signature_state == "VALID"
+    && candidate.branch == "smart-ship-candidates/" + candidate.claim_commit,
+    "repair publication differs from the original signed candidate receipt"
+}
 
 /**
  * Recover the already integrated incident source without granting a new dispatch.

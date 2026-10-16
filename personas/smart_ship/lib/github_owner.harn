@@ -1,15 +1,25 @@
-import { EffectRequest } from "./effect_contract"
+import { EffectRequest, EffectTarget } from "./effect_contract"
 import { EffectClaim } from "./effect_owner"
 import { policy_digest } from "./identity"
 import { Installation } from "./installation"
 import { Authority, SignedAdmission } from "./types"
 import {
   GithubPullRequestReviewCensus,
+  GithubSignedCommitObservation,
   github_pr_review_census,
 } from "harn-github-connector/default"
 
 /** The privileged integration owner retains its configured credential reference. */
 pub type GithubIntegrationConfiguration = {installation: Installation, token_reference: string}
+
+/** The shared signing and publication contract binds the complete reserved candidate. */
+pub type GithubCandidate = {
+  schema: "smart-ship.github-candidate.v1",
+  request: EffectTarget,
+  claim_commit: string,
+  branch: string,
+  commit: GithubSignedCommitObservation,
+}
 
 /** Only the configured controller and frozen policy can operate current authority. */
 pub fn github_authority_owned(

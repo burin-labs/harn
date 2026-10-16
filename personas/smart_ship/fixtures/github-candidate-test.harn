@@ -5,13 +5,16 @@ import {
   Change,
   Controller,
   Fence,
+  RepairPermit,
   candidate_effect,
   commit_state,
   control,
   prepare_state,
   read_state,
+  repair_candidate_effect,
   reserve_effect,
 } from "../lib/main"
+import { prepare_cleanup_stop } from "./github-cleanup-control"
 import { git } from "./neutral"
 
 const REPOSITORY = "example/project"
@@ -104,7 +107,12 @@ fn creation_calls(testing: HarnessTesting) -> list<CreateCall> {
  * Exercise actual SDK creation/read calls and remote authority CAS without a production mutation.
  */
 @complexity(allow)
-pub fn exercise_candidate(harness: Harness, f: CandidateFixture, mode: string) {
+pub fn exercise_candidate(
+  harness: Harness,
+  f: CandidateFixture,
+  mode: string,
+  repair: {permit: RepairPermit, additions: list<{path: string, contents: string}>}? = nil,
+) {
   const config = f.config
   const acting = if mode == "wrong_controller" {
     config + {installation: config.installation + {controller: "sha256:" + "e".repeat(64)}}
@@ -117,16 +125,22 @@ pub fn exercise_candidate(harness: Harness, f: CandidateFixture, mode: string) {
   const settings_path = path_join(f.root, "candidate-command-settings.json")
   const command_path = path_join(f.root, "candidate-command.json")
   harness.fs.write_text(settings_path, json_stringify(config))
-  const request = candidate_effect(
-    REPOSITORY,
-    f.base,
-    if mode == "wrong_tree" {
-      "f".repeat(40)
-    } else {
-      f.tree
-    },
-    f.changes.map({ change -> change.admission }),
-  )
+  const tree = if mode == "wrong_tree" {
+    "f".repeat(40)
+  } else {
+    f.tree
+  }
+  const request = if repair != nil {
+    repair_candidate_effect(
+      REPOSITORY,
+      f.base,
+      tree,
+      f.changes.map({ change -> change.admission }),
+      repair.permit,
+    )
+  } else {
+    candidate_effect(REPOSITORY, f.base, tree, f.changes.map({ change -> change.admission }))
+  }
   let reserved = unwrap(
     reserve_effect(
       f.initial,
@@ -149,11 +163,13 @@ pub fn exercise_candidate(harness: Harness, f: CandidateFixture, mode: string) {
     commit_state(
       harness.process,
       local,
-      prepare_state(harness.process, local, {commit: nil, state: nil}, initial),
+      prepare_state(harness.process, local, read_state(harness.process, local), initial),
     ).status,
     "committed",
   )
-  harness.testing.respond("secrets", "read", "public-synthetic-fixture-token")
+  if repair == nil {
+    harness.testing.respond("secrets", "read", "public-synthetic-fixture-token")
+  }
   harness.testing.http_mock(
     "GET",
     API + "/repos/" + REPOSITORY + "/branches/main",
@@ -163,10 +179,18 @@ pub fn exercise_candidate(harness: Harness, f: CandidateFixture, mode: string) {
   const authority_pushes = harness.runtime.atomic(0)
   const lost_settlement = harness.runtime.atomic(0)
   const stopped_during_preparation = harness.runtime.atomic(0)
-  const store_path = path_join(f.root, "candidate-stop-store.json")
-  harness.fs.write_text(store_path, json_stringify(local))
+  const stop_prepared = path_join(f.root, "cleanup-stop-write.json")
+  const stop_accepted = path_join(f.root, "candidate-stop-accepted")
+  const stop_claimed = harness.runtime.channel(nil, 1)
+  const stop_actor = if mode == "stop_during_prepare" {
+    spawn {
+      require harness.runtime.receive(stop_claimed) == true, "candidate claim was not reached"
+      prepare_cleanup_stop(pick(harness, ["process", "fs"]), local, f.root)
+    }
+  } else {
+    nil
+  }
   const assets = harness.fs.runtime_paths().asset_root
-  const binary = harness.env.get("HARN_BIN") ?? "harn"
   harness.runtime.command_policy_push(
     command_policy(
       {
@@ -178,16 +202,15 @@ pub fn exercise_candidate(harness: Harness, f: CandidateFixture, mode: string) {
           if argv[0] == "git" && argv[1] == "read-tree" && mode == "stop_during_prepare"
             && harness.runtime.atomic_get(stopped_during_preparation) == 0 {
             harness.runtime.atomic_add(stopped_during_preparation, 1)
-            // A hook cannot spawn recursively. The child accepts stop durably before
-            // executing the original preparation command in its unchanged directory.
+            // Apply the controller's prepared stop at this exact preparation boundary.
             return {
               rewrite: {
                 argv: [
                   "node",
                   path_join(assets, "github-candidate-stop.mjs"),
-                  binary,
-                  path_join(assets, "github-publisher-stop.harn"),
-                  store_path,
+                  stop_prepared,
+                  stop_accepted,
+                  f.remote,
                 ]
                   + argv,
               },
@@ -232,6 +255,9 @@ pub fn exercise_candidate(harness: Harness, f: CandidateFixture, mode: string) {
               return nil
             }
             harness.runtime.atomic_add(claims, 1)
+            if mode == "stop_during_prepare" {
+              harness.runtime.send(stop_claimed, true)
+            }
             const branch = "smart-ship-candidates/" + refspec.split(":")[0]!
             harness.testing.http_mock(
               "GET",
@@ -339,7 +365,11 @@ pub fn exercise_candidate(harness: Harness, f: CandidateFixture, mode: string) {
   } else {
     dispatch_github_candidate(harness, acting, fence(reserved), request)
   }
+  if stop_actor != nil {
+    await(stop_actor)
+  }
   const state = read_state(harness.process, config.installation.store).state!
+  const candidate_status = state.effects.find({ item -> item.request == request })!.status
   const calls = creation_calls(harness.testing)
   assert_eq(git(harness.process, f.remote, ["rev-parse", "refs/heads/main"]), f.base)
   assert_eq(state.pending, nil)
@@ -367,36 +397,55 @@ pub fn exercise_candidate(harness: Harness, f: CandidateFixture, mode: string) {
     )
     if mode == "stop_during_prepare" {
       assert_eq(harness.runtime.atomic_get(stopped_during_preparation), 1)
-      assert_eq(state.authority.mode, "stopped")
+      assert_eq(harness.fs.read_text(stop_accepted), "stopped")
+      assert_eq(state.authority.mode, "stopped", result.reason ?? "stop refusal was not reported")
     }
     return
   }
-  assert_eq(len(calls), 1, "the actual signing SDK mutation must be reached once")
+  assert_eq(
+    len(calls),
+    1,
+    "the actual signing SDK mutation must be reached once: "
+      + result.status
+      + ": "
+      + (result.reason ?? "unreported"),
+  )
   const input = calls[0]!.variables.input
   assert_eq(input.expectedHeadOid, f.base)
   assert_eq(input.branch.repositoryNameWithOwner, REPOSITORY)
   assert_eq(input.branch.branchName, "smart-ship-candidates/" + result.claim!.commit)
   assert_eq(
     input.fileChanges.additions.map({ item -> item.path }).sorted(),
-    ["first.txt", "second.txt"],
+    if repair != nil {
+      repair.additions.map({ item -> item.path }).sorted()
+    } else {
+      ["first.txt", "second.txt"]
+    },
   )
   assert_eq(input.fileChanges.deletions, [])
   for addition in input.fileChanges.additions {
-    assert_eq(base64_decode(addition.contents), addition.path.replace(".txt", " reviewed\n"))
+    assert_eq(
+      base64_decode(addition.contents),
+      if repair != nil {
+        repair.additions.find({ item -> item.path == addition.path })!.contents
+      } else {
+        addition.path.replace(".txt", " reviewed\n")
+      },
+    )
   }
   if mode == "cleanup_setup" {
     assert_eq(result.status, "confirmed", result.reason ?? "unreported")
-    assert_eq(state.effects[0]!.status, "confirmed")
+    assert_eq(candidate_status, "confirmed")
     assert_eq(result.candidate!.commit.tree_oid, f.tree)
     return
   }
   if ["normal", "command", "command_new"].contains(mode) {
     assert_eq(result.status, "confirmed", result.reason ?? "unreported")
-    assert_eq(state.effects[0]!.status, "confirmed")
+    assert_eq(candidate_status, "confirmed")
     assert_eq(result.candidate!.commit.tree_oid, f.tree)
   } else {
     assert_eq(result.status, "reconciliation_required", result.reason ?? "unreported")
-    assert_eq(state.effects[0]!.status, "dispatching")
+    assert_eq(candidate_status, "dispatching")
   }
   const again = dispatch_github_candidate(harness, config, fence(state), request)
   assert_eq(again.dispatch_started, false)

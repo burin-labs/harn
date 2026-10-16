@@ -205,6 +205,15 @@ snapshot and verification-request identity. `repair_publication_authorized`
 requires completely measured spend within the reservation before the privileged
 publication owner can accept the proposal. Settled workers cannot keep making
 effects. Unknown usage and overruns hold publication.
+
+For GitHub repairs, `repair_candidate_effect` binds one proposed tree to that
+priced attempt and the failed main snapshot's exact original admissions. The
+worker's Git objects must be present in the signing workspace. The existing
+candidate signer confirms the new tree, linear parent, and GitHub signature.
+Publication requires that same confirmed proposal and atomically updates main
+with controller authority. It does not re-read retained PRs or require their
+branches to survive integration. New admissions still require current reviews.
+
 `complete` records repair verification in that attempt's ledger. Another failed
 repair keeps the original incident and remaining budget; `repair_snapshot`
 selects the latest measured repair source for the next attempt. Only independent

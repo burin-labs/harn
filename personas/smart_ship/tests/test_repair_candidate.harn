@@ -1,3 +1,4 @@
+import { exercise_publisher } from "../fixtures/github-publisher-test"
 import { git } from "../fixtures/neutral"
 import { Fixture, execution, fixture, proof } from "../fixtures/support"
 import {
@@ -15,7 +16,7 @@ import {
   reserve_effect,
   settle_effect,
 } from "../lib/controller"
-import { github_repair_basis } from "../lib/github_repair"
+import { github_repair_basis, require_github_repair_candidate } from "../lib/github_repair"
 import {
   GitStore,
   commit_state,
@@ -26,6 +27,91 @@ import {
 import { Fence } from "../lib/types"
 
 type Setup = {fixture: Fixture, claimed: Controller, priced: Controller, permit: RepairPermit}
+
+@heavy(threads: 4)
+pipeline test_repair_signing_publication_and_checkpoint_follow_confirmed_main(harness: Harness) {
+  exercise_publisher(harness, "repair:normal")
+}
+
+@test(cases: [{name: "missing", args: ["missing"]}, {name: "commit", args: ["commit"]}, {name: "tree", args: ["tree"]}, {name: "permit", args: ["permit"]}, {name: "signature", args: ["signature"]}])
+pipeline test_repair_publication_requires_the_same_confirmed_signed_proposal(
+  harness: Harness,
+  mutation: string,
+) {
+  const s = setup(harness.random)
+  const base = s.fixture.snapshot.sources[0]!
+  const snapshot = s.fixture.snapshot
+    + {
+      origin: {kind: "repair", permit: s.permit},
+      sources: [base + {commit: "f".repeat(40), tree: sha256_hex("repair")}],
+    }
+  const request = repair_candidate_effect(
+    base.repository,
+    base.commit,
+    snapshot.sources[0]!.tree,
+    snapshot.changes.map({ change -> change.admission }),
+    s.permit,
+  )
+  const receipt = {
+    schema: "smart-ship.github-candidate.v1",
+    request: pick(request, ["repository", "source", "input_digest"]),
+    claim_commit: "a".repeat(40),
+    branch: "smart-ship-candidates/" + "a".repeat(40),
+    commit: {
+      repository: base.repository,
+      oid: snapshot.sources[0]!.commit,
+      tree_oid: snapshot.sources[0]!.tree,
+      parent_oids: [base.commit],
+      url: "https://github.com/example/project/commit/" + "f".repeat(40),
+      signature_valid: true,
+      signed_by_github: true,
+      signature_state: "VALID",
+    },
+  }
+  const effect = {
+    installation: s.priced.authority.installation,
+    request: request,
+    generation: s.priced.authority.generation,
+    controller: s.priced.authority.controller,
+    policy_digest: s.priced.authority.policy_digest,
+    status: "confirmed",
+    dispatch_binding: nil,
+    dispatch_id: "sha256:" + sha256_hex("signing dispatch"),
+    dispatch_revision: 1,
+    receipt: effect_receipt(json_stringify(receipt)),
+  }
+  const claim = {
+    remote: "fixture",
+    ref: "refs/heads/authority",
+    commit: "b".repeat(40),
+    state: s.priced + {effects: [effect]},
+  }
+  require_github_repair_candidate(claim, snapshot, base.commit)
+  let changed = snapshot
+  let changed_claim = claim
+  if mutation == "missing" {
+    changed_claim.state.effects = []
+  } else if mutation == "commit" {
+    changed.sources = [snapshot.sources[0]! + {commit: "e".repeat(40)}]
+  } else if mutation == "tree" {
+    changed.sources = [snapshot.sources[0]! + {tree: sha256_hex("another tree")}]
+  } else if mutation == "permit" {
+    changed.origin = {kind: "repair", permit: s.permit + {attempt: 2}}
+  } else {
+    changed_claim.state.effects = [
+      effect
+        + {
+          receipt: effect_receipt(
+            json_stringify(receipt + {commit: receipt.commit + {signature_valid: false}}),
+          ),
+        },
+    ]
+  }
+  const refused = try {
+    require_github_repair_candidate(changed_claim, changed, base.commit)
+  }
+  assert(is_err(refused), "another or unconfirmed proposal must not reach publication")
+}
 
 pipeline test_github_repair_requires_its_confirmed_failed_main_snapshot(harness: Harness) {
   const s = setup(harness.random)
