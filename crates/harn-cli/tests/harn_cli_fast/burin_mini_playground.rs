@@ -211,7 +211,9 @@ fn assert_verification_refused(report: &serde_json::Value, expected: &str, comma
                         event["metadata"]["tool_call_id"] == refusal["metadata"]["tool_call_id"]
                     })
             })
-            .count();
+            .filter_map(|event| event["metadata"]["tool_call_id"].as_str())
+            .collect::<HashSet<_>>()
+            .len();
         assert_eq!(
             count, 1,
             "the verifier command must be reached once: {command}: {report}"
@@ -786,6 +788,25 @@ mod stage_summary_tests {
                 },
             ],
         })
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn command_updates_are_one_refused_verifier_attempt() {
+        let report = windows_node_not_recognized_report();
+        super::assert_verification_refused(
+            &report,
+            "not recognized as an internal or external command",
+            &["node scripts/verify-comment.js"],
+        );
+        assert!(std::panic::catch_unwind(|| {
+            super::assert_verification_refused(
+                &report,
+                "not recognized as an internal or external command",
+                &["a command that never ran"],
+            );
+        })
+        .is_err());
     }
 
     #[test]
