@@ -54,14 +54,8 @@ fn key_inventory_valid(keys: list<VerifierKey>) -> bool {
     )
 }
 
-/** Validate installation policy before accepting any submitted work. */
-pub fn policy_errors(policy: Policy) -> list<string> {
+fn policy_budget_errors(policy: Policy) -> list<string> {
   let errors: list<string> = []
-  if policy.installation == "" || len(policy.repositories) == 0
-    || policy.repositories.contains("")
-    || duplicate(policy.repositories) {
-    errors = errors + ["installation and unique repositories are required"]
-  }
   if policy.max_changes < 1 || policy.max_unverified_ms < 1
     || policy.max_repair_attempts < 0
     || policy.max_repair_usd < 0.0
@@ -77,6 +71,18 @@ pub fn policy_errors(policy: Policy) -> list<string> {
       errors = errors + ["repair budget integer cannot be represented exactly as a float"]
     }
   }
+  return errors
+}
+
+/** Validate installation policy before accepting any submitted work. */
+pub fn policy_errors(policy: Policy) -> list<string> {
+  let errors: list<string> = []
+  if policy.installation == "" || len(policy.repositories) == 0
+    || policy.repositories.contains("")
+    || duplicate(policy.repositories) {
+    errors = errors + ["installation and unique repositories are required"]
+  }
+  errors = errors + policy_budget_errors(policy)
   for inventory in [
     {role: "executor", keys: policy.verifier_keys},
     {role: "checkpoint", keys: policy.checkpoint_keys},
