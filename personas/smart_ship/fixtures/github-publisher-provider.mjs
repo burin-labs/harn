@@ -1,5 +1,5 @@
 import {spawnSync} from 'node:child_process';
-import {writeFileSync} from 'node:fs';
+import {readFileSync, writeFileSync} from 'node:fs';
 import {dirname} from 'node:path';
 
 // Test-owned provider. It consumes the actual SDK mutation, atomically applies its
@@ -7,9 +7,13 @@ import {dirname} from 'node:path';
 const [remote, body, mode, report, binary, stopScript, store, ...read] = process.argv.slice(2);
 const operation = JSON.parse(body).variables.input;
 const updates = operation.refUpdates;
-const cleanup = updates.length === 1 &&
-  /^refs\/heads\/smart-ship-objects\/[a-f0-9]{40}$/.test(updates[0].name) &&
-  updates[0].afterOid === '0'.repeat(40);
+const deletions = updates.filter(row =>
+  /^refs\/heads\/smart-ship-objects\/[a-f0-9]{40}$/.test(row.name) &&
+  row.afterOid === '0'.repeat(40));
+const authorityRef = JSON.parse(readFileSync(store, 'utf8')).ref;
+const cleanup = deletions.length === 1 && (updates.length === 1 ||
+  (updates.length === 2 && updates.some(row => row.name === authorityRef &&
+    row.beforeOid === row.afterOid)));
 if ((!cleanup && updates.length !== 4) || updates.some(row => row.force ||
     !/^refs\/heads\/[A-Za-z0-9/-]+$/.test(row.name) ||
     !/^[a-f0-9]{40}$/.test(row.beforeOid) || !/^[a-f0-9]{40}$/.test(row.afterOid))) {
@@ -20,7 +24,7 @@ function checked(program, args, options = {}) {
   if (result.status !== 0) throw new Error(result.stderr || 'fixture child failed');
   return result;
 }
-if (!cleanup && mode === 'stop') {
+if ((!cleanup && mode === 'stop') || (cleanup && mode === 'cleanup_stop')) {
   checked(binary, ['run', '--standalone', stopScript, '--', store], {
     cwd: dirname(store),
     env: {PATH: process.env.PATH, HOME: process.env.HOME,

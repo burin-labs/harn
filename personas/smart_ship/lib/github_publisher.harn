@@ -713,6 +713,12 @@ pub fn cleanup_github_integration(
           repo: parts[1]!,
           updates: [
             {
+              ref: configuration.installation.store.ref,
+              before_oid: unwrap(qualified).observed!,
+              after_oid: unwrap(qualified).observed!,
+              force: false,
+            },
+            {
               ref: store.ref,
               before_oid: transaction.state_commit,
               after_oid: "0".repeat(40),

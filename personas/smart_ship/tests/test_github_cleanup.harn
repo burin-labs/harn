@@ -1,0 +1,6 @@
+import { exercise_publisher } from "../fixtures/github-publisher-test"
+
+@heavy(threads: 4)
+pipeline test_cleanup_stop_is_guarded_by_the_same_atomic_provider_transaction(harness: Harness) {
+  exercise_publisher(harness, "cleanup_stop")
+}

@@ -527,6 +527,12 @@ pub fn exercise_publisher(harness: Harness, mode: string) {
       assert_eq(read_state(harness.process, stage_store).commit, recovered.state_commit)
       const updates: list<GithubRefUpdate> = [
         {
+          ref: config.installation.store.ref,
+          before_oid: durable.commit!,
+          after_oid: durable.commit!,
+          force: false,
+        },
+        {
           ref: stage_ref,
           before_oid: recovered.state_commit,
           after_oid: "0".repeat(40),
@@ -560,7 +566,7 @@ pub fn exercise_publisher(harness: Harness, mode: string) {
     schema_of(ProviderTransport),
   )
   assert(!transport.timed_out, "provider transport timed out: " + json_stringify(transport))
-  const success = ["normal", "lost_ack", "lost_readback", "command"].contains(mode)
+  const success = ["normal", "lost_ack", "lost_readback", "command", "cleanup_stop"].contains(mode)
   const refused = ["stop", "head_change"].contains(mode)
   require harness.fs.exists(report_path),
     "fixture provider did not report: "
@@ -716,6 +722,12 @@ pub fn exercise_publisher(harness: Harness, mode: string) {
   )
   const cleanup_updates: list<GithubRefUpdate> = [
     {
+      ref: config.installation.store.ref,
+      before_oid: durable.commit!,
+      after_oid: durable.commit!,
+      force: false,
+    },
+    {
       ref: recovered.staging_ref,
       before_oid: from_remote.state_commit,
       after_oid: "0".repeat(40),
@@ -730,6 +742,30 @@ pub fn exercise_publisher(harness: Harness, mode: string) {
     {status: 200, body: json_stringify({data: {updateRefs: {clientMutationId: cleanup_id}}})},
   )
   const cleaned = cleanup_github_integration(harness, config, from_remote)
+  if mode == "cleanup_stop" {
+    assert_eq(
+      cleaned.status,
+      "unknown",
+      "a stop accepted before deletion must retain the staged object",
+    )
+    assert_eq(read_state(harness.process, stage_store).commit, from_remote.state_commit)
+    const stopped = read_state(harness.process, config.installation.store)
+    assert_eq(stopped.state!.authority.mode, "stopped")
+    assert(stopped.commit != durable.commit)
+    assert_eq(stopped.state!.pending, snapshot)
+    assert_eq(git(harness.process, remote, ["rev-parse", "refs/heads/main"]), candidate)
+    const cleanup_report: ProviderReport = json_decode(
+      harness.fs.read_text(report_path),
+      schema_of(ProviderReport),
+    )?
+    assert_eq(
+      cleanup_report.applied,
+      false,
+      "the provider must actually reject the stale atomic guard",
+    )
+    assert_eq(cleanup_report.updates, 2)
+    return
+  }
   assert_eq(
     cleaned.status,
     if mode == "unapplied" {

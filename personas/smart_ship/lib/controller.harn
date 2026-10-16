@@ -690,7 +690,7 @@ pub fn claim_repair(
   return Ok(next)
 }
 
-/** Drain preserves claimed work; stop and shadow revoke outstanding repair claims. */
+/** Stop and shadow cancel undispatched intent; claimed outcomes still require reconciliation. */
 pub fn control(
   state: Controller,
   fence: Fence,
@@ -705,7 +705,26 @@ pub fn control(
     next.incidents = next.incidents.map(revoke_attempts)
     next.effects = next.effects.map(
       { effect ->
-        if unresolved_effect(effect) {
+        if effect.status == "reserved" && effect.dispatch_id == nil {
+          effect
+            + {
+              status: "refused",
+              receipt: effect_receipt(
+                json_stringify(
+                  {
+                    schema: "smart-ship.cancelled-before-dispatch.v1",
+                    request: pick(effect.request, ["repository", "source", "input_digest"]),
+                    kind: effect.request.kind,
+                    authority: pick(
+                      next.authority,
+                      ["installation", "generation", "revision", "controller"],
+                    ),
+                    mode: mode,
+                  },
+                ),
+              ),
+            }
+        } else if unresolved_effect(effect) {
           effect + {status: "unknown"}
         } else {
           effect

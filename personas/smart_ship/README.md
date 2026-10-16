@@ -138,6 +138,8 @@ digest and keep the staging object available for recovery. Early refusals have n
 prepared transaction. `reconcile_github_integration` reads the
 actual outcome. `cleanup_github_integration` deletes only the exact staged object
 after conclusive confirmation or refusal, using another provider comparison.
+That deletion includes the current authority ref as a no-op guard in the same
+atomic transaction, so a stop or concurrent authority revision refuses cleanup.
 Unresolved objects remain available for recovery.
 Recovery and cleanup require the original dispatch's provider binding, including
 its credential reference. A different reference cannot reconcile or delete its objects.

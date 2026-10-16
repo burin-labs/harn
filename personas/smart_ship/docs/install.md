@@ -53,6 +53,9 @@ harn run .smart-ship-source/personas/smart_ship/cli.harn -- '{"action":"control"
 Use `mode: stopped` to revoke repair claims and stop new work. Resume explicitly
 with `mode: active`; stopped workers must claim a new attempt. Use `mode: draining`
 to refuse new admission while already admitted verification finishes.
+Stop and shadow mode durably refuse external requests that never acquired a
+dispatch claim. Already dispatched work remains unresolved until its provider
+outcome is measured; resuming does not authorize another attempt at that request.
 
 To transfer ownership, drain first and reconcile every reserved or unknown
 external request. Invoke `action: transfer` with `target_controller` set to the

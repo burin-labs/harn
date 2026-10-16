@@ -1703,7 +1703,7 @@ pub fn confirm_integration(
 
 ### fn `control`
 
-Drain preserves claimed work; stop and shadow revoke outstanding repair claims.
+Stop and shadow cancel undispatched intent; claimed outcomes still require reconciliation.
 
 ```harn
 pub fn control(

@@ -31,6 +31,77 @@ fn fence(state: Controller) -> Fence {
   return pick(state.authority, ["installation", "generation", "revision", "controller"])
 }
 
+@test(cases: [{name: "stop", args: ["stopped"]}, {name: "shadow", args: ["shadow"]}])
+pipeline test_control_cancels_undispatched_intent_without_an_unknown_transfer_barrier(
+  harness: Harness,
+  mode: "stopped" | "shadow",
+) {
+  const s = setup(harness)
+  defer {
+    harness.fs.delete(s.root)
+  }
+  const before = read_state(harness.process, s.store)
+  assert_eq(before.state!.effects[0]!.status, "reserved")
+  assert_eq(before.state!.effects[0]!.dispatch_id, nil)
+  const cancelled = unwrap(control(before.state!, fence(before.state!), mode))
+  assert_eq(
+    commit_state(
+      harness.process,
+      s.store,
+      prepare_state(harness.process, s.store, before, cancelled),
+    ).status,
+    "committed",
+  )
+  const observed = read_state(harness.process, s.store)
+  assert_eq(observed.state!.effects[0]!.status, "refused")
+  assert(observed.state!.effects[0]!.receipt != nil)
+  assert_eq(observed.state!.effects[0]!.dispatch_id, nil)
+  const resumed = unwrap(control(observed.state!, fence(observed.state!), "active"))
+  assert_eq(
+    commit_state(
+      harness.process,
+      s.store,
+      prepare_state(harness.process, s.store, observed, resumed),
+    ).status,
+    "committed",
+  )
+  let calls = 0
+  const attempted = dispatch_reserved_effect(
+    pick(harness, ["process", "random"]),
+    s.store,
+    fence(resumed),
+    s.request,
+    { _request ->
+      calls += 1
+      {status: "unknown", receipt: nil}
+    },
+  )
+  assert_eq(attempted.dispatch_started, false)
+  assert_eq(calls, 0)
+  const current = read_state(harness.process, s.store)
+  const draining = unwrap(control(current.state!, fence(current.state!), "draining"))
+  assert_eq(
+    commit_state(
+      harness.process,
+      s.store,
+      prepare_state(harness.process, s.store, current, draining),
+    ).status,
+    "committed",
+  )
+  const transferred = unwrap(transfer(draining, fence(draining), digest("replacement controller")))
+  assert_eq(
+    commit_state(
+      harness.process,
+      s.store,
+      prepare_state(harness.process, s.store, read_state(harness.process, s.store), transferred),
+    ).status,
+    "committed",
+  )
+  const final = read_state(harness.process, s.store)
+  assert_eq(final.state!.authority.generation, 2)
+  assert_eq(final.state!.effects[0]!.status, "refused")
+}
+
 pipeline test_state_object_upload_is_write_once_and_never_publishes_authority(harness: Harness) {
   const s = setup(harness)
   defer {

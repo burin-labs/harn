@@ -176,7 +176,9 @@ pipeline test_remote_state_cas_refuses_a_stale_writer_and_survives_a_new_reader(
   const stopped_read = read_state(harness.process, store + {workspace: restarted})
   assert(stopped_read.state != nil)
   assert(!effect_authorized(stopped_read.state, effect))
-  assert_eq(stopped_read.state.effects[0]?.status, "unknown")
+  assert_eq(stopped_read.state.effects[0]?.status, "refused")
+  assert_eq(stopped_read.state.effects[0]?.dispatch_id, nil)
+  assert(stopped_read.state.effects[0]?.receipt != nil)
   // Read failures are unknown, not a fabricated empty store or a successful write.
   const unavailable = store + {remote: path_join(root, "missing.git")}
   assert(
