@@ -20,7 +20,8 @@
  * of scope. `make`-driven lanes are out of scope too: the Makefile's
  * HARN_RUST_TEST_ENV already owns the same contract.
  */
-import { read_yaml } from "std/fs"
+import { read_json, read_toml, read_yaml } from "std/fs"
+import { schema_closed_object, schema_literal, schema_validator } from "std/schema"
 import { empty_scope_failure } from "./guard_scope.harn"
 import { scan_glob } from "./path_visibility.harn"
 
@@ -36,6 +37,69 @@ const REQUIRED_STACK = "16777216"
 const E2E_BUILD_JOBS = "$" + "{{ steps.resource-budget.outputs.build_jobs }}"
 
 pub type LaneViolation = {workflow: string, job: string, command: string, reason: string}
+
+pub type NativeQualificationPolicy = {
+  schema: "harn.native_qualification.v1",
+  profile: string,
+  inherits: "ci",
+}
+
+pub type NativeQualificationObservation = {
+  step_count: int,
+  command: string,
+  conditional: bool,
+  profile_exact: bool,
+}
+
+/** The workflow and nextest configuration are checked projections of one purpose policy. */
+pub fn native_qualification_command(policy: NativeQualificationPolicy) -> string {
+  return LANE_WRAPPER
+    + " cargo-nextest nextest run --locked --workspace --exclude harn-wasm --profile $"
+    + "{{ github.event_name == 'workflow_dispatch' && '"
+    + policy.profile
+    + "' || '"
+    + policy.inherits
+    + "' }}"
+}
+
+pub fn native_qualification_observation(
+  document: dict,
+  configuration: dict,
+  policy: NativeQualificationPolicy,
+) -> NativeQualificationObservation {
+  const steps = (document?.jobs?.nextest?.steps ?? []).filter(
+    { step -> step?.name == "Run workspace nextest" },
+  )
+  const step = len(steps) == 1 ? steps[0] : nil
+  return {
+    step_count: len(steps),
+    command: to_string(step?.run ?? ""),
+    conditional: step?.["if"] != nil || step?.["continue-on-error"] != nil,
+    profile_exact: schema_validator(
+      schema_closed_object({inherits: schema_literal(policy.inherits)}),
+    )
+      .report(configuration?.profile?.[policy.profile]).ok,
+  }
+}
+
+pub fn native_qualification_violations(
+  observed: NativeQualificationObservation,
+  policy: NativeQualificationPolicy,
+) -> list<LaneViolation> {
+  if observed.step_count == 1 && !observed.conditional && observed.profile_exact
+    && observed.command == native_qualification_command(policy) {
+    return []
+  }
+  return [
+    {
+      workflow: "macos-nightly.yml",
+      job: "nextest",
+      command: observed.command,
+      reason:
+        "NATIVE_QUALIFICATION_UNMEASURED: expected one unconditional workspace step selecting ${policy.profile} on dispatch and inheriting ci without overrides; observed ${observed.step_count} step(s)",
+    },
+  ]
+}
 
 /**
  * Join backslash-continued lines so a multi-line shell command is judged as
@@ -192,7 +256,18 @@ fn workflow_name(path: string) -> string {
 }
 
 pub fn main(harness: Harness) {
-  let violations: list<LaneViolation> = []
+  const policy = schema_expect(
+    read_json(harness.fs, ".config/native-qualification.json", nil),
+    schema_of(NativeQualificationPolicy),
+  )
+  require regex_match("^[a-z][a-z0-9-]{1,63}$", policy.profile) != nil,
+    "invalid qualification profile name"
+  const native = native_qualification_observation(
+    read_yaml(harness.fs, ".github/workflows/macos-nightly.yml", nil) ?? {},
+    read_toml(harness.fs, ".config/nextest.toml", nil) ?? {},
+    policy,
+  )
+  let violations: list<LaneViolation> = native_qualification_violations(native, policy)
   let scanned = 0
   for path in scan_glob(harness.fs, "check-rust-test-lane-policy", WORKFLOW_GLOB).sorted() {
     const document = read_yaml(harness.fs, path, nil)
@@ -222,4 +297,7 @@ pub fn main(harness: Harness) {
     harness.runtime.exit(1)
   }
   harness.stdio.println("Rust test lane stack contract: OK (${scanned} workflow(s))")
+  harness.stdio.println(
+    "Native qualification: ${native.step_count} workspace step; profile=${policy.profile}; exact_ci_inheritance=${native.profile_exact}",
+  )
 }

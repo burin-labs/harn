@@ -18,6 +18,7 @@ import {
 import {
   github_actions_exact_proof,
 } from "../crates/harn-stdlib/src/stdlib/stdlib_connectors_github"
+import { RELEASE_PLATFORMS, ReleasePlatform, ReleasePlatforms } from "./lib/release_platforms"
 
 pub type ReleaseAuditLane = {name: string, runner: string, proof: "merge_group" | "residual"}
 
@@ -40,6 +41,7 @@ pub type ReleaseAuditCiJob = {
 
 pub type ReleaseAuditContract = {
   schema_version: "harn.release_audit_contract.v1",
+  platforms: list<ReleasePlatform>,
   lanes: list<ReleaseAuditLane>,
   merge_group_jobs: list<ReleaseAuditCiJob>,
 }
@@ -95,10 +97,16 @@ pub type ReleaseAuditPlan = {
 pub const WINDOWS_NIGHTLY_ADVISORY = "WINDOWS_NIGHTLY_ADVISORY"
 
 /** Platforms whose exact successful dispatch a hosted receipt must prove. */
-const REQUIRED_PLATFORMS = ["macos"]
+const REQUIRED_PLATFORMS = RELEASE_PLATFORMS.filter({ row -> row.required }).map(
+  { row -> row.name },
+)
+  .to_list()
 
 /** Platforms a hosted receipt may report without its outcome gating certification. */
-const ADVISORY_PLATFORMS = ["windows"]
+const ADVISORY_PLATFORMS = RELEASE_PLATFORMS.filter({ row -> !row.required }).map(
+  { row -> row.name },
+)
+  .to_list()
 
 fn sha_schema() {
   return schema_string() + {pattern: "^[0-9a-f]{40}$"}
@@ -144,6 +152,7 @@ fn contract_schema() {
   return schema_closed_object(
     {
       schema_version: schema_literal("harn.release_audit_contract.v1"),
+      platforms: schema_of(ReleasePlatforms),
       lanes: schema_list(lane_schema()),
       merge_group_jobs: schema_list(ci_job_schema()),
     },
@@ -247,6 +256,15 @@ fn platform_proof_schema() {
                 name: schema_string() + {min_len: 1},
                 status: schema_literal("completed"),
                 conclusion: schema_literal("success"),
+                steps: schema_list(
+                  schema_closed_object(
+                    {
+                      name: schema_string(),
+                      status: schema_string(),
+                      conclusion: schema_nullable(schema_string()),
+                    },
+                  ),
+                ),
                 url: schema_string()
                   + {pattern: "^https://github[.]com/.+/actions/runs/[0-9]+/job/[0-9]+$"},
               },
@@ -365,7 +383,12 @@ fn contract_from_validated(value: dict) -> ReleaseAuditContract {
         },
       ]
   }
-  return {schema_version: "harn.release_audit_contract.v1", lanes: lanes, merge_group_jobs: jobs}
+  return {
+    schema_version: "harn.release_audit_contract.v1",
+    platforms: value.platforms,
+    lanes: lanes,
+    merge_group_jobs: jobs,
+  }
 }
 
 /** Validate the machine-readable lane and CI proof mapping once at its boundary. */
@@ -375,6 +398,9 @@ pub fn release_audit_contract_parse(value: any) -> ReleaseAuditContract? {
     return nil
   }
   const contract = contract_from_validated(report.value)
+  if contract.platforms != RELEASE_PLATFORMS {
+    return nil
+  }
   const lane_names = contract.lanes.map({ lane -> lane.name }).to_list()
   const lane_runners = contract.lanes.map({ lane -> lane.runner }).to_list()
   const job_names = contract.merge_group_jobs.map({ job -> job.name }).to_list()
@@ -508,6 +534,52 @@ pub fn release_audit_residual_plan(
   )
 }
 
+/** Refuse a platform proof unless its exact run, job and required phases were measured. */
+fn platform_proof_refusal(
+  platform: ReleasePlatformProof,
+  repo: string,
+  expected: string,
+) -> string {
+  const definition = RELEASE_PLATFORMS.find({ row -> row.name == platform.platform })
+  if definition == nil {
+    return "platform_identity_mismatch"
+  }
+  if platform.workflow_path != definition.workflow_path
+    || platform.required_job != definition.required_job {
+    return "platform_identity_mismatch"
+  }
+  if platform.completed_at_ms - platform.started_at_ms != platform.duration_ms {
+    return "platform_timing_mismatch"
+  }
+  const proof = github_actions_exact_proof(
+    {
+      repo: repo,
+      workflow_path: platform.workflow_path,
+      event: "workflow_dispatch",
+      head_sha: expected,
+      required_job: platform.required_job,
+      run_id: platform.run.id,
+    },
+    [platform.run],
+    platform.jobs,
+  )
+  if !proof.ok {
+    return "platform_proof_" + proof.reason
+  }
+  const job = platform.jobs.jobs.find({ row -> row.name == definition.required_job })
+  if job == nil
+    || definition.required_steps.any(
+      { name ->
+        const matches = job.steps.filter({ step -> step.name == name }).to_list()
+        return len(matches) != 1 || matches[0].status != "completed"
+          || matches[0].conclusion != "success"
+      },
+    ) {
+    return "platform_steps_unmeasured"
+  }
+  return ""
+}
+
 /** Validate one closed proof receipt and return the only audit plan it may authorize. */
 pub fn release_audit_receipt_plan(
   contract: ReleaseAuditContract,
@@ -573,39 +645,12 @@ pub fn release_audit_receipt_plan(
       + " code="
       + entry.code
   }
-  const expected_workflows = {
-    windows: ".github/workflows/windows-nightly.yml",
-    macos: ".github/workflows/macos-nightly.yml",
-  }
-  const expected_jobs = {
-    windows: "Workspace nextest (windows-latest)",
-    macos: "Workspace nextest (macos-latest)",
-  }
   let slowest = ""
   let longest = -1
   for platform in receipt.platforms {
-    if platform.workflow_path != expected_workflows[platform.platform]
-      || platform.required_job
-        != expected_jobs[platform.platform] {
-      return release_audit_full_plan(contract, "platform_identity_mismatch", expected)
-    }
-    if platform.completed_at_ms - platform.started_at_ms != platform.duration_ms {
-      return release_audit_full_plan(contract, "platform_timing_mismatch", expected)
-    }
-    const proof = github_actions_exact_proof(
-      {
-        repo: receipt.source.repo,
-        workflow_path: platform.workflow_path,
-        event: "workflow_dispatch",
-        head_sha: expected,
-        required_job: platform.required_job,
-        run_id: platform.run.id,
-      },
-      [platform.run],
-      platform.jobs,
-    )
-    if !proof.ok {
-      return release_audit_full_plan(contract, "platform_proof_" + proof.reason, expected)
+    const refusal = platform_proof_refusal(platform, receipt.source.repo, expected)
+    if refusal != "" {
+      return release_audit_full_plan(contract, refusal, expected)
     }
     if platform.platform == "windows" {
       windows_advisory = WINDOWS_NIGHTLY_ADVISORY + " state=success run=" + platform.run.url

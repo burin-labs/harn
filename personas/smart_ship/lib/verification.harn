@@ -15,6 +15,7 @@ import {
 import { ReviewAdmission } from "./review"
 import {
   AdmissionRecord,
+  AdmissionRule,
   AdmissionVerification,
   Execution,
   Policy,
@@ -82,6 +83,7 @@ pub fn policy_errors(policy: Policy) -> list<string> {
   for rule in policy.admission_rules {
     if rule.id == "" || !policy.repositories.contains(rule.repository)
       || rule.repository_id == ""
+      || trim(rule.base_branch) == ""
       || rule.scope_trust_domain == ""
       || len(review_policy_errors(rule.review)) > 0
       || !policy.scope_keys.any({ key -> key.trust_domain == rule.scope_trust_domain }) {
@@ -346,7 +348,9 @@ fn admission_time_errors(record: AdmissionRecord) -> list<string> {
   return invalid
 }
 
-fn qualify_admission(signed: SignedAdmission, policy: Policy) -> AdmissionVerification {
+type AdmissionAuthentication = {rule: AdmissionRule?, invalid: list<string>}
+
+fn authenticate_admission(signed: SignedAdmission, policy: Policy) -> AdmissionAuthentication {
   const record = signed.record
   const scope = record.scope.scope
   const rule = policy.admission_rules.find({ candidate -> candidate.id == scope.rule })
@@ -357,12 +361,16 @@ fn qualify_admission(signed: SignedAdmission, policy: Policy) -> AdmissionVerifi
     || scope.policy_digest != record.policy_digest
     || scope.source.repository != record.source.repository
     || scope.reviewed_head != record.source.head
-    || scope.reviewed_base != record.source.base {
+    || scope.reviewed_base != record.source.base
+    || scope.reviewed_base_branch != record.source.base_branch {
     invalid = invalid + ["admission-source-or-policy"]
   }
   if rule == nil || rule.repository != record.source.repository {
     invalid = invalid + ["admission-rule"]
   } else {
+    if rule.base_branch != record.source.base_branch {
+      invalid = invalid + ["admission-target-binding"]
+    }
     if rule.repository_id != record.source.base_repository_id {
       invalid = invalid + ["admission-repository-binding"]
     }
@@ -379,6 +387,14 @@ fn qualify_admission(signed: SignedAdmission, policy: Policy) -> AdmissionVerifi
   if !signature_valid(signed, admission_bytes(record), policy.admission_keys, policy.installation) {
     invalid = invalid + ["admission-signature"]
   }
+  return {rule: rule, invalid: invalid}
+}
+
+fn qualify_admission(signed: SignedAdmission, policy: Policy) -> AdmissionVerification {
+  const record = signed.record
+  const authenticated = authenticate_admission(signed, policy)
+  const rule = authenticated.rule
+  const invalid = authenticated.invalid
   let review: ReviewAdmission? = nil
   if rule != nil {
     review = review_admission(record.source, rule.review, record.reviews)

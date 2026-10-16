@@ -1,13 +1,15 @@
 pub import {
   AdmissionEffect,
+  EffectReceipt,
   EffectRefusal,
   EffectRequest,
   EffectTarget,
   ReleaseEffect,
   RerunEffect,
   admission_effect,
+  effect_receipt,
 } from "./effect_contract"
-import { qualify_admission_effect } from "./effect_contract"
+import { effect_receipt_valid, qualify_admission_effect } from "./effect_contract"
 import {
   checkpoint_id,
   is_digest,
@@ -101,8 +103,9 @@ pub type Effect = {
   controller: string,
   policy_digest: string,
   status: "reserved" | "dispatching" | "unknown" | "confirmed" | "refused",
+  dispatch_binding: string?,
   dispatch_id: string?,
-  receipt: string?,
+  receipt: EffectReceipt?,
 }
 
 fn unresolved_effect(effect: Effect) -> bool {
@@ -199,6 +202,7 @@ pub fn reserve_effect(
   fence: Fence,
   request: EffectRequest,
   policy: Policy,
+  dispatch_binding: string? = nil,
 ) -> Result<Controller, EffectRefusal> {
   if !authorized(state, fence) || state.authority.mode != "active"
     || !policy_matches(state, policy)
@@ -206,6 +210,7 @@ pub fn reserve_effect(
     || request.repository == ""
     || !is_git_id(request.source)
     || !is_digest(request.input_digest)
+    || (dispatch_binding != nil && !is_digest(dispatch_binding))
     || state.authority.held_repositories.contains(request.repository) {
     return Err(effect_refusal("external effect authority or source identity is invalid"))
   }
@@ -253,6 +258,7 @@ pub fn reserve_effect(
         controller: state.authority.controller,
         policy_digest: state.authority.policy_digest,
         status: "reserved",
+        dispatch_binding: dispatch_binding,
         dispatch_id: nil,
         receipt: nil,
       },
@@ -278,10 +284,12 @@ pub fn begin_effect(
   fence: Fence,
   request: EffectRequest,
   dispatch_id: string,
+  dispatch_binding: string? = nil,
 ) -> Result<Controller, string> {
   const effect = state.effects.find({ item -> item.request == request })
   if !authorized(state, fence) || effect == nil || !effect_authorized(state, effect)
     || !is_digest(dispatch_id)
+    || effect.dispatch_binding != dispatch_binding
     || effect.dispatch_id != nil {
     return Err("external dispatch authority is stale, stopped, or already consumed")
   }
@@ -304,11 +312,11 @@ pub fn settle_effect(
   fence: Fence,
   request: EffectRequest,
   status: "unknown" | "confirmed" | "refused",
-  receipt: string?,
+  receipt: EffectReceipt?,
 ) -> Result<Controller, string> {
   if !authorized(state, fence)
-    || (status != "unknown" && (receipt == nil || !is_digest(receipt)))
-    || (status == "unknown" && receipt != nil) {
+    || (status != "unknown" && receipt == nil)
+    || (receipt != nil && !effect_receipt_valid(receipt)) {
     return Err("effect settlement requires current authority and an observed receipt")
   }
   const effect = state.effects.find({ item -> item.request == request })

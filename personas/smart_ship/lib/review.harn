@@ -6,6 +6,7 @@ pub type ReviewedSource = {
   change: string,
   head: string,
   base: string,
+  base_branch: string,
   author: ReviewActor?,
   state: "open" | "closed" | "merged" | nil,
   draft: bool?,
@@ -55,6 +56,7 @@ pub type ReviewObservation = {
   change: string,
   head: string,
   base: string,
+  base_branch: string,
   platform_decision: "approved" | "changes_requested" | "review_required" | nil,
   declared_reviews: int,
   declared_threads: int,
@@ -71,7 +73,8 @@ pub fn decode_reviewed_change(value: unknown) -> ReviewedChangeObservation {
   const reviews = validate_review_observation(read.reviews)
   require read.source.repository == reviews.repository && read.source.change == reviews.change
     && read.source.head == reviews.head
-    && read.source.base == reviews.base,
+    && read.source.base == reviews.base
+    && read.source.base_branch == reviews.base_branch,
     "reviewed change source differs from its complete review census"
   return {source: read.source, reviews: reviews}
 }
@@ -81,6 +84,7 @@ pub fn validate_review_observation(value: ReviewObservation) -> ReviewObservatio
   require value.repository != "" && value.change != ""
     && is_git_id(value.head)
     && is_git_id(value.base)
+    && trim(value.base_branch) != ""
     && value.declared_reviews >= 0
     && value.declared_reviews == len(value.reviews)
     && value.declared_threads >= 0

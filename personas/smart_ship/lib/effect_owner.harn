@@ -1,13 +1,13 @@
-import { EffectRequest, begin_effect, settle_effect } from "./controller"
+import { EffectReceipt, EffectRequest, begin_effect, settle_effect } from "./controller"
+import { effect_receipt_valid } from "./effect_contract"
 import { GitStore, commit_state, prepare_state, read_state } from "./git_store"
-import { is_digest } from "./identity"
 import { Fence } from "./types"
 
 /** Only the effect owner receives these handles; dispatch identities come from its own entropy. */
 pub type EffectOwnerHost = {process: HarnessProcess, random: HarnessRandom}
 
 /** Provider evidence is separate from confirmation that its receipt reached durable state. */
-pub type EffectOutcome = {status: "confirmed" | "refused" | "unknown", receipt: string?}
+pub type EffectOutcome = {status: "confirmed" | "refused" | "unknown", receipt: EffectReceipt?}
 
 /** A started dispatch is never retried from its reservation, even if settlement is uncertain. */
 pub type EffectDispatch = {
@@ -18,11 +18,8 @@ pub type EffectDispatch = {
 }
 
 fn outcome_valid(outcome: EffectOutcome) -> bool {
-  return if outcome.status == "unknown" {
-    outcome.receipt == nil
-  } else {
-    outcome.receipt != nil && is_digest(outcome.receipt)
-  }
+  return (outcome.status == "unknown" || outcome.receipt != nil)
+    && (outcome.receipt == nil || effect_receipt_valid(outcome.receipt))
 }
 
 /**
@@ -37,6 +34,7 @@ pub fn dispatch_reserved_effect(
   fence: Fence,
   request: EffectRequest,
   dispatch: fn(EffectRequest) -> EffectOutcome,
+  dispatch_binding: string? = nil,
 ) -> EffectDispatch {
   const process = host.process
   const previous = read_state(process, store)
@@ -51,7 +49,7 @@ pub fn dispatch_reserved_effect(
   }
   // Distinct actors must prepare distinct commits, even within one Git timestamp second.
   const dispatch_id = "sha256:" + sha256_hex(host.random.uuid())
-  const started = begin_effect(state, fence, request, dispatch_id)
+  const started = begin_effect(state, fence, request, dispatch_id, dispatch_binding)
   if is_err(started) {
     return {
       status: "not_started",

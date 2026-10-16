@@ -8,5 +8,6 @@ Makefile
 scripts/affected-crates.harn
 scripts/ci/affected_crate_args.sh
 .config/nextest.toml
+.config/native-qualification.json
 spec/run-view-fixtures/
 .github/workflows/ci.yml

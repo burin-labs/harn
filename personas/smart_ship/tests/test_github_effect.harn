@@ -1,0 +1,78 @@
+type SmokeReceipt = {status: "passed", scenario: string}
+
+fn run_case(harness: Harness, scenario: string) {
+  const root = harness.fs.mkdtemp_in_workspace("smart-ship-github-effect-report-")
+  defer {
+    harness.fs.delete(root)
+  }
+  const receipt = path_join(root, "tests.json")
+  const binary = harness.env.get("HARN_BIN") ?? "harn"
+  const command = path_join(
+    harness.fs.runtime_paths().asset_root,
+    "../fixtures/github-effect-test.mjs",
+  )
+  const result = harness.process.run(
+    {program: "node", args: [command, binary, receipt, scenario], timeout_ms: 180000},
+  )
+  require result.success && result.exit_code == 0, result.stdout + "\n" + result.stderr
+  const report: SmokeReceipt = schema_expect(
+    json_parse(harness.fs.read_text(receipt)),
+    schema_of(SmokeReceipt),
+  )
+  require report.status == "passed" && report.scenario == scenario,
+    "scenario did not report its terminal result"
+}
+
+// Each case starts a child Harn runtime and its worker pool.
+@heavy(threads: 8)
+pipeline test_github_effect_receipt_survives_restart_without_redispatch(harness: Harness) {
+  run_case(harness, "receipt")
+}
+
+@heavy(threads: 8)
+@test(cases: [{name: "stopped", args: ["stopped"]}, {name: "stale", args: ["stale"]}, {name: "invalid-signature", args: ["invalid-signature"]}])
+pipeline test_github_effect_stop_stale_and_signature_controls_after_positive(
+  harness: Harness,
+  variation: string,
+) {
+  run_case(harness, variation)
+}
+
+@heavy(threads: 8)
+@test(cases: [{name: "changed-head", args: ["changed-head"]}, {name: "protected", args: ["protected"]}, {name: "uncertain", args: ["uncertain"]}])
+pipeline test_github_effect_definite_refusal_and_uncertain_outcomes(
+  harness: Harness,
+  variation: string,
+) {
+  run_case(harness, variation)
+}
+
+@heavy(threads: 8)
+pipeline test_github_effect_resumes_a_reserved_but_undispatched_admission(harness: Harness) {
+  run_case(harness, "reservation")
+}
+
+@heavy(threads: 8)
+@test(cases: [{name: "withdrawn", args: ["withdrawn"]}, {name: "unresolved", args: ["unresolved"]}, {name: "missing", args: ["missing"]}])
+pipeline test_github_effect_refreshes_trusted_review_before_mutation(
+  harness: Harness,
+  variation: string,
+) {
+  run_case(harness, variation)
+}
+
+@heavy(threads: 8)
+@test(cases: [{name: "changed-base", args: ["changed-base"]}, {name: "changed-repository", args: ["changed-repository"]}, {name: "changed-target", args: ["changed-target"]}])
+pipeline test_github_effect_rejects_changed_signed_source(harness: Harness, variation: string) {
+  run_case(harness, variation)
+}
+
+@heavy(threads: 8)
+pipeline test_github_effect_uses_the_signed_scope_review_rule(harness: Harness) {
+  run_case(harness, "rule-binding")
+}
+
+@heavy(threads: 8)
+pipeline test_github_effect_reservation_binds_the_provider_configuration(harness: Harness) {
+  run_case(harness, "configuration-binding")
+}

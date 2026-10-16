@@ -1,5 +1,21 @@
 {
   "schema_version": "harn.release_audit_contract.v1",
+  "platforms": [
+    {
+      "name": "macos",
+      "required": true,
+      "workflow_path": ".github/workflows/macos-nightly.yml",
+      "required_job": "Workspace nextest (macos-latest)",
+      "required_steps": ["Run workspace nextest", "Smoke test harn run", "Verify release test-case performance"]
+    },
+    {
+      "name": "windows",
+      "required": false,
+      "workflow_path": ".github/workflows/windows-nightly.yml",
+      "required_job": "Workspace nextest (windows-latest)",
+      "required_steps": ["Run workspace nextest"]
+    }
+  ],
   "lanes": [
     {"name": "rust-audit", "runner": "run_rust_audit", "proof": "merge_group"},
     {"name": "harn-audit", "runner": "run_harn_audit", "proof": "merge_group"},

@@ -1,5 +1,6 @@
 import { git_env_remove, git_noninteractive_env } from "std/git"
 import { Controller, transfer_ready } from "./controller"
+import { effect_receipt_valid } from "./effect_contract"
 import { is_git_id, policy_digest } from "./identity"
 import { policy_errors } from "./verification"
 
@@ -94,10 +95,18 @@ pub fn read_state(process: HarnessProcess, store: GitStore) -> StateRead {
   run(process, store, ["fetch", "--quiet", "--no-write-fetch-head", "--", store.remote, commit])
   const text = run(process, store, ["show", commit + ":state.json"])
   const state: Controller = schema_expect(json_parse(text), schema_of(Controller))
+  require state.effects.all(
+    { effect -> effect.receipt == nil || effect_receipt_valid(effect.receipt) },
+  ),
+    "durable effect receipt content does not match its identity"
   return {commit: commit, state: state}
 }
 
 fn check_transition(previous: Controller?, next: Controller) {
+  require next.effects.all(
+    { effect -> effect.receipt == nil || effect_receipt_valid(effect.receipt) },
+  ),
+    "effect receipt content does not match its identity"
   require next.authority.policy.installation == next.authority.installation
     && len(policy_errors(next.authority.policy)) == 0
     && next.authority.policy_digest == policy_digest(next.authority.policy),

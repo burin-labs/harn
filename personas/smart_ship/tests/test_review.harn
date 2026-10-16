@@ -9,6 +9,7 @@ pipeline test_replay_requires_measured_complete_inventory_and_preserves_unknown_
     change: "17",
     head: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     base: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    base_branch: "main",
     platform_decision: nil,
     declared_reviews: 1,
     declared_threads: 1,
@@ -42,6 +43,7 @@ pipeline test_replay_requires_measured_complete_inventory_and_preserves_unknown_
     observed + {declared_reviews: 0},
     observed + {declared_threads: -1},
     observed + {head: "moving-main"},
+    observed + {base_branch: ""},
     observed + {declared_reviews: 2, reviews: observed.reviews + observed.reviews},
     observed + {declared_threads: 2, threads: observed.threads + observed.threads},
   ] {

@@ -112,6 +112,10 @@ pipeline test_repair_stops_before_another_provider_turn_when_authority_is_revoke
 }
 
 pipeline test_failed_verification_does_not_finish_repair_and_pass_does(harness: Harness) {
+  harness.testing.clock_set(1700000000000)
+  defer {
+    harness.testing.clock_reset()
+  }
   let attempts = 0
   const tools = tool_define(
     tool_registry(),

@@ -1,3 +1,4 @@
+import { assert_error_contains } from "std/testing"
 import { git } from "../fixtures/neutral"
 import { Fixture, digest, fixture, reviewed_admission } from "../fixtures/support"
 import {
@@ -11,6 +12,7 @@ import {
   commit_state,
   control,
   dispatch_reserved_effect,
+  effect_receipt,
   prepare_state,
   read_state,
   reserve_effect,
@@ -18,6 +20,8 @@ import {
 } from "../lib/main"
 
 type Setup = {root: string, store: GitStore, f: Fixture, request: EffectRequest, state: Controller}
+
+type ProviderEvidence = {integrated_commit: string}
 
 fn fence(state: Controller) -> Fence {
   return pick(state.authority, ["installation", "generation", "revision", "controller"])
@@ -66,7 +70,10 @@ pipeline test_only_one_concurrent_owner_dispatches_and_a_prior_stop_refuses(harn
   const callback = { request ->
     assert_eq(request, s.request)
     harness.fs.append_locked(marker, "executed\n")
-    return {status: "confirmed", receipt: digest("measured provider receipt")}
+    return {
+      status: "confirmed",
+      receipt: effect_receipt(json_stringify({integrated_commit: s.request.source})),
+    }
   }
   const outcomes = parallel settle [1, 2] with { max_concurrent: 2 } { actor ->
     dispatch_reserved_effect(
@@ -88,6 +95,26 @@ pipeline test_only_one_concurrent_owner_dispatches_and_a_prior_stop_refuses(harn
   assert_eq(results.filter({ result -> result.status == "settled" }).len(), 1)
   const completed = read_state(harness.process, s.store).state!
   assert_eq(completed.effects[0]?.status, "confirmed")
+  const evidence: ProviderEvidence = schema_expect(
+    json_parse(completed.effects[0]!.receipt!.body),
+    schema_of(ProviderEvidence),
+  )
+  assert_eq(evidence.integrated_commit, s.request.source)
+  const checked = read_state(harness.process, s.store)
+  const next = unwrap(control(completed, fence(completed), "draining"))
+  assert(prepare_state(harness.process, s.store, checked, next).commit != "")
+  const corrupted = next
+    + {
+      effects: next.effects.map(
+        { effect ->
+          effect + {receipt: effect.receipt! + {body: "{\"integrated_commit\":\"substituted\"}"}}
+        },
+      ),
+    }
+  assert_error_contains(
+    fn() { prepare_state(harness.process, s.store, checked, corrupted) },
+    "receipt content does not match its identity",
+  )
   assert(completed.effects[0]?.dispatch_id != nil)
   const replayed = dispatch_reserved_effect(
     pick(harness, ["process", "random"]),

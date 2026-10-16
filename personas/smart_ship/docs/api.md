@@ -8,6 +8,122 @@ Version: `0.1.0`
 
 `lib/github.harn`
 
+### type `GithubAdmissionConfiguration`
+
+Trusted installation settings; submissions cannot choose authentication or transport.
+
+```harn
+pub type GithubAdmissionConfiguration = {
+  installation: Installation,
+  token_reference: string,
+  method: "merge" | "squash" | "rebase",
+  api_base_url?: string,
+}
+```
+
+### type `GithubAdmissionConfirmed`
+
+A confirmed provider result retains the actual integrated commit, not a guessed tree.
+
+```harn
+pub type GithubAdmissionConfirmed = {
+  schema: "smart-ship.github-admission-result.v1",
+  status: "confirmed",
+  request: AdmissionEffect,
+  review: GithubAdmissionReview,
+  provider: GithubPullRequestMergeReceipt,
+}
+```
+
+### type `GithubAdmissionDispatch`
+
+Dispatch status says whether this invocation acted; prior receipt content remains inspectable.
+
+```harn
+pub type GithubAdmissionDispatch = {
+  dispatch: EffectDispatch,
+  reason: string?,
+  admission_refusal: EffectRefusal?,
+}
+```
+
+### type `GithubAdmissionEvidence`
+
+Closed wire evidence preserves confirmed, refused and uncertain provider outcomes.
+
+```harn
+pub type GithubAdmissionEvidence = GithubAdmissionConfirmed \
+  | GithubAdmissionReviewRefused \
+  | GithubAdmissionRefused \
+  | GithubAdmissionUnknown
+```
+
+### type `GithubAdmissionRefused`
+
+A definite refusal is different from losing a response after a possible mutation.
+
+```harn
+pub type GithubAdmissionRefused = {
+  schema: "smart-ship.github-admission-result.v1",
+  status: "refused",
+  request: AdmissionEffect,
+  review: GithubAdmissionReview?,
+  error: GithubConnectorError,
+}
+```
+
+### type `GithubAdmissionReview`
+
+The complete fresh review census and the installation's decision travel with the result.
+
+```harn
+pub type GithubAdmissionReview = {observation: ReviewedChangeObservation, decision: ReviewAdmission}
+```
+
+### type `GithubAdmissionReviewRefused`
+
+Policy withdrawal is a measured decision, not a provider transport error.
+
+```harn
+pub type GithubAdmissionReviewRefused = {
+  schema: "smart-ship.github-admission-result.v1",
+  status: "refused",
+  request: AdmissionEffect,
+  review: GithubAdmissionReview,
+}
+```
+
+### type `GithubAdmissionSubmission`
+
+A complete signed witness and the authority revision the submitter observed.
+
+```harn
+pub type GithubAdmissionSubmission = {fence: Fence, admission: SignedAdmission}
+```
+
+### type `GithubAdmissionUnknown`
+
+Uncertain operations block transfer and require observation before any new action.
+
+```harn
+pub type GithubAdmissionUnknown = {
+  schema: "smart-ship.github-admission-result.v1",
+  status: "unknown",
+  request: AdmissionEffect,
+  review: GithubAdmissionReview,
+  error: GithubConnectorError,
+}
+```
+
+### fn `github_admission_binding`
+
+Bind recovery to effective nonsecret provider settings; secret values never enter state.
+
+```harn
+pub fn github_admission_binding(configuration: GithubAdmissionConfiguration) -> string {
+}
+```
+
 ### fn `github_reviewed_change`
 
 Normalize the connector's complete exact-head census for live reads and deterministic replay.
@@ -26,6 +142,19 @@ pub fn read_github_reviewed_change(
   harness: Harness,
   request: GithubPullRequestReviewCensusRequest,
 ) -> GithubConnectorResult<ReviewedChangeObservation> {
+}
+```
+
+### fn `submit_github_admission`
+
+Reserve once, commit the fenced dispatch, and let GitHub enforce its effective branch policy.
+
+```harn
+pub fn submit_github_admission(
+  harness: Harness,
+  configuration: GithubAdmissionConfiguration,
+  submission: GithubAdmissionSubmission,
+) -> GithubAdmissionDispatch {
 }
 ```
 
@@ -74,6 +203,7 @@ pub type AdmissionRule = {
   id: string,
   repository: string,
   repository_id: string?,
+  base_branch: string,
   scope_trust_domain: string,
   review: ReviewPolicy,
 }
@@ -91,6 +221,7 @@ pub type AdmissionScope = {
   rule: string,
   reviewed_head: string,
   reviewed_base: string,
+  reviewed_base_branch: string,
   source: Source,
   requirements: list<JobInputs>,
   inventory_complete: bool,
@@ -229,8 +360,9 @@ pub type Effect = {
   controller: string,
   policy_digest: string,
   status: "reserved" | "dispatching" | "unknown" | "confirmed" | "refused",
+  dispatch_binding: string?,
   dispatch_id: string?,
-  receipt: string?,
+  receipt: EffectReceipt?,
 }
 ```
 
@@ -252,7 +384,7 @@ pub type EffectDispatch = {
 Provider evidence is separate from confirmation that its receipt reached durable state.
 
 ```harn
-pub type EffectOutcome = {status: "confirmed" | "refused" | "unknown", receipt: string?}
+pub type EffectOutcome = {status: "confirmed" | "refused" | "unknown", receipt: EffectReceipt?}
 ```
 
 ### type `EffectOwnerHost`
@@ -261,6 +393,14 @@ Only the effect owner receives these handles; dispatch identities come from its 
 
 ```harn
 pub type EffectOwnerHost = {process: HarnessProcess, random: HarnessRandom}
+```
+
+### type `EffectReceipt`
+
+Provider evidence travels with durable state rather than an unavailable hash alone.
+
+```harn
+pub type EffectReceipt = {schema: "smart-ship.effect-receipt.v1", body: string, digest: string}
 ```
 
 ### type `EffectRefusal`
@@ -704,6 +844,7 @@ pub type ReviewObservation = {
   change: string,
   head: string,
   base: string,
+  base_branch: string,
   platform_decision: "approved" | "changes_requested" | "review_required" | nil,
   declared_reviews: int,
   declared_threads: int,
@@ -746,6 +887,7 @@ pub type ReviewedSource = {
   change: string,
   head: string,
   base: string,
+  base_branch: string,
   author: ReviewActor?,
   state: "open" | "closed" | "merged" | nil,
   draft: bool?,
@@ -907,6 +1049,7 @@ pub fn begin_effect(
   fence: Fence,
   request: EffectRequest,
   dispatch_id: string,
+  dispatch_binding: string? = nil,
 ) -> Result<Controller, string> {
 }
 ```
@@ -1043,6 +1186,7 @@ pub fn dispatch_reserved_effect(
   fence: Fence,
   request: EffectRequest,
   dispatch: fn(EffectRequest) -> EffectOutcome,
+  dispatch_binding: string? = nil,
 ) -> EffectDispatch {
 }
 ```
@@ -1053,6 +1197,15 @@ Re-read durable state before dispatch. A reservation is not perpetual permission
 
 ```harn
 pub fn effect_authorized(state: Controller, effect: Effect) -> bool {
+}
+```
+
+### fn `effect_receipt`
+
+Canonical JSON retains provider-specific evidence without adding forge fields to the controller.
+
+```harn
+pub fn effect_receipt(body: string) -> EffectReceipt {
 }
 ```
 
@@ -1348,6 +1501,7 @@ pub fn reserve_effect(
   fence: Fence,
   request: EffectRequest,
   policy: Policy,
+  dispatch_binding: string? = nil,
 ) -> Result<Controller, EffectRefusal> {
 }
 ```
@@ -1409,7 +1563,7 @@ pub fn settle_effect(
   fence: Fence,
   request: EffectRequest,
   status: "unknown" | "confirmed" | "refused",
-  receipt: string?,
+  receipt: EffectReceipt?,
 ) -> Result<Controller, string> {
 }
 ```
