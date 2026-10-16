@@ -41,19 +41,19 @@ path = "scripts/local-checks/cli.harn"
 [[package]]
 name = "harn-github-connector"
 source = "git+https://github.com/burin-labs/harn-github-connector"
-tag = "v0.12.0"
-rev_request = "v0.12.0"
-commit = "e27cbeb54c325e06724f9b314af3acf820f04f41"
-content_hash = "sha256-v2:9debd8570ad2ba3e2bd800f280e57e4f277bda23fc6d72246933705808899d2b"
-package_version = "0.12.0"
+tag = "v0.14.0"
+rev_request = "v0.14.0"
+commit = "773a8404dc21dc3688e280b8a93572b97939316f"
+content_hash = "sha256-v2:995aba08b08c9e8780c402241c2823300007e46246bef5232a3741578ce977ef"
+package_version = "0.14.0"
 harn_compat = ">=0.10.166,<0.11"
-manifest_digest = "sha256:654ed8c599510aa8edc2fe81244d53e553cfccc80e7800689549590d124974df"
+manifest_digest = "sha256:232672708a49b628a8b9393a65a2810912dba3ff7885262f57ae5bb733eb6073"
 
 [package.registry]
 source = "https://packages.harnlang.com/harn-package-index.toml"
 name = "@burin/github-connector"
-version = "0.12.0"
-provenance_url = "https://github.com/burin-labs/harn-github-connector/releases/tag/v0.12.0"
+version = "0.14.0"
+provenance_url = "https://github.com/burin-labs/harn-github-connector/releases/tag/v0.14.0"
 
 [[package.exports.modules]]
 name = "default"

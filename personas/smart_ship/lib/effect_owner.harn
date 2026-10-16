@@ -1,10 +1,16 @@
-import { EffectReceipt, EffectRequest, begin_effect, settle_effect } from "./controller"
+import { Controller, EffectReceipt, EffectRequest, begin_effect, settle_effect } from "./controller"
 import { effect_receipt_valid } from "./effect_contract"
-import { GitStore, commit_state, prepare_state, read_state } from "./git_store"
+import { CommitResult, GitStore, commit_state, prepare_state, read_state } from "./git_store"
 import { Fence } from "./types"
 
 /** Only the effect owner receives these handles; dispatch identities come from its own entropy. */
 pub type EffectOwnerHost = {process: HarnessProcess, random: HarnessRandom}
+
+/** Only the actor whose distinct state commit reached the remote owns this dispatch. */
+pub type EffectClaim = {remote: string, ref: string, commit: string, state: Controller}
+
+/** A refused or uncertain claim grants no provider authority; retain the measured revision. */
+pub type EffectClaimRefusal = {observed: string?}
 
 /** Provider evidence is separate from confirmation that its receipt reached durable state. */
 pub type EffectOutcome = {status: "confirmed" | "refused" | "unknown", receipt: EffectReceipt?}
@@ -23,11 +29,75 @@ fn outcome_valid(outcome: EffectOutcome) -> bool {
 }
 
 /**
- * Run only in the privileged effect owner. The callback retains provider credentials there;
- * workers submit requests and fences. The remote CAS is the dispatch commitment boundary.
- * Stop before commitment refuses dispatch; an already committed provider action requires a
- * measured terminal receipt. Transfer is barred throughout dispatch and uncertain recovery.
+ * Run only in the privileged effect owner; workers submit requests and fences.
+ * The remote CAS is shared by ordinary callbacks and prepared atomic transactions.
+ * A prior stop refuses the claim. A later control changes the returned commit's guard.
+ * Transfer stays barred until the claimed effect has a measured terminal outcome.
  */
+pub fn claim_reserved_effect(
+  host: EffectOwnerHost,
+  store: GitStore,
+  fence: Fence,
+  request: EffectRequest,
+  dispatch_binding: string? = nil,
+) -> Result<EffectClaim, EffectClaimRefusal> {
+  const process = host.process
+  const previous = read_state(process, store)
+  const state = previous.state
+  if state == nil {
+    return Err({observed: previous.commit})
+  }
+  // Distinct actors must prepare distinct commits, even within one Git timestamp second.
+  const dispatch_id = "sha256:" + sha256_hex(host.random.uuid())
+  const started = begin_effect(state, fence, request, dispatch_id, dispatch_binding)
+  if is_err(started) {
+    return Err({observed: previous.commit})
+  }
+  const prepared = prepare_state(process, store, previous, unwrap(started))
+  const committed = commit_state(process, store, prepared)
+  if committed.status != "committed" {
+    return Err({observed: committed.observed})
+  }
+  return Ok({remote: store.remote, ref: store.ref, commit: prepared.commit, state: unwrap(started)})
+}
+
+/** Record a measured outcome only for the exact dispatch this owner durably claimed. */
+pub fn settle_owned_effect(
+  process: HarnessProcess,
+  store: GitStore,
+  claim: EffectClaim,
+  request: EffectRequest,
+  outcome: EffectOutcome,
+) -> CommitResult {
+  require claim.remote == store.remote && claim.ref == store.ref && outcome_valid(outcome),
+    "effect settlement differs from its claimed store or valid outcome"
+  const claimed = claim.state.effects.find({ effect -> effect.request == request })
+  require claimed != nil && claimed.status == "dispatching" && claimed.dispatch_id != nil,
+    "effect settlement requires its original durable dispatch claim"
+  const current = read_state(process, store)
+  const state = current.state
+  require state != nil
+    && state.authority.installation == claim.state.authority.installation
+    && state.authority.generation == claim.state.authority.generation
+    && state.authority.controller == claim.state.authority.controller,
+    "dispatch settlement authority changed"
+  const effect = state.effects.find({ item -> item.request == request })
+  require effect != nil && effect.dispatch_id == claimed.dispatch_id
+    && effect.dispatch_binding == claimed.dispatch_binding,
+    "effect settlement belongs to a different dispatch"
+  const next = unwrap(
+    settle_effect(
+      state,
+      pick(state.authority, ["installation", "generation", "revision", "controller"]),
+      request,
+      outcome.status,
+      outcome.receipt,
+    ),
+  )
+  return commit_state(process, store, prepare_state(process, store, current, next))
+}
+
+/** Claim once, call the provider once, and settle its measured result through the same owner. */
 pub fn dispatch_reserved_effect(
   host: EffectOwnerHost,
   store: GitStore,
@@ -36,38 +106,20 @@ pub fn dispatch_reserved_effect(
   dispatch: fn(EffectRequest) -> EffectOutcome,
   dispatch_binding: string? = nil,
 ) -> EffectDispatch {
+  if request.kind == "integration" {
+    return {status: "not_started", dispatch_started: false, state_commit: nil, outcome: nil}
+  }
   const process = host.process
-  const previous = read_state(process, store)
-  const state = previous.state
-  if state == nil {
+  const claimed = claim_reserved_effect(host, store, fence, request, dispatch_binding)
+  if is_err(claimed) {
     return {
       status: "not_started",
       dispatch_started: false,
-      state_commit: previous.commit,
+      state_commit: unwrap_err(claimed).observed,
       outcome: nil,
     }
   }
-  // Distinct actors must prepare distinct commits, even within one Git timestamp second.
-  const dispatch_id = "sha256:" + sha256_hex(host.random.uuid())
-  const started = begin_effect(state, fence, request, dispatch_id, dispatch_binding)
-  if is_err(started) {
-    return {
-      status: "not_started",
-      dispatch_started: false,
-      state_commit: previous.commit,
-      outcome: nil,
-    }
-  }
-  const prepared = prepare_state(process, store, previous, unwrap(started))
-  const committed = commit_state(process, store, prepared)
-  if committed.status != "committed" {
-    return {
-      status: "not_started",
-      dispatch_started: false,
-      state_commit: committed.observed,
-      outcome: nil,
-    }
-  }
+  const claim = unwrap(claimed)
   // Only the actor that committed reserved -> dispatching may invoke this callback.
   const attempted = try {
     const measured: EffectOutcome = schema_expect(dispatch(request), schema_of(EffectOutcome))
@@ -80,23 +132,7 @@ pub fn dispatch_reserved_effect(
     {status: "unknown", receipt: nil}
   }
   const settlement = try {
-    const current = read_state(process, store)
-    const current_state = current.state
-    require current_state != nil
-      && current_state.authority.installation == fence.installation
-      && current_state.authority.generation == fence.generation
-      && current_state.authority.controller == fence.controller,
-      "dispatch settlement authority changed"
-    const next = unwrap(
-      settle_effect(
-        current_state,
-        pick(current_state.authority, ["installation", "generation", "revision", "controller"]),
-        request,
-        outcome.status,
-        outcome.receipt,
-      ),
-    )
-    commit_state(process, store, prepare_state(process, store, current, next))
+    settle_owned_effect(process, store, claim, request, outcome)
   }
   if is_ok(settlement) && unwrap(settlement).status == "committed" {
     return {
@@ -113,7 +149,7 @@ pub fn dispatch_reserved_effect(
   return {
     status: "reconciliation_required",
     dispatch_started: true,
-    state_commit: prepared.commit,
+    state_commit: claim.commit,
     outcome: outcome,
   }
 }

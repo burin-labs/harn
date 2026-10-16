@@ -1,6 +1,7 @@
 import { assert_error_contains } from "std/testing"
 import { git } from "../fixtures/neutral"
 import { Fixture, digest, fixture, reviewed_admission } from "../fixtures/support"
+import { require_git_transport, stage_state } from "../lib/git_store"
 import {
   AdmissionEffect,
   Controller,
@@ -9,10 +10,13 @@ import {
   GitStore,
   admission_effect,
   begin_effect,
+  claim_reserved_effect,
   commit_state,
+  confirm_integration,
   control,
   dispatch_reserved_effect,
   effect_receipt,
+  integration_effect,
   prepare_state,
   read_state,
   reserve_effect,
@@ -25,6 +29,198 @@ type ProviderEvidence = {integrated_commit: string}
 
 fn fence(state: Controller) -> Fence {
   return pick(state.authority, ["installation", "generation", "revision", "controller"])
+}
+
+pipeline test_state_object_upload_is_write_once_and_never_publishes_authority(harness: Harness) {
+  const s = setup(harness)
+  defer {
+    harness.fs.delete(s.root)
+  }
+  const previous = read_state(harness.process, s.store)
+  const next = unwrap(control(s.state, fence(s.state), "draining"))
+  const first = prepare_state(harness.process, s.store, previous, next)
+  const second = prepare_state(
+    harness.process,
+    s.store,
+    previous,
+    unwrap(control(s.state, fence(s.state), "stopped")),
+  )
+  assert(first.commit != second.commit)
+  const raced = parallel settle [first, second] with { max_concurrent: 2 } { candidate ->
+    stage_state(harness.process, s.store, candidate)
+  }
+  assert_eq(raced.failed, 0)
+  const results = raced.results.map({ result -> unwrap(result) })
+  assert_eq(results.filter({ result -> result.result.status == "committed" }).len(), 1)
+  assert_eq(results.filter({ result -> result.result.status == "conflict" }).len(), 1)
+  const staged = results.find({ result -> result.result.status == "committed" })!
+  const write = if staged.result.commit == first.commit {
+    first
+  } else {
+    second
+  }
+  assert_eq(staged.ref, "refs/heads/smart-ship-objects/" + previous.commit!)
+  assert_eq(staged.result.status, "committed")
+  assert_eq(staged.result.observed, write.commit)
+  assert_eq(
+    read_state(harness.process, s.store),
+    previous,
+    "uploading objects must not publish the prepared authority transition",
+  )
+  assert_eq(stage_state(harness.process, s.store, write), staged)
+  const competing = if write == first {
+    second
+  } else {
+    first
+  }
+  assert(competing.commit != write.commit)
+  const refused = stage_state(harness.process, s.store, competing)
+  assert_eq(refused.result.status, "conflict")
+  assert_eq(refused.result.observed, write.commit)
+  assert_eq(
+    git(harness.process, s.root, ["--git-dir=" + s.store.remote, "rev-parse", staged.ref]),
+    write.commit,
+  )
+  assert_error_contains(
+    fn() { stage_state(
+      harness.process,
+      s.store,
+      write + {state: write.state + {pending: s.f.snapshot}},
+    ) },
+    "prepared state payload changed",
+  )
+  const unavailable = stage_state(
+    harness.process,
+    s.store + {remote: path_join(s.root, "unavailable.git")},
+    write,
+  )
+  assert_eq(unavailable.result.status, "unknown", "an unmeasured remote is never an empty success")
+  assert_eq(unavailable.result.observed, nil)
+}
+
+pipeline test_forge_transport_refuses_fetch_push_and_named_remote_redirection(harness: Harness) {
+  const s = setup(harness)
+  defer {
+    harness.fs.delete(s.root)
+  }
+  const expected = "https://github.com/example/project.git"
+  const bound = s.store + {remote: expected}
+  require_git_transport(harness.process, bound, expected)
+  assert_error_contains(
+    fn() { require_git_transport(harness.process, s.store, expected) },
+    "Git transport differs",
+  )
+  for kind in ["insteadOf", "pushInsteadOf"] {
+    const key = "url.file:///unrelated-fixture/." + kind
+    git(harness.process, s.store.workspace, ["config", key, "https://github.com/"])
+    assert_error_contains(
+      fn() { require_git_transport(harness.process, bound, expected) },
+      "transport was redirected",
+    )
+    git(harness.process, s.store.workspace, ["config", "--unset-all", key])
+    require_git_transport(harness.process, bound, expected)
+  }
+  git(
+    harness.process,
+    s.store.workspace,
+    ["config", "remote.smart-ship-transport.pushurl", "https://github.com/other/project.git"],
+  )
+  assert_error_contains(
+    fn() { require_git_transport(harness.process, bound, expected) },
+    "transport was redirected",
+  )
+}
+
+pipeline test_atomic_adapter_claim_is_unique_durable_and_invalidated_by_stop(harness: Harness) {
+  const s = setup(harness)
+  defer {
+    harness.fs.delete(s.root)
+  }
+  const outcomes = parallel settle [1, 2] with { max_concurrent: 2 } { actor ->
+    claim_reserved_effect(pick(harness, ["process", "random"]), s.store, fence(s.state), s.request)
+  }
+  assert_eq(outcomes.failed, 0)
+  const results = outcomes.results.map({ result -> unwrap(result) })
+  const winners = results.filter({ result -> is_ok(result) })
+  assert_eq(len(winners), 1, "one actor must own the prepared atomic transaction")
+  const claim = unwrap(winners[0]!)
+  assert_eq(claim.remote, s.store.remote)
+  assert_eq(claim.ref, s.store.ref)
+  const current = read_state(harness.process, s.store)
+  assert_eq(current.commit, claim.commit, "the claim must name the actual remote revision")
+  assert_eq(current.state, claim.state)
+  assert_eq(claim.state.effects[0]?.status, "dispatching")
+  assert(claim.state.effects[0]?.dispatch_id != nil)
+  assert_eq(claim.state.effects[0]?.dispatch_revision, claim.state.authority.revision)
+  assert(
+    is_err(
+      claim_reserved_effect(
+        pick(harness, ["process", "random"]),
+        s.store,
+        fence(claim.state),
+        s.request,
+      ),
+    ),
+    "a repeated delivery must not obtain a second claim",
+  )
+  const stopped = unwrap(control(claim.state, fence(claim.state), "stopped"))
+  const rewritten = stopped
+    + {
+      effects: stopped.effects.map(
+        { effect -> effect + {dispatch_revision: claim.state.authority.revision - 1} },
+      ),
+    }
+  assert_error_contains(
+    fn() { prepare_state(harness.process, s.store, current, rewritten) },
+    "recorded dispatch identity and revision cannot change",
+  )
+  const stop = prepare_state(harness.process, s.store, current, stopped)
+  assert_eq(commit_state(harness.process, s.store, stop).status, "committed")
+  const after = read_state(harness.process, s.store)
+  assert(after.commit != claim.commit, "accepted stop must invalidate the atomic ref guard")
+  assert_eq(after.state!.effects[0]?.status, "unknown")
+  assert(is_err(transfer(after.state!, fence(after.state!), "replacement")))
+}
+
+pipeline test_prepared_group_state_keeps_the_remote_unchanged_until_commit(harness: Harness) {
+  const s = setup(harness)
+  defer {
+    harness.fs.delete(s.root)
+  }
+  // Use another bare owner so the fixture's unrelated admission claim cannot authorize a group.
+  const store = s.store + {ref: "refs/heads/group-authority"}
+  const initial = s.state + {effects: [], authority: s.f.authority}
+  const request = integration_effect(s.f.snapshot)
+  const reserved = unwrap(reserve_effect(initial, fence(initial), request, s.f.policy, nil, 1000))
+  const reservation = prepare_state(harness.process, store, {commit: nil, state: nil}, reserved)
+  assert_eq(commit_state(harness.process, store, reservation).status, "committed")
+  const claim = unwrap(
+    claim_reserved_effect(pick(harness, ["process", "random"]), store, fence(reserved), request),
+  )
+  const receipt = effect_receipt(json_stringify(pick(request, ["source", "input_digest"])))
+  const next = unwrap(
+    confirm_integration(claim.state, fence(claim.state), request, s.f.policy, 1000, receipt),
+  )
+  const prepared = prepare_state(
+    harness.process,
+    store,
+    {commit: claim.commit, state: claim.state},
+    next,
+  )
+  const before = read_state(harness.process, store)
+  assert_eq(before.commit, claim.commit)
+  assert_eq(before.state!.pending, nil)
+  assert_eq(before.state!.effects[0]!.status, "dispatching")
+  assert(prepared.commit != before.commit)
+  assert_eq(prepared.state.pending, s.f.snapshot)
+  assert_error_contains(
+    fn() { commit_state(harness.process, store, prepared) },
+    "integration confirmation requires the atomic destination transaction",
+  )
+  const after = read_state(harness.process, store)
+  assert_eq(after.commit, claim.commit, "ordinary state writes cannot publish a fake integration")
+  assert_eq(after.state!.pending, nil)
+  assert_eq(after.state!.effects[0]!.status, "dispatching")
 }
 
 fn setup(harness: Harness) -> Setup {

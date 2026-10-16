@@ -393,6 +393,7 @@ decision_limits = { max_choice_options = 255, score_levels_min = 2, score_levels
 model_match = "typesafe-ai/jev*"
 extends = true
 decision_protocol = "vercel_evaluate"
+decision_upstream_provider = "typesafe-ai"
 decision_question_kinds = ["boolean", "choice", "score"]
 decision_limits = { max_choice_options = 255, score_levels_min = 2, score_levels_max = 10, state_window_tokens = 32000, request_window_tokens = 64000 }
 
@@ -449,6 +450,112 @@ model_match = ["openai/gpt-5.4-nano", "openai/gpt-5.4-mini"]
 extends = true
 decision_protocol = "structured_llm"
 decision_question_kinds = ["boolean", "choice", "score"]
+
+# --- source: 10-decisions/01-system-one.toml ---
+# Native decision APIs read 2026-10-15. Harn's text/JSON adapter keeps
+# probed 255-choice and 2..10-score bounds unless a route needs less.
+# Context ceilings come from the route index, not a chat model's weights.
+# https://openrouter.ai/api/v1/models?output_modalities=decisions
+# https://ai-gateway.vercel.sh/v1/models
+
+[[provider.openrouter]]
+model_match = ["openrouter/respan/span-02", "openrouter/nace-ai/drex-v1.5", "openrouter/nace-ai/drex-v2.0"]
+extends = true
+decision_protocol = "openrouter_decisions"
+decision_question_kinds = ["boolean", "choice", "score"]
+decision_limits = { max_choice_options = 255, score_levels_min = 2, score_levels_max = 10, state_window_tokens = 131072, request_window_tokens = 131072 }
+
+[[provider.openrouter]]
+model_match = ["openrouter/liquid/d1", "openrouter/cloudflare/clef", "openrouter/cloudflare/clef-omni", "openrouter/inception/mercury-decide"]
+extends = true
+decision_protocol = "openrouter_decisions"
+decision_question_kinds = ["boolean", "choice", "score"]
+decision_limits = { max_choice_options = 255, score_levels_min = 2, score_levels_max = 10, state_window_tokens = 65536, request_window_tokens = 65536 }
+
+[[provider.openrouter]]
+model_match = ["openrouter/liquid/d1-ultra", "openrouter/microsoft/microsoft-decision-1"]
+extends = true
+decision_protocol = "openrouter_decisions"
+decision_question_kinds = ["boolean", "choice", "score"]
+decision_limits = { max_choice_options = 255, score_levels_min = 2, score_levels_max = 10, state_window_tokens = 32768, request_window_tokens = 32768 }
+
+[[provider.openrouter]]
+model_match = "openrouter/scaledown/classify-1"
+extends = true
+decision_protocol = "openrouter_decisions"
+decision_question_kinds = ["boolean", "choice", "score"]
+decision_limits = { max_choice_options = 255, score_levels_min = 2, score_levels_max = 10, state_window_tokens = 1000000, request_window_tokens = 1000000 }
+
+[[provider.openrouter]]
+model_match = "openrouter/cloudflare/clef-flash"
+extends = true
+decision_protocol = "openrouter_decisions"
+decision_question_kinds = ["boolean", "choice", "score"]
+decision_limits = { max_choice_options = 255, score_levels_min = 2, score_levels_max = 10, state_window_tokens = 24576, request_window_tokens = 24576 }
+
+[[provider.openrouter]]
+model_match = ["openrouter/perplexity/pplx-decider-v1.1-27b", "openrouter/perplexity/pplx-decider-latest"]
+extends = true
+decision_protocol = "openrouter_decisions"
+decision_question_kinds = ["boolean", "choice", "score"]
+decision_limits = { max_choice_options = 255, score_levels_min = 2, score_levels_max = 10, state_window_tokens = 262144, request_window_tokens = 262144 }
+
+[[provider.openrouter]]
+model_match = "openrouter/openai/gpt-6-luna-decisions"
+extends = true
+decision_protocol = "openrouter_decisions"
+decision_question_kinds = ["boolean", "choice", "score"]
+decision_limits = { max_questions = 200, max_choice_options = 255, score_levels_min = 2, score_levels_max = 10, state_window_tokens = 1050000, request_window_tokens = 1050000 }
+
+[[provider.openrouter]]
+model_match = "openrouter/togethercomputer/tev1-4b-experimental"
+extends = true
+decision_protocol = "openrouter_decisions"
+decision_question_kinds = ["boolean", "choice", "score"]
+# Live rejection: "Tev1 needs between 2 and 20 options per question".
+decision_limits = { max_choice_options = 20, score_levels_min = 2, score_levels_max = 10, state_window_tokens = 32768, request_window_tokens = 32768 }
+
+[[provider.openrouter]]
+model_match = ["openrouter/upstage/solar-decide", "openrouter/upstage/solar-decide-flash"]
+extends = true
+decision_protocol = "openrouter_decisions"
+decision_question_kinds = ["boolean", "choice", "score"]
+# Live 422 reports 26 single-token labels on both Solar routes.
+decision_limits = { max_choice_options = 26, score_levels_min = 2, score_levels_max = 10, state_window_tokens = 524288, request_window_tokens = 524288 }
+
+[[provider.openrouter]]
+model_match = "openrouter/jaredpalmer/kev-4b"
+extends = true
+decision_protocol = "openrouter_decisions"
+decision_question_kinds = ["boolean", "choice", "score"]
+decision_limits = { max_choice_options = 255, score_levels_min = 2, score_levels_max = 10, state_window_tokens = 8192, request_window_tokens = 8192 }
+
+[[provider.vercel_ai_gateway]]
+model_match = "convaiinnovations/laya"
+extends = true
+decision_protocol = "vercel_evaluate"
+decision_upstream_provider = "boundless"
+decision_question_kinds = ["boolean", "choice", "score"]
+# 64 short candidates returned a distribution; 128/255 returned HTTP 413.
+# This is a tested adapter bound within the route's small context, not a
+# published vendor ceiling. The required ZDR filter still blocks this account.
+decision_limits = { max_choice_options = 64, score_levels_min = 2, score_levels_max = 10, state_window_tokens = 8192, request_window_tokens = 8192 }
+
+[[provider.vercel_ai_gateway]]
+model_match = "liquid/d1-ultra"
+extends = true
+decision_protocol = "vercel_evaluate"
+decision_upstream_provider = "liquid"
+decision_question_kinds = ["boolean", "choice", "score"]
+decision_limits = { max_choice_options = 255, score_levels_min = 2, score_levels_max = 10, state_window_tokens = 32768, request_window_tokens = 32768 }
+
+[[provider.vercel_ai_gateway]]
+model_match = "perplexity/pplx-decider-v1.1-27b"
+extends = true
+decision_protocol = "vercel_evaluate"
+decision_upstream_provider = "perplexity"
+decision_question_kinds = ["boolean", "choice", "score"]
+decision_limits = { max_choice_options = 255, score_levels_min = 2, score_levels_max = 10, state_window_tokens = 262144, request_window_tokens = 262144 }
 
 # --- source: 10-defaults/provider-defaults.toml ---
 [provider_defaults.anthropic]
@@ -1965,6 +2072,494 @@ model_match = "openai/gpt-*"
 extends = true
 defer_loading = false
 tool_search = []
+
+# --- source: 20-providers/03-october-refresh.toml ---
+# Route-specific October 2026 additions. Keep these before provider-family
+# fallbacks: a listed model must not silently inherit text-only tool behavior.
+# Live Harn tool-probe and agent-loop evidence is recorded in the refresh
+# report; unknown-access routes deliberately do not advertise native tools.
+
+[[provider.openrouter]]
+model_match = ["thinkingmachines/inkling", "thinkingmachines/inkling-small"]
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+structured_output_mode = "native_json"
+thinking_modes = ["enabled", "effort"]
+reasoning_effort_levels = ["none", "minimal", "low", "medium", "high", "max"]
+vision_supported = true
+vision = true
+prompt_caching = true
+thinking_block_style = "inline"
+
+[[provider.together]]
+model_match = ["thinkingmachines/Inkling", "together/thinkingmachines/Inkling"]
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+structured_output_mode = "native_json"
+thinking_modes = ["enabled", "effort"]
+reasoning_effort_levels = ["none", "minimal", "low", "medium", "high", "max"]
+vision_supported = true
+vision = true
+prompt_caching = true
+thinking_block_style = "inline"
+
+[[provider.fireworks]]
+model_match = "accounts/fireworks/models/inkling"
+native_tools = true
+preferred_tool_format = "native"
+thinking_modes = ["enabled"]
+vision_supported = true
+vision = true
+thinking_block_style = "inline"
+
+[[provider.deepinfra]]
+model_match = ["thinkingmachines/Inkling-Small", "deepinfra/thinkingmachines/Inkling-Small"]
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+structured_output_mode = "native_json"
+thinking_modes = ["enabled", "effort"]
+reasoning_effort_levels = ["none", "minimal", "low", "medium", "high", "max"]
+vision_supported = true
+vision = true
+prompt_caching = true
+thinking_block_style = "inline"
+
+[[provider.openrouter]]
+model_match = "nvidia/nemotron-3.5-lightning"
+native_tools = true
+preferred_tool_format = "native"
+thinking_modes = ["enabled"]
+prompt_caching = true
+thinking_block_style = "inline"
+
+[[provider.deepinfra]]
+model_match = ["nvidia/NVIDIA-Nemotron-3.5-Lightning", "deepinfra/nvidia/NVIDIA-Nemotron-3.5-Lightning"]
+native_tools = true
+preferred_tool_format = "native"
+thinking_modes = ["enabled"]
+prompt_caching = true
+thinking_block_style = "inline"
+
+[[provider.openrouter]]
+model_match = "qwen/qwen3.8-max-prime"
+native_tools = true
+preferred_tool_format = "native"
+# Alibaba rejects forced and required tool choice while thinking is enabled.
+# October 15: forced tool probe returned 400; auto called the tool successfully.
+allowed_tool_choice_modes = ["auto"]
+structured_output = "native"
+structured_output_mode = "native_json"
+thinking_modes = ["effort"]
+reasoning_effort_levels = ["minimal", "low", "medium", "high", "xhigh"]
+reasoning_none_supported = false
+reasoning_disable_supported = false
+vision_supported = true
+vision = true
+prompt_caching = true
+thinking_block_style = "inline"
+
+[[provider.gemini]]
+model_match = ["gemini-4-argon", "models/gemini-4-argon"]
+native_tools = true
+preferred_tool_format = "native"
+live_endpoint_family = "gemini_interactions"
+advanced_generation_options = []
+temperature_supported = false
+top_p_supported = false
+top_k_supported = false
+structured_output = "native"
+structured_output_mode = "native_json"
+thinking_modes = ["effort"]
+reasoning_effort_levels = ["low", "medium", "high"]
+reasoning_effort_supported = true
+reasoning_none_supported = false
+reasoning_disable_supported = false
+vision_supported = true
+audio_supported = true
+pdf_supported = true
+files_api_supported = true
+prompt_caching = true
+prompt_cache_min_prefix_tokens = 4096
+thinking_block_style = "reasoning_summary"
+
+[[provider.openrouter]]
+model_match = "google/gemini-4-argon"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+structured_output_mode = "native_json"
+thinking_modes = ["effort"]
+reasoning_effort_levels = ["low", "medium", "high"]
+reasoning_none_supported = false
+reasoning_disable_supported = false
+vision_supported = true
+audio_supported = true
+pdf_supported = true
+prompt_caching = true
+thinking_block_style = "reasoning_summary"
+
+[[provider.openrouter]]
+model_match = ["nvidia/nemotron-3.5-super-vl", "nvidia/nemotron-3.5-super-vl:free"]
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+structured_output_mode = "native_json"
+thinking_modes = ["enabled"]
+vision_supported = true
+vision = true
+thinking_block_style = "inline"
+
+[[provider.together]]
+model_match = ["nvidia/NVIDIA-Nemotron-3.5-Super-VL", "together/nvidia/NVIDIA-Nemotron-3.5-Super-VL"]
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+structured_output_mode = "native_json"
+thinking_modes = ["enabled"]
+vision_supported = true
+vision = true
+prompt_caching = true
+thinking_block_style = "inline"
+
+[[provider.deepinfra]]
+model_match = ["nvidia/NVIDIA-Nemotron-3.5-Super-VL", "deepinfra/nvidia/NVIDIA-Nemotron-3.5-Super-VL"]
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+structured_output_mode = "native_json"
+thinking_modes = ["enabled"]
+vision_supported = true
+vision = true
+prompt_caching = true
+thinking_block_style = "inline"
+
+[[provider.nvidia]]
+model_match = "nvidia/nemotron-3.5-super-vl-120b-a12b"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+structured_output_mode = "native_json"
+thinking_modes = ["enabled"]
+vision_supported = true
+vision = true
+thinking_block_style = "inline"
+
+[[provider.openrouter]]
+model_match = "stepfun/step-5-preview"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+structured_output_mode = "native_json"
+thinking_modes = ["effort"]
+reasoning_effort_levels = ["low", "medium", "high"]
+reasoning_none_supported = false
+reasoning_disable_supported = false
+vision_supported = true
+vision = true
+prompt_caching = true
+thinking_block_style = "inline"
+
+[[provider.deepinfra]]
+model_match = ["stepfun-ai/Step-5-Preview", "deepinfra/stepfun-ai/Step-5-Preview"]
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+structured_output_mode = "native_json"
+thinking_modes = ["effort"]
+reasoning_effort_levels = ["low", "medium", "high"]
+reasoning_none_supported = false
+reasoning_disable_supported = false
+vision_supported = true
+vision = true
+prompt_caching = true
+thinking_block_style = "inline"
+
+[[provider.openrouter]]
+model_match = "inception/mercury-2.5"
+# The route is indexed, but October 15 tool and effort probes returned upstream
+# 502 errors. Keep native tools unverified until the endpoint can be exercised.
+native_tools = false
+preferred_tool_format = "json"
+thinking_modes = ["enabled"]
+prompt_caching = true
+thinking_block_style = "inline"
+
+[[provider.inception]]
+model_match = "mercury-2.5"
+native_tools = false
+preferred_tool_format = "json"
+thinking_modes = ["enabled"]
+
+[[provider.openrouter]]
+model_match = "liquid/lfm-2.5-24b-a2b"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+structured_output_mode = "native_json"
+thinking_modes = ["enabled"]
+reasoning_none_supported = false
+reasoning_disable_supported = false
+thinking_block_style = "inline"
+
+[[provider.openrouter]]
+model_match = "inclusionai/ling-3.1-flash"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+structured_output_mode = "native_json"
+thinking_modes = ["enabled"]
+prompt_caching = true
+thinking_block_style = "inline"
+
+[[provider.deepinfra]]
+model_match = ["inclusionAI/Ling-3.1-flash", "deepinfra/inclusionAI/Ling-3.1-flash"]
+native_tools = true
+preferred_tool_format = "native"
+thinking_modes = ["enabled"]
+prompt_caching = true
+thinking_block_style = "inline"
+
+[[provider.openrouter]]
+model_match = "fireworks/ember-1"
+native_tools = true
+preferred_tool_format = "native"
+thinking_modes = ["enabled", "effort"]
+reasoning_effort_levels = ["none", "low", "high", "max"]
+vision_supported = true
+vision = true
+prompt_caching = true
+thinking_block_style = "inline"
+
+[[provider.fireworks]]
+model_match = "accounts/fireworks/models/ember-1"
+native_tools = true
+preferred_tool_format = "native"
+thinking_modes = ["enabled"]
+vision_supported = true
+vision = true
+prompt_caching = true
+thinking_block_style = "inline"
+
+[[provider.openrouter]]
+model_match = "moondream/moondream3.1-9b-a2b"
+native_tools = false
+preferred_tool_format = "json"
+structured_output = "unsupported"
+thinking_modes = ["enabled"]
+vision_supported = true
+vision = true
+
+[[provider.openrouter]]
+model_match = ["meta/muse-spark-open", "meta/muse-glimmer-30b"]
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+structured_output_mode = "native_json"
+thinking_modes = ["effort"]
+reasoning_effort_levels = ["low", "medium", "high", "xhigh"]
+reasoning_none_supported = false
+reasoning_disable_supported = false
+vision_supported = true
+vision = true
+prompt_caching = true
+thinking_block_style = "inline"
+
+[[provider.openrouter]]
+model_match = ["meta/muse-wonder", "meta/muse-wonder-1.0"]
+native_tools = true
+preferred_tool_format = "native"
+allowed_tool_choice_modes = ["auto"]
+structured_output = "native"
+structured_output_mode = "native_json"
+thinking_modes = ["effort"]
+reasoning_effort_levels = ["minimal", "low", "medium", "high", "xhigh", "max"]
+reasoning_none_supported = false
+reasoning_disable_supported = false
+vision_supported = true
+vision = true
+prompt_caching = true
+thinking_block_style = "inline"
+
+[[provider.meta]]
+model_match = "muse-wonder-1.0"
+native_tools = true
+preferred_tool_format = "native"
+allowed_tool_choice_modes = ["auto"]
+structured_output = "native"
+structured_output_mode = "native_json"
+thinking_modes = ["effort"]
+reasoning_effort_levels = ["minimal", "low", "medium", "high", "xhigh", "max"]
+reasoning_none_supported = false
+reasoning_disable_supported = false
+vision_supported = true
+vision = true
+prompt_caching = true
+thinking_block_style = "inline"
+
+[[provider.fireworks]]
+model_match = "accounts/fireworks/models/muse-spark-open"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+structured_output_mode = "native_json"
+thinking_modes = ["effort"]
+reasoning_effort_levels = ["low", "medium", "high", "xhigh"]
+reasoning_none_supported = false
+reasoning_disable_supported = false
+vision_supported = true
+vision = true
+prompt_caching = true
+thinking_block_style = "inline"
+
+[[provider.together]]
+model_match = ["meta-models/Muse-Spark-Open-816B-A42B", "together/meta-models/Muse-Spark-Open-816B-A42B", "meta-models/Muse-Glimmer-30B", "together/meta-models/Muse-Glimmer-30B"]
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+structured_output_mode = "native_json"
+thinking_modes = ["effort"]
+reasoning_effort_levels = ["low", "medium", "high", "xhigh"]
+reasoning_none_supported = false
+reasoning_disable_supported = false
+vision_supported = true
+vision = true
+prompt_caching = true
+thinking_block_style = "inline"
+
+[[provider.huggingface]]
+model_match = ["meta-models/Muse-Spark-Open-816B-A42B", "huggingface/meta-models/Muse-Spark-Open-816B-A42B"]
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+structured_output_mode = "native_json"
+thinking_modes = ["effort"]
+reasoning_none_supported = false
+reasoning_disable_supported = false
+vision_supported = true
+vision = true
+thinking_block_style = "inline"
+
+[[provider.deepinfra]]
+model_match = ["meta-models/Muse-Glimmer-30B", "deepinfra/meta-models/Muse-Glimmer-30B"]
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+structured_output_mode = "native_json"
+thinking_modes = ["effort"]
+reasoning_effort_levels = ["low", "medium", "high", "xhigh"]
+reasoning_none_supported = false
+reasoning_disable_supported = false
+vision_supported = true
+vision = true
+prompt_caching = true
+thinking_block_style = "inline"
+
+[[provider.nvidia]]
+model_match = ["meta/muse-glimmer-30b", "nvidia/meta/muse-glimmer-30b"]
+native_tools = true
+preferred_tool_format = "native"
+thinking_modes = ["enabled"]
+reasoning_none_supported = false
+reasoning_disable_supported = false
+vision_supported = true
+vision = true
+thinking_block_style = "inline"
+
+[[provider.groq]]
+model_match = ["meta-models/muse-spark-open", "groq/meta-models/muse-spark-open"]
+native_tools = false
+thinking_modes = ["effort"]
+reasoning_none_supported = false
+reasoning_disable_supported = false
+vision_supported = true
+vision = true
+
+[[provider.baseten]]
+model_match = ["meta-models/Muse-Spark-Open-816B-A42B", "baseten/meta-models/Muse-Spark-Open-816B-A42B"]
+native_tools = false
+preferred_tool_format = "json"
+thinking_modes = ["effort"]
+reasoning_none_supported = false
+reasoning_disable_supported = false
+vision_supported = true
+vision = true
+prompt_caching = true
+
+# --- source: 20-providers/04-hosted-family-refresh.toml ---
+# Exact routes keep new families out of the generic text-tool fallback.
+# Reasoning effort controls remain undeclared until separately probed.
+[[provider.openrouter]]
+model_match = "unbiased/pareto-26.9"
+native_tools = true
+preferred_tool_format = "native"
+vision_supported = true
+vision = true
+
+[[provider.openrouter]]
+model_match = ["aion-labs/aion-3.5", "upstage/solar-mini4", "upstage/solar-pro4", "tencent/hy4-preview", "ibm-granite/granite-4.2-8b"]
+native_tools = true
+preferred_tool_format = "native"
+thinking_modes = ["enabled"]
+thinking_block_style = "inline"
+
+[[provider.openrouter]]
+model_match = ["perceptron/perceptron-mk1.5", "nex-agi/nex-n2.5-pro", "bytedance-seed/seed-2-1-turbo"]
+native_tools = true
+preferred_tool_format = "native"
+vision_supported = true
+vision = true
+thinking_modes = ["enabled"]
+thinking_block_style = "inline"
+
+[[provider.openrouter]]
+model_match = ["qwen/qwen3.8-omni-flash", "qwen/qwen3.8-flash"]
+native_tools = true
+preferred_tool_format = "native"
+vision_supported = true
+vision = true
+thinking_modes = ["enabled"]
+thinking_block_style = "inline"
+allowed_tool_choice_modes = ["auto"]
+
+[[provider.cohere]]
+model_match = ["north-mini-code-1-0", "north-small-translate-1-0"]
+# Published evaluation routes, with no live key to establish tool/effort claims.
+native_tools = false
+preferred_tool_format = "json"
+thinking_modes = []
+
+[[provider.openrouter]]
+model_match = ["meta/muse-spark-1.3", "meta/muse-spark-1.3-contributor"]
+native_tools = true
+preferred_tool_format = "native"
+vision_supported = true
+vision = true
+thinking_modes = ["enabled"]
+reasoning_none_supported = false
+reasoning_disable_supported = false
+thinking_block_style = "inline"
+
+[[provider.openrouter]]
+model_match = "aion-labs/aion-3.5-mini"
+# October 15: returned a tool call with an invented argument key, then failed
+# the real agent's marker task. Do not advertise schema-correct native tools.
+native_tools = false
+preferred_tool_format = "json"
+thinking_modes = ["enabled"]
+reasoning_none_supported = false
+reasoning_disable_supported = false
+thinking_block_style = "inline"
+
+[[provider.openrouter]]
+model_match = "qwen/qwen3.8-2.4t-a95b"
+native_tools = true
+preferred_tool_format = "native"
+thinking_modes = ["enabled"]
+thinking_block_style = "inline"
+allowed_tool_choice_modes = ["auto"]
 
 # --- source: 20-providers/05-downstream-contributed.toml ---
 # Exact routes contributed from a downstream project's `harn.toml`

@@ -1,0 +1,26 @@
+import { Controller, GitStore, commit_state, control, prepare_state, read_state } from "../lib/main"
+
+fn main(harness: Harness) {
+  require len(argv) == 1, "pass the fixture's private local store"
+  const store: GitStore = schema_expect(
+    json_parse(harness.fs.read_text(argv[0]!)),
+    schema_of(GitStore),
+  )
+  require !store.remote.contains("://"), "the stop fixture requires a private local provider"
+  const previous = read_state(harness.process, store)
+  const state: Controller = previous.state!
+  const stopped = unwrap(
+    control(
+      state,
+      pick(state.authority, ["installation", "generation", "revision", "controller"]),
+      "stopped",
+    ),
+  )
+  require commit_state(
+    harness.process,
+    store,
+    prepare_state(harness.process, store, previous, stopped),
+  ).status
+    == "committed",
+    "fixture stop did not reach durable authority"
+}

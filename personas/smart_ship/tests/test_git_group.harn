@@ -1,0 +1,138 @@
+import { assert_error_contains } from "std/testing"
+import { git } from "../fixtures/neutral"
+import { prepare_group_tree, require_group_candidate } from "../lib/git_group"
+
+pipeline test_group_materialization_keeps_both_divergent_changes_and_refuses_omissions(
+  harness: Harness,
+) {
+  const root = harness.fs.mkdtemp_in_workspace("smart-ship-git-group-")
+  defer {
+    harness.fs.delete(root)
+  }
+  git(harness.process, root, ["init", "--quiet"])
+  harness.fs.write_text(path_join(root, "first.txt"), "first baseline\n")
+  harness.fs.write_text(path_join(root, "second.txt"), "second baseline\n")
+  git(harness.process, root, ["add", "--all"])
+  git(harness.process, root, ["commit", "--quiet", "-m", "baseline"])
+  const base = git(harness.process, root, ["rev-parse", "HEAD"])
+  harness.fs.write_text(path_join(root, "first.txt"), "first reviewed change\n")
+  git(harness.process, root, ["commit", "--quiet", "-am", "first change"])
+  const first = git(harness.process, root, ["rev-parse", "HEAD"])
+  git(harness.process, root, ["checkout", "--quiet", "--detach", base])
+  harness.fs.write_text(path_join(root, "second.txt"), "second reviewed change\n")
+  git(harness.process, root, ["commit", "--quiet", "-am", "second change"])
+  const second = git(harness.process, root, ["rev-parse", "HEAD"])
+  const index = git(harness.process, root, ["write-tree"])
+  const refs = git(harness.process, root, ["show-ref"])
+  const group = prepare_group_tree(harness.process, root, base, [first, second])
+  assert_eq(group.tree, prepare_group_tree(harness.process, root, base, [second, first]).tree)
+  assert_eq(
+    git(harness.process, root, ["show", group.tree + ":first.txt"]),
+    "first reviewed change",
+  )
+  assert_eq(
+    git(harness.process, root, ["show", group.tree + ":second.txt"]),
+    "second reviewed change",
+  )
+  const candidate = git(
+    harness.process,
+    root,
+    ["commit-tree", group.tree, "-p", base, "-m", "group"],
+  )
+  require_group_candidate(harness.process, root, group, candidate, group.tree)
+  assert_error_contains(
+    fn() { require_group_candidate(
+      harness.process,
+      root,
+      group,
+      first,
+      git(harness.process, root, ["rev-parse", first + "^{tree}"]),
+    ) },
+    "exactly the composed reviewed changes",
+  )
+  assert_error_contains(
+    fn() { require_group_candidate(
+      harness.process,
+      root,
+      group + {tree: index},
+      candidate,
+      group.tree,
+    ) },
+    "differs from its measured reviewed heads",
+  )
+  const wrong_parent = git(
+    harness.process,
+    root,
+    ["commit-tree", group.tree, "-p", first, "-m", "wrong parent"],
+  )
+  assert_error_contains(
+    fn() { require_group_candidate(harness.process, root, group, wrong_parent, group.tree) },
+    "one linear commit",
+  )
+  assert_eq(git(harness.process, root, ["rev-parse", "HEAD"]), second)
+  assert_eq(git(harness.process, root, ["write-tree"]), index)
+  assert_eq(git(harness.process, root, ["show-ref"]), refs)
+  assert_eq(git(harness.process, root, ["status", "--porcelain"]), "")
+  // Main may have advanced since both PR branches forked. Preserve its newer work.
+  git(harness.process, root, ["checkout", "--quiet", "--detach", base])
+  harness.fs.write_text(path_join(root, "retained.txt"), "newer integrated work\n")
+  git(harness.process, root, ["add", "retained.txt"])
+  git(harness.process, root, ["commit", "--quiet", "-m", "advance destination"])
+  const advanced = git(harness.process, root, ["rev-parse", "HEAD"])
+  git(harness.process, root, ["checkout", "--quiet", "--detach", second])
+  const cumulative = prepare_group_tree(harness.process, root, advanced, [first, second])
+  assert_eq(
+    git(harness.process, root, ["show", cumulative.tree + ":retained.txt"]),
+    "newer integrated work",
+  )
+  assert_eq(
+    git(harness.process, root, ["show", cumulative.tree + ":first.txt"]),
+    "first reviewed change",
+  )
+  assert_eq(
+    git(harness.process, root, ["show", cumulative.tree + ":second.txt"]),
+    "second reviewed change",
+  )
+  const cumulative_candidate = git(
+    harness.process,
+    root,
+    ["commit-tree", cumulative.tree, "-p", advanced, "-m", "cumulative group"],
+  )
+  require_group_candidate(harness.process, root, cumulative, cumulative_candidate, cumulative.tree)
+  assert_eq(git(harness.process, root, ["rev-parse", "HEAD"]), second)
+  assert_eq(git(harness.process, root, ["status", "--porcelain"]), "")
+}
+
+pipeline test_group_tree_conflict_and_missing_object_do_not_produce_a_candidate(harness: Harness) {
+  const root = harness.fs.mkdtemp_in_workspace("smart-ship-git-conflict-")
+  defer {
+    harness.fs.delete(root)
+  }
+  git(harness.process, root, ["init", "--quiet"])
+  harness.fs.write_text(path_join(root, "shared.txt"), "baseline\n")
+  git(harness.process, root, ["add", "--all"])
+  git(harness.process, root, ["commit", "--quiet", "-m", "baseline"])
+  const base = git(harness.process, root, ["rev-parse", "HEAD"])
+  harness.fs.write_text(path_join(root, "shared.txt"), "first\n")
+  git(harness.process, root, ["commit", "--quiet", "-am", "first"])
+  const first = git(harness.process, root, ["rev-parse", "HEAD"])
+  git(harness.process, root, ["checkout", "--quiet", "--detach", base])
+  harness.fs.write_text(path_join(root, "shared.txt"), "second\n")
+  git(harness.process, root, ["commit", "--quiet", "-am", "second"])
+  const second = git(harness.process, root, ["rev-parse", "HEAD"])
+  assert_error_contains(
+    fn() { prepare_group_tree(harness.process, root, base, [first, second]) },
+    "failed or conflicted",
+  )
+  assert_error_contains(
+    fn() { prepare_group_tree(harness.process, root, base, ["e".repeat(40)]) },
+    "failed or conflicted",
+  )
+  assert_error_contains(
+    fn() { prepare_group_tree(harness.process, root, base, []) },
+    "one to thirty distinct",
+  )
+  assert_eq(git(harness.process, root, ["rev-parse", "HEAD"]), second)
+  assert_eq(harness.fs.read_text(path_join(root, "shared.txt")), "second\n")
+  assert_eq(git(harness.process, root, ["status", "--porcelain"]), "")
+}

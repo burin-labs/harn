@@ -9,7 +9,8 @@ name = "Gemma 4 31B (OpenRouter)"
 provider = "openrouter"
 context_window = 262144
 capabilities = ["tools", "vision", "streaming", "thinking"]
-pricing = { input_per_mtok = 0.09, output_per_mtok = 0.34, cache_read_per_mtok = 0.05 }
+# OpenRouter route card, 2026-10-15; other Gemma hosts have separate cards.
+pricing = { input_per_mtok = 0.20, output_per_mtok = 0.40, cache_read_per_mtok = 0.05 }
 tier = "frontier"
 open_weight = true
 strengths = ["vision", "reasoning", "coding", "cheap"]

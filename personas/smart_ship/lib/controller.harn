@@ -4,10 +4,12 @@ pub import {
   EffectRefusal,
   EffectRequest,
   EffectTarget,
+  IntegrationEffect,
   ReleaseEffect,
   RerunEffect,
   admission_effect,
   effect_receipt,
+  integration_effect,
 } from "./effect_contract"
 import { effect_receipt_valid, qualify_admission_effect } from "./effect_contract"
 import {
@@ -105,6 +107,7 @@ pub type Effect = {
   status: "reserved" | "dispatching" | "unknown" | "confirmed" | "refused",
   dispatch_binding: string?,
   dispatch_id: string?,
+  dispatch_revision: int?,
   receipt: EffectReceipt?,
 }
 
@@ -196,6 +199,35 @@ fn effect_refusal(
   return {reason: reason, admission: admission, verification: verification}
 }
 
+fn qualify_integration(
+  state: Controller,
+  fence: Fence,
+  request: IntegrationEffect,
+  policy: Policy,
+  now_ms: int?,
+) -> EffectRefusal? {
+  const derived = try {
+    integration_effect(request.snapshot)
+  }
+  const verification = verify(request.snapshot, [], policy)
+  if is_err(derived) || unwrap(derived) != request {
+    return effect_refusal(
+      "integration target differs from its complete frontier",
+      nil,
+      verification,
+    )
+  }
+  if now_ms == nil {
+    return effect_refusal("integration requires the owner's current time", nil, verification)
+  }
+  const offered = offer(state, fence, request.snapshot, policy, now_ms)
+  return if is_err(offered) {
+    effect_refusal(unwrap_err(offered), nil, verification)
+  } else {
+    nil
+  }
+}
+
 /** Persist the qualified reservation with CAS; refusals retain any measured evidence. */
 pub fn reserve_effect(
   state: Controller,
@@ -203,6 +235,7 @@ pub fn reserve_effect(
   request: EffectRequest,
   policy: Policy,
   dispatch_binding: string? = nil,
+  now_ms: int? = nil,
 ) -> Result<Controller, EffectRefusal> {
   if !authorized(state, fence) || state.authority.mode != "active"
     || !policy_matches(state, policy)
@@ -217,6 +250,13 @@ pub fn reserve_effect(
   const admission = qualify_admission_effect(request, policy)
   if admission != nil && admission.status != "admitted" {
     return Err(effect_refusal("external admission is not qualified", admission))
+  }
+  if request.kind == "integration" {
+    const integration = schema_expect(request, schema_of(IntegrationEffect))
+    const refusal = qualify_integration(state, fence, integration, policy, now_ms)
+    if refusal != nil {
+      return Err(refusal)
+    }
   }
   if request.kind == "release" {
     const checkpoint = state.checkpoint
@@ -260,6 +300,7 @@ pub fn reserve_effect(
         status: "reserved",
         dispatch_binding: dispatch_binding,
         dispatch_id: nil,
+        dispatch_revision: nil,
         receipt: nil,
       },
     ]
@@ -297,7 +338,12 @@ pub fn begin_effect(
   next.effects = state.effects.map(
     { item ->
       if item == effect {
-        item + {status: "dispatching", dispatch_id: dispatch_id}
+        item
+          + {
+            status: "dispatching",
+            dispatch_id: dispatch_id,
+            dispatch_revision: next.authority.revision,
+          }
       } else {
         item
       }
@@ -308,6 +354,19 @@ pub fn begin_effect(
 
 /** Only a measured terminal receipt settles a request; timeout remains a transfer barrier. */
 pub fn settle_effect(
+  state: Controller,
+  fence: Fence,
+  request: EffectRequest,
+  status: "unknown" | "confirmed" | "refused",
+  receipt: EffectReceipt?,
+) -> Result<Controller, string> {
+  if request.kind == "integration" && status == "confirmed" {
+    return Err("integration confirmation must retain its pending verification frontier")
+  }
+  return settle_claimed_effect(state, fence, request, status, receipt)
+}
+
+fn settle_claimed_effect(
   state: Controller,
   fence: Fence,
   request: EffectRequest,
@@ -337,6 +396,39 @@ pub fn settle_effect(
     },
   )
   return Ok(next)
+}
+
+/**
+ * Prepare the state that must move atomically with the destination ref.
+ * A durable dispatch claim is required; preparing this value does not confirm a provider write.
+ * Reuse offer's complete census, cumulative retention and debt limits at the final boundary.
+ */
+pub fn confirm_integration(
+  state: Controller,
+  fence: Fence,
+  request: IntegrationEffect,
+  policy: Policy,
+  now_ms: int,
+  receipt: EffectReceipt,
+) -> Result<Controller, string> {
+  const effect = state.effects.find({ item -> item.request == request })
+  if effect == nil || effect.status != "dispatching" || effect.dispatch_id == nil {
+    return Err("integration requires the durable dispatch claim")
+  }
+  const offered = offer(state, fence, request.snapshot, policy, now_ms)
+  if is_err(offered) {
+    return Err(unwrap_err(offered))
+  }
+  const settled = settle_claimed_effect(state, fence, request, "confirmed", receipt)
+  if is_err(settled) {
+    return settled
+  }
+  const frontier = unwrap(offered)
+  // One atomic write advances authority once while retaining both transitions.
+  return Ok(
+    unwrap(settled)
+      + {pending: frontier.pending, unverified_since_ms: frontier.unverified_since_ms},
+  )
 }
 
 /** Freeze the newest cumulative frontier without cancelling the running verification. */

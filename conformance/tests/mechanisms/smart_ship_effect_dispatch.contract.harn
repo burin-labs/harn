@@ -63,7 +63,8 @@ pipeline default(harness: Harness) {
     harness.stdio,
     "dispatch_claim_bound",
     claimed.effects[0]?.status == "dispatching"
-      && claimed.effects[0]?.dispatch_id == digest("actor one"),
+      && claimed.effects[0]?.dispatch_id == digest("actor one")
+      && claimed.effects[0]?.dispatch_revision == claimed.authority.revision,
   )
   contract_negative(
     harness.stdio,

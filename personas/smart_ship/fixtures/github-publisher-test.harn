@@ -1,0 +1,688 @@
+import { prepare_group_tree } from "../lib/git_group"
+import {
+  GithubIntegrationConfiguration,
+  GithubIntegrationPreparationRefusal,
+  cleanup_github_integration,
+  dispatch_github_integration,
+  github_integration_binding,
+  reconcile_github_integration,
+  recover_github_integration,
+} from "../lib/github_publisher"
+import {
+  Change,
+  Controller,
+  Fence,
+  commit_state,
+  control,
+  freeze_snapshot,
+  integration_effect,
+  policy_digest,
+  prepare_state,
+  read_state,
+  reserve_effect,
+  transfer,
+} from "../lib/main"
+import { git } from "./neutral"
+import { digest, execution, finish_reviewed_admission, fixture, reviewed_request } from "./support"
+import { GithubRefUpdate } from "harn-github-connector/default"
+
+const REPOSITORY = "example/project"
+
+const REMOTE = "https://github.com/" + REPOSITORY + ".git"
+
+const API = "https://api.github.com"
+
+type AtomicRequest = {
+  variables: {
+    input: {
+      clientMutationId: string,
+      refUpdates: list<{name: string, beforeOid: string, afterOid: string, force: bool}>,
+    },
+  },
+}
+
+type ProviderReport = {applied: bool, updates: int}
+
+type CommandHook = {request: {argv: list<string>}}
+
+fn review_pages(identity: dict, number: int, head: string, approved: bool) -> list<dict> {
+  const page_info = {hasNextPage: false, endCursor: nil}
+  return [
+    identity
+      + {
+        inventory: {
+          totalCount: 1,
+          nodes: [
+            {
+              id: "review-" + to_string(number),
+              state: if approved {
+                "APPROVED"
+              } else {
+                "DISMISSED"
+              },
+              commit: {oid: head},
+              author: {id: "fixture-reviewer", login: "trusted", type: "Bot"},
+              updatedAt: "2026-10-15T12:00:00Z",
+              submittedAt: "2026-10-15T11:00:00Z",
+            },
+          ],
+          pageInfo: page_info,
+        },
+      },
+    identity + {inventory: {totalCount: 0, nodes: [], pageInfo: page_info}},
+    identity + {reviews: {totalCount: 1}, reviewThreads: {totalCount: 0}},
+  ]
+}
+
+fn fence(state: Controller) -> Fence {
+  return pick(state.authority, ["installation", "generation", "revision", "controller"])
+}
+
+/** Actual Git objects and ref transactions; only HTTP and transport endpoints are test-owned. */
+// The controls deliberately share one instrumented lifecycle and positive setup.
+@complexity(allow)
+pub fn exercise_publisher(harness: Harness, mode: string) {
+  const root = harness.fs.mkdtemp_in_workspace("smart-ship-publisher-")
+  defer {
+    harness.fs.delete(root)
+  }
+  const remote = path_join(root, "remote.git")
+  const workspace = path_join(root, "owner.git")
+  const source = path_join(root, "source")
+  git(harness.process, root, ["init", "--bare", "--quiet", remote])
+  git(harness.process, root, ["init", "--bare", "--quiet", workspace])
+  git(harness.process, workspace, ["config", "user.name", "Smart Ship Fixture"])
+  git(harness.process, workspace, ["config", "user.email", "fixture@example.invalid"])
+  git(harness.process, root, ["init", "--quiet", source])
+  harness.fs.write_text(path_join(source, "first.txt"), "first baseline\n")
+  harness.fs.write_text(path_join(source, "second.txt"), "second baseline\n")
+  git(harness.process, source, ["add", "--all"])
+  git(harness.process, source, ["commit", "--quiet", "-m", "baseline"])
+  const base = git(harness.process, source, ["rev-parse", "HEAD"])
+  let heads: list<string> = []
+  for name in ["first", "second"] {
+    git(harness.process, source, ["checkout", "--quiet", "--detach", base])
+    harness.fs.write_text(path_join(source, name + ".txt"), name + " reviewed\n")
+    git(harness.process, source, ["commit", "--quiet", "-am", name])
+    heads = heads + [git(harness.process, source, ["rev-parse", "HEAD"])]
+  }
+  const group = prepare_group_tree(harness.process, source, base, heads)
+  const candidate = git(
+    harness.process,
+    source,
+    ["commit-tree", group.tree, "-p", base, "-m", "composed candidate"],
+  )
+  git(
+    harness.process,
+    source,
+    [
+      "push",
+      "--quiet",
+      remote,
+      base + ":refs/heads/main",
+      heads[0]! + ":refs/heads/feature/42",
+      heads[1]! + ":refs/heads/feature/43",
+      candidate + ":refs/heads/candidate",
+    ],
+  )
+  const f = fixture(harness.random)
+  const policy = f.policy
+    + {
+      repositories: [REPOSITORY],
+      admission_rules: f.policy.admission_rules.map(
+        { rule -> rule + {repository: REPOSITORY, repository_id: "fixture-repository"} },
+      ),
+    }
+  const now = harness.clock.now_ms()
+  let changes: list<Change> = []
+  let pages: list<dict> = []
+  let withdrawn_pages: list<dict> = []
+  for number in [42, 43] {
+    const head = heads[number - 42]!
+    const original = execution(f)
+    const executed = original
+      + {
+        source: {
+          repository: REPOSITORY,
+          commit: head,
+          tree: git(harness.process, source, ["rev-parse", head + "^{tree}"]),
+        },
+        requirement: original.requirement + {repository: REPOSITORY},
+        started_at_ms: now - 2,
+        completed_at_ms: now - 1,
+      }
+    const admission = reviewed_request(
+      policy,
+      f.private_key,
+      {id: to_string(number), base: base},
+      executed,
+    )
+    const signed = finish_reviewed_admission(
+      admission
+        + {
+          source: admission.source
+            + {head_repository_id: "fixture-repository", base_repository_id: "fixture-repository"},
+        },
+      f.private_key,
+      executed,
+    )
+    changes = changes
+      + [
+        {
+          id: to_string(number),
+          repository: REPOSITORY,
+          head: head,
+          integrated_commit: candidate,
+          admission: signed,
+        },
+      ]
+    const identity = {
+      number: number,
+      headRefOid: head,
+      headRefName: "feature/" + to_string(number),
+      baseRefOid: base,
+      baseRefName: "main",
+      reviewDecision: "APPROVED",
+      author: {id: "fixture-author", login: "Fixture author", type: "User"},
+      state: "OPEN",
+      isDraft: false,
+      headRepository: {id: "fixture-repository", nameWithOwner: REPOSITORY},
+      baseRepository: {id: "fixture-repository", nameWithOwner: REPOSITORY},
+    }
+    pages = pages + review_pages(identity, number, head, mode != "withdraw_before_prepare")
+    withdrawn_pages = withdrawn_pages + review_pages(identity, number, head, false)
+  }
+  const initial: Controller = {
+    schema: "smart-ship.controller.v1",
+    authority: f.authority
+      + {
+        policy: policy,
+        policy_digest: policy_digest(policy),
+        controller: digest("publisher fixture controller"),
+      },
+    active: nil,
+    pending: nil,
+    checkpoint: nil,
+    incidents: [],
+    effects: [],
+    unverified_since_ms: nil,
+  }
+  const config: GithubIntegrationConfiguration = {
+    installation: {
+      schema: "smart-ship.installation.v1",
+      policy: policy,
+      controller: initial.authority.controller,
+      store: {
+        workspace: workspace,
+        remote: REMOTE,
+        ref: "refs/heads/authority",
+        timeout_ms: 10000,
+        signed_commits: false,
+      },
+    },
+    token_reference: "fixture/github-token",
+  }
+  const snapshot = freeze_snapshot(
+    f.snapshot
+      + {
+        sources: [{repository: REPOSITORY, commit: candidate, tree: group.tree}],
+        changes: changes,
+        requirements: f.snapshot.requirements.map(
+          { requirement -> requirement + {repository: REPOSITORY} },
+        ),
+        policy_digest: policy_digest(policy),
+        created_at_ms: now,
+      },
+  )
+  const request = integration_effect(snapshot)
+  const reserved = unwrap(
+    reserve_effect(
+      initial,
+      fence(initial),
+      request,
+      policy,
+      github_integration_binding(config),
+      now,
+    ),
+  )
+  const applied = harness.runtime.atomic(0)
+  const report_path = path_join(root, "provider.json")
+  const store_path = path_join(root, "store.json")
+  harness.fs.write_text(store_path, json_stringify(config.installation.store + {remote: remote}))
+  const assets = harness.fs.runtime_paths().asset_root
+  const binary = harness.env.get("HARN_BIN") ?? "harn"
+  // Production code still validates the canonical URL. The test host redirects only
+  // actual network Git commands to its private provider, after policy validation.
+  harness.runtime.command_policy_push(
+    command_policy(
+      {
+        workspace_roots: [root],
+        pre: { ctx ->
+          const context: CommandHook = schema_expect(ctx, schema_of(CommandHook))
+          const argv = context.request.argv
+          if argv[0] == "git" && argv[1] == "ls-remote" {
+            let seen = 0
+            for call in harness.testing.http_mock_calls() {
+              const body = try {
+                json_parse(call.body)
+              }
+              if call.method != "POST" || is_err(body) || !schema_is(unwrap(body), AtomicRequest) {
+                continue
+              }
+              if seen < harness.runtime.atomic_get(applied) {
+                seen += 1
+                continue
+              }
+              harness.runtime.atomic_add(applied, 1)
+              // Hooks cannot recursively spawn processes. Rewrite this read into a
+              // fixture provider that applies the already observed SDK request first,
+              // then executes this exact read. No mutation occurs before the request.
+              return {
+                rewrite: {
+                  argv: [
+                    "node",
+                    path_join(assets, "github-publisher-provider.mjs"),
+                    remote,
+                    call.body,
+                    mode,
+                    report_path,
+                    binary,
+                    path_join(assets, "github-publisher-stop.harn"),
+                    store_path,
+                  ]
+                    + argv.map(
+                      { arg ->
+                        if arg == REMOTE {
+                          remote
+                        } else {
+                          arg
+                        }
+                      },
+                    ),
+                },
+              }
+            }
+          }
+          if argv[0] == "git" && ["fetch", "push", "ls-remote"].contains(argv[1]) {
+            return {
+              rewrite: {
+                argv: argv.map(
+                  { arg ->
+                    if arg == REMOTE {
+                      remote
+                    } else {
+                      arg
+                    }
+                  },
+                ),
+              },
+            }
+          }
+          return nil
+        },
+        post: { ctx ->
+          const context: CommandHook = schema_expect(ctx, schema_of(CommandHook))
+          const argv = context.request.argv
+          const refspec = argv[len(argv) - 1] ?? ""
+          if argv[0] == "git" && argv[1] == "push"
+            && regex_match("^[0-9a-f]{40}:refs/heads/smart-ship-objects/[0-9a-f]{40}$", refspec)
+              != nil {
+            const oid = refspec.split(":")[0]!
+            const claim = refspec.split("/").last()!
+            const updates: list<GithubRefUpdate> = [
+              {ref: "refs/heads/main", before_oid: base, after_oid: candidate, force: false},
+              {ref: config.installation.store.ref, before_oid: claim, after_oid: oid, force: false},
+              {
+                ref: "refs/heads/feature/42",
+                before_oid: heads[0]!,
+                after_oid: heads[0]!,
+                force: false,
+              },
+              {
+                ref: "refs/heads/feature/43",
+                before_oid: heads[1]!,
+                after_oid: heads[1]!,
+                force: false,
+              },
+            ]
+            const id = "refs-" + sha256_hex(json_stringify({repo: REPOSITORY, updates: updates}))
+            const refreshed_pages = if mode == "withdraw_during_upload" {
+              withdrawn_pages
+            } else {
+              pages
+            }
+            const acknowledgement = {
+              status: 200,
+              body: if ["stop", "head_change"].contains(mode) {
+                json_stringify({errors: [{type: "UNPROCESSABLE"}]})
+              } else {
+                json_stringify(
+                  {
+                    data: {
+                      updateRefs: {
+                        clientMutationId: if mode == "lost_ack" {
+                          "lost-acknowledgement"
+                        } else {
+                          id
+                        },
+                      },
+                    },
+                  },
+                )
+              },
+            }
+            harness.testing.http_mock(
+              "POST",
+              API + "/graphql",
+              {
+                responses: refreshed_pages.map(
+                  { page ->
+                    {status: 200, body: json_stringify({data: {repository: {pullRequest: page}}})}
+                  },
+                )
+                  + [acknowledgement],
+              },
+            )
+          }
+          return nil
+        },
+      },
+    ),
+  )
+  defer {
+    harness.runtime.command_policy_pop()
+  }
+  assert_eq(
+    commit_state(
+      harness.process,
+      config.installation.store,
+      prepare_state(
+        harness.process,
+        config.installation.store,
+        {commit: nil, state: nil},
+        reserved,
+      ),
+    ).status,
+    "committed",
+  )
+  harness.testing.respond("secrets", "read", "public-synthetic-fixture-token")
+  harness.testing.http_mock(
+    "POST",
+    API + "/graphql",
+    {
+      responses: pages.map(
+        { page -> {status: 200, body: json_stringify({data: {repository: {pullRequest: page}}})} },
+      ),
+    },
+  )
+  harness.testing.http_mock(
+    "GET",
+    API + "/repos/" + REPOSITORY,
+    {status: 200, body: json_stringify({node_id: "fixture-repository"})},
+  )
+  const result = dispatch_github_integration(harness, config, fence(reserved), request, base)
+  if ["withdraw_before_prepare", "withdraw_during_upload"].contains(mode) {
+    const durable = read_state(harness.process, config.installation.store)
+    const draining = unwrap(control(durable.state!, fence(durable.state!), "draining"))
+    const mutation_count = harness.testing.http_mock_calls().filter(
+      { call ->
+        const parsed = try {
+          json_parse(call.body)
+        }
+        call.method == "POST" && is_ok(parsed) && schema_is(unwrap(parsed), AtomicRequest)
+      },
+    )
+      .len()
+    const observed = {
+      main: git(harness.process, remote, ["rev-parse", "refs/heads/main"]),
+      result: result.status,
+      durable: durable.state!.effects[0]!.status,
+      pending_absent: durable.state!.pending == nil,
+      provider_started: result.dispatch_started,
+      mutation_count: mutation_count,
+      transfer_released: is_ok(transfer(draining, fence(draining), digest("next controller"))),
+    }
+    harness.stdio.println(json_stringify(observed + {expected_main: base, mode: mode}))
+    assert_eq(
+      observed,
+      {
+        main: base,
+        result: "refused",
+        durable: "refused",
+        pending_absent: true,
+        provider_started: false,
+        mutation_count: 0,
+        transfer_released: true,
+      },
+      "withdrawn review must refuse before publication and release the no-dispatch claim",
+    )
+    const refusal: GithubIntegrationPreparationRefusal = schema_expect(
+      json_parse(durable.state!.effects[0]!.receipt!.body),
+      schema_of(GithubIntegrationPreparationRefusal),
+    )
+    assert(!refusal.details_omitted)
+    assert(refusal.reviews != nil && len(refusal.reviews) == 2)
+    const stage_ref = "refs/heads/smart-ship-objects/" + result.claim!.commit
+    const stage_store = config.installation.store + {ref: stage_ref}
+    if mode == "withdraw_before_prepare" {
+      assert_eq(result.transaction, nil)
+      assert_eq(read_state(harness.process, stage_store).commit, nil)
+      const recovery = try {
+        recover_github_integration(harness.process, config, request)
+      }
+      assert(is_err(recovery), "an early refusal must not invent a prepared transaction")
+    } else {
+      const recovered = recover_github_integration(harness.process, config, request)
+      assert_eq(recovered, result.transaction!)
+      assert_eq(reconcile_github_integration(harness.process, config, recovered).status, "refused")
+      assert_eq(read_state(harness.process, stage_store).commit, recovered.state_commit)
+      const updates: list<GithubRefUpdate> = [
+        {
+          ref: stage_ref,
+          before_oid: recovered.state_commit,
+          after_oid: "0".repeat(40),
+          force: false,
+        },
+      ]
+      const id = "refs-" + sha256_hex(json_stringify({repo: REPOSITORY, updates: updates}))
+      harness.testing.http_mock(
+        "POST",
+        API + "/graphql",
+        {status: 200, body: json_stringify({data: {updateRefs: {clientMutationId: id}}})},
+      )
+      assert_eq(cleanup_github_integration(harness, config, recovered).status, "deleted")
+      assert_eq(read_state(harness.process, stage_store).commit, nil)
+      assert_eq(read_state(harness.process, config.installation.store), durable)
+      assert_eq(recover_github_integration(harness.process, config, request), recovered)
+      const calls = harness.testing.http_mock_calls()
+      assert_eq(cleanup_github_integration(harness, config, recovered).status, "deleted")
+      assert_eq(harness.testing.http_mock_calls(), calls)
+    }
+    return
+  }
+  assert(
+    result.dispatch_started,
+    "publisher did not reach its provider: " + (result.reason ?? "unreported"),
+  )
+  assert_eq(harness.runtime.atomic_get(applied), 1)
+  const success = ["normal", "lost_ack", "lost_readback"].contains(mode)
+  const refused = ["stop", "head_change"].contains(mode)
+  require harness.fs.exists(report_path),
+    "fixture provider did not report: "
+    + (result.reason ?? "unreported")
+  const provider: ProviderReport = schema_expect(
+    json_parse(harness.fs.read_text(report_path)),
+    schema_of(ProviderReport),
+  )
+  assert_eq(provider.applied, success)
+  assert_eq(provider.updates, 4)
+  assert_eq(
+    result.status,
+    if success && mode != "lost_readback" {
+      "confirmed"
+    } else if refused {
+      "refused"
+    } else {
+      "reconciliation_required"
+    },
+  )
+  const durable = read_state(harness.process, config.installation.store)
+  assert_eq(
+    git(harness.process, remote, ["rev-parse", "refs/heads/main"]),
+    if success {
+      candidate
+    } else {
+      base
+    },
+  )
+  if success {
+    assert_eq(durable.commit, result.transaction!.state_commit)
+    assert_eq(durable.state!.pending, snapshot)
+    assert_eq(durable.state!.checkpoint, nil)
+    assert_eq(durable.state!.effects[0]!.status, "confirmed")
+  } else {
+    assert_eq(durable.state!.pending, nil)
+    assert_eq(
+      durable.state!.effects[0]!.status,
+      if refused {
+        "refused"
+      } else {
+        "dispatching"
+      },
+    )
+    assert_eq(durable.state!.effects[0]!.receipt != nil, refused)
+    assert_eq(
+      durable.state!.authority.mode,
+      if mode == "stop" {
+        "stopped"
+      } else {
+        "active"
+      },
+    )
+  }
+  const calls = harness.testing.http_mock_calls()
+  const mutations = calls.filter(
+    { call ->
+      const body = try {
+        json_parse(call.body)
+      }
+      call.method == "POST" && is_ok(body) && schema_is(unwrap(body), AtomicRequest)
+    },
+  )
+  assert_eq(len(mutations), 1, "the actual SDK atomic request must fire exactly once")
+  const recovered = reconcile_github_integration(harness.process, config, result.transaction!)
+  assert_eq(
+    recovered.status,
+    if success {
+      "confirmed"
+    } else if refused {
+      "refused"
+    } else {
+      "unresolved"
+    },
+  )
+  const from_remote = recover_github_integration(harness.process, config, request)
+  assert_eq(
+    from_remote,
+    result.transaction!,
+    "recovery must reconstruct the complete transaction without saved local preparation",
+  )
+  assert_eq(reconcile_github_integration(harness.process, config, from_remote), recovered)
+  if mode == "normal" {
+    const changed_provider = config + {token_reference: config.token_reference + "-changed"}
+    const rebound = try {
+      reconcile_github_integration(harness.process, changed_provider, from_remote)
+    }
+    assert(is_err(rebound), "reconciliation must preserve the dispatch's provider binding")
+    const restarted = try {
+      recover_github_integration(harness.process, changed_provider, request)
+    }
+    assert(is_err(restarted), "restart must preserve the dispatch's provider binding")
+    const before_cleanup = harness.testing.http_mock_calls()
+    assert_eq(cleanup_github_integration(harness, changed_provider, from_remote).status, "retained")
+    assert_eq(harness.testing.http_mock_calls(), before_cleanup)
+  }
+  const repeated = dispatch_github_integration(
+    harness,
+    config,
+    fence(durable.state!),
+    request,
+    base,
+  )
+  assert(!repeated.dispatch_started)
+  assert_eq(
+    harness.testing.http_mock_calls(),
+    calls,
+    "restart/repeated delivery must not dispatch a second provider request",
+  )
+  if mode == "normal" {
+    assert(result.provider != nil && result.error == nil)
+  }
+  if ["unapplied", "lost_readback"].contains(mode) {
+    assert(
+      result.provider != nil && result.error == nil,
+      "a positive SDK acknowledgement alone must not confirm integration",
+    )
+    assert(result.status == "reconciliation_required")
+  }
+  if mode == "lost_ack" {
+    assert(result.provider == nil && result.error != nil)
+  }
+  const stage_store = config.installation.store + {ref: recovered.staging_ref}
+  assert_eq(
+    read_state(harness.process, stage_store).commit,
+    from_remote.state_commit,
+    "cleanup requires a measured existing staged object",
+  )
+  const cleanup_updates: list<GithubRefUpdate> = [
+    {
+      ref: recovered.staging_ref,
+      before_oid: from_remote.state_commit,
+      after_oid: "0".repeat(40),
+      force: false,
+    },
+  ]
+  const cleanup_id = "refs-"
+    + sha256_hex(json_stringify({repo: REPOSITORY, updates: cleanup_updates}))
+  harness.testing.http_mock(
+    "POST",
+    API + "/graphql",
+    {status: 200, body: json_stringify({data: {updateRefs: {clientMutationId: cleanup_id}}})},
+  )
+  const cleaned = cleanup_github_integration(harness, config, from_remote)
+  assert_eq(
+    cleaned.status,
+    if mode == "unapplied" {
+      "retained"
+    } else {
+      "deleted"
+    },
+  )
+  assert_eq(
+    harness.runtime.atomic_get(applied),
+    if mode == "unapplied" {
+      1
+    } else {
+      2
+    },
+  )
+  if mode == "unapplied" {
+    assert_eq(read_state(harness.process, stage_store).commit, from_remote.state_commit)
+  } else {
+    assert_eq(read_state(harness.process, stage_store).commit, nil)
+    assert_eq(
+      read_state(harness.process, config.installation.store),
+      durable,
+      "staging cleanup must not modify authority or pending verification",
+    )
+    const after_cleanup = recover_github_integration(harness.process, config, request)
+    assert_eq(after_cleanup, from_remote, "terminal recovery must survive temporary ref cleanup")
+    const cleanup_calls = harness.testing.http_mock_calls()
+    assert_eq(cleanup_github_integration(harness, config, from_remote).status, "deleted")
+    assert_eq(
+      harness.testing.http_mock_calls(),
+      cleanup_calls,
+      "already measured cleanup must not send another deletion",
+    )
+  }
+}

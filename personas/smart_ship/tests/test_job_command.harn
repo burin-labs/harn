@@ -1,8 +1,10 @@
-type CommandEvidence = {status: "passed"}
+type CommandEvidence = {status: "passed", mode: string}
 
 @heavy(threads: 8)
+@test(cases: [{name: "snapshot", args: ["snapshot"]}, {name: "admission", args: ["admission"]}, {name: "refusals", args: ["refusals"]}, {name: "reports", args: ["reports"]}])
 pipeline test_public_job_command_executes_bound_jobs_and_retains_reached_failures(
   harness: Harness,
+  mode: string,
 ) {
   const root = harness.fs.mkdtemp_in_workspace("smart-ship-job-command-")
   defer {
@@ -28,6 +30,7 @@ pipeline test_public_job_command_executes_bound_jobs_and_retains_reached_failure
         path_join(artifact, "job-cli.harn"),
         path_join(assets, "job-dispatch.harn"),
         path_join(root, "project"),
+        mode,
       ],
       timeout_ms: 180000,
     },
@@ -38,4 +41,5 @@ pipeline test_public_job_command_executes_bound_jobs_and_retains_reached_failure
     schema_of(CommandEvidence),
   )
   assert_eq(evidence.status, "passed")
+  assert_eq(evidence.mode, mode)
 }

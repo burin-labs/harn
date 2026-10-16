@@ -1,0 +1,104 @@
+# Native decision APIs read 2026-10-15. Harn's text/JSON adapter keeps
+# probed 255-choice and 2..10-score bounds unless a route needs less.
+# Context ceilings come from the route index, not a chat model's weights.
+# https://openrouter.ai/api/v1/models?output_modalities=decisions
+# https://ai-gateway.vercel.sh/v1/models
+
+[[provider.openrouter]]
+model_match = ["openrouter/respan/span-02", "openrouter/nace-ai/drex-v1.5", "openrouter/nace-ai/drex-v2.0"]
+extends = true
+decision_protocol = "openrouter_decisions"
+decision_question_kinds = ["boolean", "choice", "score"]
+decision_limits = { max_choice_options = 255, score_levels_min = 2, score_levels_max = 10, state_window_tokens = 131072, request_window_tokens = 131072 }
+
+[[provider.openrouter]]
+model_match = ["openrouter/liquid/d1", "openrouter/cloudflare/clef", "openrouter/cloudflare/clef-omni", "openrouter/inception/mercury-decide"]
+extends = true
+decision_protocol = "openrouter_decisions"
+decision_question_kinds = ["boolean", "choice", "score"]
+decision_limits = { max_choice_options = 255, score_levels_min = 2, score_levels_max = 10, state_window_tokens = 65536, request_window_tokens = 65536 }
+
+[[provider.openrouter]]
+model_match = ["openrouter/liquid/d1-ultra", "openrouter/microsoft/microsoft-decision-1"]
+extends = true
+decision_protocol = "openrouter_decisions"
+decision_question_kinds = ["boolean", "choice", "score"]
+decision_limits = { max_choice_options = 255, score_levels_min = 2, score_levels_max = 10, state_window_tokens = 32768, request_window_tokens = 32768 }
+
+[[provider.openrouter]]
+model_match = "openrouter/scaledown/classify-1"
+extends = true
+decision_protocol = "openrouter_decisions"
+decision_question_kinds = ["boolean", "choice", "score"]
+decision_limits = { max_choice_options = 255, score_levels_min = 2, score_levels_max = 10, state_window_tokens = 1000000, request_window_tokens = 1000000 }
+
+[[provider.openrouter]]
+model_match = "openrouter/cloudflare/clef-flash"
+extends = true
+decision_protocol = "openrouter_decisions"
+decision_question_kinds = ["boolean", "choice", "score"]
+decision_limits = { max_choice_options = 255, score_levels_min = 2, score_levels_max = 10, state_window_tokens = 24576, request_window_tokens = 24576 }
+
+[[provider.openrouter]]
+model_match = ["openrouter/perplexity/pplx-decider-v1.1-27b", "openrouter/perplexity/pplx-decider-latest"]
+extends = true
+decision_protocol = "openrouter_decisions"
+decision_question_kinds = ["boolean", "choice", "score"]
+decision_limits = { max_choice_options = 255, score_levels_min = 2, score_levels_max = 10, state_window_tokens = 262144, request_window_tokens = 262144 }
+
+[[provider.openrouter]]
+model_match = "openrouter/openai/gpt-6-luna-decisions"
+extends = true
+decision_protocol = "openrouter_decisions"
+decision_question_kinds = ["boolean", "choice", "score"]
+decision_limits = { max_questions = 200, max_choice_options = 255, score_levels_min = 2, score_levels_max = 10, state_window_tokens = 1050000, request_window_tokens = 1050000 }
+
+[[provider.openrouter]]
+model_match = "openrouter/togethercomputer/tev1-4b-experimental"
+extends = true
+decision_protocol = "openrouter_decisions"
+decision_question_kinds = ["boolean", "choice", "score"]
+# Live rejection: "Tev1 needs between 2 and 20 options per question".
+decision_limits = { max_choice_options = 20, score_levels_min = 2, score_levels_max = 10, state_window_tokens = 32768, request_window_tokens = 32768 }
+
+[[provider.openrouter]]
+model_match = ["openrouter/upstage/solar-decide", "openrouter/upstage/solar-decide-flash"]
+extends = true
+decision_protocol = "openrouter_decisions"
+decision_question_kinds = ["boolean", "choice", "score"]
+# Live 422 reports 26 single-token labels on both Solar routes.
+decision_limits = { max_choice_options = 26, score_levels_min = 2, score_levels_max = 10, state_window_tokens = 524288, request_window_tokens = 524288 }
+
+[[provider.openrouter]]
+model_match = "openrouter/jaredpalmer/kev-4b"
+extends = true
+decision_protocol = "openrouter_decisions"
+decision_question_kinds = ["boolean", "choice", "score"]
+decision_limits = { max_choice_options = 255, score_levels_min = 2, score_levels_max = 10, state_window_tokens = 8192, request_window_tokens = 8192 }
+
+[[provider.vercel_ai_gateway]]
+model_match = "convaiinnovations/laya"
+extends = true
+decision_protocol = "vercel_evaluate"
+decision_upstream_provider = "boundless"
+decision_question_kinds = ["boolean", "choice", "score"]
+# 64 short candidates returned a distribution; 128/255 returned HTTP 413.
+# This is a tested adapter bound within the route's small context, not a
+# published vendor ceiling. The required ZDR filter still blocks this account.
+decision_limits = { max_choice_options = 64, score_levels_min = 2, score_levels_max = 10, state_window_tokens = 8192, request_window_tokens = 8192 }
+
+[[provider.vercel_ai_gateway]]
+model_match = "liquid/d1-ultra"
+extends = true
+decision_protocol = "vercel_evaluate"
+decision_upstream_provider = "liquid"
+decision_question_kinds = ["boolean", "choice", "score"]
+decision_limits = { max_choice_options = 255, score_levels_min = 2, score_levels_max = 10, state_window_tokens = 32768, request_window_tokens = 32768 }
+
+[[provider.vercel_ai_gateway]]
+model_match = "perplexity/pplx-decider-v1.1-27b"
+extends = true
+decision_protocol = "vercel_evaluate"
+decision_upstream_provider = "perplexity"
+decision_question_kinds = ["boolean", "choice", "score"]
+decision_limits = { max_choice_options = 255, score_levels_min = 2, score_levels_max = 10, state_window_tokens = 262144, request_window_tokens = 262144 }

@@ -27,8 +27,28 @@ pub import {
   submit_github_admission,
 } from "./github_effect"
 pub import {
+  GithubIntegrationTransaction,
+  GithubIntegrationWitness,
+  github_integration_state,
+  github_integration_transaction,
+  prepare_github_integration,
+} from "./github_integration"
+pub import {
   GithubIssuerConfiguration,
   GithubIssuerSettings,
   load_github_issuer,
 } from "./github_issuer"
+pub import {
+  GithubIntegrationCleanup,
+  GithubIntegrationConfiguration,
+  GithubIntegrationDispatch,
+  GithubIntegrationPreparationRefusal,
+  GithubIntegrationReconciliation,
+  GithubIntegrationRefusal,
+  cleanup_github_integration,
+  dispatch_github_integration,
+  github_integration_binding,
+  reconcile_github_integration,
+  recover_github_integration,
+} from "./github_publisher"
 pub import { github_reviewed_change, read_github_reviewed_change } from "./github_review"

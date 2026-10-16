@@ -1,0 +1,208 @@
+import { review_admission } from "./admission"
+import { Controller, IntegrationEffect, confirm_integration } from "./controller"
+import { effect_receipt } from "./effect_contract"
+import { EffectClaim } from "./effect_owner"
+import { StateWrite } from "./git_store"
+import { github_reviewed_change } from "./github_review"
+import { is_git_id } from "./identity"
+import { Change, Fence } from "./types"
+import { GithubPullRequestReviewCensus, GithubRefUpdate } from "harn-github-connector/default"
+
+/** A source-bound transaction witness; preparing it performs no forge mutation. */
+pub type GithubIntegrationWitness = {
+  schema: "smart-ship.github-integration.v1",
+  request: IntegrationEffect,
+  repository_remote: string,
+  authority_ref: string,
+  authority_before: string,
+  destination: GithubRefUpdate,
+  head_guards: list<GithubRefUpdate>,
+  observations: list<GithubPullRequestReviewCensus>,
+  prepared_at_ms: int,
+}
+
+/** The exact state object and source guards must travel in the same provider transaction. */
+pub type GithubIntegrationTransaction = {
+  repository: string,
+  witness: GithubIntegrationWitness,
+  state_commit: string,
+  updates: list<GithubRefUpdate>,
+}
+
+fn fence(state: Controller) -> Fence {
+  return pick(state.authority, ["installation", "generation", "revision", "controller"])
+}
+
+fn retained_changes(state: Controller) -> list<Change> {
+  return (state.pending ?? state.active ?? state.checkpoint?.snapshot)?.changes ?? []
+}
+
+/** Select only newly admitted changes; preparation and final requalification share this owner. */
+pub fn github_incoming_changes(claim: EffectClaim, request: IntegrationEffect) -> list<Change> {
+  const prior = retained_changes(claim.state)
+  return request.snapshot.changes.filter({ change -> !prior.contains(change) }).to_list()
+}
+
+fn require_present_object(oid: string) {
+  require is_git_id(oid) && oid != "0".repeat(len(oid)),
+    "integration requires existing objects, never a ref deletion"
+}
+
+/**
+ * Requalify each newly integrated change through the existing review owner.
+ * Same-repository source branches become no-op guards in the atomic transaction.
+ * Retained changes are already integrated and may no longer have live PR branches.
+ */
+pub fn prepare_github_integration(
+  claim: EffectClaim,
+  request: IntegrationEffect,
+  authority_ref: string,
+  expected_base: string,
+  observations: list<GithubPullRequestReviewCensus>,
+  now_ms: int,
+) -> GithubIntegrationWitness {
+  const witness = build_witness(claim, request, authority_ref, expected_base, observations, now_ms)
+  unwrap(github_integration_state(claim, witness))
+  return witness
+}
+
+fn build_witness(
+  claim: EffectClaim,
+  request: IntegrationEffect,
+  authority_ref: string,
+  expected_base: string,
+  observations: list<GithubPullRequestReviewCensus>,
+  now_ms: int,
+) -> GithubIntegrationWitness {
+  require_present_object(claim.commit)
+  require_present_object(expected_base)
+  require_present_object(request.source)
+  require claim.remote == "https://github.com/" + request.repository + ".git"
+    && claim.ref == authority_ref,
+    "GitHub integration must retain the claimed repository and authority ref"
+  const effect = claim.state.effects.find({ item -> item.request == request })
+  require effect != nil && effect.status == "dispatching" && effect.dispatch_id != nil,
+    "integration requires the unique durable dispatch claim"
+  const frontier = claim.state.pending ?? claim.state.active ?? claim.state.checkpoint?.snapshot
+  const known_source = (frontier?.sources ?? []).find(
+    { row -> row.repository == request.repository },
+  )
+  require known_source == nil || known_source.commit == expected_base,
+    "integration destination drifted from the retained controller frontier"
+  const incoming = github_incoming_changes(claim, request)
+  require len(incoming) > 0 && len(incoming) <= 30 && len(observations) == len(incoming),
+    "integration requires one complete observation per new change and at most thirty heads"
+  const branch = incoming[0]!.admission.record.source.base_branch
+  const destination = "refs/heads/" + branch
+  require branch != "" && authority_ref.starts_with("refs/heads/")
+    && authority_ref != destination,
+    "destination and controller must be distinct branch refs"
+  let guards: list<GithubRefUpdate> = []
+  let complete: list<GithubPullRequestReviewCensus> = []
+  for change in incoming {
+    const source = change.admission.record.source
+    const rows = observations.filter(
+      { row -> row.repository == source.repository && to_string(row.number) == source.change },
+    )
+    require len(rows) == 1, "source observation is missing or duplicated"
+    const census = rows[0]!
+    complete = complete + [census]
+    const observed = github_reviewed_change(census)
+    require observed.source == source && source.repository == request.repository
+      && source.base == expected_base
+      && source.base_branch == branch,
+      "fresh review source differs from the signed admission or destination"
+    require census.head_repository != nil && census.base_repository != nil
+      && census.head_repository == census.base_repository
+      && census.head_repository.full_name == request.repository
+      && census.head_branch != "",
+      "atomic source guards require an actual branch in the destination repository"
+    const rule = claim.state.authority.policy.admission_rules.find(
+      { item -> item.id == change.admission.record.scope.scope.rule },
+    )
+    require rule != nil
+      && review_admission(observed.source, rule.review, observed.reviews).status == "approved",
+      "current complete reviews no longer authorize this change"
+    const ref = "refs/heads/" + census.head_branch
+    require ref != destination && ref != authority_ref
+      && !guards.any({ item -> item.ref == ref }),
+      "source guards must name distinct branches outside destination and controller"
+    guards = guards + [{ref: ref, before_oid: source.head, after_oid: source.head, force: false}]
+  }
+  const witness: GithubIntegrationWitness = {
+    schema: "smart-ship.github-integration.v1",
+    request: request,
+    repository_remote: claim.remote,
+    authority_ref: authority_ref,
+    authority_before: claim.commit,
+    destination: {
+      ref: destination,
+      before_oid: expected_base,
+      after_oid: request.source,
+      force: false,
+    },
+    head_guards: guards,
+    observations: complete,
+    prepared_at_ms: now_ms,
+  }
+  return witness
+}
+
+/** Prepare confirmation and pending verification as one state revision, without publishing it. */
+pub fn github_integration_state(
+  claim: EffectClaim,
+  witness: GithubIntegrationWitness,
+) -> Result<Controller, string> {
+  const canonical = try {
+    build_witness(
+      claim,
+      witness.request,
+      witness.authority_ref,
+      witness.destination.before_oid,
+      witness.observations,
+      witness.prepared_at_ms,
+    )
+  }
+  if is_err(canonical) || unwrap(canonical) != witness {
+    return Err("integration witness differs from its complete source and controller guards")
+  }
+  return confirm_integration(
+    claim.state,
+    fence(claim.state),
+    witness.request,
+    claim.state.authority.policy,
+    witness.prepared_at_ms,
+    effect_receipt(json_stringify(witness)),
+  )
+}
+
+/**
+ * Couple the prepared state's exact payload to both moving refs and every source guard.
+ * Object upload, transport binding and provider dispatch belong to the privileged publisher.
+ * This pure plan alone grants no mutation authority and does not establish source materialization.
+ */
+pub fn github_integration_transaction(
+  claim: EffectClaim,
+  witness: GithubIntegrationWitness,
+  prepared: StateWrite,
+) -> GithubIntegrationTransaction {
+  require_present_object(prepared.commit)
+  require prepared.expected == claim.commit && prepared.commit != claim.commit
+    && prepared.state == unwrap(github_integration_state(claim, witness)),
+    "prepared controller object differs from the complete integration confirmation"
+  return {
+    repository: witness.request.repository,
+    witness: witness,
+    state_commit: prepared.commit,
+    updates: [
+      witness.destination,
+      {
+        ref: witness.authority_ref,
+        before_oid: claim.commit,
+        after_oid: prepared.commit,
+        force: false,
+      },
+    ]
+      + witness.head_guards,
+  }
+}

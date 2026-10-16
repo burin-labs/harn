@@ -82,6 +82,73 @@ the provider. The adapter keeps mutation credentials away from repair workers.
 Every mutation owner must use this protocol before authority can transfer.
 A prior read of a lease is insufficient.
 
+`integration_effect` retains a complete cumulative snapshot for one repository.
+Reservation reuses the snapshot verifier and admission budgets with a measured
+current time. It does not mark the group integrated. After a durable dispatch
+claim, `confirm_integration` prepares one state revision containing both the
+confirmed effect and its pending verification work. The atomic forge adapter
+must publish that state together with the destination change. Ordinary provider
+callbacks, ordinary effect settlement and the ordinary Git state writer refuse
+new integration confirmation, so they cannot silently lose the verification
+obligation. Preparing the state is not evidence that a forge transaction happened.
+
+The GitHub export adds `prepare_github_integration` and
+`github_integration_transaction`. They retain the complete fresh review censuses
+and build one transaction containing the destination update, the claimed
+controller update, and an unchanged-ref guard for each newly admitted source
+branch. The prepared controller object must contain the same witness and pending
+verification obligation. Replayed data cannot drop or substitute these guards.
+The claim retains the remote and ref measured by the Git owner. A known
+controller frontier also binds the destination's expected base. Fork branches
+cannot participate in this single-repository transaction, even when review
+policy permits them. These functions prepare data without contacting the forge.
+The Git store's `require_git_transport` checks fetch and push URL resolution
+against the publisher's repository, using a private probe remote in the bare
+object workspace. `stage_state` uploads the exact validated object to
+`refs/heads/smart-ship-objects/<expected-authority-commit>` without moving the
+authority ref. Competing states have the same parent and cannot replace one
+another through its non-force push. Unknown uploads retain their ref and object
+for reconciliation. The publisher must delete this ref with an exact-object
+comparison only after the final transaction is reconciled.
+
+`prepare_group_tree` composes exact reviewed heads with stock Git's
+`merge-tree --write-tree`, including branches that forked before the destination
+advanced. It writes only loose intermediate objects. `require_group_candidate`
+then compares the complete result with the proposed candidate's actual tree and
+requires exactly one parent at the expected destination. Missing or additional
+edits and a changed parent are refused. These checks do not create a signed
+candidate or prove that a provider accepted a ref update.
+
+`dispatch_github_integration` consumes a provider-bound reservation, rechecks
+complete current reviews and candidate materialization, uploads the exact state
+object, then reads complete reviews again before making one SDK ref transaction.
+A changed review census requires new preparation. A provider acknowledgement alone
+cannot confirm integration: actual authority must retain the witnessed effect
+and pending verification. Definite provider refusals settle through the same
+effect owner. Preparation failures also settle a durable refusal before publication,
+so rejected work does not retain a dispatch claim indefinitely. Unknown publication
+outcomes require observation and never redispatch.
+
+`recover_github_integration` reconstructs preparation from remote authority
+history and the staging branch. Each dispatch records its immutable authority
+revision, so later controls do not hide the original claim. Confirmed work remains
+recoverable from history after staging cleanup; refusals retain the complete
+transaction in their durable receipt. Oversized refusal details retain a transaction
+digest and keep the staging object available for recovery. Early refusals have no
+prepared transaction. `reconcile_github_integration` reads the
+actual outcome. `cleanup_github_integration` deletes only the exact staged object
+after conclusive confirmation or refusal, using another provider comparison.
+Unresolved objects remain available for recovery.
+Recovery and cleanup require the original dispatch's provider binding, including
+its credential reference. A different reference cannot reconcile or delete its objects.
+
+The adapter requires an already accessible signed GitHub candidate. Automated
+signed candidate preparation and live GitHub qualification are still in progress.
+The owning adapter tests run complete SDK requests against HTTP fixtures and real
+Git ref transactions, including stop, head change, lost acknowledgement, lost
+read-back, false acknowledgement, restart and cleanup. They do not prove GitHub's
+live signature or protection enforcement.
+
 `checkpoint_valid` verifies both the original execution signatures and the
 checkpoint publisher's signature. Consumers use `release_identity` to obtain
 the exact proven manifest identity. A moving branch is a convenience projection.

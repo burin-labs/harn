@@ -75,6 +75,48 @@ pin native tools.
 Ollama runs locally and doesn't require an API key. The default host is
 `http://localhost:11434`.
 
+### Meta Muse models
+
+Muse Spark Open is the open-weight release; `muse-spark-1.3` selects Meta's
+proprietary API model. Use `meta/muse-spark-open` through OpenRouter or select
+a provider-qualified route from `harn models list`. The catalog also includes
+Together, Fireworks, Hugging Face Router, Baseten, Groq, and Vercel routes.
+Their context limits, prices, and account access differ.
+
+Groq's route requires organization acceptance of the model's terms and access
+to its limited preview. Baseten's route has no
+live verification with Harn's probe account. Both retain unknown availability;
+neither advertises verified native tool support. OpenRouter also serves the
+model through Nebius. A partner announcement doesn't establish a direct model
+ID or access for your account.
+
+The [October catalog evidence](https://github.com/burin-labs/harn/blob/main/docs/llm/provider-evidence/2026-10-15-catalog-refresh.md)
+records live tool and vision checks, account restrictions, and unverified routes.
+
+Muse Wonder uses `muse-wonder-1.0` on Meta's API, `meta/muse-wonder` through
+OpenRouter, and `vercel/meta/muse-wonder-1.0` on Vercel. Wonder Full is available
+through Muse Code subscriptions and has no public API route. Meta's discounted
+Spark contributor routes permit training on your traffic; Wonder has no
+contributor API tier. See [Meta's rate card](https://dev.meta.ai/docs/pricing-rate-limits).
+
+Modal's shared endpoints use a workspace-specific hostname as the request's
+model ID. Configure an OpenAI-compatible provider overlay with the base URL
+`https://inference.us-west.modal.direct/v1`, bearer authentication, and a
+credential environment variable such as `MODAL_PROXY_TOKEN`. Set `wire_model`
+to the hostname Modal shows for your endpoint. Harn doesn't invent a global
+Modal model ID. See [Modal's endpoint integrations](https://modal.com/docs/guide/endpoint-integrations).
+
+### Gemini 4 Argon
+
+`gemini-4-argon` uses Google's Interactions API. Input, thinking, and output
+share one context window. Harn supports the `low`, `medium`, and `high` thinking
+levels and omits unsupported sampling controls. Explicit cache creation isn't
+supported; implicit caching applies to eligible prefixes.
+
+The direct route's introductory pricing ends November 30, 2026. Its catalog
+promotion restores the published regular rates on December 1. Gateway routes
+have separate rate cards. See [Google's migration reference](https://ai.google.dev/gemini-api/docs/latest-model).
+
 On a fresh install, `harn run` and `harn playground`/`harn try` detect Harn
 programs that call provider-backed LLM builtins such as `harness.llm.call`,
 `harness.llm.stream_call`, or `agent_loop`. If no user or project provider config is
@@ -661,6 +703,7 @@ accepts these fields:
 | `tool_format_justification` | table | Why this row chose native vs text tools. Required on self-hosted rows that set `native_tools` or `preferred_tool_format`. One of `{ measured = "<receipt of THIS runtime>" }`, `{ assumed = "<why the pin holds, and the rollback>" }`, or `{ mirrors = { provider = "...", model_match = "..." } }`. A comment that cites a sibling is not a receipt. A `mirrors` link must stay in sync with the cited row (#6829). |
 | `message_wire_format` | string | Shared request/response message format: `openai`, `anthropic`, `gemini`, or `ollama`. |
 | `live_endpoint_family` | string | Which synchronous endpoint a route dispatches to when its dialect serves more than one: `gemini_generate_content` (default) or `gemini_interactions`. Absent for dialects with a single live endpoint. Independent of `batch_wire_format` — Gemini Batch stays `generateContent`-shaped either way. |
+| `decision_upstream_provider` | string | Exact serving-provider pin for a native gateway decision route. Required for `vercel_evaluate`; it can differ from the model author. |
 | `native_tool_wire_format` | string | Native tool definition shape for shared helpers: `openai` or `anthropic`. Gemini and Vertex accept Harn's canonical tool definitions and their adapters emit Google `functionDeclarations`. |
 | `defer_loading` | bool | Whether `defer_loading: true` on tool definitions is honored server-side. |
 | `tool_search` | list of strings | Native `tool_search` variants, preferred first. Anthropic: `["bm25", "regex"]`. OpenAI: `["hosted", "client"]`. Empty = no native support (client fallback only). |

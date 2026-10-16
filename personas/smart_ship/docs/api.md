@@ -206,6 +206,120 @@ Preserve actual bounded provider responses, including the complete artifact-list
 pub type GithubCiRead = {endpoint: string, response: unknown}
 ```
 
+### type `GithubIntegrationCleanup`
+
+Unresolved integrations retain their objects. Cleanup never overwrites a competing ref.
+
+```harn
+pub type GithubIntegrationCleanup = {
+  status: "deleted" | "retained" | "unknown",
+  observed: string?,
+  provider: GithubRefUpdatesReceipt?,
+  error: GithubConnectorError?,
+  reason: string?,
+}
+```
+
+### type `GithubIntegrationConfiguration`
+
+Trusted public-GitHub installation; workers never receive its secret reference or handles.
+
+```harn
+pub type GithubIntegrationConfiguration = {installation: Installation, token_reference: string}
+```
+
+### type `GithubIntegrationDispatch`
+
+Keep prepared identities after an uncertain response. Repeated delivery never dispatches again.
+
+```harn
+pub type GithubIntegrationDispatch = {
+  status: "not_started" | "confirmed" | "refused" | "reconciliation_required",
+  dispatch_started: bool,
+  claim: EffectClaim?,
+  transaction: GithubIntegrationTransaction?,
+  stage: StateObjectStage?,
+  provider: GithubRefUpdatesReceipt?,
+  error: GithubConnectorError?,
+  reason: string?,
+}
+```
+
+### type `GithubIntegrationPreparationRefusal`
+
+A refusal before the publication call proves that no destination mutation was started.
+
+```harn
+pub type GithubIntegrationPreparationRefusal = {
+  schema: "smart-ship.github-preparation-refusal.v1",
+  request: EffectTarget,
+  claim_commit: string,
+  transaction: GithubIntegrationTransaction?,
+  transaction_digest: string?,
+  reviews: list<GithubPullRequestReviewCensus>?,
+  reason: string,
+  reason_truncated: bool,
+  details_omitted: bool,
+}
+```
+
+### type `GithubIntegrationReconciliation`
+
+Read-back is conclusive only when the exact atomic confirmation survives in current authority.
+
+```harn
+pub type GithubIntegrationReconciliation = {
+  status: "confirmed" | "refused" | "unresolved",
+  observed: string?,
+  state_commit: string,
+  staging_ref: string,
+  staging_needed: bool,
+}
+```
+
+### type `GithubIntegrationRefusal`
+
+A conclusive provider refusal is retained independently of a successful transaction witness.
+
+```harn
+pub type GithubIntegrationRefusal = {
+  schema: "smart-ship.github-integration-refusal.v1",
+  transaction: GithubIntegrationTransaction,
+  provider: GithubConnectorError,
+}
+```
+
+### type `GithubIntegrationTransaction`
+
+The exact state object and source guards must travel in the same provider transaction.
+
+```harn
+pub type GithubIntegrationTransaction = {
+  repository: string,
+  witness: GithubIntegrationWitness,
+  state_commit: string,
+  updates: list<GithubRefUpdate>,
+}
+```
+
+### type `GithubIntegrationWitness`
+
+A source-bound transaction witness; preparing it performs no forge mutation.
+
+```harn
+pub type GithubIntegrationWitness = {
+  schema: "smart-ship.github-integration.v1",
+  request: IntegrationEffect,
+  repository_remote: string,
+  authority_ref: string,
+  authority_before: string,
+  destination: GithubRefUpdate,
+  head_guards: list<GithubRefUpdate>,
+  observations: list<GithubPullRequestReviewCensus>,
+  prepared_at_ms: int,
+}
+```
+
 ### type `GithubIssuerConfiguration`
 
 One canonical policy file supplies the scope preparer and admission issuer.
@@ -247,6 +361,36 @@ pub fn assess_github_ci(
 }
 ```
 
+### fn `cleanup_github_integration`
+
+Delete only a conclusively reconciled transaction's exact owned staging object.
+
+```harn
+pub fn cleanup_github_integration(
+  harness: Harness,
+  configuration: GithubIntegrationConfiguration,
+  transaction: GithubIntegrationTransaction,
+) -> GithubIntegrationCleanup {
+}
+```
+
+### fn `dispatch_github_integration`
+
+Dispatch an already reserved integration once. The candidate must already be an accessible
+signed GitHub object. Materialization is checked with stock Git before the provider call.
+Destination, authority and all current source heads participate in one SDK transaction.
+
+```harn
+pub fn dispatch_github_integration(
+  harness: Harness,
+  configuration: GithubIntegrationConfiguration,
+  fence: Fence,
+  request: IntegrationEffect,
+  expected_base: string,
+) -> GithubIntegrationDispatch {
+}
+```
+
 ### fn `github_admission_binding`
 
 Bind recovery to effective nonsecret provider settings; secret values never enter state.
@@ -268,6 +412,42 @@ pub fn github_ci_identities(
 }
 ```
 
+### fn `github_integration_binding`
+
+The reservation binds the configured provider identity before any claim can invoke it.
+
+```harn
+pub fn github_integration_binding(configuration: GithubIntegrationConfiguration) -> string {
+}
+```
+
+### fn `github_integration_state`
+
+Prepare confirmation and pending verification as one state revision, without publishing it.
+
+```harn
+pub fn github_integration_state(
+  claim: EffectClaim,
+  witness: GithubIntegrationWitness,
+) -> Result<Controller, string> {
+}
+```
+
+### fn `github_integration_transaction`
+
+Couple the prepared state's exact payload to both moving refs and every source guard.
+Object upload, transport binding and provider dispatch belong to the privileged publisher.
+This pure plan alone grants no mutation authority and does not establish source materialization.
+
+```harn
+pub fn github_integration_transaction(
+  claim: EffectClaim,
+  witness: GithubIntegrationWitness,
+  prepared: StateWrite,
+) -> GithubIntegrationTransaction {
+}
+```
+
 ### fn `github_reviewed_change`
 
 Normalize the connector's complete exact-head census for live reads and deterministic replay.
@@ -283,6 +463,24 @@ Load trusted issuer settings and public policy before reading any credential or 
 
 ```harn
 pub fn load_github_issuer(fs: HarnessFs, path: string) -> GithubIssuerConfiguration {
+}
+```
+
+### fn `prepare_github_integration`
+
+Requalify each newly integrated change through the existing review owner.
+Same-repository source branches become no-op guards in the atomic transaction.
+Retained changes are already integrated and may no longer have live PR branches.
+
+```harn
+pub fn prepare_github_integration(
+  claim: EffectClaim,
+  request: IntegrationEffect,
+  authority_ref: string,
+  expected_base: string,
+  observations: list<GithubPullRequestReviewCensus>,
+  now_ms: int,
+) -> GithubIntegrationWitness {
 }
 ```
 
@@ -311,6 +509,33 @@ pub fn read_github_reviewed_change(
   harness: Harness,
   request: GithubPullRequestReviewCensusRequest,
 ) -> GithubConnectorResult<ReviewedChangeObservation> {
+}
+```
+
+### fn `reconcile_github_integration`
+
+Recover from persisted transaction data by reading actual Git objects and current authority.
+This performs no provider mutation and never turns an unresolved observation into a retry.
+
+```harn
+pub fn reconcile_github_integration(
+  process: HarnessProcess,
+  configuration: GithubIntegrationConfiguration,
+  transaction: GithubIntegrationTransaction,
+) -> GithubIntegrationReconciliation {
+}
+```
+
+### fn `recover_github_integration`
+
+Recover the prepared transaction from remote authority history and its owned staging branch.
+
+```harn
+pub fn recover_github_integration(
+  process: HarnessProcess,
+  configuration: GithubIntegrationConfiguration,
+  request: IntegrationEffect,
+) -> GithubIntegrationTransaction {
 }
 ```
 
@@ -545,8 +770,25 @@ pub type Effect = {
   status: "reserved" | "dispatching" | "unknown" | "confirmed" | "refused",
   dispatch_binding: string?,
   dispatch_id: string?,
+  dispatch_revision: int?,
   receipt: EffectReceipt?,
 }
+```
+
+### type `EffectClaim`
+
+Only the actor whose distinct state commit reached the remote owns this dispatch.
+
+```harn
+pub type EffectClaim = {remote: string, ref: string, commit: string, state: Controller}
+```
+
+### type `EffectClaimRefusal`
+
+A refused or uncertain claim grants no provider authority; retain the measured revision.
+
+```harn
+pub type EffectClaimRefusal = {observed: string?}
 ```
 
 ### type `EffectDispatch`
@@ -603,7 +845,7 @@ pub type EffectRefusal = {
 A digest cannot stand in for an admission record at the mutation boundary.
 
 ```harn
-pub type EffectRequest = AdmissionEffect | ReleaseEffect | RerunEffect
+pub type EffectRequest = AdmissionEffect | IntegrationEffect | ReleaseEffect | RerunEffect
 ```
 
 ### type `EffectTarget`
@@ -658,6 +900,14 @@ pub type GitStore = {
 }
 ```
 
+### type `GroupTree`
+
+Exact stock-Git composition, before any destination or authority ref moves.
+
+```harn
+pub type GroupTree = {base: string, heads: list<string>, tree: string}
+```
+
 ### type `Incident`
 
 One incident retains the failed immutable source, original evidence, and all repair attempts.
@@ -702,6 +952,14 @@ pub type Installation = {
   store: GitStore,
   controller: string,
 }
+```
+
+### type `IntegrationEffect`
+
+One repository's cumulative frontier retains every signed change and required job.
+
+```harn
+pub type IntegrationEffect = EffectTarget & {kind: "integration", snapshot: Snapshot}
 ```
 
 ### type `JobInputs`
@@ -1141,6 +1399,14 @@ One immutable Git source identity. Repository names are installation data.
 pub type Source = {repository: string, commit: string, tree: string}
 ```
 
+### type `StateObjectStage`
+
+Upload evidence is separate from authority publication; retain uncertain uploads for recovery.
+
+```harn
+pub type StateObjectStage = {ref: string, result: CommitResult}
+```
+
 ### type `StateRead`
 
 The remote commit is the compare-and-swap revision, independent of local files or leases.
@@ -1318,9 +1584,28 @@ pub fn claim_repair(
 }
 ```
 
+### fn `claim_reserved_effect`
+
+Run only in the privileged effect owner; workers submit requests and fences.
+The remote CAS is shared by ordinary callbacks and prepared atomic transactions.
+A prior stop refuses the claim. A later control changes the returned commit's guard.
+Transfer stays barred until the claimed effect has a measured terminal outcome.
+
+```harn
+pub fn claim_reserved_effect(
+  host: EffectOwnerHost,
+  store: GitStore,
+  fence: Fence,
+  request: EffectRequest,
+  dispatch_binding: string? = nil,
+) -> Result<EffectClaim, EffectClaimRefusal> {
+}
+```
+
 ### fn `commit_state`
 
 A non-force push of a single-parent commit atomically rejects competing remote writers.
+New integration confirmations belong to the atomic destination-and-state publisher.
 
 ```harn
 pub fn commit_state(process: HarnessProcess, store: GitStore, write: StateWrite) -> CommitResult {
@@ -1338,6 +1623,24 @@ pub fn complete(
   completed: Snapshot,
   proofs: list<Proof>,
   policy: Policy,
+) -> Result<Controller, string> {
+}
+```
+
+### fn `confirm_integration`
+
+Prepare the state that must move atomically with the destination ref.
+A durable dispatch claim is required; preparing this value does not confirm a provider write.
+Reuse offer's complete census, cumulative retention and debt limits at the final boundary.
+
+```harn
+pub fn confirm_integration(
+  state: Controller,
+  fence: Fence,
+  request: IntegrationEffect,
+  policy: Policy,
+  now_ms: int,
+  receipt: EffectReceipt,
 ) -> Result<Controller, string> {
 }
 ```
@@ -1375,10 +1678,7 @@ pub fn decode_reviewed_change(value: unknown) -> ReviewedChangeObservation {
 
 ### fn `dispatch_reserved_effect`
 
-Run only in the privileged effect owner. The callback retains provider credentials there;
-workers submit requests and fences. The remote CAS is the dispatch commitment boundary.
-Stop before commitment refuses dispatch; an already committed provider action requires a
-measured terminal receipt. Transfer is barred throughout dispatch and uncertain recovery.
+Claim once, call the provider once, and settle its measured result through the same owner.
 
 ```harn
 pub fn dispatch_reserved_effect(
@@ -1480,6 +1780,15 @@ pub fn inspect_installation(process: HarnessProcess, config: Installation) -> In
 }
 ```
 
+### fn `integration_effect`
+
+Derive the mutation identity from the complete immutable single-repository frontier.
+
+```harn
+pub fn integration_effect(snapshot: Snapshot) -> IntegrationEffect {
+}
+```
+
 ### fn `is_digest`
 
 Content evidence names its hash algorithm.
@@ -1569,6 +1878,23 @@ Bind prechecks to signed scope; current reviews are authenticated by the admissi
 
 ```harn
 pub fn prepare_admission(request: AdmissionRequest) -> VerificationPlan {
+}
+```
+
+### fn `prepare_group_tree`
+
+Merge each exact reviewed head onto the destination through Git's merge-tree.
+Only loose objects are written. The caller's worktree, index and refs stay unchanged.
+Temporary commits carry intermediate trees, never destination history or signed lineage.
+
+```harn
+pub fn prepare_group_tree(
+  process: HarnessProcess,
+  workspace: string,
+  base: string,
+  heads: list<string>,
+  timeout_ms: int = 10000,
+) -> GroupTree {
 }
 ```
 
@@ -1683,6 +2009,31 @@ pub fn repair_spend(incident: Incident) -> RepairSpend {
 }
 ```
 
+### fn `require_git_transport`
+
+Refuse fetch or push aliases and URL rewrites before binding Git objects to a forge API.
+
+```harn
+pub fn require_git_transport(process: HarnessProcess, store: GitStore, expected_remote: string) {
+}
+```
+
+### fn `require_group_candidate`
+
+Bind the proposed linear candidate to the exact composition, refusing omitted or extra edits.
+
+```harn
+pub fn require_group_candidate(
+  process: HarnessProcess,
+  workspace: string,
+  group: GroupTree,
+  candidate: string,
+  expected_tree: string,
+  timeout_ms: int = 10000,
+) {
+}
+```
+
 ### fn `requirement_identity`
 
 Complete semantic inputs must match before an original job can be reused.
@@ -1703,6 +2054,7 @@ pub fn reserve_effect(
   request: EffectRequest,
   policy: Policy,
   dispatch_binding: string? = nil,
+  now_ms: int? = nil,
 ) -> Result<Controller, EffectRefusal> {
 }
 ```
@@ -1769,6 +2121,21 @@ pub fn settle_effect(
 }
 ```
 
+### fn `settle_owned_effect`
+
+Record a measured outcome only for the exact dispatch this owner durably claimed.
+
+```harn
+pub fn settle_owned_effect(
+  process: HarnessProcess,
+  store: GitStore,
+  claim: EffectClaim,
+  request: EffectRequest,
+  outcome: EffectOutcome,
+) -> CommitResult {
+}
+```
+
 ### fn `snapshot_bytes`
 
 Snapshot identity covers the immutable frontier and its derived verification requests.
@@ -1805,6 +2172,21 @@ pub fn source_identity(source: Source) -> string {
 }
 ```
 
+### fn `stage_state`
+
+Upload an exact state object to a write-once branch keyed by its expected authority revision.
+This never moves the authority ref. Delete the staging ref only after its transaction is
+reconciled, with a provider-side comparison against the measured staged object.
+
+```harn
+pub fn stage_state(
+  process: HarnessProcess,
+  store: GitStore,
+  write: StateWrite,
+) -> StateObjectStage {
+}
+```
+
 ### fn `start`
 
 Claim exactly one frozen snapshot; newer offers occupy only the pending slot.
@@ -1834,6 +2216,19 @@ Live adapters and replay readers enter through the same source and inventory con
 
 ```harn
 pub fn validate_review_observation(value: ReviewObservation) -> ReviewObservation {
+}
+```
+
+### fn `validate_state_write`
+
+Validate the actual immutable object, its exact parent and payload, and its transition.
+
+```harn
+pub fn validate_state_write(
+  process: HarnessProcess,
+  store: GitStore,
+  write: StateWrite,
+) -> Controller? {
 }
 ```
 

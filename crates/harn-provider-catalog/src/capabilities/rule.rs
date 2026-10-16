@@ -106,6 +106,10 @@ provider_rule! {
         /// [`DecisionLimits`].
         #[serde(default)]
         pub decision_limits: Option<DecisionLimits>,
+        /// Exact upstream provider pin for a gateway decision route. Model
+        /// authors and serving providers can differ, so do not infer it.
+        #[serde(default)]
+        pub decision_upstream_provider: Option<String>,
         /// Native tool definition wire shape. Known values are `openai`
         /// and `anthropic`.
         #[serde(default)]

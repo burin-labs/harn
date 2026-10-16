@@ -74,9 +74,6 @@ fn main(harness: Harness) {
       repo: parts[1]!,
       pull_number: to_int(input.request.source.change),
       expected_head_oid: input.request.scope.scope.reviewed_head,
-      per_page: 100,
-      max_pages: 100,
-      maximum_count: 10000,
       options: options,
     },
   )

@@ -19,4 +19,4 @@ roots = ["tests"]
 
 [dependencies]
 burin-ci-checks = { git = "https://github.com/burin-labs/.github", rev = "a4da07f69b45a057dc46465bea10948f7bf3e0a3" }
-harn-github-connector = { git = "https://github.com/burin-labs/harn-github-connector", tag = "v0.12.0", registry = "https://packages.harnlang.com/harn-package-index.toml", registry_name = "@burin/github-connector", registry_version = "0.12.0", registry_commit = "e27cbeb54c325e06724f9b314af3acf820f04f41", registry_provenance = "https://github.com/burin-labs/harn-github-connector/releases/tag/v0.12.0" }
+harn-github-connector = { git = "https://github.com/burin-labs/harn-github-connector", tag = "v0.14.0", registry = "https://packages.harnlang.com/harn-package-index.toml", registry_name = "@burin/github-connector", registry_version = "0.14.0", registry_commit = "773a8404dc21dc3688e280b8a93572b97939316f", registry_provenance = "https://github.com/burin-labs/harn-github-connector/releases/tag/v0.14.0" }
