@@ -86,35 +86,60 @@ times, platform approval, and thread resolution separately. Unknown facts stay
 unknown.
 The observation supplies review evidence; it does not admit or merge the change.
 
-## Integrate a qualified GitHub change
+## Prepare and integrate a GitHub group
 
 Qualify the release guard and transfer exclusive landing ownership before
-activating this adapter. GitHub continues to enforce effective branch rules,
-including a required merge queue. The command does not change repository rules.
+activating this adapter. The command does not change repository rules. Its
+atomic publication must be permitted by the installation's effective policy;
+a required merge queue remains authoritative until a qualified fenced transfer.
 
-Save a `GithubAdmissionConfiguration` in a trusted file outside submitted
+Save a `GithubIntegrationConfiguration` in a trusted file outside submitted
 artifacts. Its `installation` field contains your qualified `Installation`
-document; `token_reference` names a host secret, and `method` selects `merge`,
-`squash`, or `rebase`. Keep Git authentication with the host's normal credential
-store. Save the signed witness and current authority fence as a
-`GithubAdmissionSubmission` in `submission.json`.
+document; `token_reference` names a host secret. Requests cannot choose
+credentials, a remote, or another API endpoint. Keep Git authentication and
+authority commit signing in the host's normal configuration.
+
+The controller is privileged: it holds Git credentials and the provider secret
+handle. The default worktree sandbox intentionally denies SSH credential files.
+The live signing proof runs only the pinned controller in trusted host mode;
+verification and repair commands run separately with their own restricted
+capabilities. Do not execute submitted commands in this controller invocation.
+
+Measure the cumulative tree with `prepare_group_tree`, then construct the exact
+`CandidateEffect` with `candidate_effect(repository, base, tree, admissions)`.
+Save a `GithubCandidateCommand` with `action: prepare`, that request, and the
+current authority `fence` in `command.json`. Keep the complete original signed
+admissions in their original order. The command commits the reservation before
+claiming its unique signing dispatch.
 
 ```sh
-HARN_EGRESS_ALLOW=api.github.com,github.com harn run --allow-process-network .smart-ship-source/personas/smart_ship/github-effect-cli.harn -- github-effect.json submission.json
+harn run --standalone --no-sandbox .smart-ship-source/personas/smart_ship/github-effect-cli.harn -- github-effect.json command.json
 ```
 
-Inspect `dispatch` and the typed `admission_refusal`. A confirmed dispatch
-retains the provider's integrated commit in the durable receipt's JSON body.
-Use that actual commit and resolve its tree when forming the next verification
-snapshot. Keep the release checkpoint held until complete verification passes.
-An uncertain dispatch requires reconciliation; submitting the same admission
-again reads its recorded outcome without contacting GitHub. A stop or stale
-fence prevents a new dispatch, while an already committed dispatch can finish
-and retain its measured result.
-If a process stopped after reserving an admission but before claiming its
-dispatch, inspect the current authority fence and resubmit the same signed
-witness with that fence. The existing owner claims the reservation once.
-An operation already marked `dispatching` or `unknown` requires reconciliation.
+Inspect `reservation` and `candidate` in `GithubCommandResult`. A refused or
+unknown reservation has no candidate outcome. A confirmed candidate retains its
+actual signed commit, tree and parent; main and the release checkpoint have not
+advanced. An unknown signing result requires `action: recover-candidate` with
+the same request. Recovery observes the unique recorded dispatch and signed
+object without creating another commit. Resume an undispatched reservation by
+passing the same request and a fresh observed fence to `prepare`.
+
+Build the verification snapshot from the actual candidate identity and measured
+stock-job plans. Retain every original head and signed admission in its
+`Change`, with `integrated_commit` set to the candidate. Construct
+`integration_effect(snapshot)`, then save a `GithubIntegrationCommand` with
+`action: integrate`, that request, the current `fence`, and `expected_base` set
+to the candidate's original destination base. The same CLI reserves and
+dispatches the atomic destination, authority and reviewed-head transaction.
+Successful integration creates pending verification; the release checkpoint
+stays held until complete verification passes.
+
+After an uncertain publication, use `action: recover-integration` with the same
+integration request and `expected_base`. Inspect `reconciliation.status`.
+Use `cleanup-integration` only after the outcome is conclusive; it deletes the
+exact temporary state-object ref and preserves unresolved objects. Missing
+outcome fields mean that stage was not measured. Keep the complete command
+result and remote authority history across restarts.
 
 ## Uninstall
 
@@ -177,8 +202,8 @@ Candidate preparation uses the same durable dispatch owner as other effects.
 An unknown signing result forbids redispatch and blocks authority transfer until
 read-back reconciliation. Confirmation records the preparation receipt only;
 it does not offer a verification snapshot, move the destination, or promote a
-release checkpoint. The GitHub candidate-signing adapter and its recovery remain
-required before this reservation can become the default integration route.
+release checkpoint. The GitHub CLI performs reservation and dispatch through
+the same owner; embedded callers can use those lower-level functions directly.
 
 Each authority generation freezes `policy_digest`. To change policy, drain
 pending and active verification, reconcile external effects, and resolve work

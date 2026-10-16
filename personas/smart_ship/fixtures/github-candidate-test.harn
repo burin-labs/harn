@@ -1,3 +1,4 @@
+import { run_github_effect_command } from "../github-effect-cli"
 import { dispatch_github_candidate, reconcile_github_candidate } from "../lib/github_candidate"
 import { GithubIntegrationConfiguration, github_integration_binding } from "../lib/github_owner"
 import {
@@ -113,6 +114,9 @@ pub fn exercise_candidate(harness: Harness, f: CandidateFixture, mode: string) {
     config
   }
   const local = config.installation.store + {remote: f.remote}
+  const settings_path = path_join(f.root, "candidate-command-settings.json")
+  const command_path = path_join(f.root, "candidate-command.json")
+  harness.fs.write_text(settings_path, json_stringify(config))
   const request = candidate_effect(
     REPOSITORY,
     f.base,
@@ -136,11 +140,16 @@ pub fn exercise_candidate(harness: Harness, f: CandidateFixture, mode: string) {
   if mode == "stopped" {
     reserved = unwrap(control(reserved, fence(reserved), "stopped"))
   }
+  const initial = if mode == "command_new" {
+    f.initial
+  } else {
+    reserved
+  }
   assert_eq(
     commit_state(
       harness.process,
       local,
-      prepare_state(harness.process, local, {commit: nil, state: nil}, reserved),
+      prepare_state(harness.process, local, {commit: nil, state: nil}, initial),
     ).status,
     "committed",
   )
@@ -151,6 +160,7 @@ pub fn exercise_candidate(harness: Harness, f: CandidateFixture, mode: string) {
     {status: 200, body: json_stringify({commit: {sha: f.base}})},
   )
   const claims = harness.runtime.atomic(0)
+  const authority_pushes = harness.runtime.atomic(0)
   const lost_settlement = harness.runtime.atomic(0)
   const stopped_during_preparation = harness.runtime.atomic(0)
   const store_path = path_join(f.root, "candidate-stop-store.json")
@@ -217,6 +227,10 @@ pub fn exercise_candidate(harness: Harness, f: CandidateFixture, mode: string) {
           const refspec = argv[len(argv) - 1] ?? ""
           if argv[0] == "git" && argv[1] == "push" && refspec.ends_with(":" + local.ref)
             && harness.runtime.atomic_get(claims) == 0 {
+            harness.runtime.atomic_add(authority_pushes, 1)
+            if mode == "command_new" && harness.runtime.atomic_get(authority_pushes) < 2 {
+              return nil
+            }
             harness.runtime.atomic_add(claims, 1)
             const branch = "smart-ship-candidates/" + refspec.split(":")[0]!
             harness.testing.http_mock(
@@ -288,7 +302,43 @@ pub fn exercise_candidate(harness: Harness, f: CandidateFixture, mode: string) {
   defer {
     harness.runtime.command_policy_pop()
   }
-  const result = dispatch_github_candidate(harness, acting, fence(reserved), request)
+  harness.fs.write_text(
+    command_path,
+    json_stringify(
+      {
+        action: "prepare",
+        request: request,
+        fence: if mode == "command_stale" {
+          fence(initial) + {revision: 0}
+        } else {
+          fence(initial)
+        },
+        token_reference: "submission/cannot-select-credentials",
+      },
+    ),
+  )
+  if mode == "command_stale" {
+    const rejected = run_github_effect_command(harness, [settings_path, command_path])
+    assert_eq(rejected.reservation!.status, "refused")
+    assert_eq(rejected.candidate, nil)
+    assert_eq(harness.testing.http_mock_calls(), [])
+    assert_eq(read_state(harness.process, local).state, initial)
+    return
+  }
+  const result = if ["command", "command_new"].contains(mode) {
+    const invoked = run_github_effect_command(harness, [settings_path, command_path])
+    assert_eq(
+      invoked.reservation!.status,
+      if mode == "command_new" {
+        "reserved"
+      } else {
+        "existing"
+      },
+    )
+    invoked.candidate!
+  } else {
+    dispatch_github_candidate(harness, acting, fence(reserved), request)
+  }
   const state = read_state(harness.process, config.installation.store).state!
   const calls = creation_calls(harness.testing)
   assert_eq(git(harness.process, f.remote, ["rev-parse", "refs/heads/main"]), f.base)
@@ -334,7 +384,7 @@ pub fn exercise_candidate(harness: Harness, f: CandidateFixture, mode: string) {
   for addition in input.fileChanges.additions {
     assert_eq(base64_decode(addition.contents), addition.path.replace(".txt", " reviewed\n"))
   }
-  if mode == "normal" {
+  if ["normal", "command", "command_new"].contains(mode) {
     assert_eq(result.status, "confirmed", result.reason ?? "unreported")
     assert_eq(state.effects[0]!.status, "confirmed")
     assert_eq(result.candidate!.commit.tree_oid, f.tree)
@@ -379,7 +429,7 @@ pub fn exercise_candidate(harness: Harness, f: CandidateFixture, mode: string) {
     assert_eq(read_state(harness.process, local).state!.effects[0]!.status, "dispatching")
     assert_eq(len(creation_calls(harness.testing)), 1)
   }
-  if ["lost_ack", "lost_settlement", "normal", "restart"].contains(mode) {
+  if ["lost_ack", "lost_settlement", "normal", "restart", "command", "command_new"].contains(mode) {
     harness.testing.http_mock(
       "POST",
       API + "/graphql",
@@ -398,7 +448,17 @@ pub fn exercise_candidate(harness: Harness, f: CandidateFixture, mode: string) {
     } else {
       config
     }
-    const recovered = reconcile_github_candidate(harness, recovery_config, request)
+    const recovered = if ["command", "command_new"].contains(mode) {
+      harness.fs.write_text(
+        command_path,
+        json_stringify({action: "recover-candidate", request: request}),
+      )
+      const recovered_command = run_github_effect_command(harness, [settings_path, command_path])
+      assert_eq(recovered_command.reservation, nil)
+      recovered_command.candidate!
+    } else {
+      reconcile_github_candidate(harness, recovery_config, request)
+    }
     assert_eq(recovered.status, "confirmed", recovered.reason ?? "unreported")
     assert_eq(recovered.candidate!.commit.oid, f.candidate)
     assert_eq(

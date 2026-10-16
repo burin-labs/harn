@@ -20,18 +20,14 @@ pub import {
   replay_github_ci,
 } from "./github_ci"
 pub import {
-  GithubAdmissionConfiguration,
-  GithubAdmissionConfirmed,
-  GithubAdmissionDispatch,
-  GithubAdmissionEvidence,
-  GithubAdmissionRefused,
-  GithubAdmissionReview,
-  GithubAdmissionReviewRefused,
-  GithubAdmissionSubmission,
-  GithubAdmissionUnknown,
-  github_admission_binding,
-  submit_github_admission,
-} from "./github_effect"
+  GithubCandidateCommand,
+  GithubCommand,
+  GithubCommandResult,
+  GithubIntegrationCommand,
+  GithubReservation,
+  execute_github_command,
+  load_github_configuration,
+} from "./github_command"
 pub import {
   GithubIntegrationTransaction,
   GithubIntegrationWitness,

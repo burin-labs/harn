@@ -156,8 +156,14 @@ duplicate wakes and a new controller workspace never authorize signing again.
 Missing, foreign or invalid objects leave the dispatch unresolved. Recovery keeps
 the original provider binding and rechecks the signed identity through the SDK.
 Accepted stops during preparation prevent the signing call. Candidate branches
-currently remain available; candidate cleanup and the default GitHub CLI cutover
-are unfinished. Live qualification is still required before rollout.
+currently remain available; candidate cleanup and full live lifecycle
+qualification are still required before rollout.
+
+`github-effect-cli.harn` accepts the closed `GithubCommand` contract for grouped
+preparation, integration, recovery and state-object cleanup. It loads provider
+settings from a trusted installation file and commits a reservation before any
+dispatch. Its former per-PR REST merge writer has been removed. Library callers
+and the installed command use the same signing and atomic publication owners.
 
 The owning adapter tests run complete SDK requests against HTTP fixtures and real
 Git ref transactions, including stop, head change, lost acknowledgement, lost

@@ -485,9 +485,8 @@ pub fn reconcile_github_integration(
   const witness = transaction.witness
   const current = read_state(process, store)
   const observed = current.state
-  require observed == nil
-    || observed.authority.installation == configuration.installation.policy.installation,
-    "reconciliation authority belongs to another installation"
+  require observed != nil && github_authority_owned(configuration, observed.authority),
+    "reconciliation configuration does not own current authority and policy"
   const claim: EffectClaim = {
     remote: store.remote,
     ref: store.ref,
@@ -577,6 +576,8 @@ pub fn recover_github_integration(
   require_git_transport(process, store, "https://github.com/" + request.repository + ".git")
   const current = read_state(process, store)
   require current.state != nil, "integration recovery has no measured authority"
+  require github_authority_owned(configuration, current.state.authority),
+    "integration recovery configuration does not own current authority and policy"
   const effect = current.state.effects.find({ item -> item.request == request })
   require effect != nil && effect.dispatch_id != nil && effect.dispatch_revision != nil,
     "integration recovery has no recorded dispatch"

@@ -8,113 +8,6 @@ Version: `0.1.0`
 
 `lib/github.harn`
 
-### type `GithubAdmissionConfiguration`
-
-Trusted installation settings; submissions cannot choose authentication or transport.
-
-```harn
-pub type GithubAdmissionConfiguration = {
-  installation: Installation,
-  token_reference: string,
-  method: "merge" | "squash" | "rebase",
-  api_base_url?: string,
-}
-```
-
-### type `GithubAdmissionConfirmed`
-
-A confirmed provider result retains the actual integrated commit, not a guessed tree.
-
-```harn
-pub type GithubAdmissionConfirmed = {
-  schema: "smart-ship.github-admission-result.v1",
-  status: "confirmed",
-  request: AdmissionEffect,
-  review: GithubAdmissionReview,
-  provider: GithubPullRequestMergeReceipt,
-}
-```
-
-### type `GithubAdmissionDispatch`
-
-Dispatch status says whether this invocation acted; prior receipt content remains inspectable.
-
-```harn
-pub type GithubAdmissionDispatch = {
-  dispatch: EffectDispatch,
-  reason: string?,
-  admission_refusal: EffectRefusal?,
-}
-```
-
-### type `GithubAdmissionEvidence`
-
-Closed wire evidence preserves confirmed, refused and uncertain provider outcomes.
-
-```harn
-pub type GithubAdmissionEvidence = GithubAdmissionConfirmed \
-  | GithubAdmissionReviewRefused \
-  | GithubAdmissionRefused \
-  | GithubAdmissionUnknown
-```
-
-### type `GithubAdmissionRefused`
-
-A definite refusal is different from losing a response after a possible mutation.
-
-```harn
-pub type GithubAdmissionRefused = {
-  schema: "smart-ship.github-admission-result.v1",
-  status: "refused",
-  request: AdmissionEffect,
-  review: GithubAdmissionReview?,
-  error: GithubConnectorError,
-}
-```
-
-### type `GithubAdmissionReview`
-
-The complete fresh review census and the installation's decision travel with the result.
-
-```harn
-pub type GithubAdmissionReview = {observation: ReviewedChangeObservation, decision: ReviewAdmission}
-```
-
-### type `GithubAdmissionReviewRefused`
-
-Policy withdrawal is a measured decision, not a provider transport error.
-
-```harn
-pub type GithubAdmissionReviewRefused = {
-  schema: "smart-ship.github-admission-result.v1",
-  status: "refused",
-  request: AdmissionEffect,
-  review: GithubAdmissionReview,
-}
-```
-
-### type `GithubAdmissionSubmission`
-
-A complete signed witness and the authority revision the submitter observed.
-
-```harn
-pub type GithubAdmissionSubmission = {fence: Fence, admission: SignedAdmission}
-```
-
-### type `GithubAdmissionUnknown`
-
-Uncertain operations block transfer and require observation before any new action.
-
-```harn
-pub type GithubAdmissionUnknown = {
-  schema: "smart-ship.github-admission-result.v1",
-  status: "unknown",
-  request: AdmissionEffect,
-  review: GithubAdmissionReview,
-  error: GithubConnectorError,
-}
-```
-
 ### type `GithubCandidate`
 
 The complete ordered admissions remain in the durable effect; this binds their signed candidate.
@@ -126,6 +19,18 @@ pub type GithubCandidate = {
   claim_commit: string,
   branch: string,
   commit: GithubSignedCommitObservation,
+}
+```
+
+### type `GithubCandidateCommand`
+
+Candidate inputs retain the complete ordered signed admissions; credentials come from installation.
+
+```harn
+pub type GithubCandidateCommand = {
+  action: "prepare" | "recover-candidate",
+  request: CandidateEffect,
+  fence?: Fence,
 }
 ```
 
@@ -234,6 +139,35 @@ Preserve actual bounded provider responses, including the complete artifact-list
 pub type GithubCiRead = {endpoint: string, response: unknown}
 ```
 
+### type `GithubCommand`
+
+One command boundary replaces the former per-PR REST merge route.
+
+```harn
+pub type GithubCommand = GithubCandidateCommand | GithubIntegrationCommand
+```
+
+### type `GithubCommandResult`
+
+Missing outcomes remain nil; reservation refusal never masquerades as completed provider work.
+
+```harn
+pub type GithubCommandResult = {
+  schema: "smart-ship.github-command-result.v1",
+  action: "prepare" \
+    | "recover-candidate" \
+    | "integrate" \
+    | "recover-integration" \
+    | "cleanup-integration",
+  request: EffectTarget,
+  reservation: GithubReservation?,
+  candidate: GithubCandidateResult?,
+  integration: GithubIntegrationDispatch?,
+  reconciliation: GithubIntegrationReconciliation?,
+  cleanup: GithubIntegrationCleanup?,
+}
+```
+
 ### type `GithubIntegrationCleanup`
 
 Unresolved integrations retain their objects. Cleanup never overwrites a competing ref.
@@ -245,6 +179,19 @@ pub type GithubIntegrationCleanup = {
   provider: GithubRefUpdatesReceipt?,
   error: GithubConnectorError?,
   reason: string?,
+}
+```
+
+### type `GithubIntegrationCommand`
+
+Integration and recovery always address the original exact snapshot and destination base.
+
+```harn
+pub type GithubIntegrationCommand = {
+  action: "integrate" | "recover-integration" | "cleanup-integration",
+  request: IntegrationEffect,
+  fence?: Fence,
+  expected_base: string,
 }
 ```
 
@@ -371,6 +318,20 @@ pub type GithubIssuerSettings = {
 }
 ```
 
+### type `GithubReservation`
+
+A reservation is durable intent, not a signing or integration acknowledgement.
+
+```harn
+pub type GithubReservation = {
+  status: "reserved" | "existing" | "refused" | "unknown",
+  fence: Fence?,
+  state_commit: string?,
+  refusal: EffectRefusal?,
+  reason: string?,
+}
+```
+
 ### fn `assess_github_ci`
 
 Live reads and archived replay enter this same original-run and signed-execution boundary.
@@ -433,12 +394,16 @@ pub fn dispatch_github_integration(
 }
 ```
 
-### fn `github_admission_binding`
+### fn `execute_github_command`
 
-Bind recovery to effective nonsecret provider settings; secret values never enter state.
+Execute the same typed grouped route for installed CLI callers and embedded hosts.
 
 ```harn
-pub fn github_admission_binding(configuration: GithubAdmissionConfiguration) -> string {
+pub fn execute_github_command(
+  harness: Harness,
+  configuration: GithubIntegrationConfiguration,
+  command: GithubCommand,
+) -> GithubCommandResult {
 }
 ```
 
@@ -496,6 +461,15 @@ Normalize the connector's complete exact-head census for live reads and determin
 
 ```harn
 pub fn github_reviewed_change(census: GithubPullRequestReviewCensus) -> ReviewedChangeObservation {
+}
+```
+
+### fn `load_github_configuration`
+
+Load only trusted installation settings; submissions cannot override authentication or transport.
+
+```harn
+pub fn load_github_configuration(fs: HarnessFs, path: string) -> GithubIntegrationConfiguration {
 }
 ```
 
@@ -605,19 +579,6 @@ pub fn replay_github_ci(
   policy: GithubCiProducerPolicy,
   jobs: list<GithubCiJob>,
 ) -> GithubCiAssessment {
-}
-```
-
-### fn `submit_github_admission`
-
-Reserve once, commit the fenced dispatch, and let GitHub enforce its effective branch policy.
-
-```harn
-pub fn submit_github_admission(
-  harness: Harness,
-  configuration: GithubAdmissionConfiguration,
-  submission: GithubAdmissionSubmission,
-) -> GithubAdmissionDispatch {
 }
 ```
 

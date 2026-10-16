@@ -1,3 +1,4 @@
+import { run_github_effect_command } from "../github-effect-cli"
 import { prepare_group_tree } from "../lib/git_group"
 import {
   GithubIntegrationConfiguration,
@@ -453,7 +454,22 @@ pub fn exercise_publisher(harness: Harness, mode: string) {
     API + "/repos/" + REPOSITORY,
     {status: 200, body: json_stringify({node_id: "fixture-repository"})},
   )
-  const result = dispatch_github_integration(harness, config, fence(reserved), request, base)
+  const command_settings = path_join(root, "publication-settings.json")
+  const command_path = path_join(root, "publication-command.json")
+  harness.fs.write_text(command_settings, json_stringify(config))
+  harness.fs.write_text(
+    command_path,
+    json_stringify(
+      {action: "integrate", request: request, fence: fence(reserved), expected_base: base},
+    ),
+  )
+  const result = if mode == "command" {
+    const invoked = run_github_effect_command(harness, [command_settings, command_path])
+    assert_eq(invoked.reservation!.status, "existing")
+    invoked.integration!
+  } else {
+    dispatch_github_integration(harness, config, fence(reserved), request, base)
+  }
   if ["withdraw_before_prepare", "withdraw_during_upload"].contains(mode) {
     const durable = read_state(harness.process, config.installation.store)
     const draining = unwrap(control(durable.state!, fence(durable.state!), "draining"))
@@ -544,7 +560,7 @@ pub fn exercise_publisher(harness: Harness, mode: string) {
     schema_of(ProviderTransport),
   )
   assert(!transport.timed_out, "provider transport timed out: " + json_stringify(transport))
-  const success = ["normal", "lost_ack", "lost_readback"].contains(mode)
+  const success = ["normal", "lost_ack", "lost_readback", "command"].contains(mode)
   const refused = ["stop", "head_change"].contains(mode)
   require harness.fs.exists(report_path),
     "fixture provider did not report: "
@@ -633,6 +649,25 @@ pub fn exercise_publisher(harness: Harness, mode: string) {
     "recovery must reconstruct the complete transaction without saved local preparation",
   )
   assert_eq(reconcile_github_integration(harness.process, config, from_remote), recovered)
+  if mode == "command" {
+    harness.fs.write_text(
+      command_path,
+      json_stringify({action: "recover-integration", request: request, expected_base: base}),
+    )
+    assert_eq(
+      run_github_effect_command(harness, [command_settings, command_path]).reconciliation,
+      recovered,
+    )
+    const stale_controller = config
+      + {installation: config.installation + {controller: digest("stale controller")}}
+    const stale_recovery = try {
+      reconcile_github_integration(harness.process, stale_controller, from_remote)
+    }
+    assert(is_err(stale_recovery), "recovery must require the installation's current controller")
+    const before_cleanup = harness.testing.http_mock_calls()
+    assert_eq(cleanup_github_integration(harness, stale_controller, from_remote).status, "retained")
+    assert_eq(harness.testing.http_mock_calls(), before_cleanup)
+  }
   if mode == "normal" {
     const changed_provider = config + {token_reference: config.token_reference + "-changed"}
     const rebound = try {
@@ -729,5 +764,16 @@ pub fn exercise_publisher(harness: Harness, mode: string) {
       cleanup_calls,
       "already measured cleanup must not send another deletion",
     )
+    if mode == "command" {
+      harness.fs.write_text(
+        command_path,
+        json_stringify({action: "cleanup-integration", request: request, expected_base: base}),
+      )
+      assert_eq(
+        run_github_effect_command(harness, [command_settings, command_path]).cleanup!.status,
+        "deleted",
+      )
+      assert_eq(harness.testing.http_mock_calls(), cleanup_calls)
+    }
   }
 }

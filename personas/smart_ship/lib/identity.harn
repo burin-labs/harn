@@ -106,7 +106,13 @@ pub fn policy_digest(policy: Policy) -> string {
             policy.max_changes,
             policy.max_unverified_ms,
             policy.max_repair_attempts,
-            policy.max_repair_usd,
+            // JSON readers may encode an integral budget as either 0 or 0.0.
+            // Preserve existing float signing bytes while canonicalizing numeric zero.
+            if policy.max_repair_usd == 0.0 {
+              0.0
+            } else {
+              to_float(policy.max_repair_usd)
+            },
           ],
         ),
     )
