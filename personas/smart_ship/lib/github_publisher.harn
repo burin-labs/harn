@@ -1,7 +1,7 @@
 import { IntegrationEffect } from "./controller"
 import { EffectTarget, effect_receipt } from "./effect_contract"
 import { EffectClaim, claim_reserved_effect, settle_owned_effect } from "./effect_owner"
-import { prepare_group_tree, require_group_candidate } from "./git_group"
+import { prepare_group_tree, require_group_ancestry, require_group_candidate } from "./git_group"
 import {
   GitStore,
   StateObjectStage,
@@ -202,6 +202,13 @@ fn prepare(
     store.workspace,
     expected_base,
     heads,
+    store.timeout_ms,
+  )
+  require_group_ancestry(
+    harness.process,
+    store.workspace,
+    group,
+    incoming.map({ change -> change.admission.record.source.base }),
     store.timeout_ms,
   )
   require incoming.all({ change -> change.integrated_commit == request.source }),

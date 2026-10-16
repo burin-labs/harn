@@ -511,18 +511,10 @@ fn workflow() {
             {name: "Upload security test archive", uses: "actions/upload-artifact@pinned"},
             {
               name: "Build portable workspace test archive",
+              "timeout-minutes": 26,
               if: "vars.HARN_CI_DISABLE_COLOCATED_TESTS == 'true'",
               env: {CARGO_BUILD_JOBS: MEASURED_BUILD_JOBS},
               run: "./scripts/ci/rust_artifact.sh build-tests bundle sha",
-            },
-            {
-              name: "Run Rust workspace tests",
-              "timeout-minutes": 26,
-              id: "release-audit-rust-test",
-              if: "vars.HARN_CI_DISABLE_COLOCATED_TESTS != 'true'",
-              env: {HARN_LLM_CALLS_DISABLED: "1"},
-              run:
-                "scripts/ci/run_rust_test_lane.sh bash scripts/ci/run_workspace_tests.sh tooling",
             },
           ],
       },
@@ -584,6 +576,59 @@ fn workflow() {
         ],
       },
       "rust-test": rust_test,
+      "rust-test-partitions": {
+        needs: ["changes"],
+        if:
+          "needs.changes.outputs.rust == 'true' && vars.HARN_CI_DISABLE_COLOCATED_TESTS != 'true'",
+        strategy: {
+          matrix: {
+            include: [
+              {partition: "tooling"},
+              {partition: "rest:1/4"},
+              {partition: "rest:2/4"},
+              {partition: "rest:3/4"},
+              {partition: "rest:4/4"},
+              {partition: "vm:1/3"},
+              {partition: "vm:2/3"},
+              {partition: "vm:3/3"},
+            ],
+          },
+        },
+        steps: [
+          {
+            name: "Run Rust workspace tests",
+            id: "release-audit-rust-test",
+            env: {
+              HARN_LLM_CALLS_DISABLED: "1",
+              HARN_EXT_TEST_PARTITION: gha_expression("matrix.partition"),
+            },
+            run:
+              "scripts/ci/run_rust_test_lane.sh bash scripts/ci/run_workspace_tests.sh \"$HARN_EXT_TEST_PARTITION\"",
+          },
+        ],
+      },
+      "rust-test-status": {
+        name: "Rust workspace tests",
+        needs: ["changes", "rust-check-inputs", "rust-test-partitions", "rust-test"],
+        if: "always()",
+        steps: [
+          {
+            name: "Verify complete Rust test results",
+            env: {
+              CHANGES_RESULT: gha_expression("needs.changes.result"),
+              RUST_SELECTED: gha_expression("needs.changes.outputs.rust"),
+              ARCHIVE_MODE: gha_expression("vars.HARN_CI_DISABLE_COLOCATED_TESTS"),
+              PRODUCER_RESULT: gha_expression("needs.rust-check-inputs.result"),
+              WORKSPACE_ARTIFACT_READY: gha_expression(
+                "needs.rust-check-inputs.outputs.workspace_artifact_ready",
+              ),
+              PARTITIONS_RESULT: gha_expression("needs.rust-test-partitions.result"),
+              ARCHIVE_RESULT: gha_expression("needs.rust-test.result"),
+            },
+            run: "bash scripts/ci/verify_rust_test_results.sh",
+          },
+        ],
+      },
       "release-residual-audit": {
         needs: artifact_consumer_needs,
         if: artifact_consumer_if,
@@ -719,7 +764,7 @@ fn workflow() {
       },
       "ci-status": {
         if: "always()",
-        needs: ["rust-cli", "security-tests-ready", "ci-walltime-report"],
+        needs: ["rust-cli", "security-tests-ready", "ci-walltime-report", "rust-test-status"],
         steps: [
           {
             name: "Verify required CI jobs",
@@ -730,7 +775,9 @@ fn workflow() {
               + gha_expression("needs['security-tests-ready'].result")
               + "\"\nci_walltime_report_result=\""
               + gha_expression("needs['ci-walltime-report'].result")
-              + "\"\nif [ \"$rust_cli_result\" != success ]; then echo 'Shared Harn CLI build failed or skipped'; fi\nif [ \"$security_tests_ready_result\" != success ]; then echo 'Linux security test input handoff failed or skipped'; fi\nif [ \"$ci_walltime_report_result\" != success ]; then echo 'CI timing report failed or skipped'; fi\nif [ \"$rust_test_result\" = skipped ] && [ \"$COLOCATED_TESTS_DISABLED\" != true ]; then :; fi",
+              + "\"\nif [ \"$rust_cli_result\" != success ]; then echo 'Shared Harn CLI build failed or skipped'; fi\nif [ \"$security_tests_ready_result\" != success ]; then echo 'Linux security test input handoff failed or skipped'; fi\nif [ \"$ci_walltime_report_result\" != success ]; then echo 'CI timing report failed or skipped'; fi\n"
+              + gha_expression("needs['rust-test-status'].result")
+              + "\nComplete Rust workspace test proof failed or skipped.",
           },
         ],
       },
@@ -985,7 +1032,7 @@ pipeline test_rejects_recompiling_workspace_test_consumer(harness: Harness, task
 }
 
 @test
-pipeline test_rejects_co_location_without_fail_closed_fallback(harness: Harness, task: unknown) {
+pipeline test_rejects_parallel_tests_without_fail_closed_fallback() {
   const valid = workflow()
   const rust_job = valid.jobs["rust-check-inputs"]
   const invalid = {
@@ -1005,6 +1052,11 @@ pipeline test_rejects_co_location_without_fail_closed_fallback(harness: Harness,
           .to_list(),
       },
       "rust-test": {...valid.jobs["rust-test"], if: "false"},
+      "rust-test-partitions": {
+        ...valid.jobs["rust-test-partitions"],
+        strategy: {matrix: {include: []}},
+      },
+      "rust-test-status": {...valid.jobs["rust-test-status"], if: "success()"},
       "ci-status": {
         steps: [
           {
@@ -1024,12 +1076,15 @@ pipeline test_rejects_co_location_without_fail_closed_fallback(harness: Harness,
   )
   assert(
     errors.contains(
-      "ci.yml:rust-check-inputs must own the exact co-located environment-neutral Rust proof",
+      "ci.yml:rust-test-partitions must execute all eight exact workspace test shares independently",
     ),
   )
   assert(errors.contains("ci.yml:rust-test must run only as the co-location kill-switch fallback"))
+  assert(errors.contains("ci.yml:ci-status must require the complete Rust test verdict"))
   assert(
-    errors.contains("ci.yml:ci-status must fail closed across co-located and fallback Rust proofs"),
+    errors.contains(
+      "ci.yml:rust-test-status must verify every partition or the complete archive fallback",
+    ),
   )
 }
 
@@ -1843,22 +1898,22 @@ pipeline test_host_bound_sandbox_filter_has_one_owner(harness: Harness) {
 }
 
 @test
-pipeline test_rejects_masked_workspace_test_failure(harness: Harness, task: unknown) {
+pipeline test_rejects_masked_workspace_test_failure() {
   const valid = workflow()
-  const producer = valid.jobs["rust-check-inputs"]
+  const partitions = valid.jobs["rust-test-partitions"]
   const unsafe = {
     ...valid,
     jobs: {
       ...valid.jobs,
-      "rust-check-inputs": {
-        ...producer,
-        steps: producer.steps.map(
+      "rust-test-partitions": {
+        ...partitions,
+        steps: partitions.steps.map(
           { step ->
             return {
               ...step,
-              run: to_string(step?.run ?? "").replace(
-                "run_workspace_tests.sh tooling",
-                "run_workspace_tests.sh tooling || true",
+              run: to_string(step.run ?? "").replace(
+                "run_workspace_tests.sh \"$HARN_EXT_TEST_PARTITION\"",
+                "run_workspace_tests.sh \"$HARN_EXT_TEST_PARTITION\" || true",
               ),
             }
           },
@@ -1869,25 +1924,25 @@ pipeline test_rejects_masked_workspace_test_failure(harness: Harness, task: unkn
   }
   assert(
     ci_linux_lane_policy_errors(unsafe).contains(
-      "ci.yml:rust-check-inputs must own the exact co-located environment-neutral Rust proof",
+      "ci.yml:rust-test-partitions must execute all eight exact workspace test shares independently",
     ),
   )
 }
 
 @test
-pipeline test_rejects_host_bound_sandbox_coverage_drift(harness: Harness, task: unknown) {
+pipeline test_rejects_host_bound_sandbox_coverage_drift() {
   const valid = workflow()
-  const producer = valid.jobs["rust-check-inputs"]
+  const partitions = valid.jobs["rust-test-partitions"]
   const security = valid.jobs["rust-security"]
   const invalid = {
     ...valid,
     jobs: {
       ...valid.jobs,
-      "rust-check-inputs": {
-        ...producer,
-        steps: producer.steps.map(
+      "rust-test-partitions": {
+        ...partitions,
+        steps: partitions.steps.map(
           { step ->
-            if step?.name != "Run Rust workspace tests" {
+            if step.name != "Run Rust workspace tests" {
               return step
             }
             return {...step, run: "cargo-nextest nextest run --locked --workspace --profile ci"}
@@ -1908,7 +1963,7 @@ pipeline test_rejects_host_bound_sandbox_coverage_drift(harness: Harness, task: 
   const errors = ci_linux_lane_policy_errors(invalid)
   assert(
     errors.contains(
-      "ci.yml:rust-check-inputs must own the exact co-located environment-neutral Rust proof",
+      "ci.yml:rust-test-partitions must execute all eight exact workspace test shares independently",
     ),
   )
   assert(
@@ -2123,7 +2178,7 @@ pipeline test_test_producer_leaves_the_cli_to_its_sibling(harness: Harness, task
   const valid = workflow()
   const producer = valid.jobs["rust-check-inputs"]
   const message =
-    "ci.yml:rust-check-inputs must publish security before co-located tests and leave the CLI to rust-cli"
+    "ci.yml:rust-check-inputs must publish security before the fallback archive and leave ordinary tests to parallel partitions"
   assert(!ci_linux_lane_policy_errors(valid).contains(message))
   // A second CLI build in the test job is the serial cost the split removed.
   const doubled = {
@@ -2143,6 +2198,54 @@ pipeline test_test_producer_leaves_the_cli_to_its_sibling(harness: Harness, task
     },
   }
   assert(ci_linux_lane_policy_errors(doubled).contains(message))
+}
+
+@test
+pipeline test_parallel_workspace_suite_refuses_missing_or_duplicated_shares() {
+  const valid = workflow()
+  assert_eq(ci_linux_lane_policy_errors(valid), [])
+  const partitions = valid.jobs["rust-test-partitions"]
+  const rows = partitions.strategy.matrix.include
+  const message =
+    "ci.yml:rust-test-partitions must execute all eight exact workspace test shares independently"
+  for removed in rows {
+    const missing = rows.filter({ row -> row.partition != removed.partition }).to_list()
+    for invalid_rows in [missing, missing + [missing[0]]] {
+      const invalid = {
+        ...valid,
+        jobs: {
+          ...valid.jobs,
+          "rust-test-partitions": {...partitions, strategy: {matrix: {include: invalid_rows}}},
+        },
+      }
+      assert(ci_linux_lane_policy_errors(invalid).contains(message))
+    }
+  }
+}
+
+@test
+pipeline test_rust_test_aggregate_refuses_unreported_or_forged_inputs() {
+  const valid = workflow()
+  assert_eq(ci_linux_lane_policy_errors(valid), [])
+  const aggregate = valid.jobs["rust-test-status"]
+  const step = aggregate.steps[0]
+  for key in step.env.keys() {
+    const invalid = {
+      ...valid,
+      jobs: {
+        ...valid.jobs,
+        "rust-test-status": {
+          ...aggregate,
+          steps: [{...step, env: {...step.env, [key]: "success"}}],
+        },
+      },
+    }
+    assert(
+      ci_linux_lane_policy_errors(invalid).contains(
+        "ci.yml:rust-test-status must verify every partition or the complete archive fallback",
+      ),
+    )
+  }
 }
 
 /** The shared CLI producer has one rung: GitHub's free standard runner. */

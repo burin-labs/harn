@@ -18,9 +18,9 @@
 # Usage: scripts/ci/use_kache.sh [github-env]
 set -euo pipefail
 
-KACHE_VERSION=v1.2.1
+KACHE_VERSION=v1.2.2
 KACHE_ASSET="kache-x86_64-unknown-linux-musl.tar.gz"
-KACHE_SHA256=9b2b86d592c5ffb53400218f450fc6b02008bd132827ae6cd133ec8859c9b753
+KACHE_SHA256=f2f6555dee50945c2a90a7fb793c2084a00cc6459d08ac2306d38d905064321b
 
 github_env=${1:-${GITHUB_ENV:?GITHUB_ENV is required}}
 compile_policy=${HARN_EXT_KACHE_COMPILE_POLICY:-artifacts}

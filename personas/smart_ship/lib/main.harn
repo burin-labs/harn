@@ -1,6 +1,8 @@
 pub import { review_admission } from "./admission"
 pub import {
   AdmissionEffect,
+  CandidateEffect,
+  CandidateQualification,
   Controller,
   Effect,
   EffectReceipt,
@@ -16,6 +18,7 @@ pub import {
   RerunEffect,
   admission_effect,
   begin_effect,
+  candidate_effect,
   claim_repair,
   complete,
   confirm_integration,
@@ -43,7 +46,12 @@ pub import {
   dispatch_reserved_effect,
   settle_owned_effect,
 } from "./effect_owner"
-pub import { GroupTree, prepare_group_tree, require_group_candidate } from "./git_group"
+pub import {
+  GroupTree,
+  prepare_group_tree,
+  require_group_ancestry,
+  require_group_candidate,
+} from "./git_group"
 pub import {
   CommitResult,
   GitStore,

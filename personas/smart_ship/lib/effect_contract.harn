@@ -1,4 +1,4 @@
-import { admission_bytes, snapshot_id } from "./identity"
+import { admission_bytes, is_git_id, snapshot_id } from "./identity"
 import { AdmissionVerification, Policy, SignedAdmission, Snapshot, Verification } from "./types"
 import { verify_admission } from "./verification"
 
@@ -7,6 +7,17 @@ pub type EffectTarget = {repository: string, source: string, input_digest: strin
 
 /** Admission effects retain the complete independently qualified witness. */
 pub type AdmissionEffect = EffectTarget & {kind: "admission", admission: SignedAdmission}
+
+/** Ordered reviewed inputs are reserved before a cumulative candidate can be signed. */
+pub type CandidateEffect = EffectTarget \
+  & {kind: "candidate", tree: string, admissions: list<SignedAdmission>}
+
+/** Every measured admission remains visible alongside invalid preparation identities. */
+pub type CandidateQualification = {
+  required: int,
+  admissions: list<AdmissionVerification>,
+  invalid: list<string>,
+}
 
 /** One repository's cumulative frontier retains every signed change and required job. */
 pub type IntegrationEffect = EffectTarget & {kind: "integration", snapshot: Snapshot}
@@ -18,7 +29,11 @@ pub type ReleaseEffect = EffectTarget & {kind: "release"}
 pub type RerunEffect = EffectTarget & {kind: "rerun"}
 
 /** A digest cannot stand in for an admission record at the mutation boundary. */
-pub type EffectRequest = AdmissionEffect | IntegrationEffect | ReleaseEffect | RerunEffect
+pub type EffectRequest = AdmissionEffect \
+  | CandidateEffect \
+  | IntegrationEffect \
+  | ReleaseEffect \
+  | RerunEffect
 
 /** Provider evidence travels with durable state rather than an unavailable hash alone. */
 pub type EffectReceipt = {schema: "smart-ship.effect-receipt.v1", body: string, digest: string}
@@ -49,6 +64,7 @@ pub type EffectRefusal = {
   reason: string,
   admission: AdmissionVerification?,
   verification: Verification?,
+  preparation?: CandidateQualification,
 }
 
 /** Derive the external target and dispatch identity from the full signed admission. */
@@ -63,6 +79,74 @@ pub fn admission_effect(signed: SignedAdmission) -> AdmissionEffect {
       ),
     admission: signed,
   }
+}
+
+/** Preserve execution order: Git composition is ordered even when a policy census is not. */
+pub fn candidate_effect(
+  repository: string,
+  base: string,
+  tree: string,
+  admissions: list<SignedAdmission>,
+) -> CandidateEffect {
+  return {
+    kind: "candidate",
+    repository: repository,
+    source: base,
+    tree: tree,
+    input_digest: "sha256:"
+      + sha256_hex(
+        "smart-ship.candidate.v1\n"
+          + json_stringify(
+            [
+              repository,
+              base,
+              tree,
+              admissions.map({ signed -> admission_effect(signed).input_digest }),
+            ],
+          ),
+      ),
+    admissions: admissions,
+  }
+}
+
+/** A complete digest never substitutes for independently qualified signed inputs. */
+pub fn qualify_candidate_effect(
+  request: CandidateEffect,
+  policy: Policy,
+) -> CandidateQualification {
+  let invalid: list<string> = []
+  const admissions = request.admissions.map({ signed -> verify_admission(signed, policy) })
+  if candidate_effect(request.repository, request.source, request.tree, request.admissions)
+    != request {
+    invalid = invalid + ["candidate-effect-target"]
+  }
+  if !is_git_id(request.tree) || request.tree == "0".repeat(len(request.tree)) {
+    invalid = invalid + ["candidate-tree"]
+  }
+  if request.source == "0".repeat(len(request.source)) {
+    invalid = invalid + ["candidate-base"]
+  }
+  if len(request.admissions) == 0 || len(request.admissions) > policy.max_changes
+    || len(request.admissions) > 30 {
+    invalid = invalid + ["candidate-change-count"]
+  }
+  let changes: list<string> = []
+  let heads: list<string> = []
+  let branch: string? = nil
+  for signed in request.admissions {
+    const source = signed.record.source
+    if source.repository != request.repository
+      || (branch != nil && source.base_branch != branch) {
+      invalid = invalid + ["candidate-source:" + source.change]
+    }
+    if changes.contains(source.change) || heads.contains(source.head) {
+      invalid = invalid + ["candidate-duplicate:" + source.change]
+    }
+    changes = changes + [source.change]
+    heads = heads + [source.head]
+    branch = source.base_branch
+  }
+  return {required: len(request.admissions), admissions: admissions, invalid: invalid}
 }
 
 /** Derive the mutation identity from the complete immutable single-repository frontier. */

@@ -28,43 +28,35 @@ const WRITE_FIELDS: &[&str] = &[
 
 /// Top-level members the alias registry reads. A caller holding a large value,
 /// such as a whole LLM result, can convert only these members to JSON.
-pub(crate) fn cache_field_roots() -> impl Iterator<Item = &'static str> {
+pub fn cache_field_roots() -> impl Iterator<Item = &'static str> {
     READ_FIELDS.iter().chain(WRITE_FIELDS).filter_map(|path| {
         path.strip_prefix('/')
             .and_then(|path| path.split('/').next())
     })
 }
 
-pub(crate) fn reported_cache_read_tokens(
-    value: &serde_json::Value,
-) -> Result<Option<i64>, &'static str> {
+pub fn reported_cache_read_tokens(value: &serde_json::Value) -> Result<Option<i64>, &'static str> {
     reported_counter(value, READ_FIELDS)
 }
 
-pub(crate) fn reported_cache_write_tokens(
-    value: &serde_json::Value,
-) -> Result<Option<i64>, &'static str> {
+pub fn reported_cache_write_tokens(value: &serde_json::Value) -> Result<Option<i64>, &'static str> {
     reported_counter(value, WRITE_FIELDS)
 }
 
-pub(crate) fn extract_cache_read_tokens(
-    value: &serde_json::Value,
-) -> Result<i64, crate::value::VmError> {
+pub fn extract_cache_read_tokens(value: &serde_json::Value) -> Result<i64, harn_vm_core::VmError> {
     reported_cache_read_tokens(value)
         .map(|count| count.unwrap_or(0))
         .map_err(invalid_usage)
 }
 
-pub(crate) fn extract_cache_write_tokens(
-    value: &serde_json::Value,
-) -> Result<i64, crate::value::VmError> {
+pub fn extract_cache_write_tokens(value: &serde_json::Value) -> Result<i64, harn_vm_core::VmError> {
     reported_cache_write_tokens(value)
         .map(|count| count.unwrap_or(0))
         .map_err(invalid_usage)
 }
 
-fn invalid_usage(reason: &'static str) -> crate::value::VmError {
-    crate::value::VmError::Runtime(format!("invalid provider cache usage: {reason}"))
+fn invalid_usage(reason: &'static str) -> harn_vm_core::VmError {
+    harn_vm_core::VmError::Runtime(format!("invalid provider cache usage: {reason}"))
 }
 
 fn reported_counter(

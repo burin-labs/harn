@@ -50,6 +50,30 @@ fn stub(count: Arc<AtomicUsize>, stream_response: bool, empty: bool) -> LlmStub 
     })
 }
 
+fn rejected_stub(count: Arc<AtomicUsize>) -> LlmStub {
+    spawn_llm_stub_many("provider rejection after dispatch", 1, move |_, stream| {
+        use std::io::{Read, Write};
+        count.fetch_add(1, Ordering::SeqCst);
+        let mut bytes = [0u8; 16_384];
+        let n = stream.read(&mut bytes).unwrap();
+        assert!(String::from_utf8_lossy(&bytes[..n]).starts_with("POST /v1/chat/completions "));
+        let body = r#"{"error":{"message":"provider rejected the dispatched request"}}"#;
+        write!(stream, "HTTP/1.1 400 Bad Request\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}", body.len()).unwrap();
+    })
+}
+
+fn native_parser_failure_stub(count: Arc<AtomicUsize>) -> LlmStub {
+    spawn_llm_stub_many("native tool parser failure", 1, move |_, stream| {
+        use std::io::{Read, Write};
+        count.fetch_add(1, Ordering::SeqCst);
+        let mut bytes = [0u8; 16_384];
+        let n = stream.read(&mut bytes).unwrap();
+        assert!(String::from_utf8_lossy(&bytes[..n]).starts_with("POST /v1/chat/completions "));
+        let body = r#"{"error":{"message":"tool call parser hit unexpected EOF while parsing tool_calls"}}"#;
+        write!(stream, "HTTP/1.1 500 Internal Server Error\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}", body.len()).unwrap();
+    })
+}
+
 fn install(addr: std::net::SocketAddr) {
     install_openai_stub_provider("openai", addr);
     crate::llm_config::set_runtime_provider_endpoint_overrides(
@@ -157,13 +181,43 @@ fn conservative_admission_does_not_recycle_an_empty_attempt_for_retry() {
         let count = Arc::new(AtomicUsize::new(0));
         let server = stub(count.clone(), false, true);
         install(server.addr());
+        let transcript_dir = tempfile::tempdir().expect("transcript tempdir");
+        crate::llm::push_llm_transcript_dir(
+            transcript_dir
+                .path()
+                .to_str()
+                .expect("utf8 transcript directory"),
+        );
         let error = vm_call_llm_full(&options(0.6, false)).await.unwrap_err();
+        crate::llm::pop_llm_transcript_dir();
         assert!(error.to_string().contains("conservative"), "{error}");
         assert_eq!(
             count.load(Ordering::SeqCst),
             1,
             "retry was denied before transport"
         );
+        let events: Vec<serde_json::Value> =
+            std::fs::read_to_string(transcript_dir.path().join("llm_transcript.jsonl"))
+                .expect("attempt transcript")
+                .lines()
+                .map(|line| serde_json::from_str(line).expect("valid transcript event"))
+                .collect();
+        let response = events
+            .iter()
+            .find(|event| event["type"] == "provider_call_response")
+            .expect("the first billed provider response was recorded");
+        let denial = events
+            .iter()
+            .find(|event| event["type"] == "provider_call_error")
+            .expect("the second attempt denial was recorded");
+        let first_cost = response["known_cost_usd"]
+            .as_f64()
+            .expect("first response has a priced ledger");
+        assert!(first_cost > 0.0, "the first attempt was billed");
+        assert_eq!(denial["provider_call_count"], 1);
+        assert_eq!(denial["known_cost_usd"], first_cost);
+        assert_eq!(denial["usage_unknown_calls"], 0);
+        assert_eq!(denial["unpriced_calls"], 0);
         assert_eq!(
             crate::llm::trace::peek_trace_usage_summary()
                 .cost
@@ -171,6 +225,123 @@ fn conservative_admission_does_not_recycle_an_empty_attempt_for_retry() {
             1,
             "the refused retry must not become an unknown provider attempt"
         );
+    });
+}
+
+#[test]
+fn conservative_admission_keeps_a_dispatched_unreported_attempt_unknown() {
+    let _env = env_guard();
+    let _transport = allow_stubbed_llm_transport();
+    let _cleanup = Cleanup;
+    crate::llm::cost::reset_cost_state();
+    crate::llm::trace::reset_trace_state();
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    runtime.block_on(async {
+        let count = Arc::new(AtomicUsize::new(0));
+        let server = native_parser_failure_stub(count.clone());
+        install(server.addr());
+        let mut opts = options(0.6, false);
+        opts.native_tools = Some(vec![serde_json::json!({
+            "type": "function",
+            "function": {
+                "name": "edit",
+                "description": "Edit a file.",
+                "parameters": {"type": "object", "properties": {}}
+            }
+        })]);
+        opts.tools = Some(crate::value::VmValue::Nil);
+        let transcript_dir = tempfile::tempdir().expect("transcript tempdir");
+        crate::llm::push_llm_transcript_dir(
+            transcript_dir
+                .path()
+                .to_str()
+                .expect("utf8 transcript directory"),
+        );
+        let error = crate::llm::agent_observe::observed_llm_call(
+            &opts,
+            Some("native"),
+            None,
+            None,
+            false,
+            false,
+            None,
+            None,
+        )
+        .await
+        .expect_err("conservative admission should refuse the degraded retry");
+        crate::llm::pop_llm_transcript_dir();
+        assert!(error.to_string().contains("conservative"), "{error}");
+        assert_eq!(
+            count.load(Ordering::SeqCst),
+            1,
+            "first request reached HTTP"
+        );
+
+        let events: Vec<serde_json::Value> =
+            std::fs::read_to_string(transcript_dir.path().join("llm_transcript.jsonl"))
+                .expect("attempt transcript")
+                .lines()
+                .map(|line| serde_json::from_str(line).expect("valid transcript event"))
+                .collect();
+        let denial = events
+            .iter()
+            .rev()
+            .find(|event| event["type"] == "provider_call_error")
+            .expect("terminal retry denial was recorded");
+        assert_eq!(denial["provider_call_count"], 1);
+        assert_eq!(denial["usage_unknown_calls"], 1);
+        assert_eq!(denial["unpriced_calls"], 1);
+        assert!(denial["cost_usd"].is_null());
+        let summary = crate::llm::trace::peek_trace_usage_summary().cost;
+        assert_eq!(summary.provider_call_count, 1);
+        assert_eq!(summary.usage_unknown_calls, 1);
+    });
+}
+
+#[test]
+fn provider_error_after_http_dispatch_keeps_usage_unknown() {
+    let _env = env_guard();
+    let _transport = allow_stubbed_llm_transport();
+    let _cleanup = Cleanup;
+    crate::llm::cost::reset_cost_state();
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    runtime.block_on(async {
+        let count = Arc::new(AtomicUsize::new(0));
+        let server = rejected_stub(count.clone());
+        install(server.addr());
+        let transcript_dir = tempfile::tempdir().expect("transcript tempdir");
+        crate::llm::push_llm_transcript_dir(
+            transcript_dir
+                .path()
+                .to_str()
+                .expect("utf8 transcript path"),
+        );
+        let error = vm_call_llm_full(&options(0.6, false))
+            .await
+            .expect_err("HTTP error after dispatch surfaces");
+        crate::llm::pop_llm_transcript_dir();
+        assert!(!error.to_string().is_empty());
+        assert_eq!(count.load(Ordering::SeqCst), 1, "request reached HTTP stub");
+        let events: Vec<serde_json::Value> =
+            std::fs::read_to_string(transcript_dir.path().join("llm_transcript.jsonl"))
+                .expect("provider error transcript")
+                .lines()
+                .map(|line| serde_json::from_str(line).expect("valid transcript event"))
+                .collect();
+        let error = events
+            .iter()
+            .find(|event| event["type"] == "provider_call_error")
+            .expect("terminal provider error observation");
+        assert_eq!(error["provider_call_count"], 1);
+        assert_eq!(error["usage_unknown_calls"], 1);
+        assert_eq!(error["unpriced_calls"], 1);
+        assert!(error["cost_usd"].is_null());
     });
 }
 

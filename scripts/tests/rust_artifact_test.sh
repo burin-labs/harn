@@ -23,6 +23,10 @@ case "$1" in
     esac
     ;;
   metadata)
+    if [[ "$*" == "metadata --locked --format-version 1" ]]; then
+      printf '%s\n' '{"workspace_members":["vm","hostlib"],"packages":[{"name":"harn-vm","source":null,"id":"vm"},{"name":"harn-hostlib","source":null,"id":"hostlib"}],"resolve":{"nodes":[{"id":"vm","features":["default","otel"]},{"id":"hostlib","features":["full"]}]}}'
+      exit 0
+    fi
     [[ "$*" == "metadata --format-version 1 --no-deps" ]] || exit 2
     printf '{"target_directory":"%s"}\n' "${FAKE_TARGET:?}"
     ;;
@@ -61,11 +65,13 @@ case "$1" in
       [[ -f "${CARGO_RECEIPTS:?}/compiler-fixture-controls" ]] || exit 2
       printf 'tests archive\n' > "${12}"
       : > "${CARGO_RECEIPTS:?}/nextest-tests"
-    elif [[ "$#" -eq 10 && "$2" == "archive" && "$3" == "--locked" && \
-      "$4" == "--workspace" && "$5" == "--profile" && "$6" == "ci" && "$7" == "-E" && \
-      "$8" == '(package(harn-vm) and binary(harn_vm)) or (package(harn-hostlib) and binary(harn_hostlib))' && \
-      "$9" == "--archive-file" && -n "${10}" ]]; then
-      printf 'security tests archive\n' > "${10}"
+    elif [[ "$#" -eq 15 && "$2" == "archive" && "$3" == "--locked" && \
+      "$4" == "-p" && "$5" == "harn-vm" && "$6" == "-p" && "$7" == "harn-hostlib" && \
+      "$8" == "--features" && "$9" == 'harn-hostlib/full,harn-vm/default,harn-vm/otel' && \
+      "${10}" == "--profile" && "${11}" == "ci" && "${12}" == "-E" && \
+      "${13}" == '(package(harn-vm) and binary(harn_vm)) or (package(harn-hostlib) and binary(harn_hostlib))' && \
+      "${14}" == "--archive-file" && -n "${15}" ]]; then
+      printf 'security tests archive\n' > "${15}"
       : > "${CARGO_RECEIPTS:?}/nextest-security"
     else
       printf 'unexpected cargo nextest argv:' >&2

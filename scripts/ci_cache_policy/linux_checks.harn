@@ -54,12 +54,14 @@ const CLI_PRODUCER_STEP_BUDGETS: list<StepBudget> = [
   {name: "Build portable Harn CLI", minutes: 31, cold_seconds: 850},
 ]
 
-/** `rust-check-inputs` builds and runs the workspace test graph. */
+/** `rust-check-inputs` builds security and the optional fallback archive. */
 const TEST_PRODUCER_STEP_BUDGETS: list<StepBudget> = [
   // 720s cold on 8 vCPU; the free 4 vCPU rung (harn#9370) takes the owned
   // rung's 24 minutes for the same reason as the CLI build above.
   {name: "Build security test archive", minutes: 24, cold_seconds: 720},
-  {name: "Run Rust workspace tests", minutes: 26, cold_seconds: 496},
+  // Retain the former whole-workspace compile-and-test allowance as the
+  // archive fallback's conservative reference; archive-only cold time is unmeasured.
+  {name: "Build portable workspace test archive", minutes: 26, cold_seconds: 496},
 ]
 
 const PRODUCER_STEP_BUDGETS: list<StepBudget> = CLI_PRODUCER_STEP_BUDGETS
@@ -828,7 +830,7 @@ fn archived_workspace_test_consumer_errors(workflow: dict, job_name: string) -> 
 
 /**
  * `rust-cli` publishes the shared CLI as its last compile; `rust-check-inputs`
- * publishes the security archive before the co-located tests, and builds no
+ * publishes the security archive before the optional fallback archive, and builds no
  * CLI of its own, so the two producers never duplicate that build.
  */
 fn producer_artifact_order_errors(workflow: dict) -> list<string> {
@@ -847,17 +849,18 @@ fn producer_artifact_order_errors(workflow: dict) -> list<string> {
   const security_build_step = step_by_name(producer_steps, "Build security test archive")
   const security_build_index = step_index_by_name(producer_steps, "Build security test archive")
   const security_upload_index = step_index_by_name(producer_steps, "Upload security test archive")
-  const colocated_index = step_index_by_name(producer_steps, "Run Rust workspace tests")
+  const fallback_index = step_index_by_name(producer_steps, "Build portable workspace test archive")
   if security_build_index < 0
     || security_upload_index < 0
-    || colocated_index < 0
+    || fallback_index < 0
     || security_build_index >= security_upload_index
-    || security_upload_index >= colocated_index
+    || security_upload_index >= fallback_index
+    || step_index_by_name(producer_steps, "Run Rust workspace tests") >= 0
     || step_index_by_name(producer_steps, "Build portable Harn CLI") >= 0
     || !contains(trim(security_build_step?.run ?? ""), "rust_artifact.sh build-security") {
     errors = errors
       + [
-        "ci.yml:rust-check-inputs must publish security before co-located tests and leave the CLI to rust-cli",
+        "ci.yml:rust-check-inputs must publish security before the fallback archive and leave ordinary tests to parallel partitions",
       ]
   }
   return errors
@@ -1082,7 +1085,7 @@ fn walltime_report_errors(workflow: dict) -> list<string> {
   return []
 }
 
-fn colocated_rust_proof_errors(workflow: dict) -> list<string> {
+fn parallel_rust_proof_errors(workflow: dict) -> list<string> {
   let errors: list<string> = []
   const rust_job = workflow?.jobs?.["rust-check-inputs"]
   const archive_step = step_by_name(rust_job?.steps ?? [], "Build portable workspace test archive")
@@ -1094,17 +1097,27 @@ fn colocated_rust_proof_errors(workflow: dict) -> list<string> {
         "ci.yml:rust-check-inputs must build the workspace test archive only for the standalone fallback",
       ]
   }
-  const colocated_step = step_by_name(rust_job?.steps ?? [], "Run Rust workspace tests")
-  const colocated_command = trim(colocated_step?.run ?? "")
-  if trim(colocated_step?.id ?? "") != "release-audit-rust-test"
-    || trim(colocated_step?.if ?? "")
-      != "vars.${COLOCATED_TESTS_DISABLE_VAR} != 'true'"
-    || trim(colocated_step?.env?.HARN_LLM_CALLS_DISABLED ?? "")
-      != "1"
-    || colocated_command
-      != "scripts/ci/run_rust_test_lane.sh bash scripts/ci/run_workspace_tests.sh tooling" {
+  const partitions = workflow?.jobs?.["rust-test-partitions"]
+  const test_step = step_by_name(partitions?.steps ?? [], "Run Rust workspace tests")
+  const rows = partitions?.strategy?.matrix?.include ?? []
+  const shares = rows.map({ row -> to_string(row?.partition ?? "") }).to_list().sorted()
+  if shares
+    != ["rest:1/4", "rest:2/4", "rest:3/4", "rest:4/4", "tooling", "vm:1/3", "vm:2/3", "vm:3/3"]
+    || strings_of(partitions?.needs) != ["changes"]
+    || !contains(trim(partitions?.if ?? ""), "needs.changes.outputs.rust == 'true'")
+    || !contains(trim(partitions?.if ?? ""), "vars.${COLOCATED_TESTS_DISABLE_VAR} != 'true'")
+    || trim(test_step?.id ?? "") != "release-audit-rust-test"
+    || trim(test_step?.env?.HARN_LLM_CALLS_DISABLED ?? "") != "1"
+    || trim(test_step?.env?.HARN_EXT_TEST_PARTITION ?? "") != "$" + "{{ matrix.partition }}"
+    || trim(test_step?.if ?? "") != ""
+    || test_step?.["continue-on-error"] != nil
+    || partitions?.["continue-on-error"] != nil
+    || trim(test_step?.run ?? "")
+      != "scripts/ci/run_rust_test_lane.sh bash scripts/ci/run_workspace_tests.sh \"$HARN_EXT_TEST_PARTITION\"" {
     errors = errors
-      + ["ci.yml:rust-check-inputs must own the exact co-located environment-neutral Rust proof"]
+      + [
+        "ci.yml:rust-test-partitions must execute all eight exact workspace test shares independently",
+      ]
   }
   const security_job = workflow?.jobs?.["rust-security"]
   const security_step = step_by_name(security_job?.steps ?? [], "Run Linux sandbox tests")
@@ -1124,19 +1137,46 @@ fn colocated_rust_proof_errors(workflow: dict) -> list<string> {
     errors = errors
       + ["ci.yml:rust-test must run only as the co-location kill-switch fallback"]
   }
+  return errors + rust_test_aggregate_errors(workflow)
+}
+
+fn rust_test_aggregate_errors(workflow: dict) -> list<string> {
+  let errors: list<string> = []
+  const aggregate = workflow?.jobs?.["rust-test-status"]
+  const aggregate_step = step_by_name(aggregate?.steps ?? [], "Verify complete Rust test results")
+  const required_env = {
+    CHANGES_RESULT: "$" + "{{ needs.changes.result }}",
+    RUST_SELECTED: "$" + "{{ needs.changes.outputs.rust }}",
+    ARCHIVE_MODE: "$" + "{{ vars.HARN_CI_DISABLE_COLOCATED_TESTS }}",
+    PRODUCER_RESULT: "$" + "{{ needs.rust-check-inputs.result }}",
+    WORKSPACE_ARTIFACT_READY: "$"
+      + "{{ needs.rust-check-inputs.outputs.workspace_artifact_ready }}",
+    PARTITIONS_RESULT: "$" + "{{ needs.rust-test-partitions.result }}",
+    ARCHIVE_RESULT: "$" + "{{ needs.rust-test.result }}",
+  }
+  if trim(aggregate?.name ?? "") != "Rust workspace tests"
+    || strings_of(aggregate?.needs).sorted()
+      != ["changes", "rust-check-inputs", "rust-test", "rust-test-partitions"]
+    || trim(aggregate?.if ?? "") != "always()"
+    || aggregate?.["continue-on-error"] != nil
+    || aggregate_step?.["continue-on-error"] != nil
+    || trim(aggregate_step?.if ?? "") != ""
+    || trim(aggregate_step?.run ?? "") != "bash scripts/ci/verify_rust_test_results.sh"
+    || aggregate_step?.env != required_env {
+    errors = errors
+      + ["ci.yml:rust-test-status must verify every partition or the complete archive fallback"]
+  }
+  const status_job = workflow?.jobs?.["ci-status"]
   const status_step = step_by_name(
     workflow?.jobs?.["ci-status"]?.steps ?? [],
     "Verify required CI jobs",
   )
   const status_command = trim(status_step?.run ?? "")
-  if !contains(
-    trim(status_step?.env?.COLOCATED_TESTS_DISABLED ?? ""),
-    COLOCATED_TESTS_DISABLE_VAR,
-  )
-    || !contains(status_command, "$COLOCATED_TESTS_DISABLED")
-    || contains(status_command, "$BLACKSMITH_DISABLED") {
+  if !strings_of(status_job?.needs).contains("rust-test-status")
+    || !contains(status_command, "needs['rust-test-status'].result")
+    || !contains(status_command, "Complete Rust workspace test proof failed or skipped.") {
     errors = errors
-      + ["ci.yml:ci-status must fail closed across co-located and fallback Rust proofs"]
+      + ["ci.yml:ci-status must require the complete Rust test verdict"]
   }
   return errors
 }
@@ -1420,7 +1460,7 @@ pub fn ci_linux_lane_policy_errors(workflow: dict) -> list<string> {
       + ["ci.yml:rust-check-inputs workspace test archive must keep memory-bounded compile fan-out"]
   }
   errors = errors + archived_workspace_test_consumer_errors(workflow, "rust-test")
-  errors = errors + colocated_rust_proof_errors(workflow)
+  errors = errors + parallel_rust_proof_errors(workflow)
   errors = errors + live_artifact_handoff_errors(workflow)
   errors = errors + walltime_report_errors(workflow)
   errors = errors + producer_step_budget_margin_errors()

@@ -1,6 +1,10 @@
 import { assert_error_contains } from "std/testing"
 import { git } from "../fixtures/neutral"
-import { prepare_group_tree, require_group_candidate } from "../lib/git_group"
+import {
+  prepare_group_tree,
+  require_group_ancestry,
+  require_group_candidate,
+} from "../lib/git_group"
 
 pipeline test_group_materialization_keeps_both_divergent_changes_and_refuses_omissions(
   harness: Harness,
@@ -81,6 +85,17 @@ pipeline test_group_materialization_keeps_both_divergent_changes_and_refuses_omi
   const advanced = git(harness.process, root, ["rev-parse", "HEAD"])
   git(harness.process, root, ["checkout", "--quiet", "--detach", second])
   const cumulative = prepare_group_tree(harness.process, root, advanced, [first, second])
+  require_group_ancestry(harness.process, root, cumulative, [base, base])
+  for wrong in [[base, first], [advanced, base]] {
+    assert_error_contains(
+      fn() { require_group_ancestry(harness.process, root, cumulative, wrong) },
+      "reviewed base must be an ancestor",
+    )
+  }
+  assert_error_contains(
+    fn() { require_group_ancestry(harness.process, root, cumulative, [base]) },
+    "one original reviewed base per ordered head",
+  )
   assert_eq(
     git(harness.process, root, ["show", cumulative.tree + ":retained.txt"]),
     "newer integrated work",

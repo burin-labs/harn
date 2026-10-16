@@ -64,23 +64,37 @@ export REAL_CARGO
 cat > "$scratch/bin/cargo" <<'SH'
 #!/usr/bin/env bash
 [[ "${FAKE_VM_METADATA:-}" == 1 && "$1" == metadata ]] || exec "$REAL_CARGO" "$@"
-jq -n '{packages: [{name: "harn-vm", source: null, id: "vm-id"}, {name: "harn-vm", source: "registry", id: "other"}],
-  resolve: {nodes: [{id: "vm-id", features: ["default", "otel"]}, {id: "other", features: ["wrong"]}]}}'
+jq -n --arg missing "${FAKE_MISSING_NODE:-false}" '{
+  workspace_members: ["vm-id", "fmt-id", "lsp-id", "package-id"],
+  packages: [{name: "harn-vm", source: null, id: "vm-id"}, {name: "harn-vm", source: "registry", id: "other"},
+    {name: "harn-fmt", source: null, id: "fmt-id"}, {name: "harn-lsp", source: null, id: "lsp-id"},
+    {name: "harn-package", source: null, id: "package-id"}],
+  resolve: {nodes: ([{id: "vm-id", features: ["default", "otel"]}, {id: "other", features: ["wrong"]},
+    {id: "fmt-id", features: []}, {id: "lsp-id", features: []}, {id: "package-id", features: []}]
+    | if $missing == "true" then map(select(.id != "vm-id")) else . end)}}'
 SH
 chmod +x "$scratch/bin/cargo"
 export PATH="$scratch/bin:$PATH" RAN_TESTS="$scratch/ran" LISTED_TESTS="$scratch/listed"
 export RUNNER_TEMP="$scratch"
+features=$(FAKE_VM_METADATA=1 bash "$root/scripts/ci/workspace_features.sh" harn-vm)
+[[ "$features" == 'harn-vm/default,harn-vm/otel' ]]
+if FAKE_VM_METADATA=1 FAKE_MISSING_NODE=true bash "$root/scripts/ci/workspace_features.sh" harn-vm > "$scratch/log" 2>&1; then
+  echo 'Missing resolved features were accepted' >&2; exit 1
+fi
+if FAKE_VM_METADATA=1 bash "$root/scripts/ci/workspace_features.sh" missing > "$scratch/log" 2>&1; then
+  echo 'A missing workspace member was accepted' >&2; exit 1
+fi
 FAKE_VM_METADATA=1 GITHUB_EVENT_NAME=push bash "$root/scripts/ci/run_workspace_tests.sh" vm:3/3 > "$scratch/log"
 jq -e '.["rust-suites"].fixture.testcases.case["filter-match"].status == "matches"' "$RUNNER_TEMP/harn-nextest-inventory.json" > /dev/null
 grep -q 'eligible=1' "$scratch/log"
 grep -q -- '--locked -p harn-vm --features harn-vm/default,harn-vm/otel --partition count:3/3 --no-tests pass' "$scratch/ran"
 GITHUB_EVENT_NAME=push bash "$root/scripts/ci/run_workspace_tests.sh" rest:1/4 > "$scratch/log"
 grep -q -- '--locked --workspace --exclude harn-vm --exclude harn-fmt --exclude harn-lsp --exclude harn-package --partition count:1/4 --no-tests pass' "$scratch/ran"
-# The producer keeps the unified workspace build and selects its crates by filter.
-GITHUB_EVENT_NAME=push bash "$root/scripts/ci/run_workspace_tests.sh" tooling > "$scratch/log"
-grep -q -- 'and (package(harn-fmt) or package(harn-lsp) or package(harn-package)) --locked --workspace --no-tests fail' "$scratch/ran"
+# The producer compiles only its three tooling packages, with workspace features.
+FAKE_VM_METADATA=1 GITHUB_EVENT_NAME=push bash "$root/scripts/ci/run_workspace_tests.sh" tooling > "$scratch/log"
+grep -q -- 'and (package(harn-fmt) or package(harn-lsp) or package(harn-package)) --locked -p harn-fmt -p harn-lsp -p harn-package --no-tests fail' "$scratch/ran"
 if grep -Eq -- '--exclude|--partition' "$scratch/ran"; then
-  echo 'The unified producer share changed the package selection or partitioned it' >&2; exit 1
+  echo 'The tooling producer share excluded or partitioned a selected package' >&2; exit 1
 fi
 # An affected selection without harn-vm leaves the vm group nothing to build.
 jq -n --arg base "$base" '{pull_request: {base: {sha: $base}}}' > "$scratch/event"

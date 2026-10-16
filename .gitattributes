@@ -21,6 +21,10 @@ scripts/release_smoke.sh eol=lf
 # when Git checks the repository out on Windows.
 *.harn.prompt text eol=lf
 
+# Crate source text enters compiler fingerprints and embedded stdlib digests.
+# Preserve the same bytes across build hosts; binary assets stay binary.
+crates/**/src/** text=auto eol=lf
+
 # Session-bundle contract fixtures are compared byte-for-byte against the
 # `serde_json::to_string_pretty` output (LF newlines), so they must check
 # out with LF on every platform — autocrlf on Windows would otherwise

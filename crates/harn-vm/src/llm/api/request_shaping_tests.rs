@@ -10,6 +10,52 @@ use super::{
 use crate::llm::env_guard;
 use crate::value::VmValue;
 
+#[test]
+fn harn_message_metadata_stays_in_transcript_but_is_removed_from_provider_payload() {
+    let mut opts = base_opts("openai");
+    opts.messages = vec![
+        serde_json::json!({
+            "role": "assistant",
+            "content": null,
+            "tool_calls": [{"id": "call_1", "type": "function", "function": {"name": "inspect", "arguments": "{}"}}],
+            "_harn": {"tool_calls": [{"id": "call_1", "name": "inspect"}], "turn": 7}
+        }),
+        serde_json::json!({
+            "role": "tool",
+            "tool_call_id": "call_1",
+            "content": "inspected",
+            "_harn": {"result_source": "host_tool"}
+        }),
+    ];
+
+    let payload = LlmRequestPayload::from(&opts);
+
+    assert!(
+        opts.messages[0].get("_harn").is_some(),
+        "audit transcript is unchanged"
+    );
+    assert!(
+        opts.messages[1].get("_harn").is_some(),
+        "tool result provenance remains in transcript"
+    );
+    assert!(payload
+        .messages
+        .iter()
+        .all(|message| message.get("_harn").is_none()));
+    assert_eq!(payload.messages[0]["tool_calls"][0]["id"], "call_1");
+    assert_eq!(payload.messages[1]["tool_call_id"], "call_1");
+    assert!(payload.messages.iter().all(|message| {
+        message.as_object().is_some_and(|fields| {
+            fields.keys().all(|key| {
+                matches!(
+                    key.as_str(),
+                    "role" | "content" | "tool_calls" | "tool_call_id"
+                )
+            })
+        })
+    }));
+}
+
 fn finalized_anthropic_body(payload: &LlmRequestPayload) -> serde_json::Value {
     let mut body = crate::llm::providers::AnthropicProvider::build_request_body(payload);
     crate::llm::providers::anthropic::reconcile_request_body(
@@ -248,6 +294,66 @@ fn fake_provider_routes_through_full_pipeline_with_streaming_deltas() {
         }
         assert_eq!(deltas, vec!["alpha".to_string(), " beta".to_string()]);
     });
+}
+
+#[test]
+fn streaming_entry_projects_harn_metadata_before_fake_provider_dispatch() {
+    use crate::llm::fake::{
+        fake_llm_captured_calls, install_fake_llm_script, FakeLlmEvent, FakeLlmScript,
+        FakeStopReason,
+    };
+
+    let _guard = env_guard();
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("runtime");
+    let _script = install_fake_llm_script(FakeLlmScript::streaming(vec![
+        FakeLlmEvent::Token("finished".into()),
+        FakeLlmEvent::Done(FakeStopReason::EndTurn),
+    ]));
+    let mut opts = base_opts("fake");
+    opts.model = "fake-stream".into();
+    opts.messages = vec![
+        serde_json::json!({
+            "role": "assistant",
+            "content": null,
+            "tool_calls": [{
+                "id": "call_1",
+                "type": "function",
+                "function": {"name": "inspect", "arguments": "{}"}
+            }],
+            "_harn": {"tool_calls": [{"id": "call_1", "name": "inspect"}]}
+        }),
+        serde_json::json!({
+            "role": "tool",
+            "tool_call_id": "call_1",
+            "content": "inspected",
+            "_harn": {"result_source": "host_tool"}
+        }),
+    ];
+
+    runtime.block_on(async {
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+        let result = vm_call_llm_full_streaming(&opts, tx)
+            .await
+            .expect("streaming fake dispatch");
+        assert_eq!(result.text, "finished");
+        assert_eq!(rx.try_recv().expect("streamed content"), "finished");
+    });
+    assert!(opts
+        .messages
+        .iter()
+        .any(|message| message.get("_harn").is_some()));
+    let calls = fake_llm_captured_calls();
+    assert_eq!(calls.len(), 1);
+    assert!(calls[0].stream);
+    assert!(calls[0]
+        .messages
+        .iter()
+        .all(|message| message.get("_harn").is_none()));
+    assert_eq!(calls[0].messages[0]["tool_calls"][0]["id"], "call_1");
+    assert_eq!(calls[0].messages[1]["tool_call_id"], "call_1");
 }
 
 #[test]

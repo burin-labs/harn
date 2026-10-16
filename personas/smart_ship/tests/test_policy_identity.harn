@@ -1,0 +1,15 @@
+import { fixture } from "../fixtures/support"
+import { policy_digest } from "../lib/identity"
+
+@test(cases: [{name: "zero", args: [0.0, 0]}, {name: "positive", args: [5.0, 5]}, {name: "negative_zero", args: [-0.0, 0.0]}])
+pipeline test_policy_identity_preserves_numeric_json_reencoding_without_erasing_budget_changes(
+  harness: Harness,
+  original: float,
+  reencoded: float,
+) {
+  const f = fixture(harness.random)
+  const policy = f.policy + {max_repair_usd: original}
+  assert_eq(policy_digest(policy), policy_digest(policy + {max_repair_usd: reencoded}))
+  assert(policy_digest(policy) != policy_digest(policy + {max_repair_usd: original + 1.0}))
+  assert(policy_digest(policy) != policy_digest(policy + {max_changes: policy.max_changes + 1}))
+}

@@ -242,6 +242,108 @@ pipeline main(harness: Harness, task: unknown) {{
     )
 }
 
+fn native_tool_round_trip_pipeline(session_id: &str) -> String {
+    format!(
+        r#"
+pipeline main(harness: Harness, task: unknown) {{
+  harness.tools.clear_hooks()
+  harness.llm.mock_clear()
+  harness.llm.mock_enqueue({{
+    text: "",
+    tool_calls: [{{name: "inspect", arguments: {{}}}}],
+    input_tokens: 100,
+    output_tokens: 20,
+    simulated_cost_usd: 0.005,
+  }})
+  harness.llm.mock_enqueue({{
+    text: "finished ##DONE##",
+    input_tokens: 120,
+    output_tokens: 12,
+    simulated_cost_usd: 0.003,
+  }})
+
+  const registry = tool_registry()
+  const tools = tool_define(
+    registry,
+    "inspect",
+    "Deterministic stand-in tool.",
+    {{parameters: {{}}, handler: {{ _args -> return "inspected" }}}},
+  )
+  const result = agent_loop(
+    harness,
+    "inspect the module",
+    nil,
+    {{
+      provider: "mock",
+      model: "mock",
+      tools: tools,
+      tool_format: "native",
+      root: "__HARN_TEST_SESSION_STORE_ROOT__",
+      max_iterations: 4,
+      loop_until_done: true,
+      session_id: "{session_id}",
+    }},
+  )
+  harness.stdio.log("status " + result.status)
+  harness.stdio.log("requests " + json_stringify(harness.llm.mock_calls()))
+}}
+"#
+    )
+}
+
+#[test]
+fn canonical_agent_loop_runs_native_tool_return_and_next_provider_call() {
+    let session_store_root = tempfile::tempdir().expect("session store tempdir");
+    let session_id = fresh_session_id("native-tool-projection");
+    let source = native_tool_round_trip_pipeline(&session_id).replace(
+        "__HARN_TEST_SESSION_STORE_ROOT__",
+        &session_store_root
+            .path()
+            .to_string_lossy()
+            .replace('\\', "\\\\")
+            .replace('"', "\\\""),
+    );
+    let output = run_with_bridge(&source).expect("canonical agent loop run");
+
+    assert!(output.contains("status done"), "{output}");
+    let requests = output
+        .lines()
+        .find_map(|line| line.strip_prefix("[harn] requests "))
+        .map(|line| serde_json::from_str::<serde_json::Value>(line).expect("request JSON"))
+        .expect("captured provider requests");
+    let requests = requests.as_array().expect("request list");
+    assert_eq!(
+        requests.len(),
+        2,
+        "tool call is followed by another provider call"
+    );
+    let messages = requests[1]["messages"]
+        .as_array()
+        .expect("second request messages");
+    assert!(
+        messages.iter().any(|message| {
+            message["role"] == "assistant"
+                && message["tool_calls"]
+                    .as_array()
+                    .is_some_and(|calls| !calls.is_empty())
+        }),
+        "second request must retain the assistant native tool call: {messages:#?}"
+    );
+    assert!(
+        messages.iter().any(|message| {
+            message["role"] == "tool_result"
+                && message["content"] == "[result of inspect]\ninspected\n[end of inspect result]\n"
+        }),
+        "second request must include the completed tool result: {messages:#?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .all(|message| message.get("_harn").is_none()),
+        "provider projection must exclude Harn-owned metadata"
+    );
+}
+
 /// One captured provider request: the message array exactly as the loop
 /// handed it to the transport, as `(role, content)` pairs.
 type CapturedRequest = Vec<(String, String)>;

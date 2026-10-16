@@ -1070,10 +1070,27 @@ pub(crate) async fn observed_llm_call(
                             &receipt,
                         )
                     });
+                // Admission denials have a typed owner record and occur
+                // before the provider boundary. They are a measured zero for
+                // this attempt; every other thrown error without a usage
+                // receipt remains unknown because transport may have begun.
+                let admission_denial_usage = (error_usage.is_none()
+                    && super::admission::denial_reason(&error).is_some())
+                .then(crate::llm::usage::LlmUsage::no_provider_request);
                 let terminal_usage = (!can_retry).then(|| {
                     let mut reported = completed_retry_usage.clone();
                     if let Some(usage) = error_usage.as_ref() {
                         reported.push(usage.clone());
+                    }
+                    // A typed admission denial measures no provider request,
+                    // so it is not another member of the physical-attempt
+                    // ledger. Keep its measured-zero receipt when it is the
+                    // whole call; after a billed retry, the prior provider
+                    // receipts remain the complete physical ledger.
+                    if reported.is_empty() && physical_attempts == 0 {
+                        if let Some(usage) = admission_denial_usage.as_ref() {
+                            return usage.clone();
+                        }
                     }
                     crate::llm::usage::LlmUsage::aggregate_attempt_ledger(
                         &reported,
@@ -1109,7 +1126,10 @@ pub(crate) async fn observed_llm_call(
                     message: &message,
                     stream_failure: error.provider_stream_failure(),
                     schema_failure: error.schema_stream_abort(),
-                    usage: terminal_usage.as_ref().or(error_usage.as_ref()),
+                    usage: terminal_usage
+                        .as_ref()
+                        .or(error_usage.as_ref())
+                        .or(admission_denial_usage.as_ref()),
                     retryable: event_retryable,
                     failover_eligible: false,
                     attempt_count: None,

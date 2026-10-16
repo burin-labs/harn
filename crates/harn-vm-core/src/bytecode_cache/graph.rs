@@ -16,11 +16,18 @@ use crate::VmError;
 /// cache probe and compilation. Writers use this constructor after setup so a
 /// newly compiled chunk is never paired with the probe's older graph.
 pub fn prepare_entry_store(source_path: &Path, source: &str) -> super::LookupOutcome {
-    let source_hash = super::sha256(source.as_bytes());
     let (context_hash, manifest) = super::GraphWalk::new(source_path, source).finish();
+    entry_store_from_graph(source, context_hash, manifest)
+}
+
+pub(super) fn entry_store_from_graph(
+    source: &str,
+    context_hash: [u8; 32],
+    manifest: Option<ContextManifest>,
+) -> super::LookupOutcome {
     super::LookupOutcome {
         key: super::CacheKey {
-            source_hash,
+            source_hash: super::sha256(source.as_bytes()),
             context_hash,
             harn_version: std::borrow::Cow::Borrowed(super::HARN_VERSION),
             compiler_contracts: super::compiler_contracts::fingerprint(),
@@ -42,6 +49,14 @@ pub(crate) fn derive_interface(
     source_path: &Path,
     source: &str,
 ) -> Result<(ModuleCompilationContext, Option<ContextManifest>), VmError> {
+    if let Some(result) = super::shipped_interface::recall(source_path, source) {
+        return Ok((
+            result
+                .entry_compilation_context
+                .expect("validated shipped interface"),
+            result.manifest,
+        ));
+    }
     let slot = super::InterfaceSlot::open(source_path, source);
     if let Some((context, manifest)) = slot.as_ref().and_then(super::InterfaceSlot::recall) {
         return Ok((context, Some(manifest)));
@@ -175,7 +190,7 @@ pub(super) fn relocatable_graph_hash(
 /// through the generation id that every install mints afresh. Its bytes are
 /// hashed beside the label, so equal package content keeps the key across
 /// reinstalls and changed content still invalidates it.
-fn relocatable_label(entry_dir: &Path, path: &Path) -> Option<String> {
+pub(super) fn relocatable_label(entry_dir: &Path, path: &Path) -> Option<String> {
     if let Some(within) = harn_modules::package_snapshot::path_within_package_generation(path) {
         return Some(format!(
             "@packages/{}",

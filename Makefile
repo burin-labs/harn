@@ -662,8 +662,8 @@ test-harn-scripts:
 	@$(HARN_BIN_ASSIGN); HARN_BIN="$$harn_bin" ./scripts/tests/lint_harn_gate_test.sh
 	@$(HARN_BIN_ASSIGN); HARN_BIN="$$harn_bin" ./scripts/tests/check_all_features_test.sh
 	@echo "=== Running Harn script test suite ==="
-	@$(HARN_SCRIPT_TEST_ENV) $(HARN_CMD) package verify personas/smart_ship --strict
-	@$(HARN_SCRIPT_TEST_ENV) $(HARN_CMD) package verify scripts/package-release --strict
+	@$(HARN_SCRIPT_TEST_ENV) $(HARN_CMD) package verify personas/smart_ship --strict --json
+	@$(HARN_SCRIPT_TEST_ENV) $(HARN_CMD) package verify scripts/package-release --strict --json
 	@$(HARN_SCRIPT_TEST_ENV) $(HARN_CMD) test scripts/tests/ --parallel
 # The denial arm of path_visibility cannot live in the suite above: `harn test`
 # runs without the worktree filesystem sandbox, so nothing is refusable in-process
@@ -1675,6 +1675,7 @@ check-release-audit-contract:
 
 check-ci-cache-policy:
 	@echo "=== Checking CI cache ownership policy ==="
+	bash scripts/tests/verify_rust_test_results_test.sh
 	bash scripts/tests/ci_post_merge_tier_test.sh
 	bash scripts/tests/workspace_test_args_test.sh
 	bash scripts/tests/ci_full_suite_test.sh
