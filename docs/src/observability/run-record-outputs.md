@@ -55,6 +55,12 @@ provider request and the value read from its built request body. For example,
 lowered the requested effort. Retries can produce more than one receipt for a
 logical call.
 
+`call_id`, `call_role`, and `call_stage` preserve the observed request's
+identity and purpose, such as `agent.main` or `completion.judge`. They travel
+with the request across provider tasks and remain attached when a session
+reindexes receipts. Older receipts and unobserved body builders carry `null`
+for missing attribution; consumers must not infer a role from call order.
+
 Agent sessions journal these receipts when the request body is built, so a
 cancelled call retains its receipt. Hosts preserve them when they call
 `materialize_session_run_record`. New sessions with no provider requests carry

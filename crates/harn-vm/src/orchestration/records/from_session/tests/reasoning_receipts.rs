@@ -16,6 +16,10 @@ fn started(reported: bool) -> AppendEvent {
 }
 
 fn receipt() -> AppendEvent {
+    attributed_receipt(None)
+}
+
+fn attributed_receipt(role: Option<&str>) -> AppendEvent {
     AppendEvent::new(
         custom("reasoning_receipt"),
         transcript_event(
@@ -23,6 +27,8 @@ fn receipt() -> AppendEvent {
             json!({
                 "receipt": crate::llm::ReasoningReceipt {
                     index: 99,
+                    call_id: role.map(|role| format!("call-{role}")),
+                    call_role: role.map(str::to_string),
                     provider: "gemini".into(),
                     model: "gemini-3.6-flash".into(),
                     wire_dialect: "gemini_interactions".into(),
@@ -51,13 +57,27 @@ async fn project(events: Vec<AppendEvent>) -> RunRecord {
 
 #[tokio::test]
 async fn lowering_survives_projection_and_receipts_use_run_local_indices() {
-    let run = project(vec![started(true), receipt(), receipt()]).await;
+    let run = project(vec![
+        started(true),
+        attributed_receipt(Some("agent.main")),
+        attributed_receipt(Some("completion.judge")),
+        receipt(),
+    ])
+    .await;
     let receipts = run.evidence.reasoning_receipts.unwrap();
-    assert_eq!(receipts.len(), 2);
+    assert_eq!(receipts.len(), 3);
     assert_eq!(receipts[0].index, 0);
     assert_eq!(receipts[1].index, 1);
     assert_eq!(receipts[0].resolved_level.as_deref(), Some("xhigh"));
     assert_eq!(receipts[0].sent_value, Some(json!("high")));
+    assert_eq!(receipts[0].call_role.as_deref(), Some("agent.main"));
+    assert_eq!(receipts[0].call_id.as_deref(), Some("call-agent.main"));
+    assert_eq!(receipts[1].call_role.as_deref(), Some("completion.judge"));
+    assert_eq!(
+        receipts[2].call_role, None,
+        "legacy attribution remains unknown"
+    );
+    assert_eq!(receipts[2].call_id, None);
 }
 
 #[tokio::test]
