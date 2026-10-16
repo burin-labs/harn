@@ -17,6 +17,63 @@ use harn_cli::commands::run::{execute_run, CliLlmMockMode, RunOutcome, RunProfil
 use harn_cli::tests::common::{cwd_lock, harn_state_lock};
 use tempfile::TempDir;
 
+#[test]
+fn macos_artifacts_execute_on_windows_without_shared_cache_writes() {
+    const MAIN: &str = "import { answer } from \"./lib\"\nfn main(harness: Harness) { harness.stdio.println(answer()) }\n";
+    const LIB: &str = concat!(
+        "import \"./leaf\"\n",
+        "pub fn answer() -> string {\n",
+        "  match Color.Ready(\"cross-host-cache-reached\") {\n",
+        "    Color.Ready(message) -> { return message }\n",
+        "    _ -> { return \"wrong\" }\n",
+        "  }\n",
+        "}\n",
+    );
+    const LEAF: &str = "pub enum Color { Ready(message: string) Empty }\n";
+    let root = TempDir::new().unwrap();
+    for (name, source) in [("main", MAIN), ("lib", LIB), ("leaf", LEAF)] {
+        fs::write(root.path().join(format!("{name}.harn")), source).unwrap();
+        for extension in ["harnbc", "harnmod", "harnifc"] {
+            let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/fixtures/macos-precompile-9652")
+                .join(format!("{name}.{extension}"));
+            fs::copy(fixture, root.path().join(format!("{name}.{extension}"))).unwrap();
+        }
+    }
+    let cache = TempDir::new().unwrap();
+    let outcome = run_harn(cache.path(), &root.path().join("main.harn"));
+    assert_eq!(outcome.exit_code, 0, "{}", outcome.stderr);
+    assert!(
+        outcome.stdout.contains("cross-host-cache-reached"),
+        "{}",
+        outcome.stdout
+    );
+    for extension in ["harnbc", "harnmod", "harnifc"] {
+        assert!(
+            cache_entries_with_extension(cache.path(), extension).is_empty(),
+            "Mac {extension} was refused"
+        );
+    }
+    let lookup = harn_vm::bytecode_cache::load(&root.path().join("main.harn"), MAIN);
+    assert!(lookup.chunk.is_some(), "Mac entry bytecode must hit");
+    assert!(
+        lookup.link_table.is_some(),
+        "Mac interface must supply the typed link table"
+    );
+
+    for name in ["main", "lib", "leaf"] {
+        fs::remove_file(root.path().join(format!("{name}.harnifc"))).unwrap();
+    }
+    let missing_cache = TempDir::new().unwrap();
+    let missing = run_harn(missing_cache.path(), &root.path().join("main.harn"));
+    assert_eq!(missing.exit_code, 0, "{}", missing.stderr);
+    assert!(missing.stdout.contains("cross-host-cache-reached"));
+    assert!(
+        !cache_entries_with_extension(missing_cache.path(), "harnifc").is_empty(),
+        "missing interfaces must visibly derive"
+    );
+}
+
 fn run_in_harn_runtime<F, Fut, R>(future_factory: F) -> R
 where
     F: FnOnce() -> Fut + Send + 'static,
