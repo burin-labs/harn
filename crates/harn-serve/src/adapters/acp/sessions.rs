@@ -2,6 +2,8 @@
 use super::*;
 
 mod budget_rearm;
+mod cancellation;
+pub(super) use cancellation::SessionCancellation;
 
 #[derive(Clone)]
 pub(super) struct ConcurrentSessionControl {
@@ -335,7 +337,7 @@ impl ConcurrentSessionControls {
         let Some(control) = control else {
             return false;
         };
-        if !control.prompt_is_active() && !control.cancellation.has_admitted_prompt() {
+        if !control.cancellation.has_admitted_prompt() {
             return false;
         }
         match apply_live_client_operation(method, &session_id, params) {
@@ -665,59 +667,12 @@ pub(super) enum PreparedSessionRequest {
     #[default]
     Unprepared,
     Prompt(Arc<PromptCancellation>),
+    Close {
+        _admission: Arc<()>,
+    },
     Cancel {
         result: Result<bool, TaskAdmissionError>,
     },
-}
-
-#[derive(Default)]
-struct CancellationState {
-    prompts: Vec<std::sync::Weak<PromptCancellation>>,
-    cancelled: bool,
-}
-
-#[derive(Clone, Default)]
-pub(super) struct SessionCancellation {
-    state: Arc<std::sync::Mutex<CancellationState>>,
-}
-
-impl SessionCancellation {
-    /// The ingress-owned scope also covers queued prompts and host preparation.
-    /// Dropped or stopped requests must not make an idle control preemptive.
-    fn has_admitted_prompt(&self) -> bool {
-        let state = self.state.lock().unwrap_or_else(|error| error.into_inner());
-        state.prompts.iter().any(|prompt| {
-            prompt
-                .upgrade()
-                .is_some_and(|prompt| !prompt.cancelled.load(Ordering::SeqCst))
-        })
-    }
-
-    pub(super) fn cancel(&self) -> bool {
-        let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
-        let already_cancelled = state.cancelled;
-        state.cancelled = true;
-        state.prompts.retain(|prompt| {
-            let Some(prompt) = prompt.upgrade() else {
-                return false;
-            };
-            prompt.cancel();
-            true
-        });
-        !already_cancelled
-    }
-
-    /// Admit a fresh scope at ingress. The queued request owns it until
-    /// dispatch, then the running prompt owns it. Stop is monotonic for every
-    /// admitted scope; a later admission cannot revive an earlier prompt.
-    pub(super) fn prepare_prompt(&self) -> Arc<PromptCancellation> {
-        let prompt = Arc::new(PromptCancellation::default());
-        let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
-        state.prompts.retain(|prompt| prompt.strong_count() > 0);
-        state.prompts.push(Arc::downgrade(&prompt));
-        state.cancelled = false;
-        prompt
-    }
 }
 
 pub(super) struct Session {
@@ -1057,9 +1012,6 @@ pub(super) fn prepare_session_request(
         .map(|result| PreparedSessionRequest::Cancel { result })
         .unwrap_or_default();
     }
-    if msg.get("method").and_then(|value| value.as_str()) != Some("session/prompt") {
-        return PreparedSessionRequest::Unprepared;
-    }
     let Some(session_id) = msg
         .get("params")
         .and_then(|params| params.get("sessionId"))
@@ -1067,9 +1019,16 @@ pub(super) fn prepare_session_request(
     else {
         return PreparedSessionRequest::Unprepared;
     };
-    lookup_session_cancellation(cancellations, session_id)
-        .map(|cancellation| PreparedSessionRequest::Prompt(cancellation.prepare_prompt()))
-        .unwrap_or_default()
+    let Some(cancellation) = lookup_session_cancellation(cancellations, session_id) else {
+        return PreparedSessionRequest::Unprepared;
+    };
+    match msg.get("method").and_then(|value| value.as_str()) {
+        Some("session/prompt") => PreparedSessionRequest::Prompt(cancellation.prepare_prompt()),
+        Some("session/close" | "session/stop") => PreparedSessionRequest::Close {
+            _admission: cancellation.prepare_close(),
+        },
+        _ => PreparedSessionRequest::Unprepared,
+    }
 }
 
 #[cfg(test)]
@@ -1389,6 +1348,7 @@ mod budget_rearm_tests {
 
         let controls = ConcurrentSessionControls::default();
         let control = ConcurrentSessionControl::new();
+        let _prompt = control.cancellation.prepare_prompt();
         control.set_prompt_active(true);
         controls.register(&session_id, control);
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();

@@ -120,9 +120,11 @@ async fn queued_controls_respond_before_prompt_host_acknowledgement() {
                 // Idle controls must not overtake an earlier close. This also
                 // rejects a fix that simply preempts every known session.
                 send(&tx, 7, "session/close", json!({"sessionId":session}));
-                send(&tx, 8, "session/takeover", json!({"sessionId":session, "clientId":"desktop"}));
+                send(&tx, 8, "session/prompt", json!({"sessionId":session, "prompt":[{"type":"text", "text":"closed"}]}));
+                send(&tx, 9, "session/takeover", json!({"sessionId":session, "clientId":"desktop"}));
                 assert!(response(&mut rx, 7).await.get("error").is_none());
                 assert_eq!(response(&mut rx, 8).await["error"]["code"], -32602);
+                assert_eq!(response(&mut rx, 9).await["error"]["code"], -32602);
                 drop(tx);
                 harn_clock::test_support::within("control ingress shutdown", server)
                     .await

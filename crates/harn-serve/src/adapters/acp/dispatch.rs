@@ -191,6 +191,7 @@ impl AcpServer {
                 self.handle_session_cancel_tool_call(&id, &params);
             }
             "session/close" => {
+                let _close_admission = preparation;
                 if self.reject_unauthenticated(&id) {
                     return;
                 }
@@ -228,6 +229,7 @@ impl AcpServer {
                 self.handle_session_heartbeat(&id, &params);
             }
             "session/stop" => {
+                let _close_admission = preparation;
                 if self.reject_unauthenticated(&id) {
                     return;
                 }
