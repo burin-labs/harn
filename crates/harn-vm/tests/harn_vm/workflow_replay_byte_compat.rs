@@ -178,12 +178,13 @@ pipeline default(harness: Harness) {{
     normalize_attempt_timestamps(&mut live_attempts);
     normalize_attempt_timestamps(&mut fixture_attempts);
     if let Some(refusal) = crate::support::sandbox_host::unavailable_worktree_sandbox() {
+        let error = refusal.into_error().to_string();
         let expected = (1..=3)
             .map(|attempt| {
                 serde_json::json!({
                     "attempt": attempt,
                     "branch": "error",
-                    "error": refusal.to_string(),
+                    "error": error,
                     "finished_at": "<ts>",
                     "outcome": "error",
                     "started_at": "<ts>",

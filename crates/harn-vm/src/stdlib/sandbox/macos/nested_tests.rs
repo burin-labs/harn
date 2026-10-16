@@ -122,7 +122,12 @@ impl Nested {
             return false;
         };
         assert_eq!(self.report["spawned"], false, "{}", self.report);
-        assert_eq!(self.report["error"], refusal.to_string(), "{}", self.report);
+        assert_eq!(
+            self.report["error"],
+            refusal.into_error().to_string(),
+            "{}",
+            self.report
+        );
         assert!(!self.inside_written && !self.outside_written);
         true
     }
