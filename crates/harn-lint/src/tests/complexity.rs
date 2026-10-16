@@ -4,6 +4,42 @@
 use super::*;
 
 #[test]
+fn callable_defaults_count_without_charging_nested_declarations_twice() {
+    let source = r"
+fn outer(flag: bool) {
+  const local = { value: bool = (flag && true) -> value }
+  fn inner() {
+    if true { return 1 }
+    return 0
+  }
+  return local()
+}
+";
+    let program = Parser::new(Lexer::new(source).tokenize().unwrap())
+        .parse()
+        .unwrap();
+    let options = LintOptions {
+        complexity_threshold: Some(1),
+        ..Default::default()
+    };
+    let diagnostics = lint_with_options(&program, &[], Some(source), &HashSet::new(), &options);
+    let messages: Vec<_> = diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic.rule == "cyclomatic-complexity")
+        .map(|diagnostic| diagnostic.message.as_str())
+        .collect();
+    assert!(
+        messages.contains(&"function `outer` has cyclomatic complexity 2 (> 1)"),
+        "{messages:?}"
+    );
+    assert_eq!(messages.len(), 2, "{messages:?}");
+    assert!(
+        messages.contains(&"function `inner` has cyclomatic complexity 2 (> 1)"),
+        "{messages:?}"
+    );
+}
+
+#[test]
 fn test_cyclomatic_complexity_quiet_below_default_threshold() {
     // 11 ifs → score 12. Under the 10-era default this would warn;
     // with the bumped default of 25 it should stay quiet.

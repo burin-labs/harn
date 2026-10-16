@@ -3443,12 +3443,16 @@ dependencies = [
 [[package]]
 name = "harn-builtin-meta"
 version = "0.10.167"
+dependencies = [
+ "harn-source-fingerprint-build",
+]
 
 [[package]]
 name = "harn-builtin-registry"
 version = "0.10.167"
 dependencies = [
  "harn-builtin-meta",
+ "harn-source-fingerprint-build",
 ]
 
 [[package]]
@@ -3458,6 +3462,7 @@ dependencies = [
  "harn-builtin-macros",
  "harn-builtin-meta",
  "harn-builtin-registry",
+ "harn-source-fingerprint-build",
  "proc-macro2",
  "syn 3.0.6",
 ]
@@ -3501,6 +3506,8 @@ dependencies = [
  "harn-rules-hostlib",
  "harn-serve",
  "harn-skills",
+ "harn-source-fingerprint",
+ "harn-source-fingerprint-build",
  "harn-stdlib",
  "harn-stdlib-artifacts",
  "harn-test-runner",
@@ -3555,6 +3562,7 @@ version = "0.10.167"
 dependencies = [
  "harn-modules",
  "harn-parser",
+ "harn-source-fingerprint-build",
  "harn-stdlib",
  "harn-vm",
  "serde",
@@ -3756,6 +3764,7 @@ dependencies = [
  "harn-lexer",
  "harn-parser",
  "harn-secret-catalog",
+ "harn-source-fingerprint-build",
  "hex",
  "regex",
  "serde",
@@ -3771,6 +3780,7 @@ version = "0.10.167"
 name = "harn-lexer"
 version = "0.10.167"
 dependencies = [
+ "harn-source-fingerprint-build",
  "serde",
 ]
 
@@ -3786,6 +3796,7 @@ dependencies = [
  "harn-parser",
  "harn-prompt-syntax",
  "harn-rules",
+ "harn-source-fingerprint-build",
  "harn-vm",
  "libloading 0.9.0",
  "tempfile",
@@ -3871,6 +3882,7 @@ dependencies = [
  "harn-flock",
  "harn-lexer",
  "harn-parser",
+ "harn-source-fingerprint-build",
  "harn-stdlib",
  "harn-stdlib-catalog",
  "serde",
@@ -3934,6 +3946,7 @@ dependencies = [
  "harn-modules",
  "harn-parser",
  "harn-rules",
+ "harn-source-fingerprint-build",
  "harn-vm",
  "hex",
  "jmespath",
@@ -3964,6 +3977,7 @@ dependencies = [
  "harn-builtin-registry",
  "harn-capability-contracts",
  "harn-lexer",
+ "harn-source-fingerprint-build",
  "imbl",
  "serde",
  "serde_json",
@@ -4116,6 +4130,23 @@ dependencies = [
 name = "harn-skills"
 version = "0.10.167"
 dependencies = [
+ "tempfile",
+]
+
+[[package]]
+name = "harn-source-fingerprint"
+version = "0.10.167"
+dependencies = [
+ "sha2-const",
+]
+
+[[package]]
+name = "harn-source-fingerprint-build"
+version = "0.10.167"
+dependencies = [
+ "harn-source-fingerprint",
+ "serde_json",
+ "sha2 0.11.0",
  "tempfile",
 ]
 
@@ -4334,6 +4365,8 @@ dependencies = [
  "harn-parser",
  "harn-prompt-syntax",
  "harn-session-store",
+ "harn-source-fingerprint",
+ "harn-source-fingerprint-build",
  "harn-stdlib",
  "harn-stdlib-catalog",
  "hex",
@@ -8129,6 +8162,12 @@ dependencies = [
  "cpufeatures 0.3.0",
  "digest 0.11.3",
 ]
+
+[[package]]
+name = "sha2-const"
+version = "0.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dbb83f144cbda94be5d2278400eee9e0a03eb68b5504349943655b7b1603c4af"
 
 [[package]]
 name = "sha3"

@@ -484,6 +484,21 @@ impl AcpServer {
         if session.budget == budget {
             return Ok(false);
         }
+        if let Some(quota) = &self.machine_spend_quota {
+            let effective = match &budget {
+                SessionBudget::Inherit => self.default_budget.clone().unwrap_or_default(),
+                SessionBudget::Unlimited => BudgetSpec::default(),
+                SessionBudget::Custom(spec) => spec.clone(),
+            };
+            quota
+                .record_session_budget_update(
+                    session_id,
+                    "authenticated-acp-client",
+                    harn_vm::llm::BudgetCeilingUpdate::from_ceiling(effective.llm_cost_usd),
+                    harn_vm::llm::BudgetCeilingUpdate::from_ceiling(effective.llm_tokens),
+                )
+                .map_err(|error| error.to_string())?;
+        }
         session.budget = budget;
         Ok(true)
     }

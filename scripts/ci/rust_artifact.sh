@@ -235,6 +235,7 @@ verify_cli_manifest() {
   require_manifest_value "$destination/manifest" rustflags_sha256 "$(printf '%s' "$EXPECTED_RUSTFLAGS" | sha256sum | cut -d ' ' -f 1)"
   require_manifest_value "$destination/manifest" dev_debug_sha256 "$(printf '%s' "$EXPECTED_DEV_DEBUG" | sha256sum | cut -d ' ' -f 1)"
   require_manifest_value "$destination/manifest" harn_sha256 "$(sha256 "$destination/harn")"
+  require_manifest_value "$destination/manifest" aot_generator_sha256 "$(sha256 "$destination/harn-cli-aot-gen")"
   require_manifest_object_id "$destination/manifest" build_freshness
 }
 
@@ -283,13 +284,22 @@ prepare_harn_cli() {
   # local content receipts without pretending the producer's absolute Cargo
   # dep-info paths can survive artifact transfer.
   export HARN_BUILD_FRESHNESS_ID="$commit"
-  cargo build --locked "${profile_args[@]}" --bin harn
+  if [[ "$profile" == "$SHARED_CLI_PROFILE" ]]; then
+    cargo build --locked "${profile_args[@]}" -p harn-cli -p harn-cli-aot-gen \
+      --bin harn --bin harn-cli-aot-gen
+  else
+    cargo build --locked "${profile_args[@]}" --bin harn
+  fi
   if [[ ! -x "$target_dir/$profile_dir/harn" ]]; then
     echo "error: build did not produce the required harn CLI at $target_dir/$profile_dir/harn" >&2
     exit 1
   fi
   install -m 0755 "$target_dir/$profile_dir/harn" "$staging/harn"
   write_rust_manifest "$staging" "$commit" "$(rustc_identity_sha256)" "$commit" "$profile"
+  if [[ "$profile" == "$SHARED_CLI_PROFILE" ]]; then
+    install -m 0755 "$target_dir/$profile_dir/harn-cli-aot-gen" "$staging/harn-cli-aot-gen"
+    echo "aot_generator_sha256=$(sha256 "$staging/harn-cli-aot-gen")" >> "$staging/manifest"
+  fi
 }
 
 pack_cli_bundle() {
@@ -297,8 +307,8 @@ pack_cli_bundle() {
   local output=$2
   (
     cd "$staging"
-    sha256sum harn manifest > CLI_SHA256SUMS
-    tar --zstd -cf "$output.tmp" harn manifest CLI_SHA256SUMS
+    sha256sum harn harn-cli-aot-gen manifest > CLI_SHA256SUMS
+    tar --zstd -cf "$output.tmp" harn harn-cli-aot-gen manifest CLI_SHA256SUMS
   )
   mv "$output.tmp" "$output"
 }
@@ -359,7 +369,7 @@ restore_cli_bundle() {
   fi
 
   listing="$(tar --zstd -tf "$bundle" | LC_ALL=C sort)"
-  if [[ "$listing" != $'CLI_SHA256SUMS\nharn\nmanifest' ]]; then
+  if [[ "$listing" != $'CLI_SHA256SUMS\nharn\nharn-cli-aot-gen\nmanifest' ]]; then
     echo "error: CLI artifact has an unexpected file set" >&2
     printf '%s\n' "$listing" >&2
     exit 1
@@ -372,12 +382,13 @@ restore_cli_bundle() {
     sha256sum -c CLI_SHA256SUMS
   )
   verify_cli_manifest "$destination" "$commit"
-  if [[ ! -x "$destination/harn" ]]; then
-    echo "error: restored harn CLI is not executable" >&2
+  if [[ ! -x "$destination/harn" || ! -x "$destination/harn-cli-aot-gen" ]]; then
+    echo "error: restored Harn CLI and AOT generator must be executable" >&2
     exit 1
   fi
   if [[ -n "$github_env" ]]; then
     printf 'HARN_BIN=%s\n' "$(cd "$destination" && pwd -P)/harn" >> "$github_env"
+    printf 'HARN_RELEASE_CLI_AOT_GEN_BIN=%s\n' "$(cd "$destination" && pwd -P)/harn-cli-aot-gen" >> "$github_env"
     printf 'SOURCE_GATE_CI_BINARY_COMMIT=%s\n' "$commit" >> "$github_env"
     printf 'SOURCE_GATE_CI_BINARY_SHA256=%s\n' "$(sha256 "$destination/harn")" >> "$github_env"
     printf 'SOURCE_GATE_CI_BINARY_BUILD_FRESHNESS_ID=%s\n' \

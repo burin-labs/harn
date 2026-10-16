@@ -10,6 +10,9 @@ use std::path::Path;
 use harn_modules::WildcardResolution;
 use harn_parser::{DiagnosticCode as Code, SNode};
 
+/// Crate-local source contribution to compiler and check cache identities.
+pub const SOURCE_FINGERPRINT: &str = env!("HARN_SOURCE_FINGERPRINT");
+
 mod complexity;
 mod decls;
 mod diagnostic;

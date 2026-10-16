@@ -1036,6 +1036,8 @@ unreserved attempt is refused. Independent top-level executions have separate
 ledgers. Allocate disjoint budgets to separate processes: for an experiment,
 actor and grader allocations across both arms must sum to the whole allowance.
 The runtime does not turn separate process budgets into a shared batch cap.
+For a runnable actor/grader sequence with disjoint process allocations, see
+[Run an experiment inside one allowance](../cookbooks/conservative-experiment.md).
 
 Full, streaming, offthread, retry, and fallback attempts use the same admission
 boundary. Complete, consistent provider token counters release only the unused
@@ -1069,6 +1071,9 @@ admission even when missing usage prevents complete settlement.
 Denials retain the terminal `budget_exceeded` contract and add a typed
 `admission_reason`, such as `unknown_pricing`, `unsupported_billing_shape`, or
 `insufficient_allowance`.
+`harness.llm.call_safe(...).error` declares both `admission_reason` and
+`provider_call_count` as optional fields, so scripts can read the reason and
+measured dispatch count directly.
 
 These are reservation facts, separate from the existing actual-usage totals
 and their unknown-usage indicators; `settled_upper_usd` is not billed spend.

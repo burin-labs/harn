@@ -4678,6 +4678,67 @@ pub struct HarnPlanDocument {
 /// Open vocabulary: unit variants are the values this binding was generated from, and `Unrecognized` carries any other string verbatim so a newer Harn never breaks an older consumer.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(from = "String", into = "String")]
+pub enum HarnMachineSpendPeriod {
+    Day,
+    Month,
+    Lifetime,
+    /// A wire value outside the vocabulary this binding was generated from. Preserved verbatim.
+    Unrecognized(String),
+}
+
+impl HarnMachineSpendPeriod {
+    /// Every value this binding was generated from, in wire order.
+    /// Excludes the `Unrecognized` escape.
+    pub const KNOWN: &'static [Self] = &[Self::Day, Self::Month, Self::Lifetime];
+
+    /// The JSON wire string for this value.
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Day => "day",
+            Self::Month => "month",
+            Self::Lifetime => "lifetime",
+            Self::Unrecognized(value) => value.as_str(),
+        }
+    }
+
+    /// Parse a wire string. An unrecognized value is preserved rather than rejected.
+    pub fn from_wire(value: &str) -> Self {
+        match value {
+            "day" => Self::Day,
+            "month" => Self::Month,
+            "lifetime" => Self::Lifetime,
+            other => Self::Unrecognized(other.to_string()),
+        }
+    }
+
+    /// Whether this value is part of the vocabulary this binding was generated from.
+    pub fn is_known(&self) -> bool {
+        !matches!(self, Self::Unrecognized(_))
+    }
+}
+
+impl From<String> for HarnMachineSpendPeriod {
+    fn from(value: String) -> Self {
+        Self::from_wire(&value)
+    }
+}
+
+impl From<HarnMachineSpendPeriod> for String {
+    fn from(value: HarnMachineSpendPeriod) -> Self {
+        value.as_str().to_string()
+    }
+}
+
+impl std::fmt::Display for HarnMachineSpendPeriod {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// Value-free inference admission vocabulary owned by harn_vm.
+/// Open vocabulary: unit variants are the values this binding was generated from, and `Unrecognized` carries any other string verbatim so a newer Harn never breaks an older consumer.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
 pub enum HarnInferenceAdmissionStatus {
     Admitted,
     Denied,
@@ -4976,6 +5037,16 @@ impl std::fmt::Display for HarnInferenceAdmissionDataControlsRefusal {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(self.as_str())
     }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnMachineSpendExhaustion {
+    pub period: HarnMachineSpendPeriod,
+    pub limit_microusd: i64,
+    pub reserved_microusd: i64,
+    pub remaining_microusd: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reset_at_unix_ms: Option<i64>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

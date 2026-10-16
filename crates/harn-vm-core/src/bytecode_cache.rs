@@ -120,9 +120,10 @@ pub const SCHEMA_VERSION: u32 = 16;
 /// are rejected on load.
 pub const HARN_VERSION: &str = env!("CARGO_PKG_VERSION");
 
-/// Build-time fingerprint of the compiler front-end — the lexer, parser, IR,
-/// and code generator — computed in `build.rs` from those crates' source and
-/// baked in via `cargo:rustc-env`. Folded into the cache key so a compiler
+/// Compiled fingerprint of the compiler and derived-interface source owners.
+/// Each crate hashes its own inputs; this composition uses the actual linked
+/// dependency contributions in workspaces and published packages alike.
+/// Folded into the cache key so a compiler
 /// change that alters emitted bytecode for unchanged source invalidates stale
 /// entries automatically, within a single version, with no manual cache wipe.
 /// `HARN_VERSION` only busts the cache across release bumps; this closes the
@@ -134,13 +135,13 @@ pub const HARN_VERSION: &str = env!("CARGO_PKG_VERSION");
 /// hash (#5610). Folding it into the context hash as well is what keeps two
 /// builds' module artifacts on distinct filenames rather than overwriting each
 /// other, since `module_filename` is derived from that hash.
-pub const CODEGEN_FINGERPRINT: &str = env!("HARN_CODEGEN_FINGERPRINT");
+pub const CODEGEN_FINGERPRINT: &str = COMPILER_SOURCE_IDENTITY.fingerprint().as_str();
 
 mod compiler_contracts;
 #[cfg(test)]
 #[path = "bytecode_cache_contract_tests.rs"]
 mod contract_tests;
-pub use compiler_contracts::compiler_fingerprint;
+pub use compiler_contracts::{compiler_fingerprint, COMPILER_SOURCE_IDENTITY};
 
 /// Conventional extension for entry-chunk cache files.
 pub const CACHE_EXTENSION: &str = "harnbc";

@@ -1,0 +1,80 @@
+import {
+  FeatureSnapshotRow,
+  feature_drift,
+  parse_feature_snapshot,
+  render_feature_drift,
+} from "./feature_drift"
+
+/** Strip Cargo tree decorations and path-dependency roots before comparing features. */
+pub fn normalize_feature_tree(text: string) -> list<FeatureSnapshotRow> {
+  let lines: list<string> = []
+  for line in text.split("\n") {
+    const plain = regex_replace(r"^[^a-zA-Z]*", "", line)
+    const undecorated = regex_replace(r" \(\*\)$", "", plain)
+    lines = lines + [regex_replace(r" \([^)]*/[^)]*\)", "", undecorated)]
+  }
+  const rows = parse_feature_snapshot(join(lines, "\n"))
+  if len(rows) == 0 {
+    throw "Cargo feature snapshot measured no packages"
+  }
+  return rows
+}
+
+fn checked(process: HarnessProcess, root: string, program: string, args: list<string>) -> string {
+  const result = process.run({program: program, args: args, cwd: root})
+  if !result.success {
+    throw program + " failed: " + result.stderr
+  }
+  return result.stdout
+}
+
+fn snapshot(process: HarnessProcess, root: string) -> list<FeatureSnapshotRow> {
+  return normalize_feature_tree(
+    checked(
+      process,
+      root,
+      "cargo",
+      ["tree", "--workspace", "--target", "all", "-e", "normal,build", "-f", "{p} {f}"],
+    ),
+  )
+}
+
+fn main(harness: Harness) {
+  if len(argv) > 1 {
+    throw "usage: check_feature_drift.harn [baseline-ref]"
+  }
+  const baseline_ref = argv[0] ?? "origin/main"
+  const root = checked(harness.process, harness.fs.cwd(), "git", ["rev-parse", "--show-toplevel"])
+    .trim()
+  checked(harness.process, root, "git", ["rev-parse", "--verify", "--quiet", baseline_ref])
+  const temporary = harness.fs.mkdtemp_in_workspace("feature-drift-")
+  const baseline_tree = path_join(temporary, "baseline")
+  defer {
+    harness.fs.delete(temporary)
+  }
+  harness.stdio.eprintln("resolving current Cargo features")
+  const current = snapshot(harness.process, root)
+  checked(
+    harness.process,
+    root,
+    "git",
+    ["worktree", "add", "--detach", baseline_tree, baseline_ref],
+  )
+  defer {
+    const cleanup = harness.process.run(
+      {program: "git", args: ["worktree", "remove", "--force", baseline_tree], cwd: root},
+    )
+    if !cleanup.success {
+      throw "could not remove temporary feature baseline: " + cleanup.stderr
+    }
+  }
+  harness.stdio.eprintln("resolving baseline Cargo features: " + baseline_ref)
+  const baseline = snapshot(harness.process, baseline_tree)
+  const drift = feature_drift(baseline, current)
+  harness.stdio.eprintln(
+    "packages: current=" + to_string(len(current)) + " baseline=" + to_string(len(baseline))
+      + " drift="
+      + to_string(len(drift)),
+  )
+  harness.stdio.println(render_feature_drift(drift, baseline_ref))
+}

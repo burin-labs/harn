@@ -1074,6 +1074,7 @@ export interface HarnACPPromptErrorData {
   code?: string
   retryable?: boolean
   retryAfterMs?: number
+  machineSpend?: HarnMachineSpendExhaustion
   provider?: string
   model?: string
 }
@@ -2433,6 +2434,13 @@ export interface HarnPlanDocument {
   created_at: string
   updated_at: string
 }
+export const HARN_MACHINE_SPEND_PERIOD_VALUES = [
+  "day",
+  "month",
+  "lifetime",
+] as const
+export type HarnMachineSpendPeriod = (typeof HARN_MACHINE_SPEND_PERIOD_VALUES)[number]
+
 export const HARN_INFERENCE_ADMISSION_STATUS_VALUES = [
   "admitted",
   "denied",
@@ -2465,6 +2473,14 @@ export const HARN_INFERENCE_ADMISSION_DATA_CONTROLS_REFUSAL_VALUES = [
   "training_without_control",
 ] as const
 export type HarnInferenceAdmissionDataControlsRefusal = (typeof HARN_INFERENCE_ADMISSION_DATA_CONTROLS_REFUSAL_VALUES)[number]
+
+export interface HarnMachineSpendExhaustion {
+  period: HarnMachineSpendPeriod
+  limit_microusd: number
+  reserved_microusd: number
+  remaining_microusd: number
+  reset_at_unix_ms?: number | null
+}
 
 export interface HarnInferenceAdmissionBoundary {
   reach: HarnInferenceAdmissionReach

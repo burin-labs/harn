@@ -45,6 +45,7 @@ mod connect_legacy_recovery;
 mod connect_secret_env_redaction;
 #[cfg(unix)]
 mod connect_secret_store;
+mod conservative_experiment;
 mod coverage_cli;
 mod decision_route_admission;
 mod demo_cli_e2e;

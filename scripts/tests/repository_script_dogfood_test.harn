@@ -1,0 +1,224 @@
+import { command_cancel, command_run, command_wait, command_wait_for_output } from "std/command"
+import { micro_options } from "../bench_vm_micro"
+import { feature_check_arguments } from "../check_all_features"
+import { baseline_options, counted_rows, diagnostic_rows } from "../check_conformance_lint_baseline"
+import { normalize_feature_tree } from "../check_feature_drift"
+
+pipeline test_diagnostic_collection_requires_exact_complete_census() {
+  assert_eq(
+    baseline_options(["--root", "conformance/tests", "--update"]),
+    {root: "conformance/tests", update: true},
+  )
+  assert(
+    is_err(
+      try {
+        baseline_options(["--root"])
+      },
+    ),
+  )
+  const clean = {
+    schemaVersion: 1,
+    ok: true,
+    error: nil,
+    warnings: [],
+    data: {
+      files: [{path: "/workspace/a.harn", status: "ok", diagnostics: []}],
+      summary: {ok: 1, warnings: 0, errors: 0, diagnostics: 0},
+    },
+  }
+  assert_eq(diagnostic_rows(json_stringify(clean), 0, ["a.harn"], "/workspace"), [])
+  assert(
+    is_err(
+      try {
+        diagnostic_rows(json_stringify(clean), 17, ["a.harn"], "/workspace")
+      },
+    ),
+  )
+  assert(
+    is_err(
+      try {
+        diagnostic_rows(json_stringify(clean), 0, ["a.harn", "missing.harn"], "/workspace")
+      },
+    ),
+  )
+  assert(
+    is_err(
+      try {
+        diagnostic_rows(json_stringify(clean), 0, ["other.harn"], "/workspace")
+      },
+    ),
+  )
+  assert(
+    is_err(
+      try {
+        diagnostic_rows("{}", 0, ["a.harn"], "/workspace")
+      },
+    ),
+  )
+  assert_eq(
+    counted_rows(["a.harn\tHARN-TEST", "a.harn\tHARN-TEST", "b.harn\tHARN-OTHER"]),
+    ["2\ta.harn\tHARN-TEST", "1\tb.harn\tHARN-OTHER"],
+  )
+}
+
+pipeline test_feature_snapshots_ignore_paths_but_refuse_no_measurement() {
+  const left = normalize_feature_tree(
+    "├── example v1.0.0 (/old/path) alpha,beta\n└── example v1.0.0 (/old/path) alpha,beta (*)\n",
+  )
+  const right = normalize_feature_tree("example v1.0.0 (/new/path) alpha,beta\n")
+  assert_eq(left, right)
+  assert_eq(len(left), 1)
+  assert(
+    is_err(
+      try {
+        normalize_feature_tree("")
+      },
+    ),
+  )
+  assert(
+    is_err(
+      try {
+        normalize_feature_tree("Cargo resolution failed")
+      },
+    ),
+  )
+}
+
+pipeline test_microbench_keeps_criterion_argv_literal() {
+  const options = micro_options(
+    [
+      "--bench",
+      "bench_vm_hot_paths",
+      "--target-dir",
+      "target with spaces",
+      "--",
+      "a; $(touch unsafe)",
+    ],
+  )
+  assert_eq(options.target, "target with spaces")
+  assert_eq(options.filters, ["a; $(touch unsafe)"])
+  assert(micro_options(["--help"]).help)
+  assert(
+    is_err(
+      try {
+        micro_options(["--bench"])
+      },
+    ),
+  )
+  assert_eq(len(feature_check_arguments()), 2)
+  assert(unwrap(feature_check_arguments()[0]).contains("--all-features"))
+  assert(unwrap(feature_check_arguments()[1]).contains("full,computer"))
+}
+
+pipeline test_microbench_cli_launches_literal_argv_and_preserves_failure(harness: Harness) {
+  const root = path_normalize(path_join(harness.fs.source_dir(), "../.."))
+  const target = harness.fs.mkdtemp_in_workspace("microbench-target-")
+  const binary = harness.env.get("HARN_BIN") ?? "harn"
+  const path = path_join(root, "scripts/tests/fixtures/script-dogfood") + ":"
+    + (harness.env.get("PATH") ?? "")
+  const args = [
+    "run",
+    "--no-sandbox",
+    path_join(root, "scripts/bench_vm_micro.harn"),
+    "--",
+    "--target-dir",
+    target,
+    "--",
+    "literal; $(touch should-not-run)",
+  ]
+  const success = harness.process.run({program: binary, args: args, cwd: root, env: {PATH: path}})
+  assert_eq(success.exit_code, 0)
+  assert(success.stdout.contains("arg=<literal; $(touch should-not-run)>"))
+  assert(success.stdout.contains("target=<" + target + ">"))
+  assert(success.stdout.contains("lto=<false>"))
+  const failure = harness.process.run(
+    {program: binary, args: args, cwd: root, env: {PATH: path, HARN_EXT_DOGFOOD_CARGO_EXIT: "17"}},
+  )
+  assert_eq(failure.exit_code, 17)
+  assert(!harness.fs.exists(path_join(root, "should-not-run")))
+}
+
+pipeline test_collector_cli_preserves_hidden_file_and_ignored_fixture_census(harness: Harness) {
+  const repo = path_normalize(path_join(harness.fs.source_dir(), "../.."))
+  const root = harness.fs.mkdtemp_in_workspace("collector-census-")
+  const baseline = path_join(root, "baseline.tsv")
+  harness.fs.write_text(
+    path_join(root, ".harn"),
+    "fn main(harness: Harness) { harness.stdio.println(\"fixture\") }\n",
+  )
+  const binary = harness.env.get("HARN_BIN") ?? "harn"
+  const args = [
+    "run",
+    "--no-sandbox",
+    path_join(repo, "scripts/check_conformance_lint_baseline.harn"),
+    "--",
+    "--root",
+    root,
+    "--update",
+  ]
+  const env = {HARN_BIN: binary, CONFORMANCE_LINT_BASELINE: baseline}
+  const hidden = harness.process.run({program: binary, args: args, cwd: repo, env: env})
+  if !hidden.success {
+    throw hidden.stderr
+  }
+  assert_eq(hidden.exit_code, 0)
+  assert(hidden.stdout.contains("sources=1"))
+  const first = harness.fs.read_text(baseline)
+  harness.fs.write_text(path_join(root, ".gitignore"), "ignored.harn\n")
+  harness.fs.write_text(
+    path_join(root, "ignored.harn"),
+    "fn main(harness: Harness) { harness.stdio.println(\"fixture\") }\n",
+  )
+  const ignored = harness.process.run({program: binary, args: args, cwd: repo, env: env})
+  assert_eq(ignored.exit_code, 0)
+  assert(ignored.stdout.contains("sources=2"))
+  assert_eq(harness.fs.read_text(baseline), first)
+}
+
+pipeline test_microbench_output_reaches_the_terminal_before_the_child_can_exit(harness: Harness) {
+  const repo = path_normalize(path_join(harness.fs.source_dir(), "../.."))
+  const target = harness.fs.mkdtemp_in_workspace("live-microbench-")
+  const fifo = path_join(target, "release.fifo")
+  assert(harness.process.run({program: "mkfifo", args: [fifo]}).success)
+  const binary = harness.env.get("HARN_BIN") ?? "harn"
+  const path = path_join(repo, "scripts/tests/fixtures/script-dogfood") + ":"
+    + (harness.env.get("PATH") ?? "")
+  const child = command_run(
+    harness.tools,
+    {
+      mode: "argv",
+      argv: [
+        binary,
+        "run",
+        "--no-sandbox",
+        path_join(repo, "scripts/bench_vm_micro.harn"),
+        "--",
+        "--target-dir",
+        target,
+      ],
+      cwd: repo,
+      env: {PATH: path, HARN_EXT_DOGFOOD_FIFO: fifo},
+      background: true,
+    },
+  )
+  defer {
+    command_cancel(harness.tools, child)
+  }
+  const observed = command_wait_for_output(
+    harness.tools,
+    child,
+    "live-before-exit",
+    {timeout_ms: 10000},
+  )
+  assert(observed.matched)
+  assert_eq(observed.result.status, "running")
+  assert(
+    harness.process.run(
+      {
+        program: "bash",
+        args: [path_join(repo, "scripts/tests/fixtures/script-dogfood/release_fifo.sh"), fifo],
+      },
+    ).success,
+  )
+  assert(command_wait(harness.tools, child, {timeout_ms: 10000}).success)
+}

@@ -356,10 +356,10 @@ jobs:
 
   package-audit:
     name: Verify publishable crates
-    needs: [changes]
+    needs: [changes, rust-cli]
     # Packaging belongs to the post-merge tier; full-suite changes prove it
     # before landing, and every main push proves it before release.
-    if: needs.changes.outputs.package_audit == 'true' && needs.changes.outputs.post_merge_tier != 'true'
+    if: ${{ !cancelled() && needs.changes.outputs.package_audit == 'true' && needs.changes.outputs.post_merge_tier != 'true' && needs.rust-cli.result == 'success' }}
     runs-on: ubuntu-24.04
     # Hang tripwire, not a perf budget (check-test-case-performance owns perf).
     # Hosted `ubuntu-24.04` completes this lane in up to ~16m — the prior 20m
@@ -371,10 +371,9 @@ jobs:
       contents: read
       actions: write
     env:
-      # Keep this lane on the combined Harn/AOT-generator Cargo invocation.
-      # Supplying a warmed HARN_BIN selects the narrow release-gate path and
-      # forfeits feature unification across the shared cold dependency graph.
-      HARN_BIN: ""
+      # The exact-commit producer supplies both executables. Cargo here only
+      # verifies the extracted publishable packages.
+      HARN_BIN_NO_BUILD: "1"
       HARN_RUNNER_TIER: github-hosted
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -400,17 +399,24 @@ jobs:
           # The serialized refresh owner admits and verifies persistent saves.
           # Parallel main CI consumers must not upload outside its cache budget.
           save: "false"
+      - name: Download shared Harn binary
+        uses: ./.github/actions/download-artifact-with-retry
+        with:
+          name: harn-cli.tar.zst
+          path: ${{ runner.temp }}
+          skip-decompress: true
+      - name: Verify shared Harn binary
+        run: >-
+          ./scripts/ci/rust_artifact.sh restore-cli
+          "$RUNNER_TEMP/harn-cli.tar.zst"
+          "$RUNNER_TEMP/harn-cli"
+          "$GITHUB_SHA"
+          "$GITHUB_ENV"
       - name: Check published crate packages
         id: release-audit-package
-        # The verifier builds Harn and its AOT generator in one Cargo invocation
-        # so their shared feature graph compiles once, then checks every exact
-        # publishable archive in one temporary Cargo workspace.
+        # The verified toolset generates and checks AOT inputs without another
+        # tool build. All exact publishable archives still compile together.
         run: ./scripts/verify_crate_packages.sh
-      # Name the commit this target was built from, for the next restore's
-      # workspace crate reuse. Only a fully successful build may claim it.
-      - name: Record the workspace cache source
-        if: success()
-        run: ./scripts/ci/reuse_workspace_crates.sh record
   # A public API break in a published crate needs a breaking fragment with its
   # migration. This proof shares nothing with package verification but its
   # trigger and warm dependency cache, so it runs beside it: in sequence the two
@@ -571,8 +577,8 @@ jobs:
   # the next release.
   release-residual-audit:
     name: Release residual audit
-    needs: [changes]
-    if: needs.changes.outputs.rust == 'true' && needs.changes.outputs.release_residual == 'true'
+    needs: [changes, rust-cli]
+    if: ${{ !cancelled() && needs.changes.outputs.rust == 'true' && needs.changes.outputs.release_residual == 'true' && needs.rust-cli.result == 'success' }}
     runs-on: ubuntu-24.04
     # Hang backstop, not a performance budget.
     timeout-minutes: 45
@@ -594,26 +600,6 @@ jobs:
           packages: ripgrep
           check-command: rg
       - uses: ./.github/actions/rust-toolchain
-      # A release generates this ignored payload before its audit, and the
-      # candidate build uploads it beside the archives. Generate it the same
-      # way so the generated-files lane checks real bytes.
-      #
-      # The audit's generated-files lane runs `make check-cli-aot` again, and
-      # the release gate gives Cargo its own target directory, so without a
-      # prebuilt generator that check recompiled it from cold: about 250s of a
-      # 300s lane that otherwise only reads files. Hand the gate the generator
-      # this step just built from the same commit.
-      - name: Generate the CLI AOT payload
-        run: |
-          make gen-cli-aot
-          make check-cli-aot
-          generator="$PWD/target/debug/harn-cli-aot-gen"
-          test -x "$generator"
-          echo "HARN_RELEASE_CLI_AOT_GEN_BIN=$generator" >> "$GITHUB_ENV"
-      - name: Wait for shared Harn binary
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: ./scripts/ci/wait_for_run_artifacts.sh harn-cli.tar.zst
       - name: Download shared Harn binary
         uses: ./.github/actions/download-artifact-with-retry
         with:
@@ -627,6 +613,8 @@ jobs:
           "$RUNNER_TEMP/harn-cli"
           "$GITHUB_SHA"
           "$GITHUB_ENV"
+      - name: Generate the CLI AOT payload
+        run: HARN_CLI_AOT_GEN_BIN="$HARN_RELEASE_CLI_AOT_GEN_BIN" make gen-cli-aot check-cli-aot
       # `make check-docs` was this job's long pole (about 120s of a 160s docs
       # lane on a fast host, roughly three times that here) and repeats what
       # "Check Harn documentation" proves on the same commit and binary in this

@@ -268,7 +268,9 @@ fn source_persona_extracts_called_steps_in_order() {
         r#"
 @persona(name: "merge_captain")
 fn merge_captain(ctx) {
-  plan(ctx)
+  @step(name: "local", retry: unused(ctx))
+  fn local(value: dict = unused(ctx)) { return value }
+  scope { plan(ctx) }
   verify(ctx)
 }
 
@@ -281,6 +283,9 @@ fn plan(ctx) {
 fn verify(ctx) {
   return ctx
 }
+
+@step(name: "unused")
+fn unused(ctx) { return ctx }
 "#,
     )
     .expect("source persona parses");

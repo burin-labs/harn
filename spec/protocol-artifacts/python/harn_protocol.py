@@ -168,6 +168,8 @@ __all__ = [
     "HarnInferenceAdmissionBoundary",
     "HarnInferenceAdmissionRequest",
     "HarnInferenceAdmissionSnapshot",
+    "HarnMachineSpendExhaustion",
+    "HarnMachineSpendPeriod",
     "ACPArtifactUpdateMetaHarn",
     "ACPArtifactUpdateMeta",
     "ACPArtifactUpdate",
@@ -1073,6 +1075,7 @@ class HarnACPPromptErrorData(_HarnDataclass):
     code: Optional[str] = None
     retryable: Optional[bool] = None
     retryAfterMs: Optional[int] = None
+    machineSpend: Optional[HarnMachineSpendExhaustion] = None
     provider: Optional[str] = None
     model: Optional[str] = None
 
@@ -2274,6 +2277,12 @@ class HarnPlanDocument(_HarnDataclass):
     updated_at: str
 
 
+class HarnMachineSpendPeriod(str, Enum):
+    DAY = "day"
+    MONTH = "month"
+    LIFETIME = "lifetime"
+
+
 class HarnInferenceAdmissionStatus(str, Enum):
     ADMITTED = "admitted"
     DENIED = "denied"
@@ -2300,6 +2309,14 @@ class HarnInferenceAdmissionDataControlsOutcome(str, Enum):
 
 class HarnInferenceAdmissionDataControlsRefusal(str, Enum):
     TRAINING_WITHOUT_CONTROL = "training_without_control"
+@dataclass
+class HarnMachineSpendExhaustion(_HarnDataclass):
+    period: HarnMachineSpendPeriod
+    limit_microusd: int
+    reserved_microusd: int
+    remaining_microusd: int
+    reset_at_unix_ms: Optional[int] = None
+
 @dataclass
 class HarnInferenceAdmissionBoundary(_HarnDataclass):
     reach: HarnInferenceAdmissionReach

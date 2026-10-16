@@ -1,0 +1,14 @@
+import { CommandSpec, command_run_streaming } from "std/command"
+
+pub type CommandExit = {success: bool, exit_code: int?}
+
+/** Preserve live compiler output while exposing only the terminal decision to callers. */
+pub fn run_visible_command(
+  harness: {tools: HarnessTools, stdio: HarnessStdio},
+  spec: CommandSpec,
+) -> CommandExit {
+  return schema_parse(
+    command_run_streaming(harness.tools, harness.stdio, spec),
+    schema_of(CommandExit),
+  )?
+}

@@ -830,18 +830,19 @@ type ACPError struct {
 
 // HarnACPPromptErrorData is the typed data payload for failed session/prompt calls.
 type HarnACPPromptErrorData struct {
-	Schema        string             `json:"schema"`
-	TerminalClass AgentTerminalClass `json:"terminalClass"`
-	Category      *string            `json:"category,omitempty"`
-	Kind          *string            `json:"kind,omitempty"`
-	Reason        *string            `json:"reason,omitempty"`
-	Origin        *string            `json:"origin,omitempty"`
-	Rule          *string            `json:"rule,omitempty"`
-	Code          *string            `json:"code,omitempty"`
-	Retryable     *bool              `json:"retryable,omitempty"`
-	RetryAfterMs  *int64             `json:"retryAfterMs,omitempty"`
-	Provider      *string            `json:"provider,omitempty"`
-	Model         *string            `json:"model,omitempty"`
+	Schema        string                      `json:"schema"`
+	TerminalClass AgentTerminalClass          `json:"terminalClass"`
+	Category      *string                     `json:"category,omitempty"`
+	Kind          *string                     `json:"kind,omitempty"`
+	Reason        *string                     `json:"reason,omitempty"`
+	Origin        *string                     `json:"origin,omitempty"`
+	Rule          *string                     `json:"rule,omitempty"`
+	Code          *string                     `json:"code,omitempty"`
+	Retryable     *bool                       `json:"retryable,omitempty"`
+	RetryAfterMs  *int64                      `json:"retryAfterMs,omitempty"`
+	MachineSpend  *HarnMachineSpendExhaustion `json:"machineSpend,omitempty"`
+	Provider      *string                     `json:"provider,omitempty"`
+	Model         *string                     `json:"model,omitempty"`
 }
 
 // HarnAgentTerminalOutcome is the producer-owned reason an agent loop ended.
@@ -2066,6 +2067,16 @@ type HarnPlanDocument struct {
 	UpdatedAt          string                             `json:"updated_at"`
 }
 
+// HarnMachineSpendPeriod is the named string type for the HarnMachineSpendPeriodValues wire vocabulary.
+type HarnMachineSpendPeriod string
+
+// HarnMachineSpendPeriodValues enumerates every wire value Harn currently emits for HarnMachineSpendPeriod.
+var HarnMachineSpendPeriodValues = []HarnMachineSpendPeriod{
+	"day",
+	"month",
+	"lifetime",
+}
+
 // HarnInferenceAdmissionStatus is the named string type for the HarnInferenceAdmissionStatusValues wire vocabulary.
 type HarnInferenceAdmissionStatus string
 
@@ -2112,6 +2123,14 @@ type HarnInferenceAdmissionDataControlsRefusal string
 // HarnInferenceAdmissionDataControlsRefusalValues enumerates every wire value Harn currently emits for HarnInferenceAdmissionDataControlsRefusal.
 var HarnInferenceAdmissionDataControlsRefusalValues = []HarnInferenceAdmissionDataControlsRefusal{
 	"training_without_control",
+}
+
+type HarnMachineSpendExhaustion struct {
+	Period            HarnMachineSpendPeriod `json:"period"`
+	LimitMicrousd     int64                  `json:"limit_microusd"`
+	ReservedMicrousd  int64                  `json:"reserved_microusd"`
+	RemainingMicrousd int64                  `json:"remaining_microusd"`
+	ResetAtUnixMs     *int64                 `json:"reset_at_unix_ms,omitempty"`
 }
 
 type HarnInferenceAdmissionBoundary struct {

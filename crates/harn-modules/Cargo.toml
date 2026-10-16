@@ -10,6 +10,7 @@ description = "Cross-file module graph and import resolution utilities for Harn"
 include = [
     "src/**/*",
     "Cargo.toml",
+    "build.rs",
 ]
 
 [dependencies]
@@ -36,6 +37,9 @@ bundled-stdlib = ["dep:harn-stdlib"]
 [dev-dependencies]
 harn-stdlib = { path = "../harn-stdlib", version = "=0.10.167" }
 tempfile = "3"
+
+[build-dependencies]
+harn-source-fingerprint-build = { path = "../harn-source-fingerprint-build", version = "=0.10.167" }
 
 [lints]
 workspace = true
