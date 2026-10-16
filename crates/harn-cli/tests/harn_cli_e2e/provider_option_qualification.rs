@@ -109,6 +109,17 @@ async fn invoke_probe(
     model: &str,
     replies: Vec<Reply>,
 ) -> (Output, Value) {
+    invoke_probe_with_mode(root, pool, model, "top_k", false, replies).await
+}
+
+async fn invoke_probe_with_mode(
+    root: &Path,
+    pool: &Pool,
+    model: &str,
+    option: &str,
+    gated: bool,
+    replies: Vec<Reply>,
+) -> (Output, Value) {
     let before = pool.requests.lock().unwrap().len();
     let expected = replies.len();
     assert!(pool.replies.lock().unwrap().is_empty());
@@ -123,7 +134,7 @@ async fn invoke_probe(
             "--model",
             model,
             "--option",
-            "top_k",
+            option,
             "--max-tokens",
             "8",
             "--fail-on-drift",
@@ -133,6 +144,9 @@ async fn invoke_probe(
         .env("HARN_LLM_CALLS_DISABLED", "0")
         .env("HARN_LLM_RATE_LIMIT_DURABLE", "0")
         .env("NO_COLOR", "1");
+    if gated {
+        command.arg("--gated");
+    }
     for name in [
         "HARN_LLM_PROVIDER",
         "HARN_LLM_MODEL",
@@ -160,15 +174,50 @@ async fn invoke_probe(
     for (index, body) in requests[before..].iter().enumerate() {
         assert_eq!(body["model"], model);
         if index == 0 {
-            assert_eq!(body["top_k"], 1);
+            assert!(
+                body.get(option).is_some(),
+                "selected option must reach transport"
+            );
+            if option == "top_k" {
+                assert_eq!(body[option], 1);
+            }
         } else {
             assert!(
-                body.get("top_k").is_none(),
+                body.get(option).is_none(),
                 "the rejection control must omit the option"
             );
         }
     }
     (output, report)
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn measured_catalog_options_admit_supported_requests_and_gate_unsupported_ones() {
+    let root = tempfile::tempdir().unwrap();
+    let pool = Pool::start(root.path()).await;
+    let model = "nex-agi/nex-n2.5-pro";
+    let (output, report) = invoke_probe_with_mode(
+        root.path(),
+        &pool,
+        model,
+        "top_k",
+        true,
+        vec![accepted(Some(model), "ok")],
+    )
+    .await;
+    assert!(output.status.success());
+    assert_eq!(report["probe"]["ungated"], false);
+    assert_eq!(report["catalog"]["claimed_supported"], true);
+    assert_eq!(report["probe"]["attempt"]["response_model"], model);
+    assert_eq!(report["diff"]["status"], "match");
+    let (output, report) =
+        invoke_probe_with_mode(root.path(), &pool, model, "stop", true, vec![]).await;
+    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(report["catalog"]["claimed_supported"], false);
+    assert_eq!(report["probe"]["verdict"], "gated_locally");
+    assert_eq!(report["probe"]["measured_count"], 0);
+    assert_eq!(report["diff"]["status"], "unmeasured");
+    assert_eq!(pool.requests.lock().unwrap().len(), 1);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

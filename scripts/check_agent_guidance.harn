@@ -1,0 +1,53 @@
+fn require_text(fs: HarnessFs, path: string, text: string) {
+  if !fs.read_text(path).contains(text) {
+    throw path + " must contain " + text
+  }
+}
+
+fn main(harness: Harness) {
+  const link = harness.process.run({program: "readlink", args: ["CLAUDE.md"]})
+  if !link.success || link.stdout.trim() != "AGENTS.md" {
+    throw "CLAUDE.md must point directly to AGENTS.md"
+  }
+  require_text(harness.fs, "AGENTS.md", "docs/src/dev/engineering-principles.md")
+  const guidance = harness.fs.read_text("AGENTS.md").lower()
+  if !guidance.contains("one owner") || guidance.contains("simpler and dumber") {
+    throw "AGENTS.md must preserve ambitious outcomes and one owner"
+  }
+  const skills = [
+    "harn-agent",
+    "harn-de-slop",
+    "harn-docs",
+    "harn-orchestration",
+    "harn-probe",
+    "harn-product-quality",
+    "harn-testing",
+  ]
+  for name in skills {
+    if !harness.fs.stat("crates/harn-skills/src/corpus/" + name + "/SKILL.md").is_file {
+      throw "missing canonical skill: " + name
+    }
+  }
+  const release_skill = "crates/harn-skills/src/corpus/release-harn/SKILL.md"
+  require_text(harness.fs, release_skill, "docs/src/maintainer-release.md")
+  const sources = [
+    "AGENTS.md",
+    ".codex/skills/harn-release/SKILL.md",
+    ".codex/skills/release-harn/SKILL.md",
+  ]
+  for source in sources {
+    require_text(harness.fs, source, "harn skill get release-harn --full")
+  }
+  for source in sources + [release_skill, "docs/src/maintainer-release.md"] {
+    if regex_match(
+      r"hosted-release\.yml|watch_harn_release|run_harn_release|release_harn\.harn|workflow run publish-release",
+      harness.fs.read_text(source),
+    )
+      != nil {
+      throw source + " contains a retired or competing release entry point"
+    }
+  }
+  harness.stdio.println(
+    "Agent guidance is canonical and linked; skills=" + to_string(len(skills) + 1),
+  )
+}

@@ -294,6 +294,9 @@ pub struct AcpPromptFailureFacts {
     pub provider: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
+    /// Durable quota facts from the monetary admission owner.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub machine_spend: Option<harn_vm::llm::MachineSpendExhaustion>,
     /// The per-route ledger the routing failure recorded: which provider/model
     /// each attempt used and how it ended. Empty for a single-route call or any
     /// non-routing failure. Lets a host render the full failover chain instead
@@ -377,6 +380,9 @@ impl AcpPromptFailureFacts {
             retry_after_ms,
             provider: string_field("provider"),
             model: string_field("model"),
+            machine_spend: (string_field("quota_scope").as_deref() == Some("machine"))
+                .then(|| serde_json::from_value(thrown.clone()).ok())
+                .flatten(),
             attempts,
             route_unknown,
         }
