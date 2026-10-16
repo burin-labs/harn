@@ -75,8 +75,8 @@ top-level keys before `v0.8`).
 | `terminal` | `AgentTerminalOutcome` | Producer-owned `{kind, reason, owner, lifecycle_state, run_record_status}` classification. `kind` preserves the precise terminal cause. `lifecycle_state` and `run_record_status` are Harn's canonical persistence projection, so adapters do not reclassify the kind. ACP receives the same value as a typed checkpoint and prompt metadata; A2A receives it in `metadata.harn.terminal`; replay run records preserve it in `metadata.terminal`. Only `kind: "natural"` proves completion. A2A maps `completion_unverified` to `failed`, not `cancelled`. |
 | `text` | string | Accumulated text output from all iterations |
 | `visible_text` | string | Human-visible accumulated output |
-| `output` | any | Present when an `output` contract is set and the loop completed (`status` `"done"`). The terminal answer parsed as JSON and, for schema contracts, validated against the schema. |
-| `output_valid` | bool | Present when an `output` contract is set and the loop completed. `true` when the terminal answer parsed and, when applicable, validated (directly or after one repair call); otherwise `false`. |
+| `output` | any | Schema-checked terminal JSON when an `output` contract is set. An eligible exhausted wrap-up can retain valid partial data without changing the failed terminal status or admitting publication. |
+| `output_valid` | bool | Whether the terminal answer satisfies the declared JSON contract. Natural completion permits one repair; an attempted wrap-up permits no repair or reuse of older JSON. Valid partial data does not establish completion. |
 | `provider_call_count` | int | Session-owned count of physical provider dispatches. Measured zero is emitted explicitly. Transport, schema, and provider failures after dispatch count; cache/replay hits and routes rejected before dispatch do not. Uncaught loop errors expose the same field on `AgentLoopTerminalError`; it is `nil` only when the session ledger itself is unavailable. The same transport-boundary measurement feeds `llm_call`'s `usage.provider_call_count`, so the two surfaces report one number for one event. |
 | `llm` | dict | LLM execution metrics — see below |
 | `tools` | dict | Tool invocation summary — see below |
@@ -354,7 +354,7 @@ Same as `harness.llm.call`, plus additional options:
 | `history` | list | nil | Caller-managed conversation history to seed. A list of messages in the canonical `harness.llm.call` shape (`{role, content, ...}`, roles `user`/`assistant`/`tool_result`/`system`) prepended to the transcript as real turns ahead of the task message, so the first LLM call sees them exactly as `harness.llm.call`'s `messages` array would. Transient seeding, not session persistence — the caller owns the history. When `history` is non-empty and the task `message` is blank, no empty user turn is appended. See [Seeding caller-managed history](#seeding-caller-managed-history) |
 | `loop_until_done` | bool | `false` | Keep looping until completion. Native-tool loops complete on final text with no tool calls; text-tool/no-tool sentinel loops complete on `##DONE##` or `<done>##DONE##</done>` |
 | `done_sentinel` | string\|nil | mode-aware | Completion sentinel for sentinel-based loops. Use a non-empty string such as `"##DONE##"` to require sentinel completion, or `nil` for no sentinel. Native-tool loop-until-done loops default to `nil`; text/no-tool loop-until-done loops default to `"##DONE##"` |
-| `output` | `"text"` \| `"json"` \| dict | nil | Terminal-answer contract. Ordinary tool turns omit it so structured transport cannot interfere with tool calling. At a `"done"` completion, the loop parses JSON and validates schema forms; one failed result gets one repair call through `llm_caller`. The value is `run.output` and the verdict is `run.output_valid`. Use `harness.llm.call_structured` for one-shot extraction. |
+| `output` | `"text"` \| `"json"` \| dict | nil | Terminal-answer contract. A stable system fragment teaches the declared JSON shape during ordinary turns, while their transport options omit `output` so tools remain callable. Natural completion permits one repair through `llm_caller`; an eligible exhausted wrap-up carries the schema but cannot repair or promote completion. The value is `run.output` and its validation verdict is `run.output_valid`. Use `harness.llm.call_structured` for one-shot extraction. |
 | `max_iterations` | int | `50` | Maximum number of LLM round-trips. Equivalent to `iteration_budget: {mode: "fixed", initial: N, max: N}` |
 | `iteration_budget` | string \| `IterationBudget` | nil | Adaptive or fixed iteration cap. Pass a record `{mode, initial, max, extend_by}` or the string `"adaptive"` / `"fixed"`. See [Adaptive iteration budget](#adaptive-iteration-budget) |
 | `loop_control` | closure | nil | Per-iteration policy callback `state -> command`. Receives a normalized loop-state snapshot and returns a command (`extend`/`stop`/`none`). See [Adaptive iteration budget](#adaptive-iteration-budget) |
@@ -1646,7 +1646,13 @@ the child transcript with `source: "inherited"` and `originating_agent_id`.
 - `budget_exceeded`
 - `session_id`
 - `transcript`
-- `data` when the child requests JSON mode or `returns.schema` succeeds
+- `status`, preserving exhaustion and other terminal outcomes; a schema or
+  publication failure on an otherwise completed result becomes that failure
+  status with a matching `error`
+- `data` when the child requests JSON mode or declares `returns.schema` and the
+  terminal output passes its contract. Valid output from an exhausted child
+  remains inspectable alongside `ok: false`, its exhaustion `status`, and
+  `error`.
 - `error: {category, message, tool?}` when the child fails or a narrowed tool
   policy rejects a call
 
