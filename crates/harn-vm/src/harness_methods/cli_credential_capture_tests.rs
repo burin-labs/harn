@@ -4,10 +4,10 @@ use tokio::net::{TcpListener, TcpStream};
 
 fn parent(port: u16, finish: &str) -> String {
     let descendant = format!(
-        "import socket;s=socket.create_connection(('127.0.0.1',{port}));s.sendall(b'ready');print('ready',flush=True);s.recv(1);s.sendall(b'alive')"
+        "import socket,sys;s=socket.create_connection(('127.0.0.1',{port}));s.sendall(b'ready');sys.stdout.buffer.write(b'ready');sys.stdout.buffer.flush();s.recv(1);s.sendall(b'alive')"
     );
     format!(
-        "import os,subprocess,sys;child=subprocess.Popen([sys.executable,'-c',{descendant:?}],stdout=subprocess.PIPE,stderr=subprocess.DEVNULL);assert child.stdout.readline()==b'ready\\n';print('synthetic-cli-token',flush=True);{finish}"
+        "import os,subprocess,sys;child=subprocess.Popen([sys.executable,'-c',{descendant:?}],stdout=subprocess.PIPE,stderr=subprocess.DEVNULL);ready=child.stdout.read(5);assert ready==b'ready',repr(ready);print('synthetic-cli-token',flush=True);{finish}"
     )
 }
 
