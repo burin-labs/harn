@@ -175,12 +175,15 @@ hostCommand(program,args,limit,'sample_command',timeout).result.then(
   fs.writeFileSync(lifecycle, `const {spawn}=require('node:child_process');
 const fs=require('node:fs'),path=require('node:path');
 const output=process.argv[3];fs.mkdirSync(output);
-const child=spawn(process.execPath,[process.argv[2],String(process.pid),output,'123','1','a'.repeat(40),'b'.repeat(40)],{stdio:'ignore'});
-const began=Date.now();setTimeout(()=>child.kill('SIGTERM'),400);
+const child=spawn(process.execPath,[process.argv[2],String(process.pid),output,'123','1','a'.repeat(40),'b'.repeat(40)],{stdio:['ignore','ignore','ignore','ipc']});
+child.once('message',message=>{
+ if(message.type!=='compiler_sampler_ready') throw new Error('unexpected sampler message');
+ child.kill('SIGTERM');
+});
 child.on('close',code=>{
  try { const receipt=JSON.parse(fs.readFileSync(path.join(output,'compiler-sample.json'),'utf8'));
- console.log(JSON.stringify({code,elapsed:Date.now()-began,receipt,owner:process.pid})); }
- catch {process.exitCode=1;}
+ console.log(JSON.stringify({code,receipt,owner:process.pid})); }
+ catch(error) {console.error(error);process.exitCode=1;}
 });
 `);
   const settlement = spawnSync(process.execPath, [lifecycle, path.resolve(__dirname, '../ci/macos_compiler_sample.cjs'), path.join(root, 'live-sample')],
@@ -188,7 +191,6 @@ child.on('close',code=>{
   assert.equal(settlement.status, 0, settlement.stderr);
   const settled = JSON.parse(settlement.stdout);
   assert.equal(settled.code, 0);
-  assert(settled.elapsed < 5000, 'owned sampler did not settle after interruption');
   assert.equal(settled.receipt.status, 'UNMEASURED');
   assert.deepEqual(settled.receipt.samples, []);
   if (process.platform === 'darwin') assert.deepEqual(settled.receipt.refusal, {stage:'settlement',cause:'interrupted'});

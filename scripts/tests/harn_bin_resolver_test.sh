@@ -50,7 +50,7 @@ trap cleanup EXIT
 # Mock Cargo needs a real source identity, not the entire caller's checkout.
 # Keep that identity small and stable while retaining every freshness refusal.
 mock_repo="$tmp_root/mock-repo"
-git init --quiet "$mock_repo"
+git init --quiet -b main "$mock_repo"
 printf 'Resolver fixture source\n' > "$mock_repo/README"
 git -C "$mock_repo" add README
 git -C "$mock_repo" -c user.name='Resolver fixture' \
