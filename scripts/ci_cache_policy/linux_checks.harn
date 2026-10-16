@@ -1,4 +1,5 @@
 import "./host_bound_rust_test_filter.harn"
+import { package_audit_overlap_errors } from "./package_audit_overlap.harn"
 import "./policy_core.harn"
 
 /** The workflow that owns the main-scoped Rust cache write. */
@@ -1421,6 +1422,7 @@ pub fn linux_cache_consumers_restore_only_errors(workflow: dict) -> list<string>
 
 pub fn ci_linux_lane_policy_errors(workflow: dict) -> list<string> {
   let errors = hosted_compile_lane_errors(workflow, "package-audit", "package-audit")
+    + package_audit_overlap_errors(workflow)
     + rust_lint_lane_errors(workflow)
     + persistent_compile_lane_errors(workflow, "rust-cli", "harn-ci-cli", CLI_PRODUCER_STEP_BUDGETS)
     + persistent_compile_lane_errors(
