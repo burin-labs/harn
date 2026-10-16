@@ -33,10 +33,10 @@ harn-vm = { path = "../harn-vm", version = "=0.10.168", default-features = false
 harn-stdlib = { path = "../harn-stdlib", version = "=0.10.168", optional = true }
 
 [dev-dependencies]
-harn-stdlib = { path = "../harn-stdlib", version = "=0.10.167" }
+harn-stdlib = { path = "../harn-stdlib", version = "=0.10.168" }
 # Exercise the actual distributed CLI's consumer surface. Resolver v2 keeps
 # these target features separate from the build-script compiler's features.
-harn-vm = { path = "../harn-vm", version = "=0.10.167", default-features = false, features = ["full", "otel"] }
+harn-vm = { path = "../harn-vm", version = "=0.10.168", default-features = false, features = ["full", "otel"] }
 tempfile = "3"
 tokio = { version = "1", features = ["rt", "time", "net"] }
 
