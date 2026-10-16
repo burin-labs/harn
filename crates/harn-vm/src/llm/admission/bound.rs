@@ -195,14 +195,38 @@ impl AttemptBound {
 }
 
 fn text_message(message: &serde_json::Value, anthropic: bool) -> bool {
-    if !message.as_object().is_some_and(|fields| {
-        fields.keys().all(|key| {
-            matches!(
+    let Some(fields) = message.as_object() else {
+        return false;
+    };
+    if !fields.keys().all(|key| {
+        matches!(
+            key.as_str(),
+            "role" | "content" | "name" | "tool_calls" | "tool_call_id"
+        ) || (anthropic
+            && matches!(
                 key.as_str(),
-                "role" | "content" | "name" | "tool_calls" | "tool_call_id"
-            ) || (anthropic && key == "cache_control")
-        })
+                "cache_control" | "provider_continuation" | "reasoning"
+            ))
     }) {
+        return false;
+    }
+    let is_assistant = message.get("role").and_then(serde_json::Value::as_str) == Some("assistant");
+    if fields.contains_key("provider_continuation")
+        && (!anthropic
+            || !is_assistant
+            || !crate::llm::reasoning_history::is_supported_anthropic_continuation(
+                &fields["provider_continuation"],
+            ))
+    {
+        return false;
+    }
+    // Durable `reasoning` is private transcript text. Anthropic egress drops
+    // it from the message object; the signed provider continuation above is the
+    // separately typed wire data. The full-context admission bound already
+    // covers the provider-visible signed blocks and generated thinking.
+    if fields.contains_key("reasoning")
+        && (!anthropic || !is_assistant || !fields["reasoning"].is_string())
+    {
         return false;
     }
     // Function arguments/results are text; image/audio/file payloads require a

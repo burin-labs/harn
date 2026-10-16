@@ -688,6 +688,7 @@ impl From<&LlmCallOptions> for LlmRequestPayload {
             done_sentinel: opts.done_sentinel.clone(),
             done_sentinel_form: opts.done_sentinel_form.clone(),
         };
+        strip_harn_owned_message_metadata(&mut payload.messages);
         super::tool_result_provenance::defang_tool_result_directives(&mut payload.messages);
         if opts.system_prompt_root == crate::llm::prompt::PromptRoot::Replacement {
             // A replacement is the entire system channel. Drop every
@@ -711,6 +712,18 @@ impl From<&LlmCallOptions> for LlmRequestPayload {
             &mut payload.messages,
         ));
         payload
+    }
+}
+
+/// `_harn` belongs to the durable execution transcript, not to a provider's
+/// message schema. Project it away exactly once at the provider request
+/// boundary so admission and transport inspect the same normalized messages
+/// while the source transcript remains intact for audit and replay.
+fn strip_harn_owned_message_metadata(messages: &mut [serde_json::Value]) {
+    for message in messages {
+        if let Some(fields) = message.as_object_mut() {
+            fields.remove("_harn");
+        }
     }
 }
 
