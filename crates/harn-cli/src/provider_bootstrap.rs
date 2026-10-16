@@ -245,7 +245,7 @@ fn source_text_uses_provider_llm(source: &str) -> bool {
         &patterns,
     );
     let mut uses_provider = false;
-    harn_parser::visit::walk_program_interpolated(source, &program, &mut |node| {
+    harn_parser::visit::walk_program_unattributed_interpolated(source, &program, &mut |node| {
         if let Node::FunctionCall { name, .. } = &node.node {
             uses_provider |= PROVIDER_BACKED_LLM_BUILTINS.contains(&name.as_str())
                 && !shadowed.contains(&(node.span.start, node.span.end));
@@ -332,6 +332,9 @@ __io_println(llm_call("prompt", "system"))
 
     #[test]
     fn provider_detection_uses_callable_scope_and_default_order() {
+        let metadata = r#"@step(retry: llm_call("metadata")) fn local() { return nil }"#;
+        assert!(harn_parser::parse_source(metadata).is_ok());
+        assert!(!source_text_uses_provider_llm(metadata));
         assert!(!source_text_uses_provider_llm(
             r#"fn local(llm_call) { return llm_call("local") }"#
         ));

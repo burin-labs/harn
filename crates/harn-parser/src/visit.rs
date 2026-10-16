@@ -68,17 +68,43 @@ pub fn walk_program_interpolated(
     program: &[SNode],
     visitor: &mut impl FnMut(&SNode),
 ) {
+    walk_interpolated(source, program, visitor, |node| node);
+}
+
+/// Walk executable children and string interpolation, excluding attribute metadata.
+pub fn walk_program_unattributed_interpolated(
+    source: &str,
+    program: &[SNode],
+    visitor: &mut impl FnMut(&SNode),
+) {
+    walk_interpolated(source, program, visitor, |node| {
+        crate::ast::peel_attributes(node).1
+    });
+}
+
+fn walk_interpolated(
+    source: &str,
+    program: &[SNode],
+    visitor: &mut impl FnMut(&SNode),
+    project: fn(&SNode) -> &SNode,
+) {
     let mut holes = Vec::new();
-    walk_program(program, &mut |node| {
-        if let Node::InterpolatedString(segments) = &node.node {
-            for segment in segments {
-                if let harn_lexer::StringSegment::Expression(text, line, column) = segment {
-                    holes.push((text.clone(), *line, *column));
+    let mut stack = Vec::with_capacity(program.len());
+    push_nodes_reversed(program, &mut stack);
+    walk_projected_stack(
+        &mut stack,
+        &mut |node| {
+            if let Node::InterpolatedString(segments) = &node.node {
+                for segment in segments {
+                    if let harn_lexer::StringSegment::Expression(text, line, column) = segment {
+                        holes.push((text.clone(), *line, *column));
+                    }
                 }
             }
-        }
-        visitor(node);
-    });
+            visitor(node);
+        },
+        project,
+    );
     // Recurse: an interpolation inside an interpolation is rare but legal, and
     // stopping at one level would restore the same unsoundness one layer down.
     while let Some((text, line, column)) = holes.pop() {
@@ -87,7 +113,7 @@ pub fn walk_program_interpolated(
         else {
             continue;
         };
-        walk_program_interpolated(source, std::slice::from_ref(&expression), visitor);
+        walk_interpolated(source, std::slice::from_ref(&expression), visitor, project);
     }
 }
 
