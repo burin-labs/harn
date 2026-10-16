@@ -1,6 +1,8 @@
 import { require_controller_artifact } from "./lib/artifact"
 import {
   Controller,
+  FormerWriter,
+  FormerWriterPermit,
   Inspection,
   Installation,
   Policy,
@@ -11,13 +13,16 @@ import {
   SignedWriterDrain,
   WriterEnrollment,
   begin_writer_drain,
+  capture_former_writer,
   commit_state,
   control,
   enroll_former_writers,
+  former_writer_authorized,
   initialize_installation,
   inspect_installation,
   is_digest,
   load_installation,
+  policy_digest,
   prepare_state,
   qualify_release_files,
   read_state,
@@ -32,6 +37,8 @@ type Request = {
     | "transfer" \
     | "release-guard" \
     | "enroll-writers" \
+    | "capture-writer" \
+    | "authorize-writer" \
     | "drain-writers" \
     | "retire-writers",
   configuration: string,
@@ -41,6 +48,48 @@ type Request = {
   release?: {checkpoint_file: string, request: ReleaseRequest, files: list<ReleaseFile>},
   writer_enrollment?: WriterEnrollment,
   writer_drain?: SignedWriterDrain,
+  writer?: FormerWriter,
+  writer_permit?: FormerWriterPermit,
+}
+
+/** A read-only decision retains the measured state revision and the caller's original permit. */
+pub type WriterAuthorization = {
+  schema: "smart-ship.writer-authorization.v1",
+  state_commit: string?,
+  status: "authorized" | "denied",
+  permit: FormerWriterPermit?,
+}
+
+fn writer_authority(
+  process: HarnessProcess,
+  config: Installation,
+  request: Request,
+) -> WriterAuthorization {
+  const read = read_state(process, config.store)
+  const state = read.state
+  let permit = request.writer_permit
+  if request.action == "capture-writer" {
+    require request.writer != nil && permit == nil,
+      "capture-writer requires a writer and no existing permit"
+    if state != nil {
+      const captured = capture_former_writer(state.authority, request.writer)
+      permit = is_ok(captured) ? unwrap(captured) : nil
+    }
+  } else {
+    require permit != nil && request.writer == nil,
+      "authorize-writer requires the original permit and no replacement writer"
+  }
+  const authorized = state != nil && permit != nil
+    && state.authority.installation == config.policy.installation
+    && state.authority.controller == config.controller
+    && state.authority.policy_digest == policy_digest(config.policy)
+    && former_writer_authorized(state.authority, permit)
+  return {
+    schema: "smart-ship.writer-authorization.v1",
+    state_commit: read.commit,
+    status: authorized ? "authorized" : "denied",
+    permit: request.action == "capture-writer" && !authorized ? nil : permit,
+  }
 }
 
 fn change(
@@ -83,7 +132,7 @@ fn change(
 }
 
 /** The CLI and embedding hosts share the complete guarded installation command boundary. */
-pub type InstallationCommandResult = Inspection | ReleaseQualification
+pub type InstallationCommandResult = Inspection | ReleaseQualification | WriterAuthorization
 
 /** Load trusted configuration, bind this artifact, and execute one installation command. */
 pub fn run_installation_command(
@@ -95,6 +144,9 @@ pub fn run_installation_command(
   const config = load_installation(harness.fs, request.configuration)
   if request.action != "inspect" {
     require_controller_artifact(pick(harness, ["env", "fs", "process"]), config.controller)
+  }
+  if ["capture-writer", "authorize-writer"].contains(request.action) {
+    return writer_authority(harness.process, config, request)
   }
   if request.action == "release-guard" {
     require request.release != nil, "release-guard requires a checkpoint file and pinned request"

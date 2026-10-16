@@ -8,12 +8,25 @@ Version: `0.1.0`
 
 `cli.harn`
 
+### type `WriterAuthorization`
+
+A read-only decision retains the measured state revision and the caller's original permit.
+
+```harn
+pub type WriterAuthorization = {
+  schema: "smart-ship.writer-authorization.v1",
+  state_commit: string?,
+  status: "authorized" | "denied",
+  permit: FormerWriterPermit?,
+}
+```
+
 ### type `InstallationCommandResult`
 
 The CLI and embedding hosts share the complete guarded installation command boundary.
 
 ```harn
-pub type InstallationCommandResult = Inspection | ReleaseQualification
+pub type InstallationCommandResult = Inspection | ReleaseQualification | WriterAuthorization
 ```
 
 ### fn `run_installation_command`

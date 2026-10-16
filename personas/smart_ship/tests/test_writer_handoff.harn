@@ -1,4 +1,4 @@
-import { run_installation_command } from "../cli"
+import { WriterAuthorization, run_installation_command } from "../cli"
 import { git } from "../fixtures/neutral"
 import { fixture } from "../fixtures/support"
 import { Controller, control } from "../lib/controller"
@@ -22,6 +22,13 @@ import {
 import { qualify_writer_drain, writer_drain_bytes } from "../lib/writer_handoff_contract"
 
 type AuthorityFields = dict<string, unknown>
+
+fn writer_check(harness: Harness, configuration: string, request: dict) -> WriterAuthorization {
+  return schema_expect(
+    run_installation_command(harness, [json_stringify(request + {configuration: configuration})]),
+    schema_of(WriterAuthorization),
+  )
+}
 
 fn fence(state: Controller) -> Fence {
   return pick(state.authority, ["installation", "generation", "revision", "controller"])
@@ -359,6 +366,19 @@ pipeline test_remote_handoff_cas_restart_and_missing_retirement_refuse(harness: 
   const shadow = initial(f.authority + {mode: "shadow", controller: config.controller})
   const empty = read_state(harness.process, store)
   assert(empty.commit == nil && empty.state == nil)
+  const missing = writer_check(
+    harness,
+    configuration,
+    {
+      action: "capture-writer",
+      writer: {id: "shipping", repository: "project", source: "a".repeat(40)},
+    },
+  )
+  assert_eq(missing.status, "denied")
+  assert(
+    missing.state_commit == nil && missing.permit == nil,
+    "missing authority must not become an unenrolled legacy route",
+  )
   const first = prepare_state(harness.process, store, empty, shadow)
   assert_eq(commit_state(harness.process, store, first).status, "committed")
   run_installation_command(
@@ -384,6 +404,52 @@ pipeline test_remote_handoff_cas_restart_and_missing_retirement_refuse(harness: 
       recorded.state!.authority.writer_handoff!.writers[0]!,
     ),
   )
+  const captured = writer_check(
+    harness,
+    configuration,
+    {action: "capture-writer", writer: permit.writer},
+  )
+  assert_eq(captured.status, "authorized")
+  assert_eq(captured.state_commit, recorded.commit)
+  assert_eq(captured.permit, permit)
+  const allowed = writer_check(
+    harness,
+    configuration,
+    {action: "authorize-writer", writer_permit: permit},
+  )
+  assert_eq(allowed.status, "authorized")
+  const foreign = writer_check(
+    harness,
+    configuration,
+    {action: "capture-writer", writer: permit.writer + {source: "b".repeat(40)}},
+  )
+  assert(foreign.status == "denied" && foreign.permit == nil)
+  const omitted = try {
+    writer_check(harness, configuration, {action: "authorize-writer"})
+  }
+  assert(is_err(omitted), "checking cannot silently capture a replacement permit")
+  const changed_configuration = path_join(root, "changed-installation.json")
+  harness.fs.write_text(
+    changed_configuration,
+    json_stringify(config + {policy: f.policy + {max_repair_usd: 1.0}}),
+  )
+  const changed_policy = writer_check(
+    harness,
+    changed_configuration,
+    {action: "authorize-writer", writer_permit: permit},
+  )
+  assert_eq(changed_policy.status, "denied", "stale installation policy must not authorize")
+  const changed_capture = writer_check(
+    harness,
+    changed_configuration,
+    {action: "capture-writer", writer: permit.writer},
+  )
+  assert(changed_capture.status == "denied" && changed_capture.permit == nil)
+  assert_eq(
+    read_state(harness.process, store).commit,
+    recorded.commit,
+    "capturing and checking a former writer must not mutate authority",
+  )
   const stale = unwrap(control(recorded.state!, fence(recorded.state!), "shadow"))
   const old_wake = prepare_state(harness.process, store, recorded, stale)
   harness.testing.clock_set(2000)
@@ -394,6 +460,14 @@ pipeline test_remote_handoff_cas_restart_and_missing_retirement_refuse(harness: 
   assert_eq(commit_state(harness.process, store, old_wake).status, "conflict")
   const drained = read_state(harness.process, store)
   assert(!former_writer_authorized(drained.state!.authority, permit))
+  const refused = writer_check(
+    harness,
+    configuration,
+    {action: "authorize-writer", writer_permit: permit},
+  )
+  assert_eq(refused.status, "denied")
+  assert_eq(refused.permit, permit, "checking a delayed writer must retain its original permit")
+  assert_eq(refused.state_commit, drained.commit)
   harness.testing.clock_set(4000)
   run_installation_command(
     harness,
@@ -462,4 +536,17 @@ pipeline test_remote_handoff_cas_restart_and_missing_retirement_refuse(harness: 
   assert(!former_writer_authorized(rollback.state!.authority, permit))
   const new_permit = unwrap(capture_former_writer(rollback.state!.authority, permit.writer))
   assert(former_writer_authorized(rollback.state!.authority, new_permit))
+  const late = writer_check(
+    harness,
+    configuration,
+    {action: "authorize-writer", writer_permit: permit},
+  )
+  assert_eq(late.status, "denied")
+  assert_eq(late.permit, permit, "rollback must not upgrade a delayed process")
+  const fresh = writer_check(
+    harness,
+    configuration,
+    {action: "capture-writer", writer: permit.writer},
+  )
+  assert(fresh.status == "authorized" && fresh.permit == new_permit)
 }

@@ -82,6 +82,23 @@ permit rather than capturing a replacement generation.
 The permit also binds the control revision. Stop and resume cannot restore a
 stopped process's authority; a fresh process must capture a new permit.
 
+For callers outside Harn, use the installation CLI's read-only `capture-writer`
+action at process startup. Pass `configuration` and `writer`, whose fields are
+the enrolled `id`, `repository`, and control-source `source` commit. Retain the
+returned permit for that process. Before each mutation, call `authorize-writer`
+with the same `configuration` and original `writer_permit`. The response names
+the measured `state_commit` and returns an explicit `authorized` or `denied`
+status. Proceed only on `authorized`; checking never captures a replacement
+permit. These reads do not change authority or create an effect reservation.
+
+Missing state, an unenrolled writer, stale policy, drain, and a changed
+generation deny authorization. Invalid or unreadable configuration or state
+fails the command. Neither result permits a fallback to the old route. Keep
+the installation location mandatory for an enrolled repository, including when
+its configuration file is missing. A refused check retains its original permit
+for inspection; a refused capture returns no permit. Outstanding provider
+effects must still settle before the signed drain can retire their owner.
+
 Invoke `drain-writers` before collecting provider observations. This commits the
 old route's admission stop. Wait for already-started effects and queued work to
 settle; a missing runner or an observation timeout does not prove completion.
