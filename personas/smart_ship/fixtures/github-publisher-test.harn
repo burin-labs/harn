@@ -43,7 +43,9 @@ type AtomicRequest = {
 
 type ProviderReport = {applied: bool, updates: int}
 
-type CommandHook = {request: {argv: list<string>}}
+type ProviderTransport = {status: string, exit_code: int, timed_out: bool, stderr: string}
+
+type CommandHook = {request: {argv: list<string>}, result?: ProviderTransport}
 
 fn review_pages(identity: dict, number: int, head: string, approved: bool) -> list<dict> {
   const page_info = {hasNextPage: false, endCursor: nil}
@@ -247,6 +249,7 @@ pub fn exercise_publisher(harness: Harness, mode: string) {
   )
   const applied = harness.runtime.atomic(0)
   const report_path = path_join(root, "provider.json")
+  const transport_path = path_join(root, "provider-transport.json")
   const store_path = path_join(root, "store.json")
   harness.fs.write_text(store_path, json_stringify(config.installation.store + {remote: remote}))
   const assets = harness.fs.runtime_paths().asset_root
@@ -323,6 +326,10 @@ pub fn exercise_publisher(harness: Harness, mode: string) {
         post: { ctx ->
           const context: CommandHook = schema_expect(ctx, schema_of(CommandHook))
           const argv = context.request.argv
+          if context.result != nil
+            && argv.contains(path_join(assets, "github-publisher-provider.mjs")) {
+            harness.fs.write_text(transport_path, json_stringify(context.result))
+          }
           const refspec = argv[len(argv) - 1] ?? ""
           if argv[0] == "git" && argv[1] == "push"
             && regex_match("^[0-9a-f]{40}:refs/heads/smart-ship-objects/[0-9a-f]{40}$", refspec)
@@ -505,11 +512,23 @@ pub fn exercise_publisher(harness: Harness, mode: string) {
     "publisher did not reach its provider: " + (result.reason ?? "unreported"),
   )
   assert_eq(harness.runtime.atomic_get(applied), 1)
+  require harness.fs.exists(transport_path), "provider transport result was not observed"
+  const transport = schema_expect(
+    json_parse(harness.fs.read_text(transport_path)),
+    schema_of(ProviderTransport),
+  )
+  assert(!transport.timed_out, "provider transport timed out: " + json_stringify(transport))
   const success = ["normal", "lost_ack", "lost_readback"].contains(mode)
   const refused = ["stop", "head_change"].contains(mode)
   require harness.fs.exists(report_path),
     "fixture provider did not report: "
     + (result.reason ?? "unreported")
+    + "; transport: "
+    + if harness.fs.exists(transport_path) {
+      harness.fs.read_text(transport_path)[0:2048]
+    } else {
+      "unreported"
+    }
   const provider: ProviderReport = schema_expect(
     json_parse(harness.fs.read_text(report_path)),
     schema_of(ProviderReport),

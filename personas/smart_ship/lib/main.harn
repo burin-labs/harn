@@ -46,7 +46,12 @@ pub import {
   dispatch_reserved_effect,
   settle_owned_effect,
 } from "./effect_owner"
-pub import { GroupTree, prepare_group_tree, require_group_candidate } from "./git_group"
+pub import {
+  GroupTree,
+  prepare_group_tree,
+  require_group_ancestry,
+  require_group_candidate,
+} from "./git_group"
 pub import {
   CommitResult,
   GitStore,

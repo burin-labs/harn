@@ -123,6 +123,9 @@ pub fn qualify_candidate_effect(
   if !is_git_id(request.tree) || request.tree == "0".repeat(len(request.tree)) {
     invalid = invalid + ["candidate-tree"]
   }
+  if request.source == "0".repeat(len(request.source)) {
+    invalid = invalid + ["candidate-base"]
+  }
   if len(request.admissions) == 0 || len(request.admissions) > policy.max_changes
     || len(request.admissions) > 30 {
     invalid = invalid + ["candidate-change-count"]
@@ -132,7 +135,7 @@ pub fn qualify_candidate_effect(
   let branch: string? = nil
   for signed in request.admissions {
     const source = signed.record.source
-    if source.repository != request.repository || source.base != request.source
+    if source.repository != request.repository
       || (branch != nil && source.base_branch != branch) {
       invalid = invalid + ["candidate-source:" + source.change]
     }

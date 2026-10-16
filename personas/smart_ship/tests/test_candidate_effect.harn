@@ -75,6 +75,8 @@ pipeline test_candidate_reservation_binds_order_and_complete_admission_witnesses
   )
   assert(reversed.input_digest != s.request.input_digest)
   assert(is_ok(reserve_effect(s.state, fence(s.state), reversed, s.policy, nil, 1000)))
+  const advanced = candidate_effect("project", "a".repeat(40), s.request.tree, s.request.admissions)
+  assert(is_ok(reserve_effect(s.state, fence(s.state), advanced, s.policy, nil, 1000)))
   const first = s.request.admissions[0]!
   const bad: SignedAdmission = first + {signature: "0".repeat(128)}
   const refusal = unwrap_err(
@@ -99,8 +101,8 @@ pipeline test_candidate_reservation_binds_order_and_complete_admission_witnesses
   for rejected in [
     candidate_effect("project", s.request.source, s.request.tree, []),
     candidate_effect("project", s.request.source, s.request.tree, [first, first]),
-    candidate_effect("project", "a".repeat(40), s.request.tree, s.request.admissions),
     candidate_effect("project", s.request.source, "0".repeat(40), s.request.admissions),
+    candidate_effect("project", "0".repeat(40), s.request.tree, s.request.admissions),
     s.request + {input_digest: "sha256:" + "f".repeat(64)},
   ] {
     const invalid = unwrap_err(

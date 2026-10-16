@@ -162,7 +162,11 @@ pending and failing job names, and invalid evidence. A nil field means that
 qualification was not measured for that stage.
 
 Before signing a cumulative candidate, measure its tree with `prepare_group_tree`
-using the exact destination base and ordered reviewed heads. Build
+using the exact destination base and ordered reviewed heads. Call
+`require_group_ancestry` with each original reviewed base in the same head order:
+an older reviewed base must remain an ancestor of both the current destination
+and its original head. Main advancing does not rewrite an admission signature.
+Build
 `candidate_effect(repository, base, tree, admissions)` with those complete signed
 admissions, then reserve it through `reserve_effect` with the current time and
 commit that state before dispatch. The digest preserves admission order. Read

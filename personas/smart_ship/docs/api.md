@@ -2058,6 +2058,21 @@ pub fn require_git_transport(process: HarnessProcess, store: GitStore, expected_
 }
 ```
 
+### fn `require_group_ancestry`
+
+Bind archived review bases to the actual histories without rewriting signed admissions.
+
+```harn
+pub fn require_group_ancestry(
+  process: HarnessProcess,
+  workspace: string,
+  group: GroupTree,
+  reviewed_bases: list<string>,
+  timeout_ms: int = 10000,
+) {
+}
+```
+
 ### fn `require_group_candidate`
 
 Bind the proposed linear candidate to the exact composition, refusing omitted or extra edits.
