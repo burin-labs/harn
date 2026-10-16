@@ -14,15 +14,16 @@
 //! dialect list would put policy back in Rust.
 
 use crate::llm::helpers::vm_value_to_json;
-use crate::stdlib::json_to_vm_value;
-use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
+use crate::schema::json_to_vm_value;
 use crate::value::{VmError, VmValue};
+use harn_builtin_macros::harn_builtin;
+use harn_vm_core::builtin_support::VmBuiltinDef;
 
 use super::bare::{bare_tool_names, parse_bare_calls_in_body, parse_bare_calls_scoped, ProseScope};
-use super::scan::{call_head, scan_units, ScanSpec};
 use super::syntax::{
     balanced_json_object_len, parse_object_literal_from, parse_ts_call_from, render_canonical_call,
 };
+use harn_llm::tool_syntax::{call_head, scan_units};
 
 /// The primitives, in the order the composition reaches for them. Registered
 /// from `llm::register_llm_builtins` alongside the other agent-host slices.
@@ -67,9 +68,9 @@ fn host_tool_scan_units_builtin(args: &[VmValue], _out: &mut String) -> Result<V
         }
         None => return Err(VmError::Runtime(format!("{LABEL}: missing spec"))),
     };
-    let spec = ScanSpec::from_json(&spec_value)
+    let scanned = scan_units(&text, &spec_value)
         .map_err(|error| VmError::Runtime(format!("{LABEL}: {error}")))?;
-    Ok(json_to_vm_value(&scan_units(&text, &spec).to_json()))
+    Ok(json_to_vm_value(&scanned))
 }
 
 /// Parse a complete `name(args)` TS call expression at the start of `text`.
@@ -142,10 +143,7 @@ fn host_tool_parse_object_literal_builtin(
 )]
 fn host_tool_call_head_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let text = string_arg(args, 0, "text", "__host_tool_call_head(text)")?;
-    Ok(json_to_vm_value(&match call_head(&text) {
-        Some(head) => serde_json::json!({"name": head.name, "sep": head.sep.to_string()}),
-        None => serde_json::json!({}),
-    }))
+    Ok(json_to_vm_value(&call_head(&text)))
 }
 
 /// Byte length of the balanced `{ … }` object at the start of `text`, counting
@@ -656,7 +654,7 @@ mod tests {
     }
 
     fn entities() -> VmValue {
-        crate::stdlib::json_to_vm_value(&serde_json::json!({
+        crate::schema::json_to_vm_value(&serde_json::json!({
             "amp;": "&",
             "lt;": "<",
             "gt;": ">",
@@ -666,7 +664,7 @@ mod tests {
 
     #[test]
     fn scan_units_reads_its_vocabulary_from_the_spec() {
-        let spec = crate::stdlib::json_to_vm_value(&serde_json::json!({
+        let spec = crate::schema::json_to_vm_value(&serde_json::json!({
             "call_tags": ["action"],
             "block_tags": [],
             "wrapper_tags": [],
@@ -698,7 +696,7 @@ mod tests {
         let error = host_tool_scan_units_builtin(
             &[
                 text("hi"),
-                crate::stdlib::json_to_vm_value(&serde_json::json!({})),
+                crate::schema::json_to_vm_value(&serde_json::json!({})),
             ],
             &mut out,
         )
@@ -803,7 +801,7 @@ mod tests {
 
     #[test]
     fn decode_entities_resolves_each_reference_exactly_once() {
-        let value = crate::stdlib::json_to_vm_value(&serde_json::json!({
+        let value = crate::schema::json_to_vm_value(&serde_json::json!({
             "content": "if (a &lt;= b) { xs.map(x =&gt; x) }",
             "nested": ["a &amp;&amp; b"],
         }));
@@ -824,7 +822,7 @@ mod tests {
     #[test]
     fn decode_entities_matches_longest_key_first() {
         // Iteration order of the caller's dict must not change the result.
-        let table = crate::stdlib::json_to_vm_value(&serde_json::json!({
+        let table = crate::schema::json_to_vm_value(&serde_json::json!({
             "lt": "L",
             "lt;": "<",
         }));
@@ -834,7 +832,7 @@ mod tests {
 
     #[test]
     fn render_call_round_trips_through_the_call_parser() {
-        let arguments = crate::stdlib::json_to_vm_value(&serde_json::json!({"path": "a.rs"}));
+        let arguments = crate::schema::json_to_vm_value(&serde_json::json!({"path": "a.rs"}));
         let rendered = call(host_tool_render_call_builtin, &[text("look"), arguments]);
         let rendered = rendered.as_str().expect("rendered call");
         assert!(rendered.starts_with("look({"), "{rendered}");
@@ -847,7 +845,7 @@ mod tests {
 
     #[test]
     fn scan_bare_calls_recovers_a_call_and_leaves_the_prose() {
-        let registry = crate::stdlib::json_to_vm_value(&serde_json::json!({
+        let registry = crate::schema::json_to_vm_value(&serde_json::json!({
             "_type": "tool_registry",
             "tools": [{"name": "look", "description": "read a file", "params": []}],
         }));
@@ -870,7 +868,7 @@ mod tests {
 
     #[test]
     fn scan_bare_units_matches_the_trimmed_single_unit_boundary() {
-        let registry = crate::stdlib::json_to_vm_value(&serde_json::json!({
+        let registry = crate::schema::json_to_vm_value(&serde_json::json!({
             "_type": "tool_registry",
             "tools": [{"name": "edit", "description": "edit a file", "params": []}],
         }));
@@ -879,7 +877,7 @@ mod tests {
             host_tool_scan_bare_calls_builtin,
             &[text(source.trim()), registry.clone()],
         );
-        let units = crate::stdlib::json_to_vm_value(&serde_json::json!([
+        let units = crate::schema::json_to_vm_value(&serde_json::json!([
             {"kind": "text", "text": source}
         ]));
         let batched = call(host_tool_scan_bare_units_builtin, &[units, registry]);

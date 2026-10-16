@@ -35,6 +35,8 @@ members = [
     "crates/harn-stdlib-artifacts",
     "crates/harn-vm",
     "crates/harn-vm-core",
+    "crates/harn-llm",
+    "crates/harn-orchestration",
     "crates/harn-wasm",
     "crates/harn-dap",
     "crates/harn-fmt",
@@ -109,11 +111,19 @@ debug = "line-tables-only"
 debug-assertions = true
 overflow-checks = true
 
-# The interpreter those lanes are bound by lives in harn-vm and its
+# The interpreter those lanes are bound by lives in harn-vm-core and its
 # dependencies, which keep opt-level 1. harn-cli itself is command plumbing,
 # and optimizing it was the longest single compile in the CI producer: about
 # 7-9 minutes after its last dependency finished, on the free 4-vCPU runner.
 [profile.ci-cli.package.harn-cli]
+opt-level = 0
+
+# Native host orchestration no longer contains the interpreter. On four
+# pinned cores, leaving Core optimized while lowering this crate saved
+# 90-157s across build, packaging, and the longest CLI proof consumer.
+# Both paired runs passed the owning audit and performance gates; see
+# bench/hosted-native-opt-level-9112.json.
+[profile.ci-cli.package.harn-vm]
 opt-level = 0
 
 # The everyday / local release: thin LTO + 16 codegen units, the same

@@ -243,7 +243,7 @@ pub(super) fn screenshots_from_tool_result(result: &VmValue) -> Vec<VmValue> {
     let json = vm_to_json(result);
     let mut found = Vec::new();
     collect(&json, &mut found);
-    found.iter().map(crate::stdlib::json_to_vm_value).collect()
+    found.iter().map(crate::schema::json_to_vm_value).collect()
 }
 
 /// The `(id, name)` of one provider-native tool-call block carried on an

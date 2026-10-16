@@ -17,7 +17,7 @@ use aws_credential_types::provider::ProvideCredentials;
 use chrono::Utc;
 
 use crate::aws_sigv4::{sign as sign_sigv4_request, AwsSigV4Input};
-use crate::llm::api::{DeltaSender, LlmRequestPayload, LlmResult};
+use crate::llm::api::{DeltaSender, LlmRequestPayload, LlmRequestPayloadExt, LlmResult};
 use crate::llm::provider::{LlmProvider, LlmProviderChat};
 use crate::llm::providers::common::{
     apply_provider_overrides, maybe_emit_delta, request_text_content, vm_err,

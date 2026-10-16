@@ -2,7 +2,7 @@
 //! scripts branch on to decide what a route supports.
 
 use crate::llm_config;
-use crate::stdlib::json_to_vm_value;
+use crate::schema::json_to_vm_value;
 use crate::value::{VmDictExt, VmValue};
 
 use super::batch_projection::{

@@ -32,7 +32,7 @@ async fn run_tool_handler(
     let prepared = registry
         .map(|registry| super::agent_tool_governance::prepared_handler_catalog(registry, tool_name))
         .transpose()?;
-    let args_vm = crate::stdlib::json_to_vm_value(tool_args);
+    let args_vm = crate::schema::json_to_vm_value(tool_args);
     let _trusted_bridge_guard = crate::orchestration::allow_trusted_bridge_calls();
     let outcome = crate::tool_handler_scope::scope(vm.call_closure_pub(handler, &[args_vm])).await;
     let captured = vm.take_output();
@@ -134,7 +134,7 @@ pub(super) async fn embedded_call_repair_result(
             .map(|name| serde_json::json!({ "name": name }))
             .collect::<Vec<_>>(),
     });
-    let tools_val = crate::stdlib::json_to_vm_value(&tools_json);
+    let tools_val = crate::schema::json_to_vm_value(&tools_json);
     let parsed = crate::llm::api::parse_text_tools_with_harn(ctx, &payload, Some(&tools_val), "")
         .await
         .ok()?;

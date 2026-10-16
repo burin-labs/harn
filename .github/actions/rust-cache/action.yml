@@ -77,6 +77,8 @@ inputs:
       store instead of the runner's default wrapper, so a crate another runner
       of the host built is a hit despite its different checkout path
       (scripts/ci/use_kache.sh). Empty keeps the runner's wrapper.
+      "kache-native-incremental" retains native compiler state for the shared
+      CLI producer only, inside its bounded runner-private target.
     required: false
     default: ""
   persistent-target-max-gib:
@@ -206,15 +208,28 @@ runs:
         echo "::notice::HARN_PERSISTENT_TARGET runner=$RUNNER_NAME key=$CACHE_SHARED_KEY state=$state used_mib=$((used_kib / 1024))"
 
     - name: Compile through the host's Kache store
-      if: inputs.compiler-cache == 'kache'
+      if: inputs.compiler-cache != ''
       shell: bash
       env:
         CACHE_PERSISTENT_TARGET: ${{ inputs.persistent-target }}
+        CACHE_COMPILER_CACHE: ${{ inputs.compiler-cache }}
+        CACHE_SHARED_KEY: ${{ inputs.shared-key }}
       run: |
         if [[ "$CACHE_PERSISTENT_TARGET" != true ]]; then
           echo "::error::compiler-cache: kache needs a persistent target on an owned runner"
           exit 1
         fi
+        case "$CACHE_COMPILER_CACHE" in
+          kache) export HARN_EXT_KACHE_COMPILE_POLICY=artifacts ;;
+          kache-native-incremental)
+            if [[ "$CACHE_SHARED_KEY" != harn-ci-cli ]]; then
+              echo "::error::native incremental compilation is measured only for harn-ci-cli"
+              exit 1
+            fi
+            export HARN_EXT_KACHE_COMPILE_POLICY=native-incremental
+            ;;
+          *) echo "::error::unknown compiler cache: $CACHE_COMPILER_CACHE"; exit 1 ;;
+        esac
         ./scripts/ci/use_kache.sh
 
     # Register before Swatinem so this companion's post hook observes the

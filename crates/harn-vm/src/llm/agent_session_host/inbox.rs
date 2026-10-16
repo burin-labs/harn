@@ -429,7 +429,7 @@ fn host_agent_session_apply_reminder_post_turn_builtin(
     let turn = args.get(1).and_then(VmValue::as_int).unwrap_or(0);
     let report = crate::agent_sessions::apply_reminder_post_turn(&session_id, turn)
         .map_err(VmError::Runtime)?;
-    Ok(crate::stdlib::json_to_vm_value(&report))
+    Ok(crate::schema::json_to_vm_value(&report))
 }
 
 const INBOX_BUILTINS: &[&VmBuiltinDef] = &[

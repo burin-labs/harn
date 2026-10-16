@@ -454,7 +454,7 @@ mod tests {
                 serde_json::json!({"name": name, "parameters": parameters})
             })
             .collect::<Vec<_>>();
-        crate::stdlib::json_to_vm_value(&serde_json::json!({"tools": tools}))
+        crate::schema::json_to_vm_value(&serde_json::json!({"tools": tools}))
     }
 
     fn dispatch_options(tools: &[&str]) -> crate::value::DictMap {
@@ -465,13 +465,13 @@ mod tests {
         let mut options = crate::value::DictMap::new();
         options.insert(
             crate::value::intern_key("policy"),
-            crate::stdlib::json_to_vm_value(&serde_json::to_value(policy).expect("policy JSON")),
+            crate::schema::json_to_vm_value(&serde_json::to_value(policy).expect("policy JSON")),
         );
         options
     }
 
     fn generic_call(arguments: serde_json::Value) -> crate::value::VmValue {
-        crate::stdlib::json_to_vm_value(&serde_json::json!({
+        crate::schema::json_to_vm_value(&serde_json::json!({
             "id": "name-recovery-proof",
             "name": "tool_call",
             "arguments": arguments
@@ -554,7 +554,7 @@ mod tests {
         let mut options = dispatch_options(&["look", "edit"]);
         options.insert(
             crate::value::intern_key("session_id"),
-            crate::stdlib::json_to_vm_value(&serde_json::json!(&session_id)),
+            crate::schema::json_to_vm_value(&serde_json::json!(&session_id)),
         );
 
         let result = crate::llm::agent_host_primitives::host_agent_dispatch_tool_call(

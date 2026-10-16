@@ -56,6 +56,42 @@
       "The latest recorded merge-queue p90 remains 1225 seconds against the 600-second goal."
     ]
   },
+  "test_unit_rebuild_trial": {
+    "host": "hetzner-1",
+    "toolchain": "rustc 1.95.0 (59807616e 2026-04-14)",
+    "build_jobs": 8,
+    "memory_limit_gib": 44,
+    "incremental": false,
+    "rustflags": "-D warnings -Clink-arg=-fuse-ld=mold",
+    "compiler_wrapper": "disabled explicitly with RUSTC_WRAPPER=",
+    "command": "./scripts/cargo_with_worktree_build_dir.sh test --locked --no-run --lib --timings -p harn-vm [after: -p harn-vm-core]",
+    "method": "Alternate native/core twice, retain built third-party dependencies in each private target, touch only each workspace library entry file to force recompilation without changing its contents, and verify clean Git status before and after each sample. Cargo timings confirm the native test unit compiled in every sample and both core units compiled in each after sample.",
+    "before": {
+      "source": "78283823a1b281057e56cf91715a6921b1515d95",
+      "wall_seconds": [120.76, 120.54],
+      "native_test_unit_seconds": [120.12, 120.04],
+      "maximum_rss_kib": [12392928, 12363728]
+    },
+    "after": {
+      "source": "6b637f4021ed6efad330813c860883aa57a0522c",
+      "wall_seconds": [116.89, 119.77],
+      "native_test_unit_seconds": [111.93, 114.79],
+      "core_test_unit_seconds": [6.08, 6.21],
+      "core_library_seconds": [4.21, 4.48],
+      "maximum_rss_kib": [11839444, 11847324]
+    },
+    "limitations": [
+      "Two observations per source on a shared host are not a CI latency distribution or isolated frontend measurements.",
+      "This compiles test binaries without running tests or building the shared CLI producer. Existing dependencies and filesystem caches are warm.",
+      "The first attempted core control failed because cached metadata was read-only. Only that private target's core/native dev artifacts were cleaned before the recorded successful core samples; no cached hardlink was made writable.",
+      "The earlier cache-enabled test attempt failed on two Linux-only private-field callers; the successful corrected retry reused dependencies and is excluded from this comparison.",
+      "The modest total-wall difference does not establish that the 600-second merge-queue goal has been met; the latest recorded p90 remains 1225 seconds."
+    ],
+    "raw_reports": [
+      "/home/ksinder/remote-builds/9112-cache-trial/physical-core-test-unit-controls/native-1.*",
+      "/home/ksinder/remote-builds/9112-cache-trial/physical-core-test-unit-controls-retry/{core-1,native-2,core-2}.*"
+    ]
+  },
   "generator_runtime_control": {
     "command": "harn run -e <200000-yield sum probe>",
     "expected_sum": 19999900000,

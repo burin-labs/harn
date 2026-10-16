@@ -4,9 +4,9 @@ use std::collections::BTreeMap;
 use std::str::FromStr;
 
 use crate::llm::api::PromptCacheTtl;
-use crate::stdlib::macros::harn_builtin;
 use crate::value::{categorized_error, DictMap, ErrorCategory, VmError, VmValue};
 use crate::vm::Vm;
+use harn_builtin_macros::harn_builtin;
 use time::OffsetDateTime;
 
 mod pricing;

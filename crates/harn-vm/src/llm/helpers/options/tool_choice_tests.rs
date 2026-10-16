@@ -34,7 +34,7 @@ native_tools = true
             ),
             (
                 crate::value::intern_key("tool_choice"),
-                crate::stdlib::json_to_vm_value(&choice),
+                crate::schema::json_to_vm_value(&choice),
             ),
         ]);
         extract_llm_options(&[

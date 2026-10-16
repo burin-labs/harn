@@ -438,7 +438,7 @@ fn build_user_prompt_block_result(session_id: &str, prompt: &str, reason: &str) 
         "daemon_state": serde_json::Value::Null,
         "daemon_snapshot_path": serde_json::Value::Null,
     });
-    crate::stdlib::json_to_vm_value(&result)
+    crate::schema::json_to_vm_value(&result)
 }
 
 /// Tear down a Harn-driven agent session and emit the final result dict.

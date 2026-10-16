@@ -597,7 +597,7 @@ pub(crate) async fn parse_text_tools_with_harn(
         None => {
             let mut vm = crate::new_vm();
             crate::register_core_stdlib(&mut vm);
-            crate::stdlib::macros::register_builtin_defs(
+            harn_vm_core::builtin_support::register_builtin_defs(
                 &mut vm,
                 crate::llm::tools::PARSE_HOST_PRIMITIVE_BUILTINS,
             );
@@ -638,7 +638,7 @@ pub(crate) fn vm_build_llm_result(
     transcript: Option<VmValue>,
     projection: &LlmTextProjection,
 ) -> VmValue {
-    use crate::stdlib::json_to_vm_value;
+    use crate::schema::json_to_vm_value;
 
     // Capability-gated split of inline `<think>` reasoning out of the visible
     // text channel. `visible_text_src` is the answer with inline reasoning

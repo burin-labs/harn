@@ -1,4 +1,5 @@
 use super::chrono_now;
+use crate::llm::api::LlmRequestPayloadExt;
 pub(super) use crate::llm::content_hash::{stable_redacted_json_hash, stable_redacted_string_hash};
 use crate::llm::served_lineage::{LineageHead, ServedMessageLineage};
 

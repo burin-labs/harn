@@ -150,7 +150,7 @@ fn attach_session_message_facts(message: VmValue, facts: &SessionMessageFacts) -
     let encoded = serde_json::to_value(facts).expect("session message facts must serialize");
     enriched.insert(
         crate::value::intern_key(SESSION_MESSAGE_FACTS_KEY),
-        crate::stdlib::json_to_vm_value(&encoded),
+        crate::schema::json_to_vm_value(&encoded),
     );
     VmValue::dict(enriched)
 }

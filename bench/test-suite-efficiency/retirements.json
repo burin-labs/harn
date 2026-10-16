@@ -3,6 +3,27 @@
   "baselineRevision": "7deefa6d8215dc5ce0bac2705624516d17c89392",
   "removedCases": [
     {
+      "path": "crates/harn-cli/src/commands/run/tests.rs",
+      "name": "execute_run_command_bound_grant_skips_non_matching_exec",
+      "reason": "SUBSUMED: the retained real entrypoint run now exercises both a matching shell and a neighboring env executable under the same command-bound grant, asserting the injected value and the absence of that name. These permission checks use the owning test runner's deadline rather than an incidental five-second child-startup budget.",
+      "retainedPath": "crates/harn-cli/src/commands/run/tests.rs",
+      "retainedName": "execute_run_granted_policy_injects_into_subprocess_env"
+    },
+    {
+      "path": "crates/harn-vm/src/orchestration/agent_inbox.rs",
+      "name": "wait_async_returns_when_push_happens",
+      "reason": "SUBSUMED: the retained wait-state check now polls the actual future to Pending, advances logical time below its deadline, and asserts that an inbox push wakes its registered waker before returning and leaving the entry drainable. It no longer assumes one scheduler yield means the waiter was installed.",
+      "retainedPath": "crates/harn-orchestration/src/agent_inbox.rs",
+      "retainedName": "wait_async_holds_through_partial_advance_then_wakes_on_entry"
+    },
+    {
+      "path": "crates/harn-vm/src/llm/tool_delimiter.rs",
+      "name": "wire_form_is_invisible_until_canonicalized",
+      "reason": "SUBSUMED: the existing live-delta test uses the same captured response and now also checks its wire-only input and remap idempotence. It compares the complete canonicalized output across arbitrary streaming chunk boundaries instead of checking only delimiter substrings.",
+      "retainedPath": "crates/harn-vm/src/llm/providers/openai_compat/tests/streaming.rs",
+      "retainedName": "delta_canonicalizer_matches_whole_string_remap_on_real_response"
+    },
+    {
       "path": "crates/harn-vm/src/llm/usage_tests.rs",
       "name": "public_usage_projections_do_not_recompute_accounting",
       "reason": "REMOVED: scanning four Rust files for forbidden call spellings coupled the test to file layout and could miss recomputation behind an imported helper. The retained test compares actual VM, event, trace and tool-probe projections of a nonempty usage ledger; exhaustive caller architecture is not a runtime coverage claim.",

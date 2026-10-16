@@ -28,6 +28,18 @@
   },
   "workflowCheckpoints": [
     {
+      "name": "Two further main merge groups before physical crate integration",
+      "sampleCount": 5,
+      "nearestRankP90Seconds": 1225,
+      "runs": [
+        {"id": 38792206605, "sha": "0f4c441cd7b062537a7eb607f120725eb6bf5019", "seconds": 1187},
+        {"id": 38782267562, "sha": "b1bb46da90526fd67e1fd50ff797eb4395d78b09", "seconds": 1212},
+        {"id": 38770059702, "sha": "82fd5af783eb7771b24e458085943719d45410b3", "seconds": 1193},
+        {"id": 38768084904, "sha": "d30f61eb7c7ced3b9d039c11acf776f6f5eaa39e", "seconds": 1024},
+        {"id": 38762676039, "sha": "92fb8aa56973128b1ca1db2a8dd9d981203ce64a", "seconds": 1225}
+      ]
+    },
+    {
       "name": "First sample after prompt syntax landed",
       "sampleCount": 5,
       "nearestRankP90Seconds": 1625,

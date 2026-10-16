@@ -1,8 +1,9 @@
 //! Canonical provider-visible projection of durable session history plus active directives.
 
-use crate::stdlib::macros::{harn_builtin, register_builtin_defs, VmBuiltinDef};
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
+use harn_builtin_macros::harn_builtin;
+use harn_vm_core::builtin_support::{register_builtin_defs, VmBuiltinDef};
 
 /// Return exactly the message view passed to model callers.
 ///

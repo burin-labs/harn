@@ -716,7 +716,7 @@ impl AnthropicProvider {
         }
         crate::llm::prompt_cache::apply_prompt_cache_breakpoint(
             &mut body,
-            crate::llm::prompt_cache::PromptCacheBreakpoint::for_request(opts),
+            crate::llm::prompt_cache::for_request(opts),
             anthropic_cache_control(opts.prompt_cache_ttl),
         );
         let tool_search_extensions =

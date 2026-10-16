@@ -61,7 +61,7 @@ mod code_mode;
 pub(crate) mod compass_router;
 pub(crate) mod computer_use;
 pub(crate) mod config_builtins;
-pub(crate) mod content;
+pub(crate) use harn_llm::content;
 pub(crate) mod content_hash;
 mod context_breakdown;
 mod conversation;
@@ -89,7 +89,7 @@ pub mod introspection;
 pub mod jsonl;
 pub mod local_profiles;
 pub mod managed_supply;
-pub(crate) mod message_lineage;
+pub(crate) use harn_llm::message_lineage;
 pub(crate) mod mock;
 mod mock_builtins;
 mod mock_error;
@@ -101,13 +101,13 @@ pub mod plan;
 mod predicate;
 pub mod prompt;
 pub(crate) mod prompt_cache;
-mod protocol_violation;
 pub mod served_lineage;
-pub use protocol_violation::{ProtocolViolation, ProtocolViolationKind};
+#[doc(inline)]
+pub use harn_llm::protocol_violation::{ProtocolViolation, ProtocolViolationKind};
 mod provider_contract_probe;
 pub use provider_contract_probe::with_portable_option_probe;
 pub mod readiness;
-pub(crate) mod reasoning_history;
+pub(crate) use harn_llm::reasoning_history;
 pub mod reasoning_policy;
 
 /// Env var that suspends the declared reasoning-effort ladder check for the
@@ -151,7 +151,8 @@ pub(crate) fn catalog_may_shape_requested_reasoning() -> bool {
 mod effective_effort;
 pub(crate) mod reasoning_modes;
 pub mod reasoning_receipt;
-pub use effective_effort::{EffectiveReasoningEffort, ReasoningEffortSource};
+#[doc(inline)]
+pub use harn_llm::effective_effort::{EffectiveReasoningEffort, ReasoningEffortSource};
 pub use reasoning_receipt::{
     dropped_reasoning_receipts, peek_reasoning_receipts, reset_reasoning_receipts, ReasoningReceipt,
 };
@@ -169,11 +170,11 @@ mod stream_builtins;
 pub(crate) mod structural_experiments;
 pub(crate) mod structured_envelope;
 pub(crate) mod system_placement;
-mod token_count;
+use harn_llm::token_count;
 pub mod tool_conformance;
 pub mod tool_scorecard;
 mod tool_scorecard_types;
-mod tool_search_score;
+use harn_llm::tool_search_score;
 mod trace_builtins;
 pub(crate) mod transcript_seed;
 mod transcript_stats;
@@ -334,7 +335,7 @@ pub(crate) mod route;
 mod stream;
 pub(crate) mod tool_call_history;
 pub(crate) mod tool_call_intent;
-pub(crate) mod tool_delimiter;
+pub(crate) use harn_llm::tool_delimiter;
 pub(crate) mod tools;
 mod trace;
 pub(crate) use trace::LlmTraceRuntime;
@@ -376,9 +377,10 @@ pub(crate) fn ensure_real_llm_allowed(provider: &str) -> Result<(), crate::value
     )))
 }
 
-use crate::stdlib::macros::{harn_builtin, register_builtin_defs, VmBuiltinDef};
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
+use harn_builtin_macros::harn_builtin;
+use harn_vm_core::builtin_support::{register_builtin_defs, VmBuiltinDef};
 use std::sync::Arc;
 
 use self::api::{vm_build_llm_result, vm_call_completion_full};
@@ -641,7 +643,7 @@ fn host_tool_search_score_builtin(args: &[VmValue], _out: &mut String) -> Result
         .map(helpers::vm_value_to_json)
         .unwrap_or(serde_json::Value::Null);
     let ranked = tool_search_score::score_tools(&query, &registry, &opts);
-    Ok(crate::stdlib::json_to_vm_value(&serde_json::Value::Array(
+    Ok(crate::schema::json_to_vm_value(&serde_json::Value::Array(
         ranked
             .into_iter()
             .map(|item| {

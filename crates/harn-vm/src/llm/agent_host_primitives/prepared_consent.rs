@@ -33,7 +33,7 @@ pub(super) fn prepare<'a>(
             } else {
                 crate::agent_events::ToolCallErrorCategory::PermissionDenied
             };
-            crate::stdlib::json_to_vm_value(&super::agent_primitive_denied_tool(
+            crate::schema::json_to_vm_value(&super::agent_primitive_denied_tool(
                 tool_name,
                 tool_id,
                 tool_args,

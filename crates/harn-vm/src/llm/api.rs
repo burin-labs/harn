@@ -51,10 +51,12 @@ pub(crate) use errors::{
 /// envelope. Public so the protocol-artifact generator can project them into
 /// every host binding rather than leaving `kind`/`reason` as bare strings.
 pub use errors::{LlmErrorKind, LlmErrorReason};
+#[doc(inline)]
+pub use harn_llm::inference::{InferenceBoundary, InferenceReach};
 pub use inference_boundary::{
     inference_admission_schemas, preview_inference_admission, DataControlsRefusal,
     InferenceAdmissionRequest, InferenceAdmissionSnapshot, InferenceAdmissionStatus,
-    InferenceBoundary, InferenceReach, DATA_CONTROLS_TRAINING_REFUSED_RULE,
+    DATA_CONTROLS_TRAINING_REFUSED_RULE,
 };
 pub(crate) use ollama::apply_ollama_runtime_settings;
 pub(crate) use ollama::ollama_unload_grace_duration_from_env;
@@ -68,10 +70,10 @@ pub use ollama::{
 pub(crate) use openai_normalize::normalize_openai_style_messages;
 pub(crate) use options::{
     push_unique_anthropic_beta_feature, DeltaSender, LlmApiMode, LlmCallOptions, LlmRequestPayload,
-    LlmRouteAlternative, LlmRouteFallback, LlmRoutePolicy, LlmRoutingDecision, LogprobsConfig,
-    MirostatConfig, OutputFormat, PromptCacheTtl, ReasoningEffort, ReminderLifecycleEmission,
-    ResolvedSetting, ThinkingConfig, TokenBias, ToolSearchConfig, ToolSearchMode,
-    ToolSearchVariant, Verbosity,
+    LlmRequestPayloadExt, LlmRouteAlternative, LlmRouteFallback, LlmRoutePolicy,
+    LlmRoutingDecision, LogprobsConfig, MirostatConfig, OutputFormat, PromptCacheTtl,
+    ReasoningEffort, ReminderLifecycleEmission, ResolvedSetting, ThinkingConfig, TokenBias,
+    ToolSearchConfig, ToolSearchMode, ToolSearchVariant, Verbosity,
 };
 #[cfg(test)]
 pub(crate) use response::empty_generation_error;

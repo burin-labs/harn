@@ -11,7 +11,7 @@ use crate::llm::capabilities::should_use_responses_transport;
 use crate::value::{VmError, VmValue};
 
 use super::openai_normalize::{debug_log_message_shapes, parse_tool_arguments};
-use super::options::{DeltaSender, LlmApiMode, LlmRequestPayload};
+use super::options::{DeltaSender, LlmApiMode, LlmRequestPayload, LlmRequestPayloadExt};
 use super::partial_tool_args::{project_partial, DeltaCoalescer, PartialToolArgs};
 use super::response::{empty_generation_error, ProviderResponseEnvelope};
 use super::result::LlmResult;

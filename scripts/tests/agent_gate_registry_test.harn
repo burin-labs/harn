@@ -519,7 +519,7 @@ pipeline test_stale_parameter_mapping_cannot_hide_configuration_reads(
 }
 
 @test
-pipeline test_repository_selectors_reject_new_keys(harness: Harness, task: unknown) {
+pipeline test_repository_selectors_reject_new_keys(harness: Harness) {
   const manifest = path_join(harness.fs.source_dir(), "../../spec/agent-gates/registry.json")
   const config = schema_expect(
     json_parse(harness.fs.read_text(manifest)),
@@ -545,6 +545,8 @@ pipeline test_repository_selectors_reject_new_keys(harness: Harness, task: unkno
     "native-reminder-policy": "fn example() { let value = reminders.get(\"__TEST_KEY__\"); }",
     "runner-model-environment": "fn example() { let _value = std::env::var(\"__TEST_KEY__\"); }",
     "runner-native-environment": "fn example() { let _value = std::env::var(\"__TEST_KEY__\"); }",
+    "shared-model-environment": "fn example() { let _value = env_flag_enabled(\"__TEST_KEY__\"); }",
+    "shared-model-environment-constants": "const EXAMPLE_ENV: &str = \"__TEST_KEY__\";",
     "runner-stdlib-environment":
       "fn example(env: HarnessEnv) { return env.get_or(\"__TEST_KEY__\", \"\") }",
     "native-stage-environment":

@@ -110,7 +110,7 @@ pub(super) async fn dispatch_pip_install(
     let mut options = crate::value::DictMap::new();
     options.insert(
         crate::value::intern_key("session_id"),
-        crate::stdlib::json_to_vm_value(&serde_json::json!(session_id)),
+        crate::schema::json_to_vm_value(&serde_json::json!(session_id)),
     );
     if let Some(reviewer) = reviewer {
         options.insert(
@@ -118,7 +118,7 @@ pub(super) async fn dispatch_pip_install(
             VmValue::Closure(reviewer),
         );
     }
-    let call = crate::stdlib::json_to_vm_value(&serde_json::json!({
+    let call = crate::schema::json_to_vm_value(&serde_json::json!({
         "id": "exec-1",
         "name": "exec",
         "arguments": {"command": "pip install pytest"},

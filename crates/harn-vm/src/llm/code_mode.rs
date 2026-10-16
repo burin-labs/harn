@@ -47,9 +47,9 @@ use std::collections::BTreeSet;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
-use crate::stdlib::macros::harn_builtin;
 use crate::value::{DictMap, VmError, VmValue};
 use crate::vm::{AsyncBuiltinCtx, VmBuiltinMetadata};
+use harn_builtin_macros::harn_builtin;
 
 /// Builtin names in the pure composition stdlib that we defensively deny in
 /// the sandbox VM. `register_core_stdlib` is I/O-free today, so this is a

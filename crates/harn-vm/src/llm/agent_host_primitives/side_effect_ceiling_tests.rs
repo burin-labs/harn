@@ -15,7 +15,7 @@ use crate::orchestration::{
     clear_all_approval_policy_repeat_counts, clear_execution_policy_stacks, pop_approval_policy,
     push_approval_policy, DecisionReview, SideEffectCeilingViolation, ToolApprovalPolicy,
 };
-use crate::stdlib::json_to_vm_value;
+use crate::schema::json_to_vm_value;
 use crate::tool_annotations::SideEffectLevel;
 
 mod malformed_paths;

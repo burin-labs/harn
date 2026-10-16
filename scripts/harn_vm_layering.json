@@ -8,7 +8,7 @@
     "llm->agent_sessions": 420,
     "llm->native_vm": 1,
     "llm->orchestration": 276,
-    "llm->stdlib": 343,
+    "llm->stdlib": 153,
     "llm->triggers": 6,
     "llm_config->llm": 55,
     "llm_config->orchestration": 1,
