@@ -283,7 +283,7 @@ pub(super) fn run(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, Host
             if path == &seed_path {
                 return Ok(ambiguous_response_with_details(
                     &env,
-                    &[(seed_path.clone(), seed_node.line, seed_node.kind.as_str())],
+                    &[(seed_path, seed_node.line, seed_node.kind.as_str())],
                     "rename aborted without writes: the indexed declaration is absent from the current source; rebuild the code index",
                 ));
             }
