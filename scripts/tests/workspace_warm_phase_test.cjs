@@ -44,18 +44,17 @@ if(name==='cargo' && args[0]==='metadata') {
     PROBE_TARGET: path.join(root, 'target'), PROBE_CALLS: path.join(root, 'calls.jsonl') } };
 }
 
-test('the real warm owner measures all three exact compiler phases and retains cache pruning', { skip: !linux }, () => {
+test('the real warm owner measures the two consumer compiler phases and retains cache pruning', { skip: !linux }, () => {
   const f = fixture();
   try {
     const run = spawnSync('bash', [owner], { cwd: f.root, env: f.env, encoding: 'utf8', timeout: 10000 });
     assert.equal(run.status, 0, run.stderr);
-    for (const phase of ['harn-build', 'workspace-tests', 'security-tests']) {
+    for (const phase of ['workspace-tests', 'security-tests']) {
       assert.match(run.stdout, new RegExp(`phase=${phase} state=begin disk_available_kib=[1-9][0-9]* memory_available_kib=[1-9][0-9]*`));
       assert.match(run.stdout, new RegExp(`phase=${phase} state=end compiler_exit=0 elapsed_seconds=[0-9.]+ peak_rss_kib=[1-9][0-9]*`));
     }
     const calls = fs.readFileSync(f.env.PROBE_CALLS, 'utf8').trim().split('\n').map(JSON.parse);
     assert.deepEqual(calls, [
-      {name:'cargo', args:['build','--locked','--bin','harn']},
       {name:'cargo-nextest', args:['nextest','run','--locked','--workspace','--profile','ci','--no-run','-E','not (test(host_bound))']},
       {name:'cargo-nextest', args:['nextest','run','--locked','--workspace','--profile','ci','--no-run','-E','(package(harn-vm) and binary(harn_vm)) or (package(harn-hostlib) and binary(harn_hostlib))']},
       {name:'cargo', args:['metadata','--format-version','1','--no-deps']},
@@ -66,7 +65,7 @@ test('the real warm owner measures all three exact compiler phases and retains c
   } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
 });
 
-for (const phase of ['harn-build', 'workspace-tests', 'security-tests']) {
+for (const phase of ['workspace-tests', 'security-tests']) {
   test(`the real warm owner preserves ${phase} compiler refusal without certifying later phases`, { skip: !linux }, () => {
     const f = fixture();
     try {
@@ -91,11 +90,11 @@ test('successful compiler execution without metrics refuses instead of certifyin
     fs.writeFileSync(copiedOwner, source.replaceAll('/usr/bin/time', transport));
     const run = spawnSync('bash', [copiedOwner], {cwd:f.root, env:f.env, encoding:'utf8', timeout:10000});
     assert.equal(run.status, 1);
-    assert.match(run.stderr, /harn-build compiler metrics are unmeasured/);
-    assert.match(run.stdout, /phase=harn-build state=begin/);
-    assert.doesNotMatch(run.stdout, /phase=harn-build state=end/);
+    assert.match(run.stderr, /workspace-tests compiler metrics are unmeasured/);
+    assert.match(run.stdout, /phase=workspace-tests state=begin/);
+    assert.doesNotMatch(run.stdout, /phase=workspace-tests state=end/);
     const calls = fs.readFileSync(f.env.PROBE_CALLS,'utf8').trim().split('\n').map(JSON.parse);
-    assert.deepEqual(calls, [{name:'cargo',args:['build','--locked','--bin','harn']}], 'the compiler actually fired before absent metrics refused');
+    assert.deepEqual(calls, [{name:'cargo-nextest',args:['nextest','run','--locked','--workspace','--profile','ci','--no-run','-E','not (test(host_bound))']}], 'the compiler actually fired before absent metrics refused');
     assert.equal(fs.existsSync(path.join(f.deps,'test-binary')), true);
   } finally { fs.rmSync(f.root,{recursive:true,force:true}); }
 });
@@ -120,7 +119,6 @@ test('a killed foreground warm process leaves an actual compiler begin witness w
     });
     assert.equal(interrupted, true, 'the control must reach the actual foreground compiler');
     assert.equal(result.signal, 'SIGKILL');
-    assert.match(output, /phase=harn-build state=end compiler_exit=0/);
     assert.match(output, /phase=workspace-tests state=begin/);
     assert.doesNotMatch(output, /phase=workspace-tests state=end/);
     assert.doesNotMatch(output, /phase=security-tests state=begin/);
