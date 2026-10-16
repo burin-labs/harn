@@ -20,7 +20,12 @@ pub enum Publication {
 
 pub(crate) fn diagnostic_disposition(message: &serde_json::Value) -> (bool, Option<Publication>) {
     match message.get(KEY) {
-        Some(value) => (true, serde_json::from_value(value.clone()).ok()),
+        Some(value) => (
+            true,
+            value
+                .as_str()
+                .and_then(|_| serde_json::from_value(value.clone()).ok()),
+        ),
         None => (false, None),
     }
 }
