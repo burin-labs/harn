@@ -307,6 +307,15 @@ package under another compiler authority. Set `HARN_CACHE_DIR` to the host's
 cache, and repeat after source, package, or compiler changes. These keys belong
 to the installed paths; adjacent artifacts remain the portable packaging form.
 
+Artifacts also identify the linked builtin contracts. A host with a lean or
+extended builtin catalog is a different compiler backend from the standalone
+CLI. Such hosts prepare through `harn_vm::bytecode_cache::CachePrecompiler`
+linked into their executing backend. The helper derives each graph's typed
+contexts once, prepares modules and their individual dependency proofs, and
+returns the entry context and store identity. The host owns entry compilation
+and package authority; a host that loads files as modules need not persist its
+inline entry chunk. Preparation never instantiates a module or calls a model.
+
 ## Toggles and environment
 
 - `HARN_CACHE_DIR=<absolute-path>` — relocate the cache directory. Empty

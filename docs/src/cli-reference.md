@@ -3269,6 +3269,10 @@ code or calls a model. Writes must succeed or the command fails. Set
 after relocating the tree, changing its dependencies, or changing Harn; these
 machine-local cache keys include canonical paths.
 
+Use the executing backend's builtin catalog. Embedded hosts whose catalog
+differs from the standalone CLI prepare through
+`harn_vm::bytecode_cache::CachePrecompiler` linked into that host.
+
 ### Regenerating artifacts, and what cannot go stale
 
 `harn precompile` is also the command that refreshes these artifacts for a
