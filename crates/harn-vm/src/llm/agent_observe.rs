@@ -1087,7 +1087,7 @@ pub(crate) async fn observed_llm_call(
                     // ledger. Keep its measured-zero receipt when it is the
                     // whole call; after a billed retry, the prior provider
                     // receipts remain the complete physical ledger.
-                    if reported.is_empty() {
+                    if reported.is_empty() && physical_attempts == 0 {
                         if let Some(usage) = admission_denial_usage.as_ref() {
                             return usage.clone();
                         }
