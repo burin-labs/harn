@@ -54,26 +54,7 @@ pub(super) fn tool_call_block(
     })
 }
 
-pub(super) fn request_text_content(message: &serde_json::Value) -> String {
-    let content = crate::llm::content::provider_visible_content(&message["content"]);
-    if let Some(text) = content.as_str() {
-        return text.to_string();
-    }
-    let Some(parts) = content.as_array() else {
-        return String::new();
-    };
-    let mut text = String::new();
-    for part in parts {
-        if let Some(value) = part.get("text").and_then(|value| value.as_str()) {
-            text.push_str(value);
-        } else if part.get("type").and_then(|value| value.as_str()) == Some("text") {
-            if let Some(value) = part.get("text").and_then(|value| value.as_str()) {
-                text.push_str(value);
-            }
-        }
-    }
-    text
-}
+pub(super) use harn_llm::wire::request_text_content;
 
 pub(super) fn empty_result(provider: &str, model: &str) -> LlmResult {
     LlmResult {

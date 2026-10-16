@@ -1,6 +1,7 @@
 //! Provider request encoding with resolved policy and deferred audit delivery.
 
 pub mod anthropic;
+pub mod gemini;
 pub mod openai;
 pub mod openai_normalize;
 pub mod prompt_cache;
@@ -55,4 +56,26 @@ pub fn apply_reasoning_mode(
 pub struct EncodedRequest {
     pub body: serde_json::Value,
     pub schema_audits: Vec<std::collections::BTreeMap<String, serde_json::Value>>,
+}
+
+/// Flatten only provider-visible text from a neutral message.
+pub fn request_text_content(message: &serde_json::Value) -> String {
+    let content = crate::content::provider_visible_content(&message["content"]);
+    if let Some(text) = content.as_str() {
+        return text.to_string();
+    }
+    let Some(parts) = content.as_array() else {
+        return String::new();
+    };
+    let mut text = String::new();
+    for part in parts {
+        if let Some(value) = part.get("text").and_then(|value| value.as_str()) {
+            text.push_str(value);
+        } else if part.get("type").and_then(|value| value.as_str()) == Some("text") {
+            if let Some(value) = part.get("text").and_then(|value| value.as_str()) {
+                text.push_str(value);
+            }
+        }
+    }
+    text
 }
