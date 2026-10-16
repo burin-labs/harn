@@ -12,7 +12,7 @@ use std::sync::OnceLock;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::clock_mock;
-use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
+use crate::stdlib::macros::harn_builtin;
 use crate::testbench::tape::{self as tape, ClockSource, TapeRecordKind};
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
@@ -186,9 +186,7 @@ pub(crate) fn register_clock_builtins(vm: &mut Vm) {
     // they honor the active clock mock. `register_builtin_def` ends up
     // calling `register_builtin_with_metadata`, which replaces existing
     // entries, preserving the override behavior.
-    for def in MODULE_BUILTINS {
-        vm.register_builtin_def(def);
-    }
+    crate::stdlib::macros::register_module_builtins(vm, module_path!());
 }
 
 #[harn_builtin(
@@ -257,9 +255,9 @@ async fn sleep_ms_impl(
 )]
 fn mock_time_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let Some(ms) = args.first().and_then(|a| a.as_int()) else {
-        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+        return Err(VmError::Thrown(VmValue::string(
             "mock_time(ms): expected an int millisecond timestamp",
-        ))));
+        )));
     };
     push_mock(ms);
     Ok(VmValue::Nil)
@@ -273,9 +271,9 @@ fn mock_time_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
 fn advance_time_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let ms = args.first().and_then(|a| a.as_int()).unwrap_or(0);
     if !is_mocked() {
-        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+        return Err(VmError::Thrown(VmValue::string(
             "advance_time: no mock active. Call mock_time(ms) first.",
-        ))));
+        )));
     }
     advance(ms);
     Ok(VmValue::Int(now_wall_ms()))
@@ -290,17 +288,6 @@ fn unmock_time_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
     pop_mock();
     Ok(VmValue::Nil)
 }
-
-pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
-    &TIMESTAMP_IMPL_DEF,
-    &ELAPSED_IMPL_DEF,
-    &MONOTONIC_MS_IMPL_DEF,
-    &NOW_MS_IMPL_DEF,
-    &SLEEP_MS_IMPL_DEF,
-    &MOCK_TIME_IMPL_DEF,
-    &ADVANCE_TIME_IMPL_DEF,
-    &UNMOCK_TIME_IMPL_DEF,
-];
 
 #[cfg(test)]
 mod tests {

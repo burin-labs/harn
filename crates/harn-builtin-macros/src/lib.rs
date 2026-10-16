@@ -202,6 +202,7 @@ fn expand_capability_method(input: CapabilityMethodInput) -> syn::Result<TokenSt
         #[doc(hidden)]
         #[allow(non_upper_case_globals)]
         pub static #def_ident: #support::VmBuiltinDef = #support::VmBuiltinDef {
+            module: module_path!(),
             sig: #sig_expr,
             contract: #contract,
             aliases: &[],
@@ -542,6 +543,7 @@ fn expand(attrs: BuiltinAttrs, item_fn: ItemFn) -> syn::Result<TokenStream2> {
         #[doc(hidden)]
         #[allow(non_upper_case_globals)]
         pub static #def_ident: #support::VmBuiltinDef = #support::VmBuiltinDef {
+            module: module_path!(),
             sig: #sig_expr,
             contract: #contract_expr,
             aliases: #aliases_arr,

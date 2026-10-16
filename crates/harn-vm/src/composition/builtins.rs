@@ -83,8 +83,8 @@ fn composition_typescript_declarations_impl(
             "composition_typescript_declarations: invalid manifest: {error}"
         ))
     })?;
-    Ok(VmValue::String(arcstr::ArcStr::from(
-        composition_typescript_declarations(&manifest),
+    Ok(VmValue::string(composition_typescript_declarations(
+        &manifest,
     )))
 }
 
@@ -102,9 +102,7 @@ fn composition_harn_api_impl(args: &[VmValue], _out: &mut String) -> Result<VmVa
     let manifest: BindingManifest = serde_json::from_value(manifest_value).map_err(|error| {
         VmError::Runtime(format!("composition_harn_api: invalid manifest: {error}"))
     })?;
-    Ok(VmValue::String(arcstr::ArcStr::from(composition_harn_api(
-        &manifest,
-    ))))
+    Ok(VmValue::string(composition_harn_api(&manifest)))
 }
 
 #[harn_builtin(

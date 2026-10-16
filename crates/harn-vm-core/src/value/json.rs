@@ -49,10 +49,8 @@ pub fn json_to_vm_value(jv: &serde_json::Value) -> VmValue {
                 VmValue::Float(n.as_f64().unwrap_or(0.0))
             }
         }
-        serde_json::Value::String(s) => VmValue::String(arcstr::ArcStr::from(s.as_str())),
-        serde_json::Value::Array(arr) => VmValue::List(std::sync::Arc::new(
-            arr.iter().map(json_to_vm_value).collect(),
-        )),
+        serde_json::Value::String(s) => VmValue::string(s.as_str()),
+        serde_json::Value::Array(arr) => VmValue::list(arr.iter().map(json_to_vm_value).collect()),
         serde_json::Value::Object(map) => {
             let mut m = super::DictMap::new();
             for (k, v) in map {

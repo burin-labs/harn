@@ -282,10 +282,10 @@ fn store_receipt(receipts: &mut BTreeMap<String, TerminalReceipt>, receipt: Term
 /// bounded (see [`RECEIPT_CAP`]), so a handle observed too late after eviction
 /// under sustained flooding resolves here — the wording covers both cases.
 fn unknown_handle_error(handle_id: &str) -> VmError {
-    VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
+    VmError::Thrown(VmValue::string(format!(
         "host_call process: unknown or expired spawn handle {handle_id:?} \
          (terminal receipts are bounded; observe or release the handle promptly)"
-    ))))
+    )))
 }
 
 /// Look up a live entry without consulting receipts.
@@ -482,10 +482,7 @@ async fn spawn(
 
     let mut result = BTreeMap::new();
     result.put_str("handle_id", handle_id);
-    result.insert(
-        "pid".to_string(),
-        pid.map(|p| VmValue::Int(p as i64)).unwrap_or(VmValue::Nil),
-    );
+    result.put_nullable("pid", pid.map(|p| VmValue::Int(p as i64)));
     result.put_str("started_at", started_at);
     result.put_str("command", command_display);
     result.put_str("status", "running");
@@ -666,22 +663,11 @@ fn poll_dict(
     let mut result = BTreeMap::new();
     result.put_str("handle_id", handle_id);
     result.put_str("status", status.as_str());
-    result.insert(
-        "running".to_string(),
-        VmValue::Bool(status == SpawnStatus::Running),
-    );
+    result.put_bool("running", status == SpawnStatus::Running);
     result.put_str("command", command);
     result.put_str("started_at", started_at);
-    result.insert(
-        "pid".to_string(),
-        pid.map(|p| VmValue::Int(p as i64)).unwrap_or(VmValue::Nil),
-    );
-    result.insert(
-        "exit_code".to_string(),
-        exit_code
-            .map(|c| VmValue::Int(c as i64))
-            .unwrap_or(VmValue::Nil),
-    );
+    result.put_nullable("pid", pid.map(|p| VmValue::Int(p as i64)));
+    result.put_nullable("exit_code", exit_code.map(|c| VmValue::Int(c as i64)));
     result.put_str("stdout", String::from_utf8_lossy(stdout));
     result.put_str("stderr", String::from_utf8_lossy(stderr));
     VmValue::dict(result)
@@ -763,19 +749,11 @@ fn with_verifier_completion(
 fn wait_dict(status: SpawnStatus, exit_code: Option<i32>, stdout: &[u8], stderr: &[u8]) -> VmValue {
     let mut result = BTreeMap::new();
     result.put_str("status", status.as_str());
-    result.insert(
-        "exit_code".to_string(),
-        exit_code
-            .map(|c| VmValue::Int(c as i64))
-            .unwrap_or(VmValue::Nil),
-    );
+    result.put_nullable("exit_code", exit_code.map(|c| VmValue::Int(c as i64)));
     result.put_str("stdout", String::from_utf8_lossy(stdout));
     result.put_str("stderr", String::from_utf8_lossy(stderr));
-    result.insert(
-        "timed_out".to_string(),
-        VmValue::Bool(status == SpawnStatus::TimedOut),
-    );
-    result.insert("running".to_string(), VmValue::Bool(false));
+    result.put_bool("timed_out", status == SpawnStatus::TimedOut);
+    result.put_bool("running", false);
     VmValue::dict(result)
 }
 
@@ -817,8 +795,8 @@ async fn wait(params: &crate::value::DictMap) -> Result<VmValue, VmError> {
                     // Wait timed out and the process is still running. Leave
                     // it running per the contract; report timed_out + running.
                     let mut result = BTreeMap::new();
-                    result.insert("timed_out".to_string(), VmValue::Bool(true));
-                    result.insert("running".to_string(), VmValue::Bool(true));
+                    result.put_bool("timed_out", true);
+                    result.put_bool("running", true);
                     result.put_str("status", "running");
                     return Ok(VmValue::dict(result));
                 }
@@ -886,7 +864,7 @@ async fn kill(params: &crate::value::DictMap) -> Result<VmValue, VmError> {
 
 fn kill_result(success: bool, status: SpawnStatus) -> VmValue {
     let mut result = BTreeMap::new();
-    result.insert("success".to_string(), VmValue::Bool(success));
+    result.put_bool("success", success);
     result.put_str("status", status.as_str());
     VmValue::dict(result)
 }
@@ -930,10 +908,7 @@ fn release(params: &crate::value::DictMap) -> Result<VmValue, VmError> {
         .remove(&handle_id)
         .is_some();
     let mut result = BTreeMap::new();
-    result.insert(
-        "released".to_string(),
-        VmValue::Bool(removed.is_some() || released_receipt),
-    );
+    result.put_bool("released", removed.is_some() || released_receipt);
     Ok(VmValue::dict(result))
 }
 
@@ -958,7 +933,7 @@ mod tests {
     }
 
     fn vstr(s: &str) -> VmValue {
-        VmValue::String(arcstr::ArcStr::from(s))
+        VmValue::string(s)
     }
 
     fn argv(items: &[&str]) -> VmValue {

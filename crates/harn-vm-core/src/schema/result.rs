@@ -88,9 +88,7 @@ pub(super) fn issue_messages(issues: &[ValidationIssue]) -> Vec<String> {
 }
 
 pub(super) fn issue_values(issues: &[ValidationIssue]) -> VmValue {
-    VmValue::List(std::sync::Arc::new(
-        issues.iter().map(ValidationIssue::to_vm_value).collect(),
-    ))
+    VmValue::list(issues.iter().map(ValidationIssue::to_vm_value).collect())
 }
 
 pub(super) fn result_ok_value(value: VmValue) -> VmValue {
@@ -108,14 +106,14 @@ pub(super) fn result_err_value(errors: Vec<ValidationIssue>, value: Option<VmVal
             .unwrap_or_else(|| "schema validation failed".to_string()),
     );
     payload.insert("issues".to_string(), issue_values(&errors));
-    payload.insert(
-        "errors".to_string(),
-        VmValue::List(std::sync::Arc::new(
+    payload.put(
+        "errors",
+        VmValue::list(
             messages
                 .into_iter()
                 .map(|err| VmValue::String(arcstr::ArcStr::from(err)))
                 .collect(),
-        )),
+        ),
     );
     if let Some(value) = value {
         payload.insert("value".to_string(), value);

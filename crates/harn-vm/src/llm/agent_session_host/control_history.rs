@@ -31,12 +31,9 @@ fn host_agent_session_control_events_builtin(
         .iter()
         .map(|event| crate::schema::json_to_vm_value(&event.to_payload()))
         .collect::<Vec<_>>();
-    Ok(VmValue::List(std::sync::Arc::new(events)))
+    Ok(VmValue::list(events))
 }
 
-const CONTROL_HISTORY_BUILTINS: &[&VmBuiltinDef] =
-    &[&HOST_AGENT_SESSION_CONTROL_EVENTS_BUILTIN_DEF];
-
 pub(super) fn register_control_history_primitives(vm: &mut Vm) {
-    register_builtin_defs(vm, CONTROL_HISTORY_BUILTINS);
+    harn_vm_core::builtin_support::register_module_builtins(vm, module_path!());
 }

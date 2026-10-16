@@ -234,7 +234,7 @@ impl VmSyncRuntime {
                 rows.push(primitive.metrics_dict());
             }
         }
-        VmValue::List(std::sync::Arc::new(rows))
+        VmValue::list(rows)
     }
 }
 
@@ -301,43 +301,16 @@ impl VmSyncPrimitive {
         let mut dict = BTreeMap::new();
         dict.put_str("kind", self.kind.as_str());
         dict.put_str("key", self.key.as_str());
-        dict.insert("capacity".to_string(), VmValue::Int(self.capacity as i64));
-        dict.insert(
-            "acquisition_count".to_string(),
-            VmValue::Int(metrics.acquisition_count as i64),
-        );
-        dict.insert(
-            "timeout_count".to_string(),
-            VmValue::Int(metrics.timeout_count as i64),
-        );
-        dict.insert(
-            "cancellation_count".to_string(),
-            VmValue::Int(metrics.cancellation_count as i64),
-        );
-        dict.insert(
-            "release_count".to_string(),
-            VmValue::Int(metrics.release_count as i64),
-        );
-        dict.insert(
-            "current_held".to_string(),
-            VmValue::Int(metrics.current_held as i64),
-        );
-        dict.insert(
-            "current_queue_depth".to_string(),
-            VmValue::Int(metrics.current_queue_depth as i64),
-        );
-        dict.insert(
-            "max_queue_depth".to_string(),
-            VmValue::Int(metrics.max_queue_depth as i64),
-        );
-        dict.insert(
-            "total_wait_ms".to_string(),
-            VmValue::Int(metrics.total_wait_ms as i64),
-        );
-        dict.insert(
-            "total_held_ms".to_string(),
-            VmValue::Int(metrics.total_held_ms as i64),
-        );
+        dict.put_int("capacity", self.capacity as i64);
+        dict.put_int("acquisition_count", metrics.acquisition_count as i64);
+        dict.put_int("timeout_count", metrics.timeout_count as i64);
+        dict.put_int("cancellation_count", metrics.cancellation_count as i64);
+        dict.put_int("release_count", metrics.release_count as i64);
+        dict.put_int("current_held", metrics.current_held as i64);
+        dict.put_int("current_queue_depth", metrics.current_queue_depth as i64);
+        dict.put_int("max_queue_depth", metrics.max_queue_depth as i64);
+        dict.put_int("total_wait_ms", metrics.total_wait_ms as i64);
+        dict.put_int("total_held_ms", metrics.total_held_ms as i64);
         VmValue::dict(dict)
     }
 }

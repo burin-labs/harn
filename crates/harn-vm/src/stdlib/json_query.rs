@@ -191,11 +191,9 @@ fn eval_path(input: &VmValue, steps: &[PathStep]) -> Vec<VmValue> {
                 },
                 PathStep::Slice(start, end) => match value {
                     VmValue::List(items) => {
-                        next.push(VmValue::List(std::sync::Arc::new(slice_list(
-                            &items, *start, *end,
-                        ))));
+                        next.push(VmValue::list(slice_list(&items, *start, *end)));
                     }
-                    _ => next.push(VmValue::List(std::sync::Arc::new(Vec::new()))),
+                    _ => next.push(VmValue::list(Vec::new())),
                 },
             }
         }
@@ -269,27 +267,25 @@ fn eval_builtin(builtin: Builtin, input: &VmValue) -> VmValue {
             _ => 1,
         }),
         Builtin::Keys => match input {
-            VmValue::Dict(map) => VmValue::List(std::sync::Arc::new(
+            VmValue::Dict(map) => VmValue::list(
                 map.keys()
-                    .map(|key| VmValue::String(arcstr::ArcStr::from(key.as_str())))
+                    .map(|key| VmValue::string(key.as_str()))
                     .collect(),
-            )),
-            VmValue::List(items) => VmValue::List(std::sync::Arc::new(
+            ),
+            VmValue::List(items) => VmValue::list(
                 (0..items.len())
                     .map(|index| VmValue::Int(index as i64))
                     .collect(),
-            )),
-            _ => VmValue::List(std::sync::Arc::new(Vec::new())),
+            ),
+            _ => VmValue::list(Vec::new()),
         },
         Builtin::Values => match input {
-            VmValue::Dict(map) => {
-                VmValue::List(std::sync::Arc::new(map.values().cloned().collect()))
-            }
+            VmValue::Dict(map) => VmValue::list(map.values().cloned().collect()),
             VmValue::List(items) => VmValue::List(items.clone()),
             VmValue::Set(set) => VmValue::List(set.shared_items()),
-            _ => VmValue::List(std::sync::Arc::new(Vec::new())),
+            _ => VmValue::list(Vec::new()),
         },
-        Builtin::Type => VmValue::String(arcstr::ArcStr::from(jq_type_name(input))),
+        Builtin::Type => VmValue::string(jq_type_name(input)),
     }
 }
 
@@ -455,9 +451,9 @@ impl<'a> Parser<'a> {
             return self.parse_object();
         }
         if self.peek_char() == Some('"') {
-            return Ok(Expr::Literal(VmValue::String(arcstr::ArcStr::from(
+            return Ok(Expr::Literal(VmValue::string(
                 self.parse_string()?.as_str(),
-            ))));
+            )));
         }
         if self
             .peek_char()

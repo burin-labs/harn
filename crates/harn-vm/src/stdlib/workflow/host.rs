@@ -1,5 +1,6 @@
 //! Host workflow registration-layer builtins for the Harn stdlib executor.
 
+use crate::value::VmDictExt;
 use std::collections::BTreeMap;
 
 use crate::orchestration::{
@@ -126,12 +127,7 @@ pub(super) async fn host_workflow_stage_complete_builtin(
     let mut dict = BTreeMap::new();
     dict.insert("state".to_string(), control);
     dict.insert("stage".to_string(), to_vm(&stage)?);
-    dict.insert(
-        "branch".to_string(),
-        branch
-            .map(|branch| VmValue::String(arcstr::ArcStr::from(branch)))
-            .unwrap_or(VmValue::Nil),
-    );
+    dict.put_nullable_str("branch", branch);
     Ok(VmValue::dict(dict))
 }
 
@@ -518,52 +514,30 @@ pub(super) async fn host_stage_execute_once_builtin(
     {
         Ok(settled) => {
             let mut dict = BTreeMap::new();
-            dict.insert("ok".to_string(), VmValue::Bool(true));
+            dict.put_bool("ok", true);
             dict.insert(
                 "result".to_string(),
                 crate::stdlib::json_to_vm_value(&settled.result),
             );
             dict.insert("artifacts".to_string(), to_vm(&settled.artifacts)?);
-            dict.insert(
-                "transcript".to_string(),
-                settled.transcript.unwrap_or(VmValue::Nil),
-            );
-            dict.insert(
-                "outcome".to_string(),
-                VmValue::String(arcstr::ArcStr::from(settled.outcome)),
-            );
-            dict.insert(
-                "branch".to_string(),
-                settled
-                    .branch
-                    .map(|branch| VmValue::String(arcstr::ArcStr::from(branch)))
-                    .unwrap_or(VmValue::Nil),
-            );
-            dict.insert(
-                "verification".to_string(),
+            dict.put_nullable("transcript", settled.transcript);
+            dict.put_str("outcome", settled.outcome);
+            dict.put_nullable_str("branch", settled.branch);
+            dict.put_nullable(
+                "verification",
                 settled
                     .verification
                     .as_ref()
-                    .map(crate::stdlib::json_to_vm_value)
-                    .unwrap_or(VmValue::Nil),
+                    .map(crate::stdlib::json_to_vm_value),
             );
             Ok(VmValue::dict(dict))
         }
         Err(error) => {
             let mut dict = BTreeMap::new();
-            dict.insert("ok".to_string(), VmValue::Bool(false));
-            dict.insert(
-                "error".to_string(),
-                VmValue::String(arcstr::ArcStr::from(error.to_string())),
-            );
-            dict.insert(
-                "outcome".to_string(),
-                VmValue::String(arcstr::ArcStr::from("error")),
-            );
-            dict.insert(
-                "branch".to_string(),
-                VmValue::String(arcstr::ArcStr::from("error")),
-            );
+            dict.put_bool("ok", false);
+            dict.put_str("error", error.to_string());
+            dict.put_str("outcome", "error");
+            dict.put_str("branch", "error");
             Ok(VmValue::dict(dict))
         }
     }

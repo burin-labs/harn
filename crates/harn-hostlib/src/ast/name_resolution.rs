@@ -22,8 +22,6 @@
 //! Callers decide what to do with a low-confidence finding; this module only
 //! refuses to overstate one.
 
-use std::sync::Arc;
-
 use harn_vm::VmValue;
 use tree_sitter::{Node, Tree};
 
@@ -126,7 +124,7 @@ impl Resolution {
             ("complete", VmValue::Bool(self.is_complete())),
             ("analysed", VmValue::Bool(self.analysed)),
             ("ceiling", str_value(self.ceiling.as_str())),
-            ("defeaters", VmValue::List(Arc::new(defeaters))),
+            ("defeaters", VmValue::list(defeaters)),
         ])
     }
 

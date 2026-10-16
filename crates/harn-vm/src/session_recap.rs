@@ -3,7 +3,7 @@
 //! A recap is a read-only view over [`SessionStore`]. It never writes a derived
 //! record and never calls a provider. The store's signed event chain remains the
 //! source of truth; this module groups those facts by the existing `run_id`,
-//! `turn_id`, and `loop_checkpoint` iteration boundaries.
+//! `turn_id`, and the agent loop's `iteration_start` / `iteration_end` events.
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
@@ -541,8 +541,11 @@ impl<'a> RecapProjector<'a> {
             .source_event_ids
             .push(event.event_id);
 
-        if record.kind() == Some(&TranscriptKind::LoopCheckpoint) {
-            self.absorb_checkpoint(turn_index, event, &record);
+        if matches!(
+            record.kind(),
+            Some(TranscriptKind::IterationStart | TranscriptKind::IterationEnd)
+        ) {
+            self.absorb_iteration_boundary(turn_index, event, &record);
         } else if matches!(event.kind, SessionEventKind::Message)
             || record.kind() == Some(&TranscriptKind::AssistantPublication)
         {
@@ -620,6 +623,25 @@ impl<'a> RecapProjector<'a> {
         self.iteration_index(turn_index, iteration)
     }
 
+    fn publication_segment(&mut self, turn_index: usize, record: &TranscriptRecord) -> usize {
+        // Accepted final prose can arrive after iteration_end. Keep it with
+        // the turn's last durable iteration without inventing either boundary.
+        let turn = &self.turns[turn_index];
+        let iteration = integer(&record.metadata().iteration)
+            .or(turn.current_iteration)
+            .or_else(|| {
+                turn.recap
+                    .iterations
+                    .iter()
+                    .rev()
+                    .find_map(|item| item.iteration)
+            });
+        if iteration.is_none() {
+            self.unassigned += 1;
+        }
+        self.iteration_index(turn_index, iteration)
+    }
+
     fn mark_segment_event(&mut self, turn_index: usize, segment_index: usize, event_id: u64) {
         self.turns[turn_index].recap.iterations[segment_index]
             .source_event_ids
@@ -627,13 +649,12 @@ impl<'a> RecapProjector<'a> {
         self.matched += 1;
     }
 
-    fn absorb_checkpoint(
+    fn absorb_iteration_boundary(
         &mut self,
         turn_index: usize,
         event: &StoredEvent,
         record: &TranscriptRecord,
     ) {
-        let kind = nonblank(&record.metadata().checkpoint_kind);
         let iteration = integer(&record.metadata().iteration);
         let Some(iteration) = iteration else {
             self.unassigned += 1;
@@ -642,21 +663,16 @@ impl<'a> RecapProjector<'a> {
         let segment_index = self.iteration_index(turn_index, Some(iteration));
         let segment = &mut self.turns[turn_index].recap.iterations[segment_index];
         segment.source_event_ids.push(event.event_id);
-        match kind.as_deref() {
-            Some("iteration_start") => {
-                segment.started = true;
-                self.turns[turn_index].current_iteration = Some(iteration);
-                self.matched += 1;
+        if record.kind() == Some(&TranscriptKind::IterationStart) {
+            segment.started = true;
+            self.turns[turn_index].current_iteration = Some(iteration);
+        } else {
+            segment.ended = true;
+            if self.turns[turn_index].current_iteration == Some(iteration) {
+                self.turns[turn_index].current_iteration = None;
             }
-            Some("iteration_end") => {
-                segment.ended = true;
-                if self.turns[turn_index].current_iteration == Some(iteration) {
-                    self.turns[turn_index].current_iteration = None;
-                }
-                self.matched += 1;
-            }
-            _ => self.unassigned += 1,
         }
+        self.matched += 1;
     }
 
     fn absorb_message(
@@ -680,7 +696,12 @@ impl<'a> RecapProjector<'a> {
                 self.matched += 1;
             }
             Some("assistant") if visibility.as_deref() == Some("public") => {
-                let segment_index = self.current_segment(turn_index);
+                let segment_index = if record.kind() == Some(&TranscriptKind::AssistantPublication)
+                {
+                    self.publication_segment(turn_index, record)
+                } else {
+                    self.current_segment(turn_index)
+                };
                 self.turns[turn_index].recap.iterations[segment_index]
                     .assistant_text
                     .push(RecapTextFact {
@@ -973,7 +994,9 @@ fn is_recap_event(event: &StoredEvent, record: &TranscriptRecord) -> bool {
     ) || matches!(
         record.kind(),
         Some(
-            TranscriptKind::LoopCheckpoint
+            TranscriptKind::IterationStart
+                | TranscriptKind::IterationEnd
+                | TranscriptKind::AssistantPublication
                 | TranscriptKind::ProgressReported
                 | TranscriptKind::AgentRunTerminal
         )

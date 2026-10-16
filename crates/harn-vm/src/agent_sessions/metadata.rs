@@ -1,4 +1,5 @@
 use super::*;
+use crate::value::VmDictExt;
 use std::collections::HashMap;
 
 pub fn set_active_skills(id: &str, skills: Vec<String>) {
@@ -95,10 +96,7 @@ pub fn record_system_prompt(id: &str, system_prompt: &str) -> Result<(), String>
                     system_prompt,
                 )),
             ));
-            next.insert(
-                crate::value::intern_key("events"),
-                VmValue::List(std::sync::Arc::new(events)),
-            );
+            next.put("events", VmValue::list(events));
         }
         apply_transcript_with_budget(state, VmValue::dict(next), "record_system_prompt")?;
         state.system_prompt = Some(system_prompt.to_string());
@@ -168,10 +166,7 @@ pub fn record_directive_nonce(id: &str, nonce: &str) -> Result<Option<String>, S
             .map(|metadata| metadata.as_ref().clone())
             .unwrap_or_else(crate::value::DictMap::new);
         metadata.put_str(DIRECTIVE_NONCE_METADATA_KEY, nonce);
-        transcript.insert(
-            crate::value::intern_key("metadata"),
-            VmValue::dict(metadata),
-        );
+        transcript.put("metadata", VmValue::dict(metadata));
         apply_transcript_with_budget(state, VmValue::dict(transcript), "record_directive_nonce")?;
         state.touch();
         Ok(Some(nonce.to_string()))
@@ -537,10 +532,7 @@ pub(super) fn clone_transcript_with_parent(transcript: &VmValue, parent_id: &str
             metadata.put_str("parent_session_id", parent_id);
             VmValue::dict(metadata)
         }
-        _ => VmValue::dict(BTreeMap::from([(
-            "parent_session_id".to_string(),
-            VmValue::String(arcstr::ArcStr::from(parent_id.to_string())),
-        )])),
+        _ => VmValue::dict([("parent_session_id", VmValue::string(parent_id.to_string()))]),
     };
     next.insert(crate::value::intern_key("metadata"), metadata);
     VmValue::dict(next)
@@ -557,10 +549,7 @@ pub(super) fn apply_system_prompt_metadata(next: &mut crate::value::DictMap, sys
             system_prompt,
         )),
     );
-    next.insert(
-        crate::value::intern_key("metadata"),
-        VmValue::dict(metadata),
-    );
+    next.put("metadata", VmValue::dict(metadata));
 }
 
 pub(super) fn transcript_with_session_metadata(
@@ -577,10 +566,7 @@ pub(super) fn transcript_with_session_metadata(
     };
     if let Some(tool_format) = state.tool_format.as_ref() {
         metadata.put_str("tool_format", tool_format.clone());
-        metadata.insert(
-            crate::value::intern_key("tool_mode_locked"),
-            VmValue::Bool(true),
-        );
+        metadata.put_bool("tool_mode_locked", true);
     }
     if let Some(system_prompt) = state.system_prompt.as_ref() {
         metadata.insert(
@@ -611,10 +597,7 @@ pub(super) fn transcript_with_session_metadata(
             crate::value::intern_key("agent_scratchpad"),
             scratchpad.clone(),
         );
-        metadata.insert(
-            crate::value::intern_key("agent_scratchpad_version"),
-            VmValue::Int(state.scratchpad_version as i64),
-        );
+        metadata.put_int("agent_scratchpad_version", state.scratchpad_version as i64);
     } else {
         metadata.remove("agent_scratchpad");
         metadata.remove("agent_scratchpad_version");
@@ -634,10 +617,7 @@ pub(super) fn transcript_with_session_metadata(
         );
     }
     if !metadata.is_empty() {
-        next.insert(
-            crate::value::intern_key("metadata"),
-            VmValue::dict(metadata),
-        );
+        next.put("metadata", VmValue::dict(metadata));
     }
     VmValue::dict(next)
 }
@@ -666,89 +646,72 @@ pub(super) fn session_snapshot(state: &SessionState) -> VmValue {
             _ => None,
         })
         .unwrap_or(0);
-    next.insert(crate::value::intern_key("length"), VmValue::Int(length));
+    next.put_int("length", length);
     next.put_str("created_at", state.created_at.clone());
-    next.insert(
-        crate::value::intern_key("parent_id"),
+    next.put_nullable(
+        "parent_id",
         state
             .parent_id
             .as_ref()
-            .map(|id| VmValue::String(arcstr::ArcStr::from(id.clone())))
-            .unwrap_or(VmValue::Nil),
+            .map(|id| VmValue::string(id.clone())),
     );
-    next.insert(
-        crate::value::intern_key("child_ids"),
-        VmValue::List(std::sync::Arc::new(
+    next.put(
+        "child_ids",
+        VmValue::list(
             state
                 .child_ids
                 .iter()
                 .cloned()
                 .map(|id| VmValue::String(arcstr::ArcStr::from(id)))
                 .collect(),
-        )),
+        ),
     );
-    next.insert(
-        crate::value::intern_key("branched_at_event_index"),
+    next.put_nullable(
+        "branched_at_event_index",
         state
             .branched_at_event_index
-            .map(|index| VmValue::Int(index as i64))
-            .unwrap_or(VmValue::Nil),
+            .map(|index| VmValue::Int(index as i64)),
     );
-    next.insert(
-        crate::value::intern_key("system_prompt"),
+    next.put_nullable(
+        "system_prompt",
         state
             .system_prompt
             .as_ref()
-            .map(|prompt| VmValue::String(arcstr::ArcStr::from(prompt.clone())))
-            .unwrap_or(VmValue::Nil),
+            .map(|prompt| VmValue::string(prompt.clone())),
     );
-    next.insert(
-        crate::value::intern_key("tool_format"),
+    next.put_nullable(
+        "tool_format",
         state
             .tool_format
             .as_ref()
-            .map(|format| VmValue::String(arcstr::ArcStr::from(format.clone())))
-            .unwrap_or(VmValue::Nil),
+            .map(|format| VmValue::string(format.clone())),
     );
-    next.insert(
-        crate::value::intern_key("pinned_model"),
+    next.put_nullable(
+        "pinned_model",
         state
             .pinned_model
             .as_ref()
-            .map(|model| VmValue::String(arcstr::ArcStr::from(model.clone())))
-            .unwrap_or(VmValue::Nil),
+            .map(|model| VmValue::string(model.clone())),
     );
-    next.insert(
-        crate::value::intern_key("pinned_reasoning_policy"),
+    next.put_nullable(
+        "pinned_reasoning_policy",
         state
             .pinned_reasoning_policy
             .as_ref()
-            .map(|policy| VmValue::String(arcstr::ArcStr::from(policy.clone())))
-            .unwrap_or(VmValue::Nil),
+            .map(|policy| VmValue::string(policy.clone())),
     );
-    next.insert(
-        crate::value::intern_key("actor_chain"),
-        state
-            .actor_chain
-            .as_ref()
-            .map(ActorChain::to_vm_value)
-            .unwrap_or(VmValue::Nil),
+    next.put_nullable(
+        "actor_chain",
+        state.actor_chain.as_ref().map(ActorChain::to_vm_value),
     );
-    next.insert(
-        crate::value::intern_key("scratchpad"),
-        state.scratchpad.clone().unwrap_or(VmValue::Nil),
-    );
-    next.insert(
-        crate::value::intern_key("scratchpad_version"),
-        VmValue::Int(state.scratchpad_version as i64),
-    );
-    next.insert(
-        crate::value::intern_key("workspace_anchor"),
+    next.put_nullable("scratchpad", state.scratchpad.clone());
+    next.put_int("scratchpad_version", state.scratchpad_version as i64);
+    next.put_nullable(
+        "workspace_anchor",
         state
             .workspace_anchor
             .as_ref()
-            .map(WorkspaceAnchor::to_vm_value)
-            .unwrap_or(VmValue::Nil),
+            .map(WorkspaceAnchor::to_vm_value),
     );
     next.insert(
         crate::value::intern_key("workspace_policy"),
@@ -760,22 +723,18 @@ pub(super) fn session_snapshot(state: &SessionState) -> VmValue {
             state.live_clients.values().map(live_client_json).collect(),
         )),
     );
-    next.insert(
-        crate::value::intern_key("live_controller_id"),
+    next.put_nullable(
+        "live_controller_id",
         state
             .live_controller_id
             .as_ref()
-            .map(|id| VmValue::String(arcstr::ArcStr::from(id.clone())))
-            .unwrap_or(VmValue::Nil),
+            .map(|id| VmValue::string(id.clone())),
     );
-    next.insert(
-        crate::value::intern_key("completed_turn_checkpoint_count"),
-        VmValue::Int(state.completed_turn_checkpoints.len() as i64),
+    next.put_int(
+        "completed_turn_checkpoint_count",
+        state.completed_turn_checkpoints.len() as i64,
     );
-    next.insert(
-        crate::value::intern_key("redo_checkpoint_count"),
-        VmValue::Int(state.redo_stack.len() as i64),
-    );
+    next.put_int("redo_checkpoint_count", state.redo_stack.len() as i64);
     VmValue::dict(next)
 }
 

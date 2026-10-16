@@ -7,7 +7,7 @@ use url::Url;
 use zeroize::Zeroizing;
 
 use crate::stdlib::args::Args;
-use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
+use crate::stdlib::macros::harn_builtin;
 use crate::url_encoding::percent_encode_component;
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
@@ -75,7 +75,7 @@ fn jwt_sign_builtin(args: &[VmValue]) -> Result<VmValue, VmError> {
     let token = jsonwebtoken::encode(&Header::new(algorithm), &claims, &key)
         .map_err(|error| jwt_error(format!("signing failed: {error}")))?;
 
-    Ok(VmValue::String(arcstr::ArcStr::from(token)))
+    Ok(VmValue::string(token))
 }
 
 #[derive(Clone, Debug)]
@@ -323,10 +323,10 @@ fn signed_url_builtin(args: &[VmValue]) -> Result<VmValue, VmError> {
     let mut signed_pairs = parts.query_pairs;
     signed_pairs.push((options.signature_param, signature));
     let signed_query = canonical_query(&signed_pairs);
-    Ok(VmValue::String(arcstr::ArcStr::from(append_query(
+    Ok(VmValue::string(append_query(
         &parts.output_prefix,
         &signed_query,
-    ))))
+    )))
 }
 
 fn verification_result(
@@ -339,23 +339,13 @@ fn verification_result(
     claims: crate::value::DictMap,
 ) -> VmValue {
     let mut result = crate::value::DictMap::new();
-    result.insert(crate::value::intern_key("valid"), VmValue::Bool(valid));
+    result.put_bool("valid", valid);
     result.put_str("reason", reason);
-    result.insert(
-        crate::value::intern_key("signature_valid"),
-        VmValue::Bool(signature_valid),
-    );
-    result.insert(crate::value::intern_key("expired"), VmValue::Bool(expired));
-    result.insert(
-        crate::value::intern_key("expires_at"),
-        expires_at.map(VmValue::Int).unwrap_or(VmValue::Nil),
-    );
-    result.insert(
-        crate::value::intern_key("kid"),
-        kid.map(|kid| VmValue::String(arcstr::ArcStr::from(kid)))
-            .unwrap_or(VmValue::Nil),
-    );
-    result.insert(crate::value::intern_key("claims"), VmValue::dict(claims));
+    result.put_bool("signature_valid", signature_valid);
+    result.put_bool("expired", expired);
+    result.put_nullable("expires_at", expires_at.map(VmValue::Int));
+    result.put_nullable_str("kid", kid);
+    result.put("claims", VmValue::dict(claims));
     VmValue::dict(result)
 }
 
@@ -465,7 +455,7 @@ fn verify_signed_url_builtin(args: &[VmValue]) -> Result<VmValue, VmError> {
         {
             claims.insert(
                 crate::value::intern_key(key),
-                VmValue::String(arcstr::ArcStr::from(value.as_str())),
+                VmValue::string(value.as_str()),
             );
         }
     }
@@ -667,9 +657,7 @@ fn bytes_or_string_input(arg: Option<&VmValue>) -> Result<Vec<u8>, VmError> {
 }
 
 pub(crate) fn register_crypto_builtins(vm: &mut Vm) {
-    for def in MODULE_BUILTINS {
-        vm.register_builtin_def(def);
-    }
+    crate::stdlib::macros::register_module_builtins(vm, module_path!());
 }
 
 #[harn_builtin(
@@ -681,9 +669,9 @@ pub(crate) fn register_crypto_builtins(vm: &mut Vm) {
 fn base64_encode_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let bytes = bytes_or_string_input(args.first())?;
     use base64::Engine;
-    Ok(VmValue::String(arcstr::ArcStr::from(
+    Ok(VmValue::string(
         base64::engine::general_purpose::STANDARD.encode(bytes),
-    )))
+    ))
 }
 
 #[harn_builtin(
@@ -695,9 +683,9 @@ fn base64_decode_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
     let val = display_arg(args);
     use base64::Engine;
     match base64::engine::general_purpose::STANDARD.decode(val.as_bytes()) {
-        Ok(bytes) => Ok(VmValue::String(arcstr::ArcStr::from(
+        Ok(bytes) => Ok(VmValue::string(
             String::from_utf8_lossy(&bytes).into_owned(),
-        ))),
+        )),
         Err(e) => Err(VmError::Runtime(format!("base64 decode error: {e}"))),
     }
 }
@@ -711,9 +699,9 @@ fn base64_decode_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
 fn base64url_encode_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let bytes = bytes_or_string_input(args.first())?;
     use base64::Engine;
-    Ok(VmValue::String(arcstr::ArcStr::from(
+    Ok(VmValue::string(
         base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes),
-    )))
+    ))
 }
 
 #[harn_builtin(
@@ -725,9 +713,9 @@ fn base64url_decode_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue,
     let val = display_arg(args);
     use base64::Engine;
     match base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(val.as_bytes()) {
-        Ok(bytes) => Ok(VmValue::String(arcstr::ArcStr::from(
+        Ok(bytes) => Ok(VmValue::string(
             String::from_utf8_lossy(&bytes).into_owned(),
-        ))),
+        )),
         Err(e) => Err(VmError::Runtime(format!("base64url decode error: {e}"))),
     }
 }
@@ -744,9 +732,9 @@ fn base64url_decode_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue,
 fn bytes_to_base64url_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     use base64::Engine;
     let bytes = bytes_or_string_input(args.first())?;
-    Ok(VmValue::String(arcstr::ArcStr::from(
+    Ok(VmValue::string(
         base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes),
-    )))
+    ))
 }
 
 // sha256_base64url(input) -> base64url-no-pad encoding of SHA-256.
@@ -763,9 +751,9 @@ fn sha256_base64url_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue,
     use sha2::Digest;
     let bytes = bytes_or_string_input(args.first())?;
     let digest = sha2::Sha256::digest(&bytes);
-    Ok(VmValue::String(arcstr::ArcStr::from(
+    Ok(VmValue::string(
         base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(digest),
-    )))
+    ))
 }
 
 // crypto_random_bytes(n) -> VmValue::Bytes of length n drawn from a
@@ -810,9 +798,7 @@ fn crypto_random_bytes_impl(args: &[VmValue], _out: &mut String) -> Result<VmVal
 )]
 fn base32_encode_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let bytes = bytes_or_string_input(args.first())?;
-    Ok(VmValue::String(arcstr::ArcStr::from(
-        data_encoding::BASE32.encode(&bytes),
-    )))
+    Ok(VmValue::string(data_encoding::BASE32.encode(&bytes)))
 }
 
 #[harn_builtin(
@@ -823,9 +809,9 @@ fn base32_encode_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
 fn base32_decode_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let val = display_arg(args);
     match data_encoding::BASE32.decode(val.as_bytes()) {
-        Ok(bytes) => Ok(VmValue::String(arcstr::ArcStr::from(
+        Ok(bytes) => Ok(VmValue::string(
             String::from_utf8_lossy(&bytes).into_owned(),
-        ))),
+        )),
         Err(e) => Err(VmError::Runtime(format!("base32 decode error: {e}"))),
     }
 }
@@ -838,9 +824,7 @@ fn base32_decode_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
 )]
 fn hex_encode_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let bytes = bytes_or_string_input(args.first())?;
-    Ok(VmValue::String(arcstr::ArcStr::from(
-        harn_kernel::pure::hex_encode(&bytes),
-    )))
+    Ok(VmValue::string(harn_kernel::pure::hex_encode(&bytes)))
 }
 
 #[harn_builtin(
@@ -852,7 +836,7 @@ fn hex_encode_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
 fn hex_decode_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let val = display_arg(args);
     harn_kernel::pure::hex_decode_text(&val)
-        .map(|text| VmValue::String(arcstr::ArcStr::from(text)))
+        .map(VmValue::string)
         .map_err(VmError::Runtime)
 }
 
@@ -882,9 +866,7 @@ fn hash_value_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
 )]
 fn sha256_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let bytes = bytes_or_string_input(args.first())?;
-    Ok(VmValue::String(arcstr::ArcStr::from(
-        harn_kernel::pure::sha256_hex(&bytes),
-    )))
+    Ok(VmValue::string(harn_kernel::pure::sha256_hex(&bytes)))
 }
 
 #[harn_builtin(
@@ -895,9 +877,7 @@ fn sha256_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> 
 fn sha224_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     use sha2::Digest;
     let bytes = bytes_or_string_input(args.first())?;
-    Ok(VmValue::String(arcstr::ArcStr::from(hex::encode(
-        sha2::Sha224::digest(&bytes),
-    ))))
+    Ok(VmValue::string(hex::encode(sha2::Sha224::digest(&bytes))))
 }
 
 #[harn_builtin(
@@ -908,9 +888,7 @@ fn sha224_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> 
 fn sha384_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     use sha2::Digest;
     let bytes = bytes_or_string_input(args.first())?;
-    Ok(VmValue::String(arcstr::ArcStr::from(hex::encode(
-        sha2::Sha384::digest(&bytes),
-    ))))
+    Ok(VmValue::string(hex::encode(sha2::Sha384::digest(&bytes))))
 }
 
 #[harn_builtin(
@@ -921,9 +899,7 @@ fn sha384_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> 
 fn sha512_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     use sha2::Digest;
     let bytes = bytes_or_string_input(args.first())?;
-    Ok(VmValue::String(arcstr::ArcStr::from(hex::encode(
-        sha2::Sha512::digest(&bytes),
-    ))))
+    Ok(VmValue::string(hex::encode(sha2::Sha512::digest(&bytes))))
 }
 
 #[harn_builtin(
@@ -935,8 +911,8 @@ fn sha512_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> 
 fn sha512_256_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     use sha2::Digest;
     let bytes = bytes_or_string_input(args.first())?;
-    Ok(VmValue::String(arcstr::ArcStr::from(hex::encode(
-        sha2::Sha512_256::digest(&bytes),
+    Ok(VmValue::string(hex::encode(sha2::Sha512_256::digest(
+        &bytes,
     ))))
 }
 
@@ -948,9 +924,7 @@ fn sha512_256_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
 fn md5_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     use md5::Digest;
     let bytes = bytes_or_string_input(args.first())?;
-    Ok(VmValue::String(arcstr::ArcStr::from(hex::encode(
-        md5::Md5::digest(&bytes),
-    ))))
+    Ok(VmValue::string(hex::encode(md5::Md5::digest(&bytes))))
 }
 
 // Pure SHA-256 helper. It accepts `Bytes` values directly, so
@@ -981,7 +955,7 @@ fn hmac_sha256_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
     let msg = args.get(1).map(|a| a.display()).unwrap_or_default();
     let mac = crate::connectors::hmac::hmac_sha256(key.as_bytes(), msg.as_bytes());
     let hex: String = mac.iter().map(|b| format!("{b:02x}")).collect();
-    Ok(VmValue::String(arcstr::ArcStr::from(hex)))
+    Ok(VmValue::string(hex))
 }
 
 // HMAC-SHA256 returning standard base64 (used by Slack-style signatures).
@@ -996,9 +970,9 @@ fn hmac_sha256_base64_impl(args: &[VmValue], _out: &mut String) -> Result<VmValu
     let key = args.first().map(|a| a.display()).unwrap_or_default();
     let msg = args.get(1).map(|a| a.display()).unwrap_or_default();
     let mac = crate::connectors::hmac::hmac_sha256(key.as_bytes(), msg.as_bytes());
-    Ok(VmValue::String(arcstr::ArcStr::from(
+    Ok(VmValue::string(
         base64::engine::general_purpose::STANDARD.encode(&mac),
-    )))
+    ))
 }
 
 // HMAC-SHA1 (hex). Provided for legacy webhook signatures (e.g. older
@@ -1015,7 +989,7 @@ fn hmac_sha1_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
     let msg = args.get(1).map(|a| a.display()).unwrap_or_default();
     let mac = crate::connectors::hmac::hmac_sha1(key.as_bytes(), msg.as_bytes());
     let hex: String = mac.iter().map(|b| format!("{b:02x}")).collect();
-    Ok(VmValue::String(arcstr::ArcStr::from(hex)))
+    Ok(VmValue::string(hex))
 }
 
 #[harn_builtin(
@@ -1092,7 +1066,7 @@ fn url_encode_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
             _ => format!("%{b:02X}"),
         })
         .collect();
-    Ok(VmValue::String(arcstr::ArcStr::from(encoded)))
+    Ok(VmValue::string(encoded))
 }
 
 #[harn_builtin(
@@ -1102,9 +1076,7 @@ fn url_encode_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
 )]
 fn url_decode_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let val = display_arg(args);
-    Ok(VmValue::String(arcstr::ArcStr::from(
-        crate::http::percent_decode(&val),
-    )))
+    Ok(VmValue::string(crate::http::percent_decode(&val)))
 }
 
 // --- modern hashing -------------------------------------------------
@@ -1118,7 +1090,7 @@ fn sha3_256_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError
     use sha3::{Digest, Sha3_256};
     let input = bytes_or_string_input(args.first())?;
     let digest = Sha3_256::digest(&input);
-    Ok(VmValue::String(arcstr::ArcStr::from(hex::encode(digest))))
+    Ok(VmValue::string(hex::encode(digest)))
 }
 
 #[harn_builtin(
@@ -1130,7 +1102,7 @@ fn sha3_512_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError
     use sha3::{Digest, Sha3_512};
     let input = bytes_or_string_input(args.first())?;
     let digest = Sha3_512::digest(&input);
-    Ok(VmValue::String(arcstr::ArcStr::from(hex::encode(digest))))
+    Ok(VmValue::string(hex::encode(digest)))
 }
 
 #[harn_builtin(
@@ -1141,9 +1113,7 @@ fn sha3_512_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError
 fn blake3_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let input = bytes_or_string_input(args.first())?;
     let digest = blake3::hash(&input);
-    Ok(VmValue::String(arcstr::ArcStr::from(
-        digest.to_hex().to_string(),
-    )))
+    Ok(VmValue::string(digest.to_hex().to_string()))
 }
 
 // --- ed25519 keypair / sign / verify --------------------------------
@@ -1175,27 +1145,25 @@ fn ed25519_keypair_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue,
 fn ed25519_sign_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     use ed25519_dalek::{Signer, SigningKey};
     if args.len() < 2 {
-        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+        return Err(VmError::Thrown(VmValue::string(
             "ed25519_sign: expected (private_hex, message)",
-        ))));
+        )));
     }
     let priv_hex = args[0].display();
     let msg = bytes_or_string_input(Some(&args[1]))?;
     let priv_bytes = hex::decode(&priv_hex).map_err(|e| {
-        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
+        VmError::Thrown(VmValue::string(format!(
             "ed25519_sign: invalid hex private key: {e}"
-        ))))
+        )))
     })?;
     let priv_arr: [u8; 32] = priv_bytes.as_slice().try_into().map_err(|_| {
-        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+        VmError::Thrown(VmValue::string(
             "ed25519_sign: private key must be 32 bytes",
-        )))
+        ))
     })?;
     let signing = SigningKey::from_bytes(&priv_arr);
     let sig = signing.sign(&msg);
-    Ok(VmValue::String(arcstr::ArcStr::from(hex::encode(
-        sig.to_bytes(),
-    ))))
+    Ok(VmValue::string(hex::encode(sig.to_bytes())))
 }
 
 #[harn_builtin(
@@ -1207,9 +1175,9 @@ fn ed25519_sign_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
 fn ed25519_verify_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     use ed25519_dalek::{Signature, Verifier, VerifyingKey};
     if args.len() < 3 {
-        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+        return Err(VmError::Thrown(VmValue::string(
             "ed25519_verify: expected (public_hex, message, signature_hex)",
-        ))));
+        )));
     }
     let pub_hex = args[0].display();
     let msg = bytes_or_string_input(Some(&args[1]))?;
@@ -1222,20 +1190,20 @@ fn ed25519_verify_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
     // or wrong-length signature simply does not verify (`false`), and we never
     // throw on attacker-controlled input.
     let pub_bytes = hex::decode(&pub_hex).map_err(|e| {
-        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
+        VmError::Thrown(VmValue::string(format!(
             "ed25519_verify: public_hex is not valid hex: {e}"
-        ))))
+        )))
     })?;
     let pub_arr: [u8; 32] = pub_bytes.as_slice().try_into().map_err(|_| {
-        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
+        VmError::Thrown(VmValue::string(format!(
             "ed25519_verify: public key must be 32 bytes, got {}",
             pub_bytes.len()
-        ))))
+        )))
     })?;
     let verifying = VerifyingKey::from_bytes(&pub_arr).map_err(|e| {
-        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
+        VmError::Thrown(VmValue::string(format!(
             "ed25519_verify: invalid public key: {e}"
-        ))))
+        )))
     })?;
 
     let sig_bytes = match hex::decode(&sig_hex) {
@@ -1279,38 +1247,34 @@ fn x25519_keypair_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, 
 fn x25519_agree_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     use x25519_dalek::{PublicKey, StaticSecret};
     if args.len() < 2 {
-        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+        return Err(VmError::Thrown(VmValue::string(
             "x25519_agree: expected (private_hex, peer_public_hex)",
-        ))));
+        )));
     }
     let priv_hex = args[0].display();
     let pub_hex = args[1].display();
     let priv_bytes = hex::decode(&priv_hex).map_err(|e| {
-        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
+        VmError::Thrown(VmValue::string(format!(
             "x25519_agree: invalid private hex: {e}"
-        ))))
+        )))
     })?;
     let pub_bytes = hex::decode(&pub_hex).map_err(|e| {
-        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
+        VmError::Thrown(VmValue::string(format!(
             "x25519_agree: invalid public hex: {e}"
-        ))))
-    })?;
-    let priv_arr: [u8; 32] = priv_bytes.as_slice().try_into().map_err(|_| {
-        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-            "x25519_agree: private must be 32 bytes",
         )))
     })?;
-    let pub_arr: [u8; 32] = pub_bytes.as_slice().try_into().map_err(|_| {
-        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-            "x25519_agree: public must be 32 bytes",
-        )))
-    })?;
+    let priv_arr: [u8; 32] = priv_bytes
+        .as_slice()
+        .try_into()
+        .map_err(|_| VmError::Thrown(VmValue::string("x25519_agree: private must be 32 bytes")))?;
+    let pub_arr: [u8; 32] = pub_bytes
+        .as_slice()
+        .try_into()
+        .map_err(|_| VmError::Thrown(VmValue::string("x25519_agree: public must be 32 bytes")))?;
     let secret = StaticSecret::from(priv_arr);
     let peer = PublicKey::from(pub_arr);
     let shared = secret.diffie_hellman(&peer);
-    Ok(VmValue::String(arcstr::ArcStr::from(hex::encode(
-        shared.as_bytes(),
-    ))))
+    Ok(VmValue::string(hex::encode(shared.as_bytes())))
 }
 
 // --- jwt_verify (HS256 / RS256 / ES256) -----------------------------
@@ -1324,9 +1288,9 @@ fn x25519_agree_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
 fn jwt_verify_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     use jsonwebtoken::{decode, DecodingKey, Validation};
     if args.len() < 3 {
-        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+        return Err(VmError::Thrown(VmValue::string(
             "jwt_verify: expected (alg, token, key)",
-        ))));
+        )));
     }
     let alg = args[0].display();
     let token = args[1].display();
@@ -1336,22 +1300,22 @@ fn jwt_verify_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
         "ES256" => Algorithm::ES256,
         "RS256" => Algorithm::RS256,
         other => {
-            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-                format!("jwt_verify: unsupported algorithm '{other}'"),
+            return Err(VmError::Thrown(VmValue::string(format!(
+                "jwt_verify: unsupported algorithm '{other}'"
             ))));
         }
     };
     let decoding_key = match algorithm {
         Algorithm::HS256 => DecodingKey::from_secret(key_str.as_bytes()),
         Algorithm::ES256 => DecodingKey::from_ec_pem(key_str.as_bytes()).map_err(|e| {
-            VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
+            VmError::Thrown(VmValue::string(format!(
                 "jwt_verify: invalid ES256 public key: {e}"
-            ))))
+            )))
         })?,
         Algorithm::RS256 => DecodingKey::from_rsa_pem(key_str.as_bytes()).map_err(|e| {
-            VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
+            VmError::Thrown(VmValue::string(format!(
                 "jwt_verify: invalid RS256 public key: {e}"
-            ))))
+            )))
         })?,
         _ => unreachable!(),
     };
@@ -1361,58 +1325,14 @@ fn jwt_verify_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
     validation.validate_exp = false;
     validation.validate_nbf = false;
     validation.required_spec_claims.clear();
-    let decoded = decode::<serde_json::Value>(&token, &decoding_key, &validation).map_err(|e| {
-        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
-            "jwt_verify: {e}"
-        ))))
-    })?;
+    let decoded = decode::<serde_json::Value>(&token, &decoding_key, &validation)
+        .map_err(|e| VmError::Thrown(VmValue::string(format!("jwt_verify: {e}"))))?;
     let claims_value = crate::schema::json_to_vm_value(&decoded.claims);
     let mut dict = crate::value::DictMap::new();
-    dict.insert(crate::value::intern_key("valid"), VmValue::Bool(true));
+    dict.put_bool("valid", true);
     dict.insert(crate::value::intern_key("claims"), claims_value);
     Ok(VmValue::dict(dict))
 }
-
-pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
-    &BASE64_ENCODE_IMPL_DEF,
-    &BASE64_DECODE_IMPL_DEF,
-    &BASE64URL_ENCODE_IMPL_DEF,
-    &BASE64URL_DECODE_IMPL_DEF,
-    &BYTES_TO_BASE64URL_IMPL_DEF,
-    &SHA256_BASE64URL_IMPL_DEF,
-    &CRYPTO_RANDOM_BYTES_IMPL_DEF,
-    &BASE32_ENCODE_IMPL_DEF,
-    &BASE32_DECODE_IMPL_DEF,
-    &HEX_ENCODE_IMPL_DEF,
-    &HEX_DECODE_IMPL_DEF,
-    &HASH_VALUE_IMPL_DEF,
-    &SHA256_IMPL_DEF,
-    &SHA224_IMPL_DEF,
-    &SHA384_IMPL_DEF,
-    &SHA512_IMPL_DEF,
-    &SHA512_256_IMPL_DEF,
-    &MD5_IMPL_DEF,
-    &SHA256_HEX_IMPL_DEF,
-    &HMAC_SHA256_IMPL_DEF,
-    &HMAC_SHA256_BASE64_IMPL_DEF,
-    &HMAC_SHA1_IMPL_DEF,
-    &JWT_SIGN_IMPL_DEF,
-    &SIGNED_URL_IMPL_DEF,
-    &VERIFY_SIGNED_URL_IMPL_DEF,
-    &AWS_SIGV4_HEADERS_IMPL_DEF,
-    &CONSTANT_TIME_EQ_IMPL_DEF,
-    &URL_ENCODE_IMPL_DEF,
-    &URL_DECODE_IMPL_DEF,
-    &SHA3_256_IMPL_DEF,
-    &SHA3_512_IMPL_DEF,
-    &BLAKE3_IMPL_DEF,
-    &ED25519_KEYPAIR_IMPL_DEF,
-    &ED25519_SIGN_IMPL_DEF,
-    &ED25519_VERIFY_IMPL_DEF,
-    &X25519_KEYPAIR_IMPL_DEF,
-    &X25519_AGREE_IMPL_DEF,
-    &JWT_VERIFY_IMPL_DEF,
-];
 
 #[cfg(test)]
 mod es256_test_keys;

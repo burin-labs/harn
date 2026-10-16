@@ -162,19 +162,14 @@ async fn pg_listener_recv_impl(
     let mut dict = crate::value::DictMap::new();
     dict.put_str("channel", channel.clone());
     dict.put_str("payload", payload.clone());
-    dict.insert(
-        crate::value::intern_key("process_id"),
-        VmValue::Int(i64::from(notification.process_id())),
-    );
+    dict.put_int("process_id", i64::from(notification.process_id()));
     let value = VmValue::dict(dict);
 
     if record.bridge {
         let parsed_payload: serde_json::Value = serde_json::from_str(&payload)
             .unwrap_or_else(|_| serde_json::Value::String(payload.clone()));
         let mut emit_args = Vec::with_capacity(2);
-        emit_args.push(VmValue::String(arcstr::ArcStr::from(format!(
-            "pg:{channel}"
-        ))));
+        emit_args.push(VmValue::string(format!("pg:{channel}")));
         emit_args.push(crate::stdlib::json_to_vm_value(&parsed_payload));
         let mut child = ctx.child_vm();
         let _ = child.call_named_builtin("emit_channel", emit_args).await;
@@ -232,10 +227,7 @@ async fn pg_notify_impl(
         _ => return Err(runtime_error("pg_notify: channel must be a string")),
     };
     validate_channel_name(&channel, "pg_notify")?;
-    let payload_value = args
-        .get(2)
-        .cloned()
-        .unwrap_or(VmValue::String(arcstr::ArcStr::from("")));
+    let payload_value = args.get(2).cloned().unwrap_or(VmValue::string(""));
     let payload = match &payload_value {
         VmValue::Nil => String::new(),
         VmValue::String(text) => text.to_string(),
@@ -248,10 +240,7 @@ async fn pg_notify_impl(
     // NOTIFY itself only accepts a string literal which forces SQL
     // synthesis. Channel names go in the first bind position too.
     let sql = "SELECT pg_notify($1, $2)";
-    let params = [
-        VmValue::String(arcstr::ArcStr::from(channel)),
-        VmValue::String(arcstr::ArcStr::from(payload)),
-    ];
+    let params = [VmValue::string(channel), VmValue::string(payload)];
     super::execute_stmt(target, sql, &params).await?;
     Ok(VmValue::Bool(true))
 }

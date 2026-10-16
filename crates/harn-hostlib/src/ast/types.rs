@@ -8,6 +8,7 @@
 
 #![allow(missing_docs)]
 
+use harn_vm::value::VmDictExt;
 use std::sync::Arc;
 
 use harn_vm::VmValue;
@@ -86,36 +87,27 @@ impl Symbol {
     /// Render as a `VmValue::Dict` matching `schemas/ast/symbols.response.json`.
     pub fn to_vm_value(&self) -> VmValue {
         let mut dict: harn_vm::value::DictMap = harn_vm::value::DictMap::new();
-        dict.insert(
-            "name".into(),
-            VmValue::String(arcstr::ArcStr::from(self.name.as_str())),
-        );
-        dict.insert(
-            "kind".into(),
-            VmValue::String(arcstr::ArcStr::from(self.kind.as_str())),
-        );
+        dict.put_str("name", self.name.as_str());
+        dict.put_str("kind", self.kind.as_str());
         dict.insert(
             "container".into(),
             match &self.container {
-                Some(s) => VmValue::String(arcstr::ArcStr::from(s.as_str())),
+                Some(s) => VmValue::string(s.as_str()),
                 None => VmValue::Nil,
             },
         );
         dict.insert(
             "access_level".into(),
             match &self.access_level {
-                Some(s) => VmValue::String(arcstr::ArcStr::from(s.as_str())),
+                Some(s) => VmValue::string(s.as_str()),
                 None => VmValue::Nil,
             },
         );
-        dict.insert(
-            "signature".into(),
-            VmValue::String(arcstr::ArcStr::from(self.signature.as_str())),
-        );
-        dict.insert("start_row".into(), VmValue::Int(self.start_row as i64));
-        dict.insert("start_col".into(), VmValue::Int(self.start_col as i64));
-        dict.insert("end_row".into(), VmValue::Int(self.end_row as i64));
-        dict.insert("end_col".into(), VmValue::Int(self.end_col as i64));
+        dict.put_str("signature", self.signature.as_str());
+        dict.put_int("start_row", self.start_row as i64);
+        dict.put_int("start_col", self.start_col as i64);
+        dict.put_int("end_row", self.end_row as i64);
+        dict.put_int("end_col", self.end_col as i64);
         VmValue::dict(dict)
     }
 }
@@ -136,29 +128,20 @@ pub struct OutlineItem {
 impl OutlineItem {
     pub fn to_vm_value(&self) -> VmValue {
         let mut dict: harn_vm::value::DictMap = harn_vm::value::DictMap::new();
-        dict.insert(
-            "name".into(),
-            VmValue::String(arcstr::ArcStr::from(self.name.as_str())),
-        );
-        dict.insert(
-            "kind".into(),
-            VmValue::String(arcstr::ArcStr::from(self.kind.as_str())),
-        );
+        dict.put_str("name", self.name.as_str());
+        dict.put_str("kind", self.kind.as_str());
         dict.insert(
             "access_level".into(),
             match &self.access_level {
-                Some(s) => VmValue::String(arcstr::ArcStr::from(s.as_str())),
+                Some(s) => VmValue::string(s.as_str()),
                 None => VmValue::Nil,
             },
         );
-        dict.insert(
-            "signature".into(),
-            VmValue::String(arcstr::ArcStr::from(self.signature.as_str())),
-        );
-        dict.insert("start_row".into(), VmValue::Int(self.start_row as i64));
-        dict.insert("end_row".into(), VmValue::Int(self.end_row as i64));
+        dict.put_str("signature", self.signature.as_str());
+        dict.put_int("start_row", self.start_row as i64);
+        dict.put_int("end_row", self.end_row as i64);
         let kids: Vec<VmValue> = self.children.iter().map(OutlineItem::to_vm_value).collect();
-        dict.insert("children".into(), VmValue::List(Arc::new(kids)));
+        dict.put("children", VmValue::List(Arc::new(kids)));
         VmValue::dict(dict)
     }
 }
@@ -182,23 +165,20 @@ pub struct ParsedNode {
 impl ParsedNode {
     pub fn to_vm_value(&self) -> VmValue {
         let mut dict: harn_vm::value::DictMap = harn_vm::value::DictMap::new();
-        dict.insert("id".into(), VmValue::Int(self.id as i64));
+        dict.put_int("id", self.id as i64);
         dict.insert(
             "parent_id".into(),
             self.parent_id
                 .map_or(VmValue::Nil, |id| VmValue::Int(id as i64)),
         );
-        dict.insert(
-            "kind".into(),
-            VmValue::String(arcstr::ArcStr::from(self.kind.as_str())),
-        );
-        dict.insert("is_named".into(), VmValue::Bool(self.is_named));
-        dict.insert("start_byte".into(), VmValue::Int(self.start_byte as i64));
-        dict.insert("end_byte".into(), VmValue::Int(self.end_byte as i64));
-        dict.insert("start_row".into(), VmValue::Int(self.start_row as i64));
-        dict.insert("start_col".into(), VmValue::Int(self.start_col as i64));
-        dict.insert("end_row".into(), VmValue::Int(self.end_row as i64));
-        dict.insert("end_col".into(), VmValue::Int(self.end_col as i64));
+        dict.put_str("kind", self.kind.as_str());
+        dict.put_bool("is_named", self.is_named);
+        dict.put_int("start_byte", self.start_byte as i64);
+        dict.put_int("end_byte", self.end_byte as i64);
+        dict.put_int("start_row", self.start_row as i64);
+        dict.put_int("start_col", self.start_col as i64);
+        dict.put_int("end_row", self.end_row as i64);
+        dict.put_int("end_col", self.end_col as i64);
         VmValue::dict(dict)
     }
 }
@@ -226,21 +206,15 @@ pub struct ParseError {
 impl ParseError {
     pub fn to_vm_value(&self) -> VmValue {
         let mut dict: harn_vm::value::DictMap = harn_vm::value::DictMap::new();
-        dict.insert("start_row".into(), VmValue::Int(self.start_row as i64));
-        dict.insert("start_col".into(), VmValue::Int(self.start_col as i64));
-        dict.insert("end_row".into(), VmValue::Int(self.end_row as i64));
-        dict.insert("end_col".into(), VmValue::Int(self.end_col as i64));
-        dict.insert("start_byte".into(), VmValue::Int(self.start_byte as i64));
-        dict.insert("end_byte".into(), VmValue::Int(self.end_byte as i64));
-        dict.insert(
-            "message".into(),
-            VmValue::String(arcstr::ArcStr::from(self.message.as_str())),
-        );
-        dict.insert(
-            "snippet".into(),
-            VmValue::String(arcstr::ArcStr::from(self.snippet.as_str())),
-        );
-        dict.insert("missing".into(), VmValue::Bool(self.missing));
+        dict.put_int("start_row", self.start_row as i64);
+        dict.put_int("start_col", self.start_col as i64);
+        dict.put_int("end_row", self.end_row as i64);
+        dict.put_int("end_col", self.end_col as i64);
+        dict.put_int("start_byte", self.start_byte as i64);
+        dict.put_int("end_byte", self.end_byte as i64);
+        dict.put_str("message", self.message.as_str());
+        dict.put_str("snippet", self.snippet.as_str());
+        dict.put_bool("missing", self.missing);
         VmValue::dict(dict)
     }
 }
@@ -259,21 +233,12 @@ pub struct UndefinedName {
 impl UndefinedName {
     pub fn to_vm_value(&self) -> VmValue {
         let mut dict: harn_vm::value::DictMap = harn_vm::value::DictMap::new();
-        dict.insert(
-            "name".into(),
-            VmValue::String(arcstr::ArcStr::from(self.name.as_str())),
-        );
-        dict.insert(
-            "kind".into(),
-            VmValue::String(arcstr::ArcStr::from(self.kind)),
-        );
-        dict.insert("row".into(), VmValue::Int(self.row as i64));
-        dict.insert("column".into(), VmValue::Int(self.column as i64));
+        dict.put_str("name", self.name.as_str());
+        dict.put_str("kind", self.kind);
+        dict.put_int("row", self.row as i64);
+        dict.put_int("column", self.column as i64);
         let message = format!("undefined name '{}'", self.name);
-        dict.insert(
-            "message".into(),
-            VmValue::String(arcstr::ArcStr::from(message.as_str())),
-        );
+        dict.put_str("message", message.as_str());
         VmValue::dict(dict)
     }
 }

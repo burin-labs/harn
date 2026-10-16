@@ -52,12 +52,12 @@ fn handler_context_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue,
     sig = "list_providers_native() -> list", category = "triggers"
 )]
 fn list_providers_native_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    Ok(VmValue::List(std::sync::Arc::new(
+    Ok(VmValue::list(
         registered_provider_metadata()
             .into_iter()
             .map(|provider| value_from_serde(&provider))
             .collect(),
-    )))
+    ))
 }
 
 #[harn_builtin(
@@ -66,12 +66,12 @@ fn list_providers_native_impl(_args: &[VmValue], _out: &mut String) -> Result<Vm
     sig = "trigger_list(...args: any) -> list", category = "triggers"
 )]
 fn trigger_list_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    Ok(VmValue::List(std::sync::Arc::new(
+    Ok(VmValue::list(
         snapshot_trigger_bindings()
             .into_iter()
             .map(|binding| value_from_serde(&binding))
             .collect(),
-    )))
+    ))
 }
 
 #[harn_builtin(

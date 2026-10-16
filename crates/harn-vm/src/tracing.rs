@@ -7,6 +7,7 @@
 //! Access via builtins: `trace_spans()` returns all completed spans,
 //! `trace_summary()` returns a formatted summary.
 
+use crate::value::VmDictExt;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::future::Future;
@@ -915,31 +916,17 @@ pub fn reset_tracing() {
 /// Convert a span to a VmValue dict for user access.
 pub fn span_to_vm_value(span: &Span) -> VmValue {
     let mut d: BTreeMap<String, VmValue> = BTreeMap::new();
-    d.insert(
-        "trace_id".into(),
-        VmValue::String(arcstr::ArcStr::from(span.trace_id.as_str())),
+    d.put_str("trace_id", span.trace_id.as_str());
+    d.put_int("span_id", span.span_id as i64);
+    d.put_nullable(
+        "parent_id",
+        span.parent_id.map(|id| VmValue::Int(id as i64)),
     );
-    d.insert("span_id".into(), VmValue::Int(span.span_id as i64));
-    d.insert(
-        "parent_id".into(),
-        span.parent_id
-            .map(|id| VmValue::Int(id as i64))
-            .unwrap_or(VmValue::Nil),
-    );
-    d.insert(
-        "kind".into(),
-        VmValue::String(arcstr::ArcStr::from(span.kind.as_str())),
-    );
-    d.insert(
-        "name".into(),
-        VmValue::String(arcstr::ArcStr::from(span.name.as_str())),
-    );
-    d.insert("start_ms".into(), VmValue::Int(span.start_ms as i64));
-    d.insert(
-        "start_unix_ms".into(),
-        VmValue::Int(span.start_unix_ms as i64),
-    );
-    d.insert("duration_ms".into(), VmValue::Int(span.duration_ms as i64));
+    d.put_str("kind", span.kind.as_str());
+    d.put_str("name", span.name.as_str());
+    d.put_int("start_ms", span.start_ms as i64);
+    d.put_int("start_unix_ms", span.start_unix_ms as i64);
+    d.put_int("duration_ms", span.duration_ms as i64);
 
     if !span.metadata.is_empty() {
         let meta: crate::value::DictMap = span
@@ -952,7 +939,7 @@ pub fn span_to_vm_value(span: &Span) -> VmValue {
                 )
             })
             .collect();
-        d.insert("metadata".into(), VmValue::dict(meta));
+        d.put("metadata", VmValue::dict(meta));
     }
     if !span.links.is_empty() {
         d.insert(

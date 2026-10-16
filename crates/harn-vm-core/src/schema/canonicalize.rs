@@ -114,7 +114,7 @@ fn canonicalize_schema_dict(
                 canonicalize_schema_value_with(value, traversal)?,
             );
         }
-        out.insert(crate::value::intern_key("properties"), VmValue::dict(next));
+        out.put("properties", VmValue::dict(next));
     }
 
     if let Some(items) = schema.get("items") {
@@ -130,10 +130,7 @@ fn canonicalize_schema_dict(
     {
         match additional {
             VmValue::Bool(value) => {
-                out.insert(
-                    crate::value::intern_key("additional_properties"),
-                    VmValue::Bool(*value),
-                );
+                out.put_bool("additional_properties", *value);
             }
             VmValue::Dict(_) => {
                 out.insert(
@@ -202,28 +199,25 @@ fn canonicalize_schema_dict(
         out.insert(crate::value::intern_key("max_items"), max_items.clone());
     }
     if schema_bool(schema, "unique_items") || schema_bool(schema, "uniqueItems") {
-        out.insert(
-            crate::value::intern_key("unique_items"),
-            VmValue::Bool(true),
-        );
+        out.put_bool("unique_items", true);
     }
     if let Some(pattern) = schema.get("pattern") {
         out.insert(crate::value::intern_key("pattern"), pattern.clone());
     }
 
     if schema_bool(schema, "nullable") {
-        out.insert(crate::value::intern_key("nullable"), VmValue::Bool(true));
+        out.put_bool("nullable", true);
     }
 
     if let Some(definitions) = schema.get("definitions").and_then(VmValue::as_dict) {
-        out.insert(
-            crate::value::intern_key("definitions"),
+        out.put(
+            "definitions",
             VmValue::dict(canonicalize_schema_map(definitions, traversal)?),
         );
     }
     if let Some(definitions) = schema.get("$defs").and_then(VmValue::as_dict) {
-        out.insert(
-            crate::value::intern_key("$defs"),
+        out.put(
+            "$defs",
             VmValue::dict(canonicalize_schema_map(definitions, traversal)?),
         );
     }
@@ -231,15 +225,12 @@ fn canonicalize_schema_dict(
     if let Some(components) = schema.get("components").and_then(VmValue::as_dict) {
         let mut next_components = components.clone();
         if let Some(schemas) = components.get("schemas").and_then(VmValue::as_dict) {
-            next_components.insert(
-                crate::value::intern_key("schemas"),
+            next_components.put(
+                "schemas",
                 VmValue::dict(canonicalize_schema_map(schemas, traversal)?),
             );
         }
-        out.insert(
-            crate::value::intern_key("components"),
-            VmValue::dict(next_components),
-        );
+        out.put("components", VmValue::dict(next_components));
     }
 
     if let Some(union) = schema
@@ -275,10 +266,7 @@ fn canonicalize_schema_dict(
                     VmValue::dict(branch)
                 })
                 .collect::<Vec<_>>();
-            out.insert(
-                crate::value::intern_key("union"),
-                VmValue::List(std::sync::Arc::new(union)),
-            );
+            out.put("union", VmValue::list(union));
         }
         _ => {}
     }
@@ -312,11 +300,11 @@ fn canonicalize_schema_list(
         VmValue::List(list) => list,
         _ => return Err("schema union/all_of must be a list".to_string()),
     };
-    Ok(VmValue::List(std::sync::Arc::new(
+    Ok(VmValue::list(
         list.iter()
             .map(|value| canonicalize_schema_value_with(value, traversal))
             .collect::<Result<Vec<_>, _>>()?,
-    )))
+    ))
 }
 
 fn validate_canonical_ref_graph(root_schema: &crate::value::DictMap) -> Result<(), String> {
@@ -490,13 +478,13 @@ fn validate_ref_graph_value(
 
 fn normalize_string_list(value: &VmValue) -> VmValue {
     match value {
-        VmValue::List(items) => VmValue::List(std::sync::Arc::new(
+        VmValue::List(items) => VmValue::list(
             items
                 .iter()
-                .map(|item| VmValue::String(arcstr::ArcStr::from(item.display())))
+                .map(|item| VmValue::string(item.display()))
                 .collect(),
-        )),
-        _ => VmValue::List(std::sync::Arc::new(Vec::new())),
+        ),
+        _ => VmValue::list(Vec::new()),
     }
 }
 

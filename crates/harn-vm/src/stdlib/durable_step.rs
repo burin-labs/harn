@@ -9,7 +9,7 @@ use crate::event_log::{
 };
 use crate::llm::vm_value_to_json;
 use crate::runtime_limits::RuntimeLimits;
-use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
+use crate::stdlib::macros::harn_builtin;
 use crate::value::{value_structural_hash_key, VmError, VmValue};
 use crate::vm::{AsyncBuiltinCtx, Vm};
 
@@ -55,9 +55,7 @@ pub(crate) fn reset_durable_step_state() {
 
 pub(crate) fn register_durable_step_builtins(vm: &mut Vm) {
     register_step_namespace(vm);
-    for def in MODULE_BUILTINS {
-        vm.register_builtin_def(def);
-    }
+    crate::stdlib::macros::register_module_builtins(vm, module_path!());
 }
 
 #[harn_builtin(
@@ -88,24 +86,19 @@ async fn step_inspect_impl(
     step_inspect(&ctx, args).await
 }
 
-pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[&STEP_RUN_IMPL_DEF, &STEP_INSPECT_IMPL_DEF];
-
 fn register_step_namespace(vm: &mut Vm) {
     let names = ["run", "inspect"];
     vm.set_global(
         "step",
         VmValue::dict(
-            std::iter::once((
-                "_namespace".to_string(),
-                VmValue::String(arcstr::ArcStr::from("step")),
-            ))
-            .chain(names.into_iter().map(|name| {
-                (
-                    name.to_string(),
-                    VmValue::BuiltinRef(arcstr::ArcStr::from(format!("step.{name}"))),
-                )
-            }))
-            .collect::<BTreeMap<_, _>>(),
+            std::iter::once(("_namespace".to_string(), VmValue::string("step")))
+                .chain(names.into_iter().map(|name| {
+                    (
+                        name.to_string(),
+                        VmValue::BuiltinRef(arcstr::ArcStr::from(format!("step.{name}"))),
+                    )
+                }))
+                .collect::<BTreeMap<_, _>>(),
         ),
     );
 }
@@ -191,13 +184,13 @@ async fn step_inspect(ctx: &AsyncBuiltinCtx, args: Vec<VmValue>) -> Result<VmVal
     let namespace = parse_step_inspect_namespace(args, &child_vm)?;
     let topic = topic_for_namespace(&namespace)?;
     let records = read_step_records(&ensure_step_event_log(), &topic).await?;
-    Ok(VmValue::List(std::sync::Arc::new(
+    Ok(VmValue::list(
         records
             .into_iter()
             .filter(|record| record.namespace == namespace)
             .map(|record| record_to_value(&record))
             .collect(),
-    )))
+    ))
 }
 
 fn parse_step_run_request(args: Vec<VmValue>) -> Result<StepRunRequest, VmError> {

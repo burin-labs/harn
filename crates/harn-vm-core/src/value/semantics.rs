@@ -15,9 +15,9 @@ pub fn string_discriminator(value: &VmValue, builtin: &str) -> Result<String, Vm
 }
 
 pub fn split_separator_required() -> VmError {
-    VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+    VmError::Thrown(VmValue::string(
         "split: separator is required (use split(text, sep) or text.split(sep))",
-    )))
+    ))
 }
 
 /// Character offsets clamp to the string bounds. Unlike slice indices,

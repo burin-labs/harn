@@ -52,7 +52,7 @@ fn host_agent_session_active_skills_builtin(
             VmValue::dict(entry)
         })
         .collect();
-    Ok(VmValue::List(std::sync::Arc::new(list)))
+    Ok(VmValue::list(list))
 }
 
 /// Append a skill lifecycle event and notify live agent-event sinks.
@@ -178,12 +178,6 @@ fn host_agent_session_record_skill_event_builtin(
     Ok(VmValue::Nil)
 }
 
-const SKILL_STATE_BUILTINS: &[&VmBuiltinDef] = &[
-    &HOST_AGENT_SESSION_SET_ACTIVE_SKILLS_BUILTIN_DEF,
-    &HOST_AGENT_SESSION_ACTIVE_SKILLS_BUILTIN_DEF,
-    &HOST_AGENT_SESSION_RECORD_SKILL_EVENT_BUILTIN_DEF,
-];
-
 pub(super) fn register_skill_state_primitives(vm: &mut Vm) {
-    register_builtin_defs(vm, SKILL_STATE_BUILTINS);
+    harn_vm_core::builtin_support::register_module_builtins(vm, module_path!());
 }

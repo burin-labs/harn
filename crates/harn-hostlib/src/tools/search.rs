@@ -7,7 +7,6 @@
 
 use std::collections::VecDeque;
 use std::path::PathBuf;
-use std::sync::Arc;
 
 use globset::{Glob, GlobSet, GlobSetBuilder};
 use grep_matcher::Matcher;
@@ -188,7 +187,7 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     let matches: Vec<VmValue> = all_rows.into_iter().map(row_to_value).collect();
 
     Ok(build_dict([
-        ("matches", VmValue::List(Arc::new(matches))),
+        ("matches", VmValue::list(matches)),
         ("files_searched", VmValue::Int(files_searched as i64)),
         ("truncated", VmValue::Bool(truncated)),
     ]))
@@ -475,8 +474,8 @@ fn row_to_value(rwp: RowWithPath) -> VmValue {
         ("line", VmValue::Int(line as i64)),
         ("column", VmValue::Int(column as i64)),
         ("text", str_value(text)),
-        ("context_before", VmValue::List(Arc::new(before))),
-        ("context_after", VmValue::List(Arc::new(after))),
+        ("context_before", VmValue::list(before)),
+        ("context_after", VmValue::list(after)),
     ])
 }
 

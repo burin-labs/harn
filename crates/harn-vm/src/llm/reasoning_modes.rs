@@ -85,9 +85,8 @@ pub(crate) fn resolve_requested(
         None | Some(STANDARD_MODE_ID) => return Ok(None),
         Some(other) => other,
     };
-    let thrown = |message: String| {
-        crate::value::VmError::Thrown(crate::value::VmValue::String(arcstr::ArcStr::from(message)))
-    };
+    let thrown =
+        |message: String| crate::value::VmError::Thrown(crate::value::VmValue::string(message));
     match gate(model, mode_id) {
         ReasoningModeGate::Usable => {}
         ReasoningModeGate::Unsupported => {

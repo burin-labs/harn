@@ -6,6 +6,7 @@
 //! the rest of the `ast::*` builtins.
 
 use std::path::PathBuf;
+#[cfg(test)]
 use std::sync::Arc;
 
 use harn_vm::VmValue;
@@ -60,7 +61,7 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
                 ("language", str_value(language.name())),
                 ("supported", VmValue::Bool(false)),
                 ("had_errors", VmValue::Bool(false)),
-                ("errors", VmValue::List(Arc::new(Vec::new()))),
+                ("errors", VmValue::list(Vec::new())),
                 ("top_level_decl_count", VmValue::Int(0)),
                 ("health", health.to_vm_value()),
             ]));
@@ -79,7 +80,7 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
         ("language", str_value(language.name())),
         ("supported", VmValue::Bool(true)),
         ("had_errors", VmValue::Bool(had_errors)),
-        ("errors", VmValue::List(Arc::new(errors_list))),
+        ("errors", VmValue::list(errors_list)),
         ("top_level_decl_count", VmValue::Int(top_level as i64)),
         ("health", health.to_vm_value()),
     ]))

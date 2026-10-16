@@ -11,22 +11,14 @@ use harn_kernel::{
     ValueShape,
 };
 
-use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
+use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
 const PROGRAM_SCHEMA: &str = "harn.portable_program.v1";
 
-const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
-    &PORTABLE_COMPILE_IMPL_DEF,
-    &PORTABLE_START_IMPL_DEF,
-    &PORTABLE_RESUME_IMPL_DEF,
-];
-
 pub(crate) fn register_portable_builtins(vm: &mut Vm) {
-    for def in MODULE_BUILTINS {
-        vm.register_builtin_def(def);
-    }
+    crate::stdlib::macros::register_module_builtins(vm, module_path!());
 }
 
 #[harn_builtin(
@@ -60,7 +52,7 @@ fn portable_compile_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue,
                     ("kind", VmValue::String(kind_name.into())),
                 ]),
             ),
-            ("diagnostics", VmValue::List(Arc::new(Vec::new()))),
+            ("diagnostics", VmValue::list(Vec::new())),
         ]),
         Err(diagnostics) => compile_failure(diagnostics),
     })
@@ -109,9 +101,7 @@ fn compile_failure(diagnostics: Vec<Diagnostic>) -> VmValue {
         ("program", VmValue::Nil),
         (
             "diagnostics",
-            VmValue::List(Arc::new(
-                diagnostics.into_iter().map(diagnostic_value).collect(),
-            )),
+            VmValue::list(diagnostics.into_iter().map(diagnostic_value).collect()),
         ),
     ])
 }

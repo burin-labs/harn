@@ -560,10 +560,10 @@ fn verification_profile_matches_impl(
     let dir = optional_dir_arg(args, 1);
     with_state("verification_profile_matches", |st| {
         let Some(fields) = st.get_namespace(&dir, PROFILE_NAMESPACE) else {
-            return Ok(VmValue::List(std::sync::Arc::new(Vec::new())));
+            return Ok(VmValue::list(Vec::new()));
         };
         let Some(rows) = fields.get("rows").and_then(|value| value.as_array()) else {
-            return Ok(VmValue::List(std::sync::Arc::new(Vec::new())));
+            return Ok(VmValue::list(Vec::new()));
         };
         let matches = matching_rows(rows, &query)
             .into_iter()
@@ -575,7 +575,7 @@ fn verification_profile_matches_impl(
                 }))
             })
             .collect();
-        Ok(VmValue::List(std::sync::Arc::new(matches)))
+        Ok(VmValue::list(matches))
     })
 }
 

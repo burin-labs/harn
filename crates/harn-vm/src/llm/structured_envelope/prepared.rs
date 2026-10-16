@@ -1,5 +1,6 @@
 //! Structured internal requests retaining already admitted route authority.
 
+use crate::value::VmDictExt;
 use crate::value::{VmError, VmValue};
 
 /// One logical structured batch without schema repair or a second output
@@ -15,7 +16,7 @@ pub(crate) async fn run_prepared_structured_call(
 ) -> Result<VmValue, VmError> {
     let options = prepare(active, prompt, schema, role, stage)?;
     let mut controls = crate::value::DictMap::new();
-    controls.insert(crate::value::intern_key("schema_retries"), VmValue::Int(0));
+    controls.put_int("schema_retries", 0);
     let outcome = Box::pin(crate::llm::call::execute_llm_call_outcome(
         None,
         options,

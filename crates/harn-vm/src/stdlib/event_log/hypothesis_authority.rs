@@ -71,8 +71,8 @@ pub fn mint_hypothesis_native_attestation(
     run_id: Option<&str>,
 ) -> Result<VmValue, VmError> {
     const OWNER: &str = "native hypothesis adapter";
-    let event_value = VmValue::String(arcstr::ArcStr::from(event_fingerprint));
-    let plan_value = VmValue::String(arcstr::ArcStr::from(plan_fingerprint));
+    let event_value = VmValue::string(event_fingerprint);
+    let plan_value = VmValue::string(plan_fingerprint);
     let proof = HypothesisEventAuthorityProof {
         authority_kind: HypothesisAuthorityKind::parse(authority_kind, OWNER)?,
         event_fingerprint: Arc::from(required_sha256_fingerprint(

@@ -2278,7 +2278,12 @@ available backends, as [OpenRouter's free router](https://openrouter.ai/docs/gui
 does. Acceptance qualifies the option only when the provider identifies the
 selected backend. The report retains that exact `response_model` separately
 from `control_response_model`; neither is inferred from the requested router.
-A controlled pool rejection reports `unavailable`, with no stable support
+A controlled pool rejection permits one more draw from the pool, sharing the
+single recovery attempt with timeout and rate-limit recovery. The receipt's
+`retry_from` retains the first verdict, reason, error, and control backend;
+accounting includes both draws and their controls. A served draw proves option
+support on its selected backend, not reliable pool availability. Persistent
+controlled pool rejections report `unavailable`, with no stable support
 verdict. Missing or echoed selection leaves the result `unmeasured`, including
 when the no-option control succeeds. Campaigns count unavailable and unmeasured
 cells separately, and neither can produce a complete qualification.

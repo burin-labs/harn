@@ -250,7 +250,7 @@ impl VmIter {
                     *byte_idx += c.len_utf8();
                     let mut buf = [0u8; 4];
                     let encoded = c.encode_utf8(&mut buf);
-                    Ok(Some(VmValue::String(arcstr::ArcStr::from(&*encoded))))
+                    Ok(Some(VmValue::string(&*encoded)))
                 } else {
                     *self = VmIter::Exhausted;
                     Ok(None)
@@ -747,7 +747,7 @@ impl VmIter {
                     *self = VmIter::Exhausted;
                     Ok(None)
                 } else {
-                    Ok(Some(VmValue::List(std::sync::Arc::new(batch))))
+                    Ok(Some(VmValue::list(batch)))
                 }
             }
             VmIter::Windows { inner, n, buf } => {
@@ -777,7 +777,7 @@ impl VmIter {
                     }
                 }
                 let snapshot: Vec<VmValue> = buf.iter().cloned().collect();
-                Ok(Some(VmValue::List(std::sync::Arc::new(snapshot))))
+                Ok(Some(VmValue::list(snapshot)))
             }
             VmIter::Chan { handle } => {
                 let is_closed = handle.is_closed();

@@ -2,6 +2,7 @@
 
 use crate::orchestration::ArtifactRecord;
 use crate::stdlib::macros::harn_builtin;
+use crate::value::VmDictExt;
 use crate::value::{VmError, VmValue};
 
 use super::super::{parse_artifact_list, parse_context_policy};
@@ -69,9 +70,9 @@ pub(super) fn microcompact_builtin(
         .map(|v| non_negative_usize(v, "microcompact", "max_chars"))
         .transpose()?
         .unwrap_or(20_000);
-    Ok(VmValue::String(arcstr::ArcStr::from(
+    Ok(VmValue::string(
         crate::orchestration::microcompact_tool_output(&text, max_chars),
-    )))
+    ))
 }
 
 fn non_negative_usize(value: &VmValue, builtin: &str, key: &str) -> Result<usize, VmError> {
@@ -259,7 +260,7 @@ pub(super) async fn transcript_auto_compact_builtin(
             .transpose()?
             .unwrap_or_default();
         Some(crate::llm::extract_llm_options(&[
-            VmValue::String(arcstr::ArcStr::from("")),
+            VmValue::string(""),
             VmValue::Nil,
             VmValue::dict(projected),
         ])?)
@@ -293,22 +294,16 @@ pub(super) async fn transcript_auto_compact_builtin(
         ),
         None => (0, String::new(), VmValue::Nil),
     };
-    let compacted_messages = VmValue::List(std::sync::Arc::new(
+    let compacted_messages = VmValue::list(
         messages
             .iter()
             .map(crate::stdlib::json_to_vm_value)
             .collect(),
-    ));
+    );
     let mut result = crate::value::DictMap::new();
     result.insert(crate::value::intern_key("messages"), compacted_messages);
-    result.insert(
-        crate::value::intern_key("archived"),
-        VmValue::Int(archived as i64),
-    );
-    result.insert(
-        crate::value::intern_key("summary"),
-        VmValue::String(arcstr::ArcStr::from(summary)),
-    );
+    result.put_int("archived", archived as i64);
+    result.put_str("summary", summary);
     result.insert(crate::value::intern_key("receipt"), receipt);
     Ok(VmValue::dict(result))
 }

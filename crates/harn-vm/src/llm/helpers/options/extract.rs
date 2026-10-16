@@ -64,11 +64,11 @@ pub(crate) fn extract_llm_options(
         option_is_explicitly_set(opts, "models") || option_is_explicitly_set(opts, "ladder")
     });
     if has_ladder_option && user_pinned_route {
-        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+        return Err(VmError::Thrown(VmValue::string(
             "llm_call: `models:`/`ladder:` cannot be combined with an explicit \
              `model:` or `provider:` on the same call — the ladder already \
              declares every rung's model/provider. Drop the standalone pin.",
-        ))));
+        )));
     }
 
     let mut routing_policy = crate::llm::routing::extract_routing_policy(options.as_ref())?;
@@ -78,12 +78,12 @@ pub(crate) fn extract_llm_options(
     // rather than silently ignoring the ladder (the ladder lowering below only
     // runs when no explicit routing policy is present).
     if has_ladder_option && explicit_routing_policy {
-        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+        return Err(VmError::Thrown(VmValue::string(
             "llm_call: `models:`/`ladder:` cannot be combined with an explicit \
              `routing:` policy — both drive model selection. Use one: a ladder \
              for a linear transport-failover chain, or `routing:` for the full \
              routing policy.",
-        ))));
+        )));
     }
     let route_policy = parse_route_policy_option(options.as_ref())?;
     let (mut provider, mut model, mut model_resolution) = resolve_model_selection(&options)?;
@@ -169,8 +169,8 @@ pub(crate) fn extract_llm_options(
     );
     let mut api_mode = parse_api_mode_option(options.as_ref())?;
     if enforce_responses_provider_gate(api_mode, &provider) {
-        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-            format!("api_mode: \"responses\" is not supported by provider \"{provider}\""),
+        return Err(VmError::Thrown(VmValue::string(format!(
+            "api_mode: \"responses\" is not supported by provider \"{provider}\""
         ))));
     }
     let session_id = opt_str(&options, "session_id")
@@ -344,10 +344,10 @@ pub(crate) fn extract_llm_options(
             Some(VmValue::Bool(false))
         )
     {
-        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+        return Err(VmError::Thrown(VmValue::string(
             "llm_call: `prompt_cache_ttl` requires provider prompt caching; remove \
              `cache: false` or omit `prompt_cache_ttl`.",
-        ))));
+        )));
     }
     let stream_explicit = options
         .as_ref()
@@ -484,9 +484,7 @@ pub(crate) fn extract_llm_options(
         )
         && crate::llm::content::messages_contain_url_images(&messages)?
     {
-        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-            "llm_call: this provider/model route requires image base64; url image content is not supported",
-        ))));
+        return Err(VmError::Thrown(VmValue::string("llm_call: this provider/model route requires image base64; url image content is not supported")));
     }
 
     let tools_val = options
@@ -521,9 +519,7 @@ pub(crate) fn extract_llm_options(
             &capability_model,
             &caps,
         ) {
-            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-                message,
-            ))));
+            return Err(VmError::Thrown(VmValue::string(message)));
         }
     }
     let mut tool_format_steer = None;
@@ -586,9 +582,9 @@ pub(crate) fn extract_llm_options(
         native_tools.as_ref().is_some_and(|tools| !tools.is_empty()),
     );
     if !provider_tools.is_empty() && api_mode != LlmApiMode::Responses {
-        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+        return Err(VmError::Thrown(VmValue::string(
             "provider_tools requires api_mode: \"responses\"",
-        ))));
+        )));
     }
     // Project the neutral `computer` function tool onto the route's native
     // computer-use surface: on `native_anthropic` / `native_openai` routes this
@@ -632,9 +628,7 @@ pub(crate) fn extract_llm_options(
         let forced = provider_overrides_force_native(options.as_ref(), &provider);
         let provider_has_native = model_based_native || forced;
         if cfg.variant == ToolSearchVariant::Hybrid && cfg.mode == ToolSearchMode::Native {
-            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-                "tool_search: variant \"hybrid\" is client-only; set mode: \"client\" or use \"bm25\"/\"regex\" for native provider tool search",
-            ))));
+            return Err(VmError::Thrown(VmValue::string("tool_search: variant \"hybrid\" is client-only; set mode: \"client\" or use \"bm25\"/\"regex\" for native provider tool search")));
         }
         // If the forced path is active, use OpenAI's default variants
         // so the injection below picks the right shape.
@@ -647,13 +641,11 @@ pub(crate) fn extract_llm_options(
         let resolution = match cfg.mode {
             ToolSearchMode::Native => {
                 if !provider_has_native {
-                    return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-                        format!(
-                            "tool_search: provider \"{provider}\" does not expose native \
+                    return Err(VmError::Thrown(VmValue::string(format!(
+                        "tool_search: provider \"{provider}\" does not expose native \
                          tool-search for model \"{model}\". Set \
                          `tool_search: {{ mode: \"client\" }}` to use the client-executed \
                          fallback, or omit tool_search to ship tools eagerly."
-                        ),
                     ))));
                 }
                 ToolSearchResolution::Native
@@ -678,11 +670,11 @@ pub(crate) fn extract_llm_options(
             let deferred = extract_deferred_tool_names(tools);
             let total_user_tools = tools.len();
             if total_user_tools > 0 && deferred.len() == total_user_tools {
-                return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+                return Err(VmError::Thrown(VmValue::string(
                     "tool_search: all tools have defer_loading set. At least \
                      one tool must be non-deferred so the model has somewhere \
                      to start. (Matches Anthropic's 400 on the same condition.)",
-                ))));
+                )));
             }
         }
 
@@ -853,18 +845,16 @@ pub(crate) fn extract_llm_options(
         if !stateful_route
             && (previous_response_id.is_some() || store.is_some() || background.is_some())
         {
-            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-                "previous_response_id / store / background require api_mode: \"responses\" or a route with provider-side conversation state",
-            ))));
+            return Err(VmError::Thrown(VmValue::string("previous_response_id / store / background require api_mode: \"responses\" or a route with provider-side conversation state")));
         }
         if truncation.is_some()
             || compact.is_some()
             || include.is_some()
             || max_tool_calls.is_some()
         {
-            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+            return Err(VmError::Thrown(VmValue::string(
                 "Responses-only options require api_mode: \"responses\"",
-            ))));
+            )));
         }
     }
 
@@ -900,8 +890,8 @@ pub(crate) fn extract_llm_options(
         None | Some("standard") => false,
         Some("fast") => true,
         Some(other) => {
-            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-                format!("llm_call: `speed` expects \"standard\" or \"fast\", got \"{other}\""),
+            return Err(VmError::Thrown(VmValue::string(format!(
+                "llm_call: `speed` expects \"standard\" or \"fast\", got \"{other}\""
             ))));
         }
     };
@@ -909,19 +899,15 @@ pub(crate) fn extract_llm_options(
         match crate::llm::serving_tiers::fast_gate(&model) {
             crate::llm::serving_tiers::ServingTierGate::Usable => {}
             crate::llm::serving_tiers::ServingTierGate::Unsupported => {
-                return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-                    format!(
+                return Err(VmError::Thrown(VmValue::string(format!(
                     "fast: model \"{model}\" (provider \"{provider}\") has no accelerated-serving \
                      tier in the catalog; remove `fast` or pick a model that advertises a `fast` serving_tier"
-                ),
                 ))));
             }
             crate::llm::serving_tiers::ServingTierGate::Deprecated { note } => {
                 let detail = note.map(|n| format!(" ({n})")).unwrap_or_default();
-                return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-                    format!(
+                return Err(VmError::Thrown(VmValue::string(format!(
                     "fast: the accelerated-serving tier for model \"{model}\" is deprecated{detail}"
-                ),
                 ))));
             }
         }
@@ -1084,16 +1070,14 @@ fn parse_prompt_cache_ttl_option(
             crate::llm::api::PromptCacheTtl::parse(&normalized)
                 .map(Some)
                 .ok_or_else(|| {
-                    VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+                    VmError::Thrown(VmValue::string(
                         "llm_call: `prompt_cache_ttl` must be \"5m\" or \"1h\"",
-                    )))
+                    ))
                 })
         }
-        other => Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-            format!(
-                "llm_call: `prompt_cache_ttl` must be a string, got {}",
-                other.type_name()
-            ),
+        other => Err(VmError::Thrown(VmValue::string(format!(
+            "llm_call: `prompt_cache_ttl` must be a string, got {}",
+            other.type_name()
         )))),
     }
 }

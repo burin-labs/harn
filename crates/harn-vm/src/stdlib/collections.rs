@@ -80,12 +80,12 @@ pub(crate) fn register_collection_builtins(vm: &mut Vm) {
 async fn chunk_impl(_ctx: AsyncBuiltinCtx, args: Vec<VmValue>) -> Result<VmValue, VmError> {
     let items = list_arg(&args, "chunk")?;
     let size = positive_usize_arg(&args, 1, 1, "chunk")?;
-    Ok(VmValue::List(Arc::new(
+    Ok(VmValue::list(
         items
             .chunks(size)
-            .map(|chunk| VmValue::List(Arc::new(chunk.to_vec())))
+            .map(|chunk| VmValue::list(chunk.to_vec()))
             .collect(),
-    )))
+    ))
 }
 
 #[harn_builtin(exposure = "pure", effects = [], sig = "window(items: list, size?: int, step?: int) -> list", kind = "async", category = "collections")]
@@ -94,15 +94,15 @@ async fn window_impl(_ctx: AsyncBuiltinCtx, args: Vec<VmValue>) -> Result<VmValu
     let size = positive_usize_arg(&args, 1, 2, "window")?;
     let step = positive_usize_arg(&args, 2, 1, "window")?;
     if size > items.len() {
-        return Ok(VmValue::List(Arc::new(Vec::new())));
+        return Ok(VmValue::list(Vec::new()));
     }
     let mut windows = Vec::new();
     let mut start = 0;
     while start + size <= items.len() {
-        windows.push(VmValue::List(Arc::new(items[start..start + size].to_vec())));
+        windows.push(VmValue::list(items[start..start + size].to_vec()));
         start += step;
     }
-    Ok(VmValue::List(Arc::new(windows)))
+    Ok(VmValue::list(windows))
 }
 
 fn required_callable<'a>(
@@ -136,12 +136,7 @@ async fn group_by_impl(ctx: AsyncBuiltinCtx, args: Vec<VmValue>) -> Result<VmVal
     Ok(VmValue::dict(
         groups
             .into_iter()
-            .map(|(key, values)| {
-                (
-                    crate::value::intern_key(&key),
-                    VmValue::List(Arc::new(values)),
-                )
-            })
+            .map(|(key, values)| (crate::value::intern_key(&key), VmValue::list(values)))
             .collect::<crate::value::DictMap>(),
     ))
 }
@@ -160,10 +155,10 @@ async fn partition_impl(ctx: AsyncBuiltinCtx, args: Vec<VmValue>) -> Result<VmVa
             no_match.push(item.clone());
         }
     }
-    Ok(VmValue::dict(BTreeMap::from([
-        ("match".to_string(), VmValue::List(Arc::new(matched))),
-        ("no_match".to_string(), VmValue::List(Arc::new(no_match))),
-    ])))
+    Ok(VmValue::dict([
+        ("match", VmValue::list(matched)),
+        ("no_match", VmValue::list(no_match)),
+    ]))
 }
 
 #[harn_builtin(exposure = "pure", effects = [], sig = "dedup_by(items: list, key_fn: closure) -> list", kind = "async", category = "collections")]
@@ -179,7 +174,7 @@ async fn dedup_by_impl(ctx: AsyncBuiltinCtx, args: Vec<VmValue>) -> Result<VmVal
             out.push(item.clone());
         }
     }
-    Ok(VmValue::List(Arc::new(out)))
+    Ok(VmValue::list(out))
 }
 
 #[harn_builtin(exposure = "pure", effects = [], sig = "flat_map(items: list, callback: closure) -> list", kind = "async", category = "collections")]
@@ -194,7 +189,7 @@ async fn flat_map_impl(ctx: AsyncBuiltinCtx, args: Vec<VmValue>) -> Result<VmVal
             other => out.push(other),
         }
     }
-    Ok(VmValue::List(Arc::new(out)))
+    Ok(VmValue::list(out))
 }
 
 async fn take_or_drop_while(
@@ -226,7 +221,7 @@ async fn take_or_drop_while(
             out.push(item.clone());
         }
     }
-    Ok(VmValue::List(Arc::new(out)))
+    Ok(VmValue::list(out))
 }
 
 #[harn_builtin(exposure = "pure", effects = [], sig = "take_while(items: list, predicate: closure) -> list", kind = "async", category = "collections")]
@@ -441,7 +436,7 @@ const DICT_BUILDER_BUILTINS: &[&VmBuiltinDef] = &[
 fn shallow_clone(value: &VmValue) -> VmValue {
     match value {
         VmValue::Dict(d) => VmValue::dict((**d).clone()),
-        VmValue::List(items) => VmValue::List(std::sync::Arc::new((**items).clone())),
+        VmValue::List(items) => VmValue::list((**items).clone()),
         VmValue::Set(items) => VmValue::Set(std::sync::Arc::new((**items).clone())),
         other => other.clone(),
     }
@@ -460,9 +455,7 @@ fn deep_clone_value(value: &VmValue) -> VmValue {
             }
             VmValue::dict(out)
         }
-        VmValue::List(items) => VmValue::List(std::sync::Arc::new(
-            items.iter().map(deep_clone_value).collect(),
-        )),
+        VmValue::List(items) => VmValue::list(items.iter().map(deep_clone_value).collect()),
         VmValue::Set(items) => VmValue::Set(std::sync::Arc::new(
             items.iter().map(deep_clone_value).collect(),
         )),
@@ -520,7 +513,7 @@ fn list_unique(value: &VmValue) -> Result<VmValue, VmError> {
     let items: &[VmValue] = match value {
         VmValue::List(items) => items,
         VmValue::Set(set) => set.items(),
-        VmValue::Nil => return Ok(VmValue::List(std::sync::Arc::new(Vec::new()))),
+        VmValue::Nil => return Ok(VmValue::list(Vec::new())),
         other => {
             return Err(VmError::TypeError(format!(
                 "unique: expected a list, got {}",
@@ -529,7 +522,7 @@ fn list_unique(value: &VmValue) -> Result<VmValue, VmError> {
         }
     };
     let out = dedup_values(items);
-    Ok(VmValue::List(std::sync::Arc::new(out)))
+    Ok(VmValue::list(out))
 }
 
 /// Converts a list of `[key, value]` pairs (or `pair(key, value)` values)

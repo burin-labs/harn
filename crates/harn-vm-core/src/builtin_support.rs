@@ -22,3 +22,33 @@ pub fn register_builtin_defs(vm: &mut crate::Vm, definitions: &'static [&'static
         vm.register_builtin_def(definition);
     }
 }
+
+/// Definitions declared in exactly one Rust module, indexed once from the
+/// authoritative linked registry. Descendants are separate owners.
+///
+/// # Panics
+/// Panics if the module has no linked definitions, preventing an empty install.
+pub fn module_builtin_defs(module: &str) -> &'static [&'static VmBuiltinDef] {
+    use std::collections::BTreeMap;
+    use std::sync::OnceLock;
+
+    static MODULES: OnceLock<BTreeMap<&'static str, Vec<&'static VmBuiltinDef>>> = OnceLock::new();
+    MODULES
+        .get_or_init(|| {
+            let mut modules: BTreeMap<_, Vec<_>> = BTreeMap::new();
+            for def in crate::vm::all_builtin_defs() {
+                modules.entry(def.module).or_default().push(*def);
+            }
+            for definitions in modules.values_mut() {
+                definitions.sort_by_key(|def| def.sig.name);
+            }
+            modules
+        })
+        .get(module)
+        .unwrap_or_else(|| panic!("no linked builtin definitions for module `{module}`"))
+}
+
+/// Install a module's declarations without a parallel list of its members.
+pub fn register_module_builtins(vm: &mut crate::Vm, module: &str) {
+    register_builtin_defs(vm, module_builtin_defs(module));
+}

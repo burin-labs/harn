@@ -234,9 +234,7 @@ pub(crate) fn apply_prompt_mode_structured_transport(args: &mut [VmValue], schem
         VmValue::String(text) => Some(text.to_string()),
         _ => None,
     }) {
-        args[0] = VmValue::String(arcstr::ArcStr::from(prompt_with_schema_contract(
-            &prompt, schema,
-        )));
+        args[0] = VmValue::string(prompt_with_schema_contract(&prompt, schema));
     }
     if let Some(options) = args.get_mut(2) {
         let mut dict = options.as_dict().cloned().unwrap_or_default();
@@ -399,7 +397,7 @@ fn merge_repair_options(
     // retries from the main call (cost amplification) and do not let
     // the main call's transient retry budget propagate either —
     // repair is best-effort and should fail fast.
-    merged.insert(crate::value::intern_key("schema_retries"), VmValue::Int(0));
+    merged.put_int("schema_retries", 0);
     // Drop any nested `repair` key from the base options so a repair
     // call cannot recursively trigger another repair pass.
     merged.remove("repair");
@@ -408,9 +406,9 @@ fn merge_repair_options(
     }
     let mut output = crate::value::DictMap::new();
     output.insert(crate::value::intern_key("schema"), schema.clone());
-    output.insert(crate::value::intern_key("strict"), VmValue::Bool(true));
+    output.put_bool("strict", true);
     output.put_str("validation", "error");
-    merged.insert(crate::value::intern_key("output"), VmValue::dict(output));
+    merged.put("output", VmValue::dict(output));
     merged
 }
 
@@ -529,28 +527,19 @@ fn finish_success_envelope(parts: SuccessEnvelope<'_>) -> VmValue {
         provider,
     } = parts;
     let mut env = crate::value::DictMap::new();
-    env.insert(crate::value::intern_key("ok"), VmValue::Bool(true));
+    env.put_bool("ok", true);
     env.insert(crate::value::intern_key("data"), data);
     env.put_str("raw_text", raw_text);
     env.put_str("error", "");
     env.insert(crate::value::intern_key("error_category"), VmValue::Nil);
-    env.insert(
-        crate::value::intern_key("attempts"),
-        VmValue::Int(attempts as i64),
-    );
-    env.insert(
-        crate::value::intern_key("repaired"),
-        VmValue::Bool(repaired),
-    );
+    env.put_int("attempts", attempts as i64);
+    env.put_bool("repaired", repaired);
     if let Some(tier) = repair_tier {
         env.put_str("repair_tier", tier);
     } else {
         env.insert(crate::value::intern_key("repair_tier"), VmValue::Nil);
     }
-    env.insert(
-        crate::value::intern_key("extracted_json"),
-        VmValue::Bool(extracted_json),
-    );
+    env.put_bool("extracted_json", extracted_json);
     env.insert(crate::value::intern_key("usage"), usage);
     env.put_str("model", model);
     env.put_str("provider", provider);
@@ -572,28 +561,19 @@ fn envelope_failure(
     };
 
     let mut env = crate::value::DictMap::new();
-    env.insert(crate::value::intern_key("ok"), VmValue::Bool(false));
+    env.put_bool("ok", false);
     env.insert(crate::value::intern_key("data"), VmValue::Nil);
     env.put_str("raw_text", outcome.raw_text.as_str());
     env.put_str("error", message.as_str());
     env.put_str("error_category", kind.category());
-    env.insert(
-        crate::value::intern_key("attempts"),
-        VmValue::Int(outcome.attempts as i64),
-    );
+    env.put_int("attempts", outcome.attempts as i64);
     env.insert(
         crate::value::intern_key("schema_retry"),
         super::call::schema_retry_failure_facts(outcome.attempts, outcome.schema_retries_budget),
     );
-    env.insert(
-        crate::value::intern_key("repaired"),
-        VmValue::Bool(repaired),
-    );
+    env.put_bool("repaired", repaired);
     env.insert(crate::value::intern_key("repair_tier"), VmValue::Nil);
-    env.insert(
-        crate::value::intern_key("extracted_json"),
-        VmValue::Bool(extracted_json),
-    );
+    env.put_bool("extracted_json", extracted_json);
     env.insert(crate::value::intern_key("usage"), usage);
     env.put_str("model", model.as_str());
     env.put_str("provider", provider.as_str());
@@ -612,22 +592,16 @@ fn envelope_from_transport_error(err: &VmError, provider: &str, model: &str) -> 
         _ => err.to_string(),
     };
     let mut env = crate::value::DictMap::new();
-    env.insert(crate::value::intern_key("ok"), VmValue::Bool(false));
+    env.put_bool("ok", false);
     env.insert(crate::value::intern_key("data"), VmValue::Nil);
     env.put_str("raw_text", "");
     env.put_str("error", message.as_str());
     env.put_str("error_category", category.as_str());
-    env.insert(crate::value::intern_key("attempts"), VmValue::Int(0));
-    env.insert(crate::value::intern_key("repaired"), VmValue::Bool(false));
+    env.put_int("attempts", 0);
+    env.put_bool("repaired", false);
     env.insert(crate::value::intern_key("repair_tier"), VmValue::Nil);
-    env.insert(
-        crate::value::intern_key("extracted_json"),
-        VmValue::Bool(false),
-    );
-    env.insert(
-        crate::value::intern_key("usage"),
-        VmValue::dict(empty_usage_dict()),
-    );
+    env.put_bool("extracted_json", false);
+    env.put("usage", VmValue::dict(empty_usage_dict()));
     env.put_str("model", model);
     env.put_str("provider", provider);
     VmValue::dict(env)
@@ -643,28 +617,19 @@ fn envelope_from_arg_error(err: &VmError) -> VmValue {
 fn envelope_from_operation_timeout(timeout_ms: u64) -> VmValue {
     let message = format!("structured operation exceeded {timeout_ms}ms total deadline");
     let mut env = crate::value::DictMap::new();
-    env.insert(crate::value::intern_key("ok"), VmValue::Bool(false));
+    env.put_bool("ok", false);
     env.insert(crate::value::intern_key("data"), VmValue::Nil);
     env.put_str("raw_text", "");
     env.put_str("error", message.as_str());
     env.put_str("error_category", "timeout");
-    env.insert(crate::value::intern_key("attempts"), VmValue::Int(0));
-    env.insert(crate::value::intern_key("repaired"), VmValue::Bool(false));
+    env.put_int("attempts", 0);
+    env.put_bool("repaired", false);
     env.insert(crate::value::intern_key("repair_tier"), VmValue::Nil);
-    env.insert(
-        crate::value::intern_key("extracted_json"),
-        VmValue::Bool(false),
-    );
-    env.insert(
-        crate::value::intern_key("usage"),
-        VmValue::dict(empty_usage_dict()),
-    );
+    env.put_bool("extracted_json", false);
+    env.put("usage", VmValue::dict(empty_usage_dict()));
     env.put_str("model", "");
     env.put_str("provider", "");
-    env.insert(
-        crate::value::intern_key("operation_timeout_ms"),
-        VmValue::Int(timeout_ms as i64),
-    );
+    env.put_int("operation_timeout_ms", timeout_ms as i64);
     VmValue::dict(env)
 }
 
@@ -693,22 +658,10 @@ fn build_usage_dict(outcome: &SchemaLoopOutcome) -> VmValue {
                 );
             }
         }
-        usage.insert(
-            crate::value::intern_key("known_cost_usd"),
-            VmValue::Float(certainty.known_cost_usd),
-        );
-        usage.insert(
-            crate::value::intern_key("unpriced_calls"),
-            VmValue::Int(certainty.unpriced_calls),
-        );
-        usage.insert(
-            crate::value::intern_key("usage_unknown_calls"),
-            VmValue::Int(certainty.usage_unknown_calls),
-        );
-        usage.insert(
-            crate::value::intern_key("provider_call_count"),
-            VmValue::Int(certainty.provider_call_count),
-        );
+        usage.put("known_cost_usd", VmValue::Float(certainty.known_cost_usd));
+        usage.put_int("unpriced_calls", certainty.unpriced_calls);
+        usage.put_int("usage_unknown_calls", certainty.usage_unknown_calls);
+        usage.put_int("provider_call_count", certainty.provider_call_count);
         return VmValue::dict(usage);
     }
     // The canonical envelope always carries `usage`; the empty dict covers

@@ -15,7 +15,7 @@ use crate::event_log::{
 };
 use crate::runtime_limits::RuntimeLimits;
 use crate::stdlib::args::{Args, ErrorKind};
-use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
+use crate::stdlib::macros::harn_builtin;
 use crate::triggers::dispatcher::{
     current_dispatch_context, current_dispatch_is_replay, DispatchContext,
 };
@@ -162,17 +162,8 @@ enum WaiterResolution {
 }
 
 pub(crate) fn register_waitpoint_builtins(vm: &mut Vm) {
-    for def in MODULE_BUILTINS {
-        vm.register_builtin_def(def);
-    }
+    crate::stdlib::macros::register_module_builtins(vm, module_path!());
 }
-
-pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
-    &WAITPOINT_CREATE_BUILTIN_MACRO_DEF,
-    &WAITPOINT_WAIT_BUILTIN_MACRO_DEF,
-    &WAITPOINT_COMPLETE_BUILTIN_MACRO_DEF,
-    &WAITPOINT_CANCEL_BUILTIN_MACRO_DEF,
-];
 
 #[harn_builtin(
     exposure = "harness.runtime.waitpoint_create",
@@ -539,12 +530,12 @@ async fn waitpoint_wait_builtin(args: &[VmValue]) -> Result<VmValue, VmError> {
             if singular {
                 return Ok(waitpoint_value(records.first().expect("single waitpoint")));
             }
-            Ok(VmValue::List(std::sync::Arc::new(
+            Ok(VmValue::list(
                 records
                     .into_iter()
                     .map(|record| waitpoint_value(&record))
                     .collect(),
-            )))
+            ))
         }
         Err(WaitpointWaitFailure::Timeout { wait_id }) => Err(waitpoint_timeout_error(&wait_id)),
         Err(WaitpointWaitFailure::Cancelled {

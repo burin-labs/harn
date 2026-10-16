@@ -525,7 +525,7 @@ impl super::super::Vm {
                 let mut s = String::with_capacity(x.len() + y.len());
                 s.push_str(&x);
                 s.push_str(&y);
-                Ok(VmValue::String(arcstr::ArcStr::from(s)))
+                Ok(VmValue::string(s))
             }
             (VmValue::List(x), VmValue::List(y)) => {
                 if x.is_empty() {
@@ -541,7 +541,7 @@ impl super::super::Vm {
                     Ok(items) => result.extend(items),
                     Err(items) => result.extend(items.iter().cloned()),
                 }
-                Ok(VmValue::List(std::sync::Arc::new(result)))
+                Ok(VmValue::list(result))
             }
             (VmValue::Dict(x), VmValue::Dict(y)) => {
                 if x.is_empty() {
