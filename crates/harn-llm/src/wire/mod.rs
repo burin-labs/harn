@@ -1,5 +1,6 @@
 //! Provider request encoding with resolved policy and deferred audit delivery.
 
+pub mod anthropic;
 pub mod openai;
 pub mod openai_normalize;
 pub mod prompt_cache;

@@ -49,7 +49,7 @@ fn publish_projection(projection: SchemaProjection, emit_receipts: bool) -> Valu
     projection.schema
 }
 
-fn publish_audit(metadata: std::collections::BTreeMap<String, Value>) {
+pub(crate) fn publish_audit(metadata: std::collections::BTreeMap<String, Value>) {
     crate::events::log_debug_meta(
         "llm.schema_compat",
         "sanitized provider-facing JSON Schema",

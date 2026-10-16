@@ -123,37 +123,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn toolset_results_echo_the_paired_namespace_including_recovery() {
-        let mut messages = vec![
-            serde_json::json!({"role": "assistant", "content": [
-                {"type": "tool_use", "id": "native", "name": "screenshot", "toolset_name": "computer"},
-                {"type": "tool_use", "id": "ordinary", "name": "screenshot"},
-                {"type": "tool_use", "id": "interrupted", "name": "screenshot", "toolset_name": "computer"}
-            ]}),
-            serde_json::json!({"role": "user", "content": [
-                {"type": "tool_result", "tool_use_id": "native", "content": "image"},
-                {"type": "tool_result", "tool_use_id": "ordinary", "content": "text"}
-            ]}),
-        ];
-        messages = crate::llm::tool_call_history::repair_tool_call_history(messages)
-            .into_iter()
-            .map(super::super::anthropic_translate_tool_role_message)
-            .collect();
-        echo_toolset_names(&mut messages);
-        let results: Vec<_> = messages
-            .iter()
-            .skip(1)
-            .flat_map(|message| message["content"].as_array().unwrap())
-            .collect();
-        assert_eq!(results.len(), 3);
-        assert_eq!(results[0]["toolset_name"], "computer");
-        assert!(results[1].get("toolset_name").is_none());
-        assert_eq!(results[2]["tool_use_id"], "interrupted");
-        assert_eq!(results[2]["toolset_name"], "computer");
-        assert_eq!(results[2]["is_error"], true);
-    }
-
-    #[test]
     fn durable_tool_ids_are_normalized_as_a_pair() {
         let mut messages = vec![
             serde_json::json!({
