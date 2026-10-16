@@ -58,10 +58,16 @@ async fn private_capture_reaps_descendants_on_completion_and_timeout() {
         let (result, mut stream) = tokio::join!(capture(command, DEADLINE), ready(&listener));
         assert_eq!(result.is_err(), refuses, "parent: {finish}");
         let mut survivor = Vec::new();
-        tokio::time::timeout(DEADLINE, stream.read_to_end(&mut survivor))
+        let closed = tokio::time::timeout(DEADLINE, stream.read_to_end(&mut survivor))
             .await
-            .expect("capture must close the reached descendant's connection")
-            .unwrap();
+            .expect("capture must close the reached descendant's connection");
+        assert!(
+            match &closed {
+                Ok(_) => true,
+                Err(error) => error.kind() == std::io::ErrorKind::ConnectionReset,
+            },
+            "descendant connection must end with EOF or reset: {closed:?}"
+        );
         assert!(survivor.is_empty(), "captured child must not survive");
     }
 }
