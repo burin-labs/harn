@@ -425,9 +425,8 @@ pub fn enforce_current_policy_for_builtin(name: &str, args: &[VmValue]) -> Resul
             _ => {}
         }
     }
-    if effects::builtin_has_network_effect(name)
-        && (!policy_allows_capability(&policy, "network", "http")
-            || !policy_allows_side_effect(&policy, "network"))
+    if effects::builtin_network_effect(name)
+        .is_some_and(|effect| !effects::effect_allowed_by_ceiling(&effect, &policy))
     {
         return reject_policy(format!("builtin '{name}' exceeds network.http ceiling"));
     }

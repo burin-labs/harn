@@ -299,6 +299,7 @@ var HarnSideEffectLevels = []HarnSideEffectLevel{
 	"read_only",
 	"workspace_write",
 	"process_exec",
+	"network_read",
 	"network",
 	"desktop_control",
 }

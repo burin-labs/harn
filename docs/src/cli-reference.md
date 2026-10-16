@@ -122,6 +122,7 @@ harn run --resume .harn/workers/worker_...json
 | `--standalone` | Run without loading ambient project configuration, skills, handlers, state roots, or manifest-derived authority |
 | `--approve-risky <operation>` | Explicitly authorize one exact risky stdlib operation for this invocation; repeatable (for example `git.push`) |
 | `--no-sandbox` | Disable the default worktree filesystem/process sandbox and network side-effect ceiling |
+| `--allow-http-read` | Permit direct HTTP reads under the run's destination policy. Remote mutations and child-process networking remain denied. Conflicts with `--no-sandbox` and `--allow-process-network`. |
 | `--allow-process-loopback` | Allow confined child processes to serve and connect over IPv4 or IPv6 loopback without opening remote egress. Supported on macOS; other local sandbox backends fail closed. |
 | `--allow-process-network` | Allow child network while retaining filesystem/process confinement. On macOS, children reach public hosts through the managed proxy while private and loopback addresses stay denied; `HARN_EGRESS_*` or `harness.net.egress_policy(...)` narrows that default. On other local platforms Harn does not attach that proxy; the grant raises the capability ceiling and children have unrestricted sockets. See [Managed child-process egress](./sandboxing.md#managed-child-process-egress). |
 | `--write-root <path>` | Write to an extra filesystem root while keeping sandboxing enabled |

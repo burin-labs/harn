@@ -10,7 +10,7 @@ export type ToolAudience = "cli" | "mcp" | "catalog" | "dashboard" | "agent";
 
 export type ToolKind = "read" | "edit" | "delete" | "move" | "search" | "execute" | "think" | "fetch" | "other";
 
-export type SideEffectLevel = "none" | "read_only" | "workspace_write" | "process_exec" | "network" | "desktop_control";
+export type SideEffectLevel = "none" | "read_only" | "workspace_write" | "process_exec" | "network_read" | "network" | "desktop_control";
 
 export type ToolTaskSupport = "forbidden" | "optional" | "required";
 
