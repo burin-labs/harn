@@ -140,7 +140,7 @@ fn shipped_interfaces_ignore_package_install_generation() {
     let destination = entry.with_extension(INTERFACE_CACHE_EXTENSION);
     let artifact = prepare_precompiled_interface(&destination, &entry, ENTRY).unwrap();
     assert_ne!(*artifact.context(), ModuleCompilationContext::default());
-    artifact.store_at(&destination).unwrap();
+    artifact.store().unwrap();
     let moved = second.path().join("entry.harn");
     let moved_destination = moved.with_extension(INTERFACE_CACHE_EXTENSION);
     std::fs::copy(destination, &moved_destination).unwrap();

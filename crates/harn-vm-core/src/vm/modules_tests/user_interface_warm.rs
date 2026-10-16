@@ -175,7 +175,7 @@ fn shipped_interfaces_survive_relocation_without_parsing() {
         let source = std::fs::read_to_string(path).unwrap();
         let dest = path.with_extension(INTERFACE_CACHE_EXTENSION);
         let interface = prepare_precompiled_interface(&dest, path, &source).unwrap();
-        interface.store_at(&dest).unwrap();
+        interface.store().unwrap();
         let artifact =
             compile_module_artifact_from_source_with_context(path, &source, interface.context())
                 .unwrap();
